@@ -3823,6 +3823,89 @@ mod tests {
         assert!(state.notify.lease().is_some());
     }
 
+    /// The store a running state hands out reaches the high water only through its raise:
+    /// putting a held record back, or any other generic write, under the marker's IRI is
+    /// refused, and the high water stays as stored.
+    #[tokio::test]
+    async fn the_states_store_cannot_lower_the_high_water() {
+        let (state, _store) = test_store::state(100).await;
+        let marker = format!(
+            "{}{HIGH_WATER_FRAGMENT}",
+            state.cfg.absolute(SUBSCRIPTIONS_PATH)
+        );
+        let before = stored_high_water(&state.store, &state.cfg).await;
+        assert!(before.is_some());
+        let lower = crate::store::sparq::marker_meta("1");
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        for parent in [None, Some(container.as_str())] {
+            let r = state.store.reinstate(&marker, parent, &lower).await;
+            assert!(
+                matches!(r, Err(crate::error::ServerError::Forbidden)),
+                "{r:?}"
+            );
+            let r = state
+                .store
+                .restore(&marker, parent, Bytes::from_static(b"1"), &lower)
+                .await;
+            assert!(
+                matches!(r, Err(crate::error::ServerError::Forbidden)),
+                "{r:?}"
+            );
+            let r = state.store.delete(&marker, parent).await;
+            assert!(
+                matches!(r, Err(crate::error::ServerError::Forbidden)),
+                "{r:?}"
+            );
+        }
+        let r = state
+            .store
+            .write(&marker, Bytes::from_static(b"1"), LWS_JSON)
+            .await;
+        assert!(
+            matches!(r, Err(crate::error::ServerError::Forbidden)),
+            "{r:?}"
+        );
+        assert_eq!(stored_high_water(&state.store, &state.cfg).await, before);
+    }
+
+    /// A wrapper of a running state's store keeps that state's lease: a state built over it,
+    /// wrapped once or twice more, is refused, so it cannot run the recovery (and lower the high
+    /// water) under the running service.
+    #[tokio::test]
+    async fn a_state_over_a_wrapper_of_a_running_ones_store_is_refused() {
+        use super::super::tracked::Tracked;
+        let (state, _store) = test_store::state(100).await;
+        let mut cfg = state.cfg.clone();
+        cfg.reset_subscription_clock = true;
+        let root = cfg.storage();
+        let marks_before = _store.marker_writes.load(Ordering::SeqCst);
+        let once = Tracked::new(state.store.clone(), root.clone());
+        let Err(why) = LwsState::new(once, cfg.clone()).await else {
+            panic!("a state was built over a wrapper of a running one's store");
+        };
+        assert!(why.contains("another LWS service"), "{why}");
+        let twice = Tracked::new(
+            Tracked::new(state.store.clone(), root.clone()),
+            root.clone(),
+        );
+        let Err(why) = LwsState::new(twice, cfg.clone()).await else {
+            panic!("a state was built over a nested wrapper of a running one's store");
+        };
+        assert!(why.contains("another LWS service"), "{why}");
+        assert_eq!(
+            _store.marker_writes.load(Ordering::SeqCst),
+            marks_before,
+            "a refused state wrote no marker"
+        );
+        // Once the running state is gone, a wrapper of its store may be served.
+        let backend = state.store.clone();
+        drop(state);
+        let state = LwsState::new(Tracked::new(backend, root), cfg)
+            .await
+            .unwrap();
+        assert!(state.notify.lease().is_some());
+    }
+
     /// A conditional create that waits for the listing it compares, while a subscription
     /// registered meanwhile passes its expiry by the clock, decides what that listing leaves out
     /// once it holds it: the subscription is left out only with its expiry stored.

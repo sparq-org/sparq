@@ -377,12 +377,19 @@ subscription must expire after it. A start logs a warning when it is more than 2
 before the state (or its store) is handed out, so no request is in flight: it removes every stored
 subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
 the mark; construction fails, the mark unchanged, while any of them is still stored (start again
-once it can be removed). An `LwsState` holds its backend's lease (`store::Lifecycle`, shared
-by every clone of `LwsState::store`) for as long as it lives: a second `LwsState` built in the
-same process over a clone of a running one's store is refused, and only the holder may lower the
-mark (`Store::reset_marker` takes the lease's guard, which only this crate makes). A state that
-replaces another must be built after the old one is dropped. Running a second process over the
-same store directory is unsupported, and nothing at this release keeps one out. A create whose
+once it can be removed). An `LwsState` holds a lease (`store::Lifecycle`) for as long as it
+lives, and the lease is per store handle: it is shared by every clone of `LwsState::store` and by
+any `Tracked` wrapper of one (`Tracked::new` takes its inner store's lease and offers no other), so
+a second `LwsState` built in the same process over a clone or a wrapper of a running one's store
+is refused, and only the holder may lower the mark (`Store::reset_marker` takes the lease's guard,
+which only this crate makes). It is not exclusion per backend: a store opened again separately
+over the same backend, or wrapped by a `Store` implementation that does not forward
+`Store::lifecycle`, has a lease of its own. A state that replaces another must be built after the
+old one is dropped. Running a second process over the same store directory is unsupported, and
+nothing at this release keeps one out. The mark changes only through `Store::raise_marker` and
+`Store::reset_marker`: the generic mutators of the store (`write`, `create_in_container`,
+`restore`, `hold`, `reinstate`, `delete`, `delete_container_if_empty`) refuse an IRI shaped like
+the mark (`ServerError::Forbidden`). A create whose
 purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
 its listing locks are held, a subscription create takes the mark's raise lock and checks again
 that the service is not halted and that its expiry is after both the clock and the stored mark

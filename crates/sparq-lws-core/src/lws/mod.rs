@@ -708,11 +708,14 @@ impl<S: Store + 'static> LwsState<S> {
         // raise atomically.
         notify::refuse_without_atomic_markers(&store)?;
         // The backend's lease, held for as long as the state lives: a second state over the same
-        // backend (a clone of this one's store, say) is refused before it reads or writes
-        // anything, so no two registries diverge over one store, and only this one may lower the
-        // notification high water.
-        let lifecycle = store.lifecycle().unwrap_or_default();
-        let lease = lifecycle
+        // store handle (a clone of this one's store, or a wrapper of it, say) is refused before
+        // it reads or writes anything, so no two registries diverge over one store, and only this
+        // one may lower the notification high water. The tracked store takes the lease its
+        // inner store keeps, so a rewrapped store keeps the running service's.
+        let store = tracked::Tracked::new(store, cfg.storage());
+        let lease = store
+            .lifecycle()
+            .unwrap_or_default()
             .acquire()
             .ok_or("another LWS service is running over this store")?;
         let http = fetch_client(&cfg)?;
@@ -736,7 +739,7 @@ impl<S: Store + 'static> LwsState<S> {
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
-                store: tracked::Tracked::new(store, cfg.storage(), lifecycle),
+                store,
                 cfg,
                 access,
                 notify,

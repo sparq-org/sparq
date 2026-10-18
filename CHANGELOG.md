@@ -168,10 +168,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
   which, while the state is built, removes every subscription with an `expires` and then stores
   the clock.
-  An `LwsState` now holds its backend's lease (shared by every clone of its store) while it
-  lives: a second `LwsState` built over a running one's store is refused, so a state that
-  replaces another must be built after the old one is dropped. `Store::reset_marker` takes that
-  lease's guard.
+  An `LwsState` now holds a lease per store handle (shared by every clone of its store and by
+  any `Tracked` wrapper of one) while it lives: a second `LwsState` built over a clone or a
+  wrapper of a running one's store is refused, so a state that replaces another must be built
+  after the old one is dropped. A store opened again separately over the same backend has a lease
+  of its own. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
+  store's lease and no longer accepts one from the caller, and the store's generic mutators refuse
+  an IRI shaped like the stored time, which changes only through `raise_marker` and
+  `reset_marker`.
 
 - **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
   change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
