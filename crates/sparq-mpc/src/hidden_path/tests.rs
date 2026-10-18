@@ -997,25 +997,40 @@ fn predicated_chain(n: usize, predicate: &str) -> PredicatedEdges {
             },
         });
     }
+    // Each edge contributes two fresh nodes, so the active graph's node domain is
+    // exactly `2n` terms. Declared explicitly, as a `{0,k}` form requires.
+    let domain: Vec<Term> = (0..n)
+        .flat_map(|i| {
+            [
+                iri_term(&format!("http://ex/s{}", i)),
+                iri_term(&format!("http://ex/o{}", i)),
+            ]
+        })
+        .collect();
     PredicatedEdges::new(edges)
+        .with_node_domain(domain)
+        .expect("the declared domain covers every edge endpoint by construction")
 }
 
 /// The bounded entry's PUBLIC bound can exceed `MAX_OUTPUT_BOUND` for inputs
 /// `check_bounded_params` ACCEPTS — the public bound sums the arms, while `B` is
 /// capped. For those shapes no admissible `B` reaches the public bound, so the
-/// caller has only the data-dependent branch. This pins the two cases the entry
-/// doc and `skills/mpc/SKILL.md` quote.
+/// caller has only the data-dependent branch. Two representative shapes, on a
+/// fixture whose declared node domain is exactly `2|E|`.
 #[test]
 fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
     use crate::oblivious_join::MAX_OUTPUT_BOUND;
 
     let backend = ShamirBackend::new_seeded(5, 0x51A3).unwrap();
 
-    // `{0,2}` over 511 edges: 2|E| diagonal + |E| at length 1 + |E|^2 at length 2.
+    // `{0,2}` over 511 edges: |V| = 2|E| diagonal + |E| at length 1 + |E|^2 at
+    // length 2.
     let two = HiddenBoundedPath::range("http://ex/p", 0, 2);
     let edges = predicated_chain(511, "http://ex/p");
     check_bounded_params(&backend, &edges, &two).expect("{0,2} over 511 edges is accepted");
-    let public = public_bounded_candidate_pair_bound(edges.len(), &two).unwrap();
+    let public =
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), &two)
+            .unwrap();
     assert_eq!(public, 2 * 511 + 511 + 511 * 511);
     assert!(
         public > MAX_OUTPUT_BOUND,
@@ -1024,11 +1039,13 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
         MAX_OUTPUT_BOUND
     );
 
-    // `{0,1}` over 87_382 edges: the diagonal plus length 1 is already `3·|E|`.
+    // `{0,1}` over 87_382 edges: the |V| = 2|E| diagonal plus length 1 is already
+    // `3·|E|` on this fixture.
     let one = HiddenBoundedPath::range("http://ex/p", 0, 1);
     let wide = predicated_chain(87_382, "http://ex/p");
     check_bounded_params(&backend, &wide, &one).expect("{0,1} over 87_382 edges is accepted");
-    let public_one = public_bounded_candidate_pair_bound(wide.len(), &one).unwrap();
+    let public_one =
+        public_bounded_candidate_pair_bound(wide.len(), wide.declared_domain_len(), &one).unwrap();
     assert_eq!(public_one, 3 * 87_382);
     assert!(
         public_one > MAX_OUTPUT_BOUND,
@@ -1036,6 +1053,9 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
         public_one,
         MAX_OUTPUT_BOUND
     );
-    // One edge fewer still fits, so 87_382 is where the reach is actually lost.
-    assert!(public_bounded_candidate_pair_bound(87_381, &one).unwrap() <= MAX_OUTPUT_BOUND);
+    // One edge fewer still fits, so on this `|V| = 2|E|` fixture 87_382 is where the
+    // reach is actually lost.
+    assert!(
+        public_bounded_candidate_pair_bound(87_381, 2 * 87_381, &one).unwrap() <= MAX_OUTPUT_BOUND
+    );
 }

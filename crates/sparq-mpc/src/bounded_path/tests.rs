@@ -53,10 +53,10 @@ fn nn(iri: &str) -> NamedNode {
     NamedNode::new(iri).unwrap()
 }
 
-/// Build the per-predicate disclosed edge set: each holder discloses its
-/// `(?s,?o)` rows for a predicate via `evaluate_local`, exactly as a federation
-/// member would. Returns the [`DisclosedEdges`] the unroller consumes.
-fn disclosed_edges(holder_docs: &[(&str, &[&str])]) -> DisclosedEdges {
+/// Build the per-predicate disclosed edge set WITHOUT declaring a node domain —
+/// each holder discloses its `(?s,?o)` rows for a predicate via `evaluate_local`,
+/// exactly as a federation member would. A `min == 0` form over this is refused.
+fn disclosed_edges_only(holder_docs: &[(&str, &[&str])]) -> DisclosedEdges {
     // holder_docs: (turtle body, [predicate IRIs this holder discloses]).
     let mut entries: Vec<(NamedNode, PartialResult)> = Vec::new();
     for (i, (doc, preds)) in holder_docs.iter().enumerate() {
@@ -69,6 +69,34 @@ fn disclosed_edges(holder_docs: &[(&str, &[&str])]) -> DisclosedEdges {
         }
     }
     DisclosedEdges::from_holder_edges(entries).unwrap()
+}
+
+/// Every subject/object IRI of the WHOLE union of the holder documents — the
+/// active graph's node domain in the sense of SPARQL 1.1 §18.4, read out of the
+/// union store through the real engine so it is literally the term set the
+/// clear-text oracle's zero-length match ranges over. Strictly wider than the
+/// endpoint set of any single predicate.
+fn active_graph_nodes(docs: &[&str]) -> Vec<NamedNode> {
+    let u = union_graph(docs);
+    let res = query(&u, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for row in &res.rows {
+        for slot in row.iter().flatten() {
+            if let Term::NamedNode(n) = slot {
+                out.insert(n.as_str().to_string());
+            }
+        }
+    }
+    out.into_iter().map(|s| nn(&s)).collect()
+}
+
+/// [`disclosed_edges_only`] plus the DECLARED public node domain of the union of
+/// all the holder documents — the input a `{0,k}` / `p?` form needs.
+fn disclosed_edges(holder_docs: &[(&str, &[&str])]) -> DisclosedEdges {
+    let docs: Vec<&str> = holder_docs.iter().map(|(d, _)| *d).collect();
+    disclosed_edges_only(holder_docs)
+        .with_node_domain(active_graph_nodes(&docs))
+        .expect("the active graph's node domain covers every disclosed endpoint")
 }
 
 /// Build a single union store from holder turtle bodies — the "evaluate the
@@ -897,9 +925,12 @@ impl FuzzRng {
     }
 }
 
-/// The three predicates the fuzz graphs use. Every holder discloses all three,
-/// so the disclosed edge set — and with it the node domain a `{0,k}` form draws
-/// its identity pairs from — is exactly the generated graph.
+/// The three predicates the fuzz graphs use. Each iteration discloses a random
+/// NON-EMPTY subset of them and draws the path's predicates from that subset, so
+/// most iterations have a predicate whose triples are in the active graph but
+/// contribute no edge to the path. Those triples still name nodes, and a `{0,k}`
+/// arm has to bind `(x,x)` for them (SPARQL 1.1 §18.4) — which is why the sweep
+/// declares the node domain of the WHOLE generated graph.
 const FUZZ_PREDS: [&str; 3] = ["http://ex/f0", "http://ex/f1", "http://ex/f2"];
 
 /// An abstract generated form, so the generator can build the oracle's view and
@@ -933,21 +964,82 @@ impl FuzzForm {
                 .any(|p| matches!(p, FuzzForm::Seq(_)) || p.has_nested_sequence()),
         }
     }
+
+    /// Whether any repetition in the form has `min == 0`, i.e. the form has a
+    /// zero-length arm and therefore reads the node domain.
+    fn admits_zero_length(&self) -> bool {
+        match self {
+            FuzzForm::Rep(_, m, _) => *m == 0,
+            FuzzForm::Seq(parts) => parts.iter().any(FuzzForm::admits_zero_length),
+        }
+    }
+}
+
+/// The form rewritten as a SPARQL property path the FINAL Rec's grammar carries
+/// (`/`, `|`, `?` only — never the removed `{m,n}`), so the real engine can serve
+/// as the oracle. `None` when the form is not expressible that way: a repetition
+/// with `max == 0` denotes the zero-length relation alone, which has no
+/// property-path spelling.
+fn fuzz_sparql(f: &FuzzForm) -> Option<String> {
+    match f {
+        FuzzForm::Rep(alts, m, k) => {
+            if *k == 0 {
+                return None;
+            }
+            let step = if alts.len() == 1 {
+                format!("<{}>", FUZZ_PREDS[alts[0]])
+            } else {
+                let inner: Vec<String> = alts
+                    .iter()
+                    .map(|&i| format!("<{}>", FUZZ_PREDS[i]))
+                    .collect();
+                format!("({})", inner.join("|"))
+            };
+            let mut arms: Vec<String> = Vec::new();
+            // `min == 0` is carried by `?`, which supplies lengths 0 AND 1.
+            let first = if *m == 0 {
+                arms.push(format!("{}?", step));
+                2
+            } else {
+                *m
+            };
+            for length in first..=*k {
+                arms.push(vec![step.clone(); length].join("/"));
+            }
+            if arms.len() == 1 {
+                Some(arms.remove(0))
+            } else {
+                Some(format!("({})", arms.join("|")))
+            }
+        }
+        FuzzForm::Seq(parts) => {
+            let rendered: Option<Vec<String>> = parts
+                .iter()
+                .map(|p| fuzz_sparql(p).map(|r| format!("({})", r)))
+                .collect();
+            Some(rendered?.join("/"))
+        }
+    }
 }
 
 /// Generate a form. `depth` bounds the nesting; the sizes are kept small so the
 /// projected chain count stays far below [`MAX_UNROLL_CHAINS`] and every case
 /// evaluates in microseconds.
-fn fuzz_form(rng: &mut FuzzRng, depth: usize) -> FuzzForm {
-    fn rep(rng: &mut FuzzRng) -> FuzzForm {
+fn fuzz_form(rng: &mut FuzzRng, depth: usize, allowed: &[usize]) -> FuzzForm {
+    fn rep(rng: &mut FuzzRng, allowed: &[usize]) -> FuzzForm {
         let n_alts = 1 + rng.below(2) as usize;
-        let alts: Vec<usize> = (0..n_alts).map(|_| rng.below(3) as usize).collect();
+        // Only DISCLOSED predicates may appear in the path: an undisclosed one
+        // contributes no edge, so a path naming it would not be the same relation
+        // the engine evaluates over the union store.
+        let alts: Vec<usize> = (0..n_alts)
+            .map(|_| allowed[rng.below(allowed.len() as u64) as usize])
+            .collect();
         let m = rng.below(3) as usize;
         let k = m + rng.below(2) as usize;
         FuzzForm::Rep(alts, m, k)
     }
     if depth == 0 || rng.chance(1, 3) {
-        return rep(rng);
+        return rep(rng, allowed);
     }
     let n_parts = 2 + rng.below(2) as usize;
     let parts = (0..n_parts)
@@ -955,14 +1047,18 @@ fn fuzz_form(rng: &mut FuzzRng, depth: usize) -> FuzzForm {
             // Nest a sequence inside a sequence often — that is the shape under
             // test — but keep plain repetitions in the mix too.
             if rng.chance(1, 2) {
-                fuzz_form(rng, depth - 1)
+                fuzz_form(rng, depth - 1, allowed)
             } else {
-                rep(rng)
+                rep(rng, allowed)
             }
         })
         .collect();
     FuzzForm::Seq(parts)
 }
+
+/// How many predicate occurrences a rendered path may have before the sweep stops
+/// handing it to the engine (see the sweep's own comment).
+const ENGINE_ORACLE_MAX_STEPS: usize = 8;
 
 /// `(s, predicate index, o)` over small integer node indices.
 type FuzzGraph = Vec<(usize, usize, usize)>;
@@ -1032,7 +1128,8 @@ fn fuzz_oracle(f: &FuzzForm, per_holder: &[FuzzGraph]) -> BTreeSet<(usize, usize
     }
     let all: BTreeSet<(usize, usize, usize)> = per_holder.iter().flatten().copied().collect();
     // The node domain the length-0 identity pairs come from: every node named by
-    // any disclosed edge, under any predicate.
+    // ANY triple of the generated graph, under any predicate — disclosed to the
+    // path or not (SPARQL 1.1 §18.4 ZeroLengthPath).
     let domain: BTreeSet<usize> = all.iter().flat_map(|&(s, _, o)| [s, o]).collect();
     match f {
         FuzzForm::Rep(alts, m, k) => {
@@ -1083,23 +1180,75 @@ fn seeded_fuzz_nested_forms_match_the_composition_oracle() {
     let mut rng = FuzzRng(0x5EED_B0A4);
     let mut nested = 0usize;
     let mut flat = 0usize;
+    let mut partial_disclosure = 0usize;
+    let mut zero_length_with_undisclosed = 0usize;
+    let mut engine_checked = 0usize;
 
     for iter in 0..200 {
         let per_holder = fuzz_graph(&mut rng);
-        let form = fuzz_form(&mut rng, 2);
+        // A random NON-EMPTY subset of the predicates is disclosed to the path.
+        // The rest stay in the active graph, contributing nodes but no edges.
+        let disclosed: Vec<usize> = loop {
+            let pick: Vec<usize> = (0..FUZZ_PREDS.len()).filter(|_| rng.chance(1, 2)).collect();
+            if !pick.is_empty() {
+                break pick;
+            }
+        };
+        let form = fuzz_form(&mut rng, 2, &disclosed);
 
         let docs: Vec<String> = per_holder.iter().map(fuzz_turtle).collect();
-        let preds: Vec<&str> = FUZZ_PREDS.to_vec();
-        let args: Vec<(&str, &[&str])> = docs.iter().map(|d| (d.as_str(), &preds[..])).collect();
+        let disclosed_iris: Vec<&str> = disclosed.iter().map(|&i| FUZZ_PREDS[i]).collect();
+        let args: Vec<(&str, &[&str])> = docs
+            .iter()
+            .map(|d| (d.as_str(), &disclosed_iris[..]))
+            .collect();
+        // `disclosed_edges` declares the node domain of the WHOLE generated graph
+        // (read back through the engine), which is what §18.4 asks for.
         let edges = disclosed_edges(&args);
 
         let got = federated_pairs(&edges, &form.to_path_form());
         let want = fuzz_oracle_pairs(&fuzz_oracle(&form, &per_holder));
         assert_eq!(
             got, want,
-            "iter {}: the unroll disagrees with the oracle\n  form: {:?}\n  graph: {:?}",
-            iter, form, per_holder
+            "iter {}: the unroll disagrees with the oracle\n  form: {:?}\n  disclosed: {:?}\n  graph: {:?}",
+            iter, form, disclosed, per_holder
         );
+
+        // Where the form is expressible in the final-Rec property-path grammar,
+        // the REAL engine is the oracle too — the same differential the named
+        // tests above run, now over randomly-generated graphs and forms.
+        // Cap how big a path the engine is asked to serve: the rendered union of
+        // chains grows multiplicatively with nesting, and the engine materialises
+        // the whole path relation, so the largest generated forms dominate the
+        // sweep's runtime without adding a shape the smaller ones miss.
+        let engine_path = fuzz_sparql(&form)
+            .filter(|p| p.matches("http://ex/f").count() <= ENGINE_ORACLE_MAX_STEPS);
+        if let Some(path) = engine_path {
+            let doc_refs: Vec<&str> = docs.iter().map(String::as_str).collect();
+            assert_eq!(
+                got,
+                clear_text_pairs(&doc_refs, &path),
+                "iter {}: the unroll disagrees with the engine\n  form: {:?}\n  path: {}\n  disclosed: {:?}\n  graph: {:?}",
+                iter,
+                form,
+                path,
+                disclosed,
+                per_holder
+            );
+            engine_checked += 1;
+        }
+
+        // Book-keeping for the coverage assertions below.
+        let undisclosed_edges = per_holder
+            .iter()
+            .flatten()
+            .any(|(_, p, _)| !disclosed.contains(p));
+        if undisclosed_edges {
+            partial_disclosure += 1;
+            if form.admits_zero_length() {
+                zero_length_with_undisclosed += 1;
+            }
+        }
 
         if form.has_nested_sequence() {
             nested += 1;
@@ -1114,4 +1263,201 @@ fn seeded_fuzz_nested_forms_match_the_composition_oracle() {
         nested
     );
     assert!(flat > 0, "and flat forms too, saw {} of 200", flat);
+    assert!(
+        partial_disclosure >= 20,
+        "the sweep must actually exercise graphs with UNDISCLOSED predicates, saw {} of 200",
+        partial_disclosure
+    );
+    assert!(
+        zero_length_with_undisclosed >= 10,
+        "and a zero-length arm together with an undisclosed predicate — the shape \
+         the node-domain fix is about — saw {} of 200",
+        zero_length_with_undisclosed
+    );
+    assert!(
+        engine_checked >= 50,
+        "and the real engine as the oracle on a good share of them, saw {} of 200",
+        engine_checked
+    );
+}
+
+// =====================================================================
+// 10. ZERO-LENGTH NODE DOMAIN — the whole active graph, not the path's
+//     own disclosed predicates (SPARQL 1.1 §18.4 ZeroLengthPath)
+// =====================================================================
+
+/// THE reproducer. Holder A holds `ex:a ex:p ex:b`, holder B holds `ex:c ex:q ex:d`,
+/// and only `ex:p` is disclosed to the path. `ex:p?` is a zero-length arm, so §18.4
+/// binds `(x,x)` for EVERY term of the active graph — including `ex:c` and `ex:d`,
+/// which occur only in the `ex:q` triple the path never traverses.
+///
+/// Drawing the identity pairs from the disclosed `ex:p` edges alone yielded
+/// {aa, ab, bb} and missed (c,c) and (d,d). With the active graph's node domain
+/// declared, the unroll equals the engine's `ex:p?` exactly.
+#[test]
+fn differential_zero_length_domain_spans_predicates_outside_the_path() {
+    let h1 = "ex:a ex:p ex:b .";
+    let h2 = "ex:c ex:q ex:d .";
+    // Only ex:p is disclosed; ex:q contributes NO edge to the path.
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"]), (h2, &[])]);
+
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let got = federated_pairs(&edges, &form);
+    let want = clear_text_pairs(&[h1, h2], "ex:p?");
+    assert_eq!(
+        got, want,
+        "p? must bind (x,x) for every term of the active graph, not just the \
+         endpoints of the disclosed ex:p edges"
+    );
+
+    // Spelled out, so the test states the answer rather than only mirroring it.
+    let term = |iri: &str| format!("{:?}", Term::from(nn(iri)));
+    for n in ["http://ex/a", "http://ex/b", "http://ex/c", "http://ex/d"] {
+        assert!(
+            got.contains(&(term(n), term(n))),
+            "the identity pair for {n} must be present: {got:?}"
+        );
+    }
+    assert!(got.contains(&(term("http://ex/a"), term("http://ex/b"))));
+    assert_eq!(
+        got.len(),
+        5,
+        "4 identity pairs + the one ex:p edge: {got:?}"
+    );
+}
+
+/// The same shape with a bounded `{0,2}` arm and a node reachable only through a
+/// predicate the path does traverse plus one it does not.
+#[test]
+fn differential_zero_to_k_domain_spans_predicates_outside_the_path() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let h2 = "ex:x ex:q ex:y . ex:y ex:q ex:z .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"]), (h2, &[])]);
+
+    let form = PathForm::range(nn("http://ex/p"), 0, 2);
+    let got = federated_pairs(&edges, &form);
+    let want = clear_text_pairs(&[h1, h2], "(ex:p)? | ex:p/ex:p");
+    assert_eq!(got, want);
+    // 6 identity pairs (a,b,c,x,y,z) + (a,b),(b,c) + (a,c) = 9.
+    assert_eq!(got.len(), 9, "{got:?}");
+}
+
+/// A zero-length arm on an edge set with NO declared node domain is REFUSED, not
+/// answered from the disclosed endpoints. The refusal is value-free: it names no
+/// term, no node count and no row count.
+#[test]
+fn zero_length_arm_without_a_declared_domain_is_refused() {
+    let h1 = "ex:a ex:p ex:b .";
+    let h2 = "ex:c ex:q ex:d .";
+    let edges = disclosed_edges_only(&[(h1, &["http://ex/p"]), (h2, &["http://ex/q"])]);
+
+    for form in [
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::range(nn("http://ex/p"), 0, 3),
+        PathForm::range(nn("http://ex/p"), 0, 0),
+        // Nested: a zero-length arm inside a sequence is refused too.
+        PathForm::Sequence(vec![
+            PathForm::exact(nn("http://ex/p"), 1),
+            PathForm::range(nn("http://ex/p"), 0, 2),
+        ]),
+    ] {
+        let err = eval_bounded_path_disclosed(&edges, &form).unwrap_err();
+        match &err {
+            MpcError::Protocol(m) => {
+                assert!(
+                    m.contains("PUBLIC node domain") && m.contains("with_node_domain"),
+                    "{}",
+                    m
+                );
+                for value in ["ex/a", "ex/b", "ex/c", "ex/d"] {
+                    assert!(!m.contains(value), "the message names a term: {}", m);
+                }
+            }
+            other => panic!("expected a Protocol refusal, got {:?}", other),
+        }
+    }
+}
+
+/// A form with `min >= 1` never reads the node domain, so it runs unchanged on an
+/// edge set that declares none — the refusal is scoped to the zero-length arm.
+#[test]
+fn a_min_one_form_needs_no_declared_domain() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let undeclared = disclosed_edges_only(&[(h1, &["http://ex/p"])]);
+    let declared = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 2);
+    assert_eq!(
+        federated_pairs(&undeclared, &form),
+        clear_text_pairs(&[h1], "ex:p | ex:p/ex:p")
+    );
+    assert_eq!(
+        federated_pairs(&undeclared, &form),
+        federated_pairs(&declared, &form),
+        "declaring a domain cannot change a min >= 1 answer"
+    );
+}
+
+/// A declared domain that omits an endpoint of a disclosed edge is inconsistent
+/// with those edges and is refused at declaration time — a zero-length arm over it
+/// would under-answer exactly as the old edge-derived domain did. The message names
+/// counts only, no terms.
+#[test]
+fn a_declared_domain_that_omits_a_disclosed_endpoint_is_refused() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let edges = disclosed_edges_only(&[(h1, &["http://ex/p"])]);
+    let err = edges
+        .clone()
+        // ex:c is an object of a disclosed edge but is left out.
+        .with_node_domain([nn("http://ex/a"), nn("http://ex/b")])
+        .unwrap_err();
+    match &err {
+        MpcError::Protocol(m) => {
+            assert!(
+                m.contains("omits 1 endpoint term(s)") && m.contains("domain of 2 term(s)"),
+                "{}",
+                m
+            );
+            assert!(!m.contains("ex/c"), "the message names a term: {}", m);
+        }
+        other => panic!("expected a Protocol refusal, got {:?}", other),
+    }
+
+    // A domain WIDER than the disclosed endpoints is fine — that is the whole
+    // point: the active graph has terms the path's predicates never touch.
+    edges
+        .with_node_domain([
+            nn("http://ex/a"),
+            nn("http://ex/b"),
+            nn("http://ex/c"),
+            nn("http://ex/elsewhere"),
+        ])
+        .expect("a superset domain is accepted");
+}
+
+/// Declaring the same domain in a different order, or with duplicates, gives the
+/// same answer: `with_node_domain` dedups and canonicalises.
+#[test]
+fn a_declared_domain_is_order_and_duplicate_insensitive() {
+    let h1 = "ex:a ex:p ex:b .";
+    let base = disclosed_edges_only(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let forward = base
+        .clone()
+        .with_node_domain([nn("http://ex/a"), nn("http://ex/b"), nn("http://ex/z")])
+        .unwrap();
+    let shuffled = base
+        .with_node_domain([
+            nn("http://ex/z"),
+            nn("http://ex/b"),
+            nn("http://ex/a"),
+            nn("http://ex/b"),
+        ])
+        .unwrap();
+    let a = eval_bounded_path_disclosed(&forward, &form).unwrap();
+    let b = eval_bounded_path_disclosed(&shuffled, &form).unwrap();
+    assert_eq!(
+        a.rows, b.rows,
+        "the row ORDER must match too, not just the set"
+    );
+    assert_eq!(pair_set(&a.vars, &a.rows).len(), 4, "aa,bb,zz,ab");
 }

@@ -48,8 +48,12 @@
 //! - **exact** `(p){k}` — one fixed `k`-hop chain ([`BoundedRepetition`] `m==k`).
 //! - **range** `(p){m,k}` — UNION of the exactly-`ℓ` chains for `ℓ in m..=k`.
 //! - **reflexive** `(p){0,k}` — the `{1,k}` union PLUS the length-0 identity pairs
-//!   `(x,x)` over the node set in scope (design §2.3); the identity pairs appear
-//!   exactly once after dedup.
+//!   `(x,x)` over the **declared public node domain** (design §2.3); the identity
+//!   pairs appear exactly once after dedup. SPARQL 1.1 §18.4 `ZeroLengthPath` binds
+//!   the zero-length match to every term of the active graph, which is strictly
+//!   wider than the endpoints of the path's own disclosed predicates, so the domain
+//!   is a declared plan input ([`DisclosedEdges::with_node_domain`]) and a `min == 0`
+//!   form without it is REFUSED rather than answered from a narrower domain.
 //! - **alternation** `(p1|p2|...)` per hop — each hop position expands over its
 //!   alternatives; a length-`ℓ` chain of an `a`-way alternation unrolls to `a^ℓ`
 //!   fixed chains (design §2.4), all unioned and deduped. Because that count is
@@ -279,10 +283,18 @@ const INTERMEDIATE_PREFIX: &str = "__pp_z";
 /// raw holder graphs, only these per-predicate disclosed edge relations
 /// (minimise data sharing, architecture §4.2). The `(a,b)` pairs are the headline
 /// federation case: endpoints are disclosed global IRIs.
+///
+/// A zero-length arm (`{0,k}` / `p?` / a bounded `p*`) additionally needs the
+/// PUBLIC node domain, which these per-predicate edge sets do NOT carry — see
+/// [`DisclosedEdges::with_node_domain`].
 #[derive(Debug, Clone)]
 pub struct DisclosedEdges {
     /// `(predicate IRI string, disclosed (?__pp_edge_s, ?__pp_edge_o) edge partial)`.
     by_predicate: Vec<(String, PartialResult)>,
+    /// The caller-declared PUBLIC node domain of the federation's active graph,
+    /// if any. Deduped, canonically ordered, IRI terms only. `None` = not
+    /// declared, and a form with `min == 0` is then refused.
+    node_domain: Option<Vec<Term>>,
 }
 
 impl DisclosedEdges {
@@ -360,7 +372,86 @@ impl DisclosedEdges {
                 None => by_predicate.push((key, rekeyed)),
             }
         }
-        Ok(DisclosedEdges { by_predicate })
+        Ok(DisclosedEdges {
+            by_predicate,
+            node_domain: None,
+        })
+    }
+
+    /// Declare the federation's PUBLIC node domain — every term that occurs as a
+    /// subject or an object of any triple in the active graph — so a zero-length
+    /// arm can be evaluated.
+    ///
+    /// ## Why this has to come from the caller
+    ///
+    /// SPARQL 1.1 §18.4 `ZeroLengthPath` binds the zero-length match to **every
+    /// term in the active graph**, subjects and objects alike — not just the terms
+    /// of the predicates the path traverses. The per-predicate relations built by
+    /// [`DisclosedEdges::from_holder_edges`] carry only the edges holders
+    /// disclosed for the path's own predicates, so their endpoint terms are a
+    /// SUBSET of that domain: a node occurring only in a triple of some other
+    /// predicate (or of a predicate no holder disclosed) is absent. Drawing the
+    /// identity pairs from the disclosed edges alone therefore dropped those
+    /// `(x, x)` pairs and answered a `{0,k}` / `p?` form with fewer rows than the
+    /// clear-text engine's `eval_path` — a wrong answer, silently.
+    ///
+    /// Widening the disclosure to recover the domain is not this module's call to
+    /// make: the holders decide what they publish (minimise data sharing,
+    /// architecture §4.2). So the domain is a declared, PUBLIC plan input, and
+    /// without it a `min == 0` form is REFUSED ([`MpcError::Protocol`]) rather
+    /// than answered from a narrower domain. A form with `min >= 1` never reads
+    /// the domain and needs no declaration.
+    ///
+    /// ## Checks
+    ///
+    /// The declared domain must COVER every endpoint of every disclosed edge —
+    /// those terms are in the active graph by construction, so a domain that
+    /// omits one is inconsistent with the edges it accompanies, and evaluating a
+    /// zero-length arm over it would again under-answer. Such a declaration is
+    /// refused with [`MpcError::Protocol`]. Terms are `NamedNode` by signature,
+    /// matching the disclosed-key regime's global-IRI requirement. Duplicates are
+    /// collapsed, and the stored order is canonical, so the identity pairs do not
+    /// depend on the order the caller listed its nodes in.
+    pub fn with_node_domain(
+        mut self,
+        nodes: impl IntoIterator<Item = NamedNode>,
+    ) -> Result<Self, MpcError> {
+        let mut declared: BTreeSet<String> = BTreeSet::new();
+        for n in nodes {
+            declared.insert(n.into_string());
+        }
+        // Every disclosed endpoint is a term of the active graph, so the declared
+        // domain has to contain it. Report only HOW MANY are missing: the count is
+        // enough to act on, and the message stays free of term values.
+        let mut missing: BTreeSet<&str> = BTreeSet::new();
+        for (_, part) in &self.by_predicate {
+            for row in &part.rows {
+                for slot in row.iter().flatten() {
+                    if let Term::NamedNode(nn) = slot {
+                        if !declared.contains(nn.as_str()) {
+                            missing.insert(nn.as_str());
+                        }
+                    }
+                }
+            }
+        }
+        if !missing.is_empty() {
+            return Err(MpcError::Protocol(format!(
+                "declared public node domain of {} term(s) omits {} endpoint term(s) of the \
+                 disclosed edges — every disclosed endpoint is a term of the active graph, so \
+                 a zero-length arm over this domain would under-answer; declare the full \
+                 subject/object domain of the active graph",
+                declared.len(),
+                missing.len()
+            )));
+        }
+        self.node_domain = Some(
+            declared
+                .into_iter()
+                .map(|iri| Term::NamedNode(NamedNode::new_unchecked(iri)))
+                .collect(),
+        );
+        Ok(self)
     }
 
     /// The disclosed edge relation for one predicate, projected onto a chosen
@@ -387,24 +478,29 @@ impl DisclosedEdges {
         }
     }
 
-    /// The set of all distinct node IRIs occurring as a subject or object in ANY
-    /// disclosed edge — the term domain over which the reflexive (length-0)
-    /// identity pairs `(x,x)` are added for `{0,k}` (design §2.3, mirroring the
-    /// clear-text engine's `graph_nodes`).
-    fn node_domain(&self) -> Vec<Term> {
-        let mut set: BTreeSet<String> = BTreeSet::new();
-        let mut nodes: Vec<Term> = Vec::new();
-        for (_, part) in &self.by_predicate {
-            for row in &part.rows {
-                for slot in row.iter().flatten() {
-                    let key = format!("{slot:?}");
-                    if set.insert(key) {
-                        nodes.push(slot.clone());
-                    }
-                }
-            }
-        }
-        nodes
+    /// The declared PUBLIC node domain over which the reflexive (length-0)
+    /// identity pairs `(x,x)` are added for `{0,k}` (design §2.3; the analogue of
+    /// the clear-text engine's `graph_nodes`, which ranges over the WHOLE active
+    /// graph).
+    ///
+    /// Fail-closed when the caller declared no domain: the disclosed per-predicate
+    /// edge sets do not carry it, and the endpoint terms they do carry are only a
+    /// subset of it, so there is nothing sound to fall back on. See
+    /// [`DisclosedEdges::with_node_domain`].
+    fn node_domain(&self) -> Result<&[Term], MpcError> {
+        self.node_domain.as_deref().ok_or_else(|| {
+            MpcError::Protocol(
+                "bounded path with min == 0 (the zero-length arm of {0,k} / p? / a bounded p*) \
+                 needs the federation's PUBLIC node domain, which the disclosed per-predicate \
+                 edge sets do not carry: SPARQL 1.1 §18.4 binds the zero-length match to every \
+                 term in the active graph, including terms occurring only in triples of \
+                 predicates this path does not traverse or that no holder disclosed. Refusing \
+                 rather than drawing the identity pairs from the disclosed endpoints alone, \
+                 which would silently under-answer. Declare the domain with \
+                 DisclosedEdges::with_node_domain, or use a form with min >= 1."
+                    .into(),
+            )
+        })
     }
 }
 
@@ -526,10 +622,12 @@ fn eval_repetition(
 
     for length in rep.min..=rep.max {
         if length == 0 {
-            // Length-0: the reflexive identity pairs (x,x) over the node domain
-            // (design §2.3). Data-independent given the node set.
-            for node in edges.node_domain() {
-                union_rows.push(vec![Some(node.clone()), Some(node)]);
+            // Length-0: the reflexive identity pairs (x,x) over the DECLARED
+            // public node domain (design §2.3; SPARQL 1.1 §18.4). Refused when no
+            // domain was declared — the disclosed edges' endpoints are only a
+            // subset of it.
+            for node in edges.node_domain()? {
+                union_rows.push(vec![Some(node.clone()), Some(node.clone())]);
             }
             continue;
         }

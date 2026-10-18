@@ -478,10 +478,14 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 ///
 /// Same contract as [`public_candidate_pair_bound`], for the bounded union. The
 /// builder keys every enumerated tuple's endpoint pair plus, when `min == 0`, the
-/// reflexive diagonal over the node domain, so the arms are bounded publicly by
+/// reflexive diagonal over the DECLARED public node domain, so the arms are
+/// bounded publicly by
 ///
-/// - `min == 0` — at most `2*|E|` nodes in the domain, so at most `2*|E|` diagonal
-///   pairs;
+/// - `min == 0` — one diagonal pair per declared node, so exactly
+///   `node_domain_len` pairs (the declared domain's SIZE is a public plan input).
+///   Pass `0` only for an edge relation that declares no domain, and note that
+///   such a relation cannot serve a `min == 0` form at all: the evaluation
+///   refuses when it reaches the diagonal, whatever this bound says;
 /// - length `1` in range — at most `|E|` pairs;
 /// - any length `>= 2` in range — at most `|E|^2` pairs.
 ///
@@ -489,19 +493,19 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 /// deliberate: the bound must not depend on the edge data, and over-counting only
 /// raises the `B` at which the decision becomes data-independent. For inputs
 /// `check_bounded_params` accepts, that sum can exceed
-/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`, or
-/// `{0,2}` with `|E| = 511` — and then no admissible `B` reaches it, so the caller
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — a `{0,2}` form only needs an
+/// `|E|` whose square passes `MAX_CHAIN_TUPLES` but whose `|E|^2` term alone
+/// passes `MAX_OUTPUT_BOUND`, and the diagonal arm adds the declared domain on
+/// top — and then no admissible `B` reaches it, so the caller
 /// has only the data-dependent branch. Neither branch hides the distinct
 /// endpoint-pair count from an observer of the run's schedule.
 ///
 /// Returns `MpcError::Protocol` if the sum overflows `usize`.
 pub fn public_bounded_candidate_pair_bound(
     edge_count: usize,
+    node_domain_len: usize,
     form: &HiddenBoundedPath,
 ) -> Result<usize, MpcError> {
-    if edge_count == 0 {
-        return Ok(0);
-    }
     let overflow = || {
         MpcError::Protocol(format!(
             "hidden bounded path: the public endpoint-pair bound overflows usize for |E|={}",
@@ -509,10 +513,16 @@ pub fn public_bounded_candidate_pair_bound(
         ))
     };
     let mut total = 0usize;
+    // The diagonal arm is sized by the DECLARED domain, which is independent of
+    // `|E|`: a graph whose other predicates name many nodes has a domain larger
+    // than `2*|E|`, and one with no declared domain never reaches here with
+    // `min == 0`. So it is added even when `|E| == 0` — the builder emits the
+    // diagonal for every declared node whether or not any edge exists.
     if form.min == 0 {
-        total = total
-            .checked_add(edge_count.checked_mul(2).ok_or_else(overflow)?)
-            .ok_or_else(overflow)?;
+        total = total.checked_add(node_domain_len).ok_or_else(overflow)?;
+    }
+    if edge_count == 0 {
+        return Ok(total);
     }
     if form.min <= 1 && form.max >= 1 {
         total = total.checked_add(edge_count).ok_or_else(overflow)?;
@@ -606,8 +616,8 @@ fn projected_bounded_candidate_count(
 ) -> Result<usize, MpcError> {
     let mut keys: BTreeSet<String> = BTreeSet::new();
     if form.min == 0 {
-        for node in edges.node_domain() {
-            keys.insert(endpoint_key(&node, &node));
+        for node in edges.node_domain()? {
+            keys.insert(endpoint_key(node, node));
         }
     }
     if !edges.is_empty() {
@@ -847,12 +857,100 @@ pub struct PredicatedEdge {
 #[derive(Debug, Clone)]
 pub struct PredicatedEdges {
     edges: Vec<PredicatedEdge>,
+    /// The caller-declared PUBLIC node domain of the active graph, if any.
+    /// Deduped and canonically ordered. `None` = not declared, and a form with
+    /// `min == 0` is then refused — see [`PredicatedEdges::with_node_domain`].
+    node_domain: Option<Vec<Term>>,
 }
 
 impl PredicatedEdges {
     /// Build the relation from the federated union of labelled edges.
+    ///
+    /// No node domain is declared, so a form with `min == 0` (a zero-length arm)
+    /// is refused; see [`PredicatedEdges::with_node_domain`].
     pub fn new(edges: Vec<PredicatedEdge>) -> Self {
-        PredicatedEdges { edges }
+        PredicatedEdges {
+            edges,
+            node_domain: None,
+        }
+    }
+
+    /// Declare the active graph's PUBLIC node domain — every term occurring as a
+    /// subject or object of any triple the federation holds — so a zero-length arm
+    /// (`{0,k}` / `p?`) can be evaluated.
+    ///
+    /// ## Why this has to come from the caller
+    ///
+    /// SPARQL 1.1 §18.4 `ZeroLengthPath` binds the zero-length match to **every
+    /// term in the active graph**. The edges in this relation are only those the
+    /// holders contributed for the path's own alternation predicates, so their
+    /// endpoint terms are a SUBSET of that domain: a node occurring only in a
+    /// triple of another predicate is absent. Drawing the reflexive diagonal from
+    /// the edge endpoints alone therefore dropped those `(x, x)` pairs and
+    /// answered a `{0,k}` / `p?` form with fewer pairs than the clear-text
+    /// engine — a wrong answer, silently.
+    ///
+    /// Having the operator reach for the wider term set instead is not available
+    /// to it and would not be its call: the holders decide which triples they
+    /// contribute. So the domain is a declared, PUBLIC plan input, and without it
+    /// [`eval_bounded_path_hidden`] refuses a `min == 0` form fail-closed, BEFORE
+    /// any sharing is drawn. A form with `min >= 1` never reads the domain.
+    ///
+    /// Note what declaring it makes public: the diagonal's terms appear in the
+    /// opened output exactly as the matched endpoint terms already do, and the
+    /// domain's SIZE enters the public candidate bound
+    /// ([`public_bounded_candidate_pair_bound`]). Both are properties of the
+    /// public plan input the caller chose to declare, not of the secret node keys.
+    ///
+    /// ## Checks
+    ///
+    /// The declared domain must COVER every endpoint term of every edge in this
+    /// relation: those terms are in the active graph by construction, so a domain
+    /// omitting one is inconsistent with the edges it accompanies and a
+    /// zero-length arm over it would again under-answer. Such a declaration is
+    /// refused with [`MpcError::Protocol`]. Duplicates are collapsed and the
+    /// stored order is canonical, so the diagonal does not depend on the order
+    /// the caller listed its nodes in.
+    pub fn with_node_domain(
+        mut self,
+        nodes: impl IntoIterator<Item = Term>,
+    ) -> Result<Self, MpcError> {
+        let mut declared: BTreeMap<String, Term> = BTreeMap::new();
+        for n in nodes {
+            declared.entry(format!("{:?}", n)).or_insert(n);
+        }
+        // Count the uncovered endpoint terms; the message names the count only.
+        let mut missing: BTreeSet<String> = BTreeSet::new();
+        for e in &self.edges {
+            for term in [&e.subject.term, &e.object.term] {
+                let key = format!("{:?}", term);
+                if !declared.contains_key(&key) {
+                    missing.insert(key);
+                }
+            }
+        }
+        if !missing.is_empty() {
+            return Err(MpcError::Protocol(format!(
+                "declared public node domain of {} term(s) omits {} endpoint term(s) of the \
+                 edge relation — every edge endpoint is a term of the active graph, so a \
+                 zero-length arm over this domain would under-answer; declare the full \
+                 subject/object domain of the active graph",
+                declared.len(),
+                missing.len()
+            )));
+        }
+        self.node_domain = Some(declared.into_values().collect());
+        Ok(self)
+    }
+
+    /// Size of the declared PUBLIC node domain, or `0` when none was declared.
+    /// This is the public input size the `min == 0` arm of
+    /// [`public_bounded_candidate_pair_bound`] is computed from. The `0` case is
+    /// never served: a `min == 0` form on an undeclared domain is refused when
+    /// the diagonal is reached, so the understated bound it would produce cannot
+    /// let a run through — see `zero_length_domain_err`.
+    fn declared_domain_len(&self) -> usize {
+        self.node_domain.as_ref().map_or(0, Vec::len)
     }
 
     /// Number of edges (`|E|` — public).
@@ -865,21 +963,41 @@ impl PredicatedEdges {
         self.edges.is_empty()
     }
 
-    /// The set of all distinct node TERMS occurring as a subject or object — the
-    /// domain over which the reflexive (length-0) identity pairs `(x, x)` are added
-    /// for `{0,k}` / `p?` (design §2.3, the secret-graph analogue of the clear-text
-    /// `graph_nodes`). Disclosed terms only; no key is touched. Each distinct node
-    /// appears once, in canonical (debug-string) order so the output is deterministic.
-    fn node_domain(&self) -> Vec<Term> {
-        let mut seen: BTreeMap<String, Term> = BTreeMap::new();
-        for e in &self.edges {
-            seen.entry(format!("{:?}", e.subject.term))
-                .or_insert_with(|| e.subject.term.clone());
-            seen.entry(format!("{:?}", e.object.term))
-                .or_insert_with(|| e.object.term.clone());
-        }
-        seen.into_values().collect()
+    /// The DECLARED public node domain over which the reflexive (length-0)
+    /// identity pairs `(x, x)` are added for `{0,k}` / `p?` (design §2.3; the
+    /// analogue of the clear-text engine's `graph_nodes`, which ranges over the
+    /// WHOLE active graph). Disclosed terms only; no key is touched. Each distinct
+    /// node appears once, in canonical (debug-string) order so the output is
+    /// deterministic.
+    ///
+    /// Fail-closed when no domain was declared: the edge relation's own endpoint
+    /// terms are only a subset of the domain, so there is nothing sound to fall
+    /// back on. See `PredicatedEdges::with_node_domain`.
+    fn node_domain(&self) -> Result<&[Term], MpcError> {
+        self.node_domain
+            .as_deref()
+            .ok_or_else(zero_length_domain_err)
     }
+}
+
+/// The fail-closed refusal of a zero-length arm (`min == 0`) on an edge relation
+/// that carries no declared public node domain. The single source of that
+/// refusal: every consumer of the diagonal — `build_bounded_candidates` and the
+/// `projected_bounded_candidate_count` projection — reaches it through
+/// `PredicatedEdges::node_domain`, and the diagonal is the first thing the build
+/// does, so the refusal lands before any sharing is drawn. Value-free: it names
+/// no term and no count.
+fn zero_length_domain_err() -> MpcError {
+    MpcError::Protocol(
+        "hidden bounded path with min == 0 (the zero-length arm of {0,k} / p?) needs the \
+         active graph's PUBLIC node domain, which the edge relation does not carry: SPARQL \
+         1.1 §18.4 binds the zero-length match to every term in the active graph, including \
+         terms occurring only in triples of predicates this path does not traverse. Refusing \
+         rather than drawing the reflexive diagonal from the edge endpoints alone, which \
+         would silently under-answer. Declare the domain with \
+         PredicatedEdges::with_node_domain, or use a form with min >= 1."
+            .into(),
+    )
 }
 
 /// A bounded property-path form the HIDDEN-regime operator understands: a repetition
@@ -1134,14 +1252,15 @@ fn build_bounded_candidates(
         Ok(())
     }
 
-    // Length-0 reflexive diagonal (design §2.3) for {0,k} / p?.
+    // Length-0 reflexive diagonal (design §2.3) over the DECLARED public node
+    // domain (SPARQL 1.1 §18.4), not the edge relation's own endpoints.
     if form.min == 0 {
-        for node in edges.node_domain() {
+        for node in edges.node_domain()? {
             fold(
                 source,
                 &mut by_pair,
                 node.clone(),
-                node,
+                node.clone(),
                 const_sharing(n, Fp::one()),
             )?;
         }
@@ -1220,8 +1339,9 @@ fn build_bounded_candidates(
 /// **The public bound can be out of reach here.**
 /// [`public_bounded_candidate_pair_bound`] sums the arms the form admits, and for
 /// inputs `check_bounded_params` accepts that sum can exceed
-/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`
-/// (`3·|E|`), or `{0,2}` with `|E| = 511` (`3·|E| + |E|^2`), for instance. No `B` is
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — a large enough `|E|` on the
+/// `|E|` arm of `{0,1}`/`{1,1}`, or on the `|E|^2` arm of any form reaching
+/// length 2, with the declared domain's size added on top when `min == 0`. No `B` is
 /// then both at or above the public bound and within `MAX_OUTPUT_BOUND`, so such a
 /// call can only run on the data-dependent branch, with the comparison that branch
 /// discloses.
@@ -1280,7 +1400,7 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     crate::oblivious_join::check_bound_public_first(
         "hidden bounded path",
         bound,
-        public_bounded_candidate_pair_bound(edges.len(), form)?,
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), form)?,
         || projected_bounded_candidate_count(edges, form),
     )?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
