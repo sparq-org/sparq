@@ -703,6 +703,31 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
+/// [`allowed`] as for a URI where nothing is (no metadata, and only a container's format, which is
+/// its listing's): what a caller other than the owner is told about a resource that was not there
+/// before a change in flight began.
+pub async fn allowed_absent<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<bool, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(true);
+    }
+    // A container's format is its listing's, whatever is stored; nothing else has one.
+    let format = uri.ends_with('/').then(|| LWS_JSON.to_string());
+    decide(
+        state,
+        action,
+        uri,
+        agent,
+        &ResourceMeta::default(),
+        Some(format),
+    )
+    .await
+}
+
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
 /// and its format. A Delete is announced once the resource is gone, so each delivery of it is
 /// authorized against this snapshot (and the grants as they stand then).
@@ -1100,16 +1125,23 @@ pub async fn handle<S: Store + 'static>(
                 if let Some(refused) = unavailable() {
                     return refused;
                 }
-                // A conditional create is evaluated against the listing.
-                let held =
-                    match super::records::service_preconditions(state, req, &container, |get| {
-                        listing(state, get, grants)
-                    })
-                    .await
-                    {
-                        Ok(held) => held,
-                        Err(refused) => return refused,
-                    };
+                // A conditional create is evaluated against the listing, which only the owner
+                // may read: anyone else is refused rather than told how it compares.
+                if !owner && super::resources::compares_state(&req.headers, false) {
+                    return state.deny(agent);
+                }
+                let held = match super::records::service_preconditions(
+                    state,
+                    req,
+                    &container,
+                    None,
+                    |get| listing(state, get, grants),
+                )
+                .await
+                {
+                    Ok(held) => held,
+                    Err(refused) => return refused,
+                };
                 create(state, req, agent, grants, held).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
@@ -1208,6 +1240,8 @@ pub async fn handle<S: Store + 'static>(
                 &container,
                 &iri,
                 what,
+                super::records::Listed::InContainer,
+                super::records::Remover::Request,
                 req.admission.clone(),
                 set_aside,
                 settle,
@@ -1249,7 +1283,7 @@ async fn create<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
     grants: bool,
-    held: Option<super::resources::IriGuard>,
+    held: Option<super::records::ListingLocks>,
 ) -> Response {
     // Anyone authenticated may ask for access, so a request is held to its size before it is
     // parsed; grants come from the owner and are held to the request body ceiling.
@@ -1377,6 +1411,7 @@ async fn create<S: Store + 'static>(
         &iri,
         Bytes::from(stored.to_string()),
         req.admission.clone(),
+        super::records::Listed::InContainer,
         held,
         agent.subject.clone(),
         register,
@@ -2003,6 +2038,84 @@ mod tests {
             d["inbox"] = json!(i);
         }
         d.to_string()
+    }
+
+    /// Only the owner may read the requests listing, so only the owner is told how a tag
+    /// compares with it: anyone else's conditional request naming one is refused, matched or not.
+    #[tokio::test]
+    async fn a_requester_is_not_told_how_the_listing_compares() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let as_ = |who: &str| Agent {
+            subject: Some(who.into()),
+            client: None,
+        };
+        let (owner, someone) = (
+            as_("https://owner.example/#me"),
+            as_("https://r.example/#me"),
+        );
+        let tag = handle(
+            &state,
+            &test_store::request(Method::GET, REQUESTS_PATH, &[], ""),
+            &owner,
+        )
+        .await
+        .headers()[header::ETAG]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let post = |who: Agent, h: (&'static str, String)| {
+            let state = state.clone();
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    REQUESTS_PATH,
+                    &[("content-type", LWS_JSON), (h.0, &h.1)],
+                    &access_doc("AccessRequest", "https://a/", None),
+                );
+                handle(&state, &req, &who).await.status()
+            }
+        };
+        for h in [
+            ("if-match", tag.clone()),
+            ("if-match", "\"other\"".to_string()),
+            ("if-none-match", tag.clone()),
+        ] {
+            assert_eq!(
+                post(someone.clone(), h.clone()).await,
+                StatusCode::FORBIDDEN,
+                "{h:?}"
+            );
+        }
+        assert_eq!(
+            post(owner.clone(), ("if-match", "\"other\"".into())).await,
+            StatusCode::PRECONDITION_FAILED
+        );
+        // The listing has no `Last-Modified`, so a date compares nothing.
+        let date = crate::http_date::format(std::time::SystemTime::now()).unwrap();
+        assert_eq!(
+            post(someone.clone(), ("if-unmodified-since", date)).await,
+            StatusCode::CREATED
+        );
+        // `*` asks only whether the container exists, so no listing is read: not even a page of
+        // it past the last.
+        let req = test_store::request(
+            Method::POST,
+            &format!("{REQUESTS_PATH}?page=99"),
+            &[("content-type", LWS_JSON), ("if-match", "*")],
+            &access_doc("AccessRequest", "https://b/", None),
+        );
+        assert_eq!(
+            handle(&state, &req, &someone).await.status(),
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            post(someone, ("if-match", "*".into())).await,
+            StatusCode::CREATED
+        );
     }
 
     #[tokio::test]

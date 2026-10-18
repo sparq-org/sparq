@@ -28,6 +28,22 @@ EXACT_FILES = {
     "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
     ".github/workflows/zk-toolchain.yml",
 }
+# The pull_request trigger narrows to zk-specific inputs: an engine, manifest or lockfile change
+# is checked after merge by the push trigger (the full set above), so the many engine PRs don't
+# each queue a proof run on this advisory lane. The in-job classifier still uses the full set.
+# sparq-canon feeds the zk digests (a host and model dependency) and sparq-query-protocol is a
+# host dependency, so both stay; the engine fixtures are compiled into zk tests with pinned
+# case counts. The evaluator's own Cargo.lock sits under zk/sparql-evaluator/.
+PR_PREFIXES = (
+    "zk/sparql-evaluator/", "bench/zk-bindings/", "crates/sparq-canon/",
+    "crates/sparq-query-protocol/", "vendor/spargebra/", "vendor/spargebra-shim/",
+    "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
+)
+PR_FILES = (EXACT_FILES - {"Cargo.toml", "Cargo.lock"}) | {
+    "crates/sparq-engine/tests/fixtures/builtin_edges.json",
+    "crates/sparq-engine/tests/fixtures/exact_temporal.json",
+    "crates/sparq-engine/tests/fixtures/temporal_lexical.json",
+}
 SCOPES = ("exact-evaluator",)
 
 

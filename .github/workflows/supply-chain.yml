@@ -29,8 +29,9 @@ on:
 permissions:
   contents: read
 
+# The event is in the key so a scheduled run and a push to main never cancel each other.
 concurrency:
-  group: supply-chain-${{ github.ref }}
+  group: supply-chain-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

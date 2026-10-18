@@ -76,11 +76,10 @@ either
   loader-emitted by naming convention, `<R>` ↦ `<R + ".acl">` (`loader.rs:229-232`), so
   `origin(?acl) = origin(?r)` by construction; or
 - `?r solidx:inheritedAcl ?acl . ?r solidx:inheritsFrom ?c . … ?auth acl:default ?c` —
-  `inheritedAcl` walks `solidx:parent` (`wac.n3:27-33`), and `parent` is
-  `common.n3:23-27`: a `string:scrape` of `^(.*/)[^/]+/?$` **filtered by
-  `?p solidx:isResource true`**.
+  `inheritedAcl` walks `solidx:parent` (`wac.n3:27-33`), and `parent` is emitted by the
+  loader from `parent_iri`, **only when the parent is itself a resource**.
 
-The scrape capture is always a *prefix* of the input, so it can only shorten the path, never
+`parent_iri` always returns a *prefix* of its input, so it can only shorten the path, never
 change the authority. The walk terminates at the pod root because the only shorter prefix is
 the authority-less `https://`, which is never in the loader's `resources` set
 (`loader.rs:214-222` seeds it from graph names and `parent_iri`, and `parent_iri` returns
@@ -176,6 +175,17 @@ to P3 (§8):
 
 Until one of those lands, case (C) stays open and **stays in the dependency closure** —
 §5.2 keeps the shared-subject edge, and §8 P3 is respecified accordingly.
+
+**Update (October 2026).** The loader now applies a simpler rule than either shape: a
+triple of a control or group document is admitted only if its subject is a blank node or
+an IRI within that document and it names no IRI the view mints (`urn:skolem:`,
+`urn:sparq:`) (`loader.rs` `admits`). A control document with any other triple
+contributes nothing, and for ACP the resources it governs, and those whose ACRs depend on
+it, get no grants from any source; a group document loses only the triples it may not
+state. A foreign document can therefore no
+longer add properties to `<o.ex/.acl#a1>`, so (C) cannot arise and §7 (7) holds by
+construction. References across documents are objects and are unaffected, so (A) and (B)
+stand as described.
 
 ### 2.3 The inert-closure lemma (a genuine negative result about a *non*-problem)
 

@@ -26,8 +26,9 @@
 //!
 //! ## Toolchain
 //! The serde + no-toolchain structural tests run WITHOUT nargo/bb. The full
-//! prove→verify→tamper→invalid-witness round-trips are `#[ignore]` + toolchain-gated
-//! (skip cleanly when nargo/bb are absent), mirroring `family_members_pzet.rs` /
+//! prove→verify→tamper→invalid-witness round-trips are `#[ignore]` + LIVE (they fail
+//! loud when nargo/bb are absent, unless the lane declares itself toolchain-free),
+//! mirroring `family_members_pzet.rs` /
 //! the `holder_pop_valid_verifies_end_to_end` e2e test.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
@@ -59,6 +60,20 @@ const STATUS_INDEX: u64 = 3;
 const STATUS_VERSION: u64 = 1;
 const CHALLENGE_HEX: &str = "0x2a";
 const SALT_BYTE: u8 = 9;
+
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest — the method the
+/// fixtures below commit under, and the one their issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND presentation message (`ZKSIG_M5`) rather
+/// than the method-unbound `ZKSIG_C3`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
 
 fn iri(s: &str) -> NamedNode {
     NamedNode::new(s).unwrap()
@@ -144,7 +159,13 @@ fn attest_holder(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_holder(&commitment, &salt, &status_ref, &holder_digest),
+        signature: sk.sign_commitment_with_holder_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &holder_digest,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -167,16 +188,7 @@ fn holder_pop(holder_sk: &SecretKey) -> String {
     holder_sk.sign_holder_pop(&challenge_fr)
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 // =========================================================================
 // NO-TOOLCHAIN: serde + new manifest field
@@ -540,8 +552,7 @@ fn verify_full(
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_valid_binding_verifies_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql holder PoK happy path");
+    if !support::require_toolchain("holder_pok_valid_binding_verifies_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);
@@ -577,8 +588,7 @@ fn holder_pok_valid_binding_verifies_end_to_end() {
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_wrong_holder_rejected_digest_mismatch() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql wrong-holder PoK");
+    if !support::require_toolchain("holder_pok_wrong_holder_rejected_digest_mismatch", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);
@@ -625,8 +635,7 @@ fn holder_pok_wrong_holder_rejected_digest_mismatch() {
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_tampered_proof_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql tampered PoK");
+    if !support::require_toolchain("holder_pok_tampered_proof_rejected", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);
@@ -676,8 +685,7 @@ fn holder_pok_tampered_proof_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan member (sq-c2ql)"]
 fn holder_pok_required_but_absent_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql mandated-PoK-absent");
+    if !support::require_toolchain("holder_pok_required_but_absent_rejected", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);

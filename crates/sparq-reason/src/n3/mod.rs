@@ -209,7 +209,7 @@ pub(crate) use run_shared::RuntimeDocs;
 /// table that was not made fresh against its sources.
 mod run_shared {
     use super::{
-        bounded, document_blank_labels, formula_bytes, fresh_blank_prefix, parser, Term,
+        bounded, document_blank_labels, formula_bytes, fresh_blank_prefix, parser, NodeKey, Term,
         VisitedDocs,
     };
     use rustc_hash::{FxHashMap, FxHashSet};
@@ -220,6 +220,48 @@ mod run_shared {
         pub(super) docs: FxHashSet<u64>,
         /// Blank labels for documents parsed at run time.
         runtime: RuntimeDocs,
+        /// Every backward proof-tree node fingerprint this TOP-LEVEL run has handed out,
+        /// by the [`NodeKey`] it was folded from.
+        ///
+        /// It belongs to the run and not to one `BwCtx` because the names cross `BwCtx`
+        /// boundaries: a query's data closure, the query's own premise evaluation and
+        /// every nested `log:conclusion` closure put their derived facts — and so the
+        /// renamed variables a quoted-formula value carries — into one substitution and
+        /// one fact store. A per-context table would leave a collision BETWEEN two
+        /// contexts unchecked, which is exactly the case where the two sides can come
+        /// from different parties (a query against someone else's data), and where a
+        /// 64-bit fold is searchable at about 2^32 work. One table per run is what makes
+        /// the fail-closed claim true of the whole run.
+        ///
+        /// Bounded by [`bounded::proof_nodes`]: entries are constant-size and live as
+        /// long as the run, so a run that would name one node too many is refused.
+        nodes: FxHashMap<u64, NodeKey>,
+        /// Every STRING identity this run has folded to a 64-bit id that a [`NodeKey`] then
+        /// carries, by the id: a backward goal's canonical key
+        /// ([`super::serialize::goal_key`]) and a nested closure's canonical formula key
+        /// ([`super::serialize::formula_canonical_key`]).
+        ///
+        /// A `NodeKey` is only as exact as its parts, so a part that is itself an
+        /// unregistered 64-bit fold is a hole in the fail-closed property: two different
+        /// goals that folded alike at one parent and site would give the SAME key, and
+        /// merge silently — the lost row and the capture this issue is about, reachable at
+        /// about 2^32 work with chosen IRIs. So the fold is handed out through the same
+        /// registry discipline as a node's: one id names one string for the whole run, and
+        /// a second, different string with that id fails the run.
+        ids: FxHashMap<u64, String>,
+        /// The salt in the root identity of the closure currently being evaluated: `0` at
+        /// the top level, and a nested closure's own formula key while it runs
+        /// (`with_formula_closure`), so two SIBLING nested closures at one nesting depth
+        /// do not number their rules into the same names.
+        scope_salt: u64,
+    }
+
+    /// Why [`RunShared::node`] would not hand out a fingerprint.
+    pub(super) enum NodeFault {
+        /// A DIFFERENT key already folded to this value.
+        Collision,
+        /// The run has named [`bounded::proof_nodes`] nodes already.
+        Full,
     }
 
     /// The table of documents parsed at run time (`log:parsedAsN3`, `log:semantics`) and
@@ -455,8 +497,123 @@ mod run_shared {
     impl RunShared {
         /// The shared state of one top-level run drawing on `runtime`.
         pub(super) fn new(runtime: RuntimeDocs) -> VisitedDocs {
-            let shared = RunShared { docs: FxHashSet::default(), runtime };
+            let shared = RunShared {
+                docs: FxHashSet::default(),
+                runtime,
+                nodes: FxHashMap::default(),
+                ids: FxHashMap::default(),
+                scope_salt: 0,
+            };
             std::rc::Rc::new(std::cell::RefCell::new(shared))
+        }
+
+        /// The fingerprint of the proof-tree node `key` names: its fold
+        /// ([`NodeKey::fold`]), registered against `key` so it can never name a second,
+        /// different key ([`RunShared::nodes`]).
+        ///
+        /// `Err(NodeFault::Collision)` when another key already holds that fold, and
+        /// `Err(NodeFault::Full)` when the run has named [`bounded::proof_nodes`] nodes.
+        /// Both fail the run: handing the fold out anyway would merge two
+        /// standardize-apart spaces, and growing the table without an allowance would let
+        /// a search of unbounded width keep memory.
+        pub(super) fn node(&mut self, key: NodeKey, room: usize) -> Result<u64, NodeFault> {
+            self.node_at(key, key.fold(), room)
+        }
+
+        /// [`RunShared::node`] with `key`'s fold already computed, for the one caller that
+        /// has to check the fold before it uses it and then register it after
+        /// ([`super::backward_prove`]): folding the same key three times per candidate site
+        /// was pure repeat work. `fold` must be `key.fold()`, which the assert pins.
+        pub(super) fn node_at(
+            &mut self,
+            key: NodeKey,
+            fold: u64,
+            room: usize,
+        ) -> Result<u64, NodeFault> {
+            debug_assert_eq!(fold, key.fold(), "node_at was given a fold that is not this key's");
+            if let Some(prev) = self.nodes.get(&fold) {
+                return if *prev == key { Ok(fold) } else { Err(NodeFault::Collision) };
+            }
+            if self.registered() >= room {
+                return Err(NodeFault::Full);
+            }
+            self.nodes.insert(fold, key);
+            Ok(fold)
+        }
+
+        /// Whether `key`'s fold is held by a DIFFERENT key already: what [`RunShared::node`]
+        /// would refuse, asked without charging the allowance or inserting anything, so a
+        /// caller that uses a fold before it registers it can refuse the collision at the
+        /// point of USE ([`super::BwCtx::conflicts`]).
+        /// `fold` must be `key.fold()`, which the assert pins.
+        pub(super) fn conflicts(&self, key: &NodeKey, fold: u64) -> bool {
+            debug_assert_eq!(fold, key.fold(), "conflicts was given a fold that is not this key's");
+            self.nodes.get(&fold).is_some_and(|prev| prev != key)
+        }
+
+        /// The id of the string identity `canon`, registered against it so it can never
+        /// name a second, different string ([`RunShared::ids`]). The same refusals as
+        /// [`RunShared::node`], and the same allowance: this is how a goal or a nested
+        /// closure's formula enters a [`NodeKey`] EXACTLY rather than as a bare fold.
+        ///
+        /// `canon` is taken BY VALUE because the table keeps it on the registering call:
+        /// borrowing it meant copying the whole canonical key again into the table, once
+        /// per distinct goal of the run, and every caller here builds it to hand over.
+        pub(super) fn intern(&mut self, canon: String, room: usize) -> Result<u64, NodeFault> {
+            let fold = super::serialize::fnv1a64(&canon);
+            if let Some(prev) = self.ids.get(&fold) {
+                return if *prev == canon { Ok(fold) } else { Err(NodeFault::Collision) };
+            }
+            if self.registered() >= room {
+                return Err(NodeFault::Full);
+            }
+            self.ids.insert(fold, canon);
+            Ok(fold)
+        }
+
+        /// Everything this run has registered, nodes and string identities together: what
+        /// the allowance counts, since both tables live as long as the run.
+        fn registered(&self) -> usize {
+            self.nodes.len() + self.ids.len()
+        }
+
+        /// How many proof-tree nodes this run has named ([`RunShared::nodes`]).
+        #[cfg(test)]
+        pub(super) fn node_count(&self) -> usize {
+            self.nodes.len()
+        }
+
+        /// Everything this run has registered, nodes and string identities together: what
+        /// the allowance counts ([`RunShared::registered`]).
+        #[cfg(test)]
+        pub(super) fn registered_count(&self) -> usize {
+            self.registered()
+        }
+
+        /// Registers `canon` under `fold`, whatever its own fold is: how a test forces an
+        /// id collision, as [`RunShared::force_node_fold`] does for a node.
+        #[cfg(test)]
+        pub(super) fn force_id_fold(&mut self, fold: u64, canon: &str) {
+            self.ids.insert(fold, canon.to_string());
+        }
+
+        /// Registers `key` under `fold`, whatever `key`'s own fold is: how a test forces
+        /// the collision a 64-bit fold makes possible but a run is very unlikely to meet.
+        #[cfg(test)]
+        pub(super) fn force_node_fold(&mut self, fold: u64, key: NodeKey) {
+            self.nodes.insert(fold, key);
+        }
+
+        /// The salt every root identity of the closure now running carries
+        /// ([`RunShared::scope_salt`]).
+        pub(super) fn scope_salt(&self) -> u64 {
+            self.scope_salt
+        }
+
+        /// Makes `salt` the scope salt and hands back the one it replaced, for the caller
+        /// to put back when its closure ends.
+        pub(super) fn swap_scope_salt(&mut self, salt: u64) -> u64 {
+            std::mem::replace(&mut self.scope_salt, salt)
         }
 
         /// The shared state of a top-level run over `sources`, with a table of its own.
@@ -562,13 +719,16 @@ fn formula_key(ts: &[[Term; 3]]) -> u64 {
     h.finish()
 }
 
-/// Goal-directed context: the document's backward (`<=`) rules plus a counter for renaming
-/// rule variables apart (standardizing apart, so nested applications of the same rule do not
-/// capture each other's bindings); also carries the document base, the optional [`Resolver`]
-/// for the document-access builtins, and the import-cycle guard ([`VisitedDocs`]).
+/// Goal-directed context: the document's backward (`<=`) rules; it also carries the
+/// document base, the optional [`Resolver`] for the document-access builtins, and the
+/// import-cycle guard ([`VisitedDocs`]). Standardizing a rule application apart (so two
+/// applications of one rule do not capture each other's bindings, or merge each other's
+/// derived facts) is deliberately not a COUNTER on this context: it is a function of where
+/// the application sits in the proof tree and of the goal it is proving ([`BwPath`]). What
+/// the context does hold for it is this evaluation's scope number and the fingerprints it
+/// has handed out.
 struct BwCtx<'a> {
     rules: &'a [Rule],
-    rename: std::cell::Cell<usize>,
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
@@ -583,6 +743,15 @@ struct BwCtx<'a> {
     /// The current round's join-work allowance ([`bounded::JoinWork`]): every binding row
     /// a premise of this run produces, and every rule firing, is charged to it.
     work: bounded::JoinWork,
+    /// This evaluation's scope number, the innermost chunk of every [`BwPath`] it mints: a
+    /// query's premise evaluation, a top-level closure and a nested `log:conclusion` closure
+    /// each number their rules from zero, so without it their names would collide.
+    scope: u64,
+    /// The salt the root identities of THIS evaluation carry, read from the run when the
+    /// context was made ([`run_shared::RunShared::scope_salt`]): `0` at the top level, and
+    /// the nested document's own formula key inside a `log:conclusion` closure, so two
+    /// sibling nested closures at one nesting depth do not share a scope.
+    scope_salt: u64,
 }
 
 impl BwCtx<'_> {
@@ -654,9 +823,12 @@ fn negation_gate(bw: &BwCtx) -> bool {
 impl<'a> BwCtx<'a> {
     /// A context sharing `visited` with the run it belongs to.
     fn new(rules: &'a [Rule], truncated: Truncation, visited: VisitedDocs) -> BwCtx<'a> {
+        let (visited_depth, scope_salt) = {
+            let shared = visited.borrow();
+            (shared.docs.len() as u64, shared.scope_salt())
+        };
         BwCtx {
             rules,
-            rename: std::cell::Cell::new(0),
             base: String::new(),
             resolver: None,
             visited,
@@ -664,7 +836,99 @@ impl<'a> BwCtx<'a> {
             nested_error: std::cell::RefCell::new(None),
             work: bounded::JoinWork::forward(&truncated),
             truncated,
+            // Each nesting level of `log:conclusion` closures gets its own even scope
+            // number; `query_terms_in` makes a query's evaluation odd (see `BwPath`).
+            scope: visited_depth * 2,
+            scope_salt,
         }
+    }
+
+    /// The fingerprint of the proof-tree node `key` names, registered for the whole run
+    /// ([`run_shared::RunShared::node`]). `None` when a DIFFERENT key already holds that
+    /// fold, or when the run has named as many nodes as [`bounded::proof_nodes`] allows:
+    /// either way the run fails rather than let two derivations share one
+    /// standardize-apart space, or the table grow with the search.
+    fn node(&self, key: NodeKey) -> Option<u64> {
+        let made = self.visited.borrow_mut().node(key, bounded::proof_nodes(&self.truncated));
+        self.registered(made)
+    }
+
+    /// The id of the string identity `canon`, interned for the whole run
+    /// ([`run_shared::RunShared::intern`]): how a goal and a nested closure's formula enter
+    /// a [`NodeKey`] exactly instead of as a bare, unchecked fold. The same refusals as
+    /// [`BwCtx::node`].
+    fn intern(&self, canon: String) -> Option<u64> {
+        let made = self.visited.borrow_mut().intern(canon, bounded::proof_nodes(&self.truncated));
+        self.registered(made)
+    }
+
+    /// A registration's answer, with either refusal recorded on the run.
+    fn registered(&self, made: Result<u64, run_shared::NodeFault>) -> Option<u64> {
+        match made {
+            Ok(fold) => Some(fold),
+            Err(run_shared::NodeFault::Collision) => {
+                self.nested_error.borrow_mut().get_or_insert_with(|| {
+                    "n3: two backward proof-tree nodes, or two of the identities their \
+                     fingerprints are built from, share one 64-bit fold; refused rather \
+                     than let their standardized-apart variables alias"
+                        .to_string()
+                });
+                None
+            }
+            Err(run_shared::NodeFault::Full) => {
+                let e = bounded::proof_nodes_exceeded(&self.truncated);
+                self.nested_error.borrow_mut().get_or_insert(e);
+                None
+            }
+        }
+    }
+
+    /// The root of rule `ri`'s proof trees in this evaluation: the fingerprint of its own
+    /// premise evaluation, which carries the evaluation's scope ([`BwCtx::scope`]) and its
+    /// salt ([`BwCtx::scope_salt`]), so a query, a top-level closure, a nested
+    /// `log:conclusion` closure and a SIBLING nested closure at the same depth cannot name
+    /// one node alike.
+    fn root_path(&self, ri: usize) -> Option<BwPath> {
+        let key = NodeKey::Root { scope: self.scope, salt: self.scope_salt, rule: ri as u64 };
+        if self.unnamed() {
+            return Some(BwPath::at(key.fold()));
+        }
+        self.node(key).map(BwPath::at)
+    }
+
+    /// Whether this evaluation can mint no proof-node NAME, because it has no `<=` rule for
+    /// [`backward_prove`] to apply: its paths are then handed out unregistered
+    /// ([`BwCtx::root_path`], [`BwPath::child`]) and the run's node accounting is untouched.
+    /// A path is registered so that two keys cannot share one fold and alias their
+    /// standardize-apart spaces; with no backward rule no variable is ever renamed after a
+    /// fold, so there is no space to alias — while charging those paths to the allowance made
+    /// a forward-only run refusable inside its own limits, one root per rule per round
+    /// (GH #6844 review round 5). The paths' folds are the same either way, so what a later
+    /// round or a sibling evaluation names is unchanged.
+    fn unnamed(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    /// Whether `key`'s fold is already registered to a DIFFERENT key, which fails the run
+    /// (the same refusal as [`BwCtx::node`], recorded here): the caller asks BEFORE it uses
+    /// the fold, because a fold used to rename variables and only registered afterwards
+    /// would, on a collision with an ancestor, be caught by neither — the renamed variables
+    /// would be the ancestor's, the caller's inherited bindings would capture them,
+    /// unification would fail and the site would be skipped with no error at all
+    /// (GH #6844 review round 5).
+    fn conflicts(&self, key: NodeKey, fold: u64) -> bool {
+        if self.unnamed() || !self.visited.borrow().conflicts(&key, fold) {
+            return false;
+        }
+        self.registered(Err(run_shared::NodeFault::Collision));
+        true
+    }
+
+    /// [`BwCtx::node`] with `key`'s fold already in hand ([`run_shared::RunShared::node_at`]).
+    fn node_at(&self, key: NodeKey, fold: u64) -> Option<u64> {
+        let made =
+            self.visited.borrow_mut().node_at(key, fold, bounded::proof_nodes(&self.truncated));
+        self.registered(made)
     }
 }
 
@@ -925,6 +1189,11 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let data_parsed = bounded::parse_n3(data, "", &cuts)?;
     let query_parsed = bounded::parse_n3(query, "", &cuts)?;
     validate_rule_quantifiers(&query_parsed)?;
+    // A query premise is matched below with no independence check, and over a closure
+    // proved with backward rules: its own universals stay refused (GH #6882).
+    if query_parsed.rules.iter().any(|r| premise_universals(&r.premise).is_some()) {
+        return Err(QUANTIFIED_ANTECEDENT.into());
+    }
     if query_parsed.rules.is_empty() {
         return Err("n3 query filter: the query document contains no `{ … } => { … }` forward \
                     rule; only forward-rule (SELECT/CONSTRUCT-style) query documents project an \
@@ -979,36 +1248,27 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     .read_further(&truncated);
     let mut bw = BwCtx::new(&backward, truncated, shared);
     bw.base = base;
+    // A query's premise evaluation numbers the QUERY's rules, the closure above numbered the
+    // data document's, and both ran at nesting depth zero: the odd scope keeps the two sets
+    // of names apart ([`BwPath`]).
+    bw.scope += 1;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
     let mut sk_counter = 0usize;
+    let mut scratch = FiringScratch::default();
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
-        let mut fired: FxHashSet<String> = FxHashSet::default();
-        for b in match_premise(&premise, &facts, &bw) {
-            let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                None
-            } else {
-                let key: String = concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect();
-                if !fired.insert(key) {
-                    continue; // this firing already instantiated its existentials
-                }
-                sk_counter += 1;
-                Some(
-                    concl_blanks
-                        .iter()
-                        .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, sk_counter, l)))
-                        .collect(),
-                )
-            };
+        let Some(root) = bw.root_path(ri) else { break };
+        let bindings = match_premise(&premise, &facts, &bw, root);
+        let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
             for c in &rule.conclusion {
-                let c = match &sk {
+                let c = match sk {
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
+                if let Some(g) = ground_triple(&c, b, &bw.truncated) {
                     // A conclusion past the term-depth limit is dropped, as a cut.
                     if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
                     {
@@ -1016,6 +1276,27 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     }
                 }
             }
+        };
+        if concl_blanks.is_empty() {
+            for b in &bindings {
+                emit(b, None);
+            }
+            continue;
+        }
+        // One instantiation per distinct conclusion-relevant binding, numbered in the
+        // canonical order of the firings (GH #6749).
+        let mut none_fired = FxHashSet::default();
+        let firings =
+            canonical_new_firings(bindings, &concl_vars, &mut none_fired, false, &mut scratch);
+        let base = sk_counter;
+        sk_counter += firings.len();
+        for (rank, b) in firings {
+            let n = base + rank + 1;
+            let sk: FxHashMap<String, String> = concl_blanks
+                .iter()
+                .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, n, l)))
+                .collect();
+            emit(&b, Some(&sk));
         }
     }
     if let Some(e) = bw.nested_error.take().or_else(|| bw.truncated.refusal()) {
@@ -1047,38 +1328,244 @@ pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[
 }
 
 /// A rule conclusion's EXISTENTIALS (its blank labels — instantiated fresh once per firing) and
-/// its VARIABLES (the firing key: one instantiation per distinct conclusion-relevant binding,
-/// so a rule re-evaluated against the same bindings does not mint endless new blanks).
+/// its CONCLUSION-RELEVANT VARIABLES ([`conclusion_relevant_vars`], the firing key: one
+/// instantiation per distinct conclusion-relevant binding, so a rule re-evaluated against the
+/// same bindings does not mint endless new blanks).
 ///
-/// Quoted triples are transparent structure — their blanks are conclusion existentials and
-/// their variables part of the firing key — whereas a quoted `{ … }` formula is an opaque VALUE
-/// whose inner terms are formula-scoped, so it is not descended into.
+/// Quoted triples are transparent structure — their blanks are conclusion existentials —
+/// whereas a quoted `{ … }` formula is an opaque VALUE whose blanks are formula-scoped, so it
+/// is not searched for existentials.
 fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String>) {
-    fn scan(
-        t: &Term,
-        blanks: &mut FxHashSet<String>,
-        vars: &mut std::collections::BTreeSet<String>,
-    ) {
+    fn blanks_of(t: &Term, blanks: &mut FxHashSet<String>) {
         match t {
             Term::Blank(l) => {
                 blanks.insert(l.clone());
             }
-            Term::Var(v) => {
-                vars.insert(v.clone());
-            }
-            Term::List(ms) => ms.iter().for_each(|m| scan(m, blanks, vars)),
-            Term::Triple(t) => t.iter().for_each(|m| scan(m, blanks, vars)),
+            Term::List(ms) => ms.iter().for_each(|m| blanks_of(m, blanks)),
+            Term::Triple(t) => t.iter().for_each(|m| blanks_of(m, blanks)),
             _ => {}
         }
     }
     let mut blanks = FxHashSet::default();
-    let mut vars = std::collections::BTreeSet::new();
     for row in conclusion {
         for t in row {
-            scan(t, &mut blanks, &mut vars);
+            blanks_of(t, &mut blanks);
         }
     }
-    (blanks.into_iter().collect(), vars.into_iter().collect())
+    (blanks.into_iter().collect(), conclusion_relevant_vars(conclusion))
+}
+
+/// Every variable whose binding can change the instantiated conclusion, sorted: exactly the
+/// variables [`ground_triple`] substitutes ([`apply_deep`]), at any depth — inside lists,
+/// quoted triples AND quoted `{ … }` formulas. This is the one definition of the firing key
+/// ([`firing_key`]), so the dedup of firings, their ranking and their tie-break cannot
+/// disagree about which bindings instantiate the same conclusion. A variable a binding
+/// leaves unbound (a formula's own quantified variable) keys as unbound.
+///
+/// One key gives one conclusion; the converse does NOT hold. A conclusion of several
+/// triples, or a symmetric one such as `{ ?x :r ?y . ?y :r ?x }`, derives one fact under
+/// several DISTINCT keys, so the firing key is no guide to how many derivations a FACT has
+/// — which proof step a fact records is settled over the whole round instead
+/// ([`step_precedes`], GH #6844).
+fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
+    fn scan(t: &Term, vars: &mut std::collections::BTreeSet<String>) {
+        match t {
+            Term::Var(v) => {
+                vars.insert(v.clone());
+            }
+            Term::List(ms) => ms.iter().for_each(|m| scan(m, vars)),
+            Term::Triple(t) => t.iter().for_each(|m| scan(m, vars)),
+            Term::Formula(rows) => rows.iter().flatten().for_each(|m| scan(m, vars)),
+            _ => {}
+        }
+    }
+    let mut vars = std::collections::BTreeSet::new();
+    conclusion.iter().flatten().for_each(|t| scan(t, &mut vars));
+    vars.into_iter().collect()
+}
+
+/// The firing key of binding `b` for a rule whose conclusion-relevant variables are
+/// `concl_vars` ([`conclusion_relevant_vars`]), written into `out` (cleared first): one
+/// existential instantiation per distinct key. Two bindings with one key instantiate the same
+/// conclusion. The buffer is the caller's so that keying a binding whose firing has already
+/// minted its existentials — the common case once a rule is saturated — allocates nothing.
+fn firing_key(b: &Binding, concl_vars: &[String], out: &mut String) {
+    use std::fmt::Write;
+    out.clear();
+    for v in concl_vars {
+        // Infallible: `String`'s `fmt::Write` never errors.
+        let _ = write!(out, "{:?};", b.get(v));
+    }
+}
+
+/// Buffers [`canonical_new_firings`] reuses across a run's rules and rounds (GH #6843): the
+/// firing-key buffer, this round's fresh keys, and the permutation that ranks them.
+#[derive(Default)]
+struct FiringScratch {
+    key: String,
+    keys: Vec<String>,
+    order: Vec<u64>,
+}
+
+/// The firings among `bindings` that mint existentials for the first time — one per firing
+/// key not yet in `fired`, which this call extends with them — each with its RANK in the
+/// canonical order of those keys (sorted; GH #6749), returned in arrival order.
+///
+/// Skolem labels are numbered by rank. The bindings arrive in the order the fact and delta
+/// hash sets yield them, which depends on insertion history and on the hasher's word size
+/// (native vs `wasm32`); ranking the round's new firings by key makes the label a function
+/// of the firing and the round's contents, which are sets, not of that order. Distinct keys
+/// get distinct ranks, so labels stay injective. Only the numbering is canonical: the
+/// firings keep their arrival order, so the facts they derive are inserted as before.
+///
+/// Bindings are deduplicated by key before sorting — `fired` itself is the dedup, so a key
+/// seen twice in one round is as settled as one carried over from an earlier round. Of
+/// several bindings with one key, the first to arrive is kept; with `tie_break`, the least by
+/// its full canonical encoding is kept instead, so the premise instances a firing builds are
+/// a function of the round. The key covers every conclusion-relevant variable, so the
+/// conclusion they instantiate — and hence the closure — is the same either way.
+///
+/// `tie_break` alone does NOT make a proof step reproducible: one conclusion can be derived
+/// under several distinct keys and by several rules, and the transitivity fast path never
+/// reaches this function at all. The step a fact records is chosen over the round's whole
+/// derivation list ([`step_precedes`], GH #6844); this tie-break only settles which binding
+/// of one key a firing uses.
+fn canonical_new_firings(
+    bindings: Vec<Binding>,
+    concl_vars: &[String],
+    fired: &mut FxHashSet<String>,
+    tie_break: bool,
+    scratch: &mut FiringScratch,
+) -> Vec<(usize, Binding)> {
+    let full_encoding = |b: &Binding| -> Vec<String> {
+        let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+        f.sort_unstable();
+        f
+    };
+    let FiringScratch { key, keys, order } = scratch;
+    keys.clear();
+    // One entry per fresh key, in the arrival order of the key's first binding; the ranks
+    // are filled in below.
+    let mut out: Vec<(usize, Binding)> = Vec::new();
+    // `tie_break` only, parallel to `out`: the kept binding's full encoding, computed when a
+    // second binding with the same key arrives and there is something to compare against.
+    let mut full: Vec<Option<Vec<String>>> = Vec::new();
+    let mut slot: FxHashMap<String, usize> = FxHashMap::default();
+    for b in bindings {
+        firing_key(&b, concl_vars, key);
+        if tie_break {
+            if let Some(&i) = slot.get(key.as_str()) {
+                let f = full_encoding(&b);
+                if full[i].is_none() {
+                    full[i] = Some(full_encoding(&out[i].1));
+                }
+                if full[i].as_ref().is_some_and(|kept| &f < kept) {
+                    full[i] = Some(f);
+                    out[i].1 = b;
+                }
+                continue; // a later binding of a key already kept
+            }
+        }
+        if fired.contains(key.as_str()) {
+            continue;
+        }
+        fired.insert(key.clone());
+        if tie_break {
+            slot.insert(key.clone(), out.len());
+            full.push(None);
+        }
+        keys.push(key.clone());
+        out.push((0, b));
+    }
+    if out.len() > 1 {
+        let index = rank_keys(keys, order);
+        for (r, &e) in order.iter().enumerate() {
+            out[(e & index) as usize].0 = r;
+        }
+    }
+    out
+}
+
+/// Fills `order` with `keys`' indexes in ASCENDING key order, packed into the low bits of a
+/// sort word — the permutation that numbers a round's firings (GH #6749). Returns the mask
+/// that reads an index back out.
+///
+/// Equivalent to sorting the indexes by `keys[i]`, and cheaper on the keys this path sees
+/// (GH #6843). A round's keys are one conclusion-variable shape filled in, so they usually
+/// share a long prefix (`Some(Iri("http://…`) that a comparison sort re-reads on every
+/// comparison. This instead strips whatever prefix they do have in common once and sorts
+/// plain `u64`s carrying the leading bytes of what is left, which usually decides every key
+/// outright:
+///
+/// - the common prefix is common, so it orders nothing, and dropping it leaves the keys'
+///   relative order unchanged;
+/// - a key's word is the next bytes zero-padded, big-endian, keeping only the bits above the
+///   index; 0 is below every byte and truncating low bits is monotone, so `k < k'` implies
+///   `word(k) <= word(k')` — a strictly smaller word is a strictly smaller key, whatever the
+///   keys' lengths and whatever bytes (`\0` included) they hold;
+/// - so sorting by word and then re-sorting each equal-word run by its whole key is exactly
+///   ascending key order. Keys are distinct, so that order is total, and the index in the low
+///   bits only separates equal words, never decides a rank.
+fn rank_keys(keys: &[String], order: &mut Vec<u64>) -> u64 {
+    debug_assert!(keys.len() > 1, "a round with one key needs no ranking");
+    let index = u64::MAX >> (keys.len() as u64).leading_zeros(); // >= keys.len() - 1
+    let common = keys[1..]
+        .iter()
+        .fold(keys[0].len(), |p, k| common_prefix(&keys[0].as_bytes()[..p], k.as_bytes()));
+    let word = |k: &String| {
+        let mut w = [0u8; 8];
+        let tail = &k.as_bytes()[common..];
+        let n = tail.len().min(8);
+        w[..n].copy_from_slice(&tail[..n]);
+        u64::from_be_bytes(w) & !index
+    };
+    order.clear();
+    order.extend(keys.iter().enumerate().map(|(i, k)| word(k) | i as u64));
+    order.sort_unstable();
+    // Re-sort the runs the packed words left tied (for most rounds, there are none).
+    let mut i = 0;
+    while i < order.len() {
+        let w = order[i] & !index;
+        let end = i + order[i..].iter().take_while(|e| *e & !index == w).count();
+        if end - i > 1 {
+            let key = |e: &u64| &keys[(e & index) as usize];
+            order[i..end].sort_unstable_by(|a, b| key(a).cmp(key(b)));
+        }
+        i = end;
+    }
+    index
+}
+
+/// Whether derivation `a` comes before `b` in the canonical order of the derivations of ONE
+/// conclusion (GH #6844): premise vectors compared lexicographically under
+/// [`serialize::row_cmp`], a shorter vector before a longer one that extends it, then the
+/// lower rule index.
+///
+/// A total order on `(premises, rule)` — `serialize::row_cmp` is `Equal` exactly on equal
+/// rows, so two derivations tie only when they record the same premises from the same rule,
+/// which makes them the same proof step. The conclusions are NOT compared: this orders the
+/// candidates for one fact, never the facts themselves, so the round's derivation order is
+/// left alone.
+fn step_precedes(a: &DerivationStep, b: &DerivationStep) -> bool {
+    use std::cmp::Ordering;
+    let (_, ra, pa) = a;
+    let (_, rb, pb) = b;
+    let by_premises = pa
+        .iter()
+        .zip(pb)
+        .map(|(x, y)| serialize::row_cmp(x, y))
+        .find(|o| *o != Ordering::Equal)
+        // Every compared row was equal, so the shorter vector is a prefix of the longer.
+        .unwrap_or_else(|| pa.len().cmp(&pb.len()));
+    match by_premises {
+        Ordering::Equal => ra < rb,
+        o => o == Ordering::Less,
+    }
+}
+
+/// The length of `a` and `b`'s common prefix.
+fn common_prefix(a: &[u8], b: &[u8]) -> usize {
+    a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 
 /// A stratified run's result ([`reason_n3_stratified`]).
@@ -1315,7 +1802,7 @@ pub(crate) fn reason_n3_terms_proof(
     cuts: &Truncation,
     runtime: Option<&RuntimeDocs>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
-    let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
+    let parsed = bounded::parse_n3_rules_with_facts(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
         parsed,
         None,
@@ -1456,7 +1943,7 @@ pub(crate) fn reason_n3_terms_with_facts(
     truncated: &Truncation,
     runtime: &RuntimeDocs,
 ) -> Result<N3Closure, String> {
-    let parsed = bounded::parse_n3_with_extra(src, "", extra, truncated)?;
+    let parsed = bounded::parse_n3_rules_with_facts(src, "", extra, truncated)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     let (facts, steps, warning) = run_closure(
         parsed,
@@ -1527,8 +2014,27 @@ impl Closure {
 }
 
 /// The semi-naive forward-chaining fixpoint shared by the id-level and
-/// term-level entry points ([`Closure`]).
+/// term-level entry points ([`Closure`]), over a document whose own universals are its
+/// document-level `__ua.` ones ([`run_closure_in`]).
 fn run_closure(
+    parsed: parser::Parsed,
+    resolver: Option<&Resolver>,
+    inherit: Option<VisitedDocs>,
+    truncated: &Truncation,
+    mode: StepMode,
+    cycles: NegationCycles,
+    runtime: Option<&RuntimeDocs>,
+) -> Result<Closure, String> {
+    let own = serialize::UNIVERSAL_VAR;
+    run_closure_in(parsed, resolver, inherit, truncated, mode, cycles, runtime, own)
+}
+
+/// [`run_closure`] over a document whose own universals are the variables named with the
+/// prefix `own_universals`: `__ua.` for a document, `__ul.<k>.` for the statements of a
+/// formula closed in the [`formula_closure`] run `k`. Only those can prove a rule
+/// premise's own universal ([`independent_firing`]).
+#[allow(clippy::too_many_arguments)]
+fn run_closure_in(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
     // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
@@ -1549,6 +2055,8 @@ fn run_closure(
     // runs (a `MaterializedN3Graph`); `None` makes one fresh against `parsed`. Ignored
     // with `inherit`, whose run state already carries its table.
     runtime: Option<&RuntimeDocs>,
+    // The prefix of this document's own universals.
+    own_universals: &str,
 ) -> Result<Closure, String> {
     validate_rule_quantifiers(&parsed)?;
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
@@ -1646,7 +2154,12 @@ fn run_closure(
     // of non-monotonic rules do not mint endless new blanks).
     let concl_meta: Vec<(Vec<String>, Vec<String>)> =
         rules.iter().map(|r| conclusion_existentials(&r.conclusion)).collect();
-    let mut fired: FxHashSet<(usize, String)> = FxHashSet::default();
+    // Each rule's own premise universals (GH #6882): `None` for nearly every rule, whose
+    // firings are then never inspected.
+    let premise_meta: Vec<Option<Box<[String]>>> =
+        rules.iter().map(|r| premise_universals(&r.premise)).collect();
+    let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
+    let mut scratch = FiringScratch::default();
     let mut sk_counter = 0usize;
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
@@ -1670,7 +2183,9 @@ fn run_closure(
     let mut trans_rules: FxHashMap<usize, usize> = FxHashMap::default(); // rule -> state index
     for (ri, rule) in rules.iter().enumerate() {
         let (joins, needs_full) = &rule_meta[ri];
+        // A premise universal must reach the firing check, which the fast path skips.
         if *needs_full
+            || premise_meta[ri].is_some()
             || rule.premise.len() != 2
             || joins.len() != 2
             || rule.conclusion.len() != 1
@@ -1849,7 +2364,10 @@ fn run_closure(
                     // (every round): full evaluation, with no delta seeding. A constant
                     // rule (no join) fires only in naive rounds.
                     if naive_round || *needs_full {
-                        match_premise(&rule.premise, &facts, &bw)
+                        match bw.root_path(ri) {
+                            Some(root) => match_premise(&rule.premise, &facts, &bw, root),
+                            None => Vec::new(),
+                        }
                     } else {
                         Vec::new()
                     }
@@ -1857,49 +2375,41 @@ fn run_closure(
                     // Semi-naive: union over delta-at-each-join-position (dedup via facts.insert).
                     let mut bs = Vec::new();
                     for &k in joins {
+                        let Some(root) = bw.root_path(ri) else { break };
                         bs.extend(match_premise_seeded(
                             &rule.premise,
                             &facts,
                             &Binding::new(),
-                            Some((&delta, k)),
+                            JoinMode::Delta(&delta, k),
                             &bw,
                             bounded::backward_depth(),
+                            root,
                         ));
                     }
                     bs
+                };
+                // A quantified premise holds only where its universals bound this run's
+                // independent store universals (GH #6882).
+                let universals = premise_meta[ri].as_deref();
+                let bindings: Vec<Binding> = match universals {
+                    None => bindings,
+                    Some(us) => bindings
+                        .into_iter()
+                        .filter(|b| independent_firing(b, us, own_universals))
+                        .collect(),
                 };
                 let (concl_blanks, concl_vars) = &concl_meta[ri];
                 // The rule's firings, charged before any conclusion is instantiated.
                 if !bw.work.charge(bindings.len().saturating_mul(rule.conclusion.len()), truncated) {
                     continue;
                 }
-                for b in bindings {
-                    // Fresh conclusion existentials: rename the conclusion's blanks
-                    // once per distinct (rule, conclusion-binding) firing.
-                    let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                        None
-                    } else {
-                        let key: String = concl_vars
-                            .iter()
-                            .map(|v| format!("{:?};", b.get(v)))
-                            .collect();
-                        if !fired.insert((ri, key)) {
-                            continue; // this firing already instantiated its existentials
-                        }
-                        sk_counter += 1;
-                        Some(
-                            concl_blanks
-                                .iter()
-                                .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l)))
-                                .collect(),
-                        )
-                    };
+                let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
                     for c in &rule.conclusion {
-                        let c = match &sk {
+                        let c = match sk {
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
+                        if let Some(g) = ground_triple(&c, b, &bw.truncated) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
                             if !facts.contains(&g)
                                 && bw.settle(bounded::generated(&bw.truncated, &g))
@@ -1909,7 +2419,12 @@ fn run_closure(
                                 let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
                                     rule.premise
                                         .iter()
-                                        .filter_map(|p| ground_triple(p, &b, &bw.truncated))
+                                        .filter_map(|p| match universals {
+                                            None => ground_triple(p, b, &bw.truncated),
+                                            // The stored facts a premise universal was
+                                            // proved from mention a store universal.
+                                            Some(_) => premise_instance(p, b, &bw.truncated),
+                                        })
                                         .filter(|t| facts.contains(t))
                                         .collect()
                                 } else {
@@ -1919,6 +2434,37 @@ fn run_closure(
                             }
                         }
                     }
+                };
+                if concl_blanks.is_empty() {
+                    // Which binding of a shared firing key arrives first is not observable
+                    // here: the proof step a fact records is chosen over the whole round's
+                    // `produced` list below (GH #6844), not per rule.
+                    for b in &bindings {
+                        emit(b, None);
+                    }
+                    continue;
+                }
+                // Fresh conclusion existentials: rename the conclusion's blanks once per
+                // distinct (rule, conclusion-binding) firing, numbered in the canonical order
+                // of this round's new firings so a label never depends on hash-set traversal
+                // order (GH #6749).
+                let tie_break = mode == StepMode::Full;
+                let firings = canonical_new_firings(
+                    bindings,
+                    concl_vars,
+                    &mut fired[ri],
+                    tie_break,
+                    &mut scratch,
+                );
+                let base = sk_counter;
+                sk_counter += firings.len();
+                for (rank, b) in firings {
+                    let n = base + rank + 1;
+                    let sk: FxHashMap<String, String> = concl_blanks
+                        .iter()
+                        .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, n, l)))
+                        .collect();
+                    emit(&b, Some(&sk));
                 }
             }
             let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -1926,6 +2472,41 @@ fn run_closure(
             // transitive predicate, those with at least one NON-transitive-rule derivation are
             // generators (a fact may be produced by several rules in one round — OR the flags).
             let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
+            // The proof step a fact records is the derivation at its FIRST entry in
+            // `produced` — `facts.insert` below is the dedup — and `produced` is built in the
+            // order the delta and fact hash sets yield their contents. THREE independent
+            // producers put several derivations of one conclusion in it: a rule whose
+            // conclusion is symmetric or has several triples derives one fact under several
+            // DISTINCT firing keys (one key gives one conclusion, but one conclusion can come
+            // from many keys); different rules derive the same fact in one round; and the
+            // transitivity fast path pushes one entry per intermediate path, over a `gen_out`
+            // adjacency whose own order comes from a hash map. So `why()` could name
+            // different premises run to run and native vs `wasm32`.
+            //
+            // Swap each conclusion's CANONICAL derivation into that conclusion's first slot:
+            // least premise vector (lexicographic under [`step_precedes`]), then least rule
+            // index. A swap only ever exchanges two entries that carry the SAME conclusion,
+            // so the multiset of (conclusion, rule) pairs the generator OR below and
+            // `facts.insert` see is untouched — it decides which derivation `why()` names and
+            // nothing else (GH #6844). Doing it here, once over the round, covers every
+            // producer; collapsing one rule's bindings by firing key cannot.
+            if mode == StepMode::Full && produced.len() > 1 {
+                let mut slot: FxHashMap<[Term; 3], usize> = FxHashMap::default();
+                for i in 0..produced.len() {
+                    match slot.get(&produced[i].0) {
+                        // `j` always holds the best entry for this conclusion so far, so one
+                        // comparison per entry suffices.
+                        Some(&j) => {
+                            if step_precedes(&produced[i], &produced[j]) {
+                                produced.swap(i, j);
+                            }
+                        }
+                        None => {
+                            slot.insert(produced[i].0.clone(), i);
+                        }
+                    }
+                }
+            }
             for (g, ri, prem) in produced {
                 let is_new = facts.insert(g.clone());
                 if is_new {
@@ -2086,6 +2667,11 @@ fn intern_closure<K: KeyMode>(
 /// caller is already carrying (a document blank or a projected query answer
 /// literally spelled `_:_l1` would otherwise MERGE with a generated cell and
 /// emit a semantically wrong graph).
+///
+/// Within that prefix the cells are numbered in the canonical order of the list VALUES
+/// reachable in those rows ([`ListExpander::new`] interns them all up front, in
+/// `serialize::term_cmp` order), so a cell label never depends on the order a fact hash set
+/// yields the rows (GH #6844).
 struct ListExpander {
     heads: FxHashMap<Term, Term>,
     structure: Vec<[Term; 3]>,
@@ -2099,11 +2685,30 @@ impl ListExpander {
     /// expand, since the prefix is fixed at construction.
     fn new<'a>(rows: impl IntoIterator<Item = &'a [Term; 3]>) -> Self {
         let mut seen = FxHashSet::default();
+        let mut lists: Vec<&Term> = Vec::new();
         for r in rows {
-            r.iter().for_each(|t| term_blank_labels(t, &mut seen));
+            r.iter().for_each(|t| {
+                term_blank_labels(t, &mut seen);
+                reachable_lists(t, &mut lists);
+            });
         }
         let prefix = fresh_blank_prefix(&seen, "_l");
-        Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix }
+        let mut exp =
+            Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix };
+        // Number the cells in the canonical order of the list VALUES, not in the order the
+        // rows happen to arrive: `rows` is usually drained from a fact hash SET, so the
+        // arrival order depends on insertion history and on the hasher's word size (native
+        // vs `wasm32`), and a cell label is a blank-node identity that shows up in `why()`
+        // strings, `term_key`s and `sparq-prov` IRIs. Interning every reachable list up
+        // front in one canonical term order, makes each cell label a function of the SET of
+        // rows (GH #6844). Expanding a row later is then a pure cache hit for its lists, so
+        // nothing in `expand` can renumber them.
+        lists.sort_by(|a, b| serialize::term_cmp(a, b));
+        lists.dedup();
+        for t in lists {
+            exp.expand(t);
+        }
+        exp
     }
     fn expand_rows(&mut self, rows: &[[Term; 3]]) -> (Vec<[Term; 3]>, Vec<[Term; 3]>) {
         let out: Vec<[Term; 3]> = rows.iter().map(|r| self.expand_row(r)).collect();
@@ -2144,29 +2749,65 @@ impl ListExpander {
     }
 }
 
+/// Every list value [`ListExpander::expand`] would intern a chain for while expanding `t`,
+/// appended to `out`: `t` itself when it is a list, plus the lists reachable through list
+/// members and triple-term components. Mirrors `expand`'s own recursion exactly — a list
+/// inside a quoted `{ … }` FORMULA is not expanded, so it is not collected either.
+fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
+    match t {
+        Term::Triple(tr) => tr.iter().for_each(|m| reachable_lists(m, out)),
+        Term::List(ms) => {
+            ms.iter().for_each(|m| reachable_lists(m, out));
+            out.push(t);
+        }
+        _ => {}
+    }
+}
+
 type Binding = HashMap<String, Term>;
+
+/// Which facts a premise evaluation's join atoms may match, and which atom (if any) is
+/// already bound into the seed. The atoms KEEP THEIR ORIGINAL premise indices under every
+/// mode, because an atom's index is part of the name its backward proofs standardize apart
+/// into ([`BwPath`]): re-indexing the remaining atoms would make a derivation's names depend
+/// on whether the round was naive or semi-naive, and the same derivation would then derive
+/// two different facts in two rounds.
+#[derive(Clone, Copy)]
+enum JoinMode<'d> {
+    /// Naive: every join atom matches all of `facts`.
+    All,
+    /// Semi-naive: the join atom at premise index `k` matches only this DELTA set (the
+    /// newly-derived facts), so the driver, by running once per join-atom index, considers
+    /// only bindings that involve ≥1 new fact.
+    Delta(&'d FxHashSet<[Term; 3]>, usize),
+    /// The rest of a semi-naive round: premise atom `k` is bound into the seed already and
+    /// is skipped, every other atom matches all of `facts`.
+    Without(usize),
+}
 
 /// All variable bindings under which every premise pattern holds (joining against `facts`,
 /// evaluating builtins as filters/computations). N3 collections `( … )` in the premise are
 /// rule-local list STRUCTURE (rdf:first/rest over fresh bnodes), not data to match — they are
 /// extracted up front and consumed by the functional builtins (e.g. `math:sum`).
-fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Binding> {
+fn match_premise(
+    premise: &[[Term; 3]],
+    facts: &FactIndex,
+    bw: &BwCtx,
+    path: BwPath,
+) -> Vec<Binding> {
     match_premise_seeded(
         premise,
         facts,
         &Binding::new(),
-        None,
+        JoinMode::All,
         bw,
         bounded::backward_depth(),
+        path,
     )
 }
 
-/// Match `premise` starting from an existing partial binding `seed`. For SEMI-NAIVE
-/// evaluation, `delta_at = Some((delta, k))` restricts the join atom at premise index `k` to
-/// match only the `delta` set (the newly-derived facts) rather than the full `facts` — so the
-/// driver, by running once per join-atom index, considers only bindings that involve ≥1 new
-/// fact. `None` = naive (every join atom matches all facts); also used for the negation
-/// sub-formula recursion.
+/// Match `premise` starting from an existing partial binding `seed`, with `join` saying
+/// which facts its join atoms may match ([`JoinMode`]).
 ///
 /// An evaluation boundary ([`within_depth`]): a `seed` past the term-depth limit is
 /// refused, as a cut, before any atom is evaluated under it.
@@ -2174,14 +2815,15 @@ fn match_premise_seeded(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
-    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    join: JoinMode<'_>,
     bw: &BwCtx,
     depth: usize,
+    path: BwPath,
 ) -> Vec<Binding> {
     if !seed.is_empty() && !within_depth(seed, bw) {
         return Vec::new();
     }
-    match_premise_admitted(premise, facts, seed, delta_at, bw, depth)
+    match_premise_admitted(premise, facts, seed, join, bw, depth, path)
 }
 
 /// [`match_premise_seeded`] for a `seed` already within the term-depth limit.
@@ -2189,14 +2831,15 @@ fn match_premise_admitted(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
-    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    join: JoinMode<'_>,
     bw: &BwCtx,
     depth: usize,
+    path: BwPath,
 ) -> Vec<Binding> {
     // Semi-naive: seed from the DELTA atom first (delta is small → most selective), then
     // evaluate the rest against the index. Doing the delta atom first makes it prune early
     // instead of letting a non-delta atom do a full predicate-index scan.
-    if let Some((delta, k)) = delta_at {
+    if let JoinMode::Delta(delta, k) = join {
         let mut seeds = Vec::new();
         for fact in delta {
             if let Some(nb) = unify(&premise[k], fact, seed, &bw.truncated) {
@@ -2209,17 +2852,33 @@ fn match_premise_admitted(
         if seeds.is_empty() {
             return Vec::new();
         }
-        let rest: Vec<[Term; 3]> =
-            premise.iter().enumerate().filter(|&(i, _)| i != k).map(|(_, p)| p.clone()).collect();
         let mut out = Vec::new();
-        // Each seed extends the admitted `seed` with parts of stored facts only.
+        // Each seed extends the admitted `seed` with parts of stored facts only. The whole
+        // premise is passed back, with atom `k` SKIPPED rather than removed, so the other
+        // atoms keep their original indices ([`JoinMode`]).
         for s in &seeds {
-            out.extend(match_premise_admitted(&rest, facts, s, None, bw, depth));
+            out.extend(match_premise_admitted(
+                premise,
+                facts,
+                s,
+                JoinMode::Without(k),
+                bw,
+                depth,
+                path,
+            ));
         }
         return out;
     }
+    // The atom a semi-naive round already bound into the seed, if any ([`JoinMode`]).
+    let skip = match join {
+        JoinMode::Without(k) => Some(k),
+        JoinMode::All | JoinMode::Delta(..) => None,
+    };
     let mut bindings: Vec<Binding> = vec![seed.clone()];
-    for pat in premise {
+    for (ai, pat) in premise.iter().enumerate() {
+        if Some(ai) == skip {
+            continue;
+        }
         // log:includes / log:notIncludes / log:supports — does the SCOPE
         // include (or entail, for supports) the object formula?
         //   * subject a `{ … }` formula (even `{}` — the EMPTY formula
@@ -2235,7 +2894,7 @@ fn match_premise_admitted(
         // `log:includes` may BIND free variables of the object pattern (one
         // binding per match, like EYE); `log:notIncludes` holds iff no match.
         if let Some(op) = scope_op(&pat[1]) {
-            let inner: &[[Term; 3]] = match &pat[2] {
+            let written: &[[Term; 3]] = match &pat[2] {
                 Term::Formula(t) => t,
                 _ => &[],
             };
@@ -2244,8 +2903,7 @@ fn match_premise_admitted(
             for b in bindings {
                 // A pattern reached through a variable was not visible to
                 // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
-                // the same way, failing the run. (Only a pattern written as a formula is
-                // matched; any other object matches as the empty pattern.)
+                // the same way, failing the run.
                 if !matches!(&pat[2], Term::Formula(_)) {
                     if let Term::Var(v) = &pat[2] {
                         if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
@@ -2256,6 +2914,39 @@ fn match_premise_admitted(
                 }
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
+                };
+                // The pattern: the formula written in place, or (GH #6936), with a FORMULA
+                // as the scope, the stored formula a variable is DIRECTLY bound to when it
+                // holds no variable at any depth ([`stored_ground_statements`]). It is
+                // matched as stored, as if written in place: its blank nodes are its own
+                // existentials. Its statements are charged to the round's work allowance
+                // first. Any other object (a chained, open or non-formula value, or an
+                // unbound variable), and every object with the store as the scope, still
+                // matches as the empty pattern: the stratification does not read a
+                // pattern given through a variable (GH #6943).
+                let formula_scope = match &scope_term {
+                    Term::Formula(_) => true,
+                    Term::Lit(v, _, _) => v == "true",
+                    _ => false,
+                };
+                let bound = match &pat[2] {
+                    Term::Var(v) if formula_scope => b.get(v).and_then(|val| match val {
+                        Term::Formula(ts) => stored_ground_statements(ts).map(|n| (ts, n)),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                let inner: &[[Term; 3]] = match bound {
+                    Some((ts, n)) => {
+                        // A spent allowance refuses the run (recorded on it): the premise
+                        // evaluation stops here, with no binding.
+                        if !bw.work.charge(n, &bw.truncated) {
+                            next.clear();
+                            break;
+                        }
+                        ts
+                    }
+                    None => written,
                 };
                 let matches: Vec<Binding> = match scope_term {
                     // log:supports searches the closure in place: no term is built.
@@ -2269,10 +2960,21 @@ fn match_premise_admitted(
                     // The store as the scope: the clause recurses into premise matching,
                     // holding a unit of the run's stack allowance (`_frames`).
                     _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
-                        Some(_frames) => match_premise_seeded(inner, facts, &b, None, bw, depth),
+                        Some(_frames) => match path.child(bw, ai as u64) {
+                            Some(at) => {
+                                match_premise_seeded(inner, facts, &b, JoinMode::All, bw, depth, at)
+                            }
+                            None => Vec::new(),
+                        },
                         None => Vec::new(),
                     },
                 };
+                // A containment's existential witnesses (`__w.` bindings of the pattern's
+                // blank nodes) stay inside it: each test gets fresh ones.
+                let mut matches = matches;
+                for nb in &mut matches {
+                    nb.retain(|k, _| !k.starts_with(PATTERN_WILDCARD));
+                }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
                     if negation_gate(bw) && matches.is_empty() {
@@ -2317,7 +3019,7 @@ fn match_premise_admitted(
             for b in bindings {
                 // Solutions of a `{ clause }` value under `seed`, against the
                 // applied scope (`None` ⇒ the clause is not a formula).
-                let solve = |clause: &Term, seed: &Binding| -> Option<Vec<Binding>> {
+                let solve = |clause: &Term, seed: &Binding, ci: u64| -> Option<Vec<Binding>> {
                     let atoms: &[[Term; 3]] = match clause {
                         Term::Formula(ts) => ts,
                         // `{}` parses as the literal true: no constraint —
@@ -2333,7 +3035,18 @@ fn match_premise_admitted(
                         // The store as the scope: as for the scoped operators above.
                         _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
                             Some(_frames) => {
-                                match_premise_seeded(atoms, facts, seed, None, bw, depth)
+                                match path.child(bw, ai as u64).and_then(|at| at.child(bw, ci)) {
+                                    Some(at) => match_premise_seeded(
+                                        atoms,
+                                        facts,
+                                        seed,
+                                        JoinMode::All,
+                                        bw,
+                                        depth,
+                                        at,
+                                    ),
+                                    None => Vec::new(),
+                                }
                             }
                             None => Vec::new(),
                         },
@@ -2356,7 +3069,7 @@ fn match_premise_admitted(
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
-                        let Some(sols) = solve(clause, &b) else { continue };
+                        let Some(sols) = solve(clause, &b, 1) else { continue };
                         if !negation_gate(bw) {
                             continue;
                         }
@@ -2383,10 +3096,10 @@ fn match_premise_admitted(
                     }
                     CollectOp::ForAll => {
                         let [ca, cb] = &members[..] else { continue };
-                        let Some(sols_a) = solve(ca, &b) else { continue };
+                        let Some(sols_a) = solve(ca, &b, 0) else { continue };
                         let holds = sols_a
                             .iter()
-                            .all(|s| matches!(solve(cb, s), Some(ss) if !ss.is_empty()));
+                            .all(|s| matches!(solve(cb, s, 1), Some(ss) if !ss.is_empty()));
                         if negation_gate(bw) && holds {
                             next.push(b);
                         }
@@ -2516,8 +3229,9 @@ fn match_premise_admitted(
                     // `_frames` holds the step's unit of the run's stack allowance.
                     if let Some((d, _frames)) = bw.settle(step) {
                         // Each proof was charged as [`backward_prove`] built it.
+                        let Some(at) = path.child(bw, ai as u64) else { return Vec::new() };
                         next.extend(
-                            backward_prove(pat, b, facts, bw, d)
+                            backward_prove(pat, b, facts, bw, d, at)
                                 .into_iter()
                                 .filter(|nb| within_depth(nb, bw)),
                         );
@@ -2664,7 +3378,14 @@ fn is_join_atom(pat: &[Term; 3]) -> bool {
 /// premise — recursively allowing joins, builtins, and further backward rules — and project
 /// each proof back onto the goal's variables. SLD resolution with standardized-apart rule
 /// variables and a depth bound (`depth` counts REMAINING backward applications).
-fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, depth: usize) -> Vec<Binding> {
+fn backward_prove(
+    pat: &[Term; 3],
+    b: &Binding,
+    facts: &FactIndex,
+    bw: &BwCtx,
+    depth: usize,
+    path: BwPath,
+) -> Vec<Binding> {
     let run = &bw.truncated;
     let (Some(g0), Some(g1), Some(g2)) = (
         bounded::substitute(&pat[0], b, run),
@@ -2680,18 +3401,96 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
     if !bw.settle(bounded::generated(&bw.truncated, &goal)) {
         return Vec::new();
     }
+    // The GOAL's own fold, one part of the key naming every node of this goal's resolution
+    // ([`NodeKey::Site`]). The goal is part of it because two applications proving
+    // DIFFERENT goals must take different names — the renamed variables their conclusions
+    // leak into two derived facts would otherwise make those facts one fact and an answer
+    // would be lost — and because it is what keeps a later round from resolving a leaked
+    // variable at the very node that minted it (a goal carrying one is a different goal).
+    // It is INTERNED once, on the first site that gets past the cheap gate below, so a goal
+    // no rule can conclude costs nothing and a goal many sites are tried against costs one
+    // interning, not one per site. Interned, not merely folded: a key is only as exact as
+    // its parts, and a bare fold here would let two different goals that fold alike at one
+    // parent and site share a key and merge silently.
+    let mut goal_id: Option<u64> = None;
     let mut out = Vec::new();
+    // The `(rule, conclusion)` SITE index: a position in the document's rule order, counted
+    // over every site whether or not the gate below skips it, so a site's index does not
+    // depend on the goal ([`BwPath`]).
+    let mut site = 0u64;
     for rule in bw.rules {
         for concl in &rule.conclusion {
+            let at = site;
+            site += 1;
             // Cheap gate: ground predicates must agree before we rename/unify anything.
             if let (Term::Iri(gp), Term::Iri(cp)) = (&goal[1], &concl[1]) {
                 if gp != cp {
                     continue;
                 }
             }
-            // Standardize apart: fresh names for this rule application's variables.
-            let n = bw.rename.get();
-            bw.rename.set(n + 1);
+            // Standardize apart: the fingerprint naming this proof-tree node's variables
+            // ([`BwPath`]). A fold shared with another KEY fails the run. The goal is
+            // folded once, on the first site that gets this far, and the site index is the
+            // only part that moves from site to site.
+            let id = match goal_id {
+                Some(id) => id,
+                None => {
+                    // Built from the goal with its variables resolved to the END of their
+                    // chains ([`bounded::walked_atom`]), not from `goal`: `goal` is
+                    // substituted one binding deep, while the `unify_walked` below follows
+                    // the whole chain, so two goals this resolution tells apart can
+                    // substitute alike and one identity over both would merge them.
+                    // `walked_atom_cow`: the walked goal is only READ here, to build its
+                    // canonical key, so its terms come back borrowed where the walk left
+                    // them as it found them instead of copied.
+                    let Some(resolved) = bounded::walked_atom_cow(&goal, b, &bw.truncated) else {
+                        // The walker refused the goal for its depth or its size, so the
+                        // goal has NO identity and no name can be minted for its proof.
+                        // The run fails with that reason: an empty proof here reads as
+                        // "not provable" and would drop an answer silently
+                        // (GH #6844 review round 5). A size refusal already fails the run
+                        // with the limit it names; a depth cut is only a cut, so it is
+                        // turned into the failure here.
+                        if bw.truncated.refusal().is_none() {
+                            let why = bw.truncated.get().unwrap_or("the walk was cut short");
+                            bw.nested_error.borrow_mut().get_or_insert_with(|| {
+                                format!(
+                                    "n3: refused a backward proof: {}, so the goal it is \
+                                     resolving has no identity to standardize its \
+                                     variables apart by (raise ClosureLimits::\
+                                     max_term_bytes, or simplify the terms the rules build)",
+                                    why
+                                )
+                            });
+                        }
+                        return Vec::new();
+                    };
+                    let Some(id) = bw.intern(serialize::goal_key_of(&resolved)) else {
+                        return Vec::new();
+                    };
+                    *goal_id.insert(id)
+                }
+            };
+            let key = NodeKey::Site { parent: path.fold, goal: id, site: at };
+            // Folded ONCE for this site: the collision check below, the renaming prefix and
+            // the registration after unification all read this one value, where each used
+            // to fold the key again.
+            let fold = key.fold();
+            // The fold is COMPUTED here and REGISTERED below, once the conclusion has
+            // unified. A site whose conclusion does not unify mints no name that survives
+            // (`rc` and `subst` are dropped), so registering it would only charge the run's
+            // tables for search it rejected — a document with many `<=` sites per predicate
+            // reached the allowance that way (GH #6844 review round 4). What CANNOT wait is
+            // the collision check: this fold is about to rename the conclusion's variables,
+            // and a fold already held by another key — an ancestor's, say — renames them to
+            // names the inherited bindings already hold, so unification fails on the capture
+            // and `continue` below would leave the collision unseen and the proof lost with
+            // no error (GH #6844 review round 5).
+            if bw.conflicts(key, fold) {
+                return Vec::new();
+            }
+            let mut pfx = BwPrefix::EMPTY;
+            let n = pfx.render(fold);
             let rc = [rename_vars(&concl[0], n), rename_vars(&concl[1], n), rename_vars(&concl[2], n)];
             let mut subst = b.clone();
             if !(unify_walked(&goal[0], &rc[0], &mut subst)
@@ -2700,12 +3499,17 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
             {
                 continue;
             }
+            // Registered now: this node's name is about to go into a proof, so a second,
+            // different key on this fold must fail the run ([`BwCtx::node`]).
+            if bw.node_at(key, fold).is_none() {
+                return Vec::new();
+            }
             let prem: Vec<[Term; 3]> = rule
                 .premise
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, None, bw, depth) {
+            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, BwPath::at(fold)) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -2714,7 +3518,11 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let Some(val) = bounded::substitute(&walk(g, &sol), &sol, &bw.truncated)
+                        // `walk_ref`, not `walk`: `substitute` reads the resolved term and
+                        // builds its own, so cloning it first was a deep copy of whatever
+                        // the proof bound — a quoted formula, on the path this rule leaks
+                        // its renamed variables through.
+                        let Some(val) = bounded::substitute(walk_ref(g, &sol), &sol, &bw.truncated)
                         else {
                             ok = false;
                             break;
@@ -2740,33 +3548,203 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
     out
 }
 
-/// `t` with every variable renamed into the standardize-apart space of rule application `n`
-/// (recursing into quoted formulae).
-fn rename_vars(t: &Term, n: usize) -> Term {
+/// `t` with every variable renamed into the standardize-apart space named by `prefix` (a
+/// [`BwPath::prefix`]), recursing into quoted formulae.
+fn rename_vars(t: &Term, prefix: &str) -> Term {
     match t {
         // A quoted formula's own universal is not a rule variable (GH #6754).
         Term::Var(v) if quoted_universal(v) => t.clone(),
-        Term::Var(v) => Term::Var(format!("__bw{n}_{v}")),
+        Term::Var(v) => Term::Var(format!("{prefix}{v}")),
         Term::Formula(ts) => Term::Formula(
-            ts.iter().map(|tr| [rename_vars(&tr[0], n), rename_vars(&tr[1], n), rename_vars(&tr[2], n)]).collect(),
+            ts.iter()
+                .map(|tr| {
+                    [rename_vars(&tr[0], prefix), rename_vars(&tr[1], prefix), rename_vars(&tr[2], prefix)]
+                })
+                .collect(),
         ),
-        Term::List(ms) => Term::List(ms.iter().map(|m| rename_vars(m, n)).collect()),
+        Term::List(ms) => Term::List(ms.iter().map(|m| rename_vars(m, prefix)).collect()),
         Term::Triple(tr) => Term::Triple(Box::new([
-            rename_vars(&tr[0], n),
-            rename_vars(&tr[1], n),
-            rename_vars(&tr[2], n),
+            rename_vars(&tr[0], prefix),
+            rename_vars(&tr[1], prefix),
+            rename_vars(&tr[2], prefix),
         ])),
         _ => t.clone(),
     }
 }
 
+/// Where one node of a backward proof tree sits, as the FINGERPRINT its standardize-apart
+/// space is named by ([`rename_vars`]) plus the steps taken since it: [`BwCtx::node`] folds a
+/// node's identity to 64 bits and refuses to hand the same fold to two different identities,
+/// so a fold names a derivation and nothing else.
+///
+/// A renamed variable is not confined to the proof. A rule conclusion can bind a goal
+/// variable to a quoted formula that still holds one, and that value reaches a derived fact,
+/// where it becomes part of the fact's term identity — its `term_key`, its `why()` string and
+/// its `sparq-prov` IRI. So the name has to be a function of the derivation, not of how much
+/// proving happened first: a counter bumped once per rule application made every such name
+/// depend on the order bindings arrived out of a fact set, and so on insertion history and on
+/// the hasher's width (native vs `wasm32`) — GH #6844 item 2.
+///
+/// A node's identity has three parts, and leaving any one out is a WRONG ANSWER, not a
+/// cosmetic defect:
+///
+/// - **The path**, because applications that coexist must differ. Depth alone does not do it:
+///   sibling conjuncts of one premise are evaluated against ONE shared substitution (each
+///   atom's bindings seed the next), so a value the first conjunct's proof leaked into it
+///   reaches the second's goal, and a sibling standardized apart the same way would unify its
+///   own copy of those variables with it. Every descent that can rename pushes a step:
+///   resolving premise atom `k` pushes `k` and then the `(rule, conclusion)` SITE index
+///   ([`backward_prove`]); a clause inside a scoped operator pushes the enclosing atom's
+///   index, and `log:collectAllIn` / `log:forAllIn` also the clause's position in the
+///   operator's subject list, so its two clauses (which share a substitution) differ. The
+///   steps are counted from the enclosing node's fingerprint ([`BwPath::base`]), which that
+///   node's own identity already accounts for, so an identity stays short however deep the
+///   proof goes.
+/// - **The goal instance**, because applications that prove DIFFERENT goals derive different
+///   facts. A quoted formula is opaque to substitution, so a renamed variable survives into
+///   the conclusion's value even where the proof bound it; two proofs of `:s0 :has ?f` and
+///   `:s1 :has ?f` must therefore not take one name, or their two derived facts merge into
+///   one and an answer is LOST. The goal enters the identity as its canonical key
+///   ([`serialize::goal_key`]).
+/// - **The scope**, so a query's premise evaluation, a top-level closure and a nested
+///   `log:conclusion` closure (each of which numbers its rules from zero in its own
+///   [`BwCtx`]) cannot collide, together with the SALT that tells two sibling nested
+///   closures at one nesting depth apart ([`BwCtx::scope_salt`]): both go into the root
+///   identity ([`BwCtx::root_path`]).
+///
+/// Keying the name to the goal is also what makes it safe ACROSS ROUNDS. The same goal
+/// re-proved at the same node in a later round takes the same name and derives the same fact
+/// — which is why a program whose only growth was the old counter now saturates. A goal that
+/// a later round reaches carrying a renamed variable leaked out of an earlier one (through a
+/// stored quoted formula and a forward `log:includes`, say) is a DIFFERENT goal, so it takes
+/// a different name and cannot capture the node that minted that variable.
+///
+/// A path is ONE `u64`, not a chain: each step's fingerprint is folded from the step and the
+/// fingerprint it is taken from ([`NodeKey::Step`]), and registered like any other, so the
+/// whole path above a node is accounted for by one word and nothing is re-encoded as the
+/// proof descends.
+///
+/// The fingerprint renders as the one `__bw<n>_` chunk [`rename_vars`] prefixes, which is the
+/// format `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes
+/// — so no downstream consumer changes: spellability, the exact writers' backward-copy
+/// refusal and the display writers' renaming all see the same shape of name as before, and a
+/// name's LENGTH no longer grows with the depth of the proof that minted it. Two renamed
+/// names are equal only if their folds and the variables behind them are (the chunk's digits
+/// are read by maximal munch), and two folds are equal only if the keys behind them are
+/// ([`BwCtx::node`] fails the run otherwise). It does NOT make a renamed name distinct
+/// from a variable a document itself spells `__bw…`: that namespace is not reserved, so such
+/// a variable can still be captured, here as before this name was ([`rename_vars`] renames
+/// it like any other).
+#[derive(Clone, Copy)]
+struct BwPath {
+    /// The fingerprint of the proof-tree node this path names.
+    fold: u64,
+}
+
+/// What a proof-tree node's fingerprint is folded from ([`BwPath`]). Each shape carries the
+/// fingerprint of the node it descends from, so a key is fixed-size however deep the proof
+/// is, and injectivity over the whole tree follows by induction: a fold names one key, and a
+/// key names its parent by that parent's own registered fold.
+///
+/// It is `Copy` and holds no string, so registering a node costs no allocation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NodeKey {
+    /// The root of rule `rule`'s proof trees in an evaluation of scope `scope` and salt
+    /// `salt` ([`BwCtx::root_path`]).
+    Root { scope: u64, salt: u64, rule: u64 },
+    /// One descent from the node `parent`: a premise atom's index, or a clause's position
+    /// inside a scoped operator ([`BwPath::child`]).
+    Step { parent: u64, step: u64 },
+    /// A rule application: resolving the goal whose key folds to `goal` at the node
+    /// `parent`, through the `(rule, conclusion)` pair at index `site` ([`backward_prove`]).
+    Site { parent: u64, goal: u64, site: u64 },
+}
+
+impl NodeKey {
+    /// This key's fold: the fingerprint of the node it names
+    /// ([`serialize::fold_key`]). The leading tag separates the three shapes.
+    fn fold(&self) -> u64 {
+        match *self {
+            NodeKey::Root { scope, salt, rule } => serialize::fold_key(1, &[scope, salt, rule]),
+            NodeKey::Step { parent, step } => serialize::fold_key(2, &[parent, step]),
+            NodeKey::Site { parent, goal, site } => serialize::fold_key(3, &[parent, goal, site]),
+        }
+    }
+}
+
+/// The buffer a node's renaming prefix `__bw<fold>_` is rendered into, on the STACK: the
+/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `_`, so it has a
+/// fixed upper bound and never needed a heap `String` of its own. One per candidate site on
+/// the backward path, where `format!` took an allocation and a free each time.
+///
+/// It renders the same bytes as `format!("__bw{fold}_")`, which `rename_vars` prefixes and
+/// `serialize::universal_base` reads back.
+struct BwPrefix([u8; 25]);
+
+impl BwPrefix {
+    const EMPTY: BwPrefix = BwPrefix([0u8; 25]);
+
+    /// `__bw<fold>_`, borrowed from this buffer.
+    fn render(&mut self, fold: u64) -> &str {
+        self.0[..4].copy_from_slice(b"__bw");
+        let mut at = self.0.len();
+        let mut rest = fold;
+        loop {
+            at -= 1;
+            self.0[at] = b'0' + (rest % 10) as u8;
+            rest /= 10;
+            if rest == 0 {
+                break;
+            }
+        }
+        // The digits were written to the END of the buffer, so shift them up against the
+        // `__bw` and put the trailing `_` after them.
+        let digits = self.0.len() - at;
+        self.0.copy_within(at.., 4);
+        self.0[4 + digits] = b'_';
+        // ASCII by construction, so the `from_utf8` cannot fail.
+        std::str::from_utf8(&self.0[..4 + digits + 1]).unwrap_or_default()
+    }
+}
+
+impl BwPath {
+    /// The path that is just the node `fold` names.
+    fn at(fold: u64) -> BwPath {
+        BwPath { fold }
+    }
+
+    /// The path one `step` further down, as its own registered node
+    /// ([`NodeKey::Step`]). `None` when that registration fails the run, exactly as
+    /// [`BwCtx::node`] describes — a step is a node like any other, so a step whose fold
+    /// is already another key's is a capture too.
+    fn child(&self, bw: &BwCtx, step: u64) -> Option<BwPath> {
+        let key = NodeKey::Step { parent: self.fold, step };
+        if bw.unnamed() {
+            return Some(BwPath::at(key.fold()));
+        }
+        bw.node(key).map(BwPath::at)
+    }
+}
+
 /// Resolve `t` through any chain of variable bindings in `s` (bounded against cycles).
 fn walk(t: &Term, s: &Binding) -> Term {
-    let mut cur = t.clone();
+    walk_ref(t, s).clone()
+}
+
+/// [`walk`] without copying anything: the term at the END of `t`'s binding chain in `s`,
+/// BORROWED from `t` or from `s`. The same chain, the same cycle bound, the same answer —
+/// `walk` is this plus one clone.
+///
+/// It exists because `walk` cloned at every hop and then again for its result, so a caller
+/// that only reads the resolved term (or only needs it to build something else) paid a deep
+/// copy of a quoted formula or a list for nothing. That is on the per-goal backward-naming
+/// path and on the per-solution projection below (GH #6844 follow-up).
+fn walk_ref<'a>(t: &'a Term, s: &'a Binding) -> &'a Term {
+    let mut cur = t;
     for _ in 0..s.len() + 1 {
-        match &cur {
+        match cur {
             Term::Var(v) => match s.get(v) {
-                Some(next) => cur = next.clone(),
+                Some(next) => cur = next,
                 None => break,
             },
             _ => break,
@@ -2880,15 +3858,11 @@ fn quoted_universal(v: &str) -> bool {
     v.starts_with(serialize::FORMULA_UNIVERSAL)
 }
 
-/// A variable no matcher may bind: a quoted formula's universal, or a rule premise's own
-/// universal (`__up.`), which [`validate_rule_quantifiers`] rejects before any matching.
-/// Should one reach a matcher anyway, it matches only itself instead of binding as an
-/// ordinary variable (and a debug build stops).
+/// A variable no matcher may bind: a quoted formula's universal. A rule premise's own
+/// universal (`__up.`) binds like a rule variable while its premise is matched;
+/// [`validate_rule_quantifiers`] admits it only where [`premise_universals_matchable`]
+/// holds, and the firing is kept only if [`independent_firing`] accepts its binding.
 fn unbindable_var(v: &str) -> bool {
-    if v.starts_with(serialize::PREMISE_UNIVERSAL) {
-        debug_assert!(false, "premise universal {v} reached a matcher past validate_rule_quantifiers");
-        return true;
-    }
     quoted_universal(v)
 }
 
@@ -2907,8 +3881,9 @@ fn frees_quoted_universal(t: &Term) -> bool {
     go(t, 0)
 }
 
-/// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
-/// tracked in GH #6882).
+/// The refusal for a rule antecedent no engine can match soundly (GH #6754). A forward
+/// rule's own premise universals in stored-predicate atoms are supported (GH #6882,
+/// [`premise_universals_matchable`]); every other quantified antecedent is refused.
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
@@ -2939,18 +3914,22 @@ fn aggregation_clauses(op: CollectOp, subject: &Term) -> &[Term] {
 /// root, or a malformed one, counts as quantified (fail-closed).
 struct QuantifierWalk {
     levels: Vec<bool>,
+    /// Whether the rule's own premise universals (`__up.`) are matched by the forward
+    /// engine (GH #6882): then only the OTHER quantifiers count. The caller has checked
+    /// that they sit only where [`premise_universals_matchable`] allows.
+    premise_matched: bool,
 }
 
 impl QuantifierWalk {
     /// The premise `atoms` of a rule (an executable root; its own universals are the
-    /// rule's `__up.` markers).
-    fn premise(atoms: &[[Term; 3]]) -> bool {
-        QuantifierWalk { levels: vec![true] }.conjunction(atoms)
+    /// rule's `__up.` markers, which count unless `premise_matched`).
+    fn premise(atoms: &[[Term; 3]], premise_matched: bool) -> bool {
+        QuantifierWalk { levels: vec![true], premise_matched }.conjunction(atoms)
     }
 
     /// A term bound into an executable position at run time: a formula there is a clause.
     fn bound_clause(t: &Term) -> bool {
-        QuantifierWalk { levels: Vec::new() }.term(t, true)
+        QuantifierWalk { levels: Vec::new(), premise_matched: false }.term(t, true)
     }
 
     /// An executable conjunction at the current level.
@@ -2997,7 +3976,7 @@ impl QuantifierWalk {
     fn bound_by_executable(&self, v: &str) -> bool {
         if v.starts_with(serialize::PREMISE_UNIVERSAL) {
             // only a rule premise binds one, and it is executable
-            return true;
+            return !self.premise_matched;
         }
         if !v.starts_with(serialize::FORMULA_UNIVERSAL) {
             return false;
@@ -3017,13 +3996,148 @@ fn quantified_clause(clause: &Term) -> bool {
 /// sees the clauses as written, at every nesting depth; a clause reached through a variable
 /// is checked again on its bound value when it is evaluated ([`match_premise_seeded`]),
 /// by the same walk.
+///
+/// A FORWARD rule's own premise universals are admitted where
+/// [`premise_universals_matchable`] holds, in a document with no backward rules (GH
+/// #6882): a backward proof would carry a store universal into a goal, where unification
+/// reads it as a variable. Backward rules' premise universals stay refused.
 pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), String> {
-    for rule in parsed.rules.iter().chain(&parsed.backward_rules) {
-        if QuantifierWalk::premise(&rule.premise) {
+    let matched = |rule: &Rule| {
+        parsed.backward_rules.is_empty() && premise_universals_matchable(&rule.premise)
+    };
+    for rule in &parsed.rules {
+        if QuantifierWalk::premise(&rule.premise, matched(rule)) {
+            return Err(QUANTIFIED_ANTECEDENT.into());
+        }
+    }
+    for rule in &parsed.backward_rules {
+        if QuantifierWalk::premise(&rule.premise, false) {
             return Err(QUANTIFIED_ANTECEDENT.into());
         }
     }
     Ok(())
+}
+
+/// Does `t` mention a variable `hit` accepts, at any depth (lists, quoted triples,
+/// quoted formulae)?
+fn mentions_var(t: &Term, hit: &impl Fn(&str) -> bool) -> bool {
+    match t {
+        Term::Var(v) => hit(v),
+        Term::List(ms) => ms.iter().any(|m| mentions_var(m, hit)),
+        Term::Triple(tr) => tr.iter().any(|m| mentions_var(m, hit)),
+        Term::Formula(ts) => ts.iter().flatten().any(|m| mentions_var(m, hit)),
+        _ => false,
+    }
+}
+
+/// Is `v` a rule premise's own universal (`__up.<iri>`)?
+fn premise_universal(v: &str) -> bool {
+    v.starts_with(serialize::PREMISE_UNIVERSAL)
+}
+
+/// The rule premise's own universals (`__up.<iri>`), each once in first-mention order;
+/// `None` when it has none, the common case, which costs a firing nothing (GH #6882).
+pub(crate) fn premise_universals(premise: &[[Term; 3]]) -> Option<Box<[String]>> {
+    fn go(t: &Term, out: &mut Vec<String>) {
+        match t {
+            Term::Var(v) if premise_universal(v) && !out.contains(v) => out.push(v.clone()),
+            Term::List(ms) => ms.iter().for_each(|m| go(m, out)),
+            Term::Triple(tr) => tr.iter().for_each(|m| go(m, out)),
+            Term::Formula(ts) => ts.iter().flatten().for_each(|m| go(m, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    premise.iter().flatten().for_each(|t| go(t, &mut out));
+    (!out.is_empty()).then(|| out.into_boxed_slice())
+}
+
+/// Whether every mention of the premise's own universals (GH #6882) is one the forward
+/// matcher proves only from stored facts: the subject or object, or inside a list or a
+/// quoted triple there, of an atom whose predicate is an IRI of no builtin, list or scope
+/// relation. Then a binding of the universal comes from unifying it with a stored term,
+/// which [`independent_firing`] checks. A universal anywhere else (a builtin operand, a
+/// scoped or aggregated clause, a quoted formula, a variable predicate, `rdf:first` /
+/// `rdf:rest`) would be evaluated as a term rather than matched, so the rule is refused.
+/// Vacuously true for a premise with none.
+fn premise_universals_matchable(premise: &[[Term; 3]]) -> bool {
+    fn outside_formulae(t: &Term) -> bool {
+        match t {
+            Term::Formula(ts) => !ts.iter().flatten().any(|m| mentions_var(m, &premise_universal)),
+            Term::List(ms) => ms.iter().all(outside_formulae),
+            Term::Triple(tr) => tr.iter().all(outside_formulae),
+            _ => true,
+        }
+    }
+    fn has_blank(t: &Term) -> bool {
+        match t {
+            Term::Blank(_) => true,
+            Term::List(ms) => ms.iter().any(has_blank),
+            Term::Triple(tr) => tr.iter().any(has_blank),
+            Term::Formula(ts) => ts.iter().flatten().any(has_blank),
+            _ => false,
+        }
+    }
+    // A premise blank is a constant only in a rule taken from a formula a closure run
+    // closes (a document's premise blanks are variables). It would match that formula's
+    // own blank, an existential whose witness may depend on the store universal, without
+    // reaching the binding [`independent_firing`] checks: refused.
+    let quantified = premise.iter().flatten().any(|t| mentions_var(t, &premise_universal));
+    if quantified && premise.iter().flatten().any(has_blank) {
+        return false;
+    }
+    premise.iter().all(|atom| {
+        if !atom.iter().any(|t| mentions_var(t, &premise_universal)) {
+            return true;
+        }
+        matches!(&atom[1], Term::Iri(_))
+            && matches!(relation(&atom[1]), Relation::Stored)
+            && outside_formulae(&atom[0])
+            && outside_formulae(&atom[2])
+    })
+}
+
+/// Whether a firing of a rule whose premise binds `universals` (its own premise
+/// universals, [`premise_universals`]) proves the quantified premise (GH #6882). A
+/// premise universal holds for every value only when the stored facts it was matched
+/// against hold for every value of the store universal it bound, so the binding must
+/// send each premise universal to:
+///
+/// * a universal OF THIS RUN's store (`own`: the document's `__ua.` universals at top
+///   level, a closure run's own `__ul.<k>.` ones inside [`formula_closure`]). A ground
+///   term proves only its own instance, and an enclosing formula's universal is a free
+///   parameter of the closed formula, not a universal of its statements;
+/// * a DIFFERENT store universal for each premise universal (injective);
+/// * a store universal no other variable of the binding mentions, at any depth: a value
+///   that mentions it depends on it, so the premise was matched for one value only;
+/// * no other variable bound to a value with a blank node in it, at any depth. A blank is
+///   an existential, which N3 scopes inside the universals of its formula (`∀z ∃b`), so
+///   its witness may depend on the store universal: `@forAll :z. :z :p _:b.` does not
+///   prove `{ @forAll :x. :x :p ?y }`. Refusing every blank is conservative.
+///
+/// The check reads the complete binding, so the order the atoms were matched in does not
+/// matter.
+fn independent_firing(b: &Binding, universals: &[String], own: &str) -> bool {
+    let mut targets: Vec<&str> = Vec::with_capacity(universals.len());
+    for u in universals {
+        match b.get(u) {
+            Some(Term::Var(t)) if t.starts_with(own) && !targets.contains(&t.as_str()) => {
+                targets.push(t);
+            }
+            _ => return false,
+        }
+    }
+    fn depends(t: &Term, targets: &[&str]) -> bool {
+        match t {
+            Term::Var(v) => targets.contains(&v.as_str()),
+            Term::Blank(_) => true,
+            Term::List(ms) => ms.iter().any(|m| depends(m, targets)),
+            Term::Triple(tr) => tr.iter().any(|m| depends(m, targets)),
+            Term::Formula(ts) => ts.iter().flatten().any(|m| depends(m, targets)),
+            _ => false,
+        }
+    }
+    b.iter().filter(|(k, _)| !premise_universal(k)).all(|(_, v)| !depends(v, &targets))
 }
 
 /// [`unify_term_in`] under a fresh [`bounded::StepBudget::unification`]. When the budget
@@ -3132,6 +4246,52 @@ fn formula_statements(ts: &[[Term; 3]]) -> usize {
     n
 }
 
+/// The statements of the stored formula `ts` and of every formula nested in it, when it
+/// holds no variable at any depth (GH #6936); `None` when it holds one. The walk keeps one
+/// iterator frame per open container, so its scratch grows with the term's depth (already
+/// within the run's term-depth allowance), not with its size, and it takes no call stack
+/// per level.
+fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
+    enum Frame<'a> {
+        Statements(std::slice::Iter<'a, [Term; 3]>),
+        Terms(std::slice::Iter<'a, Term>),
+    }
+    let mut n = ts.len();
+    let mut stack = vec![Frame::Statements(ts.iter())];
+    while let Some(top) = stack.last_mut() {
+        let t = match top {
+            Frame::Statements(it) => match it.next() {
+                Some(st) => {
+                    stack.push(Frame::Terms(st.iter()));
+                    continue;
+                }
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+            Frame::Terms(it) => match it.next() {
+                Some(t) => t,
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+        };
+        match t {
+            Term::Var(_) => return None,
+            Term::Formula(rs) => {
+                n = n.saturating_add(rs.len());
+                stack.push(Frame::Statements(rs.iter()));
+            }
+            Term::List(ms) => stack.push(Frame::Terms(ms.iter())),
+            Term::Triple(tr) => stack.push(Frame::Terms(tr.iter())),
+            _ => {}
+        }
+    }
+    Some(n)
+}
+
 /// The search of [`formula_unify`].
 fn formula_search(
     ps: &[[Term; 3]],
@@ -3220,6 +4380,17 @@ fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 
     } else {
         None
     }
+}
+
+/// A premise atom instantiated under `b`, left variables and all: with [`ground_triple`]'s
+/// substitution but not its groundness test, so a fact that mentions a store universal
+/// can be named as a firing's support.
+fn premise_instance(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 3]> {
+    Some([
+        bounded::substitute_deep(&t[0], b, run)?,
+        bounded::substitute_deep(&t[1], b, run)?,
+        bounded::substitute_deep(&t[2], b, run)?,
+    ])
 }
 
 /// Every variable of `stmts` named `from + rest` renamed to `to + rest`, at any depth.
@@ -4087,6 +5258,30 @@ fn formula_bytes<'a>(statements: impl Iterator<Item = &'a [Term; 3]>) -> usize {
 
 /// `f` over the closure of formula `ts` under its own rules: its statements plus their
 /// derivations, each once, borrowed (nothing is copied to make the closure's formula).
+/// The run's scope salt while one nested closure is being evaluated
+/// ([`run_shared::RunShared::scope_salt`]): made by swapping the new salt in, and puts the
+/// one it replaced back when it is dropped, on every path out of the closure, an early
+/// return included (and, where panics unwind, an unwind). The salt is a stack discipline,
+/// so it is a guard and not a restore written out at each exit — one of which the first
+/// cut of this missed.
+struct ScopeSalt<'a> {
+    at: &'a VisitedDocs,
+    outer: u64,
+}
+
+impl<'a> ScopeSalt<'a> {
+    fn swapped_in(at: &'a VisitedDocs, salt: u64) -> ScopeSalt<'a> {
+        let outer = at.borrow_mut().swap_scope_salt(salt);
+        ScopeSalt { at, outer }
+    }
+}
+
+impl Drop for ScopeSalt<'_> {
+    fn drop(&mut self) {
+        self.at.borrow_mut().swap_scope_salt(self.outer);
+    }
+}
+
 fn with_formula_closure<R>(
     ts: &[[Term; 3]],
     bw: &BwCtx,
@@ -4123,7 +5318,12 @@ fn with_formula_closure<R>(
         ));
         return f(&ts.iter().collect::<Vec<_>>());
     }
-
+    // This document's own canonical identity salts the root identities the nested closure
+    // mints ([`BwCtx::scope_salt`]). Nesting DEPTH alone does not tell two closures apart:
+    // two sibling `log:conclusion` formulas of one outer document are closed at the same
+    // depth, one after the other, and would otherwise number their rules into the same
+    // names while both sets of derived facts reach the outer substitution.
+    //
     let mut facts: Vec<[Term; 3]> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
     let mut backward: Vec<Rule> = Vec::new();
@@ -4151,6 +5351,44 @@ fn with_formula_closure<R>(
             _ => facts.push(row),
         }
     }
+    // This document's own canonical identity salts the root identities the nested closure
+    // mints ([`BwCtx::scope_salt`]). Nesting DEPTH alone does not tell two closures apart:
+    // two sibling `log:conclusion` formulas of one outer document are closed at the same
+    // depth, one after the other, and would otherwise number their rules into the same
+    // names while both sets of derived facts reach the outer substitution.
+    //
+    // It is NOT `key` above. That one is `FxHasher` over `[[Term; 3]]::hash`, whose value
+    // depends on the target's pointer width, which is exactly the dependence GH #6844
+    // removes — it is fine for the cycle guard, which only has to agree with itself inside
+    // one run, and wrong for anything a name is built from. The salt is
+    // `serialize::formula_canonical_key`'s fold instead: explicit `u64` arithmetic over
+    // `term_key`s, the same on `wasm32` as on a 64-bit target.
+    //
+    // It is REGISTERED ([`BwCtx::intern`], which refuses a fold a different identity
+    // already holds and fails the run) exactly when this nested document has a `<=` rule,
+    // and so can mint a name the registration has to keep apart from every other. With no
+    // backward rule the closure renames nothing — its `BwCtx` is `unnamed()` and hands its
+    // paths out unregistered — so registering the salt only spent the run's backward
+    // identity allowance on a purely forward closure, and a run inside its own join-work
+    // limit WAS refused for it: each nested closure gets a fresh join/round allowance, but
+    // the salts accumulate run-wide against `bounded::proof_nodes`, so a deep CHAIN of
+    // forward-only closures was refused with the backward proof-node cut in a document
+    // that cannot mint a single name (`a_deep_forward_only_closure_chain_answers_at_a_
+    // tight_limit`). The fold is the SAME either way, so what any name minted elsewhere in
+    // the run is built from does not move.
+    //
+    // `_salt` puts the enclosing closure's salt back however this function leaves.
+    let canon = serialize::formula_canonical_key(ts);
+    let salt = if backward.is_empty() {
+        serialize::fnv1a64(&canon)
+    } else {
+        let Some(salt) = bw.intern(canon) else {
+            bw.visited.borrow_mut().docs.remove(&key);
+            return f(&ts.iter().collect::<Vec<_>>());
+        };
+        salt
+    };
+    let _salt = ScopeSalt::swapped_in(&bw.visited, salt);
     let parsed =
         parser::Parsed { facts, rules, backward_rules: backward, base: bw.base.clone() };
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
@@ -4164,7 +5402,7 @@ fn with_formula_closure<R>(
         NegationCycles::SinglePass => NegationCycles::SinglePass,
         _ => NegationCycles::Reject,
     };
-    let closed = match run_closure(
+    let closed = match run_closure_in(
         parsed,
         bw.resolver,
         Some(bw.visited.clone()),
@@ -4172,6 +5410,7 @@ fn with_formula_closure<R>(
         StepMode::None,
         cycles,
         None,
+        &lift,
     ) {
         Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
@@ -4188,6 +5427,15 @@ fn with_formula_closure<R>(
     bw.visited.borrow_mut().docs.remove(&key);
     let mut derived: Vec<[Term; 3]> = closed.all.into_iter().collect();
     parser::own_universals_from(&mut derived, &lift);
+    // `closed.all` is a hash SET: draining it yields the derivations in an order that
+    // depends on the closure's insertion history and on the hasher's word size (native vs
+    // `wasm32`). A formula is an ORDERED vector of rows to the engine, so that order is part
+    // of the result term's identity — its `term_key`, and every `why()` string and
+    // `sparq-prov` IRI built from it. Sort the derivations into `serialize::row_cmp` order,
+    // one canonical total order on terms, so the result
+    // formula is a function of the closure's CONTENTS (a set) and not of its traversal
+    // (GH #6844). The original statements keep the subject formula's own order ahead of them.
+    derived.sort_by(serialize::row_cmp);
     let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
     let mut all: Vec<&[Term; 3]> = ts.iter().collect();
     all.extend(derived.iter().filter(|f| seen.insert(f)));
@@ -8845,6 +10093,1599 @@ mod tests {
             parent_node, parent_object,
             "the existential must co-refer across its :hasParent and rdf:type triples"
         );
+    }
+
+    /// GH #6749: the documents below hold the same facts; only their order and an unrelated
+    /// padding set (which changes the fact sets' capacity, so their traversal order) differ.
+    fn skolem_order_variants(n: usize) -> Vec<String> {
+        let rules = "{ ?x :p :v } => { ?x :q _:e } .\n{ ?x :q ?e } => { ?e :r _:f } .\n";
+        let subj: Vec<String> = (0..n).map(|i| format!(":s{i:02} :p :v .\n")).collect();
+        let pad: String = (0..300).map(|i| format!(":pad{i} :unrelated {i} .\n")).collect();
+        let head = "@prefix : <http://ex/> .\n";
+        let fwd: String = subj.concat();
+        let rev: String = subj.iter().rev().cloned().collect();
+        let mut mixed = subj.clone();
+        mixed.rotate_left(n / 3);
+        vec![
+            format!("{head}{fwd}{rules}"),
+            format!("{head}{rules}{rev}"),
+            format!("{head}{pad}{}{rules}", mixed.concat()),
+            format!("{head}{rules}{}{pad}", rev),
+        ]
+    }
+
+    /// subject IRI -> (its `:q` existential's label, that existential's `:r` label).
+    fn skolem_labels(src: &str) -> std::collections::BTreeMap<String, (String, String)> {
+        let c = reason_n3_terms(src, None).unwrap();
+        let find = |s: &Term, p: &str| -> Option<String> {
+            c.facts.iter().find_map(|[fs, fp, fo]| match (fp, fo) {
+                (Term::Iri(i), Term::Blank(l)) if i == p && fs == s => Some(l.clone()),
+                _ => None,
+            })
+        };
+        c.facts
+            .iter()
+            .filter_map(|[s, p, _]| match (s, p) {
+                (Term::Iri(si), Term::Iri(pi)) if pi == "http://ex/p" => {
+                    let e = find(s, "http://ex/q")?;
+                    let f = find(&Term::Blank(e.clone()), "http://ex/r")?;
+                    Some((si.clone(), (e, f)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn skolem_labels_do_not_depend_on_traversal_order() {
+        // GH #6749: a rule existential's label was taken from a counter bumped in the order
+        // the delta hash set yields bindings, so it depended on insertion history and the
+        // hasher's word size. The label must be a function of the firing alone.
+        let n = 24;
+        let runs: Vec<_> = skolem_order_variants(n).iter().map(|d| skolem_labels(d)).collect();
+        assert_eq!(runs[0].len(), n, "every subject fires both existential rules");
+        for r in &runs[1..] {
+            assert_eq!(r, &runs[0], "same facts, different order: same skolem labels");
+        }
+        // Minted in the canonical order of the firings' bindings: rule order within a
+        // round, then the bound terms, so `:s00` takes the first label of its round.
+        let first = &runs[0]["http://ex/s00"];
+        assert_eq!(first.0, "__sk0_1_e");
+        assert_eq!(runs[0]["http://ex/s23"].0, format!("__sk0_{n}_e"));
+        // The second round's firings follow, keyed by the first round's labels.
+        let mut f: Vec<String> = runs[0].values().map(|(_, f)| f.clone()).collect();
+        f.sort();
+        let mut want: Vec<String> = (n + 1..=2 * n).map(|k| format!("__sk0_{k}_f")).collect();
+        want.sort();
+        assert_eq!(f, want);
+    }
+
+    /// Direct unit test for the node fingerprints `BwPath` is made of: distinct identities
+    /// get distinct fingerprints, one identity always gets the same fingerprint, and two
+    /// identities that fold alike FAIL the run rather than share one.
+    #[test]
+    fn a_node_fingerprint_names_one_identity_or_fails_the_run() {
+        use super::{run_shared::RunShared, BwCtx, NodeKey, Truncation};
+        let shared = RunShared::for_sources(&[]);
+        let bw = BwCtx::new(&[], Truncation::top_level(), shared);
+        // The root of one rule's proof trees, and the nodes under it.
+        let root = bw.root_path(0).expect("a fresh run hands out a root");
+        let other_rule = bw.root_path(1).expect("and another rule's root");
+        assert_ne!(root.fold, other_rule.fold, "two rules, two roots");
+        let site = |parent: u64, goal: u64, site: u64| NodeKey::Site { parent, goal, site };
+        // The evaluation SCOPE is in the root identity, so a query's premise evaluation, a
+        // closure and a nested `log:conclusion` closure cannot name one node alike even
+        // though each numbers its own rules from zero.
+        let mut other_scope =
+            BwCtx::new(&[], Truncation::top_level(), RunShared::for_sources(&[]));
+        other_scope.scope += 1;
+        assert_ne!(
+            other_scope.root_path(0).expect("a root").fold,
+            root.fold,
+            "rule 0 of another evaluation is another node"
+        );
+        // The SALT is in it too, so two sibling nested closures at ONE nesting depth — same
+        // scope number, each numbering its own rules from zero — are still distinct nodes.
+        let mut sibling =
+            BwCtx::new(&[], Truncation::top_level(), RunShared::for_sources(&[]));
+        sibling.scope = other_scope.scope;
+        sibling.scope_salt = other_scope.scope_salt ^ 0x9e37_79b9;
+        assert_ne!(
+            sibling.root_path(0).expect("a root").fold,
+            other_scope.root_path(0).expect("a root").fold,
+            "a sibling closure at the same depth is another evaluation"
+        );
+        let a = site(root.fold, 1, 0);
+        // Same node, same key, so the same fingerprint — this is what lets a goal re-proved
+        // in a later round derive the same fact instead of a new one.
+        assert_eq!(bw.node(a), bw.node(a));
+        // A different site, a different goal and a different rule are all different nodes.
+        let others = [site(root.fold, 1, 1), site(root.fold, 2, 0), site(other_rule.fold, 1, 0)];
+        let mut folds = vec![bw.node(a).expect("a fingerprint")];
+        for o in others {
+            folds.push(bw.node(o).expect("a fingerprint"));
+        }
+        // A step taken from a node is its own registered node, and two steps do not run
+        // together: the pair (1, 2) is not the single step 12.
+        let child = root.child(&bw, 1).expect("a step");
+        let grand = child.child(&bw, 2).expect("another step");
+        folds.push(bw.node(site(grand.fold, 1, 0)).expect("a fingerprint"));
+        let wide = root.child(&bw, 12).expect("one wider step");
+        folds.push(bw.node(site(wide.fold, 1, 0)).expect("a fingerprint"));
+        let mut uniq = folds.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), folds.len(), "{folds:?}");
+        assert!(bw.nested_error.borrow().is_none(), "nothing has collided yet");
+        // Force the collision a 64-bit fold makes possible: another key is already
+        // registered under the fold this one would take. The run is refused rather than let
+        // the two share a standardize-apart space.
+        let clash = site(root.fold, 99, 99);
+        let taken = bw.node(site(root.fold, 98, 98)).expect("a fingerprint");
+        bw.visited.borrow_mut().force_node_fold(clash.fold(), site(root.fold, 98, 98));
+        assert_ne!(taken, clash.fold(), "the two keys are distinct nodes");
+        assert_eq!(bw.node(clash), None);
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("fingerprint")),
+            "{:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// The collision table belongs to the RUN, not to one `BwCtx`: a query's data closure,
+    /// the query's own premise evaluation and every nested `log:conclusion` closure share
+    /// one run, and their derived facts — and so the renamed variables a quoted-formula
+    /// value carries — meet in one substitution and one fact store. A table per context
+    /// would leave a collision BETWEEN two of them unchecked, which is the case where the
+    /// two sides can come from different parties and a 64-bit fold is searchable.
+    #[test]
+    fn the_collision_table_spans_every_context_of_one_run() {
+        use super::{run_shared::RunShared, BwCtx, NodeKey, Truncation};
+        let shared = RunShared::for_sources(&[]);
+        // Two contexts of ONE run, as a closure and the query over it are.
+        let rules = one_backward_rule();
+        let closure = BwCtx::new(&rules, Truncation::top_level(), shared.clone());
+        let mut query = BwCtx::new(&rules, Truncation::top_level(), shared.clone());
+        query.scope += 1;
+        let root = closure.root_path(0).expect("a root");
+        let mine = NodeKey::Site { parent: root.fold, goal: 7, site: 0 };
+        let fold = closure.node(mine).expect("the closure names its node");
+        // The RUN holds what the closure named — the root and the site — so the other
+        // context reads the same registration rather than starting a table of its own.
+        assert_eq!(shared.borrow().node_count(), 2);
+        assert_eq!(query.node(mine), Some(fold), "the other context sees the same node");
+        assert_eq!(shared.borrow().node_count(), 2, "and did not register it again");
+        // So a DIFFERENT key that folds to that same value is refused in the other context
+        // too. A table per context would hand it out.
+        let theirs = NodeKey::Site { parent: root.fold, goal: 8, site: 0 };
+        query.visited.borrow_mut().force_node_fold(theirs.fold(), mine);
+        assert_eq!(query.node(theirs), None, "a cross-context collision is refused");
+        assert!(
+            query.nested_error.borrow().as_deref().is_some_and(|e| e.contains("fingerprint")),
+            "{:?}",
+            query.nested_error.borrow()
+        );
+    }
+
+    /// The tables are charged to an allowance: a run that would register one entry too many
+    /// is refused with the cut, rather than letting them grow with the search. The
+    /// allowance is `ClosureLimits::max_join_rows`, and its default — the unbounded
+    /// sentinel — never refuses, so a large finite backward workload still answers.
+    #[test]
+    fn registering_more_than_the_allowance_fails_the_run() {
+        use super::{run_shared::RunShared, BwCtx, ClosureLimits, NodeKey, Truncation};
+        // The allowance is the per-round rows TIMES the rounds the run may take, so a
+        // two-entry allowance is two rows in one round.
+        let limits =
+            ClosureLimits { max_join_rows: 2, max_rounds: 1, ..ClosureLimits::default() };
+        // A context with a `<=` rule in it: one with none registers nothing at all, since no
+        // name it could mint would ever rename a variable ([`BwCtx::unnamed`]).
+        let rules = one_backward_rule();
+        let bw =
+            BwCtx::new(&rules, Truncation::top_level_with(limits), RunShared::for_sources(&[]));
+        // The root is the first entry; one site key is the second.
+        let root = bw.root_path(0).expect("a root");
+        bw.node(NodeKey::Site { parent: root.fold, goal: 1, site: 0 }).expect("the second");
+        assert_eq!(
+            bw.node(NodeKey::Site { parent: root.fold, goal: 2, site: 0 }),
+            None,
+            "the third entry is one too many"
+        );
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("proof-node limit")),
+            "{:?}",
+            bw.nested_error.borrow()
+        );
+        // An INTERNED identity is charged to the same allowance, not a second one.
+        let tight =
+            BwCtx::new(&rules, Truncation::top_level_with(limits), RunShared::for_sources(&[]));
+        tight.root_path(0).expect("a root");
+        tight.intern("G1".to_string()).expect("the second entry");
+        assert_eq!(tight.intern("G2".to_string()), None, "interning is charged to the same allowance");
+        // The DEFAULT allowance is the unbounded sentinel: nothing is refused.
+        let open = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        let open_root = open.root_path(0).expect("a root");
+        for g in 0..64 {
+            open.node(NodeKey::Site { parent: open_root.fold, goal: g, site: 0 })
+                .expect("the default refuses nothing");
+            open.intern(format!("G{}", g)).expect("nor any identity");
+        }
+        assert!(open.nested_error.borrow().is_none());
+    }
+
+    /// A `NodeKey` is only as exact as its parts, so the GOAL enters it as an INTERNED id,
+    /// not as a bare fold: two different goals that folded alike at one parent and site
+    /// would otherwise give the same key and merge silently — the lost row and the capture
+    /// this issue is about, reachable with chosen IRIs at about 2^32 work.
+    #[test]
+    fn a_goal_fold_collision_fails_the_run_instead_of_merging_two_goals() {
+        use super::{run_shared::RunShared, BwCtx, Truncation};
+        let bw = BwCtx::new(&[], Truncation::top_level(), RunShared::for_sources(&[]));
+        let mine = serialize::goal_key(&[
+            Term::Iri("http://ex/a".into()),
+            Term::Iri("http://ex/p".into()),
+            Term::Var("y".into()),
+        ]);
+        let theirs = serialize::goal_key(&[
+            Term::Iri("http://ex/b".into()),
+            Term::Iri("http://ex/p".into()),
+            Term::Var("y".into()),
+        ]);
+        assert_ne!(mine, theirs, "two different goals");
+        let id = bw.intern(mine.clone()).expect("the first goal interns");
+        assert_eq!(bw.intern(mine.clone()), Some(id), "and interns to the same id again");
+        // Force the fold collision: the other goal's fold is already taken by this one.
+        bw.visited.borrow_mut().force_id_fold(serialize::fnv1a64(&theirs), &mine);
+        assert_eq!(bw.intern(theirs.clone()), None, "a goal-fold collision is refused");
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("64-bit fold")),
+            "{:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// The goal reaches a site's key through the run's INTERN table and not as a bare fold,
+    /// at the CALL SITE: with the fold this goal's canonical key takes already held by a
+    /// different key, `backward_prove` fails the run instead of naming the site — which is
+    /// what a goal folded straight into the key would do, merging the two goals.
+    #[test]
+    fn backward_prove_takes_its_goal_id_from_the_run_table() {
+        use super::{run_shared::RunShared, BwCtx, BwPath, FactIndex, Rule, Truncation};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let var = |s: &str| Term::Var(s.to_string());
+        let rules = vec![Rule {
+            premise: vec![[var("x"), iri("p"), var("y")]],
+            conclusion: vec![[var("x"), iri("has"), var("y")]],
+        }];
+        let facts = FactIndex::from_iter(vec![[iri("a"), iri("p"), iri("v")]]);
+        let goal = [iri("a"), iri("has"), var("z")];
+        let depth = bounded::backward_depth();
+        let prove = |bw: &BwCtx| {
+            backward_prove(&goal, &Binding::default(), &facts, bw, depth, BwPath::at(0))
+        };
+
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        assert_eq!(prove(&bw).len(), 1, "the rule proves the goal");
+        assert!(bw.nested_error.borrow().is_none());
+
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        let taken = serialize::fnv1a64(&serialize::goal_key(&goal));
+        bw.visited.borrow_mut().force_id_fold(taken, "another identity entirely");
+        assert!(prove(&bw).is_empty(), "the goal's fold is another key's, so it is refused");
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("64-bit fold")),
+            "{:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// A nested closure salts its root identities with the closure's own CANONICAL key,
+    /// interned in the run's table — not with the `formula_key` the import-cycle guard uses,
+    /// whose `FxHasher` value depends on the target's pointer width — and the enclosing
+    /// closure's salt is put back when the closure ends.
+    #[test]
+    fn a_nested_closure_is_salted_with_its_interned_canonical_key() {
+        use super::{run_shared::RunShared, BwCtx, Truncation};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let ts = vec![[iri("s"), iri("p"), iri("o")]];
+        let bw = BwCtx::new(&[], Truncation::top_level(), RunShared::for_sources(&[]));
+        let outer = bw.visited.borrow().scope_salt();
+        let want = serialize::fnv1a64(&serialize::formula_canonical_key(&ts));
+        let inside = with_formula_closure(&ts, &bw, |_| bw.visited.borrow().scope_salt());
+        assert_eq!(inside, want, "the salt is the interned canonical key of the closure");
+        assert_ne!(
+            inside,
+            formula_key(&ts),
+            "and not the cycle guard's pointer-width-dependent hash"
+        );
+        assert_eq!(bw.visited.borrow().scope_salt(), outer, "put back on the way out");
+    }
+
+    /// GH #6844 review round 4 (independent finding N1): a goal's identity must resolve the
+    /// caller's bindings INSIDE a quoted formula too. The proof runs with the caller's whole
+    /// binding, and a `log:includes` premise reads the formula through it, so two goals that
+    /// differ only inside a quoted formula prove different things — here `{ :a :q :z }` and
+    /// `{ :b :q :z }`. Leaving formulas opaque in the identity gave both one name, their two
+    /// formula-valued answers became one term, and a row was lost (the base derives two).
+    #[test]
+    fn a_caller_binding_inside_a_quoted_formula_tells_two_goals_apart() {
+        let data = "@prefix : <http://ex/> .\n\
+                    @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                    :a :p :va .\n:b :p :vb .\n\
+                    { ?f :val { ?m :inner ?w } } <= { ?f log:includes { ?m :q ?n } } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?y :p ?any . { ?y :q :z } :val ?g } => { :all :vals ?g } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per formula-held binding: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    /// GH #6844 review round 4 (Codex finding 1), pinned as INTENDED rather than fixed: two
+    /// branches that reach the SAME walked goal (`:a :has ?f` under `:s0` and under `:s1`)
+    /// share one renaming, so their two formula values are one term and the projection, which
+    /// keeps only `?f`, yields ONE row where the counter gave two. The two rows the base
+    /// gives are α-variants of each other — the variables inside the quoted formula are bound
+    /// by the formula, so the terms are equal up to renaming — and collapsing them is the
+    /// same saturation property that makes the GH #6757 programs terminate.
+    #[test]
+    fn two_branches_proving_one_goal_share_one_renaming() {
+        let rows = derived_rows(BRANCHES_DATA, BRANCHES_QUERY_UNPROJECTED);
+        assert_eq!(rows.len(), 1, "α-variants of one goal's proof are one row: {rows:?}");
+    }
+
+    /// The other half of the condition on sharing: what is shared is the renaming of
+    /// variables SCOPED INSIDE the quoted formula, not the branch. Project the branch
+    /// (`?s`) and both rows survive — the shared name never merges two answers that differ
+    /// outside the formula.
+    #[test]
+    fn a_shared_renaming_keeps_both_rows_when_the_branch_is_projected() {
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?s :q :yes . :a :has ?f } => { ?s :vals ?f } .\n";
+        let rows = derived_rows(BRANCHES_DATA, query);
+        assert_eq!(rows.len(), 2, "one row per branch: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    /// And the soundness condition on it: a head-only fresh term asserted at TOP level is
+    /// not a formula-scoped variable, so sharing a renaming must not make two derivations
+    /// share it. Two branches assert the blank of `[ :inner ?y ]`, which the proof projects
+    /// out as `?f`: both rows survive, and the term each carries is what the base engine
+    /// gives — the blank's label comes from the parser's document-wide table, which no part
+    /// of this change touches, and is the same label on both sides of this branch. The test
+    /// is here so that making the name part of a blank's identity could not change it
+    /// silently.
+    #[test]
+    fn a_head_only_fresh_term_is_what_the_base_engine_derives() {
+        let data = "@prefix : <http://ex/> .\n\
+                    :s0 :q :yes .\n:s1 :q :yes .\n:a :p :v .\n\
+                    { ?x :has [ :inner ?y ] } <= { ?x :p ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?s :q :yes . :a :has ?f } => { ?s :got ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per branch: {rows:?}");
+        let blank = |r: &str| r.split("Blank(").nth(1).map(str::to_string);
+        assert!(blank(&rows[0]).is_some(), "the fresh term is a blank: {rows:?}");
+        assert_eq!(blank(&rows[0]), blank(&rows[1]), "the base's label, unchanged: {rows:?}");
+    }
+
+    /// Two branches of one query reaching one backward goal, for the three tests above.
+    const BRANCHES_DATA: &str = "@prefix : <http://ex/> .\n\
+         :s0 :q :yes .\n:s1 :q :yes .\n:a :p :v .\n\
+         { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
+    /// The query of [`BRANCHES_DATA`] that projects only the proved value.
+    const BRANCHES_QUERY_UNPROJECTED: &str = "@prefix : <http://ex/> .\n\
+         { ?s :q :yes . :a :has ?f } => { :all :vals ?f } .\n";
+
+    /// GH #6844 review round 4 (independent finding N2): the registration allowance is
+    /// run-wide while `max_join_rows` bounds one ROUND, so charging the per-round number
+    /// refused a program the base answers. This is that program — 40 `<=` sites that cannot
+    /// unify, one that can, 200 subjects — and it answers under a `max_join_rows` of 1500,
+    /// both because a site is registered only once its conclusion unifies and because the
+    /// allowance is now the per-round rows times the rounds the run may take.
+    #[test]
+    fn a_wide_backward_search_answers_under_a_set_join_row_limit() {
+        let mut src = String::from("@prefix : <http://ex/> .\n");
+        for i in 0..40 {
+            src.push_str(&format!("{{ ?x :has :c{} }} <= {{ ?x :p :nomatch }} .\n", i));
+        }
+        src.push_str("{ ?x :has ?y } <= { ?x :p ?y } .\n");
+        for i in 0..200 {
+            src.push_str(&format!(":s{} :q :yes .\n:s{} :p :v .\n", i, i));
+        }
+        src.push_str("{ ?x :q :yes . ?x :has ?f } => { ?x :d ?f } .\n");
+        let limits = bounded::ClosureLimits { max_join_rows: 1500, ..Default::default() };
+        let closed = reason_n3_terms_with_limits(&src, None, None, NegationCycles::default(), limits)
+            .expect("the run answers instead of being refused");
+        let derived = closed
+            .derived
+            .iter()
+            .filter(|t| t[1] == Term::Iri("http://ex/d".into()))
+            .count();
+        assert_eq!(derived, 200, "one derivation per subject");
+    }
+
+    /// One `<=` rule, enough to make a `BwCtx` over it do its node accounting: a context
+    /// with no backward rule hands its paths out unregistered (`BwCtx::unnamed`).
+    fn one_backward_rule() -> Vec<Rule> {
+        vec![Rule { premise: Vec::new(), conclusion: Vec::new() }]
+    }
+
+    /// GH #6844 review round 5 (loop finding 2): a forward rule's premise evaluation walks
+    /// paths — a root per rule, a step per premise atom — and registered every one of them
+    /// whether or not any backward resolution could ever use them, so a forward-only
+    /// evaluation spent the backward-proof allowance and grew the run's tables with the
+    /// search. An evaluation with no `<=` rule now hands those paths out UNREGISTERED: it
+    /// mints no name, so no fold of its can rename a variable and no two of them can alias
+    /// a standardize-apart space. The folds are unchanged either way, which is what keeps a
+    /// later round naming the same node.
+    #[test]
+    fn a_forward_only_evaluation_registers_no_proof_nodes() {
+        use super::{run_shared::RunShared, BwCtx, Truncation};
+        let shared = RunShared::for_sources(&[]);
+        let forward = BwCtx::new(&[], Truncation::top_level(), shared.clone());
+        let root = forward.root_path(0).expect("a root");
+        let step = root.child(&forward, 0).expect("a premise step");
+        assert_eq!(shared.borrow().node_count(), 0, "a forward-only evaluation names nothing");
+        assert!(forward.nested_error.borrow().is_none());
+        // And an evaluation that HAS a backward rule registers the same two paths, under the
+        // same folds: what changed is the accounting, not any name.
+        let rules = one_backward_rule();
+        let named = RunShared::for_sources(&[]);
+        let backward = BwCtx::new(&rules, Truncation::top_level(), named.clone());
+        let b_root = backward.root_path(0).expect("a root");
+        let b_step = b_root.child(&backward, 0).expect("a premise step");
+        assert_eq!((b_root.fold, b_step.fold), (root.fold, step.fold), "the same two nodes");
+        assert_eq!(named.borrow().node_count(), 2, "registered, because a name can be minted");
+    }
+
+    /// The lazy nested-closure salt DOES change which runs are refused, and this pins the
+    /// direction: strictly fewer. A document with NO `<=` rule anywhere, built as a CHAIN of
+    /// nested forward-only `log:conclusion` closures, used to be refused with the
+    /// `backward proof-node limit exceeded` cut and now answers.
+    ///
+    /// Why a chain and not siblings: each nested closure gets a FRESH join/round allowance
+    /// (`bounded::enter_closure`), but the salts every level registered accumulated
+    /// RUN-WIDE against `bounded::proof_nodes` — `max_join_rows × max_rounds`. So ten
+    /// levels of nesting registered ten identities against an allowance of three, and were
+    /// refused for backward naming in a document that cannot mint a single name. Sibling
+    /// closures do not show this, which is why the first version of this work reported the
+    /// refusal as unreachable; it is reachable, by depth.
+    ///
+    /// The answers are unchanged wherever both sides answer — what changes is only that
+    /// fewer runs are refused.
+    #[test]
+    fn a_deep_forward_only_closure_chain_answers_at_a_tight_limit() {
+        // Ten levels, each wrapping the one below in a `log:conclusion` whose outer rule
+        // concludes from it. No `<=` rule at any level.
+        let depth = 10;
+        let mut inner = format!(":k{depth} :p :v .");
+        for k in (0..depth).rev() {
+            inner = format!(
+                ":k{k} :p :v . {{ {{ {inner} }} log:conclusion ?c{k} }} => {{ :r{k} :is ?c{k} }} ."
+            );
+        }
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n{inner}\n"
+        );
+        // Tight enough that ten accumulated salts would exceed the allowance
+        // (`proof_nodes` = 1 × 3 = 3), and loose enough for the closure's own forward work.
+        let limits =
+            ClosureLimits { max_rounds: 3, max_join_rows: 1, ..ClosureLimits::default() };
+        let out = reason_n3_terms_with_limits(
+            &src,
+            None,
+            None,
+            NegationCycles::Reject,
+            limits,
+        )
+        .expect("a document that can mint no name is not refused for backward naming");
+        // The outer rule fired from the nested closure's result, and that result is the
+        // formula term the closure built.
+        let concluded = out
+            .facts
+            .iter()
+            .find(|[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is"))
+            .expect("the outer rule concluded :r0 :is <the nested closure>");
+        assert!(
+            matches!(&concluded[0], Term::Iri(i) if i == "http://ex/r0"),
+            "concluded about :r0, got {:?}",
+            concluded[0]
+        );
+        assert!(
+            matches!(&concluded[2], Term::Formula(rows) if !rows.is_empty()),
+            "log:conclusion is formula-valued and the closure is not empty: {:?}",
+            concluded[2]
+        );
+        // And the document's own asserted fact is still there, so this is the whole answer
+        // and not a truncated one.
+        assert!(
+            out.facts.iter().any(|[sub, p, o]| matches!((sub, p, o), (Term::Iri(a), Term::Iri(b), Term::Iri(c))
+                if a == "http://ex/k0" && b == "http://ex/p" && c == "http://ex/v")),
+            "the top-level asserted fact survives"
+        );
+    }
+
+    /// `walk_ref` resolves the chain `walk` resolved, and `walk` is it plus a clone: the
+    /// same answer for an unbound variable, a one-hop chain, a long chain, a chain ending
+    /// in a compound, a non-variable, and a CYCLE — where the answer is whatever the
+    /// shared iteration bound (`s.len() + 1` hops) lands on, so the two must agree there
+    /// too or a cyclic binding would resolve differently than it used to.
+    #[test]
+    fn walk_ref_resolves_what_walk_resolved() {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let var = |s: &str| Term::Var(s.to_string());
+        let mut b = Binding::default();
+        b.insert("one".into(), iri("http://ex/v"));
+        b.insert("two".into(), var("one"));
+        b.insert("three".into(), var("two"));
+        b.insert("deep".into(), Term::List(vec![var("three"), iri("http://ex/w")]));
+        b.insert("toDeep".into(), var("deep"));
+        // A two-variable cycle, and a self-cycle.
+        b.insert("loopA".into(), var("loopB"));
+        b.insert("loopB".into(), var("loopA"));
+        b.insert("self".into(), var("self"));
+        let probes = vec![
+            var("one"),
+            var("two"),
+            var("three"),
+            var("deep"),
+            var("toDeep"),
+            var("unbound"),
+            var("loopA"),
+            var("loopB"),
+            var("self"),
+            iri("http://ex/plain"),
+            Term::List(vec![var("two")]),
+            Term::Formula(vec![[var("two"), iri("http://ex/p"), var("one")]]),
+        ];
+        // The reference is the cloning loop `walk` WAS, spelled out: `walk` now delegates
+        // to `walk_ref`, so comparing the two against each other would pass whatever
+        // `walk_ref` did.
+        let reference = |t: &Term| -> Term {
+            let mut cur = t.clone();
+            for _ in 0..b.len() + 1 {
+                match &cur {
+                    Term::Var(v) => match b.get(v) {
+                        Some(next) => cur = next.clone(),
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
+            cur
+        };
+        for t in &probes {
+            assert_eq!(walk_ref(t, &b), &reference(t), "walk_ref disagreed on {t:?}");
+            assert_eq!(walk(t, &b), reference(t), "walk disagreed on {t:?}");
+        }
+    }
+
+    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
+    /// the one `__bw<n>_` chunk `serialize::universal_base` reads back and that every
+    /// renamed variable carries, so a drift here would rename every standardize-apart
+    /// space. Checked at the digit-count boundaries and at both extremes of a `u64`.
+    #[test]
+    fn the_renaming_prefix_renders_what_format_rendered() {
+        let mut folds: Vec<u64> = vec![0, 1, 9, 10, 11, 99, 100, 999, 1000, u64::MAX, u64::MAX - 1];
+        // A spread of wide values, including one of every digit count.
+        let mut at = 1u64;
+        while at <= u64::MAX / 10 {
+            folds.push(at);
+            folds.push(at * 9);
+            at *= 10;
+        }
+        for f in folds {
+            let mut pfx = BwPrefix::EMPTY;
+            assert_eq!(pfx.render(f), format!("__bw{f}_"), "BwPrefix::render({f})");
+        }
+    }
+
+    /// A purely FORWARD nested closure must not spend the run's backward identity
+    /// allowance. `with_formula_closure` interned the nested document's scope salt before
+    /// it knew whether that document had a `<=` rule at all, so a forward-only
+    /// `log:conclusion` closure registered an identity no name could ever be built from —
+    /// charging `bounded::proof_nodes` and growing the run's table — and a run inside its
+    /// own join-work limit could be refused for it.
+    ///
+    /// This is the same shape as `a_forward_only_evaluation_registers_no_proof_nodes` and
+    /// asserts the same thing: the ACCOUNTING. What that accounting lets through is pinned
+    /// separately, by `a_deep_forward_only_closure_chain_answers_at_a_tight_limit` — the
+    /// refusal here is reachable, by nesting DEPTH rather than by sibling count. The salt's
+    /// VALUE is unchanged, which is the
+    /// other half — a closure that does have a `<=` rule registers that same fold, so no
+    /// name minted anywhere in the run moves.
+    #[test]
+    fn a_forward_only_nested_closure_registers_no_identity() {
+        let nested = |rule: &str| {
+            format!(
+                "@prefix : <http://ex/> .\n\
+                 @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                 {{ {{ :a :p :v . {rule} }} log:conclusion ?c }} => {{ :result :is ?c }} .\n"
+            )
+        };
+        // A run's registrations are not reachable from the public entry points, so the
+        // closure is driven through one and the table read from the run it was given.
+        let registered = |src: &str| {
+            let shared = run_shared::RunShared::for_sources(&[]);
+            let parsed = bounded::parse_n3(src, "", &Truncation::top_level()).expect("parses");
+            let out = run_closure_in(
+                parsed,
+                None,
+                Some(shared.clone()),
+                &Truncation::top_level(),
+                StepMode::None,
+                NegationCycles::Reject,
+                None,
+                "",
+            )
+            .expect("closes");
+            drop(out);
+            // Bound, not returned straight out: the `Ref` has to be dropped before
+            // `shared` is.
+            let registered = shared.borrow().registered_count();
+            registered
+        };
+        let fwd_src = nested("{ ?x :p :v } => { ?x :q :w } .");
+        assert_eq!(registered(&fwd_src), 0, "a forward-only nested closure registers nothing");
+        // And it still answers: the closure runs, and the outer rule concludes from it.
+        let out = reason_n3_terms(&fwd_src, None).expect("the forward-only document reasons");
+        assert!(
+            out.facts.iter().any(
+                |[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is")
+            ),
+            "the nested closure's result reached the outer conclusion"
+        );
+        // The same document with a BACKWARD rule in the nested formula DOES register the
+        // salt, because a name can then be minted inside that closure.
+        assert!(
+            registered(&nested("{ ?x :q :w } <= { ?x :p :v } .")) > 0,
+            "a nested closure that can mint a name registers its salt"
+        );
+    }
+
+    /// The other half of finding R4-1: a goal the walker REFUSES — it has no identity, so
+    /// no name can be minted for its proof — fails the run, rather than coming back as an
+    /// empty proof that reads as "not provable". The goal here is admitted by the
+    /// evaluation boundary, which substitutes ONE binding (`[ ?x1 ]`), and refused by the
+    /// walk, which follows the whole chain and so builds a term nested past the walker's
+    /// room. That refusal records a cut and nothing else, so the failure is made here.
+    #[test]
+    fn a_goal_the_walker_refuses_fails_the_run_instead_of_proving_nothing() {
+        use super::{run_shared::RunShared, BwCtx, BwPath, FactIndex, Rule, Truncation};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let var = |s: &str| Term::Var(s.to_string());
+        let rules = vec![Rule {
+            premise: vec![[var("x"), iri("p"), var("y")]],
+            conclusion: vec![[var("x"), iri("has"), var("y")]],
+        }];
+        let facts = FactIndex::from_iter(vec![[iri("a"), iri("p"), iri("v")]]);
+        // A chain of 1000 bindings, each one list level deeper than the last.
+        let mut chain = Binding::default();
+        for i in 0..1_000u32 {
+            chain.insert(format!("x{}", i), Term::List(vec![var(&format!("x{}", i + 1))]));
+        }
+        chain.insert("x1000".into(), iri("a"));
+        let goal = [var("x0"), iri("has"), var("z")];
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        let proved = backward_prove(
+            &goal,
+            &chain,
+            &facts,
+            &bw,
+            bounded::backward_depth(),
+            BwPath::at(0),
+        );
+        assert!(proved.is_empty(), "nothing is proved from a goal with no identity");
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("no identity")),
+            "and the run fails rather than passing as unprovable: {:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// GH #6844 review round 5 (loop finding 1): the site's fingerprint renames the
+    /// conclusion's variables BEFORE it is registered, so a fold already held by another key
+    /// has to be refused at the point of USE. It was not: the renamed variables were the
+    /// other key's, the inherited bindings captured them, unification failed and the site
+    /// was skipped — the proof lost with no error. Here the fold of the site this proof will
+    /// take is forced onto a different key, and the conclusion is one that cannot unify with
+    /// the goal (`:b`, not `:a`) — exactly the path that skipped the check.
+    #[test]
+    fn a_site_fold_collision_fails_the_run_even_when_the_conclusion_cannot_unify() {
+        use super::{run_shared::RunShared, BwCtx, BwPath, FactIndex, NodeKey, Rule, Truncation};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let var = |s: &str| Term::Var(s.to_string());
+        let rules = vec![Rule {
+            premise: vec![[var("x"), iri("p"), var("y")]],
+            conclusion: vec![[iri("b"), iri("has"), var("y")]],
+        }];
+        let facts = FactIndex::from_iter(vec![[iri("a"), iri("p"), iri("v")]]);
+        let goal = [iri("a"), iri("has"), var("z")];
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        // The key this proof's one site will take: the root path the call is given (0), the
+        // goal's interned identity, and site 0.
+        let key = NodeKey::Site {
+            parent: 0,
+            goal: serialize::fnv1a64(&serialize::goal_key(&goal)),
+            site: 0,
+        };
+        let other = NodeKey::Site { parent: 0, goal: 1, site: 1 };
+        assert_ne!(key.fold(), other.fold(), "the two keys are distinct nodes");
+        bw.visited.borrow_mut().force_node_fold(key.fold(), other);
+        let proved = backward_prove(
+            &goal,
+            &Binding::default(),
+            &facts,
+            &bw,
+            bounded::backward_depth(),
+            BwPath::at(0),
+        );
+        assert!(proved.is_empty(), "the conclusion cannot unify, so nothing is proved");
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("fingerprint")),
+            "and the collision fails the run rather than passing as unprovable: {:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// GH #6844 review round 5 (finding R4-1, new in round 4): a caller variable bound to a
+    /// quoted formula that mentions a variable of the SAME NAME. Walking the goal's identity
+    /// into the formula resolved that name to the formula again, so the walk went round until
+    /// the term-depth room ran out, `walked_atom` refused the goal and the proof came back
+    /// EMPTY — the answer was dropped with no error. The occurs check on the walk stack
+    /// leaves such a name as the variable it is (it is the formula's own), so the goal walks
+    /// to a finite term and the row survives.
+    #[test]
+    fn a_formula_naming_the_variable_it_is_bound_to_still_answers() {
+        let data = "@prefix : <http://ex/> .\n\
+                    @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                    :s :p { ?x :q :z } .\n\
+                    { ?f :val :ok } <= { ?f log:includes { ?a :q ?b } } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { :s :p ?x . ?x :val ?g } => { :r :is ?g } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows, vec![SELF_NAMING_ROW.to_string()], "the base engine's one row");
+    }
+
+    /// The same cycle without a builtin in the premise, and with the name repeated across
+    /// two triples of the formula: the walk of `{ ?x :q ?x . ?x :r ?x }` under `?x` bound to
+    /// that very formula re-entered it at each of the four occurrences.
+    #[test]
+    fn a_formula_naming_itself_in_several_places_still_answers() {
+        let data = "@prefix : <http://ex/> .\n\
+                    :s :p { ?x :q ?x . ?x :r ?x } .\n\
+                    { ?f :val :ok } <= true .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { :s :p ?x . ?x :val ?g } => { :r :is ?g } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows, vec![SELF_NAMING_ROW.to_string()], "the base engine's one row");
+    }
+
+    /// The row both self-naming-formula tests expect, as [`derived_rows`] prints it: the
+    /// `:r :is :ok` the base engine derives.
+    const SELF_NAMING_ROW: &str = "Iri(\"http://ex/r\") Iri(\"http://ex/is\") Iri(\"http://ex/ok\")";
+
+    /// Every `:derived` row of a query run, as `subject object` debug strings, sorted — so
+    /// the comparison is of the derived facts as a SET, not of the projection's row order.
+    fn derived_rows(data: &str, query: &str) -> Vec<String> {
+        let out = reason_n3_query_terms(data, query).expect("queries");
+        let mut rows: Vec<String> =
+            out.iter().map(|r| format!("{:?} {:?} {:?}", r[0], r[1], r[2])).collect();
+        rows.sort();
+        rows
+    }
+
+    #[test]
+    fn backward_renaming_does_not_depend_on_traversal_order() {
+        // GH #6844 item 2: a backward rule's conclusion can bind a goal variable to a
+        // QUOTED FORMULA that still holds the rule's freshened variables, and that value
+        // reaches a derived fact — where the `__bw<n>_` name is part of the fact's term
+        // identity (its `term_key`, its `why()` string, its `sparq-prov` IRI). The name came
+        // from a counter bumped once per rule application, and the applications here run one
+        // per binding of the preceding conjunct, in the order the fact set yields them: so
+        // which subject got `__bw0_z` moved with insertion history and hasher width.
+        let n = 6;
+        let prefixes = "@prefix : <http://ex/> .\n{ ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
+        let body: Vec<String> =
+            (0..n).map(|i| format!(":s{i:02} :q :yes .\n:s{i:02} :p :v{i:02} .\n")).collect();
+        let query = "@prefix : <http://ex/> .\n{ ?x :q :yes . ?x :has ?f } => { ?x :derived ?f } .\n";
+        let runs: Vec<Vec<String>> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|d| derived_rows(d, query)).collect();
+        assert_eq!(runs[0].len(), n, "every subject derives one row");
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+        // The name is the derivation's own fingerprint and nothing else: one `__bw<n>_`
+        // chunk, so its length does not grow with the depth of the proof that minted it.
+        let names: Vec<&str> = runs[0]
+            .iter()
+            .map(|r| {
+                let at = r.find("Var(\"__bw").expect("the value carries a renamed variable");
+                &r[at..]
+            })
+            .collect();
+        for v in &names {
+            let rest = v.strip_prefix("Var(\"__bw").expect("a renamed variable");
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            assert!(digits > 0, "{v}");
+            assert!(
+                rest[digits..].starts_with("_y\"), Iri(\"http://ex/inner\")"),
+                "one chunk, then the rule's own variable: {v}"
+            );
+        }
+        // Each subject is a different GOAL, so each takes a name of its own: one derived
+        // value per subject, never one value standing for all of them.
+        let mut uniq = names.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), n, "one renaming per goal: {names:?}");
+    }
+
+    #[test]
+    fn two_goals_of_one_site_derive_two_facts() {
+        // GH #6844 item 2: naming a node by its PATH alone merges every resolution of that
+        // site, whatever it is proving. A quoted formula is opaque to substitution, so a
+        // renamed variable survives into the conclusion's value even where the proof bound
+        // it: with one name, `:s0`'s `{ ?y :inner ?z }` and `:s1`'s are the SAME term and the
+        // two rows collapse into one — an answer is lost. The goal chunk of the name keeps
+        // the two applications apart because they prove different goals.
+        let data = "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n\
+                    { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?x :p ?any . ?x :has ?f } => { :all :vals ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per subject's own value: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    #[test]
+    fn two_sites_proving_one_goal_derive_two_facts() {
+        // GH #6844 item 2: one goal can be proved through SEVERAL `(rule, conclusion)` sites,
+        // and each application is its own copy of its rule. Both rules here conclude the same
+        // shape, so the only thing telling their two derived values apart is which rule
+        // proved them: drop the site index from a node's identity and the two applications
+        // take one name, their two quoted-formula values become the SAME term, and the two
+        // rows collapse into one — an answer is lost, exactly as when two different goals
+        // share a name.
+        let data = "@prefix : <http://ex/> .\n:a :p :v .\n:a :q :w .\n\
+                    { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n\
+                    { ?x :has { ?y :inner ?z } } <= { ?x :q ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n{ :a :has ?f } => { :all :vals ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per proof: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    #[test]
+    fn aliased_goal_variables_are_resolved_before_the_goal_is_identified() {
+        // GH #6844 item 2: the goal a step is handed is substituted ONE binding deep, while
+        // the unification that resolves it follows the whole chain. The repeated `?t` here
+        // aliases the first rule's renamed `?x` to its renamed `?y`, so the two goals
+        // `(…_x) :has ?f` of the two `?y :p ?z` matches differ only PAST that one binding:
+        // identify them from the substituted goal and both resolutions take one name, their
+        // two quoted-formula values become the same term, and one of the two rows is lost.
+        // Identifying them from the goal with every variable walked to the end of its chain
+        // ([`bounded::walked_atom`]) keeps them apart.
+        let data = "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n\
+                    { (?x ?y) :outer ?f } <= { ?y :p ?z . (?x) :has ?f } .\n\
+                    { (?u) :has { ?v :inner ?w } } <= { ?u :p ?v } .\n";
+        let query = "@prefix : <http://ex/> .\n{ (?t ?t) :outer ?f } => { :all :vals ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per aliased subject's own value: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    #[test]
+    fn a_leaked_name_coming_back_through_the_store_does_not_capture() {
+        // GH #6844 item 2: the premise substitution is not the only channel a renamed
+        // variable travels. A quoted formula holding one is STORED, and a later round pulls
+        // it back out (`log:includes` here) into an ordinary bindable variable, which then
+        // becomes a goal term. If the name only spelled the proof-tree node, that variable
+        // would arrive at the very node that MINTED it: round 2's goal `…_y :has ?f` would
+        // unify `…_y` with the node's own freshened `…_x`, so proving the premise would bind
+        // the goal's own subject as a side effect, the projection would find it refined to a
+        // constant the caller never asked for, and the row would be dropped — silently
+        // losing `:k :seed3`. The goal chunk makes a goal carrying a leaked variable a
+        // DIFFERENT goal, so it is standardized apart from the node it came from.
+        let doc = "@prefix : <http://ex/> .\n\
+                   @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   :a :p :c .\n:k :seed1 { :a :in :zz } .\n\
+                   :seed1 :next :seed2 .\n:seed2 :next :seed3 .\n\
+                   { ?x :has { ?y :in ?z } } <= { :a :p ?y } .\n\
+                   { :k ?sp ?g . ?sp :next ?np . ?g log:includes { ?s :in ?w } . ?s :has ?f }\n\
+                     => { :k ?np ?f } .\n";
+        let closure = reason_n3_terms(doc, None).expect("the closure saturates");
+        let seeds: Vec<String> = closure
+            .facts
+            .iter()
+            .filter_map(|[s, p, _]| match (s, p) {
+                (Term::Iri(s), Term::Iri(p)) if s == "http://ex/k" => {
+                    Some(p.rsplit('/').next().unwrap_or(p).to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        for want in ["seed1", "seed2", "seed3"] {
+            assert!(seeds.iter().any(|s| s == want), "{want} missing: {seeds:?}");
+        }
+    }
+
+    #[test]
+    fn sibling_backward_proofs_do_not_capture_each_other() {
+        // GH #6844 item 2: SIBLING conjuncts of one premise are at the same DEPTH, so depth
+        // alone would give them one renaming — and they are not independent of each other:
+        // each conjunct's bindings seed the next, so the value the first one's proof leaks
+        // into the shared substitution (a quoted formula still holding its freshened
+        // variables) reaches the second one's goal. Here both conjuncts resolve the same
+        // goal predicate through the same backward rule. Two independent applications of a
+        // rule are distinct terms, so `log:equalTo` must NOT hold between the two copies;
+        // under one renaming they would be the same term and `:same` would be derived.
+        let data = "@prefix : <http://ex/> .\n:a :p :m .\n{ ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     { ?x :has ?f . ?x :has ?g . ?f log:equalTo ?g } => { ?x :same :yes } .\n";
+        let rows = derived_rows(data, query);
+        assert!(
+            rows.is_empty(),
+            "two sibling resolutions of one goal must stay distinct terms, got {rows:?}"
+        );
+        // The same query over one freshened copy compared with ITSELF does hold, so the
+        // emptiness above is the renaming and not a broken `log:equalTo`.
+        let one = "@prefix : <http://ex/> .\n@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   { ?x :has ?f . ?f log:equalTo ?f } => { ?x :same :yes } .\n";
+        assert_eq!(derived_rows(data, one).len(), 1, "one copy equals itself");
+    }
+
+    #[test]
+    fn nested_backward_proofs_do_not_capture_each_other() {
+        // GH #6844 item 2: a recursive backward rule applies itself under its own
+        // substitution, so an application and its ANCESTOR must not standardize apart into
+        // the same names — `?m` at two depths would be forced equal and only the one-step
+        // chain would be provable.
+        let data = "@prefix : <http://ex/> .\n:a :par :b .\n:b :par :c .\n:c :par :d .\n\
+                    { ?x :reaches ?y } <= { ?x :par ?y } .\n\
+                    { ?x :reaches ?y } <= { ?x :par ?m . ?m :reaches ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n{ :a :reaches ?y } => { :a :got ?y } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(
+            rows.len(),
+            3,
+            "every descendant is reachable through a recursive application, got {rows:?}"
+        );
+        for want in [":b", ":c", ":d"] {
+            let iri = format!("Iri(\"http://ex/{}\")", &want[1..]);
+            assert!(rows.iter().any(|r| r.ends_with(&iri)), "{want} missing from {rows:?}");
+        }
+    }
+
+    /// GH #6844 variants: `body` written in several orders, and with an unrelated padding
+    /// set that changes the fact sets' capacity and so their traversal order. Every variant
+    /// holds the same statements, so every variant has the same closure as a SET.
+    fn order_variants(prefixes: &str, body: &[String], pad_pred: &str) -> Vec<String> {
+        let pad: String = (0..300).map(|i| format!(":pad{i} {pad_pred} {i} .\n")).collect();
+        let fwd: String = body.concat();
+        let rev: String = body.iter().rev().cloned().collect();
+        let mut mixed = body.to_vec();
+        mixed.rotate_left(body.len() / 3);
+        vec![
+            format!("{prefixes}{fwd}"),
+            format!("{prefixes}{rev}"),
+            format!("{prefixes}{}", mixed.concat()),
+            format!("{prefixes}{pad}{fwd}"),
+            format!("{prefixes}{rev}{pad}"),
+            format!("{prefixes}{pad}{}", mixed.concat()),
+        ]
+    }
+
+    /// The `:q` rows of the `log:conclusion` formula bound to `?c`, IN THE ORDER the result
+    /// formula holds them.
+    fn nested_closure_row_order(src: &str) -> Vec<String> {
+        let c = reason_n3_terms(src, None).expect("reasons");
+        let formula = c
+            .facts
+            .iter()
+            .find_map(|[s, p, o]| match (s, p) {
+                (Term::Iri(si), Term::Iri(pi))
+                    if si == "http://ex/result" && pi == "http://ex/is" =>
+                {
+                    Some(o.clone())
+                }
+                _ => None,
+            })
+            .expect("the rule concluded :result :is <the nested closure>");
+        let Term::Formula(rows) = formula else { panic!("log:conclusion is formula-valued") };
+        rows.iter()
+            .filter(|r| matches!(&r[1], Term::Iri(i) if i == "http://ex/q"))
+            .map(|r| format!("{:?}", r[0]))
+            .collect()
+    }
+
+    #[test]
+    fn nested_closure_rows_do_not_depend_on_traversal_order() {
+        // GH #6844 item 1: `log:conclusion` built its result formula by draining the nested
+        // closure's fact hash SET, so the rows' order — part of a formula term's identity,
+        // and so of its `term_key` and of every `why()` string built from it — followed that
+        // set's traversal.
+        let n = 24;
+        let body: Vec<String> = (0..n).map(|i| format!("        :s{i:02} :p :v .\n")).collect();
+        let runs: Vec<Vec<String>> = order_variants("", &body, ":unrelated")
+            .iter()
+            .map(|inner| {
+                let src = format!(
+                    "@prefix : <http://ex/> .\n\
+                     @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     {{ {{\n{inner}        {{ ?x :p :v }} => {{ ?x :q :w }} .\n\
+                     }} log:conclusion ?c }} => {{ :result :is ?c }} .\n"
+                );
+                nested_closure_row_order(&src)
+            })
+            .collect();
+        assert_eq!(runs[0].len(), n, "every subject's `:q` row is derived in the closure");
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+    }
+
+    /// subject local name -> the list-cell label its `:has` list value's chain head carries.
+    fn list_cell_labels(src: &str, n: usize) -> std::collections::BTreeMap<String, String> {
+        let mut dict = Dict::new();
+        let triples = reason_n3(&mut dict, src).expect("reasons");
+        let has = dict.intern_iri("http://ex/has");
+        // Probe the labels the expander can have minted (one cell per member, so `n` lists
+        // of two members need at most `2 * n`), AFTER the run so an existing label resolves
+        // to the id it was interned under.
+        let cells: Vec<(Id, String)> =
+            (1..=2 * n).map(|k| (dict.intern_blank(&format!("_l0_{k}")), format!("_l0_{k}"))).collect();
+        (0..n)
+            .filter_map(|i| {
+                let s = dict.intern_iri(&format!("http://ex/a{i:02}"));
+                let head = triples.iter().find(|[ts, tp, _]| *ts == s && *tp == has)?[2];
+                let label = cells.iter().find(|(id, _)| *id == head)?.1.clone();
+                Some((format!("a{i:02}"), label))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn list_cell_labels_do_not_depend_on_traversal_order() {
+        // GH #6844 item 3: `ListExpander` numbered its cells from a counter bumped as the
+        // rows arrived, and the rows are drained from the closure's fact hash SET — so a
+        // generated cell's blank label (an RDF node identity, reachable in `why()` output
+        // and in `sparq-prov` IRIs) followed that set's traversal order.
+        let n = 12;
+        let body: Vec<String> =
+            (0..n).map(|i| format!(":a{i:02} :raw ( :m{i:02} :n{i:02} ) .\n")).collect();
+        // The lists reach the expander through a DERIVED fact, so they are carried by the
+        // closure's hash set rather than by the parsed document's statement order.
+        let prefixes = "@prefix : <http://ex/> .\n{ ?a :raw ?l } => { ?a :has ?l } .\n";
+        let runs: Vec<_> = order_variants(prefixes, &body, ":unrelated")
+            .iter()
+            .map(|src| list_cell_labels(src, n))
+            .collect();
+        assert_eq!(runs[0].len(), n, "every subject's list value got a chain head");
+        assert_eq!(
+            runs[0].values().collect::<std::collections::BTreeSet<_>>().len(),
+            n,
+            "distinct list values get distinct chain heads"
+        );
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+    }
+
+    /// conclusion key -> the premise keys its ONE proof step records, for every derived fact.
+    fn proof_premises(src: &str) -> std::collections::BTreeMap<String, Vec<[String; 3]>> {
+        let (_, steps) = reason_n3_proof(&mut Dict::new(), src).expect("reasons");
+        steps
+            .iter()
+            .map(|s| (s.conclusion_key.join("|"), s.premise_keys.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_traversal_order() {
+        // GH #6844 item 4: a conclusion with no existentials is instantiated the same way by
+        // every binding sharing its firing key, so several bindings derive ONE fact — and
+        // only the first to ARRIVE had its premises kept as that fact's proof step. Here
+        // `:a<i> :reaches :b<i>` is derivable through either of two intermediates, so which
+        // premises `why()` names followed the delta set's traversal order.
+        let n = 16;
+        // Each statement is its own variant element, so reversing or rotating the document
+        // genuinely reorders the two routes `:a<i> -> :b<i>` against each other.
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            for m in ["m", "o", "q"] {
+                body.push(format!(":a{i:02} :link :{m}{i:02} .\n"));
+                body.push(format!(":{m}{i:02} :link :b{i:02} .\n"));
+            }
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :link ?y . ?y :link ?z } => { ?x :reaches ?z } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":link").iter().map(|s| proof_premises(s)).collect();
+        // Exactly one step per `i`: `:a<i> :reaches :b<i>`, derivable under three bindings
+        // (one per intermediate) in one round, so every recorded step is an ambiguous one.
+        assert_eq!(runs[0].len(), n, "one ambiguous step per subject");
+        assert_proof_premises_agree(&runs);
+        // The derivation kept is the one with the LEAST premise vector of the three, so the
+        // proof names `:m00` — not whichever route the delta set happened to yield first.
+        let step = &runs[0]["I\"http://ex/a00\"|I\"http://ex/reaches\"|I\"http://ex/b00\""];
+        assert!(
+            step.iter().any(|p| p[2] == "I\"http://ex/m00\"" || p[0] == "I\"http://ex/m00\""),
+            "the least premise vector is recorded: {step:?}"
+        );
+    }
+
+    /// Every variant's `proof_premises` map, asserted equal to the first variant's, naming
+    /// the first disagreeing step. The shared body of the GH #6844 proof determinism tests.
+    fn assert_proof_premises_agree(runs: &[std::collections::BTreeMap<String, Vec<[String; 3]>>]) {
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            let diff: Vec<&String> =
+                r.iter().filter(|(k, v)| runs[0].get(*k) != Some(v)).map(|(k, _)| k).collect();
+            assert_eq!(r.len(), runs[0].len(), "variant {i} recorded a different step set");
+            assert!(
+                diff.is_empty(),
+                "variant {i} named different premises for {} of {} steps, e.g. {:?} -> {:?} \
+                 (was {:?})",
+                diff.len(),
+                r.len(),
+                diff[0],
+                r[diff[0]],
+                runs[0][diff[0]],
+            );
+        }
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_which_firing_key_arrives_first() {
+        // GH #6844 review round 1: collapsing a rule's bindings by FIRING KEY is not enough,
+        // because one key gives one conclusion but one conclusion can come from many keys. A
+        // symmetric conclusion is the clean witness: over `:a :p :b . :b :p :a .` the rule
+        // below fires under the two DISTINCT keys (?x=:a, ?y=:b) and (?x=:b, ?y=:a), and each
+        // derives BOTH `:a :r :b` and `:b :r :a` — from different premises. The firing-key
+        // dedup never sees the collision; only choosing over the round's derivations does.
+        let n = 24;
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            body.push(format!(":a{i:02} :p :b{i:02} .\n"));
+            body.push(format!(":b{i:02} :p :a{i:02} .\n"));
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :p ?y } => { ?x :r ?y . ?y :r ?x } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|s| proof_premises(s)).collect();
+        // Two `:r` facts per `i`, each derivable under either key.
+        assert_eq!(runs[0].len(), 2 * n, "two ambiguous steps per subject pair");
+        assert_proof_premises_agree(&runs);
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_traversal_order_through_the_transitivity_fast_path() {
+        // GH #6844 review round 1: a rule of the exact shape
+        // `{?x P ?y. ?y P ?z} => {?x P ?z}` takes the TRANSITIVITY fast path, which is chosen
+        // regardless of StepMode and bypasses the binding machinery entirely — it walks the
+        // delta set and a `gen_out` adjacency whose own order comes from a hash map, pushing
+        // one derivation per intermediate path. So no per-rule binding fix can reach it.
+        // Here each `:a<i>` reaches its `:b<i>` through three intermediates.
+        let n = 16;
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            for m in ["m", "o", "q"] {
+                body.push(format!(":a{i:02} :link :{m}{i:02} .\n"));
+                body.push(format!(":{m}{i:02} :link :b{i:02} .\n"));
+            }
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :link ?y . ?y :link ?z } => { ?x :link ?z } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|s| proof_premises(s)).collect();
+        assert!(runs[0].len() >= n, "steps recorded: {}", runs[0].len());
+        assert_proof_premises_agree(&runs);
+    }
+
+    /// A deterministic xorshift64* stream, for the randomized differentials below.
+    fn rng(seed: u64) -> impl FnMut(u64) -> u64 {
+        let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        move |m| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % m.max(1)
+        }
+    }
+
+    /// The STRAIGHTFORWARD ordering GH #6838 shipped, kept as the reference the optimized
+    /// ranking (GH #6843) is differentially tested against: one entry per firing key not yet
+    /// in `fired`, in arrival order, ranked by sorting those keys.
+    fn reference_new_firings(
+        bindings: Vec<Binding>,
+        concl_vars: &[String],
+        fired: &mut FxHashSet<String>,
+        tie_break: bool,
+    ) -> Vec<(usize, Binding)> {
+        let full_encoding = |b: &Binding| -> Vec<String> {
+            let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+            f.sort_unstable();
+            f
+        };
+        let mut fresh: Vec<(String, Binding)> = Vec::new();
+        let mut full: Vec<Vec<String>> = Vec::new();
+        let mut slot: FxHashMap<String, usize> = FxHashMap::default();
+        for b in bindings {
+            let mut key = String::new();
+            firing_key(&b, concl_vars, &mut key);
+            if fired.contains(&key) {
+                continue;
+            }
+            match slot.get(&key) {
+                None => {
+                    slot.insert(key.clone(), fresh.len());
+                    full.push(full_encoding(&b));
+                    fresh.push((key, b));
+                }
+                Some(&i) if tie_break => {
+                    let f = full_encoding(&b);
+                    if f < full[i] {
+                        full[i] = f;
+                        fresh[i].1 = b;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        let mut order: Vec<usize> = (0..fresh.len()).collect();
+        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0));
+        let mut rank = vec![0; fresh.len()];
+        for (r, &i) in order.iter().enumerate() {
+            rank[i] = r;
+        }
+        for (key, _) in &fresh {
+            fired.insert(key.clone());
+        }
+        fresh.into_iter().zip(rank).map(|((_, b), r)| (r, b)).collect()
+    }
+
+    /// Random bindings over `concl_vars` plus an extra variable (so proof-mode tie-breaking
+    /// has something to break on), with a small term alphabet so keys repeat, share long
+    /// prefixes, and sometimes prefix one another.
+    fn random_bindings(seed: u64, concl_vars: &[String], n: usize) -> Vec<Binding> {
+        let mut r = rng(seed);
+        let term = |i: u64| -> Term {
+            match i % 5 {
+                // Long shared prefixes, and `…s1` is a prefix of `…s1x`: the packed sort
+                // word cannot separate these on its leading bytes alone.
+                0 => Term::Iri(format!("http://example.org/a/very/long/shared/path/s{}", i / 5)),
+                1 => Term::Iri(format!("http://example.org/a/very/long/shared/path/s{}x", i / 5)),
+                2 => Term::Blank(format!("b{}", i / 5)),
+                // A literal whose Debug escapes a control character, so the key holds `\u{0}`
+                // rather than a raw NUL.
+                3 => Term::Lit(format!("l\u{0}{}", i / 5), "http://x/dt".into(), None),
+                _ => Term::List(vec![Term::Iri(format!("http://x/{}", i / 5))]),
+            }
+        };
+        (0..n)
+            .map(|_| {
+                let mut b = Binding::new();
+                for v in concl_vars {
+                    if r(8) > 0 {
+                        // Sometimes leave a variable unbound: it keys as unbound.
+                        b.insert(v.clone(), term(r(14)));
+                    }
+                }
+                b.insert("other".to_string(), term(r(14)));
+                b
+            })
+            .collect()
+    }
+
+    #[test]
+    fn canonical_new_firings_matches_the_reference_ordering() {
+        // GH #6843: the optimized ranking must agree with GH #6838's straightforward
+        // "sort the round's new keys" ordering on every input — same firings, same ranks,
+        // same bindings kept, same `fired` set — in BOTH strategy branches (`tie_break` is
+        // the proof-mode branch). Randomized over rule shapes, binding counts and the
+        // carried-over `fired` set.
+        // Rounds compared, ranked rounds, tie-broken rounds (a later binding of a key the round
+        // already keeps reached the comparison), and rounds where that comparison REPLACED
+        // the first-arriving binding.
+        let mut covered = (0, 0, 0, 0);
+        for seed in 0..600u64 {
+            let mut r = rng(seed ^ 0x5151);
+            let tie_break = seed % 2 == 0;
+            let nvars = 1 + r(3) as usize;
+            let concl_vars: Vec<String> = (0..nvars).map(|i| format!("v{i}")).collect();
+            let mut mine: FxHashSet<String> = FxHashSet::default();
+            let mut theirs: FxHashSet<String> = FxHashSet::default();
+            let mut scratch = FiringScratch::default();
+            // Several rounds, so keys carried over in `fired` are exercised too.
+            for round in 0..3 {
+                let bindings = random_bindings(seed * 7 + round, &concl_vars, r(12) as usize);
+                // What the tie-break saw, measured on the input rather than inferred from the
+                // output: the first binding of each fresh key, and whether a later one arrived.
+                let mut first: FxHashMap<String, Binding> = FxHashMap::default();
+                let mut repeated = false;
+                for b in &bindings {
+                    let mut key = String::new();
+                    firing_key(b, &concl_vars, &mut key);
+                    if theirs.contains(&key) {
+                        continue;
+                    }
+                    repeated |= first.contains_key(&key);
+                    first.entry(key).or_insert_with(|| b.clone());
+                }
+                let want =
+                    reference_new_firings(bindings.clone(), &concl_vars, &mut theirs, tie_break);
+                let got = canonical_new_firings(
+                    bindings,
+                    &concl_vars,
+                    &mut mine,
+                    tie_break,
+                    &mut scratch,
+                );
+                let fmt = |f: &[(usize, Binding)]| -> Vec<String> {
+                    f.iter()
+                        .map(|(rank, b)| {
+                            let mut e: Vec<String> =
+                                b.iter().map(|(v, t)| format!("{v:?}={t:?}")).collect();
+                            e.sort();
+                            format!("{rank}:{}", e.join(","))
+                        })
+                        .collect()
+                };
+                assert_eq!(
+                    fmt(&got),
+                    fmt(&want),
+                    "seed {seed} round {round} tie_break={tie_break}"
+                );
+                let mut m: Vec<&String> = mine.iter().collect();
+                let mut t: Vec<&String> = theirs.iter().collect();
+                m.sort();
+                t.sort();
+                assert_eq!(m, t, "fired keys diverged (seed {seed} round {round})");
+                covered.0 += 1;
+                covered.1 += usize::from(got.len() > 1);
+                if tie_break && repeated {
+                    covered.2 += 1;
+                    let replaced = got.iter().any(|(_, b)| {
+                        let mut key = String::new();
+                        firing_key(b, &concl_vars, &mut key);
+                        first.get(&key) != Some(b)
+                    });
+                    covered.3 += usize::from(replaced);
+                }
+            }
+        }
+        // The differential is worthless if the inputs never reach the ranking or the
+        // tie-break; pin that they do, and that the tie-break both keeps and replaces.
+        assert!(covered.1 > 500, "rounds that actually rank: {}", covered.1);
+        assert!(covered.2 > 120, "rounds that reach the tie-break: {}", covered.2);
+        assert!(covered.3 > 60, "rounds where the tie-break replaces: {}", covered.3);
+    }
+
+    #[test]
+    fn rank_keys_matches_sorting_the_keys() {
+        // GH #6843: the packed-word ranking, against the plain comparison sort it replaces,
+        // on the cases its correctness argument turns on — a long common prefix, keys that
+        // differ only past the packed bytes, a key that is a prefix of another, and keys
+        // holding an escaped NUL, non-ASCII bytes, very long keys, and index masks of every
+        // width a small round reaches. Every set is shuffled first, so the ranking never
+        // starts from sorted input.
+        let long = "Some(Iri(\"http://example.org/a/very/long/shared/path/s";
+        let mut sets: Vec<Vec<String>> = vec![
+            vec![format!("{long}1\"));"), format!("{long}10\"));"), format!("{long}2\"));")],
+            vec!["ab".into(), "a".into(), "abc".into(), "b".into()],
+            vec!["a\\u{0}b".into(), "ab".into(), "a".into()],
+            // The common prefix ends at `a` vs `b`, so the `a…` keys are identical for 24 bytes
+            // PAST it: their packed words all tie, and only the whole-key re-sort orders them.
+            (0..9)
+                .map(|i| format!("{long}aaaaaaaaaaaaaaaaaaaaaaaa{i}"))
+                .chain([format!("{long}b")])
+                .collect(),
+            // Multi-byte UTF-8: `é` (C3 A9) and `ê` (C3 AA) share their lead byte, and `€`
+            // (E2 82 AC) sorts above both; a split character must not reorder anything.
+            ["é", "ê", "e", "€", "éé", "éê", "ée", "z", "\u{10FFFF}", "é€"]
+                .iter()
+                .map(|t| format!("{long}{t}\"));"))
+                .collect(),
+            // Very long keys that differ only in their last byte, after 10 KB in common past
+            // the common prefix of the whole set.
+            (0..6)
+                .map(|i| format!("{long}{}{i}", "x".repeat(10_000)))
+                .chain([format!("{long}y")])
+                .collect(),
+        ];
+        // Index masks of every width up to 10 bits, at and either side of each power of two.
+        // The `Q` key pins the common prefix at `{long}`, so every `P…` key's packed word is
+        // `Paaaaaa` plus one varying LAST byte: the mask truncates some or all of what tells
+        // those keys apart, and the run re-sort has to finish the job.
+        for n in [1usize, 2, 3, 4, 7, 8, 9, 15, 16, 17, 255, 256, 257, 511, 512, 513] {
+            sets.push(
+                (0..n)
+                    .map(|i| format!("{long}Paaaaaa{}{i:04x}", char::from(b'0' + (i % 64) as u8)))
+                    .chain([format!("{long}Q")])
+                    .collect(),
+            );
+        }
+        let mut r = rng(0xabc);
+        for _ in 0..200 {
+            let n = 2 + r(20) as usize;
+            let mut keys: Vec<String> = (0..n)
+                .map(|_| match r(3) {
+                    0 => format!("{long}{}\"));", r(40)),
+                    1 => format!("{}", r(1000)),
+                    _ => format!("Some(Lit(\"l\\u{{0}}{}\"));", r(40)),
+                })
+                .collect();
+            keys.sort();
+            keys.dedup(); // the ranking's contract: the round's keys are distinct
+            if keys.len() > 1 {
+                sets.push(keys);
+            }
+        }
+        for mut keys in sets {
+            for i in (1..keys.len()).rev() {
+                keys.swap(i, r(i as u64 + 1) as usize);
+            }
+            let mut want: Vec<usize> = (0..keys.len()).collect();
+            want.sort_by(|&x, &y| keys[x].cmp(&keys[y]));
+            let mut order = Vec::new();
+            let index = rank_keys(&keys, &mut order);
+            let got: Vec<usize> = order.iter().map(|e| (e & index) as usize).collect();
+            assert_eq!(got, want, "ranking {keys:?}");
+        }
+    }
+
+    #[test]
+    fn random_existential_rule_sets_label_order_independently() {
+        // GH #6749/#6843: the closure-level half of the differential — over random
+        // existential rule sets, reordering a document (which changes the fact sets'
+        // traversal order) must change neither the closure nor one skolem label.
+        let mut labelled = 0;
+        for seed in 0..120u64 {
+            let mut r = rng(seed ^ 0x77);
+            let mut rules = String::new();
+            for i in 0..1 + r(3) {
+                let (p, q) = (r(3), r(3));
+                rules.push_str(&match r(3) {
+                    0 => format!("{{ ?x :p{p} ?y }} => {{ ?x :c{i} _:e. _:e :k ?y }} .\n"),
+                    1 => format!(
+                        "{{ ?x :p{p} ?y. ?y :p{q} ?z }} => {{ ?x :c{i} _:e. _:e :k ?z, ?y }} .\n"
+                    ),
+                    _ => format!("{{ ?x :p{p} ?y }} => {{ _:e :c{i} ?x. _:f :k _:e }} .\n"),
+                });
+            }
+            let facts: Vec<String> = (0..4 + r(14))
+                .map(|_| {
+                    let (a, b, p) = (r(6), r(6), r(3));
+                    if r(5) == 0 {
+                        format!(":s{a} :p{p} \"l{b}\" .\n")
+                    } else {
+                        format!(":s{a} :p{p} :s{b} .\n")
+                    }
+                })
+                .collect();
+            let head = "@prefix : <http://ex/> .\n";
+            let pad: String = (0..200).map(|i| format!(":pad{i} :unrelated {i} .\n")).collect();
+            let rev: String = facts.iter().rev().cloned().collect();
+            let docs = [
+                format!("{head}{}{rules}", facts.concat()),
+                format!("{head}{rules}{rev}"),
+                format!("{head}{pad}{rules}{}", facts.concat()),
+            ];
+            let render = |src: &str| -> Vec<String> {
+                let c = reason_n3_terms(src, None).unwrap();
+                let mut f: Vec<String> = c
+                    .facts
+                    .iter()
+                    .map(|t| format!("{t:?}"))
+                    .filter(|f| !f.contains("/unrelated"))
+                    .collect();
+                f.sort();
+                f
+            };
+            let base = render(&docs[0]);
+            if base.iter().any(|f| f.contains("__sk")) {
+                labelled += 1;
+            }
+            for d in &docs[1..] {
+                assert_eq!(render(d), base, "seed {seed}: reordering changed the closure");
+            }
+        }
+        assert!(labelled > 80, "documents that minted a skolem: {labelled}");
+    }
+
+    #[test]
+    fn skolem_statement_keys_and_proofs_are_reproducible() {
+        // GH #6749: the identity keys (and so sparq-prov entity IRIs) and the proof steps
+        // carry the skolem labels, so they inherit the labels' order (in)dependence.
+        let render = |src: &str| {
+            let mut dict = Dict::new();
+            let run = reason_n3_proof_run(&mut dict, src).unwrap();
+            let mut keys: Vec<String> = run
+                .closure_keys
+                .iter()
+                .map(|k| k.join(" "))
+                .filter(|k| !k.contains("/unrelated"))
+                .collect();
+            keys.sort();
+            let mut steps: Vec<String> = run
+                .steps
+                .iter()
+                .map(|st| format!("{} {:?} <= {:?}", st.rule, st.conclusion_key, st.premise_keys))
+                .collect();
+            steps.sort();
+            (keys, steps)
+        };
+        let docs = skolem_order_variants(12);
+        let base = render(&docs[0]);
+        for d in &docs[1..] {
+            let r = render(d);
+            assert_eq!(r.0, base.0, "statement keys are order-independent");
+            assert_eq!(r.1, base.1, "proof steps are order-independent");
+        }
+    }
+
+    #[test]
+    fn proof_recording_does_not_change_the_closure() {
+        // Review of GH #6749: a variable substituted inside a concluded `{ … }` formula was
+        // left out of the firing key, so both bindings below shared one (empty) key. Plain
+        // runs kept the first binding to arrive and proof runs the least, so recording a
+        // proof changed the derived formula and `why()` could miss a materialized fact.
+        // Every variable the conclusion substitutes is now in the key: each binding fires.
+        let run = |src: &str, mode: StepMode| {
+            let cuts = Truncation::top_level();
+            let parsed = bounded::parse_n3(src, "", &cuts).unwrap();
+            let (facts, steps, _) =
+                run_closure(parsed, None, None, &cuts, mode, NegationCycles::Reject, None)
+                    .unwrap()
+                    .top_level();
+            let mut all: Vec<String> = facts.all.iter().map(|f| format!("{f:?}")).collect();
+            all.sort();
+            let derived: FxHashSet<String> =
+                steps.iter().map(|(g, _, _)| format!("{g:?}")).collect();
+            (all, derived)
+        };
+        let docs = [
+            "@prefix : <http://ex/> .\n:b :p :v . :a :p :v .\n\
+             { ?x :p :v } => { _:e :q { ?x :r :v } } .\n",
+            "@prefix : <http://ex/> .\n:a :p :v . :b :p :v .\n\
+             { ?x :p :v } => { _:e :q { ?x :r :v } } .\n",
+            // Nested formula, list and quoted triple inside the formula.
+            "@prefix : <http://ex/> .\n:b :p :w . :a :p :w . :c :p :w .\n\
+             { ?x :p ?y } => { _:e :q { :g :h { ( ?x ) :r << ?y :s :t >> } } } .\n",
+        ];
+        for src in docs {
+            let (plain, _) = run(src, StepMode::None);
+            let (proved, derived) = run(src, StepMode::Full);
+            assert_eq!(plain, proved, "proof recording changed the closure of {src}");
+            let input = bounded::parse_n3(src, "", &Truncation::top_level()).unwrap();
+            let n_in = input.facts.len();
+            assert_eq!(derived.len() + n_in, proved.len(), "every derived fact has a step");
+            let n_fired = proved.iter().filter(|f| f.contains("http://ex/q")).count();
+            assert_eq!(n_fired, n_in, "one existential per binding of {src}");
+        }
+    }
+
+    #[test]
+    fn query_existential_labels_do_not_depend_on_traversal_order() {
+        // GH #6749, the `--query` projection's own existentials (`__qsk…`).
+        let q = "@prefix : <http://ex/> .\n{ ?x :p :v } => { ?x :ans _:a } .\n";
+        let label_of = |data: &str| -> std::collections::BTreeMap<String, String> {
+            reason_n3_query_terms(data, q)
+                .unwrap()
+                .into_iter()
+                .filter_map(|[s, _, o]| match (s, o) {
+                    (Term::Iri(s), Term::Blank(l)) => Some((s, l)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let docs = skolem_order_variants(16);
+        let base = label_of(&docs[0]);
+        assert_eq!(base.len(), 16);
+        for d in &docs[1..] {
+            assert_eq!(label_of(d), base, "same data, different order: same query labels");
+        }
     }
 
     // ---- [OPUS-4.8] sq-qcnn.16: coverage gap tests for uncovered builtin paths ----

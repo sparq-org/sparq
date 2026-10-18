@@ -82,10 +82,10 @@ fn wac_rematerialization_revokes() {
     assert!(can(&mut s, Some(CAROL), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     // remove carol from the team group document
     let name = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/groups/team"));
-    let pos = s.graph.named.iter().position(|(n, _)| *n == name).expect("group graph");
+    let pos = s.graph().named.iter().position(|(n, _)| *n == name).expect("group graph");
     let without_carol = "<https://pod.ex/groups/team#g> \
          <http://www.w3.org/2006/vcard/ns#hasMember> <https://bob.ex/card#me> .";
-    s.graph.named[pos].1 = Graph::load_str(without_carol, "ntriples").unwrap();
+    s.graph_unchecked_mut().named[pos].1 = Graph::load_str(without_carol, "ntriples").unwrap();
     s.materialize_wac().expect("re-materialize");
     assert!(!can(&mut s, Some(CAROL), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     assert!(can(&mut s, Some(BOB), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
@@ -164,4 +164,21 @@ fn wac_allow_header_advertises_held_modes() {
     // 6. Fail-closed before materialization: an un-materialized store grants nothing.
     let bare = PodStore::new(Graph::load_dataset(&wac_fixture(), "nquads").expect("fixture loads"));
     assert_eq!(bare.wac_allow(&sess(Some(ALICE)), &pub1), r#"user="",public="""#);
+}
+
+/// A path with an empty segment (`/priv0//d.ttl`) inherits through the same container
+/// chain the store enumerates: the owner's root `acl:default` still reaches it, and an
+/// agent without a grant still gets nothing.
+#[test]
+fn wac_inherits_across_an_empty_path_segment() {
+    let mut nq = wac_fixture();
+    nq.push_str("<https://pod.ex/priv0//d.ttl#s> <urn:p> \"v\" <https://pod.ex/priv0//d.ttl> .\n");
+    let g = Graph::load_dataset(&nq, "nquads").expect("fixture loads");
+    let mut s = PodStore::new(g);
+    s.materialize_wac().expect("wac materializes");
+    let doc = "https://pod.ex/priv0//d.ttl";
+    assert!(can(&mut s, Some(ALICE), None, Mode::Read, doc));
+    assert!(can(&mut s, Some(ALICE), None, Mode::Write, doc));
+    assert!(!can(&mut s, Some(BOB), None, Mode::Read, doc));
+    assert!(!can(&mut s, None, None, Mode::Read, doc));
 }

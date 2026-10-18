@@ -109,17 +109,68 @@ Materialize the authorization view from the access-control documents, then enfor
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
   TRUSTED caller. `AccessProvenance::set_creator(resource, webid)` /
   `set_owner(resource, webid)` build the map; the loader synthesizes
-  `<r> solidx:creator|owner <w>` facts from THAT map ONLY. The loader hard-rejects any
-  control-document triple whose predicate is in the derivation-internal `solidx:` namespace
-  (§2.4), so a writer who embeds `<r> solidx:creator <self>` in a content document OR in the
-  `.acr` they control cannot self-grant (this also blocks forged `solidx:appliesToResource`
-  policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
+  `<r> solidx:creator|owner <w>` facts from THAT map ONLY. A control document may describe
+  only its own nodes (subject a blank node or an IRI in the document), name no minted
+  `urn:skolem:`/`urn:sparq:` IRI anywhere, name no reserved principal (`auth:`/`solidx:`, or
+  an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
+  `auth:`/`solidx:` predicate or class. Under ACP, an `.acr` that uses (as an access
+  control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
+  `update_as*` refuse a write that would add such a triple to a control document the active
+  view reads (`.acr` under ACP, `.acl` under WAC, neither reserved nor authority-less),
+  judged in the state the write leaves (a statement an update adds and removes again is not
+  checked), naming it (nothing changes; a writer of one `.acr`
+  can so learn whether another is rejected); other documents are filtered per triple by the
+  loader; a stored document holding
+  one is rejected whole by the loader, and the resources it governs (ACP: the resource and everything below it; WAC:
+  everything the rejected ACL governs, stored or not) get no grant from any source, static,
+  attached, bridged or trust. So a writer who embeds `<r> solidx:creator <self>` in a
+  content document OR in the `.acr` they control cannot self-grant (this also blocks forged
+  `solidx:appliesToResource` policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
   granted `R2`), and so is every role a provenance matcher plays: in `allOf`, `anyOf` and
   `noneOf` it is decided against the resource being accessed (an `allOf` of
   `CreatorAgent` and `OwnerAgent` needs both on the same resource, and a `noneOf`
   `CreatorAgent` excepts that resource's creator) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
-  `materialize_acp()` is `materialize_acp_with(&AccessProvenance::new())` — no provenance ⇒
-  no `CreatorAgent`/`OwnerAgent` grant (fail-closed).
+  The store keeps the provenance and credentials of its last successful ACP
+  materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
+  `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
+  no `CreatorAgent`/`OwnerAgent` grant (fail-closed). `materialize_acp_with(&prov)` stores
+  `prov` with NO credentials (it is `materialize_acp_with_credentials(&prov, &empty)`). To
+  clear them, or when a holding expires or is revoked, call
+  `materialize_acp_with_credentials` with the current maps. Provenance follows every
+  change to which graphs exist, staged with the change and installed only once it
+  commits. Only the net effect counts: a resource (document or container) keeps its creator
+  and owner across a change if it exists before and after it, whatever happens in between,
+  or if its own `.acr` is stored before the change, was stored when the provenance was last
+  installed, and is not removed at any point in it; it loses them otherwise (so an `.acr`
+  stored by an edit the store was not told of keeps nothing). So the facts of a dropped document, or of an emptied container, are
+  kept with its `.acr` and come back with the resource only while that `.acr` stays stored
+  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update never records a
+  creator; a direct edit (below) records its agent as creator of the resources it names that
+  the edit brings into being, unless the resource's own `.acr` was already stored. A container
+  the edit brings into being alongside a resource it names — an ancestor with nothing stored
+  below it before — is not one of them, so a writer never becomes the creator of a container
+  above what it wrote. A commit refused at its
+  commit point unwritten changes nothing; any other failed commit (part of the update may be
+  applied, or journaled for a reopen to replay) drops the view, and `materialize_acp()`
+  refuses until the context is passed again. The dataset is read through `store.graph()`; a
+  caller that edits it through `store.graph_unchecked_mut()` takes `store.stored_graphs()`
+  first and then calls
+  `store.rematerialize_after_edit(&before, creator, created, acp)` — `created` naming the
+  resources `creator` created — which
+  applies the same rule and installs the view and provenance together only on success. It
+  refuses when `acp` is not the model the view in force was built under, rather than replacing
+  that view. Every entry point that installs a view does, and before it changes anything, so
+  the refusal leaves the dataset, the stored provenance and the view as they were:
+  every `update_as*` (whether or not the update changes the access-control documents: what it
+  writes and the facts it stages are installed over the view in force either way), and
+  `put_acl*`/`delete_acl*` (the MCP server passes its session agent and the
+  resource its call created). `store.holds_resource(iri)` asks whether `iri` is a resource of
+  the view, the store's own enumeration.
+  `store.acp_provenance()` reads the stored provenance. A resource removed by editing
+  the dataset without that call is forgotten at the next rebuild, WAC or ACP (unless its
+  own `.acr` is stored and was at the previous install; facts passed back unchanged to
+  `materialize_acp_with*` are judged the same way), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
+  documents name `acp:CreatorAgent` or `acp:OwnerAgent`.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
   `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller
@@ -245,9 +296,9 @@ Materialize the authorization view from the access-control documents, then enfor
   primitive. Replaces (or removes) the `.acl`/`.acr` GRAPH and re-materializes
   `<urn:sparq:auth>` as ONE **atomic, fail-closed** unit, so SPARQ stays the source of
   truth (the auth view is always a pure function of the present `.acl` graphs — no stale
-  grant survives a rule change). `content` is parsed FIRST (malformed ⇒ `Err`, nothing
-  mutated); a re-materialization failure (e.g. a reserved-encoding principal) ROLLS BACK to
-  the prior content + prior auth view (all-or-nothing). A non-`.acl`/`.acr` target IRI is
+  grant survives a rule change). `content` is parsed FIRST (malformed, or stating a triple
+  the document may not — see above — ⇒ `Err`, nothing mutated); a re-materialization
+  failure ROLLS BACK to the prior content + prior auth view (all-or-nothing). A non-`.acl`/`.acr` target IRI is
   rejected (write content graphs through `update_as`). It performs **NO session
   authorization** — the server authorizes the request itself (e.g. `decide(.., Mode::Control)`)
   and `update_as` remains the session-checked write path. Always-present API (no cargo gate;

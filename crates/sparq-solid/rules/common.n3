@@ -1,30 +1,14 @@
-# Shared ancestry rules: Solid slash semantics derived from IRI structure, in pure N3.
+# Shared ancestry rules: the transitive closure of the Solid slash-semantics parent.
 # Prepended to every stratum of both systems (wac.n3, acp-a/b/c.n3).
 #
 # Input facts (loader-synthesized, see src/loader.rs):
 #   <R> solidx:isResource true .   — every pod graph + every structural container prefix
+#   <R> solidx:parent <P> .        — immediate parent (loader::parent_iri), kept only when
+#                                    <P> is a resource too, so the walk stops at the pod root
 # Outputs (consumed by wac.n3 nearest-ancestor walk / acp-a.n3 cumulative inheritance):
-#   <R> solidx:parent <P> .        — immediate Solid slash-semantics parent
 #   <R> solidx:ancestor <A> .      — transitive closure of parent
-#
-# `string:scrape` takes ( string regex ) and binds the FIRST capture group; `log:uri`
-# converts IRI <-> string in either direction. The parent is only kept when it is a
-# known resource, so the walk stops at the pod root (its structural parent, e.g.
-# <https://>, is never a resource).
 
 @prefix solidx: <https://sparq.dev/ns/solidx#> .
-@prefix string: <http://www.w3.org/2000/10/swap/string#> .
-@prefix log:    <http://www.w3.org/2000/10/swap/log#> .
-
-# Split into candidate + filter ON PURPOSE: a single rule with TWO unbound join atoms
-# (?r isResource, ?p isResource) makes semi-naive evaluation seeded at the ?p atom
-# enumerate the full ?r × ?p cross product (~2M scrape evaluations on the 1.1k-graph
-# fixture — measured 117s); split, every seeding direction has the other side bound.
-{ ?r solidx:isResource true . ?r log:uri ?rs .
-  (?rs "^(.*/)[^/]+/?$") string:scrape ?ps . ?p log:uri ?ps . }
-=> { ?r solidx:parentCand ?p } .
-
-{ ?r solidx:parentCand ?p . ?p solidx:isResource true . } => { ?r solidx:parent ?p } .
 
 { ?r solidx:parent ?p . }                          => { ?r solidx:ancestor ?p } .
 { ?r solidx:parent ?p . ?p solidx:ancestor ?a . }  => { ?r solidx:ancestor ?a } .

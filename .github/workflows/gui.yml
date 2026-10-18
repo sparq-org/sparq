@@ -92,6 +92,8 @@ concurrency:
 
 jobs:
   shared-client:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: shared TS client typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -120,6 +122,8 @@ jobs:
         run: npm test
 
   site-with-shared-client:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: site build + typecheck (consuming @sparq/client)
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -206,6 +210,8 @@ jobs:
   # (no `advisory` keyword): it is TS + a static export, fully reproducible on a Linux runner
   # without any webview system libraries, so a break here is a real regression.
   gui-app:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: "operational GUI frontend (build + lint + typecheck, both targets)"
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -330,6 +336,8 @@ jobs:
   # PATH SCOPE: gui/** + packages/** (changes to the shared @sparq/client can affect the frontend).
   # The job is NOT in the `merge_group` event; it carries no advisory-registry entry.
   gui-mock-ipc:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: "GUI Playwright mocked-IPC lane"
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -427,6 +435,8 @@ jobs:
   # is diagnostic and stays in `tauri-e2e`, where webkit2gtk is actually installed; the script
   # exits 0 when those tools are absent, so the regression guard runs cleanly here.
   gui-hermetic-guards:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: "GUI hermetic guards (browserName tripwire + no-sleep-gate)"
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -459,6 +469,8 @@ jobs:
   # release matrix cannot drift. macOS/Windows ship their webview (WKWebView / WebView2) with
   # the OS, so only the Linux rows install the webkit2gtk system libraries.
   tauri-build:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: "GUI build + clippy (${{ matrix.label }}, advisory)"
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -467,13 +479,13 @@ jobs:
       # Do not let one platform's failure cancel the others — each row is independent
       # diagnostic signal while the leg is advisory.
       fail-fast: false
+      # A pull request builds the x64 Linux row only; the macOS, Windows and arm64 rows run on
+      # the push to main (and on dispatch). They are advisory, so a PR never waited on them, and
+      # they were most of this workflow's runner time.
       matrix:
-        include:
-          - { os: macos-14, label: arm64-darwin }
-          - { os: macos-15-intel, label: x64-darwin }
-          - { os: ubuntu-latest, label: x64-linux }
-          - { os: ubuntu-24.04-arm, label: arm64-linux }
-          - { os: windows-latest, label: win-x64 }
+        include: ${{ fromJSON(github.event_name == 'pull_request'
+          && '[{"os":"ubuntu-latest","label":"x64-linux"}]'
+          || '[{"os":"macos-14","label":"arm64-darwin"},{"os":"macos-15-intel","label":"x64-darwin"},{"os":"ubuntu-latest","label":"x64-linux"},{"os":"ubuntu-24.04-arm","label":"arm64-linux"},{"os":"windows-latest","label":"win-x64"}]') }}
     defaults:
       run:
         working-directory: gui/src-tauri
@@ -613,6 +625,8 @@ jobs:
   # DELETING the registry entry. #3773: only the environment-coupled webview work is
   # legitimately advisory here — the two hermetic guards were hoisted out.
   tauri-e2e:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: "GUI tauri-driver e2e (Linux, advisory)"
     runs-on: ubuntu-latest
     continue-on-error: true

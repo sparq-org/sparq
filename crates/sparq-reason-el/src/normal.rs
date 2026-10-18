@@ -70,6 +70,22 @@ pub struct Names {
     /// trigger (a derived `∃r.Self ∈ S(X)` must add the self-loop link) and the ABox self-loop
     /// realisation readoff.
     self_of_concept: FxHashMap<Concept, Role>,
+    /// Structural normalization names survive across normalizers (including incremental edits).
+    definitions: FxHashMap<Definition, Concept>,
+}
+
+// Only definitional names are shared, never the target of an input inclusion. Each
+// key identifies the same constructor over the same stable role/concept ids. Reuse
+// is conservative: any model of the input can interpret the name as exactly that
+// structure, satisfying every occurrence's defining axiom. The rules only emit one
+// direction of the definition, so keep LHS/RHS keys separate rather than adding
+// converse axioms or letting an unrelated inclusion constrain a shared name.
+#[derive(PartialEq, Eq, Hash)]
+enum Definition {
+    LhsExists(Role, Concept),
+    RhsExists(Role, Concept),
+    LhsAnd(Concept, Concept),
+    RhsAnd(Vec<Concept>),
 }
 
 /// The internal concept index for ⊤ (`owl:Thing`).
@@ -133,6 +149,15 @@ impl Names {
     pub fn fresh(&mut self) -> Concept {
         let c = self.to_dict.len() as Concept;
         self.to_dict.push(None);
+        c
+    }
+
+    fn definition(&mut self, key: Definition) -> Concept {
+        if let Some(&c) = self.definitions.get(&key) {
+            return c;
+        }
+        let c = self.fresh();
+        self.definitions.insert(key, c);
         c
     }
 
@@ -290,9 +315,6 @@ pub enum Expr {
 pub struct Normalizer<'a> {
     pub(crate) names: &'a mut Names,
     out: Vec<Normal>,
-    /// Memoizes `∃r.C ⊑ X` and `X ⊑ ∃r.C` fresh names so identical sub-expressions reuse one
-    /// fresh concept (keeps the index space small on restriction-heavy ontologies).
-    exists_name: FxHashMap<(Role, Concept), Concept>,
 }
 
 impl<'a> Normalizer<'a> {
@@ -300,7 +322,6 @@ impl<'a> Normalizer<'a> {
         Normalizer {
             names,
             out: Vec::new(),
-            exists_name: FxHashMap::default(),
         }
     }
 
@@ -336,12 +357,16 @@ impl<'a> Normalizer<'a> {
         debug_assert!(atoms.len() >= 2);
         let mut acc = atoms[0];
         for &next in &atoms[1..atoms.len() - 1] {
-            let f = self.names.fresh();
-            self.out.push(Normal::AndSub(acc, next, f));
-            acc = f;
+            acc = self.lhs_and_name(acc, next);
         }
         let last = atoms[atoms.len() - 1];
         self.out.push(Normal::AndSub(acc, last, d));
+    }
+
+    fn lhs_and_name(&mut self, a: Concept, b: Concept) -> Concept {
+        let x = self.names.definition(Definition::LhsAnd(a, b));
+        self.out.push(Normal::AndSub(a, b, x));
+        x
     }
 
     /// Reduces a concept appearing in a SUBclass (LHS) position to a basic concept, emitting
@@ -351,12 +376,11 @@ impl<'a> Normalizer<'a> {
         match e {
             Expr::Atom(c) => *c,
             Expr::And(parts) if parts.len() >= 2 => {
-                // (C1 ⊓ … ⊓ Cn) as a sub-CONCEPT: name it X with each Ci ⊑-chain ⊑ X is wrong;
-                // instead introduce X with `C1 ⊓ … ⊓ Cn ⊑ X` AND, for soundness in LHS reuse,
-                // `X ⊑ Ci`. The MVP only needs the ⊑ X direction (LHS occurrence), so emit the
-                // AndSub chain that lands on a fresh X.
-                let x = self.names.fresh();
-                self.and_lhs(parts, x);
+                let atoms: Vec<Concept> = parts.iter().map(|p| self.lhs_concept(p)).collect();
+                let mut x = atoms[0];
+                for &next in &atoms[1..] {
+                    x = self.lhs_and_name(x, next);
+                }
                 x
             }
             Expr::And(parts) => {
@@ -365,12 +389,9 @@ impl<'a> Normalizer<'a> {
             }
             Expr::Exists(r, inner) => {
                 let c = self.rhs_concept(inner); // filler in a positive (RHS-like) position
-                let key = (*r, c);
-                if let Some(&x) = self.exists_name.get(&key) {
-                    return x;
-                }
-                let x = self.names.fresh();
-                self.exists_name.insert(key, x);
+                let x = self.names.definition(Definition::LhsExists(*r, c));
+                // Re-emit definitions even on a cache hit: this normalizer's output
+                // must stand alone, while an incremental delta may repeat old axioms.
                 self.out.push(Normal::ExistsSub(*r, c, x));
                 x
             }
@@ -387,19 +408,66 @@ impl<'a> Normalizer<'a> {
             Expr::And(parts) => {
                 // Name the conjunction X with `X ⊑ Di` for each part; return X. This is the
                 // RHS conjunction split: a subclass of the conjunction is a subclass of each.
-                let x = self.names.fresh();
-                for p in parts {
-                    let d = self.rhs_concept(p);
+                let atoms: Vec<Concept> = parts.iter().map(|p| self.rhs_concept(p)).collect();
+                let x = self.names.definition(Definition::RhsAnd(atoms.clone()));
+                for d in atoms {
                     self.out.push(Normal::Sub(x, d));
                 }
                 x
             }
             Expr::Exists(r, inner) => {
                 let c = self.rhs_concept(inner);
-                let x = self.names.fresh();
+                let x = self.names.definition(Definition::RhsExists(*r, c));
                 self.out.push(Normal::SubExists(x, *r, c));
                 x
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structural_names_distinguish_definitions_and_reemit_axioms() {
+        let mut names = Names::new();
+        let a = names.class(10);
+        let b = names.class(11);
+        let r = names.role(12);
+        let s = names.role(13);
+        let expressions = [
+            Expr::Exists(r, Box::new(Expr::Atom(a))),
+            Expr::Exists(s, Box::new(Expr::Atom(a))),
+            Expr::Exists(r, Box::new(Expr::Atom(b))),
+            Expr::And(vec![Expr::Atom(a), Expr::Atom(b)]),
+            Expr::And(vec![Expr::Atom(a), Expr::Atom(TOP)]),
+        ];
+        let mut norm = Normalizer::new(&mut names);
+        let rhs: Vec<_> = expressions.iter().map(|e| norm.rhs_concept(e)).collect();
+        let lhs: Vec<_> = expressions.iter().map(|e| norm.lhs_concept(e)).collect();
+        let first = norm.finish();
+        let all: FxHashSet<_> = rhs.iter().chain(&lhs).copied().collect();
+        assert_eq!(
+            all.len(),
+            2 * expressions.len(),
+            "distinct definitions aliased"
+        );
+        assert!(all.iter().all(|&c| names.dict_of(c).is_none()));
+        let count = names.concept_count();
+
+        let mut norm = Normalizer::new(&mut names);
+        for (e, &c) in expressions.iter().zip(&rhs) {
+            assert_eq!(norm.rhs_concept(e), c);
+        }
+        for (e, &c) in expressions.iter().zip(&lhs) {
+            assert_eq!(norm.lhs_concept(e), c);
+        }
+        assert_eq!(
+            norm.finish(),
+            first,
+            "cached definitions must still be emitted"
+        );
+        assert_eq!(names.concept_count(), count);
     }
 }

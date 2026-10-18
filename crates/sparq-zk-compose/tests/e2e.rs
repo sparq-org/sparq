@@ -12,9 +12,10 @@
 //!
 //! At least one NON-ignored test runs a real (small) full prove+verify:
 //! `full_prove_verify_filter_int_d1`. It is gated behind the `nargo`/`bb`
-//! toolchain being on PATH (skips cleanly if absent, like sparq-zk's live
-//! cross-check), so default `cargo test` stays green in minimal CI while still
-//! exercising the real cryptographic path when the toolchain is present.
+//! toolchain being on PATH. The gate (`tests/support/mod.rs`) FAILS LOUD when a
+//! tool is missing, so a toolchain-free run can no longer report `ok` for a body
+//! that never executed; a lane that deliberately has no toolchain declares that
+//! with `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN=1` and gets a printed, named skip.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sparq_zk::commit::commit_triples;
@@ -73,6 +74,22 @@ const FIXTURE_STATUS_LIST: &str = "http://ex/status/1";
 const FIXTURE_STATUS_INDEX: u64 = 3;
 /// The status-list version the fixtures bind + the relying party accepts.
 const FIXTURE_STATUS_VERSION: u64 = 1;
+
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest -- the method
+/// every fixture here commits under, and the one its issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND shapes (`ZKSIG_M5` for a bearer
+/// attestation, `ZKSIG_M4` for a holder-bound one) rather than the
+/// method-unbound `ZKSIG_C3` / `ZKSIG_C4`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
+
 
 /// The relying party's revocation policy accepting the fixture version (window 0)
 /// AND carrying a fresh, NON-revoked AUTHORITATIVE snapshot. This is the external
@@ -206,7 +223,12 @@ fn attest_with_status(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -278,7 +300,12 @@ fn attest_with_status_commit(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -352,16 +379,7 @@ fn credential_graph() -> Vec<Triple> {
     ]
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq_zk_compose_{name}_{}", std::process::id()));
@@ -504,8 +522,7 @@ fn structure_rejects_cross_graph_bnode_join() {
 
 #[test]
 fn witness_gen_filter_int_satisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping witness-gen test");
+    if !support::require_toolchain("witness_gen_filter_int_satisfiable", &["nargo", "bb"]) {
         return;
     }
     // tag-isolated witness gen: previously this relied on targeting a
@@ -532,8 +549,7 @@ fn witness_gen_filter_int_satisfiable() {
 
 #[test]
 fn witness_gen_filter_int_rejects_false_verdict() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("witness_gen_filter_int_rejects_false_verdict", &["nargo", "bb"]) {
         return;
     }
     // 17 >= 18 is false; claim true -> witness generation must fail.
@@ -558,8 +574,7 @@ fn witness_gen_filter_int_rejects_false_verdict() {
 // `filter_int` circuit's `!eq` verdict branch through the engine seam.
 #[test]
 fn witness_gen_filter_int_ne_satisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping witness-gen Ne test");
+    if !support::require_toolchain("witness_gen_filter_int_ne_satisfiable", &["nargo", "bb"]) {
         return;
     }
     // 30 != 18 is true. Tag-isolated witness gen (filter_int_d2, value "30").
@@ -577,8 +592,7 @@ fn witness_gen_filter_int_ne_satisfiable() {
 
 #[test]
 fn witness_gen_filter_int_ne_rejects_false_verdict() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("witness_gen_filter_int_ne_rejects_false_verdict", &["nargo", "bb"]) {
         return;
     }
     // Forge: 18 != 18 is FALSE; claim the `!=` verdict is true -> witness
@@ -600,8 +614,7 @@ fn witness_gen_filter_int_ne_rejects_false_verdict() {
 
 #[test]
 fn witness_gen_scan_satisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("witness_gen_scan_satisfiable", &["nargo", "bb"]) {
         return;
     }
     let salt = salt_from_bytes(&[7u8; 32]);
@@ -632,8 +645,7 @@ fn witness_gen_scan_satisfiable() {
 /// NON-ignored full prove+verify on the smallest member (gated on toolchain).
 #[test]
 fn full_prove_verify_filter_int_d1() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping full prove+verify");
+    if !support::require_toolchain("full_prove_verify_filter_int_d1", &["nargo", "bb"]) {
         return;
     }
     let operand_enc = encode_int_literal(5);
@@ -668,8 +680,7 @@ fn full_prove_verify_filter_int_d1() {
 /// Tag-isolated (shares filter_int_d1 with the other full-prove/forge tests).
 #[test]
 fn full_prove_verify_filter_int_ne_d1() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping full prove+verify (Ne)");
+    if !support::require_toolchain("full_prove_verify_filter_int_ne_d1", &["nargo", "bb"]) {
         return;
     }
     // 5 != 9 is true.
@@ -701,8 +712,7 @@ fn full_prove_verify_filter_int_ne_d1() {
 #[test]
 #[ignore = "slow: full bb prove of a scan member"]
 fn full_manifest_prove_verify_scan() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("full_manifest_prove_verify_scan", &["nargo", "bb"]) {
         return;
     }
     let salt = salt_from_bytes(&[7u8; 32]);
@@ -778,8 +788,8 @@ fn full_manifest_prove_verify_scan() {
 // in the manifest (declare statement B, or bundle a non-canonical vk) while
 // leaving proof_hex pointing at the real proof, and assert verify_manifest
 // returns Err. Before fixes #1/#2 every one of these returned Ok(()). They are
-// toolchain-gated (skip cleanly if nargo/bb absent), like the happy-path full
-// prove+verify.
+// LIVE: they need nargo/bb and fail loud without them unless the lane declares
+// itself toolchain-free, like the happy-path full prove+verify.
 
 use sparq_zk_compose::driver::ProofArtifacts;
 
@@ -892,8 +902,7 @@ fn filter_manifest(
 /// verify_manifest path (reconstruction byte-matches, canonical vk verifies).
 #[test]
 fn forge_positive_honest_filter_verifies() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_positive_honest_filter_verifies", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex("0x2a".into());
@@ -925,8 +934,7 @@ fn forge_positive_honest_filter_verifies() {
 /// (bound=10) => PublicInputMismatch. Before #1 this returned Ok(()).
 #[test]
 fn forge_reject_statement_substitution() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_reject_statement_substitution", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex("0x2a".into());
@@ -960,8 +968,7 @@ fn forge_reject_statement_substitution() {
 /// proof is for the genuine false verdict) is rejected by the byte-compare.
 #[test]
 fn forge_reject_verdict_substitution() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_reject_verdict_substitution", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex("0x2a".into());
@@ -1000,8 +1007,7 @@ fn forge_reject_verdict_substitution() {
 /// #4 replay defence: a captured proof cannot be replayed under a fresh nonce.
 #[test]
 fn forge_reject_challenge_rebind() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_reject_challenge_rebind", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -1063,8 +1069,7 @@ fn honest_nonce_manifest(
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (audit #4 happy path)"]
 fn nonce_happy_path_fresh_nonce_verifies() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("nonce_happy_path_fresh_nonce_verifies", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -1097,8 +1102,7 @@ fn nonce_happy_path_fresh_nonce_verifies() {
 #[test]
 #[ignore = "slow: full bb prove (audit #4 replay-under-new-nonce)"]
 fn nonce_replay_under_new_nonce_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("nonce_replay_under_new_nonce_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -1137,8 +1141,7 @@ fn nonce_replay_under_new_nonce_rejected() {
 #[test]
 #[ignore = "slow: full bb prove (audit #4 single-use store)"]
 fn nonce_single_use_second_presentation_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("nonce_single_use_second_presentation_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -1522,7 +1525,13 @@ fn attest_with_holder(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_holder(&commitment, &salt, &status_ref, &holder_digest),
+        signature: sk.sign_commitment_with_holder_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &holder_digest,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -1939,8 +1948,7 @@ fn holder_binding_unrelated_attestation_does_not_satisfy_scoped_check() {
 #[test]
 #[ignore = "slow: full bb prove of a scan member under a HolderPop binding (sq-cwq)"]
 fn holder_pop_valid_verifies_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-cwq HolderPop happy path");
+    if !support::require_toolchain("holder_pop_valid_verifies_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let salt = salt_from_bytes(&[7u8; 32]);
@@ -2099,8 +2107,7 @@ fn malformed_proof_hex_rejected_not_panicked() {
 /// (trusting art.vk) this returned Ok(()).
 #[test]
 fn forge_reject_noncanonical_vk() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_reject_noncanonical_vk", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex("0x2a".into());
@@ -2142,8 +2149,7 @@ fn forge_reject_noncanonical_vk() {
 /// vk, not art.vk, is the one bb uses.)
 #[test]
 fn forge_artvk_is_ignored() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_artvk_is_ignored", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex("0x2a".into());
@@ -4210,8 +4216,7 @@ fn forge_wrong_length_attribution_rejected() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the scan reconstruct unit test"]
 fn probe_scan_public_inputs_hex() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping probe");
+    if !support::require_toolchain("probe_scan_public_inputs_hex", &["nargo", "bb"]) {
         return;
     }
     let salt = salt_from_bytes(&[7u8; 32]);
@@ -4244,8 +4249,7 @@ fn probe_scan_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the filter_f64 reconstruct unit test"]
 fn probe_filter_f64_public_inputs_hex() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping probe");
+    if !support::require_toolchain("probe_filter_f64_public_inputs_hex", &["nargo", "bb"]) {
         return;
     }
     // operand = 25.0 (xsd:double), FILTER(?o >= 18.0) -> true. value has 2
@@ -4275,8 +4279,7 @@ fn probe_filter_f64_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the filter_signed_int reconstruct unit test"]
 fn probe_filter_signed_int_public_inputs_hex() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping probe");
+    if !support::require_toolchain("probe_filter_signed_int_public_inputs_hex", &["nargo", "bb"]) {
         return;
     }
     // operand = -42 (xsd:integer, md=2), FILTER(?o < 1) -> true.
@@ -4303,8 +4306,7 @@ fn probe_filter_signed_int_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the filter_decimal reconstruct unit test"]
 fn probe_filter_decimal_public_inputs_hex() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping probe");
+    if !support::require_toolchain("probe_filter_decimal_public_inputs_hex", &["nargo", "bb"]) {
         return;
     }
     // operand = 123.45 (xsd:decimal, i3 f2), FILTER(?o > 123.40) -> true.
@@ -4337,8 +4339,7 @@ fn probe_filter_decimal_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the scan_k2 reconstruct unit test"]
 fn probe_scan_k2_public_inputs_hex() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping probe");
+    if !support::require_toolchain("probe_scan_k2_public_inputs_hex", &["nargo", "bb"]) {
         return;
     }
     // Two distinct named-graph credentials, each committed under its OWN salt
@@ -4790,8 +4791,7 @@ fn revocation_within_window_verifies() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (audit #12 happy path)"]
 fn revocation_full_prove_verify_non_revoked_verifies() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("revocation_full_prove_verify_non_revoked_verifies", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -4832,8 +4832,7 @@ fn revocation_full_prove_verify_non_revoked_verifies() {
 #[test]
 #[ignore = "slow: full bb prove (audit #12 revoked-end-to-end forge)"]
 fn revocation_full_prove_verify_revoked_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("revocation_full_prove_verify_revoked_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5111,8 +5110,7 @@ fn committed_index_disclosed_commitment_mismatch_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + the hidden-revocation member"]
 fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-revocation full prove+verify");
+    if !support::require_toolchain("hidden_revocation_unrevoked_verifies_and_index_is_private", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5180,8 +5178,7 @@ fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
 #[test]
 #[ignore = "slow: attempts a bb prove that must be unsatisfiable"]
 fn hidden_revocation_revoked_index_is_unprovable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-revocation unprovable case");
+    if !support::require_toolchain("hidden_revocation_revoked_index_is_unprovable", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5214,8 +5211,7 @@ fn hidden_revocation_revoked_index_is_unprovable() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + a forged-root hidden-revocation proof"]
 fn hidden_revocation_forged_root_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-revocation forged-root case");
+    if !support::require_toolchain("hidden_revocation_forged_root_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5323,7 +5319,12 @@ fn attest_with_status_fully_hidden(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef::fully_hidden(ref_commitment, index_commitment)),
@@ -5474,8 +5475,7 @@ fn prove_fully_hidden_revocation(
 #[test]
 #[ignore = "slow: full bb prove of a scan + a fully-hidden revocation proof"]
 fn full_manifest_fully_hidden_revocation() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping fully-hidden revocation e2e");
+    if !support::require_toolchain("full_manifest_fully_hidden_revocation", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5530,8 +5530,7 @@ fn full_manifest_fully_hidden_revocation() {
 #[test]
 #[ignore = "slow: full bb prove attempt of a revoked fully-hidden proof"]
 fn fully_hidden_revocation_revoked_credential_unprovable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping revoked fully-hidden case");
+    if !support::require_toolchain("fully_hidden_revocation_revoked_credential_unprovable", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5566,8 +5565,7 @@ fn fully_hidden_revocation_revoked_credential_unprovable() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + a forged-anchor fully-hidden proof"]
 fn fully_hidden_revocation_forged_anchor_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping fully-hidden forged-anchor case");
+    if !support::require_toolchain("fully_hidden_revocation_forged_anchor_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -5623,8 +5621,7 @@ fn fully_hidden_revocation_forged_anchor_rejected() {
 #[test]
 #[ignore = "slow: two full bb proves of a scan + fully-hidden revocation proof"]
 fn fully_hidden_revocation_linkage_reuse_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping fully-hidden linkage-reuse case");
+    if !support::require_toolchain("fully_hidden_revocation_linkage_reuse_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -6115,11 +6112,27 @@ fn hi_scan_manifest(prover: &CircuitProver, signer_sk: &SecretKey, tag: &str) ->
 fn hi_message(commitment: &Fr, salt: &Fr) -> Fr {
     let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
     let status_ref = sparq_zk::sig::status_ref_digest(&list_id, FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
+    sparq_zk::sig::presentation_message_with_status_and_scheme(
+        commitment,
+        salt,
+        &status_ref,
+        &string_canonical_scheme(),
+    )
+}
+
+/// The LEGACY method-UNBOUND (`ZKSIG_C3`) counterpart of [`hi_message`] -- the
+/// message a credential issued before the method-bound shapes existed carries.
+/// Used only by the test whose SUBJECT is the method policy's treatment of such
+/// a credential.
+fn hi_message_unbound(commitment: &Fr, salt: &Fr) -> Fr {
+    let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
+    let status_ref = sparq_zk::sig::status_ref_digest(&list_id, FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
     sparq_zk::sig::commitment_message_with_status(commitment, salt, &status_ref)
 }
 
 /// Prove the hidden_issuer_d4 circuit: `signer_sk` signed `m` (the status-bound
-/// message over `commitment`/`salt`); membership is proved against the tree of
+/// message over `commitment`/`salt`; METHOD-BOUND unless `method_bound` is
+/// false, which selects the legacy unbound message); membership is proved against the tree of
 /// `keyset`. `keyset` MUST be the canonical-order key set both prover and verifier
 /// use; the signer's index is its position there. Returns the assembled manifest
 /// field. (For the out-of-set test, the signer is NOT in `keyset` and we must
@@ -6135,16 +6148,31 @@ fn prove_hidden_issuer(
     commitment: &Fr,
     salt: &Fr,
     challenge: &Fr,
+    method_bound: bool,
     tag: &str,
 ) -> HiddenIssuerAttestation {
-    let m = hi_message(commitment, salt);
-    let sig = sparq_zk::sig::signature_from_hex(&signer_sk.sign_commitment_with_status(
-        commitment, salt,
-        &sparq_zk::sig::status_ref_digest(
-            &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
-            FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
-        ),
-    )).unwrap();
+    let status_ref = sparq_zk::sig::status_ref_digest(
+        &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
+        FIXTURE_STATUS_INDEX,
+        FIXTURE_STATUS_VERSION,
+    );
+    let (m, sig_hex) = if method_bound {
+        (
+            hi_message(commitment, salt),
+            signer_sk.sign_presentation_with_status_and_scheme(
+                commitment,
+                salt,
+                &status_ref,
+                &string_canonical_scheme(),
+            ),
+        )
+    } else {
+        (
+            hi_message_unbound(commitment, salt),
+            signer_sk.sign_commitment_with_status(commitment, salt, &status_ref),
+        )
+    };
+    let sig = sparq_zk::sig::signature_from_hex(&sig_hex).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer_sk.public_key(), &m, &sig).unwrap();
     let pks: Vec<_> = keys_in_order.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).expect("root");
@@ -6193,8 +6221,7 @@ fn hi_canonical_signers() -> Vec<SecretKey> {
 #[test]
 #[ignore = "slow: full bb prove of a scan + the hidden-issuer member"]
 fn hidden_issuer_in_set_verifies_and_key_is_private() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-issuer full prove+verify");
+    if !support::require_toolchain("hidden_issuer_in_set_verifies_and_key_is_private", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -6207,7 +6234,7 @@ fn hidden_issuer_in_set_verifies_and_key_is_private() {
     let signer_index = keyset.member_index(&signer_hex).expect("signer in K") as u64;
 
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_ok",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, true, "hi_ok",
     );
 
     // --- KEY-NOT-DISCLOSED assertion (the privacy goal). ---
@@ -6299,8 +6326,7 @@ fn hi_scan_manifest_no_clear_attestation(
 #[test]
 #[ignore = "slow: full bb prove of a scan + the hidden-issuer member (sq-xxg hidden-only)"]
 fn hidden_issuer_only_verifies_with_clear_key_absent() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-issuer-only full prove+verify");
+    if !support::require_toolchain("hidden_issuer_only_verifies_with_clear_key_absent", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -6319,7 +6345,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
     assert!(manifest.key_set.is_empty(), "no declared key_set");
 
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_only",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, true, "hi_only",
     );
     // The hidden entry MUST carry the salt so the verifier can recompute m for a
     // hidden-only commitment (no clear attestation to read it from).
@@ -6344,6 +6370,76 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
     );
 }
 
+/// HIDDEN-ONLY, METHOD POLICY: the manifest's `hidden_issuer_attestations[i].message`
+/// is a FREE field, so it has to be held to the candidate set — it is what selects
+/// the commitment method the hidden-issuer gate is then required to bind.
+///
+/// Over the same valid hidden-only proof as the happy path above:
+/// - the honest method-UNBOUND message verifies under the default policy, and is
+///   refused with `MethodNotAuthenticated` once the relying party requires an
+///   authenticated method (the credential attests none);
+/// - that same message replaced by a value matching NO candidate is refused with
+///   `HiddenIssuerMessageMismatch` under BOTH policies, so a declared message
+///   outside the candidate set cannot carry a presentation past the policy.
+#[test]
+#[ignore = "slow: full bb prove of a scan + the hidden-issuer member (hidden-only method policy)"]
+fn hidden_issuer_only_message_is_held_to_the_method_policy() {
+    use sparq_zk_compose::MethodPolicy;
+    if !support::require_toolchain("hidden_issuer_only_message_is_held_to_the_method_policy", &["nargo", "bb"]) {
+        return;
+    }
+    let prover = CircuitProver::from_crate_root();
+    let signer = test_issuer_sk(1);
+    let (mut manifest, c, salt) =
+        hi_scan_manifest_no_clear_attestation(&prover, "hi_policy_scan");
+    let challenge = Fr::from(0x2au64);
+    let keyset = hi_keyset();
+    let signers = hi_canonical_signers();
+    let signer_index = keyset
+        .member_index(&public_key_to_hex(&signer.public_key()))
+        .expect("signer in K") as u64;
+    let hidden = prove_hidden_issuer(
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, false, "hi_policy",
+    );
+    manifest.hidden_issuer_attestations = vec![hidden];
+    // The hidden entry declares the LEGACY method-UNBOUND message, so the
+    // default policy must refuse it and only the written-down downgrade accepts.
+    let permissive = hi_keyset().with_method_policy(MethodPolicy::current().admit_unbound());
+
+    let run = |m: &ProofManifest, ks: &KeySet, tag: &str| {
+        verify_manifest(
+            m, &prover, &scratch(tag), ks, &fresh_policy(),
+            &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(),
+            &EntailmentPolicy::simple_only(),
+            &nonce_for("0x2a"), &InMemorySeenNonces::new(),
+        )
+    };
+
+    match run(&manifest, &keyset, "hi_policy_default") {
+        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        other => panic!("expected MethodNotAuthenticated under the default policy, got {other:?}"),
+    }
+    run(&manifest, &permissive, "hi_policy_permissive")
+        .expect("admit_unbound accepts the honest method-unbound hidden-only presentation");
+
+    // The SAME proof, with the declared message replaced by a non-candidate value.
+    let mut mutated = manifest.clone();
+    mutated.hidden_issuer_attestations[0].message = FieldHex::from_field(&Fr::from(1u64));
+    // It is wire-expressible: it survives a JSON round-trip unchanged.
+    let round_tripped =
+        ProofManifest::from_json(&mutated.to_json()).expect("the mutated manifest parses");
+    assert_eq!(
+        round_tripped.hidden_issuer_attestations[0].message,
+        mutated.hidden_issuer_attestations[0].message
+    );
+    for (label, ks) in [("default", keyset.clone()), ("admit_unbound", permissive.clone())] {
+        match run(&round_tripped, &ks, "hi_policy_mutated") {
+            Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
+            other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
+        }
+    }
+}
+
 /// OUT-OF-SET KEY: a REAL signature by an issuer NOT in K. Its signature is valid
 /// (the schnorr gadget accepts it), but the key is not a member of the committed
 /// set, so the in-circuit membership fold cannot recompute key_set_root -- the
@@ -6352,8 +6448,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
 #[test]
 #[ignore = "slow: attempts a bb prove that must be unsatisfiable (out-of-set key)"]
 fn hidden_issuer_out_of_set_key_is_unprovable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-issuer out-of-set case");
+    if !support::require_toolchain("hidden_issuer_out_of_set_key_is_unprovable", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -6367,7 +6462,7 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&outsider.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&outsider.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     // The outsider's signature is itself VALID (control: verify it).
     assert!(sparq_zk::sig::verify(&outsider.public_key(), &m, &sig), "outsider's sig is valid");
     let schnorr = sparq_zk::sig::in_circuit_witness(&outsider.public_key(), &m, &sig).unwrap();
@@ -6392,8 +6487,7 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
 #[test]
 #[ignore = "slow: attempts a bb prove that must be unsatisfiable (forged sig)"]
 fn hidden_issuer_forged_signature_is_unprovable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-issuer forged-sig case");
+    if !support::require_toolchain("hidden_issuer_forged_signature_is_unprovable", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -6408,7 +6502,7 @@ fn hidden_issuer_forged_signature_is_unprovable() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     let mut schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     // Tamper s: now s*G != R + e*pk, the in-circuit equation is unsatisfiable.
     schnorr.s += Fr::from(1u64);
@@ -6431,8 +6525,7 @@ fn hidden_issuer_forged_signature_is_unprovable() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + a forged-root hidden-issuer proof"]
 fn hidden_issuer_forged_root_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping hidden-issuer forged-root case");
+    if !support::require_toolchain("hidden_issuer_forged_root_rejected", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -6455,7 +6548,7 @@ fn hidden_issuer_forged_root_rejected() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     let siblings = key_membership_witness(&forged_pks, HI_DEPTH, 0).unwrap();
     let witness = HiddenIssuerWitness { schnorr, index: 0, siblings };
@@ -6548,8 +6641,7 @@ fn double_credential_graph(score: u64) -> Vec<Triple> {
 /// operand, not a free input). Toolchain-gated (real nargo execute).
 #[test]
 fn filter_f64_witness_honest_proves_lie_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping filter_f64 witness soundness test");
+    if !support::require_toolchain("filter_f64_witness_honest_proves_lie_rejected", &["nargo", "bb"]) {
         return;
     }
     // operand = 25.0 (xsd:double), FILTER(?o >= 18.0) — true.
@@ -6584,8 +6676,7 @@ fn filter_f64_witness_honest_proves_lie_rejected() {
 /// `operand_enc` encodes fails the in-circuit `operand encoding mismatch` assert.
 #[test]
 fn filter_f64_operand_binding_rejects_substituted_value() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping filter_f64 operand-binding test");
+    if !support::require_toolchain("filter_f64_operand_binding_rejects_substituted_value", &["nargo", "bb"]) {
         return;
     }
     // operand_enc is for 25.0, but the prover witnesses digits for 99 (two digits,
@@ -6617,8 +6708,7 @@ fn filter_f64_operand_binding_rejects_substituted_value() {
 /// pins — but exercising the host build/render path the manifest actually uses.
 #[test]
 fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping composable signed-int witness soundness test");
+    if !support::require_toolchain("filter_signed_int_composable_witness_honest_proves_lie_rejected", &["nargo", "bb"]) {
         return;
     }
     // operand = -42 (xsd:integer, md=2), FILTER(?o < 1) — true (a negative is < +1).
@@ -6653,8 +6743,7 @@ fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
 /// manifest-composable wiring against the real decimal token binding.
 #[test]
 fn filter_decimal_composable_witness_honest_proves_lie_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping composable decimal witness soundness test");
+    if !support::require_toolchain("filter_decimal_composable_witness_honest_proves_lie_rejected", &["nargo", "bb"]) {
         return;
     }
     // operand = 123.45 (xsd:decimal, i3 f2), FILTER(?o > 123.40) — true.
@@ -6694,8 +6783,7 @@ fn filter_decimal_composable_witness_honest_proves_lie_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + composable filter_f64 member (sq-q7e/sq-tat)"]
 fn filter_f64_composes_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping filter_f64 e2e composition");
+    if !support::require_toolchain("filter_f64_composes_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let salt = salt_from_bytes(&[7u8; 32]);

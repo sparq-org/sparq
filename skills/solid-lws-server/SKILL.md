@@ -73,8 +73,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. An update that times out
   can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions are fenced against that, but resource writes and their
-  rollback are not, so the native LWS server still refuses this backend (below).
+  requests and subscriptions, and the content write of a resource create, are fenced
+  against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -105,7 +105,18 @@ Generate the DPoP proof for the exact HTTP method and target URI. Reusing a
 proof fails because its `jti` is replay-protected. A valid token proves identity
 but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
-`acl:Control` mode.
+`acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
+it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
+the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
+without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
+N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
+any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
+bytes are still read and rewritten whole, so the time an append takes follows their size. A
+reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
+N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
+`PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it
+(whether it may go depends on what it holds). A `POST` names its member
+with the slug and a random suffix, so the name says nothing of what else was created.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
 or `acl:AuthenticatedAgent`, or `acl:agentGroup`. A group grant resolves only when
@@ -185,8 +196,16 @@ conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
 listing can change without moving their recorded time. `If-Modified-Since` on a
-read accepts the same three forms. As with a concrete ETag validator, a
-writer without Read on the target is refused rather than told the outcome.
+read accepts the same three forms. A `GET` or `HEAD` evaluates `If-Match` and
+`If-Unmodified-Since` too, before `If-None-Match`, and answers `412` when they
+fail; on a read `If-Match` must name the tag of the representation selected,
+not another format's. An entity-tag list may span several header lines; one that
+is not the RFC 9110 grammar (only space and tab may surround a tag) names no tag,
+so it fails `If-Match` and never triggers `If-None-Match`. A `Range` applies only
+while `If-Range`, when sent on one header line, is the strong `ETag` of the
+representation selected; otherwise the whole body is served. As with a concrete
+ETag validator, a writer without Read on the target is refused rather than told
+the outcome.
 Container reads include generated `ldp:contains` triples. A container's `ETag`
 covers its own record and its membership: a tag read in any format is a valid
 `If-Match` for the container until it or its membership changes. Creating a
@@ -197,7 +216,14 @@ same bytes.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
-are themselves protected by `acl:Control`.
+are themselves protected by `acl:Control`. A name ending in `.meta` (any case, %-decoded too)
+is where the LWS surface keeps a resource's linkset record, so the LDP surface answers `404` for
+it on every method a request is routed for (a CORS preflight is answered before routing),
+whichever surfaces are enabled. A container of that name (`X.meta/`) and what lies under it are
+ordinary resources: a stored record never lists as a member, conflicts with that container or
+serves as a group document, and a container whose only members are such records is empty. So
+is any path under `/.lws/` below the storage root, where the LWS surface keeps its grants, access
+requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`) is a `400`; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
 
 ## Negotiate RDF representations
 
@@ -265,16 +291,58 @@ self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
 because a remote write reported as failed may still commit later. Only the creates and
-removals of service records (grants, requests, subscriptions) are fenced against that (see
-below); resource writes, and putting a failed change back, are not.
+removals of service records (grants, requests, subscriptions), and a resource create's
+content write, are fenced against that (see below); other resource writes, and putting a
+failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
-that; the owner's subscriptions are not counted), the server at most 512 of each (507),
-and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
-access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
-separate share of 512. Stored requests or subscriptions past these quotas at startup (stored
-before a quota was lowered, or written to the store directly) are all loaded and none is removed;
-the start logs a line naming the container and what is past which quota, and no new one is
-admitted to a share until it is under its quota. An access document nested too deeply to store and read back gets 400. A
+that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
+(413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
+holds never makes it smaller, and the count behind a 429 is read from the requester's own
+records alone. The server holds at most 512 access requests and 512 subscriptions in all (507),
+the storage owner's subscriptions counted apart against 512 of its own. Those totals are
+resource bounds, not capacities: a 507 says the storage is full of subscriptions (or of access
+requests) **whoever filled it** — a newcomer holding none is refused the same. One subscriber
+cannot reach a total on its own, being held to 16.
+**Subscriptions have storage of their own.** In the in-memory store they are admitted against a
+service pool (`in_service_pool`, `InMemoryStoreLimits::max_pool_resource_count` and
+`max_pool_bytes`, sized for the 1,024 the notification service admits) and take nothing from the
+content ceilings (`max_resource_count`, `max_total_bytes`), so no number of subscriptions, from
+any number of identities, can make a write of content answer 507. A full pool refuses a
+subscription create (507) and nothing else. **Residual:** that 507 is an aggregate-occupancy
+signal — a requester well under its own 16 learns from it that the pool is full, which is
+something about how many subscriptions others hold. It is the occupancy of a bounded shared
+resource, as the access-request total is, and it carries no subscriber, topic or inbox; it is
+the signal a shared resource bound cannot avoid giving, kept to the subscription pool so it
+never reaches a content write.
+A type-search filter is at most 8 KiB and an
+access grant 256 KiB; these limits apply while the body is read. Stored requests or subscriptions
+past these bounds at startup (stored
+before one was lowered, or written to the store directly) are all loaded and none is removed;
+the start logs a line naming the container and what is past which bound, and no new one is
+admitted to a bound until it is under it. A subscription create removes up to 16 expired
+subscriptions **of its own subscriber's** before it is counted, so the purging it waits for is
+its own records'. Everyone else's are removed by an expiry sweeper that runs every 2 seconds
+(and when a create goes through) for as long as the server does, whether any create is admitted
+or refused. Each sweep looks at most at 256 subscriptions, from where the last one stopped, and
+starts at most 16 removals at once, in places of their own that request load cannot take; each
+removal is given up after 2 minutes, longer than a healthy store's calls take (a degraded
+store may still cut one short; one that never completes holds up no other), and one that fails, is given up or (in a build that
+unwinds) panics is tried again after a wait that doubles from 10
+seconds to 10 minutes; a removal whose delete the store leaves unknown is settled within that
+same deadline, never handed on, so its place comes back with it. The sweeper stops, aborting
+the removals under way, as soon as the server's last handle is dropped. Removal is eventual, subject to the store making
+progress: removals contend with requests for the store and its index, and a store that never
+answers delays them indefinitely. A start removes every expired subscription it loads. A
+subscriber's conditional subscription create compares its own listing, and holds only that
+listing (and the container, shared) while it is evaluated and until the new subscription is
+registered (when the store leaves the create's outcome unknown, it holds that listing shared
+until the outcome is settled, so the subscriber's other creates and removals go on meanwhile):
+what it waits on is a change to its own subscriptions, the inline purge of its own expired ones
+above, or the owner's conditional create (which holds the container alone, and once queued keeps
+later shared holders waiting behind it, so then, for at most the lock wait, another
+subscriber's change too), never another subscriber's create or removal otherwise, and never
+the sweeper's removal of anyone else's expired subscription, which is listed nowhere (once seen
+expired, a subscription stays expired, even if the clock is stepped back). An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -309,9 +377,17 @@ What the server exposes, all discoverable from the storage description
 - **Storage**: `application/lws+json` containers with paging links, data resources with
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
-  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
-  which take `PATCH` with JSON Patch (advertised in `Allow` and `Accept-Patch`; a failed
-  precondition gets `412`). A linkset `PATCH` changes only user-managed links: the
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`
+  (a linkset has none of its own: `{resource}.meta.meta` is `404`, or the challenge),
+  which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
+  (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
+  `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
+  in one write and is checked as a `PATCH` result is (its `204` carries no `ETag`, since what is
+  stored is the document resolved and with the server-managed links; a `GET` reads the tag); its body is at most what the metadata may
+  hold (`413` past it, unread), and before it is parsed a scan that keeps nothing charges it as
+  the patch is charged and refuses it (`413`) past what keeps parsing it (the same reader again,
+  keeping what it reads) within the linkset cost budget beyond the body itself; a number in it
+  gets `422`, text that is not JSON (or nests past what the parser reads) `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
   server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
   values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
@@ -328,7 +404,7 @@ What the server exposes, all discoverable from the storage description
   relative reference grown by the base) to 2 MiB; past any of these, `413`. A document with
   members besides `linkset` gets `422`. A `Link` header on a create or replace is held to the
   same target and length caps (`431` past them). Every write that stores a linkset (a create, a
-  replace, a linkset `PATCH`) checks the document it would serve, with the server-managed links
+  replace, a linkset `PATCH` or `PUT`) checks the document it would serve, with the server-managed links
   put back and the representation's size at its longest, against exactly what a linkset `PATCH`
   checks its target with (those caps, that cost, and the metadata's size limit), and gets `413`
   past it, so whatever is stored can be patched. A linkset stored before these checks that
@@ -353,8 +429,10 @@ What the server exposes, all discoverable from the storage description
   values their texts denote (zero is zero whatever its sign or exponent). A number longer than
   1,024 characters, or whose power of ten does not fit 64 bits, in the patch or the resource, gets
   `422`; a resource whose text is not JSON as written gets `415`. Sizes are those of the JSON as
-  written, and a `test` is charged for what it reads of both sides. A patch that reads the content (`test`, `copy`, `move`) needs
-  Read as well as Modify. A `POST` whose request is cancelled after the member is written is
+  written, and a `test` is charged for what it reads of both sides. A patch reads what it patches (whether
+  even an `add` of one member applies depends on the document's shape, format and size), so a
+  `PATCH`, of a resource or of its linkset, needs Read as well as Modify, and without it is
+  refused (`401`/`403`) before anything about the target answers it. A `POST` whose request is cancelled after the member is written is
   still announced; a `DELETE` that fails, and is being put back, announces nothing. `livez` and
   `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
@@ -419,7 +497,9 @@ What the server exposes, all discoverable from the storage description
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
-  create or removal answers `503` with `Retry-After`. The tasks that settle them belong to the
+  create or removal answers `503` with `Retry-After`. Residual: requests and the settling of
+  outcomes the store left unknown share those 256 places, so while many outcomes wait to be
+  settled (a store that keeps failing), any caller's create or removal can get that `503`. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
@@ -460,7 +540,7 @@ What the server exposes, all discoverable from the storage description
   subscriptions to its own service container (not to one to the storage root): the owner and the
   record's author may hear of it. A stored subscription that cannot be read stops the start; one
   whose stored body is not a subscription is quarantined as access records are: listed to the
-  owner, counted against both shares, `500` to a read, removed by the owner's `DELETE` as any
+  owner, counted against both totals, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
   not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
@@ -472,16 +552,48 @@ What the server exposes, all discoverable from the storage description
   owed. Both are counted in memory from the start, and only for a change that happened (a delete
   that fails counts nothing). The authorization for one change has no budget of its own (one
   party's subscriptions that may not read the resource could spend it before an authorized one is
-  reached): the subscription quotas cap it at one check per subscription in force (at most
+  reached): the subscription totals cap it at one check per subscription in force (at most
   1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
   resource's access taken for the change, so its metadata is read and the grants are scanned
-  once per change. A recursive delete too large to put back is refused before any of its
+  once per change. Taking a place in the delivery queue, parsing each inbox and running each
+  delivery leave the request's task before any of them is queued, on a task of their own
+  (`Notifier::send`), so a delivery target that never answers holds up neither that change nor
+  the next, and the request does not do the per-delivery work of however many subscriptions the
+  change has. When the runtime runs that task is the runtime's business: the deliveries are off
+  the request's task, which is not a promise that they happen after the response reaches the
+  client. Who hears of the change is still decided on the request's task, while its locks are
+  held.
+  A recursive delete too large to put back is refused before any of its
   notifications is prepared.
-- Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
+- Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
-  `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
-  anything is removed. When putting back fails too, it is tried a few more times with the
+  `Last-Modified`) are as they were. A recursive delete too large to put back is refused with
+  `409` before anything is removed. Nothing is copied to put a resource back: the store holds
+  the bytes its record points at (a hold, itself stored, so a stop leaves nothing unaccounted
+  for) and the record is put back pointing at them, validators included. Each change's holds are
+  its own (two changes holding the same bytes each release only theirs). Bytes a record leaves are
+  reclaimed in two steps through the index, whichever server instance acts: they are first named
+  as being reclaimed, in one step that also finds no record naming them (a resource's, or a
+  hold's), so none can come to name them again; only then are they deleted (a reclaim a stop cut
+  short is finished at the next start). That step relies on the index applying updates one at a
+  time: the embedded store or sparq-server; another SPARQL endpoint is not supported behind a
+  storage that holds bytes. The holds go once the change is kept or put back, and a start
+  releases any of this storage's holds whose change's intent is gone or says it was kept. So no delete is
+  refused for the size of what is stored, and none answers `507` for want of room to copy it.
+  Residuals: what bounds a recursive delete (`409`) is how many resources it removes and the size
+  of their metadata (types, links and linkset, which it reads to decide who may act on them while
+  the delete is in flight), never their content; hold records (a few fixed fields per resource a
+  change touches) are not counted against the storage's quota, but intents are (each carries the
+  metadata records it would put back), so in a storage at its ceiling a change that needs one is
+  refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
+  and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
+  (or, the process stopping first, the next start); and a response's status, timing and quota
+  outcome are independent of the content of the resources a change touches, not of their
+  metadata, of the room others leave in the shared quota, or of the backends' and the index's
+  own work. A start
+  settles every intent of its storage and releases holds as if no other process served it: one
+  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
@@ -539,7 +651,29 @@ What the server exposes, all discoverable from the storage description
   (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
-  nothing.
+  nothing. A write whose precondition compares the target's state (a tag in `If-Match` or
+  `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
+  and on a conditional `POST` Read on the container whose listing it compares (an access request's
+  listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
+  outcome would have been. A bare `*` asks only whether the target exists and needs no Read: a writer learns
+  that much from any write's response (`201` or `204`, a `DELETE`'s `404`). The Read check comes
+  first, before the target's existence, format or metadata decide anything, and an
+  `If-Unmodified-Since` counts as a comparison on every route that evaluates dates, whether or not
+  the target has a recorded time. A
+  precondition that compares no state (`*`, or a field the write ignores or cannot read) is
+  evaluated on the target's existence alone, without its listing, so neither a page past the last
+  nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
+  root compares its public storage description, which needs no Read. A data `PUT`'s, or any
+  `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
+  that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
+  follow from what is stored needs Read as well as Modify (or Delete): a `PUT` replacing a data
+  resource (it keeps the stored links and types, which decide whether it is admitted), a whole
+  linkset `PUT`, every `PATCH`, and a container `DELETE`. A `Slug`
+  names a new member only for a writer that may read the container; anyone else's member gets a
+  name the server chooses, so the name says nothing about which members are there. A
+  subscriber's subscription listing, and its `ETag`, change only with its own subscriptions, and
+  are read through a per-subscriber index, so neither what it is shown nor the work taken to
+  show it grows with how many subscriptions anyone else holds.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link

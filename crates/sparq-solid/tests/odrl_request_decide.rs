@@ -853,7 +853,7 @@ fn grants_need_a_current_covered_graph() {
         "nquads",
     )
     .expect("loads");
-    s.graph.named.extend(added.named);
+    s.graph_unchecked_mut().named.extend(added.named);
     assert!(!s.decide(&bob, fresh, Mode::Read).allow, "created since the materialization");
     assert!(!reads(&s, &bob, fresh));
     s.materialize_wac().expect("wac");
@@ -963,7 +963,8 @@ fn control_and_rules_are_untouched() {
         );
     }
     assert!(s.decide(&alice, "https://pod.ex/.acl", Mode::Write).allow);
-    let acl_write = "INSERT DATA { GRAPH <https://pod.ex/.acl> { <urn:x> <urn:y> 1 } }";
+    let acl_write =
+        "INSERT DATA { GRAPH <https://pod.ex/.acl> { <https://pod.ex/.acl#x> <urn:y> 1 } }";
     s.update_as(&alice, acl_write)
         .expect("alice still edits her rules");
 }
@@ -1207,4 +1208,202 @@ fn read_prohibitions_reach_update_conditions() {
         .expect("query");
     assert!(copied.contains("hello"), "readable data is copied: {copied}");
     assert!(!copied.contains("private"), "prohibited data leaked: {copied}");
+}
+
+/// Policies come only from the embedding application through
+/// [`PodStore::attach_odrl_policy`]: an ODRL policy a session writes into pod documents
+/// it controls, including its own access-control document, grants nothing, while the
+/// same policy attached by the application does.
+#[test]
+fn policies_in_pod_data_are_never_attached() {
+    let bob_acl = "\
+<https://pod.ex/bob/x#it> <https://ex.dev/ns#title> \"bob\" <https://pod.ex/bob/x> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/bob/> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/bob/> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <https://pod.ex/bob/.acl> .
+";
+    let mut s = bare_store_with(bob_acl);
+    let bob = session(Some(BOB), None);
+    for doc in ["https://pod.ex/bob/x", "https://pod.ex/bob/.acl"] {
+        let ins = format!(
+            "INSERT DATA {{ GRAPH <{doc}> {{ \
+             <{doc}#p> a <{ODRL}Set> ; <{ODRL}permission> <{doc}#r> . \
+             <{doc}#r> <{ODRL}action> <{ODRL}read> ; <{ODRL}target> <{N2}> ; \
+             <{ODRL}assignee> <{BOB}> }} }}"
+        );
+        s.update_as(&bob, &ins)
+            .unwrap_or_else(|e| panic!("bob may write {doc}: {e}"));
+    }
+    assert!(!reads(&s, &bob, N2), "a stored policy granted access");
+    s.attach_odrl_policy(policy("permission", "read", "", Some(BOB), Some(N2)).expect("policy"))
+        .expect("attach");
+    assert!(reads(&s, &bob, N2), "the attached policy grants access");
+}
+
+/// A resource whose access control document cannot be used gets no grant from any source:
+/// not from an attached ODRL permission, and not from one bridged into the view.
+#[test]
+fn a_rejected_access_control_document_withholds_every_grant_source() {
+    let acp = "http://www.w3.org/ns/solid/acp#";
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let (root, acr) = ("https://pod.ex/.acr", format!("{N2}.acr"));
+    let pod = format!(
+        "<{N1}#it> <https://ex.dev/ns#title> \"hello\" <{N1}> .\n\
+         <{N2}#it> <https://ex.dev/ns#title> \"private\" <{N2}> .\n\
+         <{root}> <{acp}memberAccessControl> <{root}#c> <{root}> .\n\
+         <{root}#c> <{acp}apply> <{root}#all> <{root}> .\n\
+         <{root}#all> <{acp}allow> <{acl}Read> <{root}> .\n\
+         <{root}#all> <{acp}anyOf> <{root}#pub> <{root}> .\n\
+         <{root}#pub> <{acp}agent> <{acp}PublicAgent> <{root}> .\n\
+         <{acr}> <{acp}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#deny> <{acr}> .\n\
+         <{acr}#deny> <{acp}deny> <{acl}Read> <{acr}> .\n\
+         <{acr}#deny> <{acp}allOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{acp}agent> <{UNSEEN}> <{acr}> .\n"
+    );
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{acr}> .\n");
+    let dave = session(Some(UNSEEN), None);
+    let pol = policy("permission", "read", "", Some(UNSEEN), Some(N2)).expect("policy");
+    for (nq, label) in [(pod.clone(), "usable"), (format!("{pod}{stray}"), "rejected")] {
+        let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        s.materialize_acp().expect("acp");
+        assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: the root policy applies");
+        assert!(!reads(&s, &dave, N2), "{label}: no static grant");
+        s.attach_odrl_policy(pol.clone()).expect("attach");
+        assert!(!reads(&s, &dave, N2), "{label}: no attached grant");
+        let bridged = Request::new(format!("{ODRL}read")).on(N2).by(UNSEEN);
+        assert!(s.materialize_odrl_permission(&pol, &bridged).granted, "{label}: bridged");
+        assert!(!reads(&s, &dave, N2), "{label}: no bridged grant");
+    }
+}
+
+/// The same under WAC: a resource whose governing ACL cannot be used gets no grant from
+/// an attached or bridged ODRL permission either. A resource below it with an ACL of its
+/// own is governed by that ACL and unaffected.
+#[test]
+fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    let (notes_acl, n1_acl) = (format!("{NOTES}.acl"), format!("{N1}.acl"));
+    let pod = format!(
+        "<{N1}#it> <https://ex.dev/ns#title> \"hello\" <{N1}> .\n\
+         <{N2}#it> <https://ex.dev/ns#title> \"private\" <{N2}> .\n\
+         <{notes_acl}#a> <{rdf_type}> <{acl}Authorization> <{notes_acl}> .\n\
+         <{notes_acl}#a> <{acl}default> <{NOTES}> <{notes_acl}> .\n\
+         <{notes_acl}#a> <{acl}agent> <{ALICE}> <{notes_acl}> .\n\
+         <{notes_acl}#a> <{acl}mode> <{acl}Control> <{notes_acl}> .\n\
+         <{n1_acl}#a> <{rdf_type}> <{acl}Authorization> <{n1_acl}> .\n\
+         <{n1_acl}#a> <{acl}accessTo> <{N1}> <{n1_acl}> .\n\
+         <{n1_acl}#a> <{acl}agent> <{ALICE}> <{n1_acl}> .\n\
+         <{n1_acl}#a> <{acl}mode> <{acl}Read> <{n1_acl}> .\n"
+    );
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{notes_acl}> .\n");
+    let dave = session(Some(UNSEEN), None);
+    let pol = policy("permission", "read", "", Some(UNSEEN), Some(N2)).expect("policy");
+    for (nq, usable) in [(pod.clone(), true), (format!("{pod}{stray}"), false)] {
+        let label = if usable { "usable" } else { "rejected" };
+        let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        s.materialize_wac().expect("wac");
+        assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1's own ACL applies");
+        assert!(!reads(&s, &dave, N2), "{label}: no static grant");
+        s.attach_odrl_policy(pol.clone()).expect("attach");
+        for pass in ["cold", "warm"] {
+            assert_eq!(reads(&s, &dave, N2), usable, "{label} ({pass}): the attached grant");
+        }
+        s.detach_odrl_policies();
+        let bridged = Request::new(format!("{ODRL}read")).on(N2).by(UNSEEN);
+        assert!(s.materialize_odrl_permission(&pol, &bridged).granted, "{label}: bridged");
+        assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant");
+        s.materialize_wac().expect("wac again");
+        assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant, replayed");
+        // A resource the rejected ACL governs that does not exist yet is withheld too.
+        let fresh = format!("{NOTES}not-yet");
+        let pol_new = policy("permission", "read", "", Some(UNSEEN), Some(&fresh)).expect("policy");
+        let bridged_new = Request::new(format!("{ODRL}read")).on(&fresh).by(UNSEEN);
+        assert!(
+            s.materialize_odrl_permission(&pol_new, &bridged_new)
+                .granted,
+            "{label}: bridged"
+        );
+        assert_eq!(
+            s.decide(&dave, &fresh, Mode::Read).allow,
+            usable,
+            "{label}: the bridged grant on a resource not created yet"
+        );
+        // So is the access-control document of a resource it governs.
+        let n2_acl = format!("{N2}.acl");
+        let pol_acl =
+            policy("permission", "read", "", Some(UNSEEN), Some(&n2_acl)).expect("policy");
+        let bridged_acl = Request::new(format!("{ODRL}read")).on(&n2_acl).by(UNSEEN);
+        assert!(
+            s.materialize_odrl_permission(&pol_acl, &bridged_acl).granted,
+            "{label}: the bridge installs the grant"
+        );
+        assert_eq!(
+            s.decide(&dave, &n2_acl, Mode::Read).allow,
+            usable,
+            "{label}: the bridged grant on n2's access-control document"
+        );
+        assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1 is still governed by its ACL");
+        // n1 and its own ACL are governed by that ACL, whatever its container's: a bridged
+        // grant on either applies.
+        for target in [N1, n1_acl.as_str()] {
+            let pol_t =
+                policy("permission", "read", "", Some(UNSEEN), Some(target)).expect("policy");
+            let bridged_t = Request::new(format!("{ODRL}read")).on(target).by(UNSEEN);
+            assert!(
+                s.materialize_odrl_permission(&pol_t, &bridged_t).granted,
+                "{label}: bridged"
+            );
+            assert!(
+                s.decide(&dave, target, Mode::Read).allow,
+                "{label}: the bridged grant on {target}"
+            );
+        }
+    }
+}
+
+/// Under ACP an access-control resource is a resource of its own: when the one that governs
+/// it is rejected, no bridged grant applies to it either.
+#[test]
+fn a_rejected_acr_of_an_acr_withholds_bridged_grants_on_it() {
+    let acp = "http://www.w3.org/ns/solid/acp#";
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let acr = format!("{N2}.acr");
+    let meta = format!("{acr}.acr");
+    let pod = format!(
+        "<{N2}#it> <https://ex.dev/ns#title> \"private\" <{N2}> .\n\
+         <{acr}> <{acp}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#p> <{acr}> .\n\
+         <{acr}#p> <{acp}allow> <{acl}Read> <{acr}> .\n\
+         <{acr}#p> <{acp}anyOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{acp}agent> <{ALICE}> <{acr}> .\n\
+         <{meta}> <{acp}accessControl> <{meta}#c> <{meta}> .\n\
+         <{meta}#c> <{acp}apply> <{meta}#p> <{meta}> .\n\
+         <{meta}#p> <{acp}allow> <{acl}Read> <{meta}> .\n\
+         <{meta}#p> <{acp}anyOf> <{meta}#m> <{meta}> .\n\
+         <{meta}#m> <{acp}agent> <{ALICE}> <{meta}> .\n"
+    );
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{meta}> .\n");
+    let dave = session(Some(UNSEEN), None);
+    let pol = policy("permission", "read", "", Some(UNSEEN), Some(&acr)).expect("policy");
+    for (nq, usable) in [(pod.clone(), true), (format!("{pod}{stray}"), false)] {
+        let label = if usable { "usable" } else { "rejected" };
+        let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        s.materialize_acp().expect("acp");
+        let bridged = Request::new(format!("{ODRL}read")).on(&acr).by(UNSEEN);
+        assert!(
+            s.materialize_odrl_permission(&pol, &bridged).granted,
+            "{label}: bridged"
+        );
+        assert_eq!(
+            s.decide(&dave, &acr, Mode::Read).allow,
+            usable,
+            "{label}: the bridged grant on n2's access-control resource"
+        );
+    }
 }

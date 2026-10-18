@@ -17,6 +17,21 @@ Toolchain baselined for these counts: `bb 5.0.0-nightly.20260324`, `nargo 1.0.0-
 
 ## Successful-result circuits (released mapping support)
 
+### `result_v5`
+
+Version 5 support for released SELECT DISTINCT mappings, identical in capacity and public ABI to the version-1 f=0 profile but folding the METHOD-BOUND presentation message, so the issuer signature attests the string-canonical commitment METHOD and not merely the commitment. The scheme digest is a compile-time constant of the relation, not a public input. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v5_k1_n16_p3_r4_f0_d10` | k=1, n=16, p=3, r=4, f=0, d=10 | 32,290 |
+| `result_v5_k2_n16_p3_r4_f0_d10` | k=2, n=16, p=3, r=4, f=0, d=10 | 59,104 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `k` | 1 (32,290) | 2 (59,104) | n=16, p=3, r=4, f=0, d=10 | +26,814 | 1.8304 |
+
 ### `result_v4`
 
 Version 4 support for released SELECT DISTINCT mappings. The first BGP pattern whose slots are all constants or projected variables is moved to index zero and checked against a public triple table the verifier reconstructs from its query and the released rows, instead of private typed openings. Issuer authentication, credential status (tree depth d), leaf membership and the remaining patterns' private typed and shared-variable joins stay in-circuit. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.
@@ -308,6 +323,7 @@ VALUE lane: FILTER against the committed value handle of the dual-leaf commitmen
 
 | member | parameters | `circuit_size` |
 | --- | --- | --- |
+| `filter_value_dl_bool` | datatype=bool | 3,032 |
 | `filter_value_dl_datetime` | datatype=datetime | 3,070 |
 | `filter_value_dl_decimal` | datatype=decimal | 3,070 |
 | `filter_value_dl_f64` | datatype=f64 | 4,502 |
@@ -395,4 +411,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 69 of 69 snapshot members across 18 families, 77 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 72 of 72 snapshot members across 19 families, 78 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.

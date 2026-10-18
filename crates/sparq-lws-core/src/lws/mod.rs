@@ -579,6 +579,14 @@ pub struct ResourceMeta {
     pub pending: bool,
 }
 
+/// Whether `iri` names a linkset's stored record rather than a resource: no resource's name ends
+/// in [`META_SUFFIX`], in any case (see `resources::sanitize_slug`), so whatever is stored under
+/// such a name is never served, listed, followed or subscribed to as a resource.
+pub(crate) fn names_record(iri: &str) -> bool {
+    let n = META_SUFFIX.len();
+    iri.len() >= n && iri.as_bytes()[iri.len() - n..].eq_ignore_ascii_case(META_SUFFIX.as_bytes())
+}
+
 /// The store key of a resource's LWS metadata, which is also its linkset's URI (the draft's own
 /// convention): `/a/b` maps to `/a/b.meta` and the container `/a/b/` to `/a/b/.meta`. Clients can
 /// never create a resource whose name ends with `.meta` or starts with a dot, so the keys never
@@ -590,12 +598,18 @@ pub fn meta_key(iri: &str) -> String {
 /// Shared server state; cheap to clone.
 pub struct LwsState<S: Store> {
     inner: Arc<Inner<S>>,
+    /// Held by the handle [`LwsState::new`] returns and every clone of it, never by a task the
+    /// state runs for itself ([`LwsState::detached`]): once the last is dropped, the state's
+    /// maintenance (the expiry sweeper, see `notify::spawn_expiry_sweeper`) stops, whatever
+    /// its tasks still hold.
+    owner: Option<Arc<tokio::sync::watch::Sender<()>>>,
 }
 
 impl<S: Store> Clone for LwsState<S> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            owner: self.owner.clone(),
         }
     }
 }
@@ -622,6 +636,9 @@ pub struct Inner<S: Store> {
     owed_touches: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
     /// The record changes being made or settled (see [`records::Settlements`]).
     pub(crate) settlements: records::Settlements,
+    /// Holds whose release failed, each with its holder: tried again by the maintenance
+    /// sweeper (see [`LwsState::unreleased`]).
+    unreleased: std::sync::Mutex<Vec<(String, StoredMeta)>>,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -633,11 +650,22 @@ pub(crate) struct WeakState<S: Store> {
 impl<S: Store> WeakState<S> {
     /// The state, while anything else still holds it.
     pub(crate) fn upgrade(&self) -> Option<LwsState<S>> {
-        self.inner.upgrade().map(|inner| LwsState { inner })
+        self.inner
+            .upgrade()
+            .map(|inner| LwsState { inner, owner: None })
     }
 }
 
 impl<S: Store> LwsState<S> {
+    /// A handle to the state for a task the state runs for itself: it keeps the state alive,
+    /// but not its maintenance (see [`LwsState`]'s `owner`).
+    pub(crate) fn detached(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            owner: None,
+        }
+    }
+
     /// A handle to the state that does not keep it alive.
     pub(crate) fn downgrade(&self) -> WeakState<S> {
         WeakState {
@@ -654,16 +682,9 @@ impl<S: Store> std::ops::Deref for LwsState<S> {
 }
 
 impl<S: Store + 'static> LwsState<S> {
-    /// A [`Journal`] for one mutation, bounded to what any one write could need to put back (a
-    /// body at the limit and its metadata, twice) and never below 64 MiB.
+    /// A [`Journal`] for one mutation, bounded to [`JOURNAL_LIMIT`] (see [`Journal::stage`]).
     pub(crate) fn journal(&self) -> Journal<'_, S> {
-        let limit = (64usize << 20).max(
-            self.cfg
-                .max_body
-                .saturating_add(MAX_META_BYTES)
-                .saturating_mul(2),
-        );
-        Journal::new(self, limit)
+        Journal::new(self, JOURNAL_LIMIT)
     }
 
     /// Build the state: ensure the storage root and the service containers exist, put back any
@@ -686,7 +707,9 @@ impl<S: Store + 'static> LwsState<S> {
         // record's create or removal among them).
         let access = access::AccessStore::empty();
         let notify = notify::Notifier::new(&cfg)?;
+        let (owner, closed) = tokio::sync::watch::channel(());
         let state = Self {
+            owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
                 store: tracked::Tracked::new(store, cfg.storage()),
                 cfg,
@@ -698,6 +721,7 @@ impl<S: Store + 'static> LwsState<S> {
                 untouched: Default::default(),
                 owed_touches: Default::default(),
                 settlements: Default::default(),
+                unreleased: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -714,6 +738,7 @@ impl<S: Store + 'static> LwsState<S> {
             .await?;
         state.access.replace(loaded);
         state.settle_hidden(hidden);
+        notify::spawn_expiry_sweeper(&state, closed);
         Ok(state)
     }
 
@@ -729,6 +754,35 @@ impl<S: Store + 'static> LwsState<S> {
     /// Record that the intent `record` of a kept change is to be cleared once the container
     /// `uri` is next touched: a stop before then leaves it, and the next start touches the
     /// container (see the `intents` module).
+    /// Keep `holder`'s hold on `meta`'s bytes, whose release failed, for the maintenance
+    /// sweeper to release ([`LwsState::release_unreleased`]).
+    pub(crate) fn release_later(&self, holder: &str, meta: &StoredMeta) {
+        let mut unreleased = self.unreleased.lock().unwrap_or_else(|e| e.into_inner());
+        if unreleased.len() < UNRELEASED_LIMIT {
+            unreleased.push((holder.to_string(), meta.clone()));
+        }
+    }
+
+    /// Whether a hold waits to be released again.
+    pub(crate) fn has_unreleased(&self) -> bool {
+        !self
+            .unreleased
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    }
+
+    /// Release again every hold whose release failed; one that fails again waits for the next.
+    pub(crate) async fn release_unreleased(&self) {
+        let waiting =
+            std::mem::take(&mut *self.unreleased.lock().unwrap_or_else(|e| e.into_inner()));
+        for (holder, meta) in waiting {
+            if self.store.release(&meta, &holder).await.is_err() {
+                self.release_later(&holder, &meta);
+            }
+        }
+    }
+
     pub(crate) fn owe_touch(&self, uri: &str, record: String) {
         self.owed_touches
             .lock()
@@ -811,7 +865,15 @@ impl<S: Store + 'static> LwsState<S> {
     /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
     /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
-        let hidden = self.hide(&left);
+        let hidden = self.hide(&left, true);
+        self.settle_aside(left, hidden, locks);
+    }
+
+    /// Set aside `left` as [`LwsState::set_aside`] does, but hide only its own resources: for a
+    /// change no container lists (a create whose content was never written), so its containers
+    /// stay visible and their locks need not be held.
+    pub(crate) fn set_aside_unlisted<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let hidden = self.hide(&left, false);
         self.settle_aside(left, hidden, locks);
     }
 
@@ -827,7 +889,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Hide each of `all`, to be put back by [`LwsState::settle_hidden`]: until then nothing of
     /// them is put back, so what is not visible stays so.
     pub(crate) fn hide_all(&self, all: Vec<Unsettled>) -> Hidden {
-        let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
+        let hidden: Vec<_> = all.iter().map(|left| self.hide(left, true)).collect();
         Hidden(all.into_iter().zip(hidden).collect())
     }
 
@@ -838,16 +900,18 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// Hide the resources of `left` and the containers listing them, and count what it holds to
-    /// put back: what [`LwsState::settle_aside`] undoes once it is back.
-    fn hide(&self, left: &Unsettled) -> (Vec<String>, usize) {
+    /// Hide the resources of `left` and, when `listed`, the containers listing them, and count
+    /// what it holds to put back: what [`LwsState::settle_aside`] undoes once it is back.
+    fn hide(&self, left: &Unsettled, listed: bool) -> (Vec<String>, usize) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
-        let parents: Vec<String> = iris
-            .iter()
-            .filter_map(|i| resources::parent_of(i, &storage))
-            .collect();
-        iris.extend(parents);
+        if listed {
+            let parents: Vec<String> = iris
+                .iter()
+                .filter_map(|i| resources::parent_of(i, &storage))
+                .collect();
+            iris.extend(parents);
+        }
         iris.sort();
         iris.dedup();
         let bytes = left.bytes();
@@ -866,7 +930,7 @@ impl<S: Store + 'static> LwsState<S> {
         locks: L,
     ) {
         let (iris, bytes) = hidden;
-        let state = self.clone();
+        let state = self.detached();
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
@@ -881,6 +945,8 @@ impl<S: Store + 'static> LwsState<S> {
                     state.owe_touch(container, record.clone());
                 }
             }
+            // Released while its locks are held: nothing can stage what it put back meanwhile.
+            left.2.release(&state).await;
             drop(left);
             state.locks.show(&iris);
             state
@@ -1068,6 +1134,8 @@ impl LwsRequest {
 /// Remove the member `iri` of `parent` (if any): its record and its parent's membership edge in
 /// one store step, so no failure can leave a live record its container no longer lists. Every
 /// removal of a member goes through here: resources, service records, expired subscriptions.
+/// (The one exception is an edge left to a linkset record already gone, which
+/// [`Journal::remove_member`] detaches alone.)
 /// A container that is not empty is not removed ([`crate::store::DeleteOutcome::NotEmpty`]).
 pub(crate) async fn remove_member<S: Store>(
     store: &S,
@@ -1077,17 +1145,33 @@ pub(crate) async fn remove_member<S: Store>(
     store.delete_container_if_empty(iri, parent).await
 }
 
+/// What a [`Journal`] may hold to put a change back: what each resource it stages costs it
+/// ([`Journal::stage`]) comes to at most this. 64 MiB.
+pub(crate) const JOURNAL_LIMIT: usize = 64 << 20;
+
+/// What staging one resource costs a [`Journal`], besides its name and, for a metadata record,
+/// its bytes: what the store's hold on its bytes and their metadata take in memory, counted at a
+/// fixed size so that it follows neither.
+const STAGED_ENTRY_BYTES: usize = 512;
+
 /// One mutation's store changes, each recorded with what it replaced, so that a failure part way
 /// puts back everything done before it ([`Journal::rollback`]). Every mutation of more than one
 /// store step goes through one: a write or delete that fails leaves content, metadata and
 /// membership as they were, validators included (records are put back with
-/// [`Store::restore`]). What a journal holds to put things back is bounded (`limit` bytes); a
-/// change that would need more is refused, and one that knows its whole extent up front
-/// ([`Journal::stage`]) is refused before it changes anything.
+/// [`Store::reinstate`], pointing at the bytes the store held for them, see [`Journal::stage`]).
+/// What a journal holds to put things back is bounded (`limit` bytes); a change that would need
+/// more is refused, and one that knows its whole extent up front ([`Journal::stage`]) is refused
+/// before it changes anything.
+///
+/// The holds it takes are released once nothing can need them: when the change is kept or put
+/// back and its intent cleared, or, for a change set aside, once it is settled
+/// ([`Unsettled`] carries them). A journal dropped before its intent was stored releases them
+/// on a task of its own; one dropped after leaves them to the intent, which the next start
+/// settles.
 pub(crate) struct Journal<'a, S: Store + 'static> {
     state: &'a LwsState<S>,
     undo: Vec<Undo>,
-    staged: std::collections::HashMap<String, Option<(Bytes, StoredMeta)>>,
+    staged: std::collections::HashMap<String, Option<Kept>>,
     held: usize,
     limit: usize,
     /// What putting back each resource staged so far takes, in the order staged: the durable
@@ -1100,9 +1184,141 @@ pub(crate) struct Journal<'a, S: Store + 'static> {
     intent: Option<String>,
     /// The resources staged so far, published as in flight from before the first step.
     in_flight: Option<InFlight>,
+    /// The holds staged so far (see [`Kept::Held`]).
+    holds: Holds<S>,
+}
+
+/// The holds a [`Journal`] took, all as one holder: the IRI its intent is (or would be) stored
+/// at, so no other journal's release can end them, and a start can tell whose they are. Released
+/// when it is dropped before its intent was stored (a change that panicked part way): once it is
+/// stored, the intent keeps them, and the next start settles it and releases them
+/// ([`intents::recover`]).
+struct Holds<S: Store + 'static> {
+    state: LwsState<S>,
+    holding: Holding,
+    intended: bool,
+}
+
+/// Holds taken as one holder (see [`Store::hold`]): each held resource, with what was held.
+#[derive(Default)]
+pub(crate) struct Holding {
+    pub(crate) holder: String,
+    pub(crate) held: Vec<(String, StoredMeta)>,
+}
+
+impl Holding {
+    /// Release every hold; one whose release fails is tried again by the maintenance sweeper
+    /// ([`LwsState::unreleased`]).
+    pub(crate) async fn release<S: Store + 'static>(&self, state: &LwsState<S>) {
+        for (_, meta) in &self.held {
+            if state.store.release(meta, &self.holder).await.is_err() {
+                state.release_later(&self.holder, meta);
+            }
+        }
+    }
+}
+
+/// How many failed releases wait to be tried again at most: past it, one is left to the next
+/// start's sweep ([`intents::recover`]), as a hold that outlives its change only keeps bytes.
+const UNRELEASED_LIMIT: usize = 4096;
+
+impl<S: Store + 'static> Holds<S> {
+    fn take(&mut self) -> Holding {
+        Holding {
+            holder: self.holding.holder.clone(),
+            held: std::mem::take(&mut self.holding.held),
+        }
+    }
+}
+
+impl<S: Store + 'static> Drop for Holds<S> {
+    fn drop(&mut self) {
+        if self.holding.held.is_empty() || self.intended {
+            return;
+        }
+        let (state, holding) = (self.state.clone(), self.take());
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move { holding.release(&state).await });
+        }
+    }
 }
 
 type StoredMeta = crate::store::ResourceMeta;
+
+/// What a resource held before a change, to put it back to.
+#[derive(Clone)]
+pub(crate) enum Kept {
+    /// Its record's metadata, whose blob key names bytes the store holds for it
+    /// ([`Store::hold`]), and, for a resource's metadata record, those bytes too (`peek`): who
+    /// may act on the resource while the change is in flight is decided on them ([`Prior`]).
+    Held {
+        meta: StoredMeta,
+        peek: Option<Bytes>,
+    },
+    /// Its bytes themselves, with its record's metadata: put back by a copy
+    /// ([`Store::restore`]). Only an intent stored before the store held bytes reads back so.
+    Copied { body: Bytes, meta: StoredMeta },
+}
+
+impl Kept {
+    fn meta(&self) -> &StoredMeta {
+        match self {
+            Kept::Held { meta, .. } | Kept::Copied { meta, .. } => meta,
+        }
+    }
+
+    /// The bytes of a metadata record, when they are known.
+    fn body(&self) -> Option<&Bytes> {
+        match self {
+            Kept::Held { peek, .. } => peek.as_ref(),
+            Kept::Copied { body, .. } => Some(body),
+        }
+    }
+
+    /// About how many bytes it takes in memory.
+    fn bytes(&self) -> usize {
+        STAGED_ENTRY_BYTES.saturating_add(self.body().map_or(0, Bytes::len))
+    }
+
+    /// Put `iri` back as this says: a member of `container` when one is given.
+    async fn put_back<S: Store>(
+        &self,
+        store: &S,
+        iri: &str,
+        container: Option<&str>,
+    ) -> Result<(), crate::error::ServerError> {
+        match self {
+            Kept::Held { meta, .. } => store.reinstate(iri, container, meta).await.map(drop),
+            Kept::Copied { body, meta } => store
+                .restore(iri, container, body.clone(), meta)
+                .await
+                .map(drop),
+        }
+    }
+}
+
+/// The holds `undo` names (see [`Kept::Held`]): each resource's, once.
+pub(crate) fn holds_of(undo: &[Undo]) -> Vec<(String, StoredMeta)> {
+    let mut out = Vec::new();
+    for step in undo {
+        match step {
+            Undo::Restore {
+                key,
+                prior: Some(Kept::Held { meta, .. }),
+            } => out.push((key.clone(), meta.clone())),
+            Undo::Recreate {
+                iri,
+                kept: Kept::Held { meta, .. },
+                ..
+            } => out.push((iri.clone(), meta.clone())),
+            Undo::Resolve { undo, .. } => out.extend(holds_of(undo)),
+            _ => {}
+        }
+    }
+    out.sort_by(|a, b| a.1.blob_key.cmp(&b.1.blob_key));
+    out.dedup_by(|a, b| a.1.blob_key == b.1.blob_key);
+    out
+}
 
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
@@ -1118,19 +1334,18 @@ pub(crate) fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError
 /// How to put back one change a [`Journal`] made.
 pub(crate) enum Undo {
     /// `key` as it was: its bytes and record, or absent.
-    Restore {
-        key: String,
-        prior: Option<(Bytes, StoredMeta)>,
-    },
+    Restore { key: String, prior: Option<Kept> },
     /// A removed member, recreated in its container as it was.
     Recreate {
         iri: String,
         parent: Option<String>,
-        body: Bytes,
-        meta: StoredMeta,
+        kept: Kept,
     },
     /// A member that may have been created, removed from its container (see [`records::delete_record`]).
     Remove { iri: String, parent: String },
+    /// A write that failed unsettled, fenced so that it can no longer commit: the steps after it
+    /// put back what it may have written, and must not be outlived by it.
+    Fence { fence: crate::store::Fence },
     /// Nothing to put back: a resource the change holds the lock of without having changed it
     /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
     /// waits on that lock while the rest is put back.
@@ -1160,30 +1375,22 @@ impl Undo {
         match self {
             Undo::Restore {
                 key,
-                prior: Some((body, meta)),
-                ..
-            } => store.restore(key, None, body.clone(), meta).await.map(drop),
+                prior: Some(kept),
+            } => kept.put_back(store, key, None).await,
             Undo::Restore {
                 key, prior: None, ..
             } => match store.delete(key, None).await {
                 Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
                 Err(e) => Err(e),
             },
-            Undo::Recreate {
-                iri,
-                parent,
-                body,
-                meta,
-            } => {
+            Undo::Recreate { iri, parent, kept } => {
                 if store.exists(iri).await? {
                     return Ok(());
                 }
-                store
-                    .restore(iri, parent.as_deref(), body.clone(), meta)
-                    .await
-                    .map(drop)
+                kept.put_back(store, iri, parent.as_deref()).await
             }
             Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
+            Undo::Fence { fence } => store.fence(fence).await,
             Undo::Locked { .. } => Ok(()),
             Undo::Forget { record, .. } => intents::clear(store, record).await,
             Undo::Resolve { record, undo, .. } => {
@@ -1206,6 +1413,7 @@ impl Undo {
                 .chain(parent.as_deref())
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
+            Undo::Fence { .. } => Vec::new(),
             Undo::Locked { iri } => vec![iri],
             Undo::Forget { iris, .. } | Undo::Resolve { iris, .. } => {
                 iris.iter().map(String::as_str).collect()
@@ -1215,8 +1423,8 @@ impl Undo {
 }
 
 /// What is left to put back of a change that could not be put back after a few tries, the next
-/// to apply first.
-pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>);
+/// to apply first, and the holds of its journal (see [`Journal`]), released once it is put back.
+pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>, Holding);
 
 /// A journaled change's resources published as in flight ([`IriLocks::changing`]), with what
 /// each was before the change began, until this is dropped: from before the change's first
@@ -1242,8 +1450,9 @@ impl Drop for InFlight {
 pub(crate) struct Hidden(Vec<(Unsettled, (Vec<String>, usize))>);
 
 impl Unsettled {
+    /// What is left of a change, holding nothing (its caller hands it the holds it carries).
     pub(crate) fn new(undo: Vec<Undo>) -> Self {
-        Self(undo, None)
+        Self(undo, None, Holding::default())
     }
 
     /// About how many bytes it holds to put back: each body, and each record at its limit.
@@ -1269,11 +1478,10 @@ fn bytes_of(undo: &[Undo]) -> usize {
     undo.iter()
         .map(|u| match u {
             Undo::Restore {
-                prior: Some((body, _)),
-                ..
+                prior: Some(kept), ..
             }
-            | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
-            Undo::Locked { .. } | Undo::Forget { .. } => 0,
+            | Undo::Recreate { kept, .. } => kept.bytes().saturating_add(MAX_META_BYTES),
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => 0,
             Undo::Resolve { undo, .. } => bytes_of(undo),
             _ => MAX_META_BYTES,
         })
@@ -1330,10 +1538,13 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
             Undo::Restore { key, prior } => match key.strip_suffix(META_SUFFIX) {
                 Some(iri) => {
                     let meta = match prior {
-                        Some((body, _)) => parse_meta(iri, body).unwrap_or(ResourceMeta {
-                            pending: true,
-                            ..ResourceMeta::default()
-                        }),
+                        Some(kept) => kept
+                            .body()
+                            .and_then(|body| parse_meta(iri, body).ok())
+                            .unwrap_or(ResourceMeta {
+                                pending: true,
+                                ..ResourceMeta::default()
+                            }),
                         None => ResourceMeta::default(),
                     };
                     (
@@ -1348,16 +1559,16 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
                     key.clone(),
                     Prior {
                         existed: Some(prior.is_some()),
-                        format: Some(prior.as_ref().and_then(|(_, m)| format(key, m))),
+                        format: Some(prior.as_ref().and_then(|k| format(key, k.meta()))),
                         ..Prior::default()
                     },
                 ),
             },
-            Undo::Recreate { iri, meta, .. } => (
+            Undo::Recreate { iri, kept, .. } => (
                 iri.clone(),
                 Prior {
                     existed: Some(true),
-                    format: Some(format(iri, meta)),
+                    format: Some(format(iri, kept.meta())),
                     ..Prior::default()
                 },
             ),
@@ -1372,7 +1583,7 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
                 priors_of(undo, out);
                 continue;
             }
-            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => continue,
         };
         out.entry(iri).or_default().or(prior);
     }
@@ -1455,24 +1666,51 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             persisted: 0,
             intent: None,
             in_flight: None,
+            holds: Holds {
+                state: state.clone(),
+                holding: Holding {
+                    holder: intents::mint(&state.cfg.storage()),
+                    held: Vec::new(),
+                },
+                intended: false,
+            },
         }
     }
 
-    /// Read what is stored at `key` now, to put back later, and charge it to the journal's
-    /// bound: a change staged whole before its first step is refused, if too large, before it
-    /// changes anything.
+    /// Have the store hold what is stored at `key` now ([`Store::hold`]), to put back later
+    /// without a copy, and charge it to the journal's bound: a change staged whole before its
+    /// first step is refused, if too large, before it changes anything. What a resource costs is
+    /// its name and a fixed size ([`STAGED_ENTRY_BYTES`]), and for a metadata record its bytes,
+    /// read too (who may act on the resource while the change is in flight is decided on them):
+    /// never the size of its content.
     pub(crate) async fn stage(&mut self, key: &str) -> Result<(), crate::error::ServerError> {
         if self.staged.contains_key(key) {
             return Ok(());
         }
-        let prior = match self.state.store.read(key).await {
-            Ok(r) => Some((r.body, r.meta)),
-            Err(crate::error::ServerError::NotFound) => None,
-            Err(e) => return Err(e),
+        let prior = match self
+            .state
+            .store
+            .hold(key, &self.holds.holding.holder)
+            .await?
+        {
+            Some(meta) => {
+                // Held from here on: released with the journal's holds, whatever follows.
+                self.holds
+                    .holding
+                    .held
+                    .push((key.to_string(), meta.clone()));
+                let peek = match key.ends_with(META_SUFFIX) {
+                    true => Some(self.state.store.read_at(key, &meta).await?),
+                    false => None,
+                };
+                Some(Kept::Held { meta, peek })
+            }
+            None => None,
         };
-        self.held = self
-            .held
-            .saturating_add(key.len() + prior.as_ref().map_or(0, |(b, _)| b.len()));
+        self.held = self.held.saturating_add(
+            key.len()
+                .saturating_add(prior.as_ref().map_or(STAGED_ENTRY_BYTES, Kept::bytes)),
+        );
         if self.held > self.limit {
             return Err(crate::error::ServerError::Conflict(
                 "the change is too large to make atomically".into(),
@@ -1503,11 +1741,10 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 unreachable!("stage plans a restore")
             };
             self.planned.push(match (prior, parent) {
-                (Some((body, meta)), _) => Undo::Recreate {
+                (Some(kept), _) => Undo::Recreate {
                     iri: key,
                     parent: parent.map(str::to_string),
-                    body,
-                    meta,
+                    kept,
                 },
                 (None, Some(parent)) => Undo::Remove {
                     iri: key,
@@ -1528,7 +1765,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         let existing = self.intent.is_some();
         let record = self
             .intent
-            .get_or_insert_with(|| intents::mint(&self.state.cfg.storage()))
+            .get_or_insert_with(|| self.holds.holding.holder.clone())
             .clone();
         // Published first: a check without the lock from now on is made on what was staged,
         // whatever this change writes or puts back.
@@ -1542,16 +1779,15 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         });
         in_flight.iris.extend(iris);
         let undo: Vec<&Undo> = self.planned.iter().rev().collect();
+        // From here on the intent may be stored (a lost reply), and keeps the holds.
+        self.holds.intended = true;
         intents::store(self.state, &record, existing, &undo, &[]).await?;
         self.persisted = self.planned.len();
         Ok(())
     }
 
     /// What was stored at `key` before this step (staged now if it was not already).
-    async fn prior(
-        &mut self,
-        key: &str,
-    ) -> Result<Option<(Bytes, StoredMeta)>, crate::error::ServerError> {
+    async fn prior(&mut self, key: &str) -> Result<Option<Kept>, crate::error::ServerError> {
         self.stage(key).await?;
         Ok(self.staged.remove(key).flatten())
     }
@@ -1613,7 +1849,19 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
-        let Some((body, meta)) = self.prior(iri).await? else {
+        let Some(kept) = self.prior(iri).await? else {
+            // A record a legacy edge lists may be gone already (its subject's removal took it):
+            // the edge, which is all that is left, goes too, so it keeps no container from being
+            // empty. The edge is not put back if the change is (it names nothing, and no LWS
+            // listing shows it), and it goes in a step of its own: with the record absent, no
+            // live member can be left unlisted by it.
+            if let (true, Some(parent)) = (names_record(iri), parent) {
+                self.durable().await?;
+                match self.state.store.delete(iri, Some(parent)).await {
+                    Ok(()) | Err(crate::error::ServerError::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
         self.durable().await?;
@@ -1628,8 +1876,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             self.undo.push(Undo::Recreate {
                 iri: iri.to_string(),
                 parent: parent.map(str::to_string),
-                body,
-                meta,
+                kept,
             });
         }
         outcome
@@ -1647,10 +1894,11 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     /// fails with an [`Undo::Resolve`], to set aside with the locks, which settles it the same
     /// way later; meanwhile the container's listing has no date, as after a touch that failed.
     pub(crate) async fn commit(
-        self,
+        mut self,
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
         let Some(record) = self.intent.clone() else {
+            self.holds.take().release(self.state).await;
             return Ok(());
         };
         let kept = match touch {
@@ -1671,6 +1919,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             }
         };
         if kept {
+            self.holds.take().release(self.state).await;
             return Ok(());
         }
         // Whether the store did it anyway is read back from the intent: still holding its plan,
@@ -1682,6 +1931,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                     if let Some(container) = touch {
                         self.state.owe_touch(container, record);
                     }
+                    self.holds.take().release(self.state).await;
                     return Ok(());
                 }
                 Ok(false) => {
@@ -1711,7 +1961,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         };
         Err((
             crate::error::ServerError::Storage("the change could not be recorded as kept".into()),
-            Some(Unsettled(vec![resolve], self.in_flight)),
+            Some(Unsettled(vec![resolve], self.in_flight, self.holds.take())),
         ))
     }
 
@@ -1725,18 +1975,35 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     ///
     /// Once it is all put back its intent is cleared; until then the intent stays, and goes with
     /// what is left (so its resources stay set aside until it is cleared too).
-    pub(crate) async fn rollback(self) -> Option<Unsettled> {
-        let forget = self.intent.map(|record| Undo::Forget {
+    pub(crate) async fn rollback(mut self) -> Option<Unsettled> {
+        let forget = self.intent.take().map(|record| Undo::Forget {
             record,
             iris: iris_of(&self.planned),
         });
+        let holds = self.holds.take();
         let store = &self.state.store;
-        match settle(store, self.undo.into_iter().rev().collect()).await {
+        let left = match settle(
+            store,
+            std::mem::take(&mut self.undo).into_iter().rev().collect(),
+        )
+        .await
+        {
             None => settle(store, forget.into_iter().collect()).await,
             Some(mut left) => {
                 left.0.extend(forget);
-                left.1 = self.in_flight;
                 Some(left)
+            }
+        };
+        match left {
+            // Every hold the journal took, a superset of those its steps left name.
+            Some(mut left) => {
+                left.1 = self.in_flight.take();
+                left.2 = holds;
+                Some(left)
+            }
+            None => {
+                holds.release(self.state).await;
+                None
             }
         }
     }
@@ -2500,6 +2767,8 @@ pub(crate) mod test_store {
     pub struct FlakyStore {
         inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
         pub fail_delete: Arc<AtomicBool>,
+        /// Every `release` fails with a backend error, releasing nothing.
+        pub fail_release: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
@@ -2647,6 +2916,7 @@ pub(crate) mod test_store {
                 fail_fence: Default::default(),
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
+                fail_release: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
@@ -2654,6 +2924,23 @@ pub(crate) mod test_store {
                 dead_after: Default::default(),
                 fired: Default::default(),
             }
+        }
+
+        /// Whether a read (or a hold) of `iri` is to fail.
+        fn read_fails(&self, iri: &str) -> bool {
+            self.fail_read_of
+                .lock()
+                .unwrap()
+                .as_deref()
+                .is_some_and(|of| {
+                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
+                })
+                || self
+                    .fail_read_of_any
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|of| of == iri)
         }
 
         /// Count a store step against [`FlakyStore::fail_step`].
@@ -2734,21 +3021,7 @@ pub(crate) mod test_store {
     #[async_trait]
     impl Store for FlakyStore {
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
-            let failing = self
-                .fail_read_of
-                .lock()
-                .unwrap()
-                .as_deref()
-                .is_some_and(|of| {
-                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
-                })
-                || self
-                    .fail_read_of_any
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .any(|of| of == iri);
-            if failing {
+            if self.read_fails(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             let read = self.inner.read(iri).await;
@@ -2921,6 +3194,39 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             self.inner.restore(iri, container, body, meta).await
+        }
+        async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+            // What a journal stages is held, not read: the read hooks apply to it alike.
+            if self.read_fails(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.hold(iri, holder).await
+        }
+        async fn reinstate(
+            &self,
+            iri: &str,
+            container: Option<&str>,
+            held: &ResourceMeta,
+        ) -> ServerResult<ResourceMeta> {
+            // A record put back, as `restore` is: counted as a step, and failed by the same hook.
+            self.restores.fetch_add(1, Ordering::SeqCst);
+            self.step()?;
+            if self.fail_restore_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.reinstate(iri, container, held).await
+        }
+        async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+            if self.fail_release.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.release(held, holder).await
+        }
+        async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
+            self.inner.holds().await
+        }
+        async fn finish_reclaims(&self) -> ServerResult<()> {
+            self.inner.finish_reclaims().await
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;
@@ -3281,7 +3587,15 @@ pub(crate) mod test_store {
     /// Set `iri` aside, as a stuck write of its content is: putting back what it holds now
     /// (removing it, when it holds nothing: a stuck create) keeps failing until [`unstick`].
     pub async fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
-        let prior = state.store.read(iri).await.ok().map(|r| (r.body, r.meta));
+        let prior = state
+            .store
+            .read(iri)
+            .await
+            .ok()
+            .map(|r| super::Kept::Copied {
+                body: r.body,
+                meta: r.meta,
+            });
         if prior.is_some() {
             *store.fail_restore_of.lock().unwrap() = Some(iri.to_string());
         } else {
@@ -3644,7 +3958,8 @@ mod tests {
     /// Review finding: a member's record and its parent's membership edge were removed in two
     /// steps on some paths (service records, expired subscriptions), so a failure in between left
     /// a live record its container no longer listed. Every removal goes through
-    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
+    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes. (Only
+    /// an edge left to a record already gone is detached alone; no path here makes one.)
     #[tokio::test]
     async fn every_removal_takes_one_step() {
         use std::sync::atomic::Ordering;

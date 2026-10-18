@@ -271,7 +271,12 @@ async fn assemble_authorized_dataset<S: Store>(
                     children
                         .into_iter()
                         .map(|child| child.as_str().to_owned())
-                        .filter(|child| child.starts_with(&root)),
+                        .filter(|child| child.starts_with(&root))
+                        // A record of the LWS surface is no member, and is never read here.
+                        .filter(|child| {
+                            !crate::ldp::target::names_linkset_record(child)
+                                && !crate::ldp::target::names_lws_service_record(child, &root)
+                        }),
                 );
             }
         }
@@ -450,18 +455,8 @@ fn require_acceptable(headers: &HeaderMap, produced: &str) -> Result<(), ServerE
     else {
         return Ok(());
     };
-    let produced_type = produced.split_once('/').map(|(kind, _)| kind).unwrap_or("");
-    let accepted = accept.split(',').any(|range| {
-        let mut parts = range.split(';');
-        let media = parts.next().unwrap_or("").trim().to_ascii_lowercase();
-        let enabled = !parts.any(|parameter| {
-            parameter
-                .trim()
-                .strip_prefix("q=")
-                .is_some_and(|value| value.trim() == "0")
-        });
-        enabled && (media == "*/*" || media == produced || media == format!("{produced_type}/*"))
-    });
+    let accepted = crate::accept::media_ranges(accept)
+        .any(|range| range.q > 0.0 && range.specificity(produced).is_some());
     if accepted || accept.trim().is_empty() {
         Ok(())
     } else {

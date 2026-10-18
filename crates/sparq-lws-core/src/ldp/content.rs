@@ -89,6 +89,36 @@ pub fn classify(content_type: Option<&str>) -> Result<RdfFormat, ServerError> {
     }
 }
 
+/// The RDF format a document stored as `content_type` is read and patched in: Turtle, JSON-LD,
+/// N-Triples or N-Quads by its media type (case-insensitive, parameters ignored); `None` for any
+/// other type. One classification serves every PATCH, whether it parses what is stored or only
+/// appends to it.
+pub fn stored_format(content_type: &str) -> Option<RdfFormat> {
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    [
+        RdfFormat::Turtle,
+        RdfFormat::JsonLd,
+        RdfFormat::NTriples,
+        RdfFormat::NQuads,
+    ]
+    .into_iter()
+    .find(|f| essence.eq_ignore_ascii_case(f.media_type()))
+}
+
+/// The named-graph statements of an N-Quads document, as N-Quads lines. A PATCH changes a
+/// document's default graph only, so these are kept as they are when it is rewritten.
+pub fn named_graph_nquads(body: &[u8]) -> Result<Vec<u8>, ServerError> {
+    let mut ser = NQuadsSerializer::new().for_writer(Vec::new());
+    for quad in NQuadsParser::new().for_slice(body) {
+        let q = quad.map_err(|e| ServerError::BadRequest(format!("invalid N-Quads: {e}")))?;
+        if q.graph_name != oxrdf::GraphName::DefaultGraph {
+            ser.serialize_quad(&q)
+                .map_err(|e| ServerError::Storage(format!("n-quads serialise: {e}")))?;
+        }
+    }
+    Ok(ser.finish())
+}
+
 /// Validate that `body` parses as RDF in `format`, returning the number of triples/quads parsed.
 ///
 /// `base_iri` is the resource's own IRI: per the LDP/RDF convention a server resolves relative IRIs
@@ -528,25 +558,14 @@ pub fn negotiate_accept_with_profile(
         *slot = Some(slot.unwrap_or(0.0).max(q));
     }
 
-    for part in raw.split(',') {
-        let mut it = part.split(';');
-        let media = it.next().unwrap_or("").trim().to_ascii_lowercase();
-        // Parse the parameters: an optional q-value (default 1.0; clamp to [0,1]; a malformed q is
-        // treated as 0 — RFC 7231 §5.3.1, an unparseable weight is not "accepted") and an optional
-        // `profile` (media-type parameter names are case-insensitive; the IRI value is not).
-        let mut q: f32 = 1.0;
-        let mut profile: Option<JsonLdProfileParam> = None;
-        for param in it {
-            let Some((name, value)) = param.split_once('=') else {
-                continue;
-            };
-            match name.trim().to_ascii_lowercase().as_str() {
-                "q" => q = value.trim().parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
-                "profile" => profile = JsonLdProfileParam::from_param_value(value),
-                _ => {}
-            }
-        }
-        match media.as_str() {
+    for range in crate::accept::media_ranges(raw) {
+        // The shared grammar gives the weight (a malformed one is 0, never "accepted") and the
+        // `profile` parameter (its name is case-insensitive; the IRI value is not).
+        let q = range.q;
+        let profile = range
+            .param("profile")
+            .and_then(JsonLdProfileParam::from_param_value);
+        match range.essence.as_str() {
             "text/*" => bump(&mut q_text_star, q),
             "application/*" => bump(&mut q_app_star, q),
             "*/*" => bump(&mut q_any, q),
@@ -924,6 +943,18 @@ mod tests {
             RdfFormat::Turtle,
         )
         .expect("acceptable")
+    }
+
+    /// A quoted-pair in the profile is the character it escapes (RFC 9110 §5.6.4), so an escaped
+    /// IRI asks for the same document form as the plain one.
+    #[test]
+    fn an_escaped_profile_is_the_profile_it_spells() {
+        let escaped = jsonld_with_profile(r"http:\/\/www.w3.org\/ns\/json-ld#compacted");
+        assert_eq!(
+            escaped,
+            jsonld_with_profile("http://www.w3.org/ns/json-ld#compacted")
+        );
+        assert_eq!(escaped.jsonld_profile, Some(JsonLdProfileParam::Compacted));
     }
 
     #[test]

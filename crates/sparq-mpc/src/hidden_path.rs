@@ -37,7 +37,7 @@
 //! match-graph leak is closed *at the decision*, not merely at the output). The
 //! `k − 1` internal-hop bits are AND-ed into a single per-tuple **chain bit** by
 //! one [`crate::shamir::mul_shares_raw`] + one
-//! [`crate::shamir::ShamirDealer::degree_reduce`] per AND — the BGW reshare-and-
+//! [`crate::shamir::degree_reduce_through`] per AND — the BGW reshare-and-
 //! recombine round (sq-dvuc, the keystone this bead depends on) that lets a
 //! degree-`2t` product be reshared back to degree `t` so the next AND can chain.
 //! For `k = 1` every edge is a trivially-connected length-1 chain, so the chain bit
@@ -68,17 +68,21 @@
 //!
 //! - **Hidden:** every intermediate node key `z_i` (never reconstructed); every
 //!   per-hop and per-pair match bit (secret-shared, never opened); the realized
-//!   chain that connected a pair (the OR-fold collapses multiplicity); the true
-//!   result cardinality beyond the public `B` (L1 bounded to `B`).
+//!   chain that connected a pair (the OR-fold collapses multiplicity).
 //! - **Disclosed:** the public bound `k`; the public candidate-tuple count `|E|^k`
 //!   (standard MPC assumption); the endpoint TERMS of the matched pairs (the result
-//!   the recipient asked for); the public padded bound `B`.
+//!   the recipient asked for); the public padded bound `B`. The true result
+//!   cardinality is bounded by `B`, and whether it is also disclosed depends on the
+//!   output mode: this stage uses the ALL-PARTY mode, where every compute party
+//!   opens the `B` tags and therefore learns the exact count; the recipient-only
+//!   mode ([`crate::oblivious_join::oblivious_set_output_to_recipient`]) keeps it out
+//!   of the compute parties' transcripts.
 //!
 //! ## Security tier (HONESTY — privacy-claims gate, cite sq-qhy4)
 //!
 //! Honest-majority, semi-honest ONLY — inherits the [`crate::shamir::ShamirBackend`]
 //! / [`crate::compare`] model and adds no new assumption. Every multiplication
-//! routes through [`crate::shamir::ShamirDealer::degree_reduce`], whose reshare has
+//! routes through [`crate::shamir::degree_reduce_through`], whose reshare has
 //! no in-protocol check that a deviating party reshared honestly, so this is **NOT**
 //! maliciously secure (the same degree-`2t`-at-`n=2t+1` residual the rest of the
 //! backend documents; sq-6d6g / sq-km34 IT-MAC is the named fix). The
@@ -97,20 +101,45 @@
 //! **sq-py8h.4** (needs the secure-sort comparator). Planner guards / cost wiring is
 //! **sq-py8h.5**. Here the endpoint dedup is over the DISCLOSED endpoint terms,
 //! which is exactly the headline case (the endpoints are the disclosed result).
+//!
+//! ## Randomness (sq-yyro, issue #6117)
+//!
+//! The chain / union stage draws every sharing through the
+//! [`crate::randomness::DistributedRandomness`] seam: each hop equality via the
+//! [`crate::compare`] `*_through` chain and each AND / OR via
+//! [`crate::shamir::degree_reduce_through`]. The single-dealer simulation's chain
+//! / union draws are unchanged from the pre-seam code (a seeded prefix pin test);
+//! a source that cannot share a holder's own input (PRSS today) makes every path
+//! fail closed. The final
+//! oblivious output stage draws from the SAME source
+//! (`oblivious_join::oblivious_set_output_through`), so one continuous
+//! source covers the whole operator — and because that stage always shares the
+//! real-row tag and the payload limbs, even the shapes whose chain stage draws
+//! nothing (`k = 1` over distinct endpoint pairs, `p?` over a single predicate
+//! with no self-loop and no repeated endpoint pair) now fail closed under PRSS.
 
-use crate::compare::secure_equal_to_bit;
+use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{
-    oblivious_join_output, oblivious_set_output, Candidate, MatchBit, ObliviousOutput,
+    oblivious_set_output_through, partial_result_from_slots, Candidate, MatchBit, ObliviousOutput,
 };
 use crate::partial::{MpcError, PartialResult};
-use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
+use crate::randomness::{require_source_matches, DistributedRandomness};
+use crate::shamir::{self, ShamirBackend, Share};
 use oxrdf::{Term, Variable};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Reserved subject-end / object-end variable names the operator projects onto.
 const SUBJECT_VAR: &str = "__pp_a";
 const OBJECT_VAR: &str = "__pp_b";
+
+/// The output schema both hidden-path entry points project onto: the endpoint pair.
+fn chain_out_vars() -> Vec<Variable> {
+    vec![
+        Variable::new_unchecked(SUBJECT_VAR),
+        Variable::new_unchecked(OBJECT_VAR),
+    ]
+}
 
 /// Maximum number of edge-tuples (`|E|^k`) the operator will enumerate before
 /// refusing the path with a [`MpcError::Protocol`]. The enumeration is
@@ -120,7 +149,45 @@ const OBJECT_VAR: &str = "__pp_b";
 /// `|E|` and `k` are PUBLIC, the count is computable in closed form WITHOUT touching
 /// any secret key, so we reject an over-cap path BEFORE any crypto runs. A protocol
 /// guard, not a tuning knob: a path that exceeds it is abusive for this regime.
+///
+/// ## What this module's caps do and do not bound
+///
+/// Every cap here bounds a COUNT: the hop count, the enumerated tuple count, the
+/// candidate count and the output bound `B`. None of them bounds a WIDTH. The
+/// payload arity, the byte length of an endpoint term's IRI or literal, and the
+/// per-slot limb count the output stage derives from the longest candidate
+/// encoding are all unbounded, as is the cost of building a network of a given
+/// width. So a caller can still present a small count of very large things. Width
+/// caps are follow-up work; no claim is made here that they exist.
 pub const MAX_CHAIN_TUPLES: u64 = 1 << 18; // 262_144
+
+/// Maximum hop count the operator will consider — the exactly-`k` chain's `k`, and
+/// the bounded form's upper bound (`HiddenBoundedPath::max`). A larger one is an
+/// [`MpcError::Protocol`] refusal raised BEFORE any enumeration, counting or draw.
+///
+/// [`MAX_CHAIN_TUPLES`] alone does not bound the hop count. Two loops grow with the
+/// hop count and run *while computing* the tuple count that cap is compared
+/// against: `projected_tuple_count` multiplies once per hop, and
+/// `check_bounded_params` accumulates `Σ_ℓ (a^ℓ·|E|^ℓ)` with an inner loop per
+/// length — quadratic in the upper bound. So hop counts are capped before
+/// evaluation, on the hop count itself, which is a PUBLIC plan parameter.
+///
+/// The value is `log2(`[`MAX_CHAIN_TUPLES`]`)`, which makes this guard agree with
+/// the tuple guard instead of adding an independent number: for `|E| >= 2` — the
+/// only case where a `k`-hop chain has more than one edge-tuple — `|E|^k >= 2^k`,
+/// so [`MAX_CHAIN_TUPLES`] already refuses every `k` above this. What the hop cap
+/// adds is the `|E| <= 1` corner, where the tuple count stays `1` (or `0`) for any
+/// `k` while the per-chain work — `k − 1` secure equalities, and a `k`-wide
+/// odometer allocation — still grows with `k`.
+///
+/// Hops beyond the number of distinct nodes are redundant for path EXISTENCE, which
+/// would permit capping the effective bound at the node count instead of refusing.
+/// This operator refuses instead: truncating the bound would silently change the
+/// evaluated form (the bounded union runs over `min..=max`, so a `min` above the
+/// node count is not a no-op), and a fail-closed refusal on a public parameter is
+/// the discipline the module's other guards follow. A protocol guard, not a tuning
+/// knob.
+pub const MAX_HOP_COUNT: usize = MAX_CHAIN_TUPLES.ilog2() as usize; // 18
 
 /// One node of the secret graph: its PRIVATE join key (an `F_p` element — the
 /// holder's injective encoding of the node, exactly the contract
@@ -194,33 +261,42 @@ fn const_sharing(n: usize, c: Fp) -> Vec<Share> {
 
 /// Secret AND of two secret-shared 0/1 bits: `[a ∧ b] = [a]·[b]`. One
 /// [`shamir::mul_shares_raw`] (degree `2t`) followed by one
-/// [`ShamirDealer::degree_reduce`] back to a fresh degree-`t` sharing — the BGW
-/// multiplication-chain step (sq-dvuc) that lets the `k` hop bits chain. (Same
+/// [`shamir::degree_reduce_through`] back to a fresh degree-`t` sharing — the BGW
+/// multiplication-chain step (sq-dvuc) that lets the `k` hop bits chain, its
+/// re-sharing randomness drawn through the [`DistributedRandomness`] seam. (Same
 /// construction as `compare.rs`'s `secret_and`; local to keep file-lane discipline.)
-fn secret_and(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
+fn secret_and(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
     let prod_2t = shamir::mul_shares_raw(a, b)?;
-    dealer.degree_reduce(&prod_2t)
+    shamir::degree_reduce_through(source, &prod_2t)
 }
 
 /// Secret OR of two secret-shared 0/1 bits via De Morgan: `[a ∨ b] = a + b − a·b`.
 /// One secure multiplication (the `a·b` term); the rest is local affine ops. Used
 /// to OR-fold the per-tuple chain bits of the chains that reach the same endpoint
 /// pair into one connected-bit (design §2.5).
-fn secret_or(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
-    let and = secret_and(dealer, a, b)?;
+fn secret_or(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    let and = secret_and(source, a, b)?;
     let sum = shamir::add_shares(a, b)?;
     shamir::sub_shares(&sum, &and)
 }
 
 /// The chain bit of ONE edge-tuple `(e_1, …, e_k)`: the secret-shared AND over the
 /// `k − 1` internal hop equalities `[e_i.object_key == e_{i+1}.subject_key]`, each a
-/// [`secure_equal_to_bit`] (secret-shared, never opened). For `k = 1` there is no
-/// internal hop, so the bit is the constant shared `1` (every edge is a length-1
-/// chain). The intermediate node KEYS are passed to the secure equality but never
-/// reconstructed.
+/// [`crate::compare::secure_equal_to_bit`] (secret-shared, never opened; drawn
+/// through the seam). For `k = 1` there is no internal hop, so the bit is the
+/// constant shared `1` (every edge is a length-1 chain). The intermediate node KEYS
+/// are passed to the secure equality but never reconstructed.
 fn tuple_chain_bit(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     tuple: &[&HiddenEdge],
 ) -> Result<Vec<Share>, MpcError> {
     let n = backend.parties();
@@ -231,8 +307,8 @@ fn tuple_chain_bit(
         // The internal hop join: e_i.object must equal e_{i+1}.subject. Both keys
         // are PRIVATE intermediate node values — the equality verdict stays a
         // secret-shared bit, never opened (closes the per-hop L2 leak at source).
-        let hop = secure_equal_to_bit(dealer, w[0].object.key, w[1].subject.key)?;
-        bit = secret_and(dealer, &bit, &hop)?;
+        let hop = secure_equal_to_bit_through(source, w[0].object.key, w[1].subject.key)?;
+        bit = secret_and(source, &bit, &hop)?;
     }
     Ok(bit)
 }
@@ -254,7 +330,7 @@ fn endpoint_key(a: &Term, b: &Term) -> String {
 /// secret-shared and never opened here.
 fn build_candidates(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     edges: &HiddenEdges,
     k: usize,
 ) -> Result<Vec<Candidate>, MpcError> {
@@ -270,14 +346,14 @@ fn build_candidates(
     loop {
         // Materialise the current tuple as edge references.
         let tuple: Vec<&HiddenEdge> = idx.iter().map(|&i| &edges.edges[i]).collect();
-        let chain_bit = tuple_chain_bit(backend, dealer, &tuple)?;
+        let chain_bit = tuple_chain_bit(backend, source, &tuple)?;
         let a_term = tuple[0].subject.term.clone();
         let b_term = tuple[k - 1].object.term.clone();
         let key = endpoint_key(&a_term, &b_term);
         match by_pair.get_mut(&key) {
             Some((_, _, acc)) => {
                 // OR this tuple's chain bit into the running connected-bit.
-                let folded = secret_or(dealer, acc, &chain_bit)?;
+                let folded = secret_or(source, acc, &chain_bit)?;
                 *acc = folded;
             }
             None => {
@@ -308,11 +384,139 @@ fn build_candidates(
     }
 }
 
-/// Fail-closed parameter checks shared by both entry points. `k >= 1`,
-/// `n >= 2t+1` (the AND/OR chain's degree reduction needs it), and the projected
-/// `|E|^k` tuple count must be within [`MAX_CHAIN_TUPLES`] — all computed from
-/// PUBLIC parameters, before any crypto runs.
+/// The number of candidates [`build_candidates`] will produce, computed from the
+/// DISCLOSED endpoint terms alone in `O(|E| log |E|)` — before a single sharing is
+/// drawn.
+///
+/// `build_candidates` groups the `|E|^k` edge-tuples by
+/// `endpoint_key(tuple[0].subject, tuple[k-1].object)`, and the odometer runs
+/// positions `0` and `k-1` independently, so the key set is determined by the edge
+/// endpoints and `k` alone:
+///
+/// - `k == 1` — one position, so the keys are the distinct `(subject, object)`
+///   pairs of the edges themselves.
+/// - `k >= 2` — positions `0` and `k-1` are different odometer digits and every
+///   combination is enumerated, so the keys are the full product of the distinct
+///   subject terms with the distinct object terms.
+///
+/// Counting is done over the same `{:?}` representation the grouping key is built
+/// from, so the result is the builder's own candidate count — EXCEPT in the one
+/// degenerate case where a term's representation contains the key's NUL separator,
+/// which would make two distinct pairs share a key; the count is then an upper
+/// bound. Either way it never UNDER-counts, so refusing on it is fail-closed, and
+/// the exact post-build check stays.
+fn projected_candidate_count(edges: &HiddenEdges, k: usize) -> Result<usize, MpcError> {
+    if edges.is_empty() || k == 0 {
+        return Ok(0);
+    }
+    if k == 1 {
+        let keys: BTreeSet<String> = edges
+            .edges
+            .iter()
+            .map(|e| endpoint_key(&e.subject.term, &e.object.term))
+            .collect();
+        return Ok(keys.len());
+    }
+    let subjects: BTreeSet<String> = edges
+        .edges
+        .iter()
+        .map(|e| format!("{:?}", e.subject.term))
+        .collect();
+    let objects: BTreeSet<String> = edges
+        .edges
+        .iter()
+        .map(|e| format!("{:?}", e.object.term))
+        .collect();
+    subjects.len().checked_mul(objects.len()).ok_or_else(|| {
+        MpcError::Protocol(format!(
+            "hidden exactly-k chain: the endpoint-pair count {} x {} overflows usize — \
+             refusing before any draw",
+            subjects.len(),
+            objects.len()
+        ))
+    })
+}
+
+/// The number of candidates [`build_bounded_candidates`] will produce, computed
+/// from the DISCLOSED endpoint terms alone and before any draw.
+///
+/// The builder folds every enumerated tuple's endpoint pair in regardless of
+/// whether the tuple's predicates matched the chain (a mismatch contributes a
+/// constant `0` bit, but the PAIR is still keyed), so the key set does not depend
+/// on the alternation at all. It is the UNION of:
+///
+/// - the reflexive diagonal `(x, x)` over the disclosed node domain, when
+///   `min == 0`;
+/// - the distinct `(subject, object)` edge pairs, when length `1` is in range;
+/// - the full product of distinct subjects with distinct objects, when any length
+///   `>= 2` is in range.
+///
+/// The union is materialised rather than estimated, because a sum of the three
+/// arms double-counts the pairs they share and would refuse a `bound` the operator
+/// should accept. It costs at most the keys the builder's own accumulator will
+/// hold: the product arm is `|A| x |B| <= |E|^2`, and [`check_bounded_params`] —
+/// which runs first — has already capped `Σ_ℓ a^ℓ·|E|^ℓ` at
+/// [`MAX_CHAIN_TUPLES`], so for any form that reaches the product arm `|E|^2` is
+/// within that cap. What it avoids is the `Σ_ℓ |E|^ℓ` secure equalities the build
+/// would have drawn before the same refusal.
+fn projected_bounded_candidate_count(
+    edges: &PredicatedEdges,
+    form: &HiddenBoundedPath,
+) -> Result<usize, MpcError> {
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    if form.min == 0 {
+        for node in edges.node_domain() {
+            keys.insert(endpoint_key(&node, &node));
+        }
+    }
+    if !edges.is_empty() {
+        let lo = form.min.max(1);
+        if lo <= form.max {
+            if lo == 1 {
+                for e in &edges.edges {
+                    keys.insert(endpoint_key(&e.subject.term, &e.object.term));
+                }
+            }
+            if form.max >= 2 {
+                // `Term` is not `Ord`, so dedup on the same `{:?}` representation
+                // `endpoint_key` is built from.
+                let mut subjects: BTreeMap<String, &Term> = BTreeMap::new();
+                let mut objects: BTreeMap<String, &Term> = BTreeMap::new();
+                for e in &edges.edges {
+                    subjects
+                        .entry(format!("{:?}", e.subject.term))
+                        .or_insert(&e.subject.term);
+                    objects
+                        .entry(format!("{:?}", e.object.term))
+                        .or_insert(&e.object.term);
+                }
+                for a in subjects.values() {
+                    for b in objects.values() {
+                        keys.insert(endpoint_key(a, b));
+                    }
+                }
+            }
+        }
+    }
+    Ok(keys.len())
+}
+
+/// Fail-closed parameter checks shared by both entry points. `k >= 1`, `k` within
+/// [`MAX_HOP_COUNT`], `n >= 2t+1` (the AND/OR chain's degree reduction needs it),
+/// and the projected `|E|^k` tuple count within [`MAX_CHAIN_TUPLES`] — all computed
+/// from PUBLIC parameters, before any crypto runs.
+///
+/// The hop cap is checked BEFORE the tuple count, because `projected_tuple_count`
+/// itself loops once per hop: hop counts are capped before evaluation.
 fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Result<(), MpcError> {
+    if k > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden exactly-k chain with k={} exceeds the MAX_HOP_COUNT cap of {} — refusing \
+             (each hop adds a secure equality to every enumerated chain, so the hop count is \
+             bounded before the enumeration is sized)",
+            k, MAX_HOP_COUNT
+        )));
+    }
     if k == 0 {
         return Err(MpcError::Protocol(
             "hidden exactly-k chain: k must be >= 1 (the reflexive length-0 arm is the {0,k} \
@@ -349,23 +553,20 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 /// oblivious output's `B`-slot reveal.
 ///
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
-/// candidate count (fail-closed in [`oblivious_set_output`] — never truncates a
-/// match). See the module docs for the full construction and security tier.
+/// candidate count (fail-closed in `oblivious_set_output_through` — never
+/// truncates a match). One fresh dealer covers the chain stage AND the output
+/// stage: this is `eval_exact_k_chain_hidden_slots_through` on that one dealer,
+/// narrowed to the disclosed rows — a single code path, so nothing here can mint a
+/// second dealer. See the module docs for the full construction and security tier.
 pub fn eval_exact_k_chain_hidden(
     backend: &ShamirBackend,
     edges: &HiddenEdges,
     k: usize,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    check_params(backend, edges, k)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_candidates(backend, &mut dealer, edges, k)?;
-    let out_vars = vec![
-        Variable::new_unchecked(SUBJECT_VAR),
-        Variable::new_unchecked(OBJECT_VAR),
-    ];
-    let (result, _cost) = oblivious_join_output(backend, &candidates, out_vars, bound)?;
-    Ok(result)
+    let (slots, _cost) =
+        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
 /// Like [`eval_exact_k_chain_hidden`] but returns the raw oblivious output (the `B`
@@ -379,11 +580,74 @@ pub fn eval_exact_k_chain_hidden_slots(
     k: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)
+}
+
+/// [`eval_exact_k_chain_hidden_slots`] with the chain stage's randomness drawn
+/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117): every hop
+/// equality via the [`crate::compare`] `*_through` chain and every AND / OR via
+/// [`shamir::degree_reduce_through`]. Under the single-dealer simulation the
+/// REVEALED multiset and the modelled cost are unchanged from the pre-seam code,
+/// and the chain prefix of the draw transcript is pinned unchanged; the revealed
+/// slot ORDER moved, since the shuffle now samples a different point of one
+/// continuous keystream rather than a second dealer's fresh one. A source
+/// whose `(n, t)` differs from `backend`'s is refused
+/// ([`require_source_matches`]); a source that cannot share a holder's own input
+/// (PRSS today) makes the evaluation fail closed with that source's error. The
+/// oblivious output stage draws from the SAME `source`
+/// ([`oblivious_set_output_through`]) — one continuous source for the whole
+/// operator, where it previously minted a second dealer from `backend` and
+/// restarted the keystream.
+pub(crate) fn eval_exact_k_chain_hidden_slots_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_candidates(backend, &mut dealer, edges, k)?;
+    // BOTH halves of the bound contract are settled before any draw. The cap on `B`
+    // comes first; then the candidate COUNT is computed from the disclosed endpoint
+    // terms in O(|E| log |E|) and `B` is required to cover it. Leaving the coverage
+    // half to the output stage meant `build_candidates` had already drawn one
+    // equality per hop of every one of the `|E|^k` tuples before a `B` too small to
+    // hold the answer was refused — up to billions of draws for a refusal that was
+    // decidable from public data. Both checks sit after `check_params` so the
+    // operator's own parameter refusals keep precedence; neither of those draws.
+    crate::oblivious_join::check_output_bound_cap(bound)?;
+    let projected = projected_candidate_count(edges, k)?;
+    crate::oblivious_join::check_output_bound(bound, projected)?;
+    let candidates = build_candidates(backend, source, edges, k)?;
     // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
-    oblivious_set_output(backend, &candidates, 2, bound)
+    // The stage re-checks the bound against the EXACT candidate count, which is what
+    // catches the degenerate case where the projection above could only bound it.
+    oblivious_set_output_through(source, backend, &candidates, 2, bound)
+}
+
+/// Test-only instrumentation: the candidates
+/// `eval_exact_k_chain_hidden_slots_through` builds, together with the
+/// `(is_real, decoded_row)` of every slot the REAL output stage opens for them.
+/// Same candidate construction and same output stage as the public path — it just
+/// keeps the dummy slots' decoded payload rows, which [`ObliviousOutput`] cannot
+/// express.
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+pub(crate) fn exact_k_chain_candidates_and_opened_rows(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    bound: usize,
+) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+    require_source_matches(source, backend)?;
+    check_params(backend, edges, k)?;
+    crate::oblivious_join::check_output_bound_cap(bound)?;
+    crate::oblivious_join::check_output_bound(bound, projected_candidate_count(edges, k)?)?;
+    let candidates = build_candidates(backend, source, edges, k)?;
+    let slots =
+        crate::oblivious_join::opened_slot_rows_through(source, backend, &candidates, 2, bound)?;
+    Ok((candidates, slots))
 }
 
 // =====================================================================
@@ -512,9 +776,13 @@ impl HiddenBoundedPath {
 /// Every fixed predicate sequence of `length` hops obtained by choosing one of the
 /// `alternatives` at each position (design §2.4). For a single-predicate step this is
 /// the one `length`-long sequence. Grows the chain set amortised (no
-/// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll);
-/// the genuine size limit is enforced upstream by [`check_bounded_params`] BEFORE this
-/// runs.
+/// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll).
+///
+/// [`check_bounded_params`] runs first and caps the chain COUNT — `Σ_ℓ a^ℓ·|E|^ℓ`
+/// against [`MAX_CHAIN_TUPLES`] — so the number of sequences this returns is
+/// bounded. It does NOT bound their WIDTHS: a predicate IRI's length is unbounded,
+/// as are the payload arity and the endpoint terms' lengths downstream. Width caps
+/// are follow-up work and are not claimed here.
 fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> {
     let mut chains: Vec<Vec<String>> = vec![Vec::new()];
     for _ in 0..length {
@@ -533,15 +801,15 @@ fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> 
 
 /// The chain bit of ONE edge-tuple against a FIXED predicate sequence `chain`: it is
 /// the secret-shared AND of (a) every internal hop equality `[e_i.object == e_{i+1}.
-/// subject]` ([`secure_equal_to_bit`], never opened — exactly [`tuple_chain_bit`]) and
-/// (b) a PUBLIC predicate-match gate per hop (`e_i.predicate == chain[i]`). The
-/// predicate gate is a fully public decision: a tuple whose predicates do not match
-/// the alternation branch contributes a constant shared `0` (no secure multiplication
-/// at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
+/// subject]` ([`crate::compare::secure_equal_to_bit`], never opened — exactly
+/// [`tuple_chain_bit`]) and (b) a PUBLIC predicate-match gate per hop
+/// (`e_i.predicate == chain[i]`). The predicate gate is a fully public decision: a
+/// tuple whose predicates do not match the alternation branch contributes a
+/// constant shared `0` (no secure multiplication at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
 /// equality but never reconstructed.
 fn predicated_tuple_chain_bit(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     tuple: &[&PredicatedEdge],
     chain: &[String],
 ) -> Result<Vec<Share>, MpcError> {
@@ -559,8 +827,8 @@ fn predicated_tuple_chain_bit(
     // exactly-k chain's `tuple_chain_bit`. Length-1 has no internal hop → shared 1.
     let mut bit = const_sharing(n, Fp::one());
     for w in tuple.windows(2) {
-        let hop = secure_equal_to_bit(dealer, w[0].object.key, w[1].subject.key)?;
-        bit = secret_and(dealer, &bit, &hop)?;
+        let hop = secure_equal_to_bit_through(source, w[0].object.key, w[1].subject.key)?;
+        bit = secret_and(source, &bit, &hop)?;
     }
     Ok(bit)
 }
@@ -585,6 +853,16 @@ fn check_bounded_params(
         return Err(MpcError::Protocol(format!(
             "hidden bounded path {{{},{}}} has min > max",
             form.min, form.max
+        )));
+    }
+    // Hop counts are capped before evaluation — and before the Σ_ℓ accumulation
+    // below, whose own cost is quadratic in `form.max`.
+    if form.max > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden bounded path {{{},{}}} exceeds the MAX_HOP_COUNT cap of {} — refusing (the \
+             union runs one fixed-length chain family per length up to the upper bound, so the \
+             hop count is bounded before the enumeration is sized)",
+            form.min, form.max, MAX_HOP_COUNT
         )));
     }
     let t = backend.threshold();
@@ -660,7 +938,7 @@ fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Re
 /// node that is also reachable from itself by a longer chain still appears once.
 fn build_bounded_candidates(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     edges: &PredicatedEdges,
     form: &HiddenBoundedPath,
 ) -> Result<Vec<Candidate>, MpcError> {
@@ -670,7 +948,7 @@ fn build_bounded_candidates(
 
     // OR this chain bit into the connected-bit of endpoint pair (a, b).
     fn fold(
-        dealer: &mut ShamirDealer,
+        source: &mut dyn DistributedRandomness,
         by_pair: &mut BTreeMap<String, (Term, Term, Vec<Share>)>,
         a: Term,
         b: Term,
@@ -679,7 +957,7 @@ fn build_bounded_candidates(
         let key = endpoint_key(&a, &b);
         match by_pair.get_mut(&key) {
             Some((_, _, acc)) => {
-                let folded = secret_or(dealer, acc, &bit)?;
+                let folded = secret_or(source, acc, &bit)?;
                 *acc = folded;
             }
             None => {
@@ -693,7 +971,7 @@ fn build_bounded_candidates(
     if form.min == 0 {
         for node in edges.node_domain() {
             fold(
-                dealer,
+                source,
                 &mut by_pair,
                 node.clone(),
                 node,
@@ -712,10 +990,10 @@ fn build_bounded_candidates(
                 loop {
                     let tuple: Vec<&PredicatedEdge> =
                         idx.iter().map(|&i| &edges.edges[i]).collect();
-                    let bit = predicated_tuple_chain_bit(backend, dealer, &tuple, &chain)?;
+                    let bit = predicated_tuple_chain_bit(backend, source, &tuple, &chain)?;
                     let a_term = tuple[0].subject.term.clone();
                     let b_term = tuple[length - 1].object.term.clone();
-                    fold(dealer, &mut by_pair, a_term, b_term, bit)?;
+                    fold(source, &mut by_pair, a_term, b_term, bit)?;
 
                     // Advance the base-|E| odometer (least-significant = idx[len-1]).
                     let mut pos = length;
@@ -757,8 +1035,11 @@ fn build_bounded_candidates(
 /// chaining and the landed oblivious output path verbatim.
 ///
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
-/// candidate count (fail-closed in [`oblivious_set_output`] — never truncates a
-/// match). Security tier is identical to [`eval_exact_k_chain_hidden`]:
+/// candidate count (fail-closed in `oblivious_set_output_through` — never
+/// truncates a match). One fresh dealer covers the union stage AND the output
+/// stage: this is `eval_bounded_path_hidden_slots_through` on that one dealer,
+/// narrowed to the disclosed rows — a single code path, so nothing here can mint a
+/// second dealer. Security tier is identical to [`eval_exact_k_chain_hidden`]:
 /// honest-majority, semi-honest, no new assumption.
 pub fn eval_bounded_path_hidden(
     backend: &ShamirBackend,
@@ -766,15 +1047,9 @@ pub fn eval_bounded_path_hidden(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    check_bounded_params(backend, edges, form)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_bounded_candidates(backend, &mut dealer, edges, form)?;
-    let out_vars = vec![
-        Variable::new_unchecked(SUBJECT_VAR),
-        Variable::new_unchecked(OBJECT_VAR),
-    ];
-    let (result, _cost) = oblivious_join_output(backend, &candidates, out_vars, bound)?;
-    Ok(result)
+    let (slots, _cost) =
+        eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
 /// Like [`eval_bounded_path_hidden`] but returns the raw oblivious output (the `B`
@@ -786,10 +1061,35 @@ pub fn eval_bounded_path_hidden_slots(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)
+}
+
+/// [`eval_bounded_path_hidden_slots`] with the union stage's randomness drawn
+/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117). Same routing,
+/// source checks and fail-closed behaviour as
+/// `eval_exact_k_chain_hidden_slots_through`, including the output stage drawn
+/// from the SAME `source`; the single-dealer simulation's revealed multiset and
+/// cost are unchanged.
+pub(crate) fn eval_bounded_path_hidden_slots_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &PredicatedEdges,
+    form: &HiddenBoundedPath,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    require_source_matches(source, backend)?;
     check_bounded_params(backend, edges, form)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_bounded_candidates(backend, &mut dealer, edges, form)?;
-    oblivious_set_output(backend, &candidates, 2, bound)
+    // Both halves of the bound contract before any draw, as in the exactly-k entry:
+    // the cap on `B`, then `B` against an UPPER BOUND on the candidate count derived
+    // from the disclosed endpoint terms. The bound is a sum of the three arms rather
+    // than their union, so it can refuse a `B` the exact count would have allowed —
+    // the fail-closed direction — and the stage still checks the exact count after
+    // the build.
+    crate::oblivious_join::check_output_bound_cap(bound)?;
+    let projected = projected_bounded_candidate_count(edges, form)?;
+    crate::oblivious_join::check_output_bound(bound, projected)?;
+    let candidates = build_bounded_candidates(backend, source, edges, form)?;
+    oblivious_set_output_through(source, backend, &candidates, 2, bound)
 }
 
 /// Planner guard + cost-model wiring for the hidden bounded property-path operator

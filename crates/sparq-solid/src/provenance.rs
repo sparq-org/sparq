@@ -43,7 +43,7 @@ struct ResourceProvenance {
 /// assert_eq!(prov.creator("https://pod.ex/notes/n1.ttl"), Some("https://alice.ex/card#me"));
 /// assert_eq!(prov.creator("https://pod.ex/notes/n2.ttl"), None); // unknown -> fail-closed
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccessProvenance {
     by_resource: FxHashMap<String, ResourceProvenance>,
 }
@@ -81,6 +81,19 @@ impl AccessProvenance {
     /// `CreatorAgent`/`OwnerAgent` grants).
     pub fn is_empty(&self) -> bool {
         self.by_resource.is_empty()
+    }
+
+    /// Keep the facts of only the resources `exists` accepts. Internal — the store drops
+    /// the facts of a resource that no longer exists and has no `.acr` of its own (see
+    /// `lifecycle`), so one created again later under the same IRI does not inherit them.
+    pub(crate) fn retain(&mut self, mut exists: impl FnMut(&str) -> bool) {
+        self.by_resource.retain(|r, _| exists(r));
+    }
+
+    /// Forget every fact about `resource` (for a resource that no longer exists, or comes back
+    /// without what kept them). Internal.
+    pub(crate) fn forget(&mut self, resource: &str) {
+        self.by_resource.remove(resource);
     }
 
     /// Iterate `(resource, creator?, owner?)` for every resource with a fact. Internal —

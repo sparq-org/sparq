@@ -34,8 +34,9 @@
 //! `HolderSetMalformedProof`, and a crafted-blob `HolderSetRootMismatch`, all
 //! reachable before any bb call because `bind_holder_set` runs after the
 //! per-sub-proof bb loop and these fire on EMPTY `sub_proofs`). The full
-//! prove→verify→tamper round-trips are `#[ignore]` + toolchain-gated (skip cleanly
-//! when nargo/bb are absent), mirroring `holder_pok_binding.rs` /
+//! prove→verify→tamper round-trips are `#[ignore]` + LIVE (they fail loud when
+//! nargo/bb are absent, unless the lane declares itself toolchain-free), mirroring
+//! `holder_pok_binding.rs` /
 //! `family_members_pzet.rs`.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
@@ -79,6 +80,18 @@ const HOLDER_SET_DEPTH: u32 = 4;
 /// commitment still needs an issuer attestation + revocation reference to pass the
 /// prefilter, exactly like every other scan e2e).
 const ISSUER_SEED: u64 = 1;
+
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest -- the method the
+/// fixtures below commit under, and the one their issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND presentation message (`ZKSIG_M5`) rather
+/// than the method-unbound `ZKSIG_C3`, because `MethodPolicy::current` now
+/// refuses an unbound attestation.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
 
 fn iri(s: &str) -> NamedNode {
     NamedNode::new(s).unwrap()
@@ -180,7 +193,7 @@ fn attest_bearer(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestat
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(
+        signature: sk.sign_presentation_with_status_and_scheme(
             &commitment,
             &salt,
             &sparq_zk::sig::status_ref_digest(
@@ -188,6 +201,7 @@ fn attest_bearer(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestat
                 STATUS_INDEX,
                 STATUS_VERSION,
             ),
+            &string_canonical_scheme(),
         ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
@@ -203,16 +217,7 @@ fn attest_bearer(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestat
     }
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 /// A minimal `Challenge`-bound manifest carrying a single `HolderSetProof` and NO
 /// `sub_proofs` (so the bb sub-proof loop is a no-op and the structural
@@ -578,8 +583,7 @@ fn manifest_with_scan_and_set(
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_in_set_verifies_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("hidden_holder_set_in_set_verifies_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -630,8 +634,7 @@ fn hidden_holder_set_in_set_verifies_end_to_end() {
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("hidden_holder_set_forged_set_root_rejected_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -694,8 +697,7 @@ fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();

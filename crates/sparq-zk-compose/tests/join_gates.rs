@@ -65,6 +65,20 @@ const STATUS_INDEX: u64 = 3;
 const STATUS_VERSION: u64 = 1;
 const CHALLENGE_HEX: &str = "0x2a";
 
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest — the method the
+/// fixtures below commit under, and the one their issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND presentation message (`ZKSIG_M5`) rather
+/// than the method-unbound `ZKSIG_C3`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
+
 fn iri(s: &str) -> NamedNode {
     NamedNode::new(s).unwrap()
 }
@@ -100,7 +114,12 @@ fn attest_full(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestatio
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -805,16 +824,7 @@ use sparq_zk_compose::verifier::{
     InMemorySeenNonces, VerifierNonce,
 };
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir =
@@ -837,8 +847,7 @@ fn nonce_for(hex: &str) -> VerifierNonce {
             Runs via `cargo nextest run -p sparq-zk-compose --run-ignored all` (or \
             `cargo test -- --ignored`) on a box with nargo+bb; sq-r2s8."]
 fn full_bb_join_accept_real_proof() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping full-bb join accept");
+    if !support::require_toolchain("full_bb_join_accept_real_proof", &["nargo", "bb"]) {
         return;
     }
 

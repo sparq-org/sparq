@@ -137,7 +137,7 @@ fn invalidation_under_concurrent_read_is_snapshot_consistent() {
     let guard = store.read().expect("rlock");
     assert_eq!(read_iris(&guard, &sess(ALICE)), post, "converged on revoked view");
     // And it equals a from-scratch rebuild — no stale grant survived the concurrent churn.
-    let fresh: Vec<String> = sparq_solid::AuthIndex::from_graph(&guard.graph)
+    let fresh: Vec<String> = sparq_solid::AuthIndex::from_graph(guard.graph())
         .accessible(&sess(ALICE), Mode::Read)
         .iter()
         .map(|n| n.as_str().to_owned())

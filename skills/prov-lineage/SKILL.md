@@ -206,9 +206,26 @@ RDFS / OWL-RL IRIs are unchanged (their key is still the conclusion string).
 `sparq-prov` has no identity-scheme version marker; the IRI shape
 (`…fact:<hash>` / `…rule:<hash>`) is the same, only N3 hash inputs differ.
 The key is injective over the engine's term identity, so an entity IRI is exactly as
-reproducible as the fact's terms: a fact carrying an existential's skolem label
-(`__sk<n>_<label>`, allocated in hash-set traversal order) can get a different IRI
-across runs or platforms (pre-existing; GH #6749).
+reproducible as the fact's terms. An existential's skolem label (`__sk<n>_<label>`)
+is numbered in the sorted order of each round's firing keys, so for the same parsed
+input a fact carrying one gets an IRI independent of hash-set traversal and hasher
+width (native vs `wasm32`; GH #6749). A `log:conclusion` formula's derived rows, and the
+list-cell labels (`_l<k>_<n>`) interning a list value mints, are sorted / numbered in a
+canonical term order for the same reason (GH #6844). A backward-chaining copy's `__bw<n>_`
+prefix is the fingerprint of the derivation that standardized that rule application apart — a
+64-bit fold of its place in the proof tree, the fully resolved goal proved (quoted formulas included) and the evaluation
+scope (a nested
+closure's own canonical key included, folded width-independently) — instead
+of counting applications in evaluation order, so a fact carrying one has a stable IRI too, and
+two proofs of different goals keep the distinct IRIs they had (GH #6844) — a variable the goal's
+resolution is already inside the expansion of stays as it is, so a formula that names itself
+resolves to a finite term rather than refusing the proof. It is not canonical across reordered isomorphic documents (anonymous `_b<n>`
+parser labels follow arrival order, formula rows keep source order, a label depends on its
+round's other firings), and it assumes stable
+binding values and firing sets: a `log:collectAllIn` list can still carry traversal
+order into a key (GH #6844). The numbering changed with GH #6749, and the nested-closure row
+order, the list-cell labels and the backward-renaming prefixes with GH #6844, so such a fact's
+IRI differs from one minted before them: regenerate as above.
 The `<hash>` is a 64-bit FNV-1a fold of the key: content-addressed, but
 **not collision-free and not a cryptographic commitment** — do not treat an entity
 IRI as proof of a fact's content; bind content with a real commitment if you need one.

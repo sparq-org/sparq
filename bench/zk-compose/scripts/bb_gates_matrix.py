@@ -39,7 +39,9 @@
 #     graphs only. Their complete-root authentication does not use the legacy
 #     lexical-handle dispatch rule or admit dual-leaf/value-only commitments.
 #     [OPUS-5.5] zkp-15.1: the version-4 public-pattern members (result_v4_*)
-#     follow the same rule; any other `result_` member fails generation.
+#     follow the same rule, and so do the method-bound version-5 members
+#     (result_v5_*, sq-j506), which prove string-canonical leaves; any other
+#     `result_` member fails generation.
 #   * STRING-LANE members (all remaining members — scan, join, path, revoke, issuer,
 #     holder, and the blake3-token `filter_*` FILTER lanes) read the
 #     string-canonical / lexical leaf, so they are LEGAL against `string-canonical`
@@ -51,8 +53,8 @@
 #     legal cell records that the (method, circuit) pair is *admitted* by the
 #     resolver rule — design-level (structural) legality — and nothing more. It
 #     does NOT assert the config can currently be committed, proved, and verified
-#     end to end: the `dual-leaf` host-leaf encoding (sq-j506) is NOT yet
-#     implemented, and `resolve_circuit` is NOT yet wired into `verify_manifest`.
+#     end to end: `resolve_circuit` is NOT yet wired into `verify_manifest`, so no
+#     dual-leaf config is an operational path.
 #     Only `string-canonical` is implemented end-to-end today. This is the SAME
 #     structural, unwired meaning the README honesty note and the Rust gate's
 #     doc-comment (crates/sparq-zk-compose/tests/bb_gates_matrix.rs) use.
@@ -97,13 +99,15 @@ SNAPSHOT_JSON = os.path.normpath(
 # circuit) surface the maintainer compares, exactly as dispatch.rs's exhaustive
 # legality sweep covers it under the `commitment-value-only` feature.
 #
-# `production_selectable` is narrowly ENUM/REGISTRY selectability: whether the
-# method is a non-research member of the `CommitmentMethod` enum / `ZK_SCHEME_*`
+# `production_selectable` mirrors `CommitmentMethod::is_production_selectable()`:
+# whether the method is a non-superseded, non-research member of the
+# `CommitmentMethod` enum / `ZK_SCHEME_*`
 # registry that a production config is allowed to name — NOT a claim it is
-# operationally usable end-to-end today. `dual-leaf` is registry-selectable but its
-# host-leaf encoding (sq-j506) is unimplemented and `resolve_circuit` is not wired
-# into `verify_manifest`, so it is not yet an operational path (see the header
-# HONESTY note); `value-only` is a research dial and never selectable in production.
+# operationally usable end-to-end today. `dual-leaf-v2` is registry-selectable but
+# `resolve_circuit` is not wired into `verify_manifest`, so it is not yet an
+# operational path (see the header HONESTY note); `dual-leaf` (v1) is SUPERSEDED and
+# admitted only for already-issued graphs; `value-only` is a research dial and never
+# selectable in production.
 METHODS = [
     {
         "key": "string-canonical",
@@ -117,12 +121,31 @@ METHODS = [
     {
         "key": "dual-leaf",
         "iri": "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1",
+        "production_selectable": False,
+        "removes_inv_vl": True,
+        "note": "The FIRST dual-leaf version, SUPERSEDED by dual-leaf-v2. Still "
+        "recognised and verifiable, so its value lane stays structurally legal here, "
+        "but no longer selectable for new issuance: its value-lane constants are "
+        "plain folds of the datatype bytes and its reserved no-value sentinel lies "
+        "inside the reachable value-handle band, leaving the "
+        "research/zk-field-native-encoding.md section 14.1 reserved-tag requirement "
+        "unmet. REMOVES INV-VL (value<->lexical agreement becomes "
+        "trusted-issuer-honesty; CR-G8 / sq-qhy4). Opt-in (`dual-leaf` feature).",
+    },
+    {
+        "key": "dual-leaf-v2",
+        "iri": "https://sparq.dev/ns/zk#poseidon2-dualleaf-v2",
         "production_selectable": True,
         "removes_inv_vl": True,
-        "note": "The #769 value-optimised method: unlocks the value lane AND keeps "
-        "term identity (via lexical_component). REMOVES INV-VL (value<->lexical "
-        "agreement becomes trusted-issuer-honesty; CR-G8 / sq-qhy4). Opt-in "
-        "(`dual-leaf` feature); host leaf encoding (sq-j506) not yet implemented.",
+        "note": "The VERSIONED dual-leaf method, and the dual-leaf version a new "
+        "issuance selects: value-lane constants derived in BLAKE3 key-derivation mode "
+        "over a length-framed (datatype, params) pair, a no-value sentinel asserted "
+        "outside the reachable value-handle band, and a dedicated bit-domain "
+        "xsd:boolean member (filter_value_dl_bool) that constrains its handle and its "
+        "bound to {0, 1} in-circuit. Same leaf SHAPE as v1, hence the same legality "
+        "row. REMOVES INV-VL exactly as v1 does — the versioning changes constant "
+        "derivation, not the trust model (CR-G8 / sq-qhy4). Opt-in (`dual-leaf` "
+        "feature).",
     },
     {
         "key": "value-only",
@@ -150,7 +173,7 @@ REASON_ILLEGAL_PAIR = "IllegalPair"
 # [OPUS-5.5] zkp-15.1: successful-result versions admitted against string-canonical
 # only. Another `result_` member must not fall through to the string-lane rule,
 # which would silently admit it for dual-leaf.
-RESULT_PREFIXES = ("result_v1_", "result_v2_", "result_v3_", "result_v4_")
+RESULT_PREFIXES = ("result_v1_", "result_v2_", "result_v3_", "result_v4_", "result_v5_")
 
 
 def lane_of(member: str) -> str:
@@ -169,11 +192,14 @@ def legality(method_key: str, lane: str, member: str = "") -> dict:
             "version to RESULT_PREFIXES only once its commitment contract is reviewed"
         )
     elif lane == "value":
-        # value-lane: legal only where a value handle was committed.
-        legal = method_key in ("dual-leaf", "value-only")
+        # value-lane: legal only where a value handle was committed. BOTH dual-leaf
+        # versions commit one, so both admit it — legality is about the leaf SHAPE,
+        # not about which version a new issuance may select (the separate
+        # `production_selectable` axis).
+        legal = method_key in ("dual-leaf", "dual-leaf-v2", "value-only")
     else:
         # string-lane: legal where the string-canonical / lexical leaf is present.
-        legal = method_key in ("string-canonical", "dual-leaf")
+        legal = method_key in ("string-canonical", "dual-leaf", "dual-leaf-v2")
     if legal:
         return {"legal": True}
     return {"legal": False, "reason": REASON_ILLEGAL_PAIR}
@@ -219,6 +245,11 @@ def main() -> int:
         # member), so the entry carries the value-lane cost alone — no ratio is
         # emitted, and none is fabricated.
         "datetime": "filter_value_dl_datetime",
+        # [OPUS-5] The DUAL-LEAF BIT-DOMAIN xsd:boolean lane. Like decimal and
+        # datetime it has NO blake3-token string-lane counterpart (there is no
+        # filter_boolean_d* member), so this entry carries the value-lane cost alone
+        # and no ratio is emitted.
+        "boolean": "filter_value_dl_bool",
     }
     comparison = {}
     for datatype, value_member in value_lane_ref.items():

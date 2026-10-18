@@ -54,8 +54,9 @@ on:
 permissions:
   contents: read
 
+# The event is in the key so a scheduled run and a push to main never cancel each other.
 concurrency:
-  group: xpath-differential-${{ github.workflow }}-${{ github.ref }}
+  group: xpath-differential-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -79,6 +80,8 @@ env:
 
 jobs:
   differential-xpath:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: xpath differential oracle (nargo)
     runs-on: ubuntu-latest
     # Building the engine + installing the Noir toolchain + nargo test; generous headroom.

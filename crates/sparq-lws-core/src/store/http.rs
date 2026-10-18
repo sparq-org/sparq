@@ -517,6 +517,39 @@ impl SparqClient for HttpSparqClient {
             .map_err(SparqHttpError::into_sparq)
     }
 
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        // One guarded update, then read back (an HTTP update does not say whether its WHERE
+        // matched). Read back named by another reclaim of the same bytes is fine: they are
+        // unreferenced all the same.
+        self.update_raw(&sparql::update_begin_reclaim(blob_key))
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let (body, _ct) = self
+            .query_raw(&sparql::ask_reclaiming(blob_key), ACCEPT_RESULTS_JSON)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        parse_ask_json(&body).map_err(SparqHttpError::into_sparq)
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        self.update_raw(&sparql::update_end_reclaim(blob_key))
+            .await
+            .map_err(SparqHttpError::into_sparq)
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        let (body, _ct) = self
+            .query_raw(&sparql::select_reclaiming(), ACCEPT_RESULTS_JSON)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        Ok(result
+            .rows
+            .into_iter()
+            .filter_map(|row| row.get("k").cloned())
+            .collect())
+    }
+
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         let q = sparql::ask_exists(iri)?;
         let (body, _ct) = self

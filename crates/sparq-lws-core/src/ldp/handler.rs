@@ -45,11 +45,13 @@ use crate::authz::{mode_for_operation, AccessMode};
 use crate::error::ServerError;
 use crate::ldp::conditional;
 use crate::ldp::content::{
-    classify, label_blank_nodes_by_position, negotiate_accept_with_profile, parse_to_triples,
-    serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
+    classify, label_blank_nodes_by_position, named_graph_nquads, negotiate_accept_with_profile,
+    parse_to_triples, serialize_triples, serialize_triples_negotiated, stored_format, validate_rdf,
+    RdfFormat,
 };
 use crate::ldp::patch::{
-    apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update, PatchKind,
+    appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update,
+    PatchKind,
 };
 use crate::ldp::range::{self, RangeOutcome};
 use crate::ldp::target::{parse_target, LdpTarget};
@@ -649,17 +651,11 @@ impl<S: Store> LdpState<S> {
             || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH)
             || (!target_iri.ends_with('/')
                 && conditional::unmodified_since_applies(
-                    header_str(headers, header::IF_MATCH),
+                    crate::entity_tag::field(headers, header::IF_MATCH).as_deref(),
                     crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
                 )
                 .is_some());
-        // The mode that governs reading THIS target's representation: Control for an `.acl`, else Read.
-        let read_mode = if crate::authz::is_acl_resource(target_iri) {
-            AccessMode::Control
-        } else {
-            AccessMode::Read
-        };
-        if has_etag_conditional && !granted.contains(&read_mode) {
+        if has_etag_conditional && !may_read(target_iri, granted) {
             return Err(if token.web_id.is_none() {
                 self.unauthenticated()
             } else {
@@ -743,13 +739,7 @@ impl<S: Store> LdpState<S> {
     /// bearing (fail-closed), keeping it subject to the V4 Read-gate. Used only by
     /// [`guard_conditional_requires_read`](Self::guard_conditional_requires_read).
     fn conditional_carries_etag(headers: &HeaderMap, name: HeaderName) -> bool {
-        match headers.get(&name) {
-            None => false,
-            Some(v) => match v.to_str() {
-                Ok(s) => !crate::ldp::conditional::is_wildcard(s),
-                Err(_) => true,
-            },
-        }
+        crate::entity_tag::field(headers, name).is_some_and(|v| !crate::entity_tag::is_wildcard(&v))
     }
 
     /// The nearest EXISTING container at or above `target` (its parent, then grandparent, … up to the
@@ -1027,8 +1017,19 @@ async fn serve_read_once<S: Store>(
     if let Some(imf) = effective_last_modified.and_then(crate::http_date::format) {
         set_str(&mut out, header::LAST_MODIFIED, &imf);
     }
+    // RFC 9110 §13.2.2 steps 1 and 2 apply to every method: a read whose `If-Match` names no tag of
+    // the current state, or whose `If-Unmodified-Since` the resource postdates, is a 412 before
+    // `If-None-Match` is looked at. The comparison is the one a write makes (the state part of the
+    // tag), so a tag read in any format holds for the state it was read from; a container's listing
+    // has no recorded time, so it ignores `If-Unmodified-Since` here as on writes.
+    conditional::require(conditional::evaluate_read_guard(
+        crate::entity_tag::field(req_headers, header::IF_MATCH).as_deref(),
+        crate::http_date::single_line(req_headers, header::IF_UNMODIFIED_SINCE),
+        &etag,
+        effective_last_modified,
+    ))?;
     if conditional::evaluate_read(
-        header_str(req_headers, header::IF_NONE_MATCH),
+        crate::entity_tag::field(req_headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(req_headers, header::IF_MODIFIED_SINCE),
         &etag,
         effective_last_modified,
@@ -1054,7 +1055,10 @@ async fn serve_read_once<S: Store>(
     let total_len = body.len() as u64;
     // `Range` is defined for GET (RFC 9110 §14.2); ignore it for HEAD so a HEAD never returns 206.
     let outcome = if with_body {
-        range::evaluate(header_str(req_headers, header::RANGE), total_len)
+        // An If-Range that no longer names this representation serves it whole (RFC 9110 §13.1.5).
+        let range = header_str(req_headers, header::RANGE)
+            .filter(|_| conditional::if_range_holds(req_headers, &etag));
+        range::evaluate(range, total_len)
     } else {
         RangeOutcome::Full
     };
@@ -1135,9 +1139,11 @@ pub async fn put_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
+    // The name alone decides this refusal, before any lock is taken.
+    let target = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &target)?;
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
-    let target = parse_target(&state.base_url, uri.path())?;
 
     // WAC for PUT — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): a PUT requires
     // `acl:Write` on the TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing
@@ -1199,8 +1205,8 @@ pub async fn put_handler<S: Store>(
     )
     .await?;
     conditional::require(conditional::evaluate_write(
-        header_str(&headers, header::IF_MATCH),
-        header_str(&headers, header::IF_NONE_MATCH),
+        crate::entity_tag::field(&headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|m| m.last_modified)),
@@ -1275,7 +1281,8 @@ pub async fn put_handler<S: Store>(
     // `invalidate_acl_if_acl`).
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target))
+    let reader = may_read(&target.iri, &granted);
+    Ok(write_response(existed, &meta, &target, reader))
 }
 
 /// `POST /{path}` — create a child resource inside a container.
@@ -1290,9 +1297,11 @@ pub async fn post_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
+    // The name alone decides this refusal, before any lock is taken.
+    let container = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &container)?;
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
-    let container = parse_target(&state.base_url, uri.path())?;
     // WAC: a POST to a container requires `acl:Append` on the container (a writer also satisfies it).
     // Anonymous ⇒ 401, authenticated-but-unauthorized ⇒ 403. Authorize BEFORE the container-shape /
     // existence checks so an unauthorized caller cannot probe existence (the read-access POST cases
@@ -1385,11 +1394,10 @@ pub async fn post_handler<S: Store>(
     // unauthorized POST. The guard is intent-based, not existence-based: `secret.acl` and `benign.acl`
     // are refused regardless of what exists, so it is never an existence oracle.)
     //
-    // SCOPE: `.acl` ONLY. `.meta` description-resources are NOT load-bearing in this server (the WAC
-    // resolver never consults a `.meta`, and the PUT/PATCH create paths only special-case `.acl`), so
-    // a `secret.meta` stem is just a normal resource name — guarding it ONLY at POST while PUT/PATCH
-    // would create it freely is an inconsistency with no security benefit, so it is not guarded. If
-    // `.meta` (or any other auxiliary) ever becomes load-bearing it MUST be guarded UNIFORMLY across
+    // SCOPE: `.acl` ONLY. A name ending in `.meta` is refused for every method by `parse_target`
+    // (it is where the LWS surface keeps a linkset record), and a POST never mints one: the minted
+    // name is the stem followed by an opaque suffix, so a `secret.meta` stem is harmless here. Any
+    // other auxiliary that becomes load-bearing MUST be guarded UNIFORMLY across
     // POST/PUT/PATCH/DELETE/read — not POST-only (see `is_acl_auxiliary_suffix`).
     if let Some(s) = &stem {
         // Check the `.acl` suffix on the bare stem (a leaf segment with no scheme/slashes). A trailing
@@ -1505,6 +1513,16 @@ pub async fn delete_handler<S: Store>(
     // outcome. Folded BEFORE the existence probe.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
+    // Whether a container may go depends on what it holds (a non-empty one is a 409), so deleting
+    // one also needs Read on it: without, the requester gets the denial, whatever it holds.
+    if target.is_container && !may_read(&target.iri, &granted) {
+        return Err(if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        });
+    }
+
     let current = state.store.meta(&target.iri).await?;
     // A DELETE of a non-existent target is reported through the SAME denial surface as a permission
     // failure (401 anonymous / 403 authenticated), NOT a 404 — so a DELETE cannot be used as an
@@ -1527,8 +1545,8 @@ pub async fn delete_handler<S: Store>(
     let current_etag =
         write_validator(&state, &target, &headers, Some(current.etag.as_str())).await?;
     conditional::require(conditional::evaluate_write(
-        header_str(&headers, header::IF_MATCH),
-        header_str(&headers, header::IF_NONE_MATCH),
+        crate::entity_tag::field(&headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.last_modified),
@@ -1549,11 +1567,32 @@ pub async fn delete_handler<S: Store>(
         // between a separate empty-check and a separate delete and be orphaned. A non-empty container
         // is a 409; an absent one a 404 (the precondition load above already 404'd a fully-absent
         // target, but the atomic op is the authoritative existence+empty decision).
-        match state
+        let mut outcome = state
             .store
             .delete_container_if_empty(&target.iri, parent.as_deref())
-            .await?
-        {
+            .await?;
+        // A container whose only members are linkset records of the LWS surface (listed by a
+        // legacy edge) is empty as the listing shows it: those records, which name nothing left in
+        // it, go first, and the delete is tried again.
+        if matches!(outcome, DeleteOutcome::NotEmpty) {
+            let members = state.store.list_children(&target.iri).await?;
+            if members
+                .iter()
+                .all(|c| crate::ldp::target::names_linkset_record(c.as_str()))
+            {
+                for record in &members {
+                    match state.store.delete(record.as_str(), Some(&target.iri)).await {
+                        Ok(()) | Err(ServerError::NotFound) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+                outcome = state
+                    .store
+                    .delete_container_if_empty(&target.iri, parent.as_deref())
+                    .await?;
+            }
+        }
+        match outcome {
             DeleteOutcome::Deleted => {
                 // EMIT only on an actual delete: Delete on the container + a derived Remove on its
                 // parent (membership shrank). NotEmpty/NotFound deleted nothing ⇒ no notification.
@@ -1601,9 +1640,11 @@ pub async fn patch_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
+    // The name alone decides this refusal, before any lock is taken.
+    let target = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &target)?;
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
-    let target = parse_target(&state.base_url, uri.path())?;
 
     // Select the PATCH language from the Content-Type (ABSENT ⇒ 400, unsupported ⇒ 415) and parse the
     // document. `text/n3` is the Solid N3 Patch; `application/sparql-update` is the INSERT/DELETE DATA
@@ -1665,19 +1706,14 @@ pub async fn patch_handler<S: Store>(
     // `N3PatchModesExtractor`, which adds `read` when the patch has `conditions`. Fold to the
     // requester's denial (401 anon / 403 auth) BEFORE the target read, so it adds no oracle of its
     // own. An unconditional (no-`where`) patch is unaffected.
-    if !patch.conditions.is_empty() {
-        let read_mode = if crate::authz::is_acl_resource(&target.iri) {
-            AccessMode::Control
+    // `solid:deletes` reads the target as much as `solid:where` does: a patch whose deletes are
+    // not all there is refused (409), so its outcome says which triples the target holds.
+    if (!patch.conditions.is_empty() || has_deletes) && !may_read(&target.iri, &granted) {
+        return Err(if token.web_id.is_none() {
+            state.unauthenticated()
         } else {
-            AccessMode::Read
-        };
-        if !granted.contains(&read_mode) {
-            return Err(if token.web_id.is_none() {
-                state.unauthenticated()
-            } else {
-                ServerError::Forbidden
-            });
-        }
+            ServerError::Forbidden
+        });
     }
 
     // V4 (`research/lws-design-records.md` §6): a conditional precondition is a CONTENT-derived
@@ -1692,14 +1728,26 @@ pub async fn patch_handler<S: Store>(
     //  - `Err(other)`       → a backend/blob inconsistency → surface the 500 (the caller is authorized,
     //                         so a 500 leaks nothing they could not already learn via a normal read).
     //
-    // Because authorization already ran above, a non-`NotFound` store error can be propagated
-    // immediately here WITHOUT an existence/state oracle: an UNAUTHORIZED caller never reaches this
-    // line (they returned the uniform 401/403 above), so a 500 is only ever seen by a caller permitted
-    // to read the target. (`ServerError` is not `Clone`; we distinguish present/absent via `current`.)
+    // An insert-only patch needs only Append, so a writer that may not read the target is told
+    // nothing about it when the patch cannot apply (its format, whether it parses, what the result
+    // would be): it gets the refusal it would get without access.
+    let reader = may_read(&target.iri, &granted);
+    let unread = |e: ServerError| {
+        if reader {
+            e
+        } else if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        }
+    };
+    // A non-`NotFound` store error goes only to a caller permitted to read the target; an
+    // insert-only writer that may not gets the refusal above. (`ServerError` is not `Clone`; we
+    // distinguish present/absent via `current`.)
     let current: Option<crate::store::Resource> = match state.store.read(&target.iri).await {
         Ok(r) => Some(r),
         Err(ServerError::NotFound) => None,
-        Err(e) => return Err(e),
+        Err(e) => return Err(unread(e)),
     };
 
     // Apply preconditions against the current state's tag and modification time.
@@ -1711,17 +1759,51 @@ pub async fn patch_handler<S: Store>(
     )
     .await?;
     conditional::require(conditional::evaluate_write(
-        header_str(&headers, header::IF_MATCH),
-        header_str(&headers, header::IF_NONE_MATCH),
+        crate::entity_tag::field(&headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
+    // A writer that may not read the target appends to it without its content being parsed: the
+    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document (each
+    // takes N-Triples lines, the last into its default graph), so the outcome follows the
+    // request, the requester's permissions and the stored type alone, never what is stored
+    // (whether it parses, what its graph holds). Any other stored type is refused to it. (Only an
+    // unconditional insert-only patch gets here without Read.) The stored bytes are still read
+    // and rewritten whole, so the time this takes follows their size.
+    if let (Some(res), false) = (&current, reader) {
+        let appendable = matches!(
+            stored_format(&res.meta.content_type),
+            Some(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
+        );
+        let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
+            return Err(unread(ServerError::Forbidden));
+        };
+        let text = text?;
+        let mut body = Vec::with_capacity(res.body.len() + text.len() + 1);
+        body.extend_from_slice(&res.body);
+        if !body.is_empty() && !body.ends_with(b"\n") {
+            body.push(b'\n');
+        }
+        body.extend_from_slice(text.as_bytes());
+        let meta = state
+            .store
+            .write(&target.iri, Bytes::from(body), &res.meta.content_type)
+            .await?;
+        #[cfg(not(target_arch = "wasm32"))]
+        state
+            .notifications
+            .notify(&target.iri, ActivityType::Update, None)
+            .await;
+        return Ok(write_response(true, &meta, &target, false));
+    }
+
     // Determine the existing triples + the stored format (default Turtle for a new resource).
-    let (existing_triples, stored_format) = match &current {
+    let (existing_triples, stored_as) = match &current {
         Some(res) => {
-            let fmt = classify(Some(&res.meta.content_type)).unwrap_or(RdfFormat::Turtle);
+            let fmt = stored_format(&res.meta.content_type).unwrap_or(RdfFormat::Turtle);
             (parse_to_triples(fmt, &res.body, &target.iri)?, fmt)
         }
         None => {
@@ -1731,8 +1813,12 @@ pub async fn patch_handler<S: Store>(
         }
     };
 
-    let patched = apply_patch(&existing_triples, &patch)?;
-    let new_body = serialize_triples(stored_format, &patched)?;
+    let patched = apply_patch(&existing_triples, &patch).map_err(unread)?;
+    let mut new_body = serialize_triples(stored_as, &patched).map_err(unread)?;
+    // An N-Quads document's named graphs are not the patch's: they are kept as stored.
+    if let (Some(res), RdfFormat::NQuads) = (&current, stored_as) {
+        new_body.extend(named_graph_nquads(&res.body)?);
+    }
 
     let existed = current.is_some();
     let parent = parent_container(&target);
@@ -1740,11 +1826,7 @@ pub async fn patch_handler<S: Store>(
     let meta = if existed {
         state
             .store
-            .write(
-                &target.iri,
-                Bytes::from(new_body),
-                stored_format.media_type(),
-            )
+            .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
             .await?
     } else if crate::authz::is_acl_resource(&target.iri) {
         // Create-on-PATCH of an AUXILIARY `.acl` resource: it is NOT a contained child. Storing it via
@@ -1754,11 +1836,7 @@ pub async fn patch_handler<S: Store>(
         // containment edge. (Auth for `.acl` ops is Control, already enforced above.)
         state
             .store
-            .write(
-                &target.iri,
-                Bytes::from(new_body),
-                stored_format.media_type(),
-            )
+            .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
             .await?
     } else {
         // Create-on-PATCH: like PUT, create intermediate containers + wire the new resource into its
@@ -1780,18 +1858,14 @@ pub async fn patch_handler<S: Store>(
                         p,
                         &target.iri,
                         Bytes::from(new_body),
-                        stored_format.media_type(),
+                        stored_as.media_type(),
                     )
                     .await?
             }
             None => {
                 state
                     .store
-                    .write(
-                        &target.iri,
-                        Bytes::from(new_body),
-                        stored_format.media_type(),
-                    )
+                    .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
                     .await?
             }
         }
@@ -1826,7 +1900,8 @@ pub async fn patch_handler<S: Store>(
     // read resolves against the patched ACL immediately.
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target))
+    let reader = may_read(&target.iri, &granted);
+    Ok(write_response(existed, &meta, &target, reader))
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -1842,11 +1917,12 @@ pub async fn patch_handler<S: Store>(
 /// response. The `read-method-support` / `read-method-allow` scenarios require OPTIONS ≠ 405 and an
 /// `Allow` listing GET + HEAD.
 pub async fn options_handler<S: Store>(
-    State(_state): State<Arc<LdpState<S>>>,
+    State(state): State<Arc<LdpState<S>>>,
     Extension(_token): Extension<VerifiedToken>,
     uri: axum::http::Uri,
 ) -> Result<Response, ServerError> {
-    let is_container = uri.path().ends_with('/');
+    // What no other method may address is not advertised either (see [`parse_target`]).
+    let is_container = parse_target(&state.base_url, uri.path())?.is_container;
     let mut out = HeaderMap::new();
     add_method_advertisement(&mut out, is_container);
     Ok((StatusCode::NO_CONTENT, out).into_response())
@@ -2114,6 +2190,8 @@ async fn sorted_children<S: Store>(
     container_iri: &str,
 ) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
     let mut children = state.store.list_children(container_iri).await?;
+    // A linkset record of the LWS surface is no member, whatever an edge to it says.
+    children.retain(|c| !crate::ldp::target::names_linkset_record(c.as_str()));
     children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
     Ok(children)
 }
@@ -2134,7 +2212,10 @@ async fn write_validator<S: Store>(
     };
     let names_a_tag = [header::IF_MATCH, header::IF_NONE_MATCH]
         .into_iter()
-        .any(|h| header_str(headers, h).is_some_and(|v| !conditional::is_wildcard(v)));
+        .any(|h| {
+            crate::entity_tag::field(headers, h)
+                .is_some_and(|v| !crate::entity_tag::is_wildcard(&v))
+        });
     if !target.is_container || !names_a_tag {
         return Ok(Some(stored.to_string()));
     }
@@ -2151,6 +2232,28 @@ async fn write_validator<S: Store>(
 /// cannot have children — the slash-semantics invariant), this is a 409 Conflict (`containment`
 /// "conflicts when … turning resource into container"). The conflict is detected by the
 /// trailing-slash container record being absent while the slash-less resource record is present.
+/// A name with a repeated slash (only a leading or trailing one gets past `parse_target`) has no
+/// chain of containers to write in: authorization walks its key as named, while containment and
+/// the slash rule would read it with the slashes folded. So nothing is written under one (a `PUT`,
+/// `PATCH` or `POST` target, or the container a `POST` names), refused on the name alone before
+/// anything is authorized or looked up; what is stored under one can still be read and deleted.
+fn refuse_repeated_slash_write(base: &str, target: &LdpTarget) -> Result<(), ServerError> {
+    target
+        .iri
+        .strip_prefix(base.trim_end_matches('/'))
+        .map_or(Ok(()), refuse_repeated_slash)
+}
+
+/// [`refuse_repeated_slash_write`] for `rest`, a path below the base URL.
+fn refuse_repeated_slash(rest: &str) -> Result<(), ServerError> {
+    if rest.contains("//") {
+        return Err(ServerError::BadRequest(
+            "a repeated slash names no container to create a resource in".into(),
+        ));
+    }
+    Ok(())
+}
+
 async fn ensure_ancestor_containers<S: Store>(
     state: &LdpState<S>,
     iri: &str,
@@ -2159,6 +2262,7 @@ async fn ensure_ancestor_containers<S: Store>(
     let Some(rest) = iri.strip_prefix(base) else {
         return Ok(());
     };
+    refuse_repeated_slash(rest)?;
 
     // The storage ROOT container `<base>/` is the ancestor of EVERYTHING; ensure it exists first (a
     // parentless write mints its record) so the walk below can wire each child into a present parent.
@@ -2189,9 +2293,13 @@ async fn ensure_ancestor_containers<S: Store>(
         prefix.push_str(seg);
         let container = format!("{prefix}/");
 
-        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict.
+        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict. A slash-less
+        // form naming a linkset record of the LWS surface is no resource, so it is not consulted.
         let slashless = prefix.clone();
-        if state.store.exists(&slashless).await? && !state.store.exists(&container).await? {
+        if !crate::ldp::target::names_linkset_record(&slashless)
+            && state.store.exists(&slashless).await?
+            && !state.store.exists(&container).await?
+        {
             return Err(ServerError::Conflict(
                 "an ancestor path already exists as a non-container resource".into(),
             ));
@@ -2228,6 +2336,11 @@ async fn reject_slash_semantics_conflict<S: Store>(
         // Resource `…/foo` collides with container `…/foo/`.
         format!("{}/", target.iri)
     };
+    // A linkset record of the LWS surface is no resource, so its name never conflicts (and is not
+    // consulted): a container `X.meta/` sits beside the record `X.meta`.
+    if crate::ldp::target::names_linkset_record(&opposite) {
+        return Ok(());
+    }
     if state.store.exists(&opposite).await? {
         return Err(ServerError::Conflict(
             "a resource and a container cannot share the same path (trailing-slash semantics)"
@@ -2237,16 +2350,28 @@ async fn reject_slash_semantics_conflict<S: Store>(
     Ok(())
 }
 
+/// Whether `granted` lets the requester read `target_iri`'s representation: Control for an `.acl`,
+/// else Read.
+fn may_read(target_iri: &str, granted: &std::collections::BTreeSet<AccessMode>) -> bool {
+    granted.contains(&if crate::authz::is_acl_resource(target_iri) {
+        AccessMode::Control
+    } else {
+        AccessMode::Read
+    })
+}
+
 /// The shared 201/204 + ETag (+ Location on create) response for PUT / PATCH writes.
 ///
 /// A container's validators are [`container_state_etag`]s, so a newly created (hence empty)
 /// container gets the empty-listing state tag. A replaced container gets no `ETag`: its current tag
 /// depends on a listing the writer may not be allowed to read, and its stored tag is not a
-/// validator for any of its representations.
+/// validator for any of its representations. A tag describes the stored representation (its
+/// length and a hash of it), so it goes only to a writer that may read it (`reader`).
 fn write_response(
     existed: bool,
     meta: &ResourceMeta,
     target: &crate::ldp::target::LdpTarget,
+    reader: bool,
 ) -> Response {
     let status = if existed {
         StatusCode::NO_CONTENT
@@ -2254,9 +2379,9 @@ fn write_response(
         StatusCode::CREATED
     };
     let mut out = HeaderMap::new();
-    if !target.is_container {
+    if reader && !target.is_container {
         set_str(&mut out, header::ETAG, &meta.etag);
-    } else if !existed {
+    } else if reader && !existed {
         set_str(
             &mut out,
             header::ETAG,
@@ -2385,29 +2510,23 @@ async fn mint_child_iri<S: Store>(
     generate_unique(store, base, stem, as_container).await
 }
 
-/// Generate a unique child IRI under `base`, optionally seeded by `stem`. Deterministic-but-unique:
-/// a monotonic counter + the stem, retried until the index reports it free. A container child gets a
-/// trailing slash.
+/// Generate a unique child IRI under `base`, optionally seeded by `stem`: the stem and a random
+/// suffix, retried until the index reports it free. Nothing in the name follows from what else was
+/// minted, here or in any other container, or when. A container child gets a trailing slash.
 async fn generate_unique<S: Store>(
     store: &S,
     base: &str,
     stem: Option<&str>,
     as_container: bool,
 ) -> Result<String, ServerError> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::UNIX_EPOCH;
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
     let prefix = stem.unwrap_or("resource");
     let suffix = if as_container { "/" } else { "" };
-    // Seed with a coarse timestamp so names are unique across process restarts too.
-    let seed = crate::clock::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    for attempt in 0..64u64 {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let candidate = format!("{base}/{prefix}-{seed:x}-{n:x}-{attempt:x}{suffix}");
+    for _ in 0..64 {
+        let mut random = [0u8; 12];
+        getrandom::getrandom(&mut random)
+            .map_err(|e| ServerError::Storage(format!("OS RNG unavailable: {e}")))?;
+        let id: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let candidate = format!("{base}/{prefix}-{id}{suffix}");
         if !store.exists(&candidate).await? {
             return Ok(candidate);
         }
@@ -2537,7 +2656,11 @@ fn write_precondition_time(
     target: &crate::ldp::target::LdpTarget,
     recorded: Option<std::time::SystemTime>,
 ) -> Option<std::time::SystemTime> {
-    if target.is_container { None } else { recorded }
+    if target.is_container {
+        None
+    } else {
+        recorded
+    }
 }
 
 fn header_str(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
@@ -3631,13 +3754,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_slug_dot_meta_is_allowed_meta_is_not_load_bearing() {
-        // `.meta` is NOT load-bearing in this server: the WAC resolver never consults a `.meta`, and
-        // the create paths only special-case `.acl`. So `secret.meta` is just a normal resource name
-        // with no security effect — guarding it ONLY at POST (while a PUT/PATCH could create it freely)
-        // was an inconsistency with no benefit. An Append-only POST of `Slug: secret.meta` is therefore
-        // ALLOWED, exactly like any other benign append. (If `.meta` ever becomes load-bearing it must
-        // be guarded UNIFORMLY across POST/PUT/PATCH/DELETE/read — see `is_acl_auxiliary_suffix`.)
+    async fn post_slug_dot_meta_mints_no_record_name() {
+        // A `.meta` stem is harmless on POST: the minted name is the stem followed by an opaque
+        // suffix, never a name ending in `.meta` (which `parse_target` refuses for every method,
+        // as the LWS surface keeps a linkset record there). An Append-only POST of
+        // `Slug: secret.meta` is therefore ALLOWED, exactly like any other benign append.
         let store = store_alice_container_bob_append_only().await;
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
         let uri: axum::http::Uri = "/alice/c/".parse().unwrap();
@@ -5211,6 +5332,58 @@ mod tests {
         );
     }
 
+    /// RFC 9110 §13.1.5: a Range applies only while If-Range names this representation by a strong,
+    /// equal entity tag; a stale tag, a weak one, another format's or a date serves the whole body.
+    #[tokio::test]
+    async fn if_range_gates_the_range() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let whole = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+        let etag = etag_of(&whole);
+        let modified = whole.headers()[header::LAST_MODIFIED]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let mut jsonld = HeaderMap::new();
+        jsonld.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/ld+json"),
+        );
+        let jsonld_tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", jsonld).await);
+        let weak = format!("W/{etag}");
+        let cases = [
+            (None, StatusCode::PARTIAL_CONTENT),
+            (Some(etag.as_str()), StatusCode::PARTIAL_CONTENT),
+            (Some("\"stale\""), StatusCode::OK),
+            (Some(weak.as_str()), StatusCode::OK),
+            (Some(jsonld_tag.as_str()), StatusCode::OK),
+            (Some(modified.as_str()), StatusCode::OK),
+        ];
+        for (if_range, want) in cases {
+            let mut h = HeaderMap::new();
+            h.insert(header::RANGE, HeaderValue::from_static("bytes=0-3"));
+            if let Some(v) = if_range {
+                h.insert(header::IF_RANGE, HeaderValue::from_str(v).unwrap());
+            }
+            let resp = get_with(&state, owner_token(), "/alice/doc", h).await;
+            assert_eq!(resp.status(), want, "{if_range:?}");
+            let len = body_bytes(resp).await.len();
+            assert_eq!(
+                len == 4,
+                want == StatusCode::PARTIAL_CONTENT,
+                "{if_range:?}: {len}"
+            );
+        }
+        // If-Range names one validator: a repeated field serves the whole representation even
+        // when each line names the current tag.
+        let mut h = HeaderMap::new();
+        h.insert(header::RANGE, HeaderValue::from_static("bytes=0-3"));
+        for _ in 0..2 {
+            h.append(header::IF_RANGE, HeaderValue::from_str(&etag).unwrap());
+        }
+        let resp = get_with(&state, owner_token(), "/alice/doc", h).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
     #[tokio::test]
     async fn get_container_conditional_uses_representation_etag() {
         // A container's validator is its RENDERED-representation ETag; a conditional GET echoing it
@@ -5246,13 +5419,26 @@ mod tests {
         precondition: HeaderName,
         tag: &str,
     ) -> Response {
+        owner_conditional_lines(state, verb, path, precondition, &[tag.as_bytes()]).await
+    }
+
+    /// As [`owner_conditional_write`], with the precondition sent as one field line per entry.
+    async fn owner_conditional_lines(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        precondition: HeaderName,
+        lines: &[&[u8]],
+    ) -> Response {
         let uri: axum::http::Uri = path.parse().unwrap();
         let (s, t) = (State(state.clone()), Extension(owner_token()));
         let mut headers = match verb {
             "PATCH" => n3_patch_headers(),
             _ => turtle_write_headers(),
         };
-        headers.insert(precondition, HeaderValue::from_str(tag).unwrap());
+        for line in lines {
+            headers.append(precondition.clone(), HeaderValue::from_bytes(line).unwrap());
+        }
         let patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
                      _:p solid:inserts { <#it> <http://p> \"v\" . }.\n";
         match verb {
@@ -5341,6 +5527,167 @@ mod tests {
                 .status(),
             StatusCode::OK
         );
+    }
+
+    /// The status of a GET or HEAD of `path` by the owner, with `headers`.
+    async fn read_status(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        headers: HeaderMap,
+    ) -> StatusCode {
+        let (s, t) = (State(state.clone()), Extension(owner_token()));
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let result = match verb {
+            "GET" => get_handler(s, t, uri, headers).await,
+            _ => head_handler(s, t, uri, headers).await,
+        };
+        result.unwrap_or_else(IntoResponse::into_response).status()
+    }
+
+    /// RFC 9110 §13.2.2: `If-Match` and `If-Unmodified-Since` are evaluated on reads too, before
+    /// `If-None-Match`. `If-Match` compares the selected representation's tag exactly (§8.8.3.2):
+    /// the tag of another format of the same state is a 412. Field lines combine into one list.
+    #[tokio::test]
+    async fn reads_evaluate_if_match_and_if_unmodified_since() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let mut jsonld = HeaderMap::new();
+        jsonld.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/ld+json"),
+        );
+        let jsonld_tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", jsonld).await);
+        let stale = "Thu, 01 Jan 1970 00:00:00 GMT";
+        let with = |pairs: &[(HeaderName, &str)]| {
+            let mut h = HeaderMap::new();
+            for (n, v) in pairs {
+                h.append(n.clone(), HeaderValue::from_str(v).unwrap());
+            }
+            h
+        };
+        let obs_text_line = [b"\"caf\xe9\", ".as_slice(), tag.as_bytes()].concat();
+        let with_bytes = |name: HeaderName, line: &[u8]| {
+            let mut h = HeaderMap::new();
+            h.insert(name, HeaderValue::from_bytes(line).unwrap());
+            h
+        };
+        for verb in ["GET", "HEAD"] {
+            let cases = [
+                (
+                    with(&[(header::IF_MATCH, "\"other\"")]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (with(&[(header::IF_MATCH, &tag)]), StatusCode::OK),
+                (
+                    with(&[(header::IF_MATCH, &jsonld_tag)]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (
+                    with(&[(header::IF_MATCH, &format!("W/{tag}"))]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                // A tag holding obs-text does not cost the current tag on its line its match.
+                (with_bytes(header::IF_MATCH, &obs_text_line), StatusCode::OK),
+                (
+                    with_bytes(header::IF_NONE_MATCH, &obs_text_line),
+                    StatusCode::NOT_MODIFIED,
+                ),
+                // A list split over two field lines is one list.
+                (
+                    with(&[(header::IF_MATCH, "\"other\""), (header::IF_MATCH, &tag)]),
+                    StatusCode::OK,
+                ),
+                (
+                    with(&[
+                        (header::IF_NONE_MATCH, "\"other\""),
+                        (header::IF_NONE_MATCH, &tag),
+                    ]),
+                    StatusCode::NOT_MODIFIED,
+                ),
+                (with(&[(header::IF_MATCH, "*")]), StatusCode::OK),
+                (
+                    with(&[(header::IF_UNMODIFIED_SINCE, stale)]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (
+                    with(&[(header::IF_UNMODIFIED_SINCE, "last week")]),
+                    StatusCode::OK,
+                ),
+                // If-Match decides alone when present (§13.2.2 step 2 applies only without it).
+                (
+                    with(&[
+                        (header::IF_MATCH, &tag),
+                        (header::IF_UNMODIFIED_SINCE, stale),
+                    ]),
+                    StatusCode::OK,
+                ),
+                // A failed If-Match is a 412 even when If-None-Match would have been a 304.
+                (
+                    with(&[
+                        (header::IF_MATCH, "\"other\""),
+                        (header::IF_NONE_MATCH, &tag),
+                    ]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (
+                    with(&[(header::IF_MATCH, &tag), (header::IF_NONE_MATCH, &tag)]),
+                    StatusCode::NOT_MODIFIED,
+                ),
+            ];
+            for (headers, want) in cases {
+                let got = read_status(&state, verb, "/alice/doc", headers.clone()).await;
+                assert_eq!(got, want, "{verb} {headers:?}");
+            }
+        }
+    }
+
+    /// A container's read `If-Match` compares against its state tag, which a membership change moves
+    /// on; its listing has no recorded time, so `If-Unmodified-Since` is ignored as on writes.
+    #[tokio::test]
+    async fn container_reads_evaluate_if_match_against_the_state_tag() {
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let put = |path: &'static str| {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::new(),
+            )
+        };
+        put("/alice/c/a").await.expect("child a");
+        let held = etag_of(&get_with(&state, owner_token(), "/alice/c/", HeaderMap::new()).await);
+        let if_match = |tag: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::IF_MATCH, HeaderValue::from_str(tag).unwrap());
+            h
+        };
+        let mut ius = HeaderMap::new();
+        ius.insert(
+            header::IF_UNMODIFIED_SINCE,
+            HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+        );
+        for verb in ["GET", "HEAD"] {
+            assert_eq!(
+                read_status(&state, verb, "/alice/c/", if_match(&held)).await,
+                StatusCode::OK
+            );
+            assert_eq!(
+                read_status(&state, verb, "/alice/c/", ius.clone()).await,
+                StatusCode::OK
+            );
+        }
+        put("/alice/c/b").await.expect("child b");
+        for verb in ["GET", "HEAD"] {
+            let got = read_status(&state, verb, "/alice/c/", if_match(&held)).await;
+            assert_eq!(
+                got,
+                StatusCode::PRECONDITION_FAILED,
+                "{verb}: a member arrived"
+            );
+        }
     }
 
     #[tokio::test]
@@ -6349,6 +6696,76 @@ mod tests {
 
     /// A date header sent on more than one field line is not one HTTP-date, so it is ignored
     /// (RFC 9110 §13.1.4) rather than read from its first line: two stale lines do not refuse the write.
+    /// A precondition's entity-tag list may be split over several field lines (RFC 9110 §5.3): a
+    /// write whose current tag is on the second `If-Match` line proceeds, and one whose current tag
+    /// is on the second `If-None-Match` line is refused.
+    #[tokio::test]
+    async fn write_tag_lists_combine_their_field_lines() {
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            for (name, ok) in [(header::IF_MATCH, true), (header::IF_NONE_MATCH, false)] {
+                let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+                let tag =
+                    etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+                let lines = [b"\"other\"".as_slice(), tag.as_bytes()];
+                let got = owner_conditional_lines(&state, verb, "/alice/doc", name.clone(), &lines)
+                    .await
+                    .status();
+                assert_eq!(got.is_success(), ok, "{verb} {name}: {got}");
+                if !ok {
+                    assert_eq!(got, StatusCode::PRECONDITION_FAILED, "{verb} {name}");
+                }
+            }
+            // A tag holding obs-text shares the current tag's line without costing it its match.
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let tag =
+                etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+            let line = [b"\"caf\xe9\", ".as_slice(), tag.as_bytes()].concat();
+            let got =
+                owner_conditional_lines(&state, verb, "/alice/doc", header::IF_MATCH, &[&line])
+                    .await
+                    .status();
+            assert!(got.is_success(), "{verb} obs-text line: {got}");
+        }
+    }
+
+    /// Review finding: only space and tab surround an entity tag (RFC 9110 §5.6.3). The current
+    /// tag wrapped in other Unicode whitespace is not a validator, so it matches nothing: a read
+    /// is neither a 304 nor passed by `If-Match`, and a write's `If-None-Match` does not refuse it.
+    #[tokio::test]
+    async fn a_tag_wrapped_in_unicode_whitespace_matches_nothing() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        for ws in ["\u{a0}", "\u{3000}"] {
+            let wrapped = format!("{ws}{tag}{ws}");
+            let value = HeaderValue::from_bytes(wrapped.as_bytes()).unwrap();
+            for verb in ["GET", "HEAD"] {
+                let mut h = HeaderMap::new();
+                h.insert(header::IF_NONE_MATCH, value.clone());
+                assert_eq!(
+                    read_status(&state, verb, "/alice/doc", h).await,
+                    StatusCode::OK
+                );
+                let mut h = HeaderMap::new();
+                h.insert(header::IF_MATCH, value.clone());
+                assert_eq!(
+                    read_status(&state, verb, "/alice/doc", h).await,
+                    StatusCode::PRECONDITION_FAILED
+                );
+            }
+            for verb in ["PUT", "PATCH", "DELETE"] {
+                for (name, ok) in [(header::IF_MATCH, false), (header::IF_NONE_MATCH, true)] {
+                    let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+                    let lines = [wrapped.as_bytes()];
+                    let got =
+                        owner_conditional_lines(&state, verb, "/alice/doc", name.clone(), &lines)
+                            .await
+                            .status();
+                    assert_eq!(got.is_success(), ok, "{verb} {name} {ws:?}: {got}");
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_repeated_if_unmodified_since_is_ignored() {
         let state = state_with_owner_resource("/alice/doc", COND_DOC).await;

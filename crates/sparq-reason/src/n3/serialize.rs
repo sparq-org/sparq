@@ -98,8 +98,11 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
     Some((n.bytes().fold(0, |a, b| a * 10 + usize::from(b - b'0')), iri))
 }
 
-/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, possibly
-/// repeated) stripped, when what remains is an `@forAll` universal.
+/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, one chunk per rule
+/// application the variable was standardized apart by, `<n>` the FINGERPRINT of the proof-tree
+/// node that application sits at — `BwPath`) stripped, when what remains is an `@forAll`
+/// universal. Each chunk's digits are read by maximal munch, so a name decomposes only one
+/// way.
 fn universal_base(v: &str) -> Option<&str> {
     let mut rest = v;
     loop {
@@ -664,11 +667,26 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// are different facts and get different keys. Blank-node labels and backward-chaining
 /// copies (`__bw<n>___ua.<iri>`) are likewise kept as the distinct terms they are. The
 /// key itself uses no interning ids, pointers, hashes, locale or number formatting, but it is
-/// only as reproducible as the TERMS: it inherits the engine's traversal-order dependence.
-/// An existential's skolem label (`__sk<n>_<label>`) is allocated in hash-set delta order,
-/// and `log:conclusion` appends derived rows in that order, so the same input can key
-/// differently across runs or platforms (as `why()` strings already do on `main`; GH #6749).
+/// only as reproducible as the TERMS. For the same parsed input, an existential's skolem
+/// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
+/// numbered in the sorted order of each round's firing keys (GH #6749), and a
+/// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). A
+/// backward-chaining copy's `__bw<n>_` prefix is likewise the fingerprint of the derivation
+/// that standardized that rule application apart — its evaluation scope, its place in the
+/// proof tree and the goal it was proving — not how many applications ran before it
+/// (GH #6844). It is not canonical across reordered isomorphic documents, and a binding value
+/// that still carries traversal order (a `log:collectAllIn` list) can still move it (GH
+/// #6844).
 fn term_key(t: &Term) -> String {
+    let mut s = String::new();
+    enc_term(t, &mut s);
+    s
+}
+
+/// `t`'s [`term_key`] bytes APPENDED to `out`: the encoder itself, so a caller building a
+/// longer key can write one term into a buffer it already owns instead of taking a fresh
+/// `String` per term ([`goal_key`], [`formula_canonical_key`]).
+fn enc_term(t: &Term, out: &mut String) {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');
         for c in s.chars() {
@@ -679,55 +697,210 @@ fn term_key(t: &Term) -> String {
         }
         out.push('"');
     }
-    fn enc(t: &Term, out: &mut String) {
-        match t {
-            Term::Iri(i) => {
-                out.push('I');
-                quoted(i, out);
-            }
-            Term::Lit(v, dt, lang) => {
-                out.push('L');
-                quoted(v, out);
-                quoted(dt, out);
-                match lang {
-                    Some(l) => {
-                        out.push('@');
-                        quoted(l, out);
-                    }
-                    None => out.push('-'),
+    match t {
+        Term::Iri(i) => {
+            out.push('I');
+            quoted(i, out);
+        }
+        Term::Lit(v, dt, lang) => {
+            out.push('L');
+            quoted(v, out);
+            quoted(dt, out);
+            match lang {
+                Some(l) => {
+                    out.push('@');
+                    quoted(l, out);
                 }
-            }
-            Term::Blank(b) => {
-                out.push('B');
-                quoted(b, out);
-            }
-            Term::Var(v) => {
-                out.push('V');
-                quoted(v, out);
-            }
-            Term::List(ms) => {
-                out.push('(');
-                ms.iter().for_each(|m| enc(m, out));
-                out.push(')');
-            }
-            Term::Formula(ts) => {
-                out.push('{');
-                for row in ts {
-                    row.iter().for_each(|m| enc(m, out));
-                    out.push(';');
-                }
-                out.push('}');
-            }
-            Term::Triple(tr) => {
-                out.push('<');
-                tr.iter().for_each(|m| enc(m, out));
-                out.push('>');
+                None => out.push('-'),
             }
         }
+        Term::Blank(b) => {
+            out.push('B');
+            quoted(b, out);
+        }
+        Term::Var(v) => {
+            out.push('V');
+            quoted(v, out);
+        }
+        Term::List(ms) => {
+            out.push('(');
+            ms.iter().for_each(|m| enc_term(m, out));
+            out.push(')');
+        }
+        Term::Formula(ts) => {
+            out.push('{');
+            for row in ts {
+                row.iter().for_each(|m| enc_term(m, out));
+                out.push(';');
+            }
+            out.push('}');
+        }
+        Term::Triple(tr) => {
+            out.push('<');
+            tr.iter().for_each(|m| enc_term(m, out));
+            out.push('>');
+        }
     }
-    let mut s = String::new();
-    enc(t, &mut s);
-    s
+}
+
+/// `body` appended to `out` behind its byte length and a `:` — the length-prefixed framing
+/// [`goal_key`] and [`formula_canonical_key`] share. The digits go straight into `out`, so
+/// framing a part allocates nothing of its own.
+fn push_framed(body: &str, out: &mut String) {
+    push_len(body.len(), out);
+    out.push(':');
+    out.push_str(body);
+}
+
+/// `n`'s decimal digits appended to `out` with no intermediate `String` — what
+/// `n.to_string()` allocated, once per part of every key built here.
+fn push_len(n: usize, out: &mut String) {
+    // `n` is always a byte length, so twenty digits is the most a 64-bit `usize` can
+    // produce and the buffer is never the limit.
+    let mut buf = [0u8; 20];
+    let mut at = buf.len();
+    let mut rest = n;
+    loop {
+        at -= 1;
+        buf[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    // Pushed as `char`s: each is ASCII, so each is one byte, and this needs no UTF-8
+    // validation pass over the digits the way building a `&str` from the buffer would.
+    for &d in &buf[at..] {
+        out.push(d as char);
+    }
+}
+
+/// A backward proof GOAL's canonical identity string: each term's `term_key` written behind
+/// its byte length, so the concatenation of three of them is injective over the goal's terms
+/// without resting on a key being self-delimiting (today's keys are, being tagged and
+/// quoted; this does not need them to stay so).
+///
+/// This goes into the identity of a proof-tree node (`BwPath`), which NAMES a
+/// standardize-apart space; it is not provenance, so it is deliberately not counted as a
+/// keyed call (`KEY_CALLS`): the plain materialization paths stay unkeyed, and a document
+/// with no `<=` rule never reaches this.
+///
+/// The form over OWNED terms, which is what this module's tests pin the key through; the
+/// evaluation itself goes through [`goal_key_of`], of which this is the `T = Term` case.
+#[cfg(test)]
+pub(super) fn goal_key(g: &[Term; 3]) -> String {
+    goal_key_of(g)
+}
+
+/// [`goal_key`] over three terms held however the caller holds them — owned, or borrowed
+/// from the walk that resolved them ([`super::bounded::walked_atom_cow`]), which is what
+/// lets the backward path key a goal without first copying its terms. ONE implementation:
+/// [`goal_key`] is this at `T = Term`, so the two cannot produce different keys.
+pub(super) fn goal_key_of<T: std::borrow::Borrow<Term>>(g: &[T; 3]) -> String {
+    // The framing needs a term's byte length BEFORE its bytes, so the three terms are
+    // encoded end to end into ONE scratch buffer with their boundaries recorded, and the
+    // framing is then written into an `out` sized from what they came to. That is two
+    // allocations for the whole goal — and for an ordinary goal neither of them grows as it
+    // is written — where a fresh `term_key` `String` plus a fresh `len().to_string()` per
+    // term was six that each grew from nothing. This runs once per goal of every backward
+    // proof search, and that growth was a substantial part of the cost GH #7095 added
+    // (GH #6844 follow-up).
+    let mut part = String::with_capacity(KEY_SCRATCH);
+    let mut ends = [0usize; 3];
+    for (t, end) in g.iter().zip(ends.iter_mut()) {
+        enc_term(t.borrow(), &mut part);
+        *end = part.len();
+    }
+    let mut out = String::with_capacity(part.len() + 3 * FRAME_MAX);
+    let mut from = 0;
+    for end in ends {
+        push_framed(&part[from..end], &mut out);
+        from = end;
+    }
+    out
+}
+
+/// What the key builders here reserve for the terms they are about to encode, before they
+/// know how long those come to: enough that an ordinary goal or row never grows the buffer,
+/// and only terms far larger than those pay one growth.
+const KEY_SCRATCH: usize = 192;
+
+/// The most [`push_framed`] can add beyond the body itself: twenty digits of a `usize` byte
+/// length and the `:`.
+const FRAME_MAX: usize = 21;
+
+/// FNV-1a over `s`'s bytes in explicit `u64` arithmetic, so the value does not depend on
+/// the target's word size (native vs `wasm32`) the way a `usize`-wide hasher would. What a
+/// proof-tree node's identity is folded to for its name (`BwCtx::node`, which refuses to
+/// hand one fold to two identities).
+pub(super) fn fnv1a64(s: &str) -> u64 {
+    fold_bytes(FNV_OFFSET, s.as_bytes())
+}
+
+/// FNV-1a's 64-bit offset basis.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a over `bytes`, continuing from `h` — `fnv1a64`'s loop, usable incrementally.
+fn fold_bytes(mut h: u64, bytes: &[u8]) -> u64 {
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// A proof-tree node key's fold: FNV-1a over `tag`, then each of `parts` big-endian, so
+/// the value is the same on `wasm32` as on a 64-bit target. The tag separates the key
+/// SHAPES (`NodeKey`), so a root, a step and a site cannot be read as one another, and
+/// every part is a fixed eight bytes, so no part's digits can run into the next's.
+///
+/// This is what names a node WITHOUT building its identity as a string: a key's parts
+/// already carry the parent node's fold, so the whole path above it is accounted for by
+/// one `u64` however deep the proof goes. It is not collision-free — nothing 64 bits wide
+/// is — which is why every fold handed out is registered against the exact key it came
+/// from, and a second, different key with the same fold fails the run (`BwCtx::node`).
+pub(super) fn fold_key(tag: u8, parts: &[u64]) -> u64 {
+    let mut h = fold_bytes(FNV_OFFSET, &[tag]);
+    for p in parts {
+        h = fold_bytes(h, &p.to_be_bytes());
+    }
+    h
+}
+
+/// The canonical identity string of a FORMULA, for the salt a nested `log:conclusion`
+/// closure's root identities carry (`BwCtx::scope_salt`): each row's `goal_key` behind its
+/// byte length, so the concatenation is injective over the rows in order.
+///
+/// It exists because `n3::formula_key` — the import-cycle guard's key — is `FxHasher` over
+/// `[[Term; 3]]::hash`, and rustc-hash picks its multiplier by `target_pointer_width` and
+/// does extra rounds on a 32-bit target. That value is fine for a guard that only has to
+/// agree with itself inside one run, and WRONG for anything a NAME is built from: it would
+/// make the names minted inside a nested closure differ between a 64-bit target and
+/// `wasm32`, which is the whole property GH #6844 is about. This is explicit `u64`
+/// arithmetic over `term_key`s and so is the same on every target.
+pub(super) fn formula_canonical_key(ts: &[[Term; 3]]) -> String {
+    let mut out = String::from("F");
+    // Two reused, pre-sized buffers, as [`goal_key`]: one for the row being framed and one
+    // for the terms being framed into it. Byte-for-byte what a nested `goal_key` per row
+    // gave.
+    let mut row_buf = String::with_capacity(KEY_SCRATCH + 3 * FRAME_MAX);
+    let mut part = String::with_capacity(KEY_SCRATCH);
+    for row in ts {
+        row_buf.clear();
+        part.clear();
+        let mut ends = [0usize; 3];
+        for (t, end) in row.iter().zip(ends.iter_mut()) {
+            enc_term(t, &mut part);
+            *end = part.len();
+        }
+        let mut from = 0;
+        for end in ends {
+            push_framed(&part[from..end], &mut row_buf);
+            from = end;
+        }
+        push_framed(&row_buf, &mut out);
+    }
+    out
 }
 
 /// The identity keys of one statement's three terms (`term_key`): equal exactly when the
@@ -737,6 +910,77 @@ pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
     #[cfg(test)]
     KEY_CALLS.with(|c| c.set(c.get() + 1));
     [term_key(&f[0]), term_key(&f[1]), term_key(&f[2])]
+}
+
+/// A deterministic TOTAL order on terms, for the engine's own canonical sorts (GH #6844):
+/// variant first (in `Term`'s declaration order), then the variant's fields in order,
+/// comparing a list, formula or triple term componentwise (a formula over its rows'
+/// terms in sequence) with a shorter sequence before a longer one that extends it.
+///
+/// `Equal` exactly when the terms are equal under `Term`'s own equality — the identity
+/// [`term_key`] encodes — so the order is as reproducible as the terms themselves. It is NOT
+/// the order of the `term_key` STRINGS (no tag bytes, no quoting), and nothing depends on
+/// that: a canonical sort only needs one order that every run and every target agrees on.
+/// Unlike keying it allocates nothing and stops at the first component that differs, which
+/// is why the plain materialization paths can afford it (`ListExpander` sorts every list
+/// value it interns).
+pub(super) fn term_cmp(a: &Term, b: &Term) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    /// The variant's position in `Term`'s declaration order.
+    fn tag(t: &Term) -> u8 {
+        match t {
+            Term::Iri(_) => 0,
+            Term::Lit(..) => 1,
+            Term::Blank(_) => 2,
+            Term::Var(_) => 3,
+            Term::Formula(_) => 4,
+            Term::List(_) => 5,
+            Term::Triple(_) => 6,
+        }
+    }
+    fn seq<'a>(
+        a: impl Iterator<Item = &'a Term>,
+        b: impl Iterator<Item = &'a Term>,
+    ) -> Ordering {
+        let (mut a, mut b) = (a, b);
+        loop {
+            return match (a.next(), b.next()) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
+                (Some(x), Some(y)) => match term_cmp(x, y) {
+                    Ordering::Equal => continue,
+                    o => o,
+                },
+            };
+        }
+    }
+    match (a, b) {
+        (Term::Iri(x), Term::Iri(y))
+        | (Term::Blank(x), Term::Blank(y))
+        | (Term::Var(x), Term::Var(y)) => x.cmp(y),
+        (Term::Lit(v, dt, lang), Term::Lit(w, et, mang)) => {
+            v.cmp(w).then_with(|| dt.cmp(et)).then_with(|| lang.cmp(mang))
+        }
+        (Term::List(x), Term::List(y)) => seq(x.iter(), y.iter()),
+        (Term::Triple(x), Term::Triple(y)) => seq(x.iter(), y.iter()),
+        // Every row is exactly three terms, so the flattened sequence's length determines
+        // the row count: comparing the rows' terms in sequence separates two formulae
+        // exactly when `Term`'s own equality does, with no row-count tie-break needed.
+        (Term::Formula(x), Term::Formula(y)) => seq(x.iter().flatten(), y.iter().flatten()),
+        _ => tag(a).cmp(&tag(b)),
+    }
+}
+
+/// One statement's terms compared in subject, predicate, object order under [`term_cmp`] —
+/// the canonical order of a formula's rows (GH #6844).
+pub(super) fn row_cmp(a: &[Term; 3], b: &[Term; 3]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| term_cmp(x, y))
+        .find(|o| *o != Ordering::Equal)
+        .unwrap_or(Ordering::Equal)
 }
 
 #[cfg(test)]
@@ -1348,6 +1592,159 @@ mod tests {
     const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
     #[test]
+    fn a_goal_key_is_injective_over_the_goals_terms() {
+        // Goals that differ in any term get different keys, so the proof-tree node
+        // identities holding them differ and their fingerprints name different
+        // standardize-apart spaces (`BwPath`); equal goals get one key, which is what lets a
+        // goal re-proved in a later round take the name it had.
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let a = [iri("http://ex/ab"), iri("http://ex/p"), iri("http://ex/c")];
+        // Different in the subject only, and the difference is exactly where one term's key
+        // ends and the next one's begins.
+        let b = [iri("http://ex/a"), iri("http://ex/bp"), iri("http://ex/c")];
+        assert_ne!(goal_key(&a), goal_key(&b), "{}", goal_key(&a));
+        // Different in the predicate only.
+        let c = [iri("http://ex/ab"), iri("http://ex/q"), iri("http://ex/c")];
+        assert_ne!(goal_key(&a), goal_key(&c), "{}", goal_key(&c));
+        // Same goal, same key: the name a later round mints for a goal it has proved before
+        // is the same name, which is what lets a closure saturate.
+        assert_eq!(goal_key(&a), goal_key(&a.clone()));
+        // A variable in the goal is part of its identity: resolving `?f` is a different goal
+        // from resolving a bound value.
+        let with_var = [iri("http://ex/ab"), iri("http://ex/p"), Term::Var("f".into())];
+        assert_ne!(goal_key(&a), goal_key(&with_var));
+    }
+
+    #[test]
+    fn the_node_fold_is_the_specified_fnv1a_in_u64_arithmetic() {
+        // Pinned against the published FNV-1a 64 test vectors, so a proof-tree node's
+        // fingerprint is the same value on a 32-bit target (`wasm32`) as on a 64-bit one —
+        // a `usize`-wide hasher is not.
+        assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    /// A corpus for the framing differential below: shapes that cross every branch of
+    /// `enc_term` and every digit boundary of the length prefix a part is framed behind.
+    fn framing_corpus() -> Vec<[Term; 3]> {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let var = |s: &str| Term::Var(s.to_string());
+        let lit = |v: &str, d: &str| Term::Lit(v.to_string(), d.to_string(), None);
+        let lang = |v: &str, l: &str| {
+            Term::Lit(v.to_string(), "http://ex/dt".into(), Some(l.to_string()))
+        };
+        vec![
+            // A one-byte part, so the prefix is one digit.
+            [Term::List(vec![]), iri(""), var("")],
+            [iri("http://ex/a"), iri("http://ex/p"), var("y")],
+            // Parts whose encodings straddle 9/10 and 99/100 bytes, where the number of
+            // digits in the length prefix changes.
+            [iri(&"x".repeat(6)), iri(&"y".repeat(7)), iri(&"z".repeat(8))],
+            [iri(&"x".repeat(95)), iri(&"y".repeat(96)), iri(&"z".repeat(97))],
+            [iri(&"x".repeat(9995)), iri("http://ex/p"), var("y")],
+            // The characters `quoted` escapes, which change a part's length.
+            [iri(r#"a"b\c"#), lit(r#"q"\"#, r#"d"t"#), lang(r#""#, r#"e"n"#)],
+            // Every compound arm, nested.
+            [
+                Term::List(vec![iri("http://ex/a"), Term::List(vec![var("m"), lit("1", "int")])]),
+                Term::Triple(Box::new([var("s"), iri("http://ex/p"), Term::List(vec![])])),
+                Term::Formula(vec![
+                    [var("x"), iri("http://ex/q"), iri("http://ex/z")],
+                    [Term::Blank("b0".into()), iri("http://ex/r"), var("x")],
+                ]),
+            ],
+            [Term::Formula(vec![]), Term::Blank("b1".into()), lang("hi", "en-GB")],
+        ]
+    }
+
+    /// The framing is BYTE-IDENTICAL to the `term_key(t)` behind `k.len().to_string()`
+    /// that `goal_key` and `formula_canonical_key` were written as before they were made to
+    /// reuse one pre-sized buffer and to write the length's digits straight into the
+    /// output. The reference here IS that arithmetic, spelled out, so the two are compared
+    /// rather than the new one being trusted — and a fold is only as stable as these bytes,
+    /// so a drift would move every `__bw<n>_` name the engine mints.
+    #[test]
+    fn the_framing_is_byte_identical_to_the_arithmetic_it_replaced() {
+        let reference_goal = |g: &[Term; 3]| {
+            let mut out = String::new();
+            for t in g {
+                let k = term_key(t);
+                out.push_str(&k.len().to_string());
+                out.push(':');
+                out.push_str(&k);
+            }
+            out
+        };
+        let corpus = framing_corpus();
+        for g in &corpus {
+            assert_eq!(goal_key(g), reference_goal(g), "goal_key framing moved");
+        }
+        // And the formula key, which frames each ROW behind its own length in turn.
+        let reference_formula = |ts: &[[Term; 3]]| {
+            let mut out = String::from("F");
+            for row in ts {
+                let k = reference_goal(row);
+                out.push_str(&k.len().to_string());
+                out.push(':');
+                out.push_str(&k);
+            }
+            out
+        };
+        for n in [0usize, 1, 2, corpus.len()] {
+            let ts = &corpus[..n];
+            assert_eq!(
+                formula_canonical_key(ts),
+                reference_formula(ts),
+                "formula_canonical_key framing moved at {n} rows"
+            );
+        }
+    }
+
+    /// `push_len` writes the decimal digits `usize::to_string` wrote, at the boundaries
+    /// where the digit count changes and at the extremes.
+    #[test]
+    fn push_len_writes_the_decimal_digits_to_string_wrote() {
+        let mut cases: Vec<usize> = vec![0, 1, 9, 10, 11, 99, 100, 101, 999, 1000, usize::MAX];
+        cases.push(usize::MAX - 1);
+        for n in cases {
+            let mut got = String::new();
+            push_len(n, &mut got);
+            assert_eq!(got, n.to_string(), "push_len({n})");
+        }
+    }
+
+    /// A nested closure's scope salt is a value, not a hash of a memory layout: its fold is
+    /// pinned to a CONSTANT here, the way the FNV vectors above are, so a change that makes
+    /// it depend on the target's pointer width (as `n3::formula_key`'s `FxHasher` does)
+    /// cannot pass. The names a `log:conclusion` closure mints carry this salt, so the whole
+    /// native-vs-`wasm32` guarantee rests on it.
+    #[test]
+    fn the_nested_closure_salt_is_a_pinned_width_independent_constant() {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let ts = vec![
+            [iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")],
+            [iri("http://ex/b"), iri("http://ex/p"), Term::Var("y".into())],
+        ];
+        let canon = formula_canonical_key(&ts);
+        assert_eq!(
+            canon,
+            concat!(
+                r#"F51:14:I"http://ex/a"14:I"http://ex/p"14:I"http://ex/b""#,
+                r#"40:14:I"http://ex/b"14:I"http://ex/p"4:V"y""#
+            )
+        );
+        assert_eq!(fnv1a64(&canon), 0xffca_1a3f_df5f_9f49);
+        // The rows are read in ORDER, and a formula is an ordered vector of rows to the
+        // engine, so swapping two rows is a different formula and a different salt.
+        let mut swapped = ts.clone();
+        swapped.swap(0, 1);
+        assert_ne!(formula_canonical_key(&swapped), canon);
+        // And every row is read, not just the first.
+        assert_ne!(formula_canonical_key(&ts[..1]), canon);
+    }
+
+    #[test]
     fn writes_each_term_kind() {
         assert_eq!(rendered(&Term::Iri("http://ex/a".into())), "<http://ex/a>");
         assert_eq!(rendered(&Term::Blank("b0".into())), "_:b0");
@@ -1506,5 +1903,81 @@ mod tests {
         assert_eq!(rendered(&Term::Iri("http://ex/a\\b".into())), "<http://ex/a\\u005Cb>");
         let dt = Term::Lit("1".into(), "http://ex/d\\t".into(), None);
         assert_eq!(rendered(&dt), "\"1\"^^<http://ex/d\\u005Ct>");
+    }
+
+    #[test]
+    fn term_cmp_is_a_total_order_agreeing_with_term_equality() {
+        // GH #6844: the canonical sorts (`ListExpander`'s cell numbering, a `log:conclusion`
+        // formula's rows) are only canonical if this comparator is a TOTAL order whose
+        // `Equal` is exactly `Term`'s own equality — otherwise two distinct terms could tie
+        // and a sort would fall back to the input's traversal order.
+        let i = |n: &str| Term::Iri(n.to_string());
+        let corpus = vec![
+            i("http://ex/a"),
+            i("http://ex/ab"),
+            i("http://ex/b"),
+            Term::Lit("1".into(), "http://ex/d".into(), None),
+            Term::Lit("1".into(), "http://ex/d".into(), Some("en".into())),
+            Term::Lit("1".into(), "http://ex/e".into(), None),
+            Term::Lit("2".into(), "http://ex/d".into(), None),
+            Term::Blank("b0".into()),
+            Term::Blank("b1".into()),
+            Term::Var("x".into()),
+            Term::List(vec![]),
+            Term::List(vec![i("http://ex/a")]),
+            Term::List(vec![i("http://ex/a"), i("http://ex/b")]),
+            Term::List(vec![i("http://ex/b")]),
+            Term::Triple(Box::new([i("http://ex/a"), i("http://ex/b"), i("http://ex/c")])),
+            Term::Triple(Box::new([i("http://ex/a"), i("http://ex/b"), i("http://ex/d")])),
+            // Formulae over the same terms with different row counts, and two formulae of
+            // one row count differing only in their last row.
+            Term::Formula(vec![[i("http://ex/a"), i("http://ex/b"), i("http://ex/c")]]),
+            Term::Formula(vec![
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/c")],
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/c")],
+            ]),
+            Term::Formula(vec![
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/c")],
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/d")],
+            ]),
+        ];
+        for a in &corpus {
+            for b in &corpus {
+                let o = term_cmp(a, b);
+                assert_eq!(
+                    o == std::cmp::Ordering::Equal,
+                    a == b,
+                    "`Equal` must mean equal: {a:?} vs {b:?}"
+                );
+                assert_eq!(o.reverse(), term_cmp(b, a), "antisymmetry: {a:?} vs {b:?}");
+                // Agrees with the injective key encoding on `Equal`, which is what makes a
+                // sorted order as reproducible as the terms' own identity.
+                assert_eq!(
+                    o == std::cmp::Ordering::Equal,
+                    term_key(a) == term_key(b),
+                    "keys disagree: {a:?} vs {b:?}"
+                );
+            }
+        }
+        // Transitivity, over every triple of the corpus.
+        for a in &corpus {
+            for b in &corpus {
+                for c in &corpus {
+                    if term_cmp(a, b).is_lt() && term_cmp(b, c).is_lt() {
+                        assert!(term_cmp(a, c).is_lt(), "transitivity: {a:?} {b:?} {c:?}");
+                    }
+                }
+            }
+        }
+        // A shorter sequence sorts before a longer one that extends it, and the variant
+        // decides before any field.
+        assert!(term_cmp(&corpus[10], &corpus[11]).is_lt(), "() < (:a)");
+        assert!(term_cmp(&corpus[11], &corpus[12]).is_lt(), "(:a) < (:a :b)");
+        assert!(term_cmp(&i("http://ex/zzz"), &Term::Blank("a".into())).is_lt(), "IRI < blank");
+        // `row_cmp` orders on subject, then predicate, then object.
+        let row = |s: &str, o: &str| [i(s), i("http://ex/p"), i(o)];
+        assert!(row_cmp(&row("http://ex/a", "http://ex/z"), &row("http://ex/b", "http://ex/a")).is_lt());
+        assert!(row_cmp(&row("http://ex/a", "http://ex/a"), &row("http://ex/a", "http://ex/b")).is_lt());
+        assert_eq!(row_cmp(&row("http://ex/a", "http://ex/a"), &row("http://ex/a", "http://ex/a")), std::cmp::Ordering::Equal);
     }
 }

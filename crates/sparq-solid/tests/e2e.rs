@@ -176,7 +176,7 @@ fn assert_paths_agree(queries: &[&str]) {
             let view_json = s.query_json_as(&session, Mode::Read, q).unwrap();
             let allowed = s.accessible(&session, Mode::Read);
             let rewritten = rewrite_for(q, &allowed).unwrap();
-            let v1_json = sparq_engine::query_json(&s.graph, &rewritten).unwrap();
+            let v1_json = sparq_engine::query_json(s.graph(), &rewritten).unwrap();
             assert_eq!(view_json, v1_json, "paths diverge for {label}: {q}");
         }
     }

@@ -1,0 +1,1528 @@
+//! The OWL 2 DL profile check: the typing constraints (OWL 2 Structural Specification §5.8.1),
+//! the global restrictions on axioms (§11), and the datatype requirements (§4, §9.4) that an
+//! ontology must meet beyond being syntactically OWL 2.
+//!
+//! The check is syntactic and terminates by construction. It reports every violation it
+//! finds, each with the input triples it is about, so it can serve as a lint gate. A few
+//! violations also bound what the reasoner may decide (see [`Violation::blocks_reasoning`]):
+//! the tableau's correctness argument assumes simple roles under cardinality / self /
+//! characteristics and a regular property hierarchy, so a reasoner run over an ontology that
+//! breaks either returns `Unknown` instead of a verdict.
+
+use super::datatypes::{self, builtin, Builtin, Facet};
+use super::model::{
+    AnnotationSubject, AnnotationValue, Axiom, AxiomRecord, ClassExpression, DataRange, EntityKind,
+    Individual, Literal, ObjectProperty, Ontology,
+};
+use super::vocab::{iri_of, Vocab, OWL, RDF, RDFS, XSD};
+use rustc_hash::{FxHashMap, FxHashSet};
+use sparq_core::dict::{Dict, Id};
+use std::collections::BTreeMap;
+
+/// The kind of an OWL 2 DL violation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ViolationKind {
+    /// An entity is used without a declaration (§5.8.1).
+    Undeclared,
+    /// An IRI is declared or used as two incompatible kinds of entity: object and data
+    /// property, a property and an annotation property, or a class and a datatype (§5.8.1).
+    IllegalPunning,
+    /// A vocabulary IRI of `rdf:`, `rdfs:`, `owl:` or `xsd:` is used as a user entity (§2.4).
+    ReservedVocabulary,
+    /// A non-simple object property appears where only simple ones are allowed: a cardinality
+    /// restriction, `ObjectHasSelf`, or a functional, inverse-functional, irreflexive,
+    /// asymmetric or disjointness axiom (§11.1).
+    NonSimpleProperty,
+    /// The property hierarchy with its chains is not regular (§11.2).
+    IrregularPropertyHierarchy,
+    /// Object property assertions between anonymous individuals form a cycle (§11.2).
+    AnonymousIndividualCycle,
+    /// A literal's lexical form is outside its datatype's lexical space.
+    IllTypedLiteral,
+    /// A datatype is used that is neither in the OWL 2 datatype map nor declared.
+    UnknownDatatype,
+    /// A facet that the datatype does not allow, or a facet value of the wrong kind (§4).
+    InvalidFacet,
+    /// A datatype definition that redefines a built-in datatype, defines an undeclared one,
+    /// or is cyclic (§9.4).
+    InvalidDatatypeDefinition,
+    /// `owl:topDataProperty` outside the super-property position of `SubDataPropertyOf`.
+    TopDataPropertyMisuse,
+    /// The extractor had to choose a reading (an undeclared predicate read as annotations).
+    ExtractionNote,
+    /// An n-ary axiom has fewer distinct operands than it needs (two): the structural
+    /// specification reads its operands as a set, so `EquivalentClasses(A A)` has one.
+    InsufficientOperands,
+}
+
+/// One OWL 2 DL violation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Violation {
+    /// What is violated.
+    pub kind: ViolationKind,
+    /// A human-readable explanation naming the entities involved.
+    pub message: String,
+    /// The input triples the violation is about.
+    pub source: Vec<usize>,
+}
+
+impl Violation {
+    /// `true` when the violation takes the ontology outside what the reasoner's correctness
+    /// argument covers (a non-simple property under a restricted construct, or an irregular
+    /// property hierarchy). The reasoner returns `Unknown` for such ontologies.
+    #[must_use]
+    pub fn blocks_reasoning(&self) -> bool {
+        matches!(
+            self.kind,
+            ViolationKind::NonSimpleProperty | ViolationKind::IrregularPropertyHierarchy
+        )
+    }
+}
+
+/// A global restriction the check did not verify for this ontology. While any remain the
+/// check does not claim the ontology is in OWL 2 DL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unchecked {
+    /// The restriction, e.g. `"xsd:pattern regular-expression syntax"`.
+    pub rule: &'static str,
+    /// The input triples it applies to (empty for ontology-wide rules).
+    pub source: Vec<usize>,
+}
+
+/// The result of the OWL 2 DL profile check. Fail-closed: [`is_dl`](Self::is_dl) holds only
+/// when no violation was found AND every restriction was checked.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DlProfileReport {
+    /// Every violation, in input order.
+    pub violations: Vec<Violation>,
+    /// The restrictions that apply to this ontology but were not verified.
+    pub unchecked: Vec<Unchecked>,
+}
+
+impl DlProfileReport {
+    /// `true` when the ontology is shown to be in OWL 2 DL.
+    #[must_use]
+    pub fn is_dl(&self) -> bool {
+        self.violations.is_empty() && self.unchecked.is_empty()
+    }
+
+    /// `Some(true)` in OWL 2 DL, `Some(false)` when a violation was found, `None` when no
+    /// violation was found but some restriction was not checked.
+    #[must_use]
+    pub fn verdict(&self) -> Option<bool> {
+        if !self.violations.is_empty() {
+            Some(false)
+        } else if self.unchecked.is_empty() {
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    /// The violations that prevent a reasoning verdict.
+    pub fn blocking(&self) -> impl Iterator<Item = &Violation> {
+        self.violations.iter().filter(|v| v.blocks_reasoning())
+    }
+}
+
+/// Runs the OWL 2 DL profile check over an extracted ontology.
+#[must_use]
+pub fn check_dl(dict: &Dict, onto: &Ontology) -> DlProfileReport {
+    let mut c = Checker::new(dict, onto);
+    c.typing();
+    c.simple_roles();
+    c.regularity();
+    c.anonymous_individuals();
+    c.datatypes();
+    c.operand_sets();
+    for note in &onto.notes {
+        c.out.push(Violation {
+            kind: ViolationKind::ExtractionNote,
+            message: note.message.clone(),
+            source: note.source.clone(),
+        });
+    }
+    for note in &onto.unrepresented {
+        c.unchecked(
+            "parts of the graph the model cannot represent",
+            &note.source,
+        );
+    }
+    if !onto.imports.is_empty() {
+        c.unchecked(
+            "the imports closure (owl:imports targets are not loaded)",
+            &[],
+        );
+        // An unloaded import may declare the entities, define the datatypes and settle the
+        // property kinds these violations are about, so they are not definite.
+        // Missing declarations and missing definitions are repairable; local errors (a
+        // cyclic, repeated or built-in definition, a literal of an unknown datatype) are not.
+        let repairable = std::mem::take(&mut c.repairable);
+        let mut open = Vec::new();
+        for (i, v) in std::mem::take(&mut c.out).into_iter().enumerate() {
+            let missing = matches!(
+                v.kind,
+                ViolationKind::Undeclared | ViolationKind::ExtractionNote
+            );
+            if missing || repairable.contains(&i) {
+                open.push(v);
+            } else {
+                c.out.push(v);
+            }
+        }
+        for v in open {
+            c.unchecked("declarations an unloaded import may supply", &v.source);
+        }
+    }
+    c.out.sort_by(|a, b| {
+        a.source
+            .first()
+            .cmp(&b.source.first())
+            .then(a.kind.cmp(&b.kind))
+    });
+    let mut unchecked = c.unchecked;
+    unchecked.sort_by(|a, b| {
+        a.source
+            .first()
+            .cmp(&b.source.first())
+            .then(a.rule.cmp(b.rule))
+    });
+    unchecked.dedup();
+    DlProfileReport {
+        violations: c.out,
+        unchecked,
+    }
+}
+
+struct Checker<'a> {
+    dict: &'a Dict,
+    onto: &'a Ontology,
+    v: Vocab,
+    out: Vec<Violation>,
+    /// Indices into `out` of violations an unloaded import could repair (a missing
+    /// declaration or datatype definition the import might supply).
+    repairable: FxHashSet<usize>,
+    unchecked: Vec<Unchecked>,
+}
+
+/// An entity use: its kind and the axiom it occurs in.
+type Uses = BTreeMap<(Id, EntityKind), Vec<usize>>;
+
+impl<'a> Checker<'a> {
+    fn new(dict: &'a Dict, onto: &'a Ontology) -> Checker<'a> {
+        Checker {
+            dict,
+            onto,
+            v: Vocab::intern(dict),
+            out: Vec::new(),
+            repairable: FxHashSet::default(),
+            unchecked: Vec::new(),
+        }
+    }
+
+    fn name(&self, id: Id) -> String {
+        iri_of(self.dict, id).unwrap_or_else(|| super::vocab::render_term(self.dict, id))
+    }
+
+    fn unchecked(&mut self, rule: &'static str, source: &[usize]) {
+        self.unchecked.push(Unchecked {
+            rule,
+            source: source.to_vec(),
+        });
+    }
+
+    fn report(&mut self, kind: ViolationKind, message: String, source: &[usize]) {
+        self.out.push(Violation {
+            kind,
+            message,
+            source: source.to_vec(),
+        });
+    }
+
+    // ---------------------------------------------------------------------------------
+    // typing constraints
+    // ---------------------------------------------------------------------------------
+
+    fn typing(&mut self) {
+        let mut uses: Uses = BTreeMap::new();
+        let mut declared: FxHashMap<Id, Vec<(EntityKind, usize)>> = FxHashMap::default();
+        for (ai, rec) in self.onto.axioms.iter().enumerate() {
+            if let Axiom::Declaration(k, id) = rec.axiom {
+                declared.entry(id).or_default().push((k, ai));
+            } else {
+                collect_axiom(&rec.axiom, &mut |id, k| {
+                    uses.entry((id, k)).or_default().push(ai);
+                });
+            }
+        }
+        // Undeclared and reserved entities.
+        let mut seen_kinds: FxHashMap<Id, FxHashSet<EntityKind>> = FxHashMap::default();
+        for (&(id, kind), axioms) in &uses {
+            seen_kinds.entry(id).or_default().insert(kind);
+            if self.is_builtin(id, kind) {
+                continue;
+            }
+            let src = self.sources(axioms);
+            // A reserved IRI cannot be defined as a datatype. Merely using one outside the
+            // datatype map (`xsd:date`) is reported once, by the datatype pass.
+            let reserved = self.is_reserved(id)
+                && (kind != EntityKind::Datatype
+                    || axioms.iter().any(|&ai| {
+                        matches!(self.onto.axioms[ai].axiom, Axiom::DatatypeDefinition(d, _) if d == id)
+                    }));
+            if reserved {
+                self.report(
+                    ViolationKind::ReservedVocabulary,
+                    format!(
+                        "{} is reserved vocabulary used as a {}",
+                        self.name(id),
+                        kind_name(kind)
+                    ),
+                    &src,
+                );
+                // Not declared either (a declaration of it is a violation of its own).
+            }
+            let has_decl = declared
+                .get(&id)
+                .is_some_and(|ds| ds.iter().any(|(k, _)| *k == kind));
+            // Undeclared datatypes are reported by the datatype pass (UnknownDatatype).
+            if !has_decl && kind != EntityKind::NamedIndividual && kind != EntityKind::Datatype {
+                self.report(
+                    ViolationKind::Undeclared,
+                    format!(
+                        "{} is used as a {} but not declared",
+                        self.name(id),
+                        kind_name(kind)
+                    ),
+                    &src,
+                );
+            }
+        }
+        let mut decl_ids: Vec<Id> = declared.keys().copied().collect();
+        decl_ids.sort_unstable();
+        for id in decl_ids {
+            for &(k, ai) in &declared[&id] {
+                seen_kinds.entry(id).or_default().insert(k);
+                // Declaring reserved vocabulary (other than a built-in entity of that kind) is
+                // as illegal as using it.
+                if !self.is_builtin(id, k) && self.is_reserved(id) && !uses.contains_key(&(id, k)) {
+                    let src = self.sources(&[ai]);
+                    self.report(
+                        ViolationKind::ReservedVocabulary,
+                        format!(
+                            "{} is reserved vocabulary declared as a {}",
+                            self.name(id),
+                            kind_name(k)
+                        ),
+                        &src,
+                    );
+                }
+            }
+        }
+        // The ontology IRI and version IRI cannot be reserved vocabulary.
+        for id in [self.onto.iri, self.onto.version_iri].into_iter().flatten() {
+            if self.is_reserved(id) {
+                self.out.push(Violation {
+                    kind: ViolationKind::ReservedVocabulary,
+                    message: format!(
+                        "{} is reserved vocabulary used as an ontology IRI",
+                        self.name(id)
+                    ),
+                    source: self.onto.header_source.clone(),
+                });
+            }
+        }
+        // Ontology and axiom annotations: their properties are annotation properties.
+        for ann in &self.onto.annotations {
+            let (id, k) = (ann.property, EntityKind::AnnotationProperty);
+            seen_kinds.entry(id).or_default().insert(k);
+            if self.is_builtin(id, k) {
+                continue;
+            }
+            let has_decl = declared
+                .get(&id)
+                .is_some_and(|ds| ds.iter().any(|(dk, _)| *dk == k));
+            if self.is_reserved(id) {
+                self.out.push(Violation {
+                    kind: ViolationKind::ReservedVocabulary,
+                    message: format!(
+                        "{} is reserved vocabulary used as an annotation property",
+                        self.name(id)
+                    ),
+                    source: ann.source.clone(),
+                });
+            }
+            if !has_decl {
+                self.out.push(Violation {
+                    kind: ViolationKind::Undeclared,
+                    message: format!(
+                        "{} is used as an annotation property but not declared",
+                        self.name(id)
+                    ),
+                    source: ann.source.clone(),
+                });
+            }
+        }
+        // Illegal punning.
+        let mut ids: Vec<Id> = seen_kinds.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
+            let ks = &seen_kinds[&id];
+            let clash = [
+                (EntityKind::ObjectProperty, EntityKind::DataProperty),
+                (EntityKind::ObjectProperty, EntityKind::AnnotationProperty),
+                (EntityKind::DataProperty, EntityKind::AnnotationProperty),
+                (EntityKind::Class, EntityKind::Datatype),
+            ]
+            .into_iter()
+            .find(|(a, b)| ks.contains(a) && ks.contains(b));
+            if let Some((a, b)) = clash {
+                let mut axioms: Vec<usize> = Vec::new();
+                for k in [a, b] {
+                    if let Some(u) = uses.get(&(id, k)) {
+                        axioms.extend(u);
+                    }
+                    if let Some(ds) = declared.get(&id) {
+                        axioms.extend(ds.iter().filter(|(dk, _)| *dk == k).map(|(_, ai)| *ai));
+                    }
+                }
+                let src = self.sources(&axioms);
+                self.report(
+                    ViolationKind::IllegalPunning,
+                    format!(
+                        "{} is both a {} and a {}",
+                        self.name(id),
+                        kind_name(a),
+                        kind_name(b)
+                    ),
+                    &src,
+                );
+            }
+        }
+        // owl:topDataProperty may only be the super-property of SubDataPropertyOf.
+        let top = self.v.top_data_property;
+        for rec in &self.onto.axioms {
+            let misuse = match &rec.axiom {
+                Axiom::SubDataPropertyOf(sub, _) => *sub == top,
+                Axiom::Declaration(..) => false,
+                ax => {
+                    let mut hit = false;
+                    collect_axiom(ax, &mut |id, k| {
+                        hit |= id == top && k == EntityKind::DataProperty;
+                    });
+                    hit
+                }
+            };
+            if misuse && top != sparq_core::dict::NO_ID {
+                self.out.push(Violation {
+                    kind: ViolationKind::TopDataPropertyMisuse,
+                    message: "owl:topDataProperty may only appear as the super-property of SubDataPropertyOf".into(),
+                    source: rec.source.clone(),
+                });
+            }
+        }
+    }
+
+    /// N-ary axioms need two distinct operands.
+    fn operand_sets(&mut self) {
+        /// The number of distinct operands, capped at 2 (all the check needs).
+        fn distinct<T: PartialEq>(xs: &[T]) -> usize {
+            match xs.first() {
+                None => 0,
+                Some(x0) if xs.iter().any(|x| x != x0) => 2,
+                Some(_) => 1,
+            }
+        }
+        let mut unsure = Vec::new();
+        for rec in &self.onto.axioms {
+            let n = match &rec.axiom {
+                // The model writes an unqualified cardinality with its default filler, so
+                // `ObjectMinCardinality(1 P)` and `ObjectMinCardinality(1 P owl:Thing)` look
+                // alike although they are structurally distinct: equal operands that contain
+                // a cardinality are not decided.
+                Axiom::EquivalentClasses(cs)
+                | Axiom::DisjointClasses(cs)
+                | Axiom::DisjointUnion(_, cs)
+                    if distinct(&cs.iter().map(canonical_class).collect::<Vec<_>>()) < 2
+                        && cs.iter().any(has_cardinality) =>
+                {
+                    unsure.push(rec.source.clone());
+                    continue;
+                }
+                // Operands are compared as structures, where the order inside a set-valued
+                // constructor (`UnionOf(A B)` vs `UnionOf(B A)`) does not count.
+                Axiom::EquivalentClasses(cs) | Axiom::DisjointClasses(cs) => {
+                    distinct(&cs.iter().map(canonical_class).collect::<Vec<_>>())
+                }
+                Axiom::DisjointUnion(_, cs) => {
+                    distinct(&cs.iter().map(canonical_class).collect::<Vec<_>>())
+                }
+                Axiom::EquivalentObjectProperties(ps) | Axiom::DisjointObjectProperties(ps) => {
+                    distinct(ps)
+                }
+                Axiom::EquivalentDataProperties(ps) | Axiom::DisjointDataProperties(ps) => {
+                    distinct(ps)
+                }
+                Axiom::SameIndividual(is) | Axiom::DifferentIndividuals(is) => distinct(is),
+                _ => continue,
+            };
+            if n < 2 {
+                self.out.push(Violation {
+                    kind: ViolationKind::InsufficientOperands,
+                    message: "the axiom needs at least two distinct operands".into(),
+                    source: rec.source.clone(),
+                });
+            }
+        }
+        for src in unsure {
+            self.unchecked("distinctness of cardinality operands", &src);
+        }
+    }
+
+    /// Whether any annotation may target axiom `ai` (one whose target is any of its input
+    /// triples, an over-approximation of its main triple).
+    fn is_annotated(&self, ai: usize) -> bool {
+        self.onto.is_annotated(ai)
+    }
+
+    fn sources(&self, axioms: &[usize]) -> Vec<usize> {
+        let mut s: Vec<usize> = axioms
+            .iter()
+            .flat_map(|&ai| self.onto.axioms[ai].source.iter().copied())
+            .collect();
+        s.sort_unstable();
+        s.dedup();
+        s
+    }
+
+    fn is_builtin(&self, id: Id, kind: EntityKind) -> bool {
+        let v = &self.v;
+        match kind {
+            EntityKind::Class => id == v.thing || id == v.nothing,
+            EntityKind::ObjectProperty => {
+                id == v.top_object_property || id == v.bottom_object_property
+            }
+            EntityKind::DataProperty => id == v.top_data_property || id == v.bottom_data_property,
+            EntityKind::AnnotationProperty => v.is_builtin_annotation_property(id),
+            EntityKind::Datatype => datatypes::is_datatype_map_iri(&self.name(id)),
+            EntityKind::NamedIndividual => false,
+        }
+    }
+
+    fn is_reserved(&self, id: Id) -> bool {
+        iri_of(self.dict, id).is_some_and(|iri| {
+            iri.starts_with(OWL)
+                || iri.starts_with(RDF)
+                || iri.starts_with(RDFS)
+                || iri.starts_with(XSD)
+        })
+    }
+
+    // ---------------------------------------------------------------------------------
+    // simple roles (§11.1)
+    // ---------------------------------------------------------------------------------
+
+    /// The property hierarchy relation `→` (closed under inverses) and the composite set.
+    fn hierarchy(
+        &self,
+    ) -> (
+        FxHashMap<ObjectProperty, Vec<ObjectProperty>>,
+        FxHashSet<ObjectProperty>,
+    ) {
+        let mut edges: FxHashMap<ObjectProperty, Vec<ObjectProperty>> = FxHashMap::default();
+        let mut add = |a: ObjectProperty, b: ObjectProperty| {
+            for (x, y) in [(a, b), (a.inverse(), b.inverse())] {
+                let e = edges.entry(x).or_default();
+                if !e.contains(&y) {
+                    e.push(y);
+                }
+            }
+        };
+        let mut composite = FxHashSet::default();
+        // §11.1: both universal object properties are composite.
+        for p in [self.v.top_object_property, self.v.bottom_object_property] {
+            if p != sparq_core::dict::NO_ID {
+                composite.insert(ObjectProperty::Named(p));
+                composite.insert(ObjectProperty::Inverse(p));
+            }
+        }
+        for rec in &self.onto.axioms {
+            match &rec.axiom {
+                Axiom::SubObjectPropertyOf(chain, sup) if chain.len() == 1 => add(chain[0], *sup),
+                Axiom::SubObjectPropertyOf(_, sup) => {
+                    composite.insert(*sup);
+                    composite.insert(sup.inverse());
+                }
+                Axiom::EquivalentObjectProperties(ps) => {
+                    for a in ps {
+                        for b in ps {
+                            if a != b {
+                                add(*a, *b);
+                            }
+                        }
+                    }
+                }
+                Axiom::InverseObjectProperties(a, b) => {
+                    add(*a, b.inverse());
+                    add(b.inverse(), *a);
+                }
+                Axiom::SymmetricObjectProperty(p) => {
+                    add(*p, p.inverse());
+                }
+                Axiom::TransitiveObjectProperty(p) => {
+                    composite.insert(*p);
+                    composite.insert(p.inverse());
+                }
+                _ => {}
+            }
+        }
+        (edges, composite)
+    }
+
+    fn non_simple(&self) -> FxHashSet<ObjectProperty> {
+        let (edges, composite) = self.hierarchy();
+        // Everything reachable from a composite property through → is non-simple.
+        let mut out: FxHashSet<ObjectProperty> = FxHashSet::default();
+        let mut work: Vec<ObjectProperty> = composite.into_iter().collect();
+        while let Some(p) = work.pop() {
+            if out.insert(p) {
+                if let Some(next) = edges.get(&p) {
+                    work.extend(next.iter().copied());
+                }
+            }
+        }
+        out
+    }
+
+    fn simple_roles(&mut self) {
+        let non_simple = self.non_simple();
+        if non_simple.is_empty() {
+            return;
+        }
+        let mut found: Vec<(ObjectProperty, &'static str, Vec<usize>)> = Vec::new();
+        for rec in &self.onto.axioms {
+            let mut check = |p: &ObjectProperty, what: &'static str| {
+                if non_simple.contains(p) {
+                    found.push((*p, what, rec.source.clone()));
+                }
+            };
+            match &rec.axiom {
+                Axiom::FunctionalObjectProperty(p) => check(p, "FunctionalObjectProperty"),
+                Axiom::InverseFunctionalObjectProperty(p) => {
+                    check(p, "InverseFunctionalObjectProperty")
+                }
+                Axiom::IrreflexiveObjectProperty(p) => check(p, "IrreflexiveObjectProperty"),
+                Axiom::AsymmetricObjectProperty(p) => check(p, "AsymmetricObjectProperty"),
+                Axiom::DisjointObjectProperties(ps) => {
+                    for p in ps {
+                        check(p, "DisjointObjectProperties");
+                    }
+                }
+                ax => {
+                    for_each_class_in_axiom(ax, &mut |ce| match ce {
+                        ClassExpression::MinCardinality(_, p, _)
+                        | ClassExpression::MaxCardinality(_, p, _)
+                        | ClassExpression::ExactCardinality(_, p, _) => {
+                            check(p, "an object cardinality restriction")
+                        }
+                        ClassExpression::HasSelf(p) => check(p, "ObjectHasSelf"),
+                        _ => {}
+                    });
+                }
+            }
+        }
+        for (p, what, src) in found {
+            let name = self.ope_name(p);
+            self.report(
+                ViolationKind::NonSimpleProperty,
+                format!("{name} is not simple (it is transitive, has a chain, or has such a sub-property) but is used in {what}"),
+                &src,
+            );
+        }
+    }
+
+    fn ope_name(&self, p: ObjectProperty) -> String {
+        match p {
+            ObjectProperty::Named(id) => self.name(id),
+            ObjectProperty::Inverse(id) => format!("ObjectInverseOf({})", self.name(id)),
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // regularity (§11.2)
+    // ---------------------------------------------------------------------------------
+
+    fn regularity(&mut self) {
+        let (edges, _) = self.hierarchy();
+        // The constraints `a < b` the order must satisfy, each with its source axiom.
+        let mut less: Vec<(ObjectProperty, ObjectProperty, usize)> = Vec::new();
+        let top = self.v.top_object_property;
+        let mut has_chain = false;
+        for (ai, rec) in self.onto.axioms.iter().enumerate() {
+            let Axiom::SubObjectPropertyOf(chain, sup) = &rec.axiom else {
+                continue;
+            };
+            if chain.len() < 2 || sup.named() == top {
+                continue;
+            }
+            has_chain = true;
+            let n = chain.len();
+            let r = *sup;
+            if n == 2 && chain[0] == r && chain[1] == r {
+                continue;
+            }
+            let smaller: Vec<ObjectProperty> = if chain[0] == r {
+                chain[1..].to_vec()
+            } else if chain[n - 1] == r {
+                chain[..n - 1].to_vec()
+            } else {
+                chain.clone()
+            };
+            for s in smaller {
+                less.push((s, r, ai));
+            }
+        }
+        if !has_chain {
+            return;
+        }
+        // §11.2 asks for a strict order `<` with (1) `S < R` iff `Inv(S) < R`, (2) `S < R`
+        // only if `R →* S` does not hold in the property hierarchy, and (3) the pairs each
+        // chain axiom needs. Every condition only forbids pairs, so an order exists iff the
+        // least relation meeting (1) and (3), closed under transitivity, is irreflexive and
+        // meets (2). That relation is reachability in the graph below.
+        let mut graph: FxHashMap<ObjectProperty, Vec<(ObjectProperty, usize)>> =
+            FxHashMap::default();
+        for &(s, r, ai) in &less {
+            for s in [s, s.inverse()] {
+                graph.entry(s).or_default().push((r, ai));
+            }
+        }
+        // `R →*` reachability in the hierarchy, computed on demand.
+        let mut below: FxHashMap<ObjectProperty, FxHashSet<ObjectProperty>> = FxHashMap::default();
+        let mut reach_hierarchy = |from: ObjectProperty| -> FxHashSet<ObjectProperty> {
+            below
+                .entry(from)
+                .or_insert_with(|| {
+                    let mut seen = FxHashSet::default();
+                    let mut work = vec![from];
+                    while let Some(x) = work.pop() {
+                        if seen.insert(x) {
+                            work.extend(edges.get(&x).into_iter().flatten().copied());
+                        }
+                    }
+                    seen
+                })
+                .clone()
+        };
+        let mut starts: Vec<ObjectProperty> = graph.keys().copied().collect();
+        starts.sort();
+        let mut cycle_axioms: Vec<usize> = Vec::new();
+        for x in starts {
+            // Everything the least order puts above `x`, with the axioms that put it there.
+            let mut above: FxHashSet<ObjectProperty> = FxHashSet::default();
+            let mut used: Vec<usize> = Vec::new();
+            let mut work: Vec<ObjectProperty> = vec![x];
+            while let Some(m) = work.pop() {
+                for &(y, ai) in graph.get(&m).map(Vec::as_slice).unwrap_or(&[]) {
+                    used.push(ai);
+                    if above.insert(y) {
+                        work.push(y);
+                    }
+                }
+            }
+            // Irreflexive, and no `x < y` with `y →* x`.
+            let bad = above.contains(&x) || above.iter().any(|&y| reach_hierarchy(y).contains(&x));
+            if bad {
+                cycle_axioms.extend(used);
+            }
+        }
+        if !cycle_axioms.is_empty() {
+            cycle_axioms.sort_unstable();
+            cycle_axioms.dedup();
+            let src = self.sources(&cycle_axioms);
+            self.report(
+                ViolationKind::IrregularPropertyHierarchy,
+                "the property chains and the property hierarchy are not regular (no strict order on the properties satisfies §11.2)".into(),
+                &src,
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // anonymous individuals (§11.2)
+    // ---------------------------------------------------------------------------------
+
+    fn anonymous_individuals(&mut self) {
+        // Union-find over anonymous individuals connected by object property assertions; an
+        // edge between two already-connected individuals closes a cycle.
+        let mut parent: FxHashMap<Id, Id> = FxHashMap::default();
+        // Iterative, with path halving: a long chain of blank individuals must not recurse.
+        fn find(parent: &mut FxHashMap<Id, Id>, mut x: Id) -> Id {
+            loop {
+                let p = *parent.entry(x).or_insert(x);
+                if p == x {
+                    return x;
+                }
+                let g = *parent.entry(p).or_insert(p);
+                parent.insert(x, g);
+                x = g;
+            }
+        }
+        let mut size: FxHashMap<Id, usize> = FxHashMap::default();
+        let mut seen_edges: FxHashSet<(Id, Id)> = FxHashSet::default();
+        let mut cyclic: Vec<Vec<usize>> = Vec::new();
+        for rec in &self.onto.axioms {
+            if let Axiom::ObjectPropertyAssertion(
+                _,
+                Individual::Anonymous(a),
+                Individual::Anonymous(b),
+            ) = &rec.axiom
+            {
+                let key = ((*a).min(*b), (*a).max(*b));
+                if a == b || !seen_edges.insert(key) {
+                    cyclic.push(rec.source.clone());
+                    continue;
+                }
+                let (ra, rb) = (find(&mut parent, *a), find(&mut parent, *b));
+                if ra == rb {
+                    cyclic.push(rec.source.clone());
+                } else {
+                    // Union by size keeps the trees shallow.
+                    let (sa, sb) = (
+                        size.get(&ra).copied().unwrap_or(1),
+                        size.get(&rb).copied().unwrap_or(1),
+                    );
+                    let (small, big) = if sa < sb { (ra, rb) } else { (rb, ra) };
+                    parent.insert(small, big);
+                    size.insert(big, sa + sb);
+                }
+            }
+        }
+        // Fail-closed: the forest condition above is the only anonymous-individual
+        // restriction checked; any other use of an anonymous individual leaves the rest of
+        // §11.2 unverified.
+        const RULE: &str = "anonymous-individual restrictions beyond the forest condition (§11.2)";
+        let anon = |i: &Individual| matches!(i, Individual::Anonymous(_));
+        let mut other_uses: Vec<Vec<usize>> = Vec::new();
+        for rec in &self.onto.axioms {
+            let mut hit = match &rec.axiom {
+                Axiom::ObjectPropertyAssertion(_, a, b) => anon(a) != anon(b),
+                Axiom::NegativeObjectPropertyAssertion(_, a, b) => anon(a) || anon(b),
+                Axiom::NegativeDataPropertyAssertion(_, a, _) => anon(a),
+                Axiom::SameIndividual(is) | Axiom::DifferentIndividuals(is) => is.iter().any(anon),
+                Axiom::AnnotationAssertion(_, subject, value) => {
+                    matches!(subject, AnnotationSubject::Anonymous(_))
+                        || matches!(value, AnnotationValue::Anonymous(_))
+                }
+                _ => false,
+            };
+            for_each_class_in_axiom(&rec.axiom, &mut |ce| match ce {
+                ClassExpression::OneOf(is) => hit |= is.iter().any(anon),
+                ClassExpression::HasValue(_, i) => hit |= anon(i),
+                _ => {}
+            });
+            if hit {
+                other_uses.push(rec.source.clone());
+            }
+        }
+        for ann in &self.onto.annotations {
+            if matches!(ann.value, AnnotationValue::Anonymous(_)) {
+                other_uses.push(ann.source.clone());
+            }
+        }
+        for src in other_uses {
+            self.unchecked(RULE, &src);
+        }
+        for src in cyclic {
+            self.report(
+                ViolationKind::AnonymousIndividualCycle,
+                "object property assertions between anonymous individuals form a cycle".into(),
+                &src,
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // datatypes
+    // ---------------------------------------------------------------------------------
+
+    fn datatypes(&mut self) {
+        let mut declared_dt: FxHashSet<Id> = FxHashSet::default();
+        let mut definitions: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
+        // Each definition's canonical range, and whether it carries annotations.
+        let mut seen_defs: FxHashMap<Id, Vec<(DataRange, bool)>> = FxHashMap::default();
+        let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
+        for (ai, rec) in self.onto.axioms.iter().enumerate() {
+            match &rec.axiom {
+                Axiom::Declaration(EntityKind::Datatype, id) => {
+                    declared_dt.insert(*id);
+                }
+                Axiom::DatatypeDefinition(id, dr) => {
+                    // The axioms form a set under structural equivalence: an unannotated
+                    // repeat of a definition is the same definition. Whether annotated
+                    // definitions with equal ranges are equal depends on their full
+                    // annotation structure, which is not compared: that case is unchecked.
+                    let range = canonical_range(dr);
+                    let annotated = self.is_annotated(ai);
+                    let reps = seen_defs.entry(*id).or_default();
+                    match reps.iter().find(|(r, _)| *r == range) {
+                        Some(&(_, other)) if !annotated && !other => {}
+                        Some(_) => {
+                            not_checked.push((
+                                "structural equality of annotated datatype definitions",
+                                self.onto.axioms[ai].source.clone(),
+                            ));
+                        }
+                        None => {
+                            reps.push((range, annotated));
+                            definitions.entry(*id).or_default().push(ai);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // The flag marks a violation an unloaded import could repair.
+        let mut found: Vec<(ViolationKind, String, Vec<usize>, bool)> = Vec::new();
+        let xml_literal = format!("{RDF}XMLLiteral");
+        // Every literal of the ontology, with the triples it came from.
+        let mut literals: Vec<(Literal, &[usize])> = Vec::new();
+        for rec in &self.onto.axioms {
+            for_each_literal_in_axiom(&rec.axiom, &mut |l| literals.push((l.clone(), &rec.source)));
+        }
+        for ann in &self.onto.annotations {
+            if let AnnotationValue::Literal(l) = &ann.value {
+                literals.push((l.clone(), &ann.source));
+            }
+        }
+        for (l, source) in &literals {
+            if l.datatype == xml_literal {
+                not_checked.push(("rdf:XMLLiteral content", source.to_vec()));
+                continue;
+            }
+            match datatypes::parse_value(&l.lexical, &l.datatype, l.lang.as_deref()) {
+                Ok(_) => {}
+                // The lexical form may be valid, but its value is beyond what is represented,
+                // so its validity is not established.
+                Err(datatypes::ValueError::Unsupported) => {
+                    not_checked.push((
+                        "literal values beyond the represented range",
+                        source.to_vec(),
+                    ));
+                }
+                Err(datatypes::ValueError::IllTyped) => found.push((
+                    ViolationKind::IllTypedLiteral,
+                    format!(
+                        "{} is not a valid {} literal",
+                        super::vocab::render_literal(l),
+                        l.datatype
+                    ),
+                    source.to_vec(),
+                    false,
+                )),
+                // §5.7 / §9.4: only datatype-map datatypes have lexical forms; a declared or
+                // defined datatype has an empty lexical space.
+                Err(datatypes::ValueError::UnknownDatatype) => found.push((
+                    ViolationKind::UnknownDatatype,
+                    format!(
+                        "{} is not in the OWL 2 datatype map, so no literal can use it",
+                        l.datatype
+                    ),
+                    source.to_vec(),
+                    false,
+                )),
+            }
+        }
+        for rec in &self.onto.axioms {
+            let mut range = |dr: &DataRange| match dr {
+                DataRange::Datatype(id) => {
+                    // §11.2: a datatype outside the map needs exactly one definition.
+                    let iri = iri_of(self.dict, *id).unwrap_or_default();
+                    let defined = definitions.get(id).is_some_and(|d| d.len() == 1);
+                    if !datatypes::is_datatype_map_iri(&iri) && !defined {
+                        // An import may define a non-reserved datatype no local axiom defines.
+                        let repairable = !definitions.contains_key(id) && !self.is_reserved(*id);
+                        found.push((
+                            ViolationKind::UnknownDatatype,
+                            format!(
+                                "{iri} is neither in the OWL 2 datatype map nor defined by exactly one DatatypeDefinition"
+                            ),
+                            rec.source.clone(),
+                            repairable,
+                        ));
+                    }
+                }
+                DataRange::Restriction(id, facets) => {
+                    let iri = iri_of(self.dict, *id).unwrap_or_default();
+                    let b = builtin(&iri);
+                    for (f, value) in facets {
+                        let firi = iri_of(self.dict, *f).unwrap_or_default();
+                        let problem = match (b, datatypes::facet(&firi)) {
+                            (None, _) => Some(format!(
+                                "facets can only restrict datatypes of the OWL 2 datatype map, not {iri}"
+                            )),
+                            (_, None) => Some(format!("{firi} is not an OWL 2 facet")),
+                            (Some(b), Some(facet)) if !b.allowed_facets().contains(&facet) => {
+                                Some(format!("{firi} does not apply to {iri}"))
+                            }
+                            (Some(b), Some(facet)) => match facet_value_problem(b, facet, value) {
+                                FacetCheck::Ok => None,
+                                FacetCheck::Bad(m) => Some(m),
+                                FacetCheck::Unchecked(rule) => {
+                                    not_checked.push((rule, rec.source.clone()));
+                                    None
+                                }
+                            },
+                        };
+                        if let Some(msg) = problem {
+                            found.push((
+                                ViolationKind::InvalidFacet,
+                                msg,
+                                rec.source.clone(),
+                                false,
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            };
+            for_each_range_in_axiom(&rec.axiom, &mut range);
+        }
+        // §11.2: a declared datatype outside the map needs exactly one definition too, even
+        // when no data range uses it.
+        let mut declared: Vec<Id> = declared_dt.iter().copied().collect();
+        declared.sort_unstable();
+        for id in declared {
+            let iri = iri_of(self.dict, id).unwrap_or_default();
+            if !datatypes::is_datatype_map_iri(&iri) && !definitions.contains_key(&id) {
+                let src: Vec<usize> = self
+                    .onto
+                    .axioms
+                    .iter()
+                    .filter(|r| r.axiom == Axiom::Declaration(EntityKind::Datatype, id))
+                    .flat_map(|r| r.source.iter().copied())
+                    .collect();
+                found.push((
+                    ViolationKind::UnknownDatatype,
+                    format!(
+                        "{iri} is neither in the OWL 2 datatype map nor defined by exactly one DatatypeDefinition"
+                    ),
+                    src,
+                    !self.is_reserved(id),
+                ));
+            }
+        }
+        // Datatype definitions.
+        let mut ids: Vec<Id> = definitions.keys().copied().collect();
+        ids.sort_unstable();
+        for id in &ids {
+            let src = self.sources(&definitions[id]);
+            let iri = iri_of(self.dict, *id).unwrap_or_default();
+            if datatypes::is_datatype_map_iri(&iri) {
+                found.push((
+                    ViolationKind::InvalidDatatypeDefinition,
+                    format!("{iri} is a built-in datatype and cannot be redefined"),
+                    src,
+                    false,
+                ));
+            } else if definitions[id].len() > 1 {
+                found.push((
+                    ViolationKind::InvalidDatatypeDefinition,
+                    format!("{iri} has more than one DatatypeDefinition"),
+                    src,
+                    false,
+                ));
+            } else if !declared_dt.contains(id) {
+                found.push((
+                    ViolationKind::InvalidDatatypeDefinition,
+                    format!("{iri} is defined but not declared as a datatype"),
+                    src,
+                    true,
+                ));
+            }
+        }
+        // Cycles among definitions.
+        let deps = |id: Id| -> Vec<Id> {
+            let mut out = Vec::new();
+            for &ai in definitions.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
+                if let Axiom::DatatypeDefinition(_, dr) = &self.onto.axioms[ai].axiom {
+                    collect_range_datatypes(dr, &mut out);
+                }
+            }
+            out
+        };
+        for &start in &ids {
+            let mut seen = FxHashSet::default();
+            let mut work = deps(start);
+            let mut cyclic = false;
+            while let Some(d) = work.pop() {
+                if d == start {
+                    cyclic = true;
+                    break;
+                }
+                if seen.insert(d) {
+                    work.extend(deps(d));
+                }
+            }
+            if cyclic {
+                let src = self.sources(&definitions[&start]);
+                found.push((
+                    ViolationKind::InvalidDatatypeDefinition,
+                    format!("the definition of {} is cyclic", self.name(start)),
+                    src,
+                    false,
+                ));
+            }
+        }
+        for (k, m, s, repairable) in found {
+            if repairable {
+                self.repairable.insert(self.out.len());
+            }
+            self.report(k, m, &s);
+        }
+        for (rule, s) in not_checked {
+            self.unchecked(rule, &s);
+        }
+    }
+}
+
+enum FacetCheck {
+    Ok,
+    Bad(String),
+    Unchecked(&'static str),
+}
+
+fn facet_value_problem(b: Builtin, facet: Facet, value: &Literal) -> FacetCheck {
+    let parsed = datatypes::parse_value(&value.lexical, &value.datatype, value.lang.as_deref());
+    let bad = |what: &str| FacetCheck::Bad(format!("the value of this facet must be {what}"));
+    if parsed == Err(datatypes::ValueError::Unsupported) {
+        return FacetCheck::Unchecked("literal values beyond the represented range");
+    }
+    match facet {
+        Facet::Length | Facet::MinLength | Facet::MaxLength => match parsed {
+            Ok(datatypes::Value::Real(r)) if r.0.is_integer() && r.0.num >= 0 => FacetCheck::Ok,
+            _ => bad("a non-negative integer"),
+        },
+        Facet::Pattern => match parsed {
+            Ok(datatypes::Value::String(_)) => {
+                FacetCheck::Unchecked("xsd:pattern regular-expression syntax")
+            }
+            _ => bad("a string"),
+        },
+        Facet::LangRange => match parsed {
+            Ok(datatypes::Value::String(r)) if is_language_range(&r) => FacetCheck::Ok,
+            _ => bad("an RFC 4647 language range"),
+        },
+        Facet::MinInclusive | Facet::MaxInclusive | Facet::MinExclusive | Facet::MaxExclusive => {
+            match parsed {
+                // In the restricted datatype's own value space: always allowed.
+                Ok(v) if datatypes::in_value_space(&v, b) => FacetCheck::Ok,
+                // owl:real and owl:rational take bounds from their whole family.
+                Ok(v)
+                    if matches!(b, Builtin::OwlReal | Builtin::OwlRational)
+                        && b.families().contains(&v.family()) =>
+                {
+                    FacetCheck::Ok
+                }
+                // Same family, outside the value space (an integer bounded by 0.5): the
+                // facet space of that combination is not checked.
+                Ok(v) if b.families().contains(&v.family()) => FacetCheck::Unchecked(
+                    "the facet space of a bound outside the restricted datatype's value space",
+                ),
+                _ => bad("a value of the restricted datatype's value space"),
+            }
+        }
+    }
+}
+
+/// RFC 4647 §2.1 basic language range: `"*"`, or `1*8ALPHA *("-" 1*8alphanum)`. OWL 2 uses
+/// basic ranges only; extended ranges (`en-*`) are not in the facet space.
+fn is_language_range(s: &str) -> bool {
+    if s == "*" {
+        return true;
+    }
+    let mut parts = s.split('-');
+    parts.next().is_some_and(|p| {
+        !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphabetic())
+    }) && parts
+        .all(|p| !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// `c` with the operands of every set-valued constructor sorted and de-duplicated, so two
+/// expressions are structurally equal exactly when their canonical forms are equal.
+fn canonical_class(c: &ClassExpression) -> ClassExpression {
+    use ClassExpression as C;
+    let set = |xs: &[ClassExpression]| {
+        let mut v: Vec<ClassExpression> = xs.iter().map(canonical_class).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    match c {
+        C::IntersectionOf(xs) => C::IntersectionOf(set(xs)),
+        C::UnionOf(xs) => C::UnionOf(set(xs)),
+        C::OneOf(is) => {
+            let mut v = is.clone();
+            v.sort();
+            v.dedup();
+            C::OneOf(v)
+        }
+        C::ComplementOf(x) => C::ComplementOf(Box::new(canonical_class(x))),
+        C::SomeValuesFrom(p, x) => C::SomeValuesFrom(*p, Box::new(canonical_class(x))),
+        C::AllValuesFrom(p, x) => C::AllValuesFrom(*p, Box::new(canonical_class(x))),
+        C::MinCardinality(n, p, x) => C::MinCardinality(*n, *p, Box::new(canonical_class(x))),
+        C::MaxCardinality(n, p, x) => C::MaxCardinality(*n, *p, Box::new(canonical_class(x))),
+        C::ExactCardinality(n, p, x) => C::ExactCardinality(*n, *p, Box::new(canonical_class(x))),
+        C::DataSomeValuesFrom(p, r) => C::DataSomeValuesFrom(*p, canonical_range(r)),
+        C::DataAllValuesFrom(p, r) => C::DataAllValuesFrom(*p, canonical_range(r)),
+        C::DataMinCardinality(n, p, r) => C::DataMinCardinality(*n, *p, canonical_range(r)),
+        C::DataMaxCardinality(n, p, r) => C::DataMaxCardinality(*n, *p, canonical_range(r)),
+        C::DataExactCardinality(n, p, r) => C::DataExactCardinality(*n, *p, canonical_range(r)),
+        other => other.clone(),
+    }
+}
+
+/// `true` when `c` contains a cardinality restriction anywhere.
+fn has_cardinality(c: &ClassExpression) -> bool {
+    use ClassExpression as C;
+    match c {
+        C::MinCardinality(..)
+        | C::MaxCardinality(..)
+        | C::ExactCardinality(..)
+        | C::DataMinCardinality(..)
+        | C::DataMaxCardinality(..)
+        | C::DataExactCardinality(..) => true,
+        C::IntersectionOf(xs) | C::UnionOf(xs) => xs.iter().any(has_cardinality),
+        C::ComplementOf(x) | C::SomeValuesFrom(_, x) | C::AllValuesFrom(_, x) => has_cardinality(x),
+        _ => false,
+    }
+}
+
+/// `r` with every operand set (union, intersection, enumeration, facets) sorted and
+/// deduplicated: structurally equivalent ranges have equal canonical forms.
+pub(crate) fn canonical_range(r: &DataRange) -> DataRange {
+    let set = |xs: &[DataRange]| {
+        let mut v: Vec<DataRange> = xs.iter().map(canonical_range).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    match r {
+        DataRange::IntersectionOf(xs) => DataRange::IntersectionOf(set(xs)),
+        DataRange::UnionOf(xs) => DataRange::UnionOf(set(xs)),
+        DataRange::ComplementOf(x) => DataRange::ComplementOf(Box::new(canonical_range(x))),
+        DataRange::OneOf(ls) => {
+            let mut v = ls.clone();
+            v.sort();
+            v.dedup();
+            DataRange::OneOf(v)
+        }
+        DataRange::Restriction(d, fs) => {
+            let mut v = fs.clone();
+            v.sort();
+            v.dedup();
+            DataRange::Restriction(*d, v)
+        }
+        other => other.clone(),
+    }
+}
+
+fn kind_name(k: EntityKind) -> &'static str {
+    match k {
+        EntityKind::Class => "class",
+        EntityKind::Datatype => "datatype",
+        EntityKind::ObjectProperty => "object property",
+        EntityKind::DataProperty => "data property",
+        EntityKind::AnnotationProperty => "annotation property",
+        EntityKind::NamedIndividual => "named individual",
+    }
+}
+
+// -------------------------------------------------------------------------------------------
+// structural walkers (shared with the reasoner)
+// -------------------------------------------------------------------------------------------
+
+fn collect_ope(p: &ObjectProperty, f: &mut impl FnMut(Id, EntityKind)) {
+    f(p.named(), EntityKind::ObjectProperty);
+}
+
+fn collect_ind(i: &Individual, f: &mut impl FnMut(Id, EntityKind)) {
+    if let Individual::Named(id) = i {
+        f(*id, EntityKind::NamedIndividual);
+    }
+}
+
+fn collect_range(dr: &DataRange, f: &mut impl FnMut(Id, EntityKind)) {
+    match dr {
+        DataRange::Datatype(id) | DataRange::Restriction(id, _) => f(*id, EntityKind::Datatype),
+        DataRange::IntersectionOf(rs) | DataRange::UnionOf(rs) => {
+            for r in rs {
+                collect_range(r, f);
+            }
+        }
+        DataRange::ComplementOf(r) => collect_range(r, f),
+        DataRange::OneOf(_) | DataRange::TopLiteral => {}
+    }
+}
+
+fn collect_range_datatypes(dr: &DataRange, out: &mut Vec<Id>) {
+    collect_range(dr, &mut |id, _| out.push(id));
+}
+
+fn collect_class(ce: &ClassExpression, f: &mut impl FnMut(Id, EntityKind)) {
+    use ClassExpression as C;
+    match ce {
+        C::Class(id) => f(*id, EntityKind::Class),
+        C::Thing | C::Nothing => {}
+        C::IntersectionOf(cs) | C::UnionOf(cs) => {
+            for c in cs {
+                collect_class(c, f);
+            }
+        }
+        C::ComplementOf(c) => collect_class(c, f),
+        C::OneOf(is) => {
+            for i in is {
+                collect_ind(i, f);
+            }
+        }
+        C::SomeValuesFrom(p, c) | C::AllValuesFrom(p, c) => {
+            collect_ope(p, f);
+            collect_class(c, f);
+        }
+        C::HasValue(p, i) => {
+            collect_ope(p, f);
+            collect_ind(i, f);
+        }
+        C::HasSelf(p) => collect_ope(p, f),
+        C::MinCardinality(_, p, c) | C::MaxCardinality(_, p, c) | C::ExactCardinality(_, p, c) => {
+            collect_ope(p, f);
+            collect_class(c, f);
+        }
+        C::DataSomeValuesFrom(d, r)
+        | C::DataAllValuesFrom(d, r)
+        | C::DataMinCardinality(_, d, r)
+        | C::DataMaxCardinality(_, d, r)
+        | C::DataExactCardinality(_, d, r) => {
+            f(*d, EntityKind::DataProperty);
+            collect_range(r, f);
+        }
+        C::DataHasValue(d, _) => f(*d, EntityKind::DataProperty),
+    }
+}
+
+/// Calls `f` with every entity (and the kind it is used as) in a logical axiom.
+pub(crate) fn collect_axiom(ax: &Axiom, f: &mut impl FnMut(Id, EntityKind)) {
+    use Axiom as A;
+    match ax {
+        A::Declaration(..) => {}
+        A::SubClassOf(a, b) => {
+            collect_class(a, f);
+            collect_class(b, f);
+        }
+        A::EquivalentClasses(cs) | A::DisjointClasses(cs) => {
+            for c in cs {
+                collect_class(c, f);
+            }
+        }
+        A::DisjointUnion(c, cs) => {
+            f(*c, EntityKind::Class);
+            for c in cs {
+                collect_class(c, f);
+            }
+        }
+        A::SubObjectPropertyOf(chain, sup) => {
+            for p in chain {
+                collect_ope(p, f);
+            }
+            collect_ope(sup, f);
+        }
+        A::EquivalentObjectProperties(ps) | A::DisjointObjectProperties(ps) => {
+            for p in ps {
+                collect_ope(p, f);
+            }
+        }
+        A::InverseObjectProperties(a, b) => {
+            collect_ope(a, f);
+            collect_ope(b, f);
+        }
+        A::ObjectPropertyDomain(p, c) | A::ObjectPropertyRange(p, c) => {
+            collect_ope(p, f);
+            collect_class(c, f);
+        }
+        A::FunctionalObjectProperty(p)
+        | A::InverseFunctionalObjectProperty(p)
+        | A::ReflexiveObjectProperty(p)
+        | A::IrreflexiveObjectProperty(p)
+        | A::SymmetricObjectProperty(p)
+        | A::AsymmetricObjectProperty(p)
+        | A::TransitiveObjectProperty(p) => collect_ope(p, f),
+        A::SubDataPropertyOf(a, b) => {
+            f(*a, EntityKind::DataProperty);
+            f(*b, EntityKind::DataProperty);
+        }
+        A::EquivalentDataProperties(ds) | A::DisjointDataProperties(ds) => {
+            for d in ds {
+                f(*d, EntityKind::DataProperty);
+            }
+        }
+        A::DataPropertyDomain(d, c) => {
+            f(*d, EntityKind::DataProperty);
+            collect_class(c, f);
+        }
+        A::DataPropertyRange(d, r) => {
+            f(*d, EntityKind::DataProperty);
+            collect_range(r, f);
+        }
+        A::FunctionalDataProperty(d) => f(*d, EntityKind::DataProperty),
+        A::DatatypeDefinition(dt, r) => {
+            f(*dt, EntityKind::Datatype);
+            collect_range(r, f);
+        }
+        A::HasKey(c, ps, ds) => {
+            collect_class(c, f);
+            for p in ps {
+                collect_ope(p, f);
+            }
+            for d in ds {
+                f(*d, EntityKind::DataProperty);
+            }
+        }
+        A::SameIndividual(is) | A::DifferentIndividuals(is) => {
+            for i in is {
+                collect_ind(i, f);
+            }
+        }
+        A::ClassAssertion(c, i) => {
+            collect_class(c, f);
+            collect_ind(i, f);
+        }
+        A::ObjectPropertyAssertion(p, a, b) | A::NegativeObjectPropertyAssertion(p, a, b) => {
+            collect_ope(p, f);
+            collect_ind(a, f);
+            collect_ind(b, f);
+        }
+        A::DataPropertyAssertion(d, a, _) | A::NegativeDataPropertyAssertion(d, a, _) => {
+            f(*d, EntityKind::DataProperty);
+            collect_ind(a, f);
+        }
+        // Annotation subjects, values and domains / ranges are plain IRIs, not entities.
+        A::AnnotationAssertion(p, _, _)
+        | A::AnnotationPropertyDomain(p, _)
+        | A::AnnotationPropertyRange(p, _) => f(*p, EntityKind::AnnotationProperty),
+        A::SubAnnotationPropertyOf(p, q) => {
+            f(*p, EntityKind::AnnotationProperty);
+            f(*q, EntityKind::AnnotationProperty);
+        }
+    }
+}
+
+fn walk_class(ce: &ClassExpression, f: &mut impl FnMut(&ClassExpression)) {
+    use ClassExpression as C;
+    f(ce);
+    match ce {
+        C::IntersectionOf(cs) | C::UnionOf(cs) => {
+            for c in cs {
+                walk_class(c, f);
+            }
+        }
+        C::ComplementOf(c)
+        | C::SomeValuesFrom(_, c)
+        | C::AllValuesFrom(_, c)
+        | C::MinCardinality(_, _, c)
+        | C::MaxCardinality(_, _, c)
+        | C::ExactCardinality(_, _, c) => walk_class(c, f),
+        _ => {}
+    }
+}
+
+/// Calls `f` with every class expression (recursively) in an axiom.
+pub(crate) fn for_each_class_in_axiom(ax: &Axiom, f: &mut impl FnMut(&ClassExpression)) {
+    use Axiom as A;
+    match ax {
+        A::SubClassOf(a, b) => {
+            walk_class(a, f);
+            walk_class(b, f);
+        }
+        A::EquivalentClasses(cs) | A::DisjointClasses(cs) | A::DisjointUnion(_, cs) => {
+            for c in cs {
+                walk_class(c, f);
+            }
+        }
+        A::ObjectPropertyDomain(_, c)
+        | A::ObjectPropertyRange(_, c)
+        | A::DataPropertyDomain(_, c)
+        | A::HasKey(c, _, _)
+        | A::ClassAssertion(c, _) => walk_class(c, f),
+        _ => {}
+    }
+}
+
+fn walk_range(dr: &DataRange, f: &mut impl FnMut(&DataRange)) {
+    f(dr);
+    match dr {
+        DataRange::IntersectionOf(rs) | DataRange::UnionOf(rs) => {
+            for r in rs {
+                walk_range(r, f);
+            }
+        }
+        DataRange::ComplementOf(r) => walk_range(r, f),
+        _ => {}
+    }
+}
+
+/// Calls `f` with every data range (recursively) in an axiom.
+pub(crate) fn for_each_range_in_axiom(ax: &Axiom, f: &mut impl FnMut(&DataRange)) {
+    let mut in_class = |ce: &ClassExpression| match ce {
+        ClassExpression::DataSomeValuesFrom(_, r)
+        | ClassExpression::DataAllValuesFrom(_, r)
+        | ClassExpression::DataMinCardinality(_, _, r)
+        | ClassExpression::DataMaxCardinality(_, _, r)
+        | ClassExpression::DataExactCardinality(_, _, r) => walk_range(r, f),
+        _ => {}
+    };
+    for_each_class_in_axiom(ax, &mut in_class);
+    match ax {
+        Axiom::DataPropertyRange(_, r) | Axiom::DatatypeDefinition(_, r) => walk_range(r, f),
+        _ => {}
+    }
+}
+
+/// Calls `f` with every literal in an axiom (assertions, has-value, one-of, facet values).
+pub(crate) fn for_each_literal_in_axiom(ax: &Axiom, f: &mut impl FnMut(&Literal)) {
+    match ax {
+        Axiom::DataPropertyAssertion(_, _, l)
+        | Axiom::NegativeDataPropertyAssertion(_, _, l)
+        | Axiom::AnnotationAssertion(_, _, AnnotationValue::Literal(l)) => f(l),
+        _ => {}
+    }
+    for_each_class_in_axiom(ax, &mut |ce| {
+        if let ClassExpression::DataHasValue(_, l) = ce {
+            f(l);
+        }
+    });
+    for_each_range_in_axiom(ax, &mut |dr| match dr {
+        DataRange::OneOf(ls) => {
+            for l in ls {
+                f(l);
+            }
+        }
+        DataRange::Restriction(_, facets) => {
+            for (_, l) in facets {
+                f(l);
+            }
+        }
+        _ => {}
+    });
+}
+
+/// The source triples of a set of axiom records (sorted, de-duplicated).
+#[allow(dead_code)]
+pub(crate) fn sources_of(records: &[&AxiomRecord]) -> Vec<usize> {
+    let mut s: Vec<usize> = records
+        .iter()
+        .flat_map(|r| r.source.iter().copied())
+        .collect();
+    s.sort_unstable();
+    s.dedup();
+    s
+}

@@ -56,7 +56,8 @@ corrections that matter for the security posture**, verified against the code at
    it is a research dial that does not exist in a default build.
 2. **What landed is CONFIG ONLY — no leaf-shape, no circuit, no encoding change.** #891 added
    the `CommitmentMethod` enum, its distinct `zk:scheme` IRIs, fail-closed parse, and the
-   `RegistryEntry::method()` / `with_method()` plumbing. The string-canonical
+   `RegistryEntry::method()` plumbing (the method is now set at construction —
+   `new_already_issued` / `new_for_issuance` / `issued` — and covered by the issuer signature). The string-canonical
    encode/commit pipeline (`encode.rs`/`commit.rs::commit_canonical`) is **byte-unchanged**;
    the dual-leaf and value-only **leaf encodings are NOT implemented** (impl bead sq-j506),
    and the `(method, circuit)` dispatch is NOT implemented (sq-cfmv). The 28-circuit
@@ -66,7 +67,7 @@ Implemented vs pending, precisely:
 
 | Component | State | Where |
 |---|---|---|
-| `CommitmentMethod` registry (enum + IRIs + fail-closed parse + `method()`/`with_method()`) | **IMPLEMENTED** (#891 / sq-zzxt, CLOSED) | `crates/sparq-zk/src/commit.rs`, `registry.rs` |
+| `CommitmentMethod` registry (enum + IRIs + fail-closed parse + `method()` + construction-time method) | **IMPLEMENTED** (#891 / sq-zzxt, CLOSED) | `crates/sparq-zk/src/commit.rs`, `registry.rs` |
 | string-canonical leaf encode + commit + its in-circuit FILTER members | **IMPLEMENTED** (the only end-to-end method today) | `encode.rs`, `commit.rs`, `zk/compose/.../filter_*.nr` |
 | dual-leaf / value-only **leaf encoding** (host) | **PENDING** — sq-j506 (audit-gated), blocked on the dual-leaf circuit | not in tree |
 | dual-leaf **circuit member** (value-FILTER over the value handle) | **PENDING** — sq-xojl | not in tree |
@@ -172,7 +173,7 @@ today**. Its leaf is `h2(TYPE_CODE_LITERAL, blake3(canonical N-Triples token))`.
 The value-optimised method for *new* issuance (#769). Its leaf carries **both** a per-datatype
 value handle (`value_component`) and a lexical-identity hash (`lexical_component`) so it can do
 cheap value FILTERs **and** retain term identity. **The leaf encoding and circuit are NOT
-implemented** (sq-j506 / sq-xojl); the registry can record the selection (`with_method`) today.
+implemented** (sq-j506 / sq-xojl); the registry can record an ALREADY-ISSUED selection (`RegistryEntry::new_already_issued`) today.
 
 - **value↔lexical agreement (INV-VL): NOT machine-enforced — REMOVED.** This is the headline
   downgrade. The value-FILTER lane is **trusted-issuer-honesty** for value↔lexical agreement.
@@ -427,7 +428,7 @@ security / privacy / soundness claim is made here.**
 
 In-repo (verified against `origin/main`, #891): `crates/sparq-zk/src/commit.rs`
 (the `CommitmentMethod` enum + tests), `crates/sparq-zk/src/registry.rs`
-(`method()`/`with_method()` + the `zk:scheme` IRIs), `crates/sparq-zk/src/sig.rs`
+(`method()`/`new_already_issued()` + the `zk:scheme` IRIs), `crates/sparq-zk/src/sig.rs`
 (the `SignatureScheme` enum + the constant-time posture note),
 `research/zk-configurable-commitment-design.md` (the program design + §8 CR-G9 proposal),
 `research/zk-field-native-encoding.md` (#794, the dual-leaf FINAL design + INV-VL framing),

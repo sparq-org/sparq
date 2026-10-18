@@ -304,6 +304,418 @@ async fn put_flood_beyond_resource_cap_is_refused_with_507() {
     assert_eq!(retry.status(), StatusCode::INSUFFICIENT_STORAGE);
 }
 
+/// The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same store. On
+/// the LDP surface such a name is never a resource: not served, written or deleted, even for the
+/// owner and even when a record is stored there.
+#[tokio::test]
+async fn a_linkset_record_name_is_no_ldp_resource() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    store
+        .write(
+            "https://pod.example/alice/doc.meta",
+            axum::body::Bytes::from_static(b"{}"),
+            "application/json",
+        )
+        .await
+        .expect("seed a record");
+    let h = Harness::with_store(store).await;
+    // The record itself and a case or %-encoded variant of it: none is routed, so none answers by
+    // whether the record is there.
+    for path in [
+        "/alice/doc.meta",
+        "/alice/doc.META",
+        "/alice/doc%2Emeta",
+        "/alice/c/.meta",
+    ] {
+        for (method, body) in [
+            ("GET", ""),
+            ("HEAD", ""),
+            ("PUT", TURTLE),
+            ("DELETE", ""),
+            ("PATCH", ""),
+        ] {
+            let ct = (method == "PUT").then_some("text/turtle");
+            let r = h.request(method, path, ct, Body::from(body)).await;
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+    let r = h
+        .request(
+            "PUT",
+            "/alice/doc.metadata",
+            Some("text/turtle"),
+            Body::from(TURTLE),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+}
+
+/// A container named like a record (`X.meta/`), and what lies under it, is an ordinary resource
+/// that its owner reaches. A stored record beside it (or listed in its parent by a legacy edge)
+/// changes no response: the same requests answer the same with and without the records.
+#[tokio::test]
+async fn a_record_beside_a_container_decides_nothing() {
+    use sparq_lws_core::store::Store;
+    async fn store(records: bool) -> CompositeStore<BackendSparqClient, InMemoryBlobStore> {
+        let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+        let alice = "https://pod.example/alice/";
+        store
+            .write(
+                "https://pod.example/",
+                axum::body::Bytes::new(),
+                "text/turtle",
+            )
+            .await
+            .expect("seed the root");
+        store
+            .create_in_container(
+                "https://pod.example/",
+                alice,
+                axum::body::Bytes::new(),
+                "text/turtle",
+            )
+            .await
+            .expect("seed alice");
+        let e = "https://pod.example/alice/e/";
+        store
+            .create_in_container(alice, e, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
+        if records {
+            store
+                .create_in_container(
+                    e,
+                    &format!("{e}old.meta"),
+                    axum::body::Bytes::from_static(b"{}"),
+                    "application/json",
+                )
+                .await
+                .expect("seed a record listed alone");
+            for name in ["doc.meta", "x.meta", ".meta"] {
+                store
+                    .write(
+                        &format!("{alice}{name}"),
+                        axum::body::Bytes::from_static(b"{}"),
+                        "application/json",
+                    )
+                    .await
+                    .expect("seed a record");
+            }
+            store
+                .create_in_container(
+                    alice,
+                    &format!("{alice}legacy.meta"),
+                    axum::body::Bytes::from_static(b"{}"),
+                    "application/json",
+                )
+                .await
+                .expect("seed a listed record");
+        }
+        store
+    }
+    async fn run(h: &Harness) -> Vec<(String, StatusCode, Vec<(String, String)>, Vec<u8>)> {
+        let mut out = Vec::new();
+        for (method, path, auth) in [
+            ("GET", "/alice/", true),
+            ("PUT", "/alice/doc.meta/", true),
+            ("PUT", "/alice/x.meta/y", true),
+            ("PUT", "/alice/legacy.meta/", true),
+            ("GET", "/alice/doc.meta/", true),
+            ("GET", "/alice/x.meta/y", true),
+            ("GET", "/alice/x.meta/", true),
+            ("GET", "/alice/", true),
+            ("HEAD", "/alice/", true),
+            ("GET", "/alice/doc.meta/", false),
+            ("PUT", "/alice/x.meta/z", false),
+            ("DELETE", "/alice/x.meta/y", true),
+            ("DELETE", "/alice/x.meta/", true),
+            ("GET", "/alice/e/", true),
+            ("DELETE", "/alice/e/", true),
+            ("GET", "/alice/", true),
+        ] {
+            let (ct, body) = match method {
+                "PUT" => (Some("text/turtle"), Body::from(TURTLE)),
+                _ => (None, Body::empty()),
+            };
+            let r = if auth {
+                h.request(method, path, ct, body).await
+            } else {
+                h.unauth_request(method, path, ct, body).await
+            };
+            let status = r.status();
+            let mut headers: Vec<(String, String)> = r
+                .headers()
+                .iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "date" | "last-modified"))
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+            headers.sort();
+            let bytes = to_bytes(r.into_body(), usize::MAX).await.unwrap().to_vec();
+            out.push((format!("{method} {path}"), status, headers, bytes));
+        }
+        out
+    }
+    let plain = run(&Harness::with_store(store(false).await).await).await;
+    let seeded = run(&Harness::with_store(store(true).await).await).await;
+    for (a, b) in plain.iter().zip(&seeded) {
+        assert_eq!(a, b, "{}", a.0);
+    }
+    let status = |i: usize| plain[i].1;
+    assert_eq!(status(1), StatusCode::CREATED, "PUT /alice/doc.meta/");
+    assert_eq!(status(2), StatusCode::CREATED, "PUT /alice/x.meta/y");
+    assert_eq!(status(4), StatusCode::OK, "GET /alice/doc.meta/");
+    assert_eq!(status(5), StatusCode::OK, "GET /alice/x.meta/y");
+    assert_eq!(status(12), StatusCode::NO_CONTENT, "DELETE /alice/x.meta/");
+    assert_eq!(status(14), StatusCode::NO_CONTENT, "DELETE /alice/e/");
+}
+
+/// A CORS preflight is answered before routing, from the request alone: a reserved name, a
+/// stored record and an ordinary path get the same answer.
+#[tokio::test]
+async fn a_preflight_answers_from_the_request_alone() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    store
+        .write(
+            "https://pod.example/alice/doc.meta",
+            axum::body::Bytes::from_static(b"{}"),
+            "application/json",
+        )
+        .await
+        .expect("seed a record");
+    let h = Harness::with_store(store).await;
+    let mut answers = Vec::new();
+    for path in [
+        "/alice/doc.meta",
+        "/alice/none.meta",
+        "/.lws/grants/g",
+        "/alice//c",
+        "/alice/doc",
+    ] {
+        let r = h
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri(path)
+                    .header("origin", "https://app.example")
+                    .header("access-control-request-method", "PUT")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut headers: Vec<(String, String)> = r
+            .headers()
+            .iter()
+            .filter(|(k, _)| k.as_str() != "date")
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        headers.sort();
+        answers.push((r.status(), headers));
+    }
+    assert_eq!(answers[0].0, StatusCode::NO_CONTENT);
+    for a in &answers[1..] {
+        assert_eq!(a, &answers[0]);
+    }
+}
+
+/// Names with a `.lws` segment below the storage root's own, and leading or trailing repeated
+/// slashes, are ordinary paths their owner reaches.
+#[tokio::test]
+async fn lws_segments_and_outer_slashes_stay_reachable() {
+    let h = Harness::new().await;
+    for path in ["/alice/.lws/report", "/alice/proj/.LWS/x"] {
+        let r = h
+            .request("PUT", path, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED, "PUT {path}");
+        let r = h.request("GET", path, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::OK, "GET {path}");
+    }
+    // Routed and looked up as named, not refused as malformed; but nothing is created under such
+    // a name, and a create through it changes nothing, whatever exists.
+    h.make_container("/alice/c/").await;
+    let r = h
+        .request("PUT", "/alice/c/x", Some("text/turtle"), Body::from(TURTLE))
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    for path in ["/alice/c//", "//alice/c", "//alice/c/x"] {
+        let r = h.request("GET", path, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "GET {path}");
+    }
+    async fn listing(h: &Harness) -> axum::body::Bytes {
+        let r = h.request("GET", "/alice/", None, Body::empty()).await;
+        to_bytes(r.into_body(), usize::MAX).await.unwrap()
+    }
+    let before = listing(&h).await;
+    for path in [
+        "//alice/c/new/x",
+        "//alice/d/x",
+        "/alice/c//",
+        "//alice/c/x/y",
+    ] {
+        for method in ["PUT", "PATCH"] {
+            let (ct, body) = match method {
+                "PUT" => ("text/turtle", TURTLE.to_string()),
+                _ => (
+                    "text/n3",
+                    "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
+                        .to_string(),
+                ),
+            };
+            let r = h.request(method, path, Some(ct), Body::from(body)).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{method} {path}");
+        }
+    }
+    assert_eq!(listing(&h).await, before);
+    // Nor does the slash rule look for a twin by a name nothing authorized: a create below a
+    // document's name with a repeated slash is refused alike whether that document exists.
+    for path in ["/alice/secret//", "/alice/nosecret//"] {
+        if path == "/alice/secret//" {
+            let r = h
+                .request(
+                    "PUT",
+                    "/alice/secret",
+                    Some("text/turtle"),
+                    Body::from(TURTLE),
+                )
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = h
+            .request("PUT", path, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {path}");
+    }
+}
+
+/// Nothing is written under a name with a repeated slash, a container left with one (from before
+/// such names were refused) included: a `POST` into one, or a `PUT` or `PATCH` of one, is refused
+/// on the name alone, and what is stored is unchanged.
+#[tokio::test]
+async fn nothing_is_written_under_a_repeated_slash() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let alice = "https://pod.example/alice/";
+    let odd = "https://pod.example/alice/c//";
+    store
+        .write(
+            "https://pod.example/",
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed the root");
+    for (parent, child) in [("https://pod.example/", alice), (alice, odd)] {
+        store
+            .create_in_container(parent, child, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
+    }
+    let h = Harness::with_store(store).await;
+    async fn listing(h: &Harness, path: &str) -> axum::body::Bytes {
+        let r = h.request("GET", path, None, Body::empty()).await;
+        to_bytes(r.into_body(), usize::MAX).await.unwrap()
+    }
+    let before = (listing(&h, "/").await, listing(&h, "/alice/").await);
+    for (method, path) in [
+        ("POST", "//alice/"),
+        ("POST", "/alice//"),
+        ("POST", "/alice/c//"),
+        ("POST", "//"),
+        ("PUT", "/alice/c//"),
+        ("PATCH", "/alice/c//"),
+    ] {
+        let (ct, body) = match method {
+            "PATCH" => (
+                "text/n3",
+                "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
+                    .to_string(),
+            ),
+            _ => ("text/turtle", TURTLE.to_string()),
+        };
+        let r = h.request(method, path, Some(ct), Body::from(body)).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{method} {path}");
+    }
+    assert_eq!(
+        (listing(&h, "/").await, listing(&h, "/alice/").await),
+        before
+    );
+    let r = h.request("GET", "/alice/c//", None, Body::empty()).await;
+    assert_eq!(r.status(), StatusCode::OK);
+}
+
+/// What is stored under a leftover repeated-slash name can still be deleted.
+#[tokio::test]
+async fn a_repeated_slash_name_left_over_can_be_deleted() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let alice = "https://pod.example/alice/";
+    store
+        .write(
+            "https://pod.example/",
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed the root");
+    for (parent, child) in [
+        ("https://pod.example/", alice),
+        (alice, "https://pod.example/alice/c//"),
+    ] {
+        store
+            .create_in_container(parent, child, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
+    }
+    let h = Harness::with_store(store).await;
+    let r = h.request("DELETE", "/alice/c//", None, Body::empty()).await;
+    assert!(r.status().is_success(), "{}", r.status());
+    let r = h.request("GET", "/alice/c//", None, Body::empty()).await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    let r = h.request("GET", "/alice/", None, Body::empty()).await;
+    let listing = to_bytes(r.into_body(), usize::MAX).await.unwrap();
+    assert!(
+        !String::from_utf8_lossy(&listing).contains("c//"),
+        "{listing:?}"
+    );
+}
+
+/// An encoded separator or dot segment is part of a name, never decoded into a path: the write
+/// lands at the name as sent, which reads back, and nothing appears at the decoded path. A raw
+/// dot segment is refused.
+#[tokio::test]
+async fn encoded_separators_and_dots_are_literal_names() {
+    let h = Harness::new().await;
+    for (sent, decoded) in [
+        ("/alice/a%2Fb", "/alice/a/b"),
+        ("/alice/c%2fd", "/alice/c/d"),
+        ("/alice/e%2F/f", "/alice/e//f"),
+        ("/alice/%2E%2E/g", "/g"),
+        ("/alice/%2e/h", "/alice/h"),
+    ] {
+        let r = h
+            .request("PUT", sent, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED, "PUT {sent}");
+        let r = h.request("GET", sent, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::OK, "GET {sent}");
+        let r = h.request("GET", decoded, None, Body::empty()).await;
+        assert_ne!(r.status(), StatusCode::OK, "GET {decoded}");
+    }
+    for raw in ["/alice/../x", "/alice/./x"] {
+        let r = h
+            .request("PUT", raw, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {raw}");
+    }
+}
+
 #[tokio::test]
 async fn put_twice_is_a_replace_with_no_content() {
     let h = Harness::new().await;
@@ -1248,6 +1660,455 @@ _:p solid:deletes { <https://pod.example/alice/restricted/missing#x> foaf:name \
         "an append-only caller's delete-patch on a missing target must be 403 (Write required), \
          not a create-authorized 409/201"
     );
+}
+
+#[tokio::test]
+async fn a_writer_without_read_learns_nothing_from_a_patch() {
+    // A writer that may not read the target is told nothing about it by a PATCH: one whose deletes
+    // need the triples to be there reads the target as a `solid:where` does, so it needs Read; and
+    // an insert's response carries no tag of the graph it cannot read.
+    let h = Harness::new().await;
+    h.make_container("/alice/drop/").await;
+    let put = h
+        .request(
+            "PUT",
+            "/alice/drop/doc",
+            Some("text/turtle"),
+            Body::from("<#me> <http://xmlns.com/foaf/0.1/name> \"Alice\" ."),
+        )
+        .await;
+    assert_eq!(put.status(), StatusCode::CREATED);
+    let acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization;
+     acl:agent <{webid}>;
+     acl:accessTo <https://pod.example/alice/drop/doc>;
+     acl:mode acl:Append, acl:Write."#,
+        webid = common::WEBID
+    );
+    let put_acl = h
+        .request(
+            "PUT",
+            "/alice/drop/doc.acl",
+            Some("text/turtle"),
+            Body::from(acl),
+        )
+        .await;
+    assert_eq!(put_acl.status(), StatusCode::CREATED);
+    let patch = |body: &'static str| {
+        h.request(
+            "PATCH",
+            "/alice/drop/doc",
+            Some("text/n3"),
+            Body::from(body),
+        )
+    };
+    let deletes = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n\
+_:p solid:deletes { <https://pod.example/alice/drop/doc#me> foaf:name \"Alice\" . }.\n";
+    assert_eq!(patch(deletes).await.status(), StatusCode::FORBIDDEN);
+    let inserts = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n\
+_:p solid:inserts { <https://pod.example/alice/drop/doc#me> foaf:nick \"A\" . }.\n";
+    let r = patch(inserts).await;
+    assert!(r.status().is_success(), "{}", r.status());
+    assert!(!r.headers().contains_key("etag"));
+    let r = h
+        .request(
+            "PUT",
+            "/alice/drop/doc",
+            Some("text/turtle"),
+            Body::from("<#me> a <#P> ."),
+        )
+        .await;
+    assert!(r.status().is_success(), "{}", r.status());
+    assert!(!r.headers().contains_key("etag"));
+    // Nor is it told the target's format: an insert into text it may not read, which cannot be
+    // patched, is refused as a write without access is, where a reader is told why.
+    let note = h
+        .request(
+            "PUT",
+            "/alice/drop/note",
+            Some("text/plain"),
+            Body::from("not rdf {"),
+        )
+        .await;
+    assert_eq!(note.status(), StatusCode::CREATED);
+    let insert = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p> 1 . }.\n";
+    let r = h
+        .request(
+            "PATCH",
+            "/alice/drop/note",
+            Some("text/n3"),
+            Body::from(insert),
+        )
+        .await;
+    assert!(r.status().is_client_error(), "{}", r.status());
+    assert_ne!(r.status(), StatusCode::FORBIDDEN);
+    let acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization;
+     acl:agent <{webid}>;
+     acl:accessTo <https://pod.example/alice/drop/note>;
+     acl:mode acl:Append."#,
+        webid = common::WEBID
+    );
+    let put_acl = h
+        .request(
+            "PUT",
+            "/alice/drop/note.acl",
+            Some("text/turtle"),
+            Body::from(acl.clone()),
+        )
+        .await;
+    assert_eq!(put_acl.status(), StatusCode::CREATED);
+    let r = h
+        .request(
+            "PATCH",
+            "/alice/drop/note",
+            Some("text/n3"),
+            Body::from(insert),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    // Text it may not read is not parsed for it either: text that happens to parse as Turtle is
+    // refused the same way, and stays as it was.
+    let text = "<#a> <https://e.example/p> 0 .";
+    let r = h
+        .request(
+            "PUT",
+            "/alice/drop/text",
+            Some("text/plain"),
+            Body::from(text),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = h
+        .request(
+            "PUT",
+            "/alice/drop/text.acl",
+            Some("text/turtle"),
+            Body::from(acl.replace("drop/note>", "drop/text>")),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let insert = insert.replace("drop/note#a", "drop/text#a");
+    let r = h
+        .request(
+            "PATCH",
+            "/alice/drop/text",
+            Some("text/n3"),
+            Body::from(insert),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+}
+
+/// A writer that may append but not read gets the same answer whatever the target holds: an
+/// insert is appended without the stored document being read, so one that does not parse, or is
+/// large, answers as a small well-formed one does.
+#[tokio::test]
+async fn an_append_without_read_follows_the_request_alone() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let large: String = (0..2000)
+        .map(|i| format!("<#s{i}> <https://e.example/p> {i} .\n"))
+        .collect();
+    for (name, body) in [
+        ("good", "<#a> <https://e.example/p> 0 .".to_string()),
+        (
+            "broken",
+            "<#a> <https://e.example/p> \"unterminated".to_string(),
+        ),
+        ("large", large),
+    ] {
+        let iri = format!("https://pod.example/alice/{name}");
+        store
+            .write(&iri, axum::body::Bytes::from(body), "text/turtle")
+            .await
+            .expect("seed a document");
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>; acl:mode acl:Append."#,
+            webid = common::WEBID
+        );
+        store
+            .write(
+                &format!("{iri}.acl"),
+                axum::body::Bytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed its acl");
+    }
+    let h = Harness::with_store(store).await;
+    let mut answers = Vec::new();
+    for name in ["good", "broken", "large"] {
+        let insert = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
+        );
+        let r = h
+            .request(
+                "PATCH",
+                &format!("/alice/{name}"),
+                Some("text/n3"),
+                Body::from(insert),
+            )
+            .await;
+        let status = r.status();
+        let mut headers: Vec<(String, String)> = r
+            .headers()
+            .iter()
+            .filter(|(k, _)| k.as_str() != "date")
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        headers.sort();
+        let body = to_bytes(r.into_body(), usize::MAX).await.unwrap();
+        answers.push((status, headers, body));
+    }
+    assert!(answers[0].0.is_success(), "{:?}", answers[0]);
+    assert_eq!(answers[0], answers[1], "a document that does not parse");
+    assert_eq!(answers[0], answers[2], "a large document");
+}
+
+/// A writer without Read appends to a stored N-Triples or N-Quads document as to a Turtle one, and
+/// is refused for a type it cannot append to (that the result is well formed is
+/// `ldp::patch::tests::an_appended_insert_is_the_union`'s).
+#[tokio::test]
+async fn an_append_without_read_takes_line_formats() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let docs = [
+        (
+            "nt",
+            "application/n-triples",
+            "<https://pod.example/alice/nt#a> <https://e.example/p> \"x\" .",
+        ),
+        (
+            "nq",
+            "application/n-quads",
+            "<https://pod.example/alice/nq#a> <https://e.example/p> \"x\" <https://e.example/g> .",
+        ),
+        (
+            "jsonld",
+            "application/ld+json",
+            r#"{"@id": "https://pod.example/alice/jsonld#a", "https://e.example/p": "x"}"#,
+        ),
+    ];
+    for (name, ct, body) in docs {
+        let iri = format!("https://pod.example/alice/{name}");
+        store
+            .write(&iri, axum::body::Bytes::from(body), ct)
+            .await
+            .expect("seed a document");
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>; acl:mode acl:Append."#,
+            webid = common::WEBID
+        );
+        store
+            .write(
+                &format!("{iri}.acl"),
+                axum::body::Bytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed its acl");
+    }
+    let h = Harness::with_store(store).await;
+    for (name, _, _) in docs {
+        let insert = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
+        );
+        let r = h
+            .request(
+                "PATCH",
+                &format!("/alice/{name}"),
+                Some("text/n3"),
+                Body::from(insert),
+            )
+            .await;
+        if name == "jsonld" {
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{name}");
+            continue;
+        }
+        assert!(r.status().is_success(), "{name}: {}", r.status());
+    }
+}
+
+/// A reader's PATCH reads a stored N-Triples or N-Quads document by the same classification an
+/// append without Read goes by, keeps its type, and leaves an N-Quads document's named graphs as
+/// they are (a PATCH changes the default graph).
+#[tokio::test]
+async fn a_patch_keeps_line_formats_and_named_graphs() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let docs = [
+        (
+            "nt",
+            "application/n-triples",
+            "<https://pod.example/alice/nt#a> <https://e.example/p> \"x\" .\n",
+        ),
+        (
+            "nq",
+            "application/n-quads",
+            "<https://pod.example/alice/nq#a> <https://e.example/p> \"x\" .\n\
+<https://pod.example/alice/nq#a> <https://e.example/p> \"kept\" <https://e.example/g> .\n",
+        ),
+    ];
+    for (name, ct, body) in docs {
+        let iri = format!("https://pod.example/alice/{name}");
+        store
+            .write(&iri, axum::body::Bytes::from(body), ct)
+            .await
+            .expect("seed a document");
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>;
+     acl:mode acl:Read, acl:Write."#,
+            webid = common::WEBID
+        );
+        store
+            .write(
+                &format!("{iri}.acl"),
+                axum::body::Bytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed its acl");
+    }
+    let h = Harness::with_store(store).await;
+    for (name, ct, _) in docs {
+        let insert = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
+        );
+        let r = h
+            .request(
+                "PATCH",
+                &format!("/alice/{name}"),
+                Some("text/n3"),
+                Body::from(insert),
+            )
+            .await;
+        assert!(r.status().is_success(), "{name}: {}", r.status());
+        let r = h
+            .request("GET", &format!("/alice/{name}"), None, Body::empty())
+            .await;
+        assert_eq!(r.status(), StatusCode::OK, "{name}");
+        let got_type = r.headers()[axum::http::header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = to_bytes(r.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(got_type.starts_with(ct), "{name}: {got_type}");
+        assert!(body.contains("\"v\""), "{name}: {body}");
+        assert!(body.contains("\"x\""), "{name}: {body}");
+        if name == "nq" {
+            assert!(
+                body.contains("\"kept\" <https://e.example/g>"),
+                "{name}: {body}"
+            );
+        }
+    }
+}
+
+/// Whether a container may be deleted depends on what it holds, so a writer that may not read it
+/// gets the denial for an empty one and a full one alike.
+#[tokio::test]
+async fn a_container_delete_without_read_is_denied_whatever_it_holds() {
+    // Write and Control without Read: the DELETE is refused alike whether the container is empty
+    // or not. With Read added, the same requests answer by what the container holds.
+    let h = Harness::new().await;
+    let acl = |c: &str, modes: &str| {
+        format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization; acl:agent <{webid}>;
+     acl:accessTo <https://pod.example{c}>; acl:default <https://pod.example{c}>;
+     acl:mode {modes}."#,
+            webid = common::WEBID
+        )
+    };
+    for (c, members, with_read) in [
+        ("/alice/wo-empty/", 0, StatusCode::NO_CONTENT),
+        ("/alice/wo-full/", 2, StatusCode::CONFLICT),
+    ] {
+        h.make_container(c).await;
+        for i in 0..members {
+            let r = h
+                .request(
+                    "PUT",
+                    &format!("{c}m{i}"),
+                    Some("text/turtle"),
+                    Body::from(TURTLE),
+                )
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = h
+            .request(
+                "PUT",
+                &format!("{c}.acl"),
+                Some("text/turtle"),
+                Body::from(acl(c, "acl:Write, acl:Control")),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = h.request("DELETE", c, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN, "{c}");
+
+        let r = h
+            .request(
+                "PUT",
+                &format!("{c}.acl"),
+                Some("text/turtle"),
+                Body::from(acl(c, "acl:Read, acl:Write, acl:Control")),
+            )
+            .await;
+        assert!(r.status().is_success(), "{c}: {}", r.status());
+        let r = h.request("DELETE", c, None, Body::empty()).await;
+        assert_eq!(r.status(), with_read, "{c}");
+    }
+}
+
+#[tokio::test]
+async fn a_posts_tag_describes_only_what_was_posted() {
+    // A POST's `ETag` goes to a writer that may not read the container (an Append drop box), so it
+    // must describe only the bytes and type it sent: the same body posted into a container with
+    // members and into an empty one gets the same tag.
+    let h = Harness::new().await;
+    h.make_container("/alice/full/").await;
+    h.make_container("/alice/empty/").await;
+    for i in 0..3 {
+        let r = h
+            .request(
+                "PUT",
+                &format!("/alice/full/m{i}"),
+                Some("text/turtle"),
+                Body::from(format!("<#m> <https://e.example/n> {i} .")),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+    }
+    let mut tags = Vec::new();
+    for c in ["/alice/full/", "/alice/empty/"] {
+        let r = h
+            .request(
+                "POST",
+                c,
+                Some("text/turtle"),
+                Body::from("<#x> <https://e.example/p> \"v\" ."),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        tags.push(r.headers().get("etag").cloned());
+    }
+    assert!(tags[0].is_some());
+    assert_eq!(tags[0], tags[1]);
 }
 
 #[tokio::test]

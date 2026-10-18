@@ -107,6 +107,25 @@ fn insert_still_ignores_variables_outside_formulas() {
 }
 
 #[test]
+fn new_ignores_base_facts_with_variables_outside_formulas() {
+    for value in [
+        Term::Var("x".into()),
+        Term::Var("__ua.http://ex/z".into()),
+        Term::List(vec![Term::Var("x".into()), fact(FACT)[2].clone()]),
+        Term::Triple(Box::new([
+            Term::Var("x".into()),
+            fact(FACT)[1].clone(),
+            fact(FACT)[2].clone(),
+        ])),
+    ] {
+        let mut asserted = fact(FACT);
+        asserted[2] = value;
+        let g = MaterializedN3Graph::new(RULES, &[asserted]).unwrap();
+        assert_matches(&g, RULES, N3Mode::Counting);
+    }
+}
+
+#[test]
 fn formula_fallback_preserves_limits_and_recovers_after_delete() {
     let src = format!("{RULES} {FACT}");
     let mut limits = ClosureLimits::default();

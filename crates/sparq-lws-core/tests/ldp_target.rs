@@ -2,6 +2,7 @@
 //! LDP target / request-URL parsing tests (pure value logic).
 
 use sparq_lws_core::ldp::target::parse_target;
+use sparq_lws_core::ServerError;
 
 const BASE: &str = "https://pod.example";
 
@@ -77,4 +78,74 @@ fn a_deep_path_parses() {
     let t = parse_target(BASE, "/a/b/c/d.ttl").unwrap();
     assert_eq!(t.iri, "https://pod.example/a/b/c/d.ttl");
     assert!(!t.is_container);
+}
+
+#[test]
+fn a_linkset_record_name_is_not_a_target() {
+    for path in [
+        "/alice/doc.meta",
+        "/alice/doc.META",
+        "/alice/c/.meta",
+        "/alice/doc%2Emeta",
+        "/alice/doc%2emeta?x=1",
+        "/alice/x.meta/y.META",
+    ] {
+        assert!(
+            matches!(parse_target(BASE, path), Err(ServerError::NotFound)),
+            "{path}"
+        );
+    }
+    // A container named like a record, and what lies under it, is an ordinary target.
+    for path in [
+        "/alice/doc.metadata",
+        "/alice/meta",
+        "/alice/x.metas/y",
+        "/alice/doc.meta/",
+        "/alice/x.meta/y",
+        "/alice/X.Meta/y/",
+    ] {
+        assert!(parse_target(BASE, path).is_ok(), "{path}");
+    }
+}
+
+#[test]
+fn the_lws_service_namespace_is_not_a_target() {
+    for path in [
+        "/.lws/grants/g1",
+        "/.lws/",
+        "/.LWS/requests/r",
+        "/%2Elws/grants/g1",
+        "//.lws/grants/x/y",
+        "///.LWS/",
+        "/%2F.lws/grants/g1",
+    ] {
+        assert!(
+            matches!(parse_target(BASE, path), Err(ServerError::NotFound)),
+            "{path}"
+        );
+    }
+    // Only the namespace below the storage root is the service's.
+    for path in [
+        "/.lwsx/a",
+        "/alice/lws/a",
+        "/a.lws",
+        "/alice/.lws/subscriptions/s",
+    ] {
+        assert!(parse_target(BASE, path).is_ok(), "{path}");
+    }
+}
+
+#[test]
+fn an_interior_empty_segment_is_no_target() {
+    for path in ["/alice//c", "/a//b/"] {
+        assert!(
+            matches!(parse_target(BASE, path), Err(ServerError::BadRequest(_))),
+            "{path}"
+        );
+    }
+    // Leading and trailing repeated slashes are kept in the key, as they always were.
+    for path in ["/", "//", "/alice/c/", "/alice/c", "//alice/c", "/alice/c//"] {
+        let t = parse_target(BASE, path).unwrap_or_else(|e| panic!("{path}: {e:?}"));
+        assert_eq!(t.iri, format!("{BASE}{path}"));
+    }
 }

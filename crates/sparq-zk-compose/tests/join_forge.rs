@@ -59,6 +59,20 @@ const STATUS_INDEX: u64 = 3;
 const STATUS_VERSION: u64 = 1;
 const CHALLENGE_HEX: &str = "0x2a";
 
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest — the method the
+/// fixtures below commit under, and the one their issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND presentation message (`ZKSIG_M5`) rather
+/// than the method-unbound `ZKSIG_C3`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
+
 fn iri(s: &str) -> NamedNode {
     NamedNode::new(s).unwrap()
 }
@@ -95,7 +109,12 @@ fn attest_full(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestatio
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -357,16 +376,7 @@ fn structural_privacy_join_value_absent_from_public_inputs() {
 // `full_bb_join_accept_real_proof` (which is the manifest-level ACCEPT control).
 // ============================================================================
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq_zk_join_forge_{name}_{}", std::process::id()));
@@ -404,8 +414,7 @@ fn honest_join_toml(built: &BuiltJoin) -> (CircuitId, String) {
 #[test]
 #[ignore = "nightly: full bb prove of a join_eq member (nargo + bb)"]
 fn bb_forge_tampered_join_proof_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping tampered-proof reject");
+    if !support::require_toolchain("bb_forge_tampered_join_proof_rejected", &["nargo", "bb"]) {
         return;
     }
     let built = honest_built_join();
@@ -436,8 +445,7 @@ fn bb_forge_tampered_join_proof_rejected() {
 #[test]
 #[ignore = "nightly: nargo execute of a join_eq member"]
 fn bb_forge_unequal_values_witness_unsatisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping unequal-values unsat");
+    if !support::require_toolchain("bb_forge_unequal_values_witness_unsatisfiable", &["nargo", "bb"]) {
         return;
     }
     // build_join on two graphs that share NO value returns None — there is no honest
@@ -510,8 +518,7 @@ fn bb_forge_unequal_values_witness_unsatisfiable() {
 #[test]
 #[ignore = "nightly: nargo execute of a join_eq member"]
 fn bb_forge_join_commitment_not_binding_value_unsatisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping forged-commitment unsat");
+    if !support::require_toolchain("bb_forge_join_commitment_not_binding_value_unsatisfiable", &["nargo", "bb"]) {
         return;
     }
     let honest = honest_built_join();
@@ -558,8 +565,7 @@ fn bb_forge_join_commitment_not_binding_value_unsatisfiable() {
 #[test]
 #[ignore = "nightly: full bb prove of a join_eq member (nargo + bb)"]
 fn bb_forge_wrong_vk_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping wrong-vk reject");
+    if !support::require_toolchain("bb_forge_wrong_vk_rejected", &["nargo", "bb"]) {
         return;
     }
     let built = honest_built_join();
@@ -593,8 +599,7 @@ fn derive_smallest_scan_id() -> CircuitId {
 #[test]
 #[ignore = "nightly: full bb prove of a join_eq member (nargo + bb)"]
 fn bb_join_value_absent_from_public_inputs() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping real-proof privacy pin");
+    if !support::require_toolchain("bb_join_value_absent_from_public_inputs", &["nargo", "bb"]) {
         return;
     }
     let built = honest_built_join();

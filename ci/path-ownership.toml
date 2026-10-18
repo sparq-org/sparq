@@ -88,6 +88,7 @@ wasm = [
   "sparq-rsp-wasm",
   "sparq-text-wasm",
   "sparq-shacl-wasm",
+  "sparq-dl-wasm",
   "sparq-introspect",
   "sparq-solid",
   # [FABLE-5] sq-98c: rlib-only wasm smoke — memmap2 target-gated out on wasm32.
@@ -189,6 +190,34 @@ crates = ["sparq-reason"]
 # include_str!'d by sparq-zk-compose's gate_count/sparql_catalog tests.
 [[map]]
 pattern = "bench/zk-compose/**"
+crates = ["sparq-zk-compose"]
+
+# The DualLeafV2 sentinel/constants Noir mirror, include_str!'d by sparq-zk's
+# tests/dual_leaf_v2_noir_pin.rs (the host/circuit pin: every `global` in that
+# .nr must equal its dual_leaf_v2 host derivation). A literal edit there is
+# exactly a change that must re-run sparq-zk, so the file is attributed to it.
+# It sits OUTSIDE zk/compose on purpose — every *.nr under zk/compose is
+# sha256-pinned by the bench/zk-compose measurement evidence.
+[[map]]
+pattern = "zk/dual-leaf-v2/**"
+crates = ["sparq-zk"]
+
+# The successful-results pin (crates/sparq-zk-compose/tests/result_scheme_pin.rs)
+# reads the result relations' signed-message constants out of these two Noir
+# sources with include_str!, so a change to either must re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/compose_core/src/result.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/compose_core/src/result_public.nr"
+crates = ["sparq-zk-compose"]
+
+# sq-j506: result_scheme_pin.rs also reads the METHOD-BOUND relation with
+# include_str! (the scheme constants and the drift derivation), so a change to it
+# must re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/compose_core/src/result_m5.nr"
 crates = ["sparq-zk-compose"]
 
 # [FABLE-5] sq-0iqzw: the ADJUDICATED cross-engine divergence allowlist, read at

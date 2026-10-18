@@ -526,6 +526,39 @@ impl NetworkCell {
     }
 }
 
+/// Acknowledgement that a shuffle's PERMUTATION IS PUBLIC, required by
+/// [`Coordinator::shuffle_public_permutation`].
+///
+/// The transport tier drives the switch network by sending each switch's endpoints
+/// and its control bit in the clear to every party, so every party's view carries
+/// the composed permutation (see that method's docs). This marker exists so no
+/// caller can reach that behaviour without naming it: the plain
+/// `Coordinator::shuffle` is refused, and the only way through takes a value of
+/// this type, which can be built only by
+/// [`PublicPermutation::acknowledged`].
+///
+/// Pass it from a measurement or correctness harness. Do NOT pass it from a path
+/// whose output is meant to hide which row went where — that needs secret control
+/// bits, which this tier does not have.
+///
+/// [`run_cell_networked`] does not build one on a caller's behalf either: it takes
+/// `Option<PublicPermutation>` and refuses [`QueryClass::ObliviousShuffle`] when it
+/// is `None`.
+#[derive(Debug, Clone, Copy)]
+pub struct PublicPermutation {
+    /// Private, so the struct cannot be built by a literal elsewhere.
+    _acknowledged: (),
+}
+
+impl PublicPermutation {
+    /// Acknowledge that the permutation will be public to every party.
+    ///
+    /// Naming this function IS the opt-in; read [`PublicPermutation`] first.
+    pub fn acknowledged() -> Self {
+        PublicPermutation { _acknowledged: () }
+    }
+}
+
 /// The coordinator drives one cell over `n` already-connected party channels.
 /// Generic over the stream type so the same logic runs over TCP loopback or a
 /// Unix socket (and, under netem, over a shaped loopback — same code).
@@ -615,9 +648,12 @@ impl<S: Read + Write> Coordinator<S> {
             )));
         }
         // Build all candidate (d, r) sharings. d = keyL - keyR; r = fresh nonzero
-        // mask. Keys 0..scale on both sides. Pair count = scale².
-        let mut d_sharings: Vec<Vec<Share>> = Vec::with_capacity(scale * scale);
-        let mut r_sharings: Vec<Vec<Share>> = Vec::with_capacity(scale * scale);
+        // mask. Keys 0..scale on both sides. Pair count = scale², which is a product
+        // of a caller-chosen number with itself: counted with checked arithmetic and
+        // capped before either vector is reserved or a single mask is drawn.
+        let pairs = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+        let mut d_sharings: Vec<Vec<Share>> = Vec::with_capacity(pairs);
+        let mut r_sharings: Vec<Vec<Share>> = Vec::with_capacity(pairs);
         for lkey in 0..scale {
             for rkey in 0..scale {
                 let d = Fp::new(lkey as u64).sub(Fp::new(rkey as u64));
@@ -650,33 +686,71 @@ impl<S: Read + Write> Coordinator<S> {
         Ok(matches)
     }
 
-    /// Run the **oblivious shuffle** over a `scale`-row secret-shared column
-    /// (sq-bdbv). The coordinator (playing the dealer, as the in-process
-    /// [`crate::oblivious::shuffle`] does) shares the `scale` row values, samples a
-    /// fresh uniformly-random secret permutation, routes it through the AS-Waksman
-    /// [`WaksmanNetwork`](crate::oblivious::WaksmanNetwork) to obtain the per-switch
-    /// control bits, then drives the network over the wire one switch at a time —
-    /// the multi-round per-switch exchange the bead asks for. Returns the opened
-    /// shuffled column (the reconstructed row values, in their permuted order) so
-    /// the caller can assert it is a permutation of the input multiset. The number
-    /// of switch rounds driven is reported via [`Coordinator`]'s caller (see
-    /// [`run_cell_networked`]).
+    /// Refused. Run the switch network over the wire with
+    /// [`Self::shuffle_public_permutation`] instead, which requires the caller to
+    /// acknowledge that **this shuffle's permutation is PUBLIC**.
     ///
-    /// `values` are the cleartext row values the dealer shares (the in-process
-    /// `check_shuffle` uses `i*7+1`; the network runner passes the same). The
-    /// permutation never leaves the coordinator's routing layer — only the
-    /// per-switch boolean (already part of a data-independent topology) crosses the
-    /// wire, exactly as the in-process simulation's local swap models.
+    /// ## Why it is refused rather than kept
+    ///
+    /// The coordinator (playing the dealer, as the in-process
+    /// [`crate::oblivious::shuffle`] does) shares the row values, samples a
+    /// permutation, routes it through the AS-Waksman
+    /// [`WaksmanNetwork`](crate::oblivious::WaksmanNetwork), and then drives the
+    /// network one switch at a time — sending each switch's endpoints AND its
+    /// control bit **in the clear** to EVERY party ([`Message::Swap`]), with each
+    /// party applying the swap to the column it holds. So every party sees the
+    /// whole control-bit sequence over a topology that is public by construction,
+    /// and keeps the intermediate column it swapped: the composed permutation is in
+    /// every party's view, and the output share vectors are the input ones
+    /// reordered. Opening the column at the end of the same call does not undo
+    /// that, because the views along the way are what carry it.
+    ///
+    /// That is fine for what this tier exists to do — MEASURE wall-clock, bytes on
+    /// the wire and the multiset-correctness of a multi-round network protocol —
+    /// and it is not a privacy shuffle. Hiding the permutation needs SECRET control
+    /// bits, i.e. the arithmetic conditional swap `x' = x + b·(y − x)` with `b`
+    /// secret-shared and one multiplication per switch. This tier does not have
+    /// that, and building it is not in scope here.
+    #[deprecated(
+        since = "0.1.7",
+        note = "the permutation is public; call shuffle_public_permutation with \
+                PublicPermutation::acknowledged()"
+    )]
     pub fn shuffle(
+        &mut self,
+        _dealer: &mut ShamirDealer,
+        _values: &[u64],
+    ) -> Result<(Vec<u64>, u64), MpcError> {
+        Err(MpcError::Protocol(
+            "Coordinator::shuffle: this transport shuffle's PERMUTATION IS PUBLIC - every \
+             party is sent each switch's endpoints and its control bit in the clear and \
+             keeps the column it swapped, so the composed permutation is in every party's \
+             view. It is a measurement harness for wall-clock and bytes-on-wire, not a \
+             privacy shuffle. A caller that accepts that calls \
+             `shuffle_public_permutation` and passes `PublicPermutation::acknowledged()`; \
+             a private-output path needs secret control bits, which this tier does not \
+             have"
+                .to_string(),
+        ))
+    }
+
+    /// [`Self::shuffle`] with the public-permutation property acknowledged — the
+    /// only way to run it.
+    ///
+    /// See [`PublicPermutation`] for what the caller is accepting. Use this for
+    /// measurement (wall-clock, bytes-on-wire, multiset correctness over the wire),
+    /// never to hide which row went where.
+    pub fn shuffle_public_permutation(
         &mut self,
         dealer: &mut ShamirDealer,
         values: &[u64],
+        _ack: PublicPermutation,
     ) -> Result<(Vec<u64>, u64), MpcError> {
         if values.is_empty() {
             return Err(MpcError::Protocol("shuffle: no rows (empty column)".into()));
         }
         let n_rows = values.len();
-        let net = crate::oblivious::WaksmanNetwork::new(n_rows);
+        let net = crate::oblivious::WaksmanNetwork::try_new(n_rows)?;
         // Sample the fresh secret permutation + route it to per-switch control bits.
         // Same unbiased sampler the in-process `shuffle` uses (no second RNG path).
         let perm = crate::oblivious::sample_random_permutation(dealer, n_rows)?;
@@ -713,7 +787,7 @@ impl<S: Read + Write> Coordinator<S> {
             return Err(MpcError::Protocol("sort: no rows (empty column)".into()));
         }
         let n_rows = values.len();
-        let net = crate::oblivious::SortingNetwork::new(n_rows);
+        let net = crate::oblivious::SortingNetwork::try_new(n_rows)?;
         // Disclosed keys = the row values (matches the in-process `sort_with_keys`
         // gate, which swaps on strict greater-than → stable ascending). The keys are
         // tracked in lockstep with the swap decisions so each gate's bit is the
@@ -851,13 +925,49 @@ fn reconstruct_rows(opened: &[Vec<Share>], t: usize) -> Result<Vec<u64>, MpcErro
 /// processes (see the module note); the example binaries run real processes.
 ///
 /// `values` is consulted for the aggregate; `scale` for the hidden join.
+///
+/// [`QueryClass::ObliviousShuffle`] runs this tier's PUBLIC-permutation shuffle, so
+/// it is the caller that must acknowledge it: pass
+/// `Some(PublicPermutation::acknowledged())`. With `None` that class is refused and
+/// nothing is driven over the wire — the token is not manufactured here, or this
+/// function would be a way around [`Coordinator::shuffle_public_permutation`]'s
+/// opt-in. Every other class ignores the argument.
 pub fn run_cell_networked(
     query_class: QueryClass,
     backend: &ShamirBackend,
     dealer: &mut ShamirDealer,
     values: &[u64],
     scale: usize,
+    public_permutation: Option<PublicPermutation>,
 ) -> Result<NetworkCell, MpcError> {
+    if query_class == QueryClass::ObliviousShuffle && public_permutation.is_none() {
+        return Err(MpcError::Protocol(
+            "run_cell_networked: QueryClass::ObliviousShuffle drives the transport shuffle, whose PERMUTATION IS PUBLIC - every party is sent each switch's endpoints and its control bit in the clear. A caller that accepts that passes `Some(PublicPermutation::acknowledged())`; a private-output path needs secret control bits, which this tier does not have"
+                .to_string(),
+        ));
+    }
+    // `scale` sizes the canonical input column each class builds, so cap it HERE —
+    // before the listener is bound and before `n` party threads are spawned, let
+    // alone before `(0..scale)` is collected. An uncapped `scale` is not a slow run
+    // but a dead process: `usize::MAX` overflows the column build and `1 << 35`
+    // exhausts memory. Each class is capped against the bound its own work is
+    // proportional to; the two classes that do not read `scale` are capped by
+    // nothing, which is stated rather than left to inference.
+    match query_class {
+        // Both build a `scale`-row column and route it through a network of that
+        // width, so the network cap is the one that fits.
+        QueryClass::ObliviousShuffle | QueryClass::ObliviousSort => {
+            crate::oblivious::check_network_width("run_cell_networked", scale)?;
+        }
+        // All-pairs over `scale x scale` rows: the candidate cardinality is the
+        // bound, and it is checked here as well as inside `Coordinator::hidden_join`.
+        QueryClass::HiddenValueEquiJoin => {
+            crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+        }
+        // `CumulativeSumAggregate` is sized by the caller's own `values` slice and
+        // ignores `scale`; `HiddenBoundedPath` has no wire driver and refuses below.
+        QueryClass::CumulativeSumAggregate | QueryClass::HiddenBoundedPath => {}
+    }
     let n = backend.parties();
     // Bind a loopback listener; parties connect to it. Port 0 ⇒ OS-assigned.
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -914,9 +1024,17 @@ pub fn run_cell_networked(
             // duplicated, or corrupted), the load-bearing correctness anchor for a
             // shuffle (which must not reveal — or alter — the multiset). The full
             // permuted column + permutation-of-input check lives in the in-crate
-            // tests that call `Coordinator::shuffle` directly. sq-bdbv.
+            // tests that call `Coordinator::shuffle_public_permutation` directly.
+            // sq-bdbv.
             let col_values: Vec<u64> = (0..scale as u64).map(|i| i * 7 + 1).collect();
-            let (opened, gates) = coord.shuffle(dealer, &col_values)?;
+            // The caller's own token, checked for presence above: this function
+            // never builds one.
+            let ack = public_permutation.ok_or_else(|| {
+                MpcError::Protocol(
+                    "run_cell_networked: missing public-permutation acknowledgement".to_string(),
+                )
+            })?;
+            let (opened, gates) = coord.shuffle_public_permutation(dealer, &col_values, ack)?;
             (opened.iter().copied().sum(), gates)
         }
         QueryClass::ObliviousSort => {
@@ -1047,6 +1165,7 @@ mod tests {
                 &mut dealer,
                 &values,
                 1,
+                None,
             )
             .unwrap();
             assert_eq!(
@@ -1079,6 +1198,7 @@ mod tests {
                 &mut dealer,
                 &[],
                 scale,
+                None,
             )
             .unwrap();
             assert_eq!(
@@ -1105,9 +1225,50 @@ mod tests {
             &mut dealer,
             &[],
             3,
+            None,
         )
         .unwrap();
         assert_eq!(cell.result as usize, 3);
+    }
+
+    /// The transport shuffle is refused without the explicit opt-in, and the
+    /// refusal says why: this tier's permutation is public to every party.
+    ///
+    /// No network is needed to assert it — the refusal lands before anything is
+    /// dealt — so the test builds a coordinator over a pair of in-memory streams.
+    #[test]
+    fn the_transport_shuffle_is_refused_without_the_public_permutation_opt_in() {
+        let backend = ShamirBackend::new_seeded(3, 0x7A11).unwrap();
+        let mut dealer = backend.dealer();
+        let (coord, handles) = loopback_coordinator(&backend);
+        let mut coord = coord;
+        #[allow(deprecated)]
+        let refused = coord.shuffle(&mut dealer, &[1u64, 2, 3]);
+        match refused {
+            Err(MpcError::Protocol(m)) => {
+                assert!(
+                    m.contains("PERMUTATION IS PUBLIC"),
+                    "the refusal must say why: {m}"
+                );
+                assert!(
+                    m.contains("shuffle_public_permutation"),
+                    "the refusal must name the opt-in: {m}"
+                );
+            }
+            other => panic!("must fail closed without the opt-in, got {other:?}"),
+        }
+        // With the acknowledgement the same call runs and permutes the multiset.
+        let values = vec![11u64, 22, 33];
+        let (opened, gates) = coord
+            .shuffle_public_permutation(&mut dealer, &values, PublicPermutation::acknowledged())
+            .unwrap();
+        assert!(gates > 0);
+        let mut got = opened;
+        got.sort_unstable();
+        assert_eq!(got, values);
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
     }
 
     // sq-bdbv: the oblivious shuffle + sort now run over the SAME
@@ -1146,6 +1307,47 @@ mod tests {
         (coord, handles)
     }
 
+    /// `Coordinator::hidden_join`'s OWN cap, tested directly on a Coordinator
+    /// rather than through `run_cell_networked`.
+    ///
+    /// Through the wire cell the two caps mask each other: the cell's own
+    /// preflight refuses first, so disabling either one alone leaves the other to
+    /// catch it and neither mutant shows. Driving the Coordinator directly isolates
+    /// this one, so it is pinned on its own terms.
+    #[test]
+    fn the_coordinators_hidden_join_caps_its_own_scale() {
+        let backend = ShamirBackend::new_seeded(3, 0xE9).unwrap();
+        let (mut coord, handles) = loopback_coordinator(&backend);
+        let mut dealer = backend.dealer();
+
+        // `scale^2` over the cap with `scale` itself under it, and the overflowing
+        // case. Both must be a typed refusal, not a wrapped length or an allocation.
+        // `scale` itself is legal (1024 is far below MAX_OUTPUT_BOUND); it is the
+        // SQUARE that is not, which is what distinguishes this cap from a width one.
+        for scale in [1usize << 10, usize::MAX] {
+            let err = coord
+                .hidden_join(&mut dealer, scale)
+                .expect_err("an over-cap pair count must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("MAX_OUTPUT_BOUND") || m.contains("overflows usize")),
+                "scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+        // A legal scale still runs the real wire join over the same Coordinator, so
+        // the cap refuses a size and not the operation.
+        let matches = coord
+            .hidden_join(&mut dealer, 4)
+            .expect("a legal scale still runs");
+        assert_eq!(matches, 4, "keys 0..4 on both sides match pairwise");
+
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+    }
+
     #[test]
     fn networked_shuffle_preserves_multiset_over_the_wire() {
         // A networked oblivious shuffle must open to a PERMUTATION of the input
@@ -1158,7 +1360,9 @@ mod tests {
             let values: Vec<u64> = (0..8u64).map(|i| i * 7 + 1).collect();
             let (mut coord, handles) = loopback_coordinator(&backend);
             let mut dealer = backend.dealer();
-            let (opened, gates) = coord.shuffle(&mut dealer, &values).unwrap();
+            let (opened, gates) = coord
+                .shuffle_public_permutation(&mut dealer, &values, PublicPermutation::acknowledged())
+                .unwrap();
             for h in handles {
                 h.join().unwrap().unwrap();
             }
@@ -1214,9 +1418,15 @@ mod tests {
             assert!(check_shuffle(&mut dealer, backend.threshold(), 8).unwrap());
             // Networked: the column-sum result equals the canonical input sum.
             let mut dealer2 = backend.dealer();
-            let cell =
-                run_cell_networked(QueryClass::ObliviousShuffle, &backend, &mut dealer2, &[], 8)
-                    .unwrap();
+            let cell = run_cell_networked(
+                QueryClass::ObliviousShuffle,
+                &backend,
+                &mut dealer2,
+                &[],
+                8,
+                Some(PublicPermutation::acknowledged()),
+            )
+            .unwrap();
             let want: u64 = (0..8u64).map(|i| i * 7 + 1).sum();
             assert_eq!(cell.result, want, "n={n}: networked shuffle multiset sum");
             assert!(cell.total_bytes() > 0);
@@ -1232,9 +1442,15 @@ mod tests {
             let mut dealer = backend.dealer();
             assert!(check_sort(&mut dealer, backend.threshold(), 9).unwrap());
             let mut dealer2 = backend.dealer();
-            let cell =
-                run_cell_networked(QueryClass::ObliviousSort, &backend, &mut dealer2, &[], 9)
-                    .unwrap();
+            let cell = run_cell_networked(
+                QueryClass::ObliviousSort,
+                &backend,
+                &mut dealer2,
+                &[],
+                9,
+                None,
+            )
+            .unwrap();
             let want: u64 = (1..=9u64).sum();
             assert_eq!(cell.result, want, "n={n}: networked sort multiset sum");
             assert!(cell.total_bytes() > 0);
@@ -1245,13 +1461,153 @@ mod tests {
         }
     }
 
+    /// `run_cell_networked` is public and drives the public-permutation shuffle, so
+    /// it must not manufacture the acknowledgement for its caller. Without the token
+    /// the shuffle class is refused, and the refusal lands before any wire work.
+    /// `scale` sizes the canonical column each class builds, so an uncapped one is
+    /// not a slow cell but a dead process: `usize::MAX` overflows the `(0..scale)`
+    /// build and a merely large value exhausts memory. The cap sits at the top of
+    /// the function, ahead of the listener and the party threads, so the refusal
+    /// costs no socket and no thread — which is also why this test can afford to
+    /// try `usize::MAX` at all.
+    #[test]
+    fn run_cell_networked_refuses_an_over_cap_scale_without_panicking() {
+        use crate::oblivious::MAX_NETWORK_WIDTH;
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+        let backend = ShamirBackend::new_seeded(3, 0xE8).unwrap();
+
+        for scale in [MAX_NETWORK_WIDTH + 1, usize::MAX] {
+            // Both network classes cap on the width. The shuffle class is passed its
+            // opt-in token, so the refusal under test is the size one and not the
+            // acknowledgement one.
+            for (class, token) in [
+                (
+                    QueryClass::ObliviousShuffle,
+                    Some(PublicPermutation::acknowledged()),
+                ),
+                (QueryClass::ObliviousSort, None),
+            ] {
+                let mut dealer = backend.dealer();
+                let err = run_cell_networked(class, &backend, &mut dealer, &[], scale, token)
+                    .expect_err("an over-cap scale must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_NETWORK_WIDTH")),
+                    "{:?} scale={}: {:?}",
+                    class,
+                    scale,
+                    err
+                );
+            }
+
+            // The all-pairs class caps on the candidate cardinality instead.
+            let mut dealer = backend.dealer();
+            let err = run_cell_networked(
+                QueryClass::HiddenValueEquiJoin,
+                &backend,
+                &mut dealer,
+                &[],
+                scale,
+                None,
+            )
+            .expect_err("an over-cap scale must be refused");
+            // `usize::MAX` squared refuses on the overflow; a merely over-cap
+            // scale refuses on the cap. Both are the same guard, reached by its
+            // two arms, and both must be a typed refusal rather than a wrap.
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("MAX_OUTPUT_BOUND") || m.contains("overflows usize")),
+                "HiddenValueEquiJoin scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+
+        // `scale` below the cap but whose SQUARE is above it: the join class must
+        // still refuse, which is what distinguishes its cap from the width one.
+        let square_over = 1usize << 10;
+        assert!(
+            square_over <= MAX_NETWORK_WIDTH && square_over * square_over > MAX_OUTPUT_BOUND,
+            "the fixture must be legal as a width but illegal as a pair count"
+        );
+        let mut dealer = backend.dealer();
+        assert!(
+            run_cell_networked(
+                QueryClass::HiddenValueEquiJoin,
+                &backend,
+                &mut dealer,
+                &[],
+                square_over,
+                None,
+            )
+            .is_err(),
+            "scale^2 above the cap must be refused even though scale is not"
+        );
+
+        // And a legal scale still runs the real wire cell, so the caps refuse a
+        // size rather than the class.
+        let mut dealer = backend.dealer();
+        run_cell_networked(
+            QueryClass::ObliviousSort,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            None,
+        )
+        .expect("a legal scale still runs");
+    }
+
+    #[test]
+    fn run_cell_networked_refuses_the_shuffle_class_without_the_opt_in() {
+        let backend = ShamirBackend::new_seeded(3, 0xE7).unwrap();
+        let mut dealer = backend.dealer();
+        let err = run_cell_networked(
+            QueryClass::ObliviousShuffle,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            None,
+        )
+        .unwrap_err();
+        match err {
+            MpcError::Protocol(msg) => assert!(
+                msg.contains("PERMUTATION IS PUBLIC")
+                    && msg.contains("PublicPermutation::acknowledged"),
+                "got: {}",
+                msg
+            ),
+            other => panic!("expected a Protocol refusal, got {:?}", other),
+        }
+        // And the same cell goes through once the caller names it.
+        let mut dealer = backend.dealer();
+        let cell = run_cell_networked(
+            QueryClass::ObliviousShuffle,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            Some(PublicPermutation::acknowledged()),
+        )
+        .unwrap();
+        assert_eq!(cell.result, (0..8u64).map(|i| i * 7 + 1).sum::<u64>());
+    }
+
     #[test]
     fn networked_shuffle_rejects_empty_column() {
         // Empty input must FAIL CLOSED (mirrors the aggregate empty-input guard).
         let backend = ShamirBackend::new_seeded(3, 0xE3).unwrap();
         let mut dealer = backend.dealer();
-        let err = run_cell_networked(QueryClass::ObliviousShuffle, &backend, &mut dealer, &[], 0)
-            .unwrap_err();
+        let err = run_cell_networked(
+            QueryClass::ObliviousShuffle,
+            &backend,
+            &mut dealer,
+            &[],
+            0,
+            Some(PublicPermutation::acknowledged()),
+        )
+        .unwrap_err();
         match err {
             MpcError::Protocol(msg) => assert!(msg.contains("no rows"), "got: {msg}"),
             other => panic!("expected Protocol error, got {other:?}"),
@@ -1271,6 +1627,7 @@ mod tests {
             &mut dealer,
             &[],
             1,
+            None,
         )
         .unwrap_err();
         match err {

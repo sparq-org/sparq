@@ -50,7 +50,7 @@ fn empty_pod() -> PodStore {
 fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
-        .graph
+        .graph()
         .named
         .iter()
         .find(|(n, _)| *n == term)
@@ -186,23 +186,24 @@ fn put_acl_rolls_back_on_reserved_principal() {
     assert_eq!(store.accessible(&sess(ALICE), Mode::Read).len(), 2);
     let prior_acl_len = graph_len(&store, "https://pod.ex/.acl");
 
-    // Now PUT a body naming a RESERVED-encoding agent — materialization REJECTS it.
-    let bad = "<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:evil> .\n";
+    // A body naming a RESERVED-encoding agent is refused before anything changes.
+    let bad = format!(
+        "{}<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:evil> .\n",
+        root_acl_read(ALICE)
+    );
     let err = store
-        .put_acl("https://pod.ex/.acl", bad, "ntriples")
-        .expect_err("reserved-encoding principal must be rejected");
-    assert!(err.contains("urn:sparq:") || err.to_lowercase().contains("reserved"), "{err}");
-
-    // Atomic: the PRIOR content and the PRIOR auth view are both intact.
+        .put_acl("https://pod.ex/.acl", &bad, "ntriples")
+        .expect_err("reserved-encoding principal must be refused");
+    assert!(err.contains("may not state"), "{err}");
     assert_eq!(
         graph_len(&store, "https://pod.ex/.acl"),
         prior_acl_len,
-        "the rejected content was rolled back — prior .acl restored"
+        "prior .acl kept"
     );
     assert_eq!(
         store.accessible(&sess(ALICE), Mode::Read).len(),
         2,
-        "alice's prior grant still stands after the failed put (no partial write)"
+        "alice's prior grant still stands after the refused put"
     );
 }
 

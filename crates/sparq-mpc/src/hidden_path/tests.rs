@@ -305,6 +305,44 @@ fn oversized_k_is_rejected() {
     assert!(matches!(err, MpcError::Protocol(m) if m.contains("chain")));
 }
 
+/// Hop counts are capped before evaluation: a `k` past [`MAX_HOP_COUNT`] — up to
+/// `usize::MAX`, where the per-hop counting loop and the `k`-wide odometer would
+/// otherwise run — is refused by the hop guard with NO draw made, so the refusal
+/// does not wait on the enumeration being sized. Finishing the test at all is the
+/// no-hang witness; nothing here asserts a timing.
+#[test]
+fn huge_hop_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+    let (edges, _i) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    // A single self-loop edge too: with |E| = 1 the projected tuple count stays 1
+    // for ANY k, so MAX_CHAIN_TUPLES never fires and only the hop cap refuses.
+    let (one_edge, _j) = hidden_edges(&[("http://ex/a", "http://ex/a")]);
+    let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+
+    for edge_set in [&edges, &one_edge] {
+        for k in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err =
+                eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, edge_set, k, 8)
+                    .expect_err("a hop count past the cap must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+                "k={}: expected the hop-count refusal, got {:?}",
+                k,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+        }
+    }
+    // The cap itself is still a legal `k` as far as the hop guard goes (|E| = 1
+    // keeps the tuple count at 1, so nothing else refuses it).
+    assert!(eval_exact_k_chain_hidden(&backend, &one_edge, MAX_HOP_COUNT, 8).is_ok());
+}
+
 // =====================================================================
 // Determinism of the disclosed result across shuffle seeds
 // =====================================================================
@@ -325,4 +363,486 @@ fn result_is_shuffle_seed_invariant() {
         let got = secure_exact_k(&backend, &edges, 2, 64);
         assert_eq!(got, want, "seed {seed}: result changed");
     }
+}
+
+// ---- sq-yyro / issue #6117: the chain stage draws through the seam ----
+
+/// The disclosed `(a, b)` IRI pairs among the revealed slots (dummies dropped).
+fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, String)> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .filter_map(|s| match s {
+            OutputSlot::Row(p) => match (&p[0], &p[1]) {
+                (Some(Term::NamedNode(a)), Some(Term::NamedNode(b))) => {
+                    Some((a.as_str().to_string(), b.as_str().to_string()))
+                }
+                other => panic!("endpoints must be bound IRIs, got {other:?}"),
+            },
+            OutputSlot::Dummy => None,
+        })
+        .collect()
+}
+
+/// A source whose `(n, t)` differs from the backend's is refused by the up-front
+/// check in `eval_exact_k_chain_hidden_slots_through`, BEFORE the chain stage
+/// draws anything.
+///
+/// The shape matters: `k = 2` over the two-hop chain at `B = 4` is a shape whose
+/// OWN stage draws (the hop equalities' operand bits, then the AND fold's
+/// re-sharings — the sites `malformed_draws_in_the_chain_are_refused` aims at).
+/// A draw-free shape would be refused by the output stage's own
+/// `require_source_matches` even with the up-front check deleted, which is why
+/// the assertions below are on the draw count and not only on the error.
+#[test]
+fn exact_k_through_refuses_a_source_that_does_not_match_the_backend() {
+    use crate::randomness::test_sources::{
+        DrawCountingSource, MisreportedThresholdSource, RecordingSource,
+    };
+    let backend = ShamirBackend::new_seeded(3, 0x9A7C).unwrap();
+    let (edges, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+
+    // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
+    // whether anything was drawn before the refusal.
+    let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer());
+    match eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 4) {
+        Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+        other => panic!("a wrong-n source must be refused, got {other:?}"),
+    }
+    assert!(
+        rec.log.is_empty(),
+        "drew {} times before refusing",
+        rec.log.len()
+    );
+
+    // Misreported `t`: every sharing such a source returns is canonically SHAPED
+    // for the backend's `n`, so no downstream shape check can catch it — only the
+    // source-match check can. Counted through a wrapper, since `RecordingSource`
+    // wraps a real dealer and so cannot misreport a threshold.
+    for t in [0, 2] {
+        let mut lying = MisreportedThresholdSource {
+            inner: backend.dealer(),
+            t,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        match eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 4) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
+            other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
+        }
+        assert_eq!(counted.draws(), 0, "t={t}: drew before refusing");
+    }
+}
+
+/// A malformed draw anywhere in the chain is refused by the check at its
+/// consumption site: the first own-input draw is a hop equality's operand bit
+/// (shape-checked in `compare`), and the first draw after the two operands'
+/// `2 · COMPARE_BITS` bits is a degree-reduction re-sharing.
+#[test]
+fn malformed_draws_in_the_chain_are_refused() {
+    use crate::compare::COMPARE_BITS;
+    use crate::randomness::test_sources::{
+        MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
+    };
+    let backend = ShamirBackend::new_seeded(3, 0x9A7D).unwrap();
+    let (edges, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    for (skip, expected) in [
+        (0, SHAPE_REFUSAL),
+        (2 * COMPARE_BITS, "re-sharing that is not the canonical"),
+    ] {
+        for how in ALL_MALFORMATIONS {
+            let mut src =
+                MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, skip, how);
+            match eval_exact_k_chain_hidden_slots_through(&mut src, &backend, &edges, 2, 4) {
+                Err(MpcError::Protocol(m)) => assert!(m.contains(expected), "{skip}, {how:?}: {m}"),
+                other => panic!("{skip}, {how:?}: must fail closed, got {other:?}"),
+            }
+            assert!(src.fired());
+        }
+    }
+}
+
+/// Under PRSS every shape fails closed for any `B > 0`, never panics. `k = 2` needs
+/// a hop equality and `k = 1` over parallel edges needs an OR-fold, both of which
+/// share a holder's own input — which PRSS refuses. Since #6117 step 6 routed the
+/// output stage through the same source, so does `k = 1` over distinct endpoint
+/// pairs, whose chain stage draws nothing: the output stage shares the real-row tag
+/// and the payload limbs for each of its `B` slots, so that shape is draw-free only
+/// at `B = 0`. (Before the routing that case ran at any `B`, because the output
+/// stage minted its own dealer and never touched the caller's source.)
+#[test]
+fn prss_fails_closed_on_every_exact_k_shape() {
+    use crate::prss::PrssRandomness;
+    let backend = ShamirBackend::new_seeded(3, 0x9A7E).unwrap();
+    let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
+    let (edges, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    let (parallel, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/a", "http://ex/b"),
+    ]);
+    // The formerly-draw-free shape still evaluates CORRECTLY through the seam on a
+    // dealer source — it is the SOURCE that refuses below, not the shape.
+    let (slots, _) =
+        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), &backend, &edges, 1, 3)
+            .unwrap();
+    assert_eq!(slots.len(), 3);
+    assert_eq!(
+        slot_pairs(&slots),
+        plaintext_exact_k(
+            &[
+                ("http://ex/a", "http://ex/b"),
+                ("http://ex/b", "http://ex/c"),
+            ],
+            1
+        )
+    );
+
+    for (edges, k) in [(&edges, 1), (&edges, 2), (&parallel, 1)] {
+        let outcome = eval_exact_k_chain_hidden_slots_through(&mut prss, &backend, edges, k, 4);
+        assert!(
+            matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+            "k = {k}: PRSS must fail closed, got {outcome:?}"
+        );
+    }
+}
+
+/// The per-pair connected-bit sharings of a candidate list, in candidate order.
+fn candidate_bits(candidates: &[crate::oblivious_join::Candidate]) -> Vec<(Vec<String>, Vec<u64>)> {
+    candidates
+        .iter()
+        .map(|c| {
+            let MatchBit::SecretShared(bit) = &c.matched else {
+                panic!("connected-bit must be secret-shared");
+            };
+            (
+                c.payload
+                    .iter()
+                    .map(|t| t.as_ref().unwrap().to_string())
+                    .collect(),
+                bit.iter().map(|s| s.y.value()).collect(),
+            )
+        })
+        .collect()
+}
+
+/// Render revealed slots as `"<a> <b>"` / `"dummy"`, in revealed order.
+fn slot_strings(slots: &[crate::oblivious_join::OutputSlot]) -> Vec<String> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .map(|s| match s {
+            OutputSlot::Row(p) => p
+                .iter()
+                .map(|t| t.as_ref().unwrap().to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            OutputSlot::Dummy => "dummy".to_string(),
+        })
+        .collect()
+}
+
+const PIN_EDGES: [(&str, &str); 2] = [
+    ("http://ex/a", "http://ex/b"),
+    ("http://ex/b", "http://ex/c"),
+];
+
+/// Captured on the PRE-ROUTING code by logging every dealer draw and re-checked
+/// byte-identical after the routing: the connected-bit sharings pin the values,
+/// the trailing `draw_fp()` WITNESS pins the draw count, and the revealed slot
+/// order pins the public output.
+#[test]
+fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
+    let backend = ShamirBackend::new_seeded(3, 0x9A7B).unwrap();
+    let (edges, _) = hidden_edges(&PIN_EDGES);
+    let mut dealer = backend.dealer();
+    let candidates = build_candidates(&backend, &mut dealer, &edges, 2).unwrap();
+    let pair = |a: &str, b: &str| vec![format!("<http://ex/{a}>"), format!("<http://ex/{b}>")];
+    assert_eq!(
+        candidate_bits(&candidates),
+        [
+            (
+                pair("a", "b"),
+                vec![200120304358927318, 400240608717854636, 600360913076781954]
+            ),
+            (
+                pair("a", "c"),
+                vec![1085933241605771511, 2171866483211543021, 951956715603620580]
+            ),
+            (
+                pair("b", "b"),
+                vec![1627966387087110708, 950089764960527465, 272213142833944222]
+            ),
+            (
+                pair("b", "c"),
+                vec![501855066999073978, 1003710133998147956, 1505565200997221934]
+            ),
+        ]
+    );
+    assert_eq!(dealer.draw_fp().value(), 641842556892271371);
+    // The REVEALED slot ORDER has moved twice: first in #6117 step 6 (the output
+    // stage draws its sharings and its shuffle from the SAME source as the chain
+    // stage instead of minting a second dealer), then again when the output stage's
+    // per-element degree reduction added its re-sharings, so the shuffle samples a
+    // later point of one continuous keystream. The order is the shuffle's secret
+    // permutation and carries no result meaning — the canonicalised multiset below
+    // is byte-identical to the pre-routing capture.
+    let (slots, cost) = eval_exact_k_chain_hidden_slots(&backend, &edges, 2, 5).unwrap();
+    assert_eq!(
+        slot_strings(&slots),
+        [
+            "<http://ex/a> <http://ex/c>",
+            "dummy",
+            "dummy",
+            "dummy",
+            "dummy"
+        ]
+    );
+    let mut sorted = slot_strings(&slots);
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        [
+            "<http://ex/a> <http://ex/c>",
+            "dummy",
+            "dummy",
+            "dummy",
+            "dummy"
+        ],
+        "revealed multiset must be unchanged"
+    );
+    assert_eq!(
+        (
+            cost.bound,
+            cost.select_mults,
+            cost.opens,
+            cost.shuffle.items,
+            cost.shuffle.switches,
+            cost.shuffle.depth_rounds
+        ),
+        (5, 5, 5, 5, 56, 5)
+    );
+}
+
+/// THE guard for the output stage's payload select on the two-hop chain
+/// `a → b → c`: only the pair `(a, c)` is connected, so every other endpoint-pair
+/// candidate is rejected — and no rejected pair's endpoint row may appear among the
+/// opened payloads of the `B` slots. The opened set must be exactly `{(a, c)}` plus
+/// the dummy encoding (two unbound cells).
+///
+/// Asserted by comparing the candidates' OWN payload rows against what each slot
+/// actually opened to, through `exact_k_chain_candidates_and_opened_rows` — the
+/// same candidate construction and the same output stage the public path runs.
+#[test]
+fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
+    let render = |row: &[Option<Term>]| format!("{row:?}");
+    for seed in 0..8u64 {
+        let backend = ShamirBackend::new_seeded(3, 0x9A80 + seed).unwrap();
+        let (edges, _) = hidden_edges(&PIN_EDGES);
+        let (candidates, slots) =
+            exact_k_chain_candidates_and_opened_rows(&mut backend.dealer(), &backend, &edges, 2, 6)
+                .unwrap();
+        assert_eq!(slots.len(), 6, "seed {seed}: exactly B slots");
+        let connected = vec![Some(iri_term("http://ex/a")), Some(iri_term("http://ex/c"))];
+        let pad: Vec<Option<Term>> = vec![None, None];
+        // Every candidate whose endpoint row is not the connected pair is rejected;
+        // its row must not be among the opened payloads.
+        let opened: Vec<String> = slots.iter().map(|(_, r)| render(r)).collect();
+        let mut rejected_seen = 0usize;
+        for c in &candidates {
+            if c.payload != connected {
+                rejected_seen += 1;
+                assert!(
+                    !opened.contains(&render(&c.payload)),
+                    "seed {seed}: a rejected pair's endpoint row was opened: {}",
+                    render(&c.payload)
+                );
+            }
+        }
+        assert!(
+            rejected_seen > 0,
+            "seed {seed}: fixture must contain rejected pairs"
+        );
+        // The opened set is exactly the connected pair plus the dummy encoding.
+        let distinct: BTreeSet<String> = opened.iter().cloned().collect();
+        assert_eq!(
+            distinct,
+            BTreeSet::from([render(&connected), render(&pad)]),
+            "seed {seed}: opened payload set"
+        );
+        for (is_real, row) in &slots {
+            if *is_real {
+                assert_eq!(row, &connected, "seed {seed}");
+            } else {
+                assert_eq!(row, &pad, "seed {seed}: dummy slot payload");
+            }
+        }
+    }
+}
+
+/// The COMPLETE draw sequence of the exactly-2 chain stage (entry count and an
+/// order-sensitive fingerprint over every method and returned `y`).
+///
+/// **This is the #6117-step-6 guard.** The transcript now ends in the output
+/// stage's 141 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// `eval_exact_k_chain_hidden_slots_through` went back to minting its own dealer
+/// for the output stage the log would stop at 1920 entries and both the length and
+/// the suffix assertion would fail.
+///
+/// The 1920-entry PREFIX is the pre-routing whole-log pin
+/// (`0x1013_9382_581b_a7e3`, captured on the pre-routing code), asserted here
+/// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
+/// chain part, and the output stage's per-element degree reduction only grew that
+/// suffix. The full-log fingerprint is the new pin.
+#[test]
+fn seeded_exact_k_stage_transcript_is_pinned() {
+    use crate::randomness::test_sources::{
+        fingerprint, prefix_before_first_shuffle, RecordingSource,
+    };
+    let backend = ShamirBackend::new_seeded(3, 0x9A7B).unwrap();
+    let (edges, _) = hidden_edges(&PIN_EDGES);
+    let mut rec = RecordingSource::new(backend.dealer());
+    eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
+    assert_eq!(rec.log.len(), 2062);
+    // Prefix unchanged from the pre-routing pin; the whole move is in the output
+    // suffix, which grew by the per-element degree reductions.
+    assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
+    // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+    // fingerprint is the value the pre-re-randomisation code produced, so only
+    // the shuffle's own output and the draws after it moved.
+    assert_eq!(
+        fingerprint(prefix_before_first_shuffle(&rec.log)),
+        0x57c8_25d3_c07f_3fe9
+    );
+    assert_eq!(fingerprint(&rec.log), 0x33fc_792d_1e0b_566a);
+    let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
+    assert_eq!(
+        suffix,
+        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
+    );
+}
+
+/// The two caps are pinned by VALUE, not only by their relation.
+///
+/// `MAX_HOP_COUNT` is DEFINED as `MAX_CHAIN_TUPLES.ilog2()`, so asserting that
+/// relation would be a tautology that passes however either moves. What is
+/// load-bearing is the numbers themselves: a reviewer reading a cost argument
+/// about "18 hops" and "2^18 tuples" should find that claim pinned somewhere, and
+/// changing either constant should make a test say so rather than quietly
+/// rescaling every bound in the module.
+#[test]
+fn the_hop_and_tuple_caps_are_pinned_by_value() {
+    use crate::hidden_path::{MAX_CHAIN_TUPLES, MAX_HOP_COUNT};
+    assert_eq!(MAX_HOP_COUNT, 18, "the documented hop cap");
+    assert_eq!(MAX_CHAIN_TUPLES, 1u64 << 18, "the documented tuple cap");
+    // And the relation the definition expresses, so a future hand-written value
+    // cannot drift from it.
+    assert_eq!(MAX_HOP_COUNT, MAX_CHAIN_TUPLES.ilog2() as usize);
+}
+
+/// Both exactly-`k` entries — the public slot path and the test-only instrumented
+/// one — refuse an over-cap output bound before ANY draw, on a NON-EMPTY edge set.
+/// `build_candidates` draws per hop equality and the output stage materialises `B`
+/// slots, so the refusal has to precede both.
+#[test]
+fn an_over_cap_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C01).unwrap();
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+        ("http://ex/c", "http://ex/d"),
+    ]);
+
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, bound)
+            .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(counted.draws(), 0, "slots_through B={bound}");
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, bound)
+                .expect_err("the instrumented entry must refuse it too");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(counted.draws(), 0, "candidates_and_opened_rows B={bound}");
+    }
+
+    // A legal bound over the same edges still runs.
+    let legal = eval_exact_k_chain_hidden(&backend, &edges, 2, 16);
+    assert!(legal.is_ok(), "a legal bound must still run: {:?}", legal);
+}
+
+/// The OTHER half of the bound contract — `B` covering the candidate count — is
+/// also settled before any draw.
+///
+/// This is the half that used to be left to the output stage: with `|E| = 2` and
+/// `k = 18` the builder drew one secure equality per hop of every one of the
+/// `2^18` tuples, about 2.1 billion draws over roughly seventeen minutes, and only
+/// THEN discovered that `B = 1` could not hold the answer. The count is decidable
+/// from the disclosed endpoint terms in `O(|E| log |E|)`, so it is now decided
+/// first. A `k = 18` fixture is used deliberately: with the guard in place the test
+/// finishes instantly, and without it the enumeration is the cost being avoided.
+#[test]
+fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C07).unwrap();
+    // Two edges over three nodes: 2 distinct subjects x 2 distinct objects = 4
+    // endpoint pairs for any k >= 2, so B = 1 cannot cover it.
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    assert_eq!(
+        projected_candidate_count(&edges, 18).unwrap(),
+        4,
+        "the projection must agree with the builder's grouping"
+    );
+
+    for k in [2usize, 18] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, k, 1)
+            .expect_err("a bound below the candidate count must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "k={}: {}", k, m),
+            other => panic!("k={}: expected a Protocol refusal, got {:?}", k, other),
+        }
+        assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+    }
+
+    // k = 1 groups by the edges' own (subject, object) pairs, so the count is 2 and
+    // B = 1 is still short — the projection must track `k`, not assume the product.
+    assert_eq!(projected_candidate_count(&edges, 1).unwrap(), 2);
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    assert!(
+        eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 1, 1).is_err(),
+        "B=1 below the k=1 count must be refused"
+    );
+    assert_eq!(counted.draws(), 0);
+
+    // And the projection is EXACT, not merely an upper bound: a bound equal to it
+    // runs, for both the k = 1 and the k >= 2 grouping.
+    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = exact count runs at k=1");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = exact count runs at k=2");
 }

@@ -12,6 +12,7 @@ name: lws-conformance
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "crates/sparq-lws-core/**"
       - "crates/sparq-lws-authn*/**"
@@ -38,6 +39,8 @@ env:
 
 jobs:
   touchstone:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: lws touchstone
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -58,6 +61,8 @@ jobs:
         with:
           key: lws-conformance
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: check the floor checker
+        run: python3 -B crates/sparq-lws-core/conformance/lws/check-floor.py --self-test
       - name: build touchstone
         working-directory: touchstone
         run: ./mvnw -q -B -ntp -pl harness-cli -am -Dmaven.test.skip=true package
@@ -80,6 +85,8 @@ jobs:
           retention-days: 14
 
   lws-net:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: lws lws-net
     runs-on: ubuntu-latest
     timeout-minutes: 45

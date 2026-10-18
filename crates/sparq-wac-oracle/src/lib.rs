@@ -895,8 +895,8 @@ pub fn fixtures() -> &'static [Fixture] {
 /// Load a fixture's pod into a [`PodStore`] and materialize its auth view with the
 /// matching `sparq-solid` materializer — [`PodStore::materialize_acp_with`] for an ACP
 /// corpus, so `acp:CreatorAgent`/`acp:OwnerAgent` matchers resolve against the fixture's
-/// TRUSTED [`Fixture::provenance`] facts (an empty list is exactly `materialize_acp`,
-/// i.e. fully fail-closed).
+/// TRUSTED [`Fixture::provenance`] facts (an empty list is exactly `materialize_acp` on a
+/// fresh store, i.e. fully fail-closed).
 ///
 /// # Errors
 ///

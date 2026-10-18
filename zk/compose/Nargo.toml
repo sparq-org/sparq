@@ -19,6 +19,8 @@ members = [
     "compose_core",
     # [GPT-6] Successful-result proofs, separate from complete-scan v1.
     "result_v1_k1_n16_p3_r4_f0",
+    "result_v5_k1_n16_p3_r4_f0_d10",
+    "result_v5_k2_n16_p3_r4_f0_d10",
     "result_v1_k1_n16_p3_r4_f2",
     "result_v1_k2_n16_p3_r4_f0",
     "result_v1_k2_n16_p3_r4_f2",
@@ -51,6 +53,15 @@ members = [
     # (method x circuit) dispatch sq-cfmv), like the filter_f64 building-block
     # precedent. NOT externally audited.
     "filter_value_dl_int",
+    # The DUAL-LEAF BIT-DOMAIN xsd:boolean value-lane member (the DualLeafV2 lane).
+    # The dedicated boolean sibling of filter_value_dl_int with the same public
+    # layout, additionally constraining the witnessed handle AND the public bound
+    # to {0, 1} -- a handle of 2 is inside the integer member's u64 range but
+    # denotes no boolean value. A separate member because the integer member
+    # legitimately uses the whole u64 domain and its gate count / evidence must not
+    # move. Same OFF-by-default `dual-leaf` feature and INV-VL downgrade (#769
+    # accepted, CR-G8 / sq-qhy4); NOT externally audited.
+    "filter_value_dl_bool",
     # [OPUS-4.8] sq-2ezsx: DUAL-LEAF value-lane FILTER members for the xsd:double
     # and xsd:decimal datatype CLASSES (sibling members of filter_value_dl_int).
     # These are MANY-TO-ONE on the term (IEEE -0.0/+0.0, NaN payloads; decimal

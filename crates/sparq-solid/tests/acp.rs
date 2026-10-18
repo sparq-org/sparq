@@ -75,7 +75,7 @@ fn acp_rematerialization_picks_up_policy_change() {
     assert!(!can(&mut s, Some(DAVE), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     // extend team2's anyOf with dave: swap the .acr graph, re-materialize
     let name = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/team2/.acr"));
-    let pos = s.graph.named.iter().position(|(n, _)| *n == name).expect("acr graph");
+    let pos = s.graph().named.iter().position(|(n, _)| *n == name).expect("acr graph");
     let acr = "https://pod.ex/team2/.acr";
     let team = format!(
         "<{acr}> <http://www.w3.org/ns/solid/acp#memberAccessControl> <{acr}#ctl-team> .\n\
@@ -84,7 +84,7 @@ fn acp_rematerialization_picks_up_policy_change() {
          <{acr}#pol-team> <http://www.w3.org/ns/solid/acp#anyOf> <{acr}#m-dave> .\n\
          <{acr}#m-dave> <http://www.w3.org/ns/solid/acp#agent> <https://dave.ex/card#me> .\n"
     );
-    s.graph.named[pos].1 = Graph::load_str(&team, "ntriples").unwrap();
+    s.graph_unchecked_mut().named[pos].1 = Graph::load_str(&team, "ntriples").unwrap();
     s.materialize_acp().expect("re-materialize");
     assert!(can(&mut s, Some(DAVE), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     // …and bob lost the write grant the old policy carried
@@ -128,7 +128,7 @@ fn acp_write_enforcement_matches_grants() {
 fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
-        .graph
+        .graph()
         .named
         .iter()
         .find(|(n, _)| *n == term)
@@ -324,29 +324,36 @@ fn acp_issuer_noneof_conditional_grant() {
     assert!(!can_iss(&mut s, Some(BOB), None, Some(EVIL_IDP), r, ISS_DOC), "bob @ evil-idp carved out");
 }
 
-/// Fail-closed: a malicious `acp:issuer` value inside the reserved `urn:sparq:` space (or
-/// carrying the pair delimiter) is rejected at materialization, exactly like a malicious
-/// agent/client value — it cannot smuggle a forged triple principal into the auth view.
+/// Fail-closed: an ACR naming a malicious `acp:issuer` value inside the reserved
+/// `urn:sparq:` space (or carrying the pair delimiter) is rejected whole at admission,
+/// exactly like a malicious agent/client value: it cannot smuggle a forged triple principal
+/// into the auth view, and the resource it governs gets no grants.
 #[test]
 fn acp_issuer_reserved_encoding_rejected() {
     let acl = "http://www.w3.org/ns/auth/acl#";
     let acp = "http://www.w3.org/ns/solid/acp#";
-    let evil = "urn:sparq:triple?agent=x&client=y&issuer=z";
-    let body = format!(
-        "<{ISS_ACR}#pol> <{acp}allow> <{acl}Read> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#pol> <{acp}allOf> <{ISS_ACR}#m> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#m> <{acp}agent> <{BOB}> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#m> <{acp}issuer> <{evil}> <{ISS_ACR}> .\n"
-    );
-    let acr = format!(
-        "<{ISS_DOC}#it> <https://ex.dev/ns#title> \"iss\" <{ISS_DOC}> .\n\
-         <{ISS_ACR}> <{acp}accessControl> <{ISS_ACR}#ctl> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#ctl> <{acp}apply> <{ISS_ACR}#pol> <{ISS_ACR}> .\n\
-         {body}"
-    );
-    let g = Graph::load_dataset(&acr, "nquads").expect("loads");
-    let mut s = PodStore::new(g);
-    assert!(s.materialize_acp().is_err(), "reserved-space issuer IRI rejected at materialization");
+    for evil in [
+        "urn:sparq:triple?agent=x&client=y&issuer=z",
+        "https://idp.ex/x&client=https://app.ex",
+    ] {
+        let body = format!(
+            "<{ISS_ACR}#pol> <{acp}allow> <{acl}Read> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#pol> <{acp}allOf> <{ISS_ACR}#m> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#m> <{acp}agent> <{BOB}> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#m> <{acp}issuer> <{evil}> <{ISS_ACR}> .\n"
+        );
+        let acr = format!(
+            "<{ISS_DOC}#it> <https://ex.dev/ns#title> \"iss\" <{ISS_DOC}> .\n\
+             <{ISS_ACR}> <{acp}accessControl> <{ISS_ACR}#ctl> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#ctl> <{acp}apply> <{ISS_ACR}#pol> <{ISS_ACR}> .\n\
+             {body}"
+        );
+        let g = Graph::load_dataset(&acr, "nquads").expect("loads");
+        let mut s = PodStore::new(g);
+        s.materialize_acp().expect("the document is rejected, not fatal");
+        assert!(!can_iss(&mut s, Some(BOB), None, None, Mode::Read, ISS_DOC), "{evil}: no grant without an issuer");
+        assert!(!can_iss(&mut s, Some(BOB), None, Some(evil), Mode::Read, ISS_DOC), "{evil}: nor with it");
+    }
 }
 
 // ── sq-3jtd.5: acp:CreatorAgent / acp:OwnerAgent support ───────────────────
@@ -761,9 +768,12 @@ fn acp_forged_creator_in_acr_document_does_not_grant() {
          <{CRE_ACR}#altm> <{acp}agent> <{mallory}> <{CRE_ACR}> .\n"
     );
     let forged = format!("<{CRE_DOC}> <{solidx}creator> <{mallory}> <{CRE_ACR}> .\n");
+    // Baseline: without the forged fact her Write grant is live.
+    let mut clean = forged_prov_store(&prov_pol, &alt_pol, "");
+    assert!(can(&mut clean, Some(mallory), None, Mode::Write, CRE_DOC), "mallory's Write is live");
     let mut s = forged_prov_store(&prov_pol, &alt_pol, &forged);
-    // Baseline: her LEGITIMATE Write grant is intact (the filter does not over-block).
-    assert!(can(&mut s, Some(mallory), None, Mode::Write, CRE_DOC), "mallory keeps her legit Write");
+    // A document stating a fact it may not state contributes nothing at all.
+    assert!(!can(&mut s, Some(mallory), None, Mode::Write, CRE_DOC), "the forging .acr grants nothing");
     // The exploit: the forged creator fact must NOT escalate her to Read.
     assert!(
         !can(&mut s, Some(mallory), None, Mode::Read, CRE_DOC),
@@ -792,8 +802,10 @@ fn acp_forged_owner_in_acr_document_does_not_grant() {
          <{CRE_ACR}#altm> <{acp}agent> <{mallory}> <{CRE_ACR}> .\n"
     );
     let forged = format!("<{CRE_DOC}> <{solidx}owner> <{mallory}> <{CRE_ACR}> .\n");
+    let mut clean = forged_prov_store(&prov_pol, &alt_pol, "");
+    assert!(can(&mut clean, Some(mallory), None, Mode::Read, CRE_DOC), "mallory's Read is live");
     let mut s = forged_prov_store(&prov_pol, &alt_pol, &forged);
-    assert!(can(&mut s, Some(mallory), None, Mode::Read, CRE_DOC), "mallory keeps her legit Read");
+    assert!(!can(&mut s, Some(mallory), None, Mode::Read, CRE_DOC), "the forging .acr grants nothing");
     assert!(
         !can(&mut s, Some(mallory), None, Mode::Write, CRE_DOC),
         "forged `solidx:owner` inside the .acr must NOT self-grant Write (privilege escalation)"
@@ -834,12 +846,17 @@ fn acp_forged_applies_to_resource_in_acr_document_does_not_grant() {
          <{forge_acr}#m> <{acp}agent> <{mallory}> <{forge_acr}> .\n\
          <{forge_acr}#pol> <{solidx}appliesToResource> <{secret_doc}> <{forge_acr}> .\n"
     );
-    let g = Graph::load_dataset(&acr, "nquads").expect("loads");
-    let mut s = PodStore::new(g);
-    s.materialize_acp().expect("materializes (forged appliesToResource filtered, not error)");
-
-    // Sanity: the policy is live — mallory legitimately reads forge/d0.ttl.
-    assert!(can(&mut s, Some(mallory), None, Mode::Read, forge_doc), "mallory reads forge/d0.ttl (legit)");
+    let store = |nq: &str| {
+        let mut s = PodStore::new(Graph::load_dataset(nq, "nquads").expect("loads"));
+        s.materialize_acp().expect("materializes (forged appliesToResource filtered, not error)");
+        s
+    };
+    // Sanity: without the forged fact the policy is live — mallory reads forge/d0.ttl.
+    let clean: String = acr.lines().filter(|l| !l.contains("appliesToResource")).map(|l| format!("{l}\n")).collect();
+    assert!(can(&mut store(&clean), Some(mallory), None, Mode::Read, forge_doc), "mallory reads forge/d0.ttl (legit)");
+    let mut s = store(&acr);
+    // The forging document contributes nothing, so not even its legitimate grant holds.
+    assert!(!can(&mut s, Some(mallory), None, Mode::Read, forge_doc), "the forging .acr grants nothing");
     // The exploit: the forged appliesToResource must NOT leak the grant onto secret/s.ttl.
     assert!(
         !can(&mut s, Some(mallory), None, Mode::Read, secret_doc),

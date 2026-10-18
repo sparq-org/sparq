@@ -971,11 +971,16 @@ record must not say otherwise. A real `LANG_CONST` is `blake3_field(lang)` — a
 that collision negligible, not impossible; the language slot is collision-resistant and
 domain-separated, never provably disjoint. The enforceable sharpening is the same shape
 §14.1 demands of the value slot — a fail-closed `assert(lang_const != LANG_NONE)` at
-ingest, mirrored wherever a witnessed `LANG_CONST` enters a circuit — and until that
-ships, "no committed language tag hashes to `LANG_NONE`" is a **retained assumption**,
-registered as an OPEN audit obligation in §14.3. (The shipped host and Noir constants
-assert nothing; their doc comments state this assumption rather than separation by
-construction, #5263.)
+ingest, mirrored wherever a witnessed `LANG_CONST` enters a circuit. The **host half
+has shipped** for both dual-leaf versions: `degenerate_value_component` (and so every
+literal, term, triple and whole-graph encoder above it) routes each language constant
+through `checked_lang_const`'s gate and refuses a tag whose constant equals `LANG_NONE`
+with `DualLeafError::ReservedLanguageConstant`, so such a tag is rejected at ingest
+rather than encoded. The gate changes no committed value: it only adds a refusal for an
+input no known tag produces. The **circuit half is still open** — no Noir member asserts
+`LANG_CONST != LANG_NONE` — so for a witnessed `LANG_CONST`, "no committed language tag
+hashes to `LANG_NONE`" remains a **retained assumption**, registered as an OPEN audit
+obligation in §14.3.
 
 The value slot is worse than probabilistic, which is why it gets an assert and not a
 caveat: its real occupants ARE small field elements, so a `0`/`1` tag collides with
@@ -1052,11 +1057,19 @@ obligations.
 Both §14 rules — the reserved-tag band exclusion on `VALUE_NONE`, and the double lane's
 in-circuit canonical fold together with the residual it leaves to sq-mslu — are registered
 as OPEN external-audit obligations under CR-G8 / sq-qhy4 alongside the rest of this
-record. So is the §14.1 **`LANG_NONE` separation assumption**: like `VALUE_NONE`'s
-exclusion (§14.4) it is today *unasserted*, resting on collision-resistance of `blake3_field` over
-the language-tag domain rather than on a check, and it stays an assumption until the
-fail-closed ingest/circuit assert §14.1 names actually ships. No soundness or privacy
-property is claimed for any of the three, pending the external sign-off.
+record. So is the §14.1 **`LANG_NONE` separation**: the fail-closed ingest assert §14.1
+names now ships on the host side for `DualLeafV1` and `DualLeafV2` (a language tag whose
+constant equals `LANG_NONE` is refused, never encoded), but no circuit asserts it, so on
+the circuit side it still rests on the preimage resistance of the 248-bit truncated hash
+for the fixed target `1`. No soundness or privacy property is claimed for any of the
+three, pending the external sign-off.
+
+The band-exclusion rule itself is **met by `DualLeafV2` on the HOST side** (§14.5) as an
+asserted, checkable invariant; `DualLeafV1` retains the in-band tag (§14.4). The
+qualifier is load-bearing: the `zk/dual-leaf-v2` Noir library mirrors the V2 sentinel and
+its band check, but no proving member imports it, so in-circuit a V2 degenerate handle is
+refused only because it cannot be witnessed through a member's range decomposition (§14.5). Registration under CR-G8 / sq-qhy4 is unchanged either way
+— being checkable is not being audited.
 
 ### 14.4 The shipped `DualLeafV1` host builder (sq-vvfte)
 
@@ -1089,7 +1102,8 @@ That is not the domain-separated `blake3_field` constant §14.1 asks for: `2` li
 the reachable handle band. Distinctness in this build rests on the routing argument
 instead: a hookable `DATATYPE_CONST` never carries a degenerate component, and a
 non-hookable one never carries a real hook. So the §14.1 band exclusion is not yet met,
-and it stays an open audit obligation alongside the `LANG_NONE` assumption (§14.3).
+and it stays an open audit obligation alongside the circuit half of the `LANG_NONE`
+separation (§14.3).
 
 **Fail-closed ingest.** A literal whose datatype is on a hookable lane in this build
 (`xsd:integer`, `xsd:decimal`, `xsd:double`) but whose lexical form that lane's encoder
@@ -1106,3 +1120,221 @@ only the per-term leaf. Nothing in `encode.rs` / `commit.rs` calls it, so the de
 `string-canonical` pipeline and every checked-in vector are byte-unchanged. The one-time
 recommit of §3.5 (§10 Q4) has therefore not happened. It is needed only if `DualLeafV1`
 replaces `StringCanonicalV1` as the default, and that remains a maintainer call.
+
+**Superseded for new issuance.** Everything above is still what `DualLeafV1` ships, and V1
+commitments stay verifiable, but the method is no longer production-selectable: the
+dual-leaf method for new issuance is `DualLeafV2` (§14.5).
+
+### 14.5 `DualLeafV2` — the versioned scheme that discharges the §14.1 reserved-tag requirement on the host side
+
+`DualLeafV1` ships the in-band tag §14.4 records. Rather than change V1's constants —
+which would invalidate every V1 commitment and vector — the scheme is **versioned**:
+`crates/sparq-zk/src/dual_leaf_v2.rs` (same `dual-leaf` feature, off by default) carries a
+second dual-leaf method, scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`. V1 is
+unchanged in its constants, vectors and public API — only three private lexical parsers widen to `pub(crate)` so V2 shares them verbatim — and stays **recognised and verifiable**; V2 is the dual-leaf method
+`CommitmentMethod::is_production_selectable` admits for **new issuance**.
+
+**(a) The reserved tag is out of band.** `dual_leaf_v2::value_none()` is derived in BLAKE3's
+key-derivation mode under its own context string and re-derived with a `u32` counter part
+until it falls **outside** the reachable handle band `[0, 2^64) ∪ (p − 2^64, p)`. The
+exclusion is asserted by a host test over `is_in_handle_band`, which is exactly the
+checkable invariant §14.1 asks for, so §14.1's requirement is **met for V2 on the HOST
+side**. The IN-CIRCUIT half remains **open**: the `zk/dual-leaf-v2` Noir library mirrors
+the sentinel as a `global` with `nargo test`-checked band assertions, each literal pinned to
+its host derivation by `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs`, but no proving
+member imports it, so no member enforces the band exclusion — a member refuses the sentinel only
+because its `u64` range decomposition (and `filter_value_dl_bool`'s `{0, 1}` constraint)
+cannot represent it. `NO_VALUE`
+mirrors it unfolded, as in V1. The Noir-side compile-time check §14.1 also names is NOT
+part of this slice: no shipped member takes a degenerate component as an in-circuit
+operand, and it belongs with the `scan.nr` / `join.nr` leaf recompute (§11 bead 3).
+
+**(b) Lane constants are framed in a separate hash domain.** A V2 value-lane
+`DATATYPE_CONST` is `derive_key(LANE_CONTEXT, u32_be(len iri) ‖ iri ‖ u32_be(len params) ‖
+params)`, where `params` names the lane's sub-domain or scale (`""`, `"scale=<fd>"`,
+`"epochscale=3"`, `"bit"`). The length framing makes a lane constant injective in
+`(datatype, params)` jointly, for **arbitrary byte strings**, so the argument does not
+rest on the datatype being a syntactically valid IRI. A V2 string-lane leaf keeps folding the **plain** `blake3_field(datatype)`, a
+different BLAKE3 mode, so a lane constant differs from the degenerate fold of every byte
+string. Both statements are properties under BLAKE3's mode domain separation and, after
+the 248-bit field reduction, its collision/preimage resistance — not unconditional facts.
+V2's language constants move into their own key-derivation context the same way.
+
+What this buys, stated precisely: it separates the **constants**, so a value lane and the
+string lane are distinguishable field elements. It is NOT what keeps a string-lane leaf
+from opening on a value-lane member, because `datatype_const` is an **unpinned public
+input** of every such member — a prover may present the plain fold in the lane's place and
+the leaf binding is still satisfied. What refuses that leaf is **(a)** the out-of-band
+sentinel of (a) above: a degenerate `value_component` carries `VALUE_NONE`, which lies
+outside the reachable handle band, so the members' `u64` range decomposition and
+`filter_value_dl_bool`'s `{0, 1}` constraint reject the handle it would have to witness;
+and **(b)** the relying party, which must pin `datatype_const` to the lane constant it
+expects. That verifier-side pinning is the sq-j506 wiring and has not shipped, so today it
+is an obligation on the relying party, recorded here rather than claimed as enforced.
+
+**(c) The boolean lane gets its own bit-constrained member.** `filter_value_dl_bool`
+(`zk/compose/compose_core/src/filter_value_bool.nr`) has `filter_value_dl_int`'s public
+layout field-for-field and additionally constrains the witnessed `VALUE_HOOK` **and** the
+public `bound` to `{0, 1}` (`v * (v - 1) == 0`). The shared integer member range-decomposes
+its handle to the whole `u64` domain, which it legitimately needs, and adding constraints to
+it would move its gate count and its measured evidence — hence a separate member. V2's
+boolean lane targets it; V1's keeps sharing the integer member, unchanged. `xsd:boolean`,
+`xsd:dateTime` and `xsd:date` are **routed** by the V2 whole-graph builder (§14.6); V1's
+routing (§14.4) is unchanged, so an already-issued V1 graph still takes the string lane for
+them.
+
+**(d) The lane↔member pairing and the issuance boundary are host-side policy.** Because
+`datatype_const` is an unpinned public input, the V2 boolean lane constant would also be
+*accepted* by the shared integer member, whose relation range-decomposes the handle over the
+whole `u64` domain. `sparq-zk-compose`'s `dispatch::check_lane_member_pairing` therefore
+refuses that pairing structurally, and `verifier::prefilter_manifest_structure` runs the same
+check per sub-proof. What that check decides, exactly: the `datatype_const` must decode to a
+constant a shipped lane derives FOR that member; its text must be the canonical rendering of
+that element; at the `ProofInputs` level the same canonicality rule covers `operand_enc` too,
+and the variant and the declared `id` must name the same member, with the member derived from
+the variant by the one function the verifier's id derivation also uses
+(`value_lane::derive_value_lane_member`). Every value-lane `Prover.toml` renderer checks the
+canonical spelling of every field element it writes with the same decoder. The SCALE a
+relying party expects is still not pinned anywhere here.
+
+The prove side has one checked entry, `CircuitProver::prove_value_lane`. It takes a typed
+`value_lane::ValueLaneProof` (one variant per lane) rather than a circuit id and caller TOML:
+the member is derived from the lane, and the `Prover.toml` is rendered inside the entry after
+the `(method, member, use)` dispatch, the canonical check of every written field, the
+lane↔member allow-list and a method/constant version agreement (a `DualLeafV1` method needs a
+V1 constant, a `DualLeafV2` method a V2 one). The raw `CircuitProver::{prove, prove_in,
+gen_witness*}` entries stay ungated and are documented as such.
+
+V1 is no longer selectable for new issuance. The gated fresh-V1 entry points — the
+whole-graph V1 commit builders, the checked prove entry and the `(method, circuit)` resolver —
+fail closed unless the caller writes down `MethodUse::LegacyAlreadyIssued` for an
+already-issued commitment. The registry takes no `MethodUse`: its issuance constructors
+(`new_for_issuance`, `issued`, `issued_with_status`) refuse a non-selectable method outright,
+and an already-issued method is recorded only through the separately named
+`new_already_issued`. The V1 value-lane builders, renderers and constants are reachable only
+by name under `legacy_v1`, while the ordinary names produce V2 only. Two honest limits: the
+flag and the legacy names are CALLER ASSERTIONS (nothing reads a signature, entry or
+timestamp to confirm issuance history), and the version agreement is enforced by the checked
+prove entry, not by `check_lane_member_pairing_for_use` on its own. Nor does any of this
+retire a recorded V1 selection; it does make the selection tamper-evident: the registry's
+`scheme` is set only at construction, and the issuer signature covers the recorded method for
+every method (the signed message binds the scheme IRI), so an entry whose `zk:scheme`
+changed after signing fails verification. A registry signature over the earlier
+method-independent message does not verify.
+
+**PRECONDITION on (a)–(d), as it now stands.** All of (a)–(d) is HOST-side. Two of the four
+things the precondition named have since been built verifier-side, and two have not; the gates
+are still CLOSED. What is now ENFORCED by the verifier:
+
+- **The commitment method is AUTHENTICATED, not assumed.** `sparq-zk-compose`'s `method_auth`
+  recovers it from the issuer signature rather than reading it from the manifest: it builds the
+  METHOD-BOUND PRESENTATION message (`ZKSIG_M5`, or `ZKSIG_M4` for a holder-bound attestation) of
+  every `CommitmentMethod::recognised()` method from values the verifier itself established — the
+  commitment, the issuer-attested salt, the issuer-bound status reference, the attested holder
+  digest — plus the method-UNBOUND `ZKSIG_C3`/`ZKSIG_C4` message, and asks which one the presented
+  signature verifies over. Exactly one bound candidate verifying names the method; more than one is
+  refused rather than resolved; only the unbound one verifying is `AuthenticatedMethod::Unbound`,
+  which is the explicit ABSENCE of an attested method and never a default. A registry entry's own
+  `ZKSIG_M3` signature is not a candidate: being recorded in an issuer's registry is a separate
+  statement from being authorised for presentation, and the two tags keep them separate. The relying
+  party's `MethodPolicy` (on the `KeySet`, like every other external anchor) then decides: the
+  default accepts `Unbound`, so every already-issued credential verifies exactly as before;
+  `require_method_bound()` refuses it; an attested `DualLeafV1` needs the written-down
+  `admit_legacy_dual_leaf_v1()` opt-in, and the `value-only` dial is admitted by no policy.
+- **For a HIDDEN-ONLY commitment the declared message is held to that same candidate set.** A
+  commitment attested solely by a hidden-issuer proof has no clear signature, so the method is
+  selected by the hidden entry's public `message`. That value must EQUAL one of the verifier-built
+  candidates — one matching none of them is refused (`HiddenIssuerMessageMismatch`) — and the policy
+  applies to the method the bb hidden-issuer stage is then required to BIND, so a declared message
+  outside the candidate set cannot carry a presentation past the policy. Until that bb stage has run,
+  a hidden-only commitment's recorded method is the method SELECTED, not one yet shown to be signed.
+
+What is now COMPUTABLE but NOT ENFORCED (no verify path calls it):
+
+- **The member, the lane constant, the SCALE and the bound are PINNED — as a computation.**
+  `sparq-zk-compose`'s `value_pin` states, for an authenticated `DualLeafV2` method and a typed
+  query FILTER (`sparq_zk::verify::fragment_typed_filters`, which keeps the constant's datatype and
+  lexical form), exactly what a value-lane sub-proof's public inputs would have to be: the member
+  the datatype routes to, the canonically-spelled lane constant — for the decimal lane
+  `decimal_lane_const(fd)` at an admitted scale, with the query constant rescaled to it EXACTLY and
+  never rounded, which is the scale pin §14.5 previously recorded as unpinned — the op code after
+  the `const op ?var` flip, the bound under the lane's own V2 encoder, and a `true` verdict. Each
+  equality fails closed on its own. `scan_method` additionally requires every commitment a scan
+  draws from to have authenticated the SAME method, and `check_lane_routed` refuses a datatype the
+  whole-graph builder does not route to a value lane at all (since §14.6 all six value lanes are
+  routed, so every datatype the lane routing accepts passes that check).
+
+What is still NOT enforced, stated plainly:
+
+- **The value-lane verifier GATES remain CLOSED.** `verifier::prefilter_manifest_structure` refuses
+  every value-lane sub-proof unconditionally at stage 0, before it reads a sub-proof for anything
+  else; the stage-2 binding-edge operand match still admits only the `filter_int` family, and
+  `filter_edge_true` is untouched. A manifest every one of whose pins HOLDS is still refused, and a
+  test asserts that. Computing a pin is not enforcing one.
+- **No pin is tied to an obligation.** There is no edge from a value-lane sub-proof to a query
+  FILTER in this verifier, so nothing establishes that a sub-proof whose pin holds is the one
+  answering that FILTER. Creating that edge, adding the stage-2 arms, routing the typed filters by
+  the scan's authenticated method, and making `encode_pattern_slot` method-aware are the remaining
+  sq-j506 wiring.
+- Numeric promotion is unsupported (an `xsd:integer` constant does not route to the decimal member;
+  it fails closed), and the decimal scale is public via the lane constant — which was already true
+  of every decimal value-lane proof.
+
+Nothing in §14.5, and nothing in the method authentication or the pin functions, makes a V2
+value-lane proof verifier-enforced.
+
+**What V2 does NOT discharge.** V2 still folds `LANG_NONE = 1` in the no-language slot;
+its `LANG_CONTEXT` key derivation does not separate a language constant from `1`, which
+is a small field element, not a hash output. The host encoder asserts the separation
+instead (the same `ReservedLanguageConstant` refusal as V1, §14.1), but no circuit does,
+so §14.3's registration of the circuit half is unchanged. Nor does
+anything here become an audited property: both dual-leaf versions carry the same INV-VL
+downgrade (value↔lexical agreement rests on trusted-issuer honesty) and the whole ZK estate
+remains NOT externally audited under CR-G8 / sq-qhy4.
+
+### 14.6 `DualLeafV2` routes all six value lanes, and the host builds every lane's inputs
+
+Two host-side gaps closed. Neither opens a verifier gate: the stage-0
+`ValueLaneSubProofNotAccepted` refusal, the stage-2 operand match, `filter_edge_true` and
+`encode_pattern_slot` are untouched, and a manifest assembled entirely by the builders below
+is still refused — a test asserts exactly that per lane.
+
+**(a) The whole-graph builder routes `xsd:boolean`, `xsd:dateTime` and `xsd:date`.**
+`dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route all six value lanes, so a
+graph committed under `DualLeafV2` carries a real value hook, under that datatype's own lane
+constant, for every literal on them. Before this, a value-lane FILTER on one of those three
+lanes bound an `operand_enc` no committed leaf of the graph was — which is why `value_pin`
+refused them as vacuous. Two consequences, both deliberate:
+
+- It **narrows what a V2 graph may contain**: the three lanes inherit §6's fail-closed rule, so
+  any lexical outside their §13.2 value domain (non-canonical spellings such as
+  `"1"^^xsd:boolean` or a `24:00:00` instant, and also XSD-canonical forms the domain excludes:
+  an untimezoned or non-`Z` `xsd:dateTime`/`xsd:date`, or more than three fraction digits) now fails the WHOLE commitment instead of taking the
+  degenerate string lane. That is the bargain the integer, decimal and double lanes already made.
+- It **re-bases those leaves**: a V2 commitment over a graph containing a literal on one of the
+  three changes. Every leaf on the three ALREADY-routed lanes, every degenerate string-lane
+  leaf, every IRI and blank-node leaf, and the whole-graph commitment over a graph of only those
+  are byte-unchanged; a fixed vector captured before the routing change pins both halves.
+
+`DualLeafV1`'s routing is unchanged, so an already-issued V1 graph is unaffected.
+
+**(b) The host builds the integer, double and decimal lanes' inputs from typed operands.**
+`sparq_zk_compose::build::build_filter_value_dl_{int, f64, decimal}` complete the set beside the
+existing `_bool` / `_datetime` / `_date` entries, over ONE shared assembly rather than three
+copies. Each takes the committed literal and the FILTER constant as `oxrdf::Literal`s, encodes
+BOTH with the lane's own V2 encoder (so the disclosed bound is the same field the committer
+would have folded, by the same code), carries the COMMITTED literal's lane constant, computes
+the verdict with that member's host verdict mirror (`integer_verdict` /
+`double_bits_verdict` / the shared `signed_epoch_verdict`) rather than taking it from the
+caller, and self-checks the lane↔member pairing. The decimal lane rescales the bound to the
+committed literal's scale **exactly** — the scale the member works at is the one folded into
+that literal's lane constant — and refuses a bound that would need rounding or would overflow
+a `u64`, through the same two functions `value_pin` pins with, so the builder's scale and the
+pin's scale cannot disagree. `BuiltFilterValueDlNumeric::lane_proof` hands the result to the
+checked typed prove entry, so the `Prover.toml` is rendered from validated typed fields and
+never from caller text.
+
+The composition is tested directly: every one of the six lanes' builder output satisfies
+`value_pin::check_value_lane_pin` for the matching typed FILTER, and changing any single pinned
+field of it — member, lane constant, op, bound, verdict — is refused with that field's own
+`PinError`.

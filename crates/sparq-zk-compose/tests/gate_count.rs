@@ -23,7 +23,7 @@
 //!
 //! sq-7pifo: because it is non-`#[ignore]`d it is SKIPPED by the
 //! zk-toolchain lane's `cargo test -- --ignored` step, and the default ci.yml
-//! lanes have no `nargo`/`bb` so it self-skips there — i.e. it ran in NO CI lane
+//! lanes have no `nargo`/`bb` so it skipped there — i.e. it ran in NO CI lane
 //! and its baselines went silently stale (the sq-25mgo fix grew filter_f64 well
 //! past the checked-in regression tolerance untripped). The zk-toolchain lane now runs the
 //! non-ignored `gate_count` + `sparql_catalog` binaries in a dedicated step (WITH
@@ -85,16 +85,7 @@ struct BbFunction {
     circuit_size: u64,
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 /// The repo's top-level `zk/` directory, relative to this crate (workspace
 /// layout: `crates/sparq-zk-compose` → `../../zk`).
@@ -223,8 +214,7 @@ fn gate_count(dir: &Path, member: &str) -> u64 {
 /// assert the live gate count has not regressed beyond the tolerance.
 #[test]
 fn gate_count_regression() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping gate-count regression gate");
+    if !support::require_toolchain("gate_count_regression", &["nargo", "bb"]) {
         return;
     }
     let snapshot: Snapshot =

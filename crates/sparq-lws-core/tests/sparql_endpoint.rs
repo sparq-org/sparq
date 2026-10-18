@@ -32,7 +32,8 @@ struct Harness {
 }
 
 impl Harness {
-    async fn new(with_secret: bool, with_broken_acl: bool) -> Self {
+    /// The root, its owner ACL and one readable resource.
+    async fn seeded() -> MemoryStore {
         let store = MemoryStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
         store
             .write(ROOT, Bytes::new(), "text/turtle")
@@ -58,6 +59,11 @@ impl Harness {
             )
             .await
             .expect("seed readable resource");
+        store
+    }
+
+    async fn new(with_secret: bool, with_broken_acl: bool) -> Self {
+        let store = Self::seeded().await;
 
         if with_secret {
             store
@@ -101,6 +107,10 @@ impl Harness {
                 .expect("store deliberately malformed ACL fixture");
         }
 
+        Self::over(store)
+    }
+
+    fn over(store: MemoryStore) -> Self {
         let issuer_key = KeyKit::generate();
         let client_key = KeyKit::generate();
         let config = VerifierConfig::new(vec![ISSUER.to_owned()], BASE_URL);
@@ -233,6 +243,41 @@ async fn direct_no_leak_matches_ldp_get_authorization() {
     );
 }
 
+/// Records of the LWS surface (a linkset record, a service record) that a legacy edge lists are
+/// no graphs of the dataset, even when they hold RDF the requester could otherwise read.
+#[tokio::test]
+async fn lws_records_are_no_graphs() {
+    let store = Harness::seeded().await;
+    let service = "https://pod.example/.lws/";
+    store
+        .create_in_container(ROOT, service, Bytes::new(), "text/turtle")
+        .await
+        .expect("seed the service container");
+    for (parent, key) in [
+        (ROOT, "https://pod.example/a.meta"),
+        (ROOT, "https://pod.example/.META"),
+        (service, "https://pod.example/.lws/g1"),
+    ] {
+        store
+            .create_in_container(
+                parent,
+                key,
+                Bytes::from(format!("<urn:r> <urn:p> \"{key}\" .")),
+                "text/turtle",
+            )
+            .await
+            .expect("seed a record listed by an edge");
+    }
+    let harness = Harness::over(store);
+    let rows = json(
+        harness
+            .direct_query("SELECT ?g WHERE { GRAPH ?g { ?s <urn:p> ?o } } ORDER BY ?g")
+            .await,
+    )
+    .await;
+    assert_eq!(binding_values(&rows, "g"), ["https://pod.example/a"]);
+}
+
 // Dataset assembly must not erase the request's VERSION contract.
 #[tokio::test]
 async fn endpoint_preserves_version_ebv_and_rejects_unknown_labels() {
@@ -360,6 +405,24 @@ async fn protocol_get_form_post_construct_and_union_default_are_live() {
         unsupported_graph_format.status(),
         StatusCode::NOT_ACCEPTABLE
     );
+    // A zero weight in any spelling, or one that is not a valid qvalue, refuses the only format
+    // the endpoint produces (RFC 9110 section 12.4.2).
+    for refused in [
+        "application/n-triples;q=0.0",
+        "application/n-triples; Q=0.000",
+        "*/*;q=2",
+    ] {
+        let response = harness
+            .request(
+                "POST",
+                "/sparql",
+                Some("application/sparql-query"),
+                Some(refused),
+                Body::from("CONSTRUCT { <urn:a> <urn:p> ?o } WHERE { GRAPH <https://pod.example/a> { <urn:a> <urn:p> ?o } }"),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{refused}");
+    }
 
     let hidden_union_graph = json(
         harness

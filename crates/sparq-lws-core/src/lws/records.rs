@@ -77,9 +77,10 @@ pub(crate) async fn within_wait<T>(
 /// once it is confirmed stored, put it in force in memory with `register`. Memory follows the
 /// store, and the answer says only what is confirmed:
 ///
-/// - The container is taken (shared, unless the caller holds it exclusively) in the request,
-///   waiting at most [`LOCK_WAIT`] (then `503`), so a conditional create sees no member
-///   arrive between its check and its own registration. The write and the registration then run
+/// - The lock of every listing the record is shown in ([`Listed`]) is taken (shared, unless the
+///   caller's [`service_preconditions`] hold them) in the request, waiting at most [`LOCK_WAIT`]
+///   (then `503`), so a conditional create sees no member arrive between its check and its own
+///   registration. The write and the registration then run
 ///   in a task of their own, holding the request's share of its admission permit (`admission`):
 ///   a client that goes away cannot stop a stored record from being registered.
 /// - The record's own lock is held from before it is created until it is registered, so a
@@ -89,8 +90,9 @@ pub(crate) async fn within_wait<T>(
 ///   the listing ([`still_listed`]): stored after all, it is registered; not stored, and the
 ///   write settled, `register` (and the quota place it holds) is dropped and the create fails.
 ///   Otherwise, the create answers that whether it was stored is not known, and a task holding
-///   the record's lock and the quota place settles it once the store answers, registering it
-///   under the container's lock, shared, if it is stored. A write that failed
+///   the record's lock, the quota place and the lock of the record's own listing (when it has
+///   one, see [`Listed`]) settles it once the store answers, registering it under the
+///   container's lock, shared, if it is stored. A write that failed
 ///   [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that timed out, whose
 ///   worker may still be running) is fenced first ([`Store::fence`]), so a listing that does not
 ///   show it is final: its quota place is released only once it can no longer commit. A start
@@ -105,7 +107,8 @@ pub(crate) async fn create_record<S, F>(
     iri: &str,
     body: Bytes,
     admission: Option<crate::overload::AdmissionSlot>,
-    held: Option<resources::IriGuard>,
+    listed: Listed<'_>,
+    held: Option<ListingLocks>,
     author: Option<String>,
     register: F,
 ) -> Result<(), Response>
@@ -124,13 +127,18 @@ where
         }
     };
     use crate::error::ServerError;
-    let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    // A store with no room for the record is the same answer the record capacities give when
+    // they are full, and is told the same way: `507`, the storage is full, not `500`.
+    let failed = |e: ServerError| match e {
+        ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
+        e => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string())),
+    };
     let Some(place) = state.settlements.reserve() else {
         return Err(settlements_full());
     };
-    let shared = match held {
-        Some(_) => None,
-        None => Some(within_wait(state.locks.read(container)).await?),
+    let held = match held {
+        Some(held) => held,
+        None => ListingLocks::shared(state, container, listed).await?,
     };
     // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
     // taking it under the container's cannot deadlock.
@@ -139,10 +147,13 @@ where
             "the record's name is taken".into(),
         )));
     };
-    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let _container = (shared, held);
+        let ListingLocks {
+            own: own_listing,
+            container: container_lock,
+        } = held;
         // Under the lock, the name must not be stored either (a quarantined record holds its
         // name, and no lock).
         match state.store.exists(&iri).await {
@@ -174,14 +185,18 @@ where
             Ok(false) if unsettled.is_none() => Err(e),
             Ok(false) | Err(_) => {
                 // Settled by a task the state owns, holding the record's own lock (a
-                // revocation of it waits), the quota place (`register` holds it) and this
-                // change's place among those being settled; the container's lock is taken
-                // only to register it. An unsettled write is fenced first, so the listing it
-                // then reads is final.
+                // revocation of it waits), the quota place (`register` holds it), the lock of
+                // its own listing, shared (so the subscriber's conditional creates wait for it,
+                // and nobody else's, while its other changes go on), and this change's place
+                // among those being settled; the container's lock is taken again only to
+                // register it. An unsettled write is fenced first, so the listing it then reads
+                // is final.
+                drop(container_lock);
+                let own_listing = own_listing.map(ListingGuard::shared);
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {
-                    let _held = (own, place);
+                    let _held = (own, place, own_listing);
                     if let Some(fence) = unsettled {
                         until_done(|| store.fence(&fence)).await;
                     }
@@ -210,23 +225,125 @@ where
         .map_err(failed)
 }
 
+/// Where a record of a service container is listed, besides the container's own listing (which
+/// shows every record to whoever may list them all): a subscription is also listed to its
+/// subscriber, alone. A create or removal of the record holds the lock of each listing it
+/// changes ([`ListingLocks`]), shared, from before its store step until it is settled, so a
+/// conditional create evaluated on one of them, holding that listing's lock alone
+/// ([`service_preconditions`]), sees nothing change in it between its check and its own
+/// registration, and waits on nothing that changes only other listings. A create whose outcome
+/// the store leaves unknown keeps that listing only shared while it is settled: the
+/// subscriber's other conditional creates still wait for the outcome, but its unconditional
+/// creates and removals go on, so the registration that settles it may follow them.
+#[derive(Clone, Copy)]
+pub(crate) enum Listed<'a> {
+    /// Nowhere: an expired subscription, which every listing leaves out. Its removal changes no
+    /// listing and takes no listing lock.
+    Nowhere,
+    /// In the container's listing alone.
+    InContainer,
+    /// In the container's listing and in the listing whose lock is named here: a name outside
+    /// the storage, so no request's target is it ([`resources::IriLocks`] holds it, apart from
+    /// every lock of a resource).
+    AlsoIn(&'a str),
+}
+
+/// The listing locks a create or removal holds (see [`Listed`]): its own listing's, and the
+/// container's. A listing lock is taken before any IRI lock and never while one is held, so it
+/// takes no part in the IRI lock order.
+pub(crate) struct ListingLocks {
+    own: Option<ListingGuard>,
+    container: Option<ListingGuard>,
+}
+
+/// A listing lock held alone (by a conditional create) or shared (by a change to the listing).
+enum ListingGuard {
+    // Held for as long as the guard is; never read.
+    Alone(#[allow(dead_code)] resources::IriGuard),
+    Shared(#[allow(dead_code)] tokio::sync::OwnedRwLockReadGuard<()>),
+}
+
+impl ListingGuard {
+    /// The same lock, shared: a conditional create's, once its check is behind it, is only a
+    /// change to the listing.
+    fn shared(self) -> Self {
+        match self {
+            ListingGuard::Alone(guard) => ListingGuard::Shared(guard.downgrade()),
+            shared => shared,
+        }
+    }
+}
+
+impl ListingLocks {
+    /// Take the locks of the listings `listed` names, shared: its own first, then the
+    /// container's, each waited for at most [`LOCK_WAIT`] (then `503`).
+    async fn shared<S: Store + 'static>(
+        state: &LwsState<S>,
+        container: &str,
+        listed: Listed<'_>,
+    ) -> Result<Self, Response> {
+        let own = match listed {
+            Listed::AlsoIn(name) => Some(ListingGuard::Shared(
+                within_wait(state.locks.read(name)).await?,
+            )),
+            Listed::Nowhere | Listed::InContainer => None,
+        };
+        let container = match listed {
+            Listed::Nowhere => None,
+            Listed::InContainer | Listed::AlsoIn(_) => Some(ListingGuard::Shared(
+                within_wait(state.locks.read(container)).await?,
+            )),
+        };
+        Ok(Self { own, container })
+    }
+}
+
 /// The preconditions of a create in a service container (grants, requests, subscriptions),
-/// evaluated against `listing` with the container held exclusively: `Ok(None)` when the create is
-/// unconditional, `Ok(Some(guard))` when its preconditions hold (the guard is passed on to
-/// [`create_record`], so no member arrives or leaves until the new one is registered), and the
-/// response to send otherwise. A listing that cannot be produced (a representation the client does
-/// not accept, a page that does not exist) is that response: its absent `ETag` is not the absence
-/// of the container.
+/// evaluated against `listing` when they compare its state (an entity tag or a date) and against
+/// existence alone otherwise, with that listing held alone: `own`, a subscriber's own listing
+/// ([`Listed::AlsoIn`]), held alone with the container's shared (only the subscriber's own
+/// records' changes wait for it, or it for them), or, when `own` is `None`, the container's
+/// whole listing, held alone. `Ok(None)` when the create is unconditional, `Ok(Some(locks))`
+/// when its preconditions hold (the locks are passed on to [`create_record`], so no member
+/// arrives or leaves the listing until the new one is registered), and the response to send
+/// otherwise. A listing that cannot be produced (a representation the client does not accept, a
+/// page that does not exist) is that response: its absent `ETag` is not the absence of the
+/// container.
 pub(crate) async fn service_preconditions<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     container: &str,
+    own: Option<&str>,
     listing: impl FnOnce(&LwsRequest) -> axum::response::Response,
-) -> Result<Option<resources::IriGuard>, axum::response::Response> {
+) -> Result<Option<ListingLocks>, axum::response::Response> {
     if !resources::is_conditional(req) {
         return Ok(None);
     }
-    let guard = within_wait(state.locks.lock(container)).await?;
+    let locks = match own {
+        Some(name) => {
+            let own = ListingGuard::Alone(within_wait(state.locks.lock(name)).await?);
+            ListingLocks {
+                own: Some(own),
+                container: Some(ListingGuard::Shared(
+                    within_wait(state.locks.read(container)).await?,
+                )),
+            }
+        }
+        None => ListingLocks {
+            own: None,
+            container: Some(ListingGuard::Alone(
+                within_wait(state.locks.lock(container)).await?,
+            )),
+        },
+    };
+    // A service listing has no `Last-Modified`, so only a tag compares its state; without one,
+    // only whether the container exists is asked, and it does.
+    if !resources::compares_state(&req.headers, false) {
+        return match resources::unless_preconditions(req, Some(resources::EXISTS), None) {
+            Some(refused) => Err(refused),
+            None => Ok(Some(locks)),
+        };
+    }
     let current = listing(&resources::plain_get(req));
     if !current.status().is_success() {
         return Err(current);
@@ -234,7 +351,7 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
     let (etag, modified) = resources::validators_of(&current);
     match resources::unless_preconditions(req, etag.as_deref(), modified) {
         Some(refused) => Err(refused),
-        None => Ok(Some(guard)),
+        None => Ok(Some(locks)),
     }
 }
 
@@ -250,10 +367,11 @@ pub(crate) enum Removed {
 /// Remove the stored record `iri` from `container` in one store step (`what` names it in an
 /// answer: "grant", "subscription"). Memory follows the store:
 ///
-/// - The record's own lock is taken first (a create of it still settling holds it, see
-///   [`create_record`]), then the container's, shared, both in the request, each waiting at most
-///   [`LOCK_WAIT`] (then `503`): a removal that stalls in the store answers later requests `503`
-///   rather than queueing them.
+/// - The lock of the record's own listing is taken first, shared (when it has one, see
+///   [`Listed`]), then the record's own lock (a create of it still settling holds it, see
+///   [`create_record`]), then the container's, shared (unless the record is listed nowhere), all
+///   in the request, each waiting at most [`LOCK_WAIT`] (then `503`): a removal that stalls in
+///   the store answers later requests `503` rather than queueing them.
 /// - The steps then run in a task of their own, holding the locks and `admission` (the request's
 ///   share of its admission permit), so a client that goes away cannot cut them short:
 ///   `set_aside` takes the record out of force while its removal runs (`None` when it is not in
@@ -263,9 +381,9 @@ pub(crate) enum Removed {
 /// - A delete that failed [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that
 ///   timed out) can still remove the record after the listing showed it. Still listed (or the
 ///   listing unreadable), it is settled in the background: the record stays out of force, and
-///   its own lock held, until the delete is fenced ([`Store::fence`]) and the listing read
-///   again; `settle` is then told the outcome under the container's lock, shared, and a record
-///   gone is announced. The answer is `500`, saying this is not known yet.
+///   its own lock and its own listing's held, until the delete is fenced ([`Store::fence`]) and
+///   the listing read again; `settle` is then told the outcome under the container's lock,
+///   shared (unless it is listed nowhere), and a record gone is announced. The answer is `500`, saying this is not known yet.
 /// - As for a create, the removal holds a place among those being made or settled
 ///   ([`Settlements`]) until it is settled (`503` when there is none), and the task that settles
 ///   it is the state's.
@@ -278,6 +396,8 @@ pub(crate) async fn remove_record<S, H, A, Z>(
     container: &str,
     iri: &str,
     what: &'static str,
+    listed: Listed<'_>,
+    by: Remover,
     admission: Option<crate::overload::AdmissionSlot>,
     set_aside: A,
     settle: Z,
@@ -288,12 +408,26 @@ where
     A: FnOnce() -> Option<H> + Send + 'static,
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
-    let Some(place) = state.settlements.reserve() else {
+    let place = match by {
+        Remover::Request => state.settlements.reserve(),
+        Remover::Sweeper => state.settlements.reserve_maintenance(),
+    };
+    let Some(place) = place else {
         return Err(settlements_full());
     };
+    let own_listing = match listed {
+        Listed::AlsoIn(name) => Some(within_wait(state.locks.read(name)).await?),
+        Listed::Nowhere | Listed::InContainer => None,
+    };
     let own = within_wait(state.locks.lock(iri)).await?;
-    let listing = within_wait(state.locks.read(container)).await?;
-    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let listing = match listed {
+        Listed::Nowhere => None,
+        Listed::InContainer | Listed::AlsoIn(_) => {
+            Some(within_wait(state.locks.read(container)).await?)
+        }
+    };
+    let in_container = listing.is_some();
+    let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
         let Some(held) = set_aside() else {
@@ -307,23 +441,36 @@ where
             Err(crate::error::ServerError::Unsettled { fence, .. }) => {
                 match still_listed(&state.store, &iri, &container).await {
                     Ok(false) => Some(true),
+                    // The sweeper's removal is settled here, within its deadline, holding what
+                    // it holds: given up past it, it is dropped with everything it holds (its
+                    // place among them) and leaves the record in force, to be tried again.
+                    Ok(true) | Err(_) if by == Remover::Sweeper => {
+                        until_done(|| state.store.fence(&fence)).await;
+                        let listed =
+                            until_done(|| still_listed(&state.store, &iri, &container)).await;
+                        Some(!listed)
+                    }
                     Ok(true) | Err(_) => {
-                        // Settled by a task the state owns, holding the record's own lock and
-                        // this change's place among those being settled, with the record out
-                        // of force until then; the container's lock is taken again only to
-                        // settle it.
+                        // Settled by a task the state owns, holding the record's own lock, its
+                        // own listing's and this change's place among those being settled,
+                        // with the record out of force until then; the container's lock is
+                        // taken again only to settle it.
                         drop(listing);
                         let (weak, store, locks) =
                             (state.downgrade(), state.store.clone(), state.locks.clone());
                         let (iri, container) = (iri.clone(), container.clone());
                         state.settlements.spawn(async move {
-                            let _place = place;
+                            let _held = (place, own_listing);
                             until_done(|| store.fence(&fence)).await;
                             let listed =
                                 until_done(|| still_listed(&store, &iri, &container)).await;
-                            let listing =
-                                until_done(|| async { locks.read(&container).await.ok_or(()) })
-                                    .await;
+                            let listing = match in_container {
+                                true => Some(
+                                    until_done(|| async { locks.read(&container).await.ok_or(()) })
+                                        .await,
+                                ),
+                                false => None,
+                            };
                             let Some(state) = weak.upgrade() else {
                                 return;
                             };
@@ -346,7 +493,7 @@ where
                 .map(|listed| !listed),
         };
         let author = settle(&state, gone == Some(true), held);
-        drop((own, listing, place));
+        drop((own, listing, place, own_listing));
         match gone {
             Some(true) => {
                 announce_record(&state, "Delete", &iri, &container, author);
@@ -361,20 +508,42 @@ where
             )),
         }
     };
-    match tokio::spawn(task).await {
+    let done = match by {
+        Remover::Request => tokio::spawn(task).await.map_err(|e| e.to_string()),
+        Remover::Sweeper => Ok(task.await),
+    };
+    match done {
         Ok(Ok(removed)) => Ok(removed),
-        Ok(Err(why)) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
-        Err(e) => Err(problem(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Some(&e.to_string()),
-        )),
+        Ok(Err(why)) | Err(why) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
     }
+}
+
+/// Who removes a record ([`remove_record`]), and so how its steps run.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Remover {
+    /// A request: the steps run in a task of their own, so a client that goes away cannot cut
+    /// them short, in a place among those [`Settlements`] has for every change.
+    Request,
+    /// The expiry sweeper (`notify::spawn_expiry_sweeper`): the steps run in its own task, which
+    /// owns them and may give them up past a deadline (dropped, they leave the record as the
+    /// store has it, in force or gone, and memory as it was, to be tried again), in a place
+    /// reserved for it ([`Settlements::reserve_maintenance`]), so no load of requests refuses it.
+    /// A delete whose outcome is unknown is settled in those same steps, never in a task of the
+    /// state's, so the deadline bounds it, and the place, too. Only for a record whose
+    /// `set_aside` changes no memory (an expired subscription): dropped part way, nothing in
+    /// memory is left out of force, and a late delete removes only what was already gone from
+    /// every listing.
+    Sweeper,
 }
 
 /// How many record changes (creates and removals of grants, requests and subscriptions) may be
 /// in progress or waiting to be settled at once. Past it, a new one is refused with `503`: a
 /// store that keeps failing cannot pile up settlement tasks, and the records and locks they hold.
 pub(crate) const MAX_SETTLING: usize = 256;
+
+/// How many of the expiry sweeper's removals may be in progress or being settled at once, in
+/// places of their own (see [`Remover::Sweeper`]).
+pub(crate) const MAINTENANCE_PLACES: usize = 16;
 
 /// The record changes in progress or being settled, owned by the state: each change holds a
 /// place ([`Settlements::reserve`]) from its request until it is settled, and the tasks that
@@ -388,6 +557,8 @@ pub(crate) const MAX_SETTLING: usize = 256;
 /// way is left as the store has it, which the next start loads.
 pub(crate) struct Settlements {
     places: Arc<tokio::sync::Semaphore>,
+    /// The places reserved for the expiry sweeper's removals ([`Remover::Sweeper`]).
+    maintenance: Arc<tokio::sync::Semaphore>,
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
 }
 
@@ -402,8 +573,22 @@ impl Settlements {
     pub(crate) fn with_capacity(places: usize) -> Self {
         Self {
             places: Arc::new(tokio::sync::Semaphore::new(places)),
+            maintenance: Arc::new(tokio::sync::Semaphore::new(MAINTENANCE_PLACES)),
             tasks: Default::default(),
         }
+    }
+
+    /// A place reserved for one of the expiry sweeper's removals: `None` when they are all
+    /// taken. No request takes one, so however many changes requests have in progress, the
+    /// sweeper keeps [`MAINTENANCE_PLACES`].
+    pub(crate) fn reserve_maintenance(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.maintenance.clone().try_acquire_owned().ok()
+    }
+
+    /// How many places reserved for the sweeper are free (tests).
+    #[cfg(test)]
+    pub(crate) fn maintenance_free(&self) -> usize {
+        self.maintenance.available_permits()
     }
 
     /// A place for one record change, held until it is settled: `None` when there is none
@@ -451,6 +636,6 @@ pub(crate) fn announce_record<S: Store + 'static>(
         is_container: false,
         relation: Some((relation, container.to_string())),
     };
-    let state = state.clone();
+    let state = state.detached();
     tokio::spawn(async move { state.notify.announce_service(&state, event, author).await });
 }

@@ -57,7 +57,7 @@
 //! COUNTED structurally — never a fabricated wall-clock (design §5, the
 //! counted-not-timed constraint).
 
-use super::{HiddenBoundedPath, MAX_CHAIN_TUPLES};
+use super::{HiddenBoundedPath, MAX_CHAIN_TUPLES, MAX_HOP_COUNT};
 use crate::metrics::CommCounter;
 use crate::oblivious::{ShuffleCost, WaksmanNetwork};
 use crate::partial::MpcError;
@@ -228,6 +228,17 @@ pub fn plan_hidden_bounded_path(
             req.min
         )));
     }
+    // Hop counts are capped before the projection, mirroring the operator's
+    // `check_bounded_params`: `project_bounded` below loops once per length and once
+    // per hop within each length, so its own cost grows with `max`.
+    if max > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden bounded path {{{},{}}} exceeds the MAX_HOP_COUNT cap of {} — refusing (the \
+             union runs one fixed-length chain family per length up to the upper bound, so the \
+             hop count is bounded before the enumeration is sized)",
+            req.min, max, MAX_HOP_COUNT
+        )));
+    }
     // (a) Statically-large unroll → reject (overflow OR over-cap), mirroring the
     // operator's `check_bounded_params` guard, computed from PUBLIC parameters.
     let (projected_tuples, secure_equalities) =
@@ -276,14 +287,31 @@ impl BoundedPathPlan {
     ///    out. It is folded in as `secure_equalities` AND/degree-reduce
     ///    multiplications (one reduction per chained bit), so the mult-round counter
     ///    reflects the reduction-round cost.
-    /// 3. **The `B`-slot oblivious output.** The select multiplications (one per
-    ///    slot), the degree-`2t` opens (one per slot), and the shuffle over `B`
-    ///    slots — exactly what [`crate::oblivious_join::oblivious_set_output`] would
-    ///    pay, derived from the built [`WaksmanNetwork`] (no hard-coded numbers).
+    /// 3. **The `B`-slot oblivious output — a LOWER BOUND.** One select
+    ///    multiplication and one degree-`t` open per slot, plus the shuffle over
+    ///    `B` slots, derived from the built [`WaksmanNetwork`] (no hard-coded
+    ///    numbers). [`crate::oblivious_join::oblivious_set_output`] pays MORE than
+    ///    this: it selects, reduces and opens the slot tag AND each packed payload
+    ///    limb, so its true cost is `B · (1 + limb_capacity)` selects, the same
+    ///    number of degree reductions (each `2t + 1` re-sharings through the
+    ///    randomness seam) and the same number of degree-`t` opens, with the
+    ///    shuffle's switch count scaled by the packed-entry width. `limb_capacity`
+    ///    is the longest candidate payload encoding rounded up to whole limbs,
+    ///    which this planner does not have — it plans over the hop structure, not
+    ///    over the payload bytes — so the counter charges the tag column only and
+    ///    is a lower bound on the output stage. The stage's own
+    ///    [`crate::oblivious_join::ObliviousOutputCost`] reports the full count.
     ///
     /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
     /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
-    pub fn comm_counter(&self, parties: usize, bound: usize) -> CommCounter {
+    ///
+    /// `B` is capped by [`crate::oblivious_join::MAX_OUTPUT_BOUND`], refused before
+    /// any of the counting below: step (3) iterates `B` times and builds a real
+    /// [`WaksmanNetwork`] over `B` slots, so an unchecked `B` would do work (and
+    /// allocate a network) proportional to a number the caller chose. Counting the
+    /// cost of a run the stage itself would refuse is not a cost model either way.
+    pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
+        crate::oblivious_join::check_output_bound_cap(bound)?;
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).
@@ -295,15 +323,19 @@ impl BoundedPathPlan {
         for _ in 0..self.secure_equalities {
             c.record_mult();
         }
-        // (3) The B-slot oblivious output: one select mult + one open per slot, plus
-        // the shuffle over B slots (switch count + depth from the real network).
+        // (3) The B-slot oblivious output, as a LOWER BOUND: one select mult + one
+        // degree-`t` open per slot — the TAG column only — plus the shuffle over B
+        // slots (switch count + depth from the real network). The per-limb selects,
+        // their degree reductions and their opens are not charged, because
+        // `limb_capacity` is a property of the payload bytes this planner does not
+        // see. See the doc above.
         for _ in 0..bound {
             c.record_mult();
             c.record_open();
         }
-        let net = WaksmanNetwork::new(bound);
+        let net = WaksmanNetwork::try_new(bound)?;
         c.record_shuffle(ShuffleCost::model(bound, net.switch_count()));
-        c
+        Ok(c)
     }
 }
 

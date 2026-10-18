@@ -11,17 +11,27 @@ name: CI
 #   gh workflow run ci.yml --ref <branch>
 # The per-commit coverage tier (coverage floors + per-crate measurement) runs on dispatch;
 # the nightly schedule runs the heavier coverage-nightly tier instead.
-# The cargo-mutants sweep runs only on the Saturday tick (and on dispatch).
+# The cargo-mutants sweep runs only on the Saturday tick, or on a dispatch that sets
+# `mutation_sweep`; a plain dispatch skips it.
 #
 # Heavy benchmarks live in bench.yml / bench-ec2.yml, NOT here.
 on:
-  workflow_dispatch: # also forces the nightly coverage + mutation tier past the freshness gate
+  workflow_dispatch: # also forces the nightly coverage tier past the freshness gate
+    inputs:
+      mutation_sweep:
+        # A full sweep is the largest single runner claim in the repository, so a dispatch
+        # that only wants the full suite on a branch must not start one as a side effect.
+        description: Also run the cargo-mutants sweep (many runner-hours)
+        type: boolean
+        default: false
   # Nightly; also drives the heavy coverage tier (coverage-nightly runs the sparq-vectors 50k
   # recall/diskann accuracy tests under llvm-cov instrumentation).
   schedule:
     # Sunday to Friday: the nightly tier. Saturday: the same tier plus the mutation sweep
     # (mutants-nightly-advisory keys on this exact cron string). Keep the two disjoint: a
     # same-day second tick would cancel the first through the concurrency group below.
+    # The Saturday tick has a concurrency group of its own, so Sunday's tick does not
+    # cancel a sweep that is still running.
     - cron: "17 3 * * 0-5"
     - cron: "17 3 * * 6"
 
@@ -29,7 +39,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # One group per cron string (and one for dispatch): a newer nightly tick cancels the
+  # previous nightly, but neither the nightly nor a dispatch cancels the weekly sweep.
+  group: ci-${{ github.ref }}-${{ github.event.schedule || github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -93,6 +105,14 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+  # No job in this workflow installs the pinned Noir toolchain (nargo/bb) — the LIVE
+  # ZK suites belong to zk-toolchain.yml, which installs it. The live tests in
+  # crates/sparq-zk-compose/tests/ now FAIL rather than return early when a tool is
+  # missing (so a toolchain lane whose install silently broke can no longer report
+  # PASS for bodies that never ran), so this workflow DECLARES itself toolchain-free
+  # here and gets a printed, named skip per live test instead. Never set this in a
+  # lane that is supposed to have the toolchain — that would re-open the false green.
+  SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN: "1"
 
 jobs:
   # BUILD-ONCE for the sharded test suite (sq-vyxy folded in). The old
@@ -592,6 +612,12 @@ jobs:
         run: cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --features stateful -- -D warnings
       - name: clippy (wasm32 target, sparq-shacl-wasm, all features, deny warnings)
         run: cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings
+      # #7031: the OWL 2 DL reasoner bundle (sparq-reason-dl's owl2dl module behind the
+      # npm package's lazily-loaded `checkOwlDl`). One feature state, so one build + clippy.
+      - name: Build sparq-dl-wasm for the browser target
+        run: cargo build -p sparq-dl-wasm --target wasm32-unknown-unknown
+      - name: clippy (wasm32 target, sparq-dl-wasm, deny warnings)
+        run: cargo clippy -p sparq-dl-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings
       - name: Guard the wasm dependency graph (no native-only deps)
         # sq-9qz6: enforce the "flate2/zstd/rayon/sparq-parse must never
         # enter the wasm graph" invariant (was comment-only) — fails if a native-only
@@ -607,6 +633,7 @@ jobs:
         # pure-Rust + wasm-portable; the guard catches any native-only dep leaking in).
         # sq-lfmf: and sparq-shacl-wasm (regex is allowed there — pure-Rust +
         # wasm-portable, the sh:pattern constraint; the guard catches native-only leaks).
+        # #7031: and sparq-dl-wasm (the OWL 2 DL reasoner bundle).
         run: ./scripts/wasm-deps-guard.sh
       # Headless wasm tests of the REAL #[wasm_bindgen] exports
       # (crates/sparq-wasm/tests/web.rs). `cargo build --target wasm32` above never
@@ -702,6 +729,11 @@ jobs:
       - name: Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node, all features)
         working-directory: crates/sparq-shacl-wasm
         run: wasm-pack test --node --all-features
+      # #7031: drive the REAL #[wasm_bindgen] checkOwlDl export (crates/sparq-dl-wasm/tests/web.rs)
+      # in a genuine wasm runtime, including the JsError arm the native tests cannot reach.
+      - name: Headless wasm tests (sparq-dl-wasm, wasm-pack test --node)
+        working-directory: crates/sparq-dl-wasm
+        run: wasm-pack test --node
       # sq-aq5: sparq-introspect wasm-safety. The crate is pure sorted scans over
       # sparq-core's public read API (no threads, no syscalls, no wall clock) so it is a
       # tier-b browser surface for in-tab schema cards. It is NOT a #[wasm_bindgen] BUNDLE
@@ -3043,12 +3075,13 @@ jobs:
     needs: nightly-gate
     # WEEKLY, not nightly: a full sweep is ~140 runner-hours (the 2026-10-12 run held ~7
     # runners for ~20h), which starved PR checks of runners every day. It runs on the
-    # Saturday cron (and manual dispatch) only, inside one day's wall clock before Sunday's
-    # tick. A skipped weekday sweep is not completion evidence for nightly-gate, so the
-    # Saturday run is always admitted at a head no Saturday run has measured.
+    # Saturday cron, or on a dispatch that sets `mutation_sweep`. A skipped weekday sweep is
+    # not completion evidence for nightly-gate, so the Saturday run is always admitted at a
+    # head no Saturday run has measured.
     if: >-
       needs.nightly-gate.outputs.fresh == 'true'
-      && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * 6')
+      && ((github.event_name == 'workflow_dispatch' && inputs.mutation_sweep)
+      || github.event.schedule == '17 3 * * 6')
     runs-on: ubuntu-latest
     # sq-qcnn.11: ONE crate PER MATRIX SHARD so the FULL eligible crate set is
     # measured every nightly. The old single serial job walked all crates on ONE runner and
@@ -3069,10 +3102,12 @@ jobs:
     strategy:
       # fail-fast MUST be false: one crate's failure/timeout must NOT cancel the sibling
       # shards (that would re-create the "only the first few crates measured" bug). max-parallel
-      # bounds concurrent runners so the nightly does not inflate CI cost unboundedly — 51 jobs
-      # (24 whole-crate + 3 sparq-reason shards + 24 sparq-engine shards) once a day, at most 8
-      # runners at a time; wall-clock is non-critical for a nightly and the staggered waves warm
-      # the shared rust-cache for later waves.
+      # bounds concurrent runners so the sweep does not crowd out PR checks — 51 jobs
+      # (24 whole-crate + 3 sparq-reason shards + 24 sparq-engine shards) once a week, at most 3
+      # runners at a time. At 8 the 2026-10-17 sweep held 8 of the 20 standard runners all day
+      # and PR-head ci-fast queued for over an hour. At 3 the sweep spans the weekend, which is
+      # why the Saturday tick has its own concurrency group; wall-clock is non-critical for a
+      # weekly sweep and the staggered waves warm the shared rust-cache for later waves.
       # sq-has2g COST NOTE, stated plainly: sub-sharding sparq-engine 1->24 is a
       # real increase in nightly runner cost — a whole-crate engine sweep is many runner-hours of
       # SERIAL work, and that work has to happen SOMEWHERE to measure the crate at all. Today's
@@ -3086,7 +3121,7 @@ jobs:
       # If that cost is judged too high, the honest response is to make the sweep cheaper or to
       # run it less often than nightly — not to keep a job that cannot finish.
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 3
       matrix:
         crate:
           - sparq-canon
