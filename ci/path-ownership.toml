@@ -213,6 +213,29 @@ crates = ["sparq-zk-compose"]
 pattern = "zk/compose/compose_core/src/result_public.nr"
 crates = ["sparq-zk-compose"]
 
+# sq-j506: the V2 recompute pin (crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs)
+# reads the in-circuit V2 leaf recompute and the term type codes out of these two
+# Noir sources with include_str!, so a change to either must re-run sparq-zk.
+[[map]]
+pattern = "zk/compose/compose_core/src/dual_leaf_v2_leaf.nr"
+crates = ["sparq-zk"]
+
+[[map]]
+pattern = "zk/compose/compose_core/src/hashes.nr"
+crates = ["sparq-zk"]
+
+# sq-j506: the V2-member unreachability guard
+# (crates/sparq-zk-compose/tests/v2_dual_leaf_members_unreachable.rs) compiles in
+# each V2 member's own main.nr with include_str!, so a change to either must
+# re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/scan_v2dl_k1_n16_r4/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/join_eq_v2dl_na16_nb16/src/main.nr"
+crates = ["sparq-zk-compose"]
+
 # sq-j506: result_scheme_pin.rs also reads the METHOD-BOUND relation with
 # include_str! (the scheme constants and the drift derivation), so a change to it
 # must re-run sparq-zk-compose.

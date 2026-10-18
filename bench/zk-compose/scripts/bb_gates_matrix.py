@@ -175,6 +175,14 @@ REASON_ILLEGAL_PAIR = "IllegalPair"
 # which would silently admit it for dual-leaf.
 RESULT_PREFIXES = ("result_v1_", "result_v2_", "result_v3_", "result_v4_", "result_v5_")
 
+# sq-j506: the V2 DUAL-LEAF component-witnessed members. Their relation recomputes
+# each leaf from witnessed V2 components, so only a V2 dual-leaf commitment has the
+# leaf shape they prove over — the string-lane rule below would wrongly admit them
+# for string-canonical and for V1 dual-leaf. No `CircuitId` names these members yet,
+# so this row records the leaf shape their relation proves over and not a resolver
+# rule that exists today.
+V2_DUAL_LEAF_PREFIXES = ("scan_v2dl_", "join_eq_v2dl_")
+
 
 def lane_of(member: str) -> str:
     return "value" if member.startswith(VALUE_LANE_PREFIX) else "string"
@@ -191,6 +199,8 @@ def legality(method_key: str, lane: str, member: str = "") -> dict:
             f"successful-result member {member!r} has no legality rule — add its "
             "version to RESULT_PREFIXES only once its commitment contract is reviewed"
         )
+    elif member.startswith(V2_DUAL_LEAF_PREFIXES):
+        legal = method_key == "dual-leaf-v2"
     elif lane == "value":
         # value-lane: legal only where a value handle was committed. BOTH dual-leaf
         # versions commit one, so both admit it — legality is about the leaf SHAPE,

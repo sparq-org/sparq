@@ -2287,6 +2287,26 @@ fn filter_inputs(value: u64, op: FilterOp, bound: u64, expected: bool) -> ProofI
         .0
 }
 
+/// sq-j506: honestly attest every scan commitment of a FILTER-forge fixture and
+/// return the key set that trusts the issuer.
+///
+/// Stage 2d — the issuer-attestation and method-authentication gate — now runs
+/// AHEAD of the stage-1 query-binding gates, because the authenticated method is
+/// what selects the encoder those gates compare pattern constants under. An
+/// unattested fixture is therefore refused at stage 2d and never reaches the gate
+/// under test, so these fixtures attest their scan commitment honestly: the forge
+/// under test is the only thing wrong with each of them. Every `scan_inputs_for`
+/// scan is committed under the same fixture salt.
+fn attested_forge_key_set(m: &mut ProofManifest) -> KeySet {
+    let sk = test_issuer_sk(1);
+    // audit #12: a scan-covering attestation is status-bound, so the fixture
+    // carries the same non-revoked fresh status the happy-path fixture carries.
+    m.revocation = Some(fixture_revocation());
+    m.status_snapshots = vec![fixture_snapshot(false)];
+    attest_all(m, &sk, salt_from_bytes(&[9u8; 32]));
+    trusted_k(&sk)
+}
+
 /// Audit #5 (comparison-substitution): a `filter_int` over (op=Ge, bound=17,
 /// expected=true) — a genuinely-true `17 >= 17` instance — must NOT satisfy a
 /// query `FILTER(?o >= 18)`. The bound (17) differs from the query constant
@@ -2305,7 +2325,7 @@ fn filter_reject_comparison_substitution_17_vs_18() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = scan_operand;
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2331,7 +2351,8 @@ fn filter_reject_comparison_substitution_17_vs_18() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
@@ -2343,7 +2364,7 @@ fn filter_reject_comparison_substitution_17_vs_18() {
 #[test]
 fn filter_reject_filter_add_on_scan_only() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2366,7 +2387,8 @@ fn filter_reject_filter_add_on_scan_only() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
@@ -2378,7 +2400,7 @@ fn filter_reject_filter_add_on_scan_only() {
 #[test]
 fn filter_reject_constant_swap_age_as_salary() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/salary> ?o }".into(),
@@ -2401,7 +2423,8 @@ fn filter_reject_constant_swap_age_as_salary() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundPattern { pattern: 0 }) => {}
         other => panic!("expected UnboundPattern(0), got {other:?}"),
     }
@@ -2428,7 +2451,7 @@ fn filter_reject_operand_slot_substitution() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = salary_operand;
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?p WHERE { ?p <http://ex/hasSalary> ?sal . ?p <http://ex/hasAge> ?age FILTER(?age >= \"65\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2456,7 +2479,8 @@ fn filter_reject_operand_slot_substitution() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "age" => {}
         other => panic!("expected UnboundFilter(age), got {other:?}"),
     }
@@ -2479,7 +2503,7 @@ fn filter_reject_false_verdict_row() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = scan_operand;
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2505,7 +2529,8 @@ fn filter_reject_false_verdict_row() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
@@ -2517,7 +2542,7 @@ fn filter_reject_false_verdict_row() {
 #[test]
 fn filter_reject_unbindable_filter_fragment() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\") }".into(),
@@ -2540,7 +2565,8 @@ fn filter_reject_unbindable_filter_fragment() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::Sparqzk(_)) => {}
         other => panic!("expected Sparqzk(UnsupportedFragment), got {other:?}"),
     }
@@ -2631,7 +2657,7 @@ fn filter_reject_unproven_failing_row() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = rows[0][2].clone();
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2658,7 +2684,8 @@ fn filter_reject_unproven_failing_row() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o) for the unproven failing row, got {other:?}"),
     }
@@ -3306,7 +3333,22 @@ fn pattern_scans_reject_a_declaration_contradicting_the_bound_constants() {
 
     // …and a scan whose bound predicate constant answers a DIFFERENT pattern:
     // an `<ex/role>` scan cannot be declared as answering an `<ex/age>` pattern.
-    let role_scan = scan_inputs_for(&credential_graph(), "http://ex/role");
+    // sq-j506: stage 2d — and with it the audit-#9 salt-uniqueness check — now
+    // runs ahead of the declaration gate, so this extra scan is committed under
+    // its OWN salt. Reusing another graph's salt would be refused as a reused
+    // salt before the declaration is read, which is not what this case is about.
+    let role_salt = salt_from_bytes(&[13u8; 32]);
+    let role_commit = commit_triples(&credential_graph(), role_salt).unwrap();
+    let role_scan = build_scan(
+        &[role_commit],
+        &Pattern {
+            s: Slot::Var,
+            p: Slot::Const(Term::NamedNode(iri("http://ex/role"))),
+            o: Slot::Var,
+        },
+    )
+    .expect("scan builds")
+    .inputs;
     let mut m = same_layout_manifest();
     m.sub_proofs.push(SubProof { inputs: role_scan, proof_hex: String::new() });
     let sk = test_issuer_sk(1);
@@ -3317,7 +3359,7 @@ fn pattern_scans_reject_a_declaration_contradicting_the_bound_constants() {
             .any(|a| a.commitment == FieldHex::from_field(&c))
         {
             m.commitment_attestations
-                .push(attest_with_salt(c, salt_from_bytes(&[9u8; 32]), &sk));
+                .push(attest_with_salt(c, role_salt, &sk));
         }
     }
     m.pattern_scans = vec![vec![3], vec![1]];

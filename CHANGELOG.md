@@ -154,6 +154,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
+  hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
+  members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
+  term encodings from witnessed V2 leaf components through
+  `compose_core::dual_leaf_v2_leaf::recompute_term` — applying the reserved-sentinel band check
+  and the reserved language-tag check at the witnessed component sites — and then run the
+  UNCHANGED `scan_check` / `join_eq_check` bodies. The shipped `scan_*` / `join_eq_*` members and
+  the relation sources are byte-unchanged, so existing verification keys and all issued material
+  stay valid; each new member's public-input vector is its shipped counterpart's, and the two are
+  told apart by their verification keys. `verifier::encode_pattern_slot` now folds a query pattern
+  constant with the encoder the scan's AUTHENTICATED commitment method selects, with no fallback,
+  and `bind_scan_pattern_methods` adds two named refusals — `CheckError::ScanPatternMethodsMixed`
+  (a `K > 1` scan whose commitments select different encoders: one pattern constant cannot match
+  two encodings) and `CheckError::ScanPatternMethodNotEncodable`. `verifier::bind_fragment_scans`
+  takes the authenticated-method map as a second argument. **Gate order:** the attestation gate
+  that authenticates the methods runs AHEAD of the stage-1 query-binding gates, and
+  `bind_scan_pattern_methods` immediately after it, so every comparison site reads an
+  authenticated map rather than comparing string-canonically whatever the attested method was;
+  in the `extended-fragment` regime `verify_fragment_manifest` runs it before
+  `bind_fragment_scans`, which is that regime's only scan-slot binding. The gate SET is
+  unchanged and every gate still runs, so nothing that was refused becomes acceptable; what
+  changes is which refusal is reported first for a manifest that fails both an attestation check
+  and a structural check, and that the pattern gates now refuse strictly more. The value-lane and
+  V2-scan verifier gates stay CLOSED: nothing becomes acceptable, and every change here only
+  adds refusals.
+  **BEHAVIOUR CHANGE in a DEFAULT build:** a scan whose authenticated method is `DualLeafV1` or
+  `DualLeafV2` is now refused when the `dual-leaf` feature is off, because the host dual-leaf
+  encoders are behind that feature and the verifier must not re-check such a scan's pattern
+  constants string-canonically. Such a manifest used to be accepted. Research-grade, not
+  externally audited (sq-qhy4).
+
 - **sparq-zk-compose (BREAKING for `successful-results` users):** successful-result issuance and
   verification are METHOD-BOUND by default. A method-UNBOUND (`ZKSIG_C3`) credential, which attests
   no commitment method at all, is refused with a named error, and the new

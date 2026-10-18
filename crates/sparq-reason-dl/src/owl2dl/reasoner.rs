@@ -40,7 +40,7 @@
 //! With nominals every class test includes the ABox.
 
 pub use super::clausify::MAX_CARDINALITY;
-use super::clausify::{clausify, AtomKind, Clauses, Refusal};
+use super::clausify::{clausify, Atom, AtomKind, Clauses, Refusal};
 use super::datatypes::{self, ValueError};
 use super::dl_profile::{
     check_dl, for_each_class_in_axiom, for_each_range_in_axiom, DlProfileReport, Violation,
@@ -147,6 +147,9 @@ pub struct Reasoner {
     sources: Vec<Vec<usize>>,
     /// Whether TBox plus ABox has a model, once computed.
     model: OnceCell<Result<bool, UnknownReason>>,
+    /// The labels of the elements of that model, when it has one: each is the set of atoms
+    /// some element is in, and it is in no other.
+    witnesses: OnceCell<Vec<Vec<Atom>>>,
 }
 
 impl Reasoner {
@@ -181,6 +184,7 @@ impl Reasoner {
                 class_iris: FxHashMap::default(),
                 sources,
                 model: OnceCell::from(Ok(false)),
+                witnesses: OnceCell::new(),
             });
         }
         let clauses = clausify(dict, onto, budget.max_steps).map_err(|u| {
@@ -208,6 +212,7 @@ impl Reasoner {
             class_iris,
             sources,
             model: OnceCell::new(),
+            witnesses: OnceCell::new(),
         })
     }
 
@@ -257,7 +262,11 @@ impl Reasoner {
             t.add_root();
         }
         self.load_abox(&mut t);
-        t.run()
+        let r = t.run();
+        if matches!(r, Ok(true)) {
+            let _ = self.witnesses.set(t.element_labels());
+        }
+        r
     }
 
     /// Adds the ABox to `t`: individual `i` becomes root node `i`.
@@ -410,23 +419,53 @@ impl Reasoner {
         // One budget for the whole classification, not one per class.
         let left = Cell::new(self.budget.max_steps);
         let pool = Some(&left);
+        let witnesses = self.witnesses.get().map_or(&[][..], Vec::as_slice);
         for &(id, a) in classes {
             if known.unsatisfiable.contains(&id) {
                 out.unsatisfiable.push(id);
                 continue;
             }
-            let mut t = self.tableau(pool);
-            let root = t.add_root();
-            t.assert_concept(root, a);
-            let r = t.run();
-            settle(pool, &t);
-            if !r.map_err(|s| self.reason(s))? {
-                out.unsatisfiable.push(id);
-                continue;
-            }
-            // The model's root is a witness: a class absent from its label is not a
-            // subsumer; one derived without any choice is.
-            for (b, deterministic) in t.root_label(root) {
+            // An element of the ontology's model in `a` shows `a` satisfiable, and each class
+            // it is not in no subsumer of `a`: only the classes every such element is in
+            // remain candidates.
+            let mut found = witnesses.iter().filter(|l| l.binary_search(&a).is_ok());
+            let candidates: Option<Vec<Atom>> = found.next().map(|first| {
+                let mut c: Vec<Atom> = first
+                    .iter()
+                    .copied()
+                    .filter(|&b| b != a && is_class(b))
+                    .collect();
+                for l in found {
+                    c.retain(|b| l.binary_search(b).is_ok());
+                }
+                c
+            });
+            let label: Vec<(Atom, bool)> = match &candidates {
+                // A test of `a` would cost as much as testing the one candidate left.
+                Some(c) if c.len() <= 1 => c.iter().map(|&b| (b, false)).collect(),
+                _ => {
+                    let mut t = self.tableau(pool);
+                    let root = t.add_root();
+                    t.assert_concept(root, a);
+                    let r = t.run();
+                    settle(pool, &t);
+                    if !r.map_err(|s| self.reason(s))? {
+                        out.unsatisfiable.push(id);
+                        continue;
+                    }
+                    // The model's root is a witness too: a class absent from its label is
+                    // not a subsumer; one derived without any choice is.
+                    t.root_label(root)
+                        .into_iter()
+                        .filter(|(b, _)| {
+                            candidates
+                                .as_ref()
+                                .is_none_or(|c| c.binary_search(b).is_ok())
+                        })
+                        .collect()
+                }
+            };
+            for (b, deterministic) in label {
                 if b == a || !is_class(b) {
                     continue;
                 }

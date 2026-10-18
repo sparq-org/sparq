@@ -137,6 +137,13 @@ fn is_value_lane(member: &str) -> bool {
 ///
 /// zkp-15.1 adds the version-4 public-pattern members, sq-j506 the method-bound
 /// version-5 ones.
+/// Kept in lockstep with `V2_DUAL_LEAF_PREFIXES` in `bb_gates_matrix.py`.
+fn is_v2_dual_leaf(member: &str) -> bool {
+    ["scan_v2dl_", "join_eq_v2dl_"]
+        .iter()
+        .any(|prefix| member.starts_with(prefix))
+}
+
 fn is_successful_result(member: &str) -> bool {
     [
         "result_v1_",
@@ -153,7 +160,11 @@ fn is_successful_result(member: &str) -> bool {
 /// members are legal only for value-handle methods; string-lane members are
 /// illegal for `value-only`.
 fn expect_legal(method_key: &str, member: &str) -> bool {
-    if is_successful_result(member) {
+    if is_v2_dual_leaf(member) {
+        // sq-j506: the relation recomputes each leaf from witnessed V2 components,
+        // so only a V2 dual-leaf commitment has the leaf shape it proves over.
+        method_key == "dual-leaf-v2"
+    } else if is_successful_result(member) {
         // The additive result relation authenticates whole string-canonical
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
