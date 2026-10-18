@@ -65,6 +65,10 @@ pub enum AuthAllowance {
     /// `max_input_term_bytes`: a term of the reasoning INPUT, as opposed to
     /// [`AuthAllowance::TermBytes`], which is one the rules derive.
     InputTermBytes,
+    /// `max_resource_iri_bytes` or `max_resource_path_depth`: the length or the container
+    /// depth of one resource IRI the input's resource enumeration would walk
+    /// ([`crate::AuthBudget`]).
+    ResourceIri,
     /// `max_decision_join_rows` or `max_decision_facts`: the work of ALL the closures of
     /// one authorization materialization added up, which the per-closure [`ClosureLimits`]
     /// cannot bound.
@@ -85,6 +89,7 @@ impl AuthAllowance {
             AuthAllowance::InputBytes => "max_document_bytes/max_input_bytes",
             AuthAllowance::InputFacts => "max_input_facts",
             AuthAllowance::InputTermBytes => "max_input_term_bytes",
+            AuthAllowance::ResourceIri => "max_resource_iri_bytes/max_resource_path_depth",
             AuthAllowance::DecisionWork => "max_decision_join_rows/max_decision_facts",
             AuthAllowance::Unspecified => "an unnamed limit",
         }
@@ -100,6 +105,7 @@ impl AuthAllowance {
             AuthAllowance::InputBytes => "input-bytes",
             AuthAllowance::InputFacts => "input-facts",
             AuthAllowance::InputTermBytes => "input-term-bytes",
+            AuthAllowance::ResourceIri => "resource-iri",
             AuthAllowance::DecisionWork => "decision-work",
             AuthAllowance::Unspecified => "unspecified",
         }
@@ -116,6 +122,7 @@ impl AuthAllowance {
             AuthAllowance::InputBytes,
             AuthAllowance::InputFacts,
             AuthAllowance::InputTermBytes,
+            AuthAllowance::ResourceIri,
             AuthAllowance::DecisionWork,
         ] {
             if kind.tag() == tag {
@@ -136,7 +143,8 @@ impl AuthAllowance {
 /// allowance has to be raised ([`crate::PodStore::set_auth_limits`]) before they will be.
 ///
 /// Read it with [`auth_allowance_refusal`] rather than by matching this text: every refusal
-/// also carries a machine-readable kind tag, which that function finds ANYWHERE in the
+/// also carries a machine-readable kind tag directly after this wording, and that function
+/// finds the pair ANYWHERE in the
 /// message. This crate's materialization errors are `String`s with no error chain to walk,
 /// and the write paths wrap a failed rebuild's error in their own sentence, so a refusal
 /// must be recognizable from the middle of a longer message — not only as a prefix.
@@ -151,7 +159,10 @@ const AUTH_ALLOWANCE_TAG: &str = "[allowance=";
 /// `err` is an error from any `materialize_*` entry point, free function or
 /// [`crate::PodStore`] method, INCLUDING one a write path wrapped in its own sentence (an
 /// update whose rebuild was refused, a rollback that could not rebuild): the kind tag is
-/// read wherever it appears, so wrapping does not hide it.
+/// read wherever it appears, so wrapping does not hide it — but only where the refusal
+/// WORDING immediately precedes it, which is the shape every refusal is written in, so a
+/// message that merely quotes the tag literal (inside a pod's own IRI, say) is not read as
+/// a refusal.
 ///
 /// # Examples
 ///
@@ -159,10 +170,22 @@ const AUTH_ALLOWANCE_TAG: &str = "[allowance=";
 /// assert_eq!(sparq_solid::auth_allowance_refusal("some other error"), None);
 /// ```
 pub fn auth_allowance_refusal(err: &str) -> Option<AuthAllowance> {
-    let at = err.find(AUTH_ALLOWANCE_TAG)? + AUTH_ALLOWANCE_TAG.len();
-    let rest = &err[at..];
-    let end = rest.find(']')?;
-    Some(AuthAllowance::from_tag(&rest[..end]))
+    // Anchored to the shape `allowance_refusal` writes — the refusal wording, one space,
+    // then the tag — rather than to the tag alone. A wrapping sentence keeps that pair
+    // adjacent wherever it puts it, so a wrapped refusal is still found.
+    for (at, _) in err.match_indices(AUTH_ALLOWANCE_TAG) {
+        if !err[..at]
+            .strip_suffix(' ')
+            .is_some_and(|before| before.ends_with(AUTH_ALLOWANCE_REFUSAL))
+        {
+            continue;
+        }
+        let rest = &err[at + AUTH_ALLOWANCE_TAG.len()..];
+        if let Some(end) = rest.find(']') {
+            return Some(AuthAllowance::from_tag(&rest[..end]));
+        }
+    }
+    None
 }
 
 /// Whether `err` is a refusal by the reasoning allowance rather than any other

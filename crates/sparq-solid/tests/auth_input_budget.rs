@@ -495,3 +495,188 @@ fn a_policy_past_the_constraint_budget_is_fail_closed_in_the_bridge() {
         "a refusal installed an auth view"
     );
 }
+
+// ── The resource ENUMERATION (`max_resource_iri_bytes` / `max_resource_path_depth`) ──
+//
+// A resource of the view brings every container on its chain, each an owned prefix string,
+// so one name of length L under D containers costs up to L x D bytes — a cost set by the
+// pod's NAMES, paid while the input is assembled, and bounded by neither the documents'
+// bytes (the names are not document content) nor the fact count (the strings exist before
+// the facts they become). The two caps bound one name's L and D, and the aggregate
+// `max_input_bytes` bounds the sum over all of them.
+
+/// A WAC pod whose only resource graph is named `resource`, with an ACL granting alice
+/// Read + Control on it: enough that the pod materializes and grants when the enumeration
+/// admits the name.
+fn pod_named(resource: &str) -> String {
+    let acl = format!("{}.acl", resource);
+    format!(
+        "<{resource}#it> <https://ex.dev/ns#k> \"v\" <{resource}> .\n\
+         <{acl}#a> <{RDF_TYPE}> <{ACL}Authorization> <{acl}> .\n\
+         <{acl}#a> <{ACL}accessTo> <{resource}> <{acl}> .\n\
+         <{acl}#a> <{ACL}agent> <{ALICE}> <{acl}> .\n\
+         <{acl}#a> <{ACL}mode> <{ACL}Read> <{acl}> .\n\
+         <{acl}#a> <{ACL}mode> <{ACL}Control> <{acl}> .\n"
+    )
+}
+
+/// A budget whose resource caps admit any name, so a pod refused under the defaults can be
+/// shown to be a pod the rest of the budget is fine with.
+fn resource_caps_open() -> AuthBudget {
+    let mut budget = default_auth_budget();
+    budget.max_resource_iri_bytes = usize::MAX;
+    budget.max_resource_path_depth = usize::MAX;
+    budget
+}
+
+/// `nquads` materializes and grants under `budget`.
+fn assert_materializes_under(nquads: &str, budget: AuthBudget, what: &str) {
+    let mut store = fresh(nquads, budget, None);
+    store.materialize_wac().unwrap_or_else(|e| panic!("{}: {}", what, e));
+    assert!(grants_anything(&store), "{}: granted nothing", what);
+}
+
+/// ONE long resource IRI is refused — by its LENGTH, before the container chain whose cost
+/// grows with it is built. The same pod materializes with the caps open, so the refusal is
+/// the cap's and not the pod's.
+#[test]
+fn one_long_resource_iri_is_refused() {
+    let nquads = pod_named(&format!("https://pod.ex/{}", "a".repeat(4_000)));
+    assert_materializes_under(&nquads, resource_caps_open(), "with the resource caps open");
+    let mut store = fresh(&nquads, default_auth_budget(), None);
+    assert_refused(
+        &mut store,
+        AuthAllowance::ResourceIri,
+        "a 4,000-byte resource IRI is past max_resource_iri_bytes",
+    );
+}
+
+/// ONE DEEP resource IRI is refused on its container count, a dimension its length does not
+/// catch: the name here is well inside `max_resource_iri_bytes` and still makes a chain
+/// longer than `max_resource_path_depth` allows.
+#[test]
+fn one_deep_resource_iri_is_refused() {
+    let depth = default_auth_budget().max_resource_path_depth + 8;
+    let resource = format!("https://pod.ex/{}doc", "a/".repeat(depth));
+    assert!(
+        resource.len() < default_auth_budget().max_resource_iri_bytes,
+        "the name is inside the LENGTH cap, so only the depth cap can refuse it"
+    );
+    let nquads = pod_named(&resource);
+    assert_materializes_under(&nquads, resource_caps_open(), "with the resource caps open");
+    let mut store = fresh(&nquads, default_auth_budget(), None);
+    assert_refused(
+        &mut store,
+        AuthAllowance::ResourceIri,
+        "a chain of more containers than max_resource_path_depth",
+    );
+}
+
+/// Each name inside both caps, the ENUMERATION of them all past the aggregate: the strings
+/// the resources and their containers own are charged against `max_input_bytes` as they are
+/// made, so a pod cannot spend the aggregate budget many short names at a time either.
+#[test]
+fn the_resource_enumeration_is_charged_against_the_aggregate() {
+    let mut nquads = String::new();
+    for i in 0..200 {
+        nquads.push_str(&format!(
+            "<https://pod.ex/c{i}/r#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/c{i}/r> .\n"
+        ));
+    }
+    nquads.push_str(&pod_named("https://pod.ex/root"));
+    assert_materializes_by_default(&nquads);
+    let mut budget = default_auth_budget();
+    budget.max_input_bytes = 2_000;
+    let mut store = fresh(&nquads, budget, None);
+    let before = all_quads(&store);
+    let err = store
+        .materialize_wac()
+        .expect_err("the enumeration alone is past the aggregate");
+    assert_eq!(
+        auth_allowance_refusal(&err),
+        Some(AuthAllowance::InputBytes),
+        "{}",
+        err
+    );
+    assert!(
+        err.contains("resources and their containers"),
+        "the refusal names the enumeration, not a document: {}",
+        err
+    );
+    assert_eq!(all_quads(&store), before, "a refusal installed something");
+    assert!(!grants_anything(&store), "a refused pod granted something");
+}
+
+/// The caps are the store's CONFIGURATION, honoured as every other budget field is: a pod
+/// the defaults admit is refused under a lowered cap, and the view in force is untouched.
+#[test]
+fn a_lowered_resource_cap_is_honoured() {
+    let nquads = pod_named("https://pod.ex/a/b/c/d");
+    assert_materializes_by_default(&nquads);
+    let mut budget = default_auth_budget();
+    budget.max_resource_path_depth = 2;
+    let mut store = fresh(&nquads, budget, None);
+    assert_refused(
+        &mut store,
+        AuthAllowance::ResourceIri,
+        "four containers under a cap of two",
+    );
+    assert_eq!(store.auth_budget().max_resource_path_depth, 2);
+}
+
+/// The fixtures — the largest pods this crate has — are nowhere near the caps, and the view
+/// they materialize is the SAME one they materialize with the caps open: the defaults bound
+/// a hostile name without touching a legitimate pod.
+#[test]
+fn the_fixtures_are_unchanged_by_the_resource_caps() {
+    for (label, nquads) in [
+        ("wac", sparq_solid::wac_fixture()),
+        ("wac50", sparq_solid::fixture::wac_fixture_sized(50)),
+    ] {
+        let mut capped = fresh(&nquads, default_auth_budget(), None);
+        capped.materialize_wac().expect("the fixture is inside the caps");
+        let mut open = fresh(&nquads, resource_caps_open(), None);
+        open.materialize_wac().expect("and inside the rest of the budget");
+        assert_eq!(
+            all_quads(&capped),
+            all_quads(&open),
+            "{}: the resource caps changed the view",
+            label
+        );
+        assert!(grants_anything(&capped), "{}: granted nothing", label);
+    }
+}
+
+/// The ODRL N3 lane runs FIVE closures, and the ledger that bounds their aggregate is the
+/// store's configured budget rather than a hardcoded default: a lowered one is honoured
+/// here as it is on the WAC and ACP lanes, and the refusal is fail-closed (nothing is
+/// written to the graph).
+#[cfg(feature = "odrl-bridge")]
+#[test]
+fn the_odrl_n3_lane_honours_a_configured_decision_budget() {
+    use sparq_solid::odrl_bridge::{materialize_odrl_n3, materialize_odrl_n3_with_budget};
+
+    let ttl = "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
+               <urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+               odrl:target <https://pod.ex/n1> ; odrl:assignee <https://alice.ex/card#me> ] .";
+    let req = sparq_policy::Request::new("http://www.w3.org/ns/odrl/2/read")
+        .on("https://pod.ex/n1")
+        .by(ALICE);
+
+    let mut graph = Graph::default();
+    materialize_odrl_n3(&mut graph, ttl, &req).expect("inside the default budget");
+
+    let mut budget = default_auth_budget();
+    budget.max_decision_facts = 1;
+    let mut graph = Graph::default();
+    let before = graph.named.len();
+    let err = materialize_odrl_n3_with_budget(&mut graph, ttl, &req, budget)
+        .expect_err("past the configured whole-decision budget");
+    assert_eq!(
+        auth_allowance_refusal(&err),
+        Some(AuthAllowance::DecisionWork),
+        "{}",
+        err
+    );
+    assert_eq!(graph.named.len(), before, "a refusal wrote to the graph");
+}
