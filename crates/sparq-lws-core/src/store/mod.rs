@@ -39,6 +39,43 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use oxrdf::NamedNode;
 
+/// The lease one running service holds over a backend for as long as it runs: shared by every
+/// handle to that backend (see [`Store::lifecycle`]), and held by at most one service at a time,
+/// so a second one built over the same backend is refused rather than run with a registry of
+/// its own beside the first. Within one process only.
+#[derive(Debug, Default)]
+pub struct Lifecycle {
+    held: std::sync::atomic::AtomicBool,
+}
+
+impl Lifecycle {
+    /// Take the lease, unless it is held: the guard gives it back when dropped.
+    pub(crate) fn acquire(self: &std::sync::Arc<Self>) -> Option<LifecycleGuard> {
+        use std::sync::atomic::Ordering;
+        self.held
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| LifecycleGuard {
+                lease: self.clone(),
+            })
+    }
+}
+
+/// A held [`Lifecycle`] lease: the authority of the one service running over a backend, which
+/// alone may lower a marker ([`Store::reset_marker`]). Only this crate makes one.
+#[derive(Debug)]
+pub struct LifecycleGuard {
+    lease: std::sync::Arc<Lifecycle>,
+}
+
+impl Drop for LifecycleGuard {
+    fn drop(&mut self) {
+        self.lease
+            .held
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 pub use blob::{BlobEntry, BlobError, BlobStore, InMemoryBlobStore};
 pub use body_cache::{BodyCache, DEFAULT_BODY_CACHE_BYTES};
 pub use counting::{
@@ -49,10 +86,10 @@ pub use embedded::EmbeddedSparqClient;
 #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
 pub use http::{HttpSparqClient, SparqHttpError};
 pub use limits::{
-    in_service_pool, is_hold_record, is_pooled_blob_key, InMemoryStoreLimits, StoreUsage,
-    DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
+    in_service_pool, is_hold_record, is_pooled_blob_key, is_service_marker, InMemoryStoreLimits,
+    StoreUsage, DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
     DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT, DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES, POOLED_BLOB_KEY_MARK,
-    SERVICE_POOL_PATH,
+    SERVICE_MARKER_FRAGMENT, SERVICE_POOL_PATH,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use reconcile::spawn_periodic;
@@ -65,6 +102,15 @@ pub use sparq::{
 pub use sparql::{BodyObject, BuildError};
 
 use crate::error::{ServerError, ServerResult};
+
+/// A failed marker write, as the store reports it.
+fn marker_error(e: SparqError) -> ServerError {
+    match e {
+        SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
+        other => ServerError::Storage(format!("{other}")),
+    }
+}
 
 /// A resource as the LDP handler sees it: bytes + the authoritative metadata.
 #[derive(Debug, Clone)]
@@ -319,6 +365,62 @@ pub trait Store: Send + Sync {
         let _ = fence;
         Err(ServerError::Storage(
             "this store has no unsettled writes to fence".into(),
+        ))
+    }
+
+    /// The value last stored under `iri` by [`raise_marker`](Store::raise_marker), as written,
+    /// or `None` when none is. A record under `iri` that is not a marker reads as an empty value.
+    ///
+    /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        let _ = iri;
+        Err(ServerError::Storage("this store keeps no markers".into()))
+    }
+
+    /// Whether [`raise_marker`](Store::raise_marker) is atomic here. The default is `false`.
+    fn raises_markers(&self) -> bool {
+        false
+    }
+
+    /// The lease every handle to this backend shares, when it keeps one: a service built over
+    /// it takes the lease for as long as it runs. The default is none (each service built over
+    /// such a store takes a lease of its own).
+    fn lifecycle(&self) -> Option<std::sync::Arc<Lifecycle>> {
+        None
+    }
+
+    /// Raise the time stored under `iri` to `value`, unless a later one is stored, in one
+    /// indivisible step under the index's own write lock, and return the time stored once it is
+    /// done. A raise never lowers what is stored, whatever order raises land in: one that fails
+    /// and lands late is a no-op once a later time is stored. With nothing stored under `iri`,
+    /// or nothing that reads as a time, `value` is stored. The value is kept in the index alone,
+    /// with no bytes, so it takes no blob capacity.
+    ///
+    /// The default refuses: a store that cannot raise atomically says so.
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        let _ = (iri, value);
+        Err(ServerError::Storage(
+            "this store cannot raise a marker atomically".into(),
+        ))
+    }
+
+    /// Store `value` under `iri` as a marker in one step, whatever is stored there, earlier or
+    /// later: the one write that may lower a marker, for a start that finds the stored one
+    /// unusable and has removed what it decided ([`raise_marker`](Store::raise_marker) keeps
+    /// every other write from lowering it). Only the service holding the backend's
+    /// [`Lifecycle`] lease may make it: `lease` is its guard, which no caller outside this crate
+    /// can make.
+    ///
+    /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &LifecycleGuard,
+    ) -> ServerResult<()> {
+        let _ = (iri, value, lease);
+        Err(ServerError::Storage(
+            "this store cannot raise a marker atomically".into(),
         ))
     }
 
@@ -710,6 +812,16 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 // The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
+    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
+    /// plants to stand for an earlier, or a damaged, one.
+    #[cfg(test)]
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(value))
+            .await
+            .expect("planted");
+    }
+
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
     pub fn in_memory_with_limits(limits: InMemoryStoreLimits) -> Self {
         Self::new(
@@ -1128,6 +1240,39 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .fence(fence)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))
+    }
+
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        match self.sparq.get_meta(iri).await {
+            Ok(m) if sparq::is_marker(&m) => Ok(Some(m.etag)),
+            Ok(_) => Ok(Some(String::new())),
+            Err(SparqError::NotFound) => Ok(None),
+            Err(e) => Err(ServerError::Storage(format!("{e}"))),
+        }
+    }
+
+    fn raises_markers(&self) -> bool {
+        self.sparq.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        self.sparq
+            .raise_marker(iri, value)
+            .await
+            .map_err(marker_error)
+    }
+
+    async fn reset_marker(&self, iri: &str, value: i64, _: &LifecycleGuard) -> ServerResult<()> {
+        if !self.sparq.raises_markers() {
+            return Err(ServerError::Storage(
+                "this store cannot raise a marker atomically".into(),
+            ));
+        }
+        // One record put: the index admits a marker's record apart from every ceiling.
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(&value.to_string()))
+            .await
+            .map_err(marker_error)
     }
 
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {

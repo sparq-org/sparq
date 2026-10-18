@@ -113,8 +113,16 @@ pub(crate) async fn within_wait<T>(
 /// - The change holds a place among those being made or settled ([`Settlements`]) from the
 ///   request until it is settled: `503` when there is none. The task that settles one is the
 ///   state's, and ends when the state is dropped.
+/// - `gate` runs once the listing locks and the record's own lock are held, and before anything
+///   is stored: it may refuse the create (its answer is the create's), and what it yields (a
+///   subscription's: the notification service's raise lock, see `notify::HighWater`) is held
+///   until the create's answer is decided: through the write, the listing read after a failed
+///   one, and the registration. A create whose outcome is not known gives it up as it answers
+///   so, before it is settled: that settling waits on the store for as long as the store does
+///   not answer, and holds no other change to the record's listings back but a conditional
+///   create's.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn create_record<S, F>(
+pub(crate) async fn create_record<S, F, G, C>(
     state: &LwsState<S>,
     container: &str,
     iri: &str,
@@ -124,10 +132,13 @@ pub(crate) async fn create_record<S, F>(
     held: Option<ListingLocks>,
     author: Option<String>,
     register: F,
+    gate: G,
 ) -> Result<(), Response>
 where
     S: Store + 'static,
     F: FnOnce(&LwsState<S>) + Send + 'static,
+    G: std::future::Future<Output = Result<Option<C>, Response>>,
+    C: Send + 'static,
 {
     // Announced as it is put in force, wherever that happens (in the request's task, or in the
     // task that settles a write whose outcome was not known), so no record in force goes
@@ -160,6 +171,7 @@ where
             "the record's name is taken".into(),
         )));
     };
+    let gate = gate.await?;
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
@@ -180,6 +192,7 @@ where
             .await;
         let Err(e) = written else {
             register(&state);
+            drop(gate);
             return Ok(());
         };
         // A record listed is stored for good (its lock keeps a revocation of it out). One not
@@ -215,6 +228,7 @@ where
                     }
                     None => (None, container_lock.map(ListingGuard::shared)),
                 };
+                drop(gate);
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {
@@ -335,13 +349,16 @@ impl ListingLocks {
 /// otherwise. A listing that cannot be produced (a representation the client does not accept, a
 /// page that does not exist) is that response: its absent `ETag` is not the absence of the
 /// container.
-pub(crate) async fn service_preconditions<S: Store + 'static>(
+pub(crate) async fn service_preconditions<S: Store + 'static, L>(
     state: &LwsState<S>,
     req: &LwsRequest,
     container: &str,
     own: Option<&str>,
-    listing: impl FnOnce(&LwsRequest) -> axum::response::Response,
-) -> Result<Option<ListingLocks>, axum::response::Response> {
+    listing: impl FnOnce(LwsRequest) -> L,
+) -> Result<Option<ListingLocks>, axum::response::Response>
+where
+    L: std::future::Future<Output = axum::response::Response>,
+{
     if !resources::is_conditional(req) {
         return Ok(None);
     }
@@ -370,7 +387,9 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
             None => Ok(Some(locks)),
         };
     }
-    let current = listing(&resources::plain_get(req));
+    // Read only now, with the locks held: what it shows (and leaves out) is decided after every
+    // change it waited on.
+    let current = listing(resources::plain_get(req)).await;
     if !current.status().is_success() {
         return Err(current);
     }
@@ -401,9 +420,11 @@ pub(crate) enum Removed {
 /// - The steps then run in a task of their own, holding the locks and `admission` (the request's
 ///   share of its admission permit), so a client that goes away cannot cut them short:
 ///   `set_aside` takes the record out of force while its removal runs (`None` when it is not in
-///   force: [`Removed::Absent`]); the record is deleted ([`delete_record`]), and a failure is
-///   checked against the listing ([`still_listed`]); `settle` is told whether it is confirmed
-///   gone, and removes it from memory or puts it back, giving the author to announce it to.
+///   force: [`Removed::Absent`]), deciding under the locks, where it may wait (a decision that
+///   needs nothing stored is [`at_once`]); the record is deleted ([`delete_record`]), and a
+///   failure is checked against the listing ([`still_listed`]); `settle` is told whether it is
+///   confirmed gone, and removes it from memory or puts it back, giving the author to announce
+///   it to.
 /// - A delete that failed [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that
 ///   timed out) can still land, so no listing read is final until its fence ([`Store::fence`])
 ///   has succeeded, whatever the listing shows. The fence is tried in the steps, and once it
@@ -420,7 +441,7 @@ pub(crate) enum Removed {
 ///   are released. Otherwise the answer is `500`, saying whether it is still stored or that this
 ///   is not known (it is left as it was, and the request may be retried).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn remove_record<S, H, A, Z>(
+pub(crate) async fn remove_record<S, H, A, F, Z>(
     state: &LwsState<S>,
     container: &str,
     iri: &str,
@@ -434,7 +455,8 @@ pub(crate) async fn remove_record<S, H, A, Z>(
 where
     S: Store + 'static,
     H: Send + 'static,
-    A: FnOnce() -> Option<H> + Send + 'static,
+    A: FnOnce() -> F + Send + 'static,
+    F: std::future::Future<Output = Option<H>> + Send + 'static,
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
     let place = match by {
@@ -459,7 +481,7 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let Some(held) = set_aside() else {
+        let Some(held) = set_aside().await else {
             return Ok(Removed::Absent);
         };
         let gone = match delete_record(&state.store, &iri, &container).await {
@@ -551,6 +573,13 @@ where
         Ok(Ok(removed)) => Ok(removed),
         Ok(Err(why)) | Err(why) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
     }
+}
+
+/// A `set_aside` for [`remove_record`] that decides at once, waiting on nothing.
+pub(crate) fn at_once<H>(
+    set_aside: impl FnOnce() -> Option<H>,
+) -> impl FnOnce() -> std::future::Ready<Option<H>> {
+    move || std::future::ready(set_aside())
 }
 
 /// Who removes a record ([`remove_record`]), and so how its steps run.
@@ -747,7 +776,7 @@ mod tests {
             Listed::InContainer,
             Remover::Request,
             None,
-            || Some(()),
+            at_once(|| Some(())),
             move |_: &LwsState<_>, gone: bool, ()| {
                 *told.lock().unwrap() = Some(gone);
                 None

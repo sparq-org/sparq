@@ -271,6 +271,26 @@ pub trait SparqClient: Send + Sync {
         ))
     }
 
+    /// Whether [`raise_marker`](SparqClient::raise_marker) is atomic here. The default is
+    /// `false`.
+    fn raises_markers(&self) -> bool {
+        false
+    }
+
+    /// Raise the time stored as a marker under `iri` to `value`, unless a later one is stored,
+    /// reading and writing in one step under this index's own write lock, and return the time
+    /// stored once it is done (see `Store::raise_marker`). The marker is an index record with no
+    /// blob, its value in its tag.
+    ///
+    /// The default refuses: a client whose read and write are separate requests (the HTTP one)
+    /// cannot keep a late, lower raise from landing over a later one.
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        let _ = (iri, value);
+        Err(SparqError::Backend(
+            "this index cannot raise a marker atomically".into(),
+        ))
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError>;
 
     /// [`list_children`](SparqClient::list_children) while it fits: at most
@@ -358,6 +378,30 @@ impl Default for InMemorySparqClient {
     }
 }
 
+/// The content type of a marker ([`SparqClient::raise_marker`]): an index record with no bytes,
+/// its value in its tag.
+pub(crate) const MARKER_TYPE: &str = "application/x-sparq-marker";
+
+/// The index record of a marker holding `value`.
+pub(crate) fn marker_meta(value: &str) -> ResourceMeta {
+    ResourceMeta {
+        content_type: MARKER_TYPE.to_string(),
+        blob_key: String::new(),
+        etag: value.to_string(),
+        last_modified: None,
+    }
+}
+
+/// Whether `meta` is a marker's record.
+pub(crate) fn is_marker(meta: &ResourceMeta) -> bool {
+    meta.content_type == MARKER_TYPE && meta.blob_key.is_empty()
+}
+
+/// The time a marker's record holds, when it is one and holds one.
+pub(crate) fn marker_time(meta: &ResourceMeta) -> Option<i64> {
+    is_marker(meta).then(|| meta.etag.parse().ok()).flatten()
+}
+
 /// The metadata records, with how many of them are in the service pool
 /// ([`super::in_service_pool`]) kept as they change, so admission can hold the pool to its own
 /// ceiling without walking the map.
@@ -367,6 +411,10 @@ struct Meta {
     pooled: usize,
     /// Records of holds ([`super::is_hold_record`]), admitted apart from every ceiling.
     holds: usize,
+    /// The one notification marker ([`super::is_service_marker`]) holding the slot kept for it,
+    /// admitted apart from every ceiling and counted in none: the first stored. Any other IRI of
+    /// that shape (another origin's) is an ordinary pool record.
+    marker: Option<String>,
 }
 
 impl Meta {
@@ -392,13 +440,32 @@ impl Meta {
         self.holds
     }
 
+    /// Records in the marker's slot: none or one.
+    fn markers(&self) -> usize {
+        usize::from(self.marker.is_some())
+    }
+
+    /// Whether `iri` is the marker holding its slot, or would take it as a new record: the slot
+    /// is taken only by a first insert while no marker holds it, so a record admitted to the pool
+    /// stays in the pool, whatever is removed after.
+    fn is_marker_slot(&self, iri: &str) -> bool {
+        match self.marker.as_deref() {
+            Some(m) => m == iri,
+            None => super::is_service_marker(iri) && !self.map.contains_key(iri),
+        }
+    }
+
     fn values(&self) -> std::collections::hash_map::Values<'_, String, ResourceMeta> {
         self.map.values()
     }
 
     fn insert(&mut self, iri: String, meta: ResourceMeta) -> Option<ResourceMeta> {
-        let pooled = super::in_service_pool(&iri);
+        let marker = self.is_marker_slot(&iri);
+        let pooled = super::in_service_pool(&iri) && !marker;
         let hold = super::is_hold_record(&iri);
+        if marker && self.marker.is_none() {
+            self.marker = Some(iri.clone());
+        }
         let replaced = self.map.insert(iri, meta);
         if replaced.is_none() {
             self.pooled += usize::from(pooled);
@@ -409,7 +476,9 @@ impl Meta {
 
     fn remove(&mut self, iri: &str) -> Option<ResourceMeta> {
         let gone = self.map.remove(iri)?;
-        if super::in_service_pool(iri) {
+        if self.marker.as_deref() == Some(iri) {
+            self.marker = None;
+        } else if super::in_service_pool(iri) {
             self.pooled -= 1;
         }
         if super::is_hold_record(iri) {
@@ -461,9 +530,14 @@ impl InMemorySparqClient {
     ///
     /// A record in the service pool ([`super::in_service_pool`]) is admitted against the pool's
     /// own ceiling and counts towards nothing else, so no number of them makes a write of
-    /// content fail.
+    /// content fail. The notification marker ([`super::is_service_marker`]) has a slot of its
+    /// own, as holds do: however full the pool, it is admitted. The slot is one: the first marker
+    /// stored holds it, and no other IRI of that shape is admitted in it.
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
-        if index.meta.contains_key(iri) || super::is_hold_record(iri) {
+        if index.meta.contains_key(iri)
+            || super::is_hold_record(iri)
+            || index.meta.is_marker_slot(iri)
+        {
             return Ok(());
         }
         let pooled = index.meta.pooled();
@@ -471,7 +545,7 @@ impl InMemorySparqClient {
             (pooled, self.limits.max_pool_resource_count)
         } else {
             (
-                index.meta.len() - pooled - index.meta.holds(),
+                index.meta.len() - pooled - index.meta.holds() - index.meta.markers(),
                 self.limits.max_resource_count,
             )
         };
@@ -521,6 +595,27 @@ impl SparqClient for InMemorySparqClient {
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         self.admit_resource(&guard, iri)?;
         Ok(guard.meta.insert(iri.to_string(), meta))
+    }
+
+    fn raises_markers(&self) -> bool {
+        true
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        // Read and written under the one index lock: no other write lands in between.
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let stored = guard.meta.get(iri).and_then(marker_time);
+        let raised = stored.map_or(value, |t| t.max(value));
+        if stored != Some(raised) {
+            self.admit_resource(&guard, iri)?;
+            guard
+                .meta
+                .insert(iri.to_string(), marker_meta(&raised.to_string()));
+        }
+        Ok(raised)
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
@@ -749,6 +844,86 @@ mod tests {
         index.put_meta("urn:a", meta("a2")).await.unwrap();
         assert_eq!(index.get_meta("urn:a").await.unwrap().blob_key, "a2");
         assert_eq!(index.quota(), limits);
+    }
+
+    /// The marker's slot is kept for one IRI: the first marker stored. Another of the same shape
+    /// (another origin, or with user information) takes room in the pool like any record of it.
+    #[tokio::test]
+    async fn the_marker_slot_holds_one_marker_alone() {
+        let limits = InMemoryStoreLimits::default().with_pool(1, usize::MAX);
+        let index = InMemorySparqClient::with_limits(limits);
+        let pooled = "http://a.example/.lws/subscriptions/";
+        index.put_meta(pooled, meta("")).await.unwrap();
+        let marker = "http://a.example/.lws/subscriptions/#high-water";
+        assert_eq!(index.raise_marker(marker, 5).await.unwrap(), 5);
+        for other in [
+            "http://b.example/.lws/subscriptions/#high-water",
+            "http://u@a.example/.lws/subscriptions/#high-water",
+        ] {
+            assert!(
+                matches!(
+                    index.raise_marker(other, 5).await,
+                    Err(SparqError::QuotaExceeded)
+                ),
+                "{other}"
+            );
+        }
+        assert_eq!(index.raise_marker(marker, 9).await.unwrap(), 9);
+        for not in [
+            "http://:/.lws/subscriptions/#high-water",
+            "http://a b/.lws/subscriptions/#high-water",
+            "http:// /.lws/subscriptions/#high-water",
+            "http://[garbage]/.lws/subscriptions/#high-water",
+            "http://[::1]x/.lws/subscriptions/#high-water",
+            "http://a%zz/.lws/subscriptions/#high-water",
+        ] {
+            assert!(!crate::store::is_service_marker(not), "{not}");
+        }
+        assert!(crate::store::is_service_marker(
+            "https://127.0.0.1:8443/.lws/subscriptions/#high-water"
+        ));
+        assert!(!crate::store::is_service_marker(
+            "http://a.example:x/.lws/subscriptions/#high-water"
+        ));
+        assert!(crate::store::is_service_marker(
+            "http://a.example:3000/.lws/subscriptions/#high-water"
+        ));
+        assert!(crate::store::is_service_marker(
+            "http://[::1]:3000/.lws/subscriptions/#high-water"
+        ));
+        assert!(!crate::store::is_service_marker(
+            "http://u@a.example/.lws/subscriptions/#high-water"
+        ));
+        assert!(!crate::store::is_service_marker(
+            "http://a.example/x/.lws/subscriptions/#high-water"
+        ));
+    }
+
+    /// A marker admitted to the pool (the slot held by another) stays in it when the slot's
+    /// holder is removed and it is written again: the pool's count is exact throughout, so it
+    /// frees its room when removed and never wraps.
+    #[tokio::test]
+    async fn a_pooled_marker_is_never_moved_into_the_slot() {
+        let limits = InMemoryStoreLimits::default().with_pool(2, usize::MAX);
+        let index = InMemorySparqClient::with_limits(limits);
+        let a = "http://a.example/.lws/subscriptions/#high-water";
+        let b = "http://b.example/.lws/subscriptions/#high-water";
+        let pooled = |index: &InMemorySparqClient| index.inner.lock().unwrap().meta.pooled();
+        index.raise_marker(a, 1).await.unwrap();
+        index.raise_marker(b, 1).await.unwrap();
+        assert_eq!(pooled(&index), 1);
+        index.delete_meta(a).await.unwrap();
+        index.raise_marker(b, 2).await.unwrap();
+        assert_eq!(pooled(&index), 1, "moved into the slot");
+        index.delete_meta(b).await.unwrap();
+        assert_eq!(pooled(&index), 0);
+        // The pool's two places are both free again, and the slot takes a new marker apart.
+        for at in ["x", "y"] {
+            let iri = format!("http://a.example/.lws/subscriptions/{at}");
+            index.put_meta(&iri, meta("")).await.unwrap();
+        }
+        index.raise_marker(a, 3).await.unwrap();
+        assert_eq!(pooled(&index), 2);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
