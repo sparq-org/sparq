@@ -103,10 +103,10 @@ use crate::rng::{MpcRng, SecureRng};
 /// public by construction, and redacts `y`.
 ///
 /// Note for anyone changing this: `Debug` here must stay independent of `y`, and
-/// must NOT become the basis of a map key. The two places in this crate that do
-/// build keys from a `Debug` rendering — `bounded_path::dedup_endpoint_pairs` and
-/// `hidden_path::endpoint_key` — format `Term` values, never a `Share`, so they
-/// are unaffected by this impl.
+/// must NOT become the basis of a map key. The places in this crate that do build
+/// keys from a `Debug` rendering — `bounded_path::dedup_endpoint_pairs`,
+/// `hidden_path::endpoint_key` and `PredicatedEdges::node_domain` — format `Term`
+/// values, never a `Share`, so they are unaffected by this impl.
 #[derive(Clone, Copy, PartialEq, Eq, zeroize::Zeroize)]
 pub struct Share {
     /// The evaluation point (party index, always `>= 1`). `x = 0` is reserved

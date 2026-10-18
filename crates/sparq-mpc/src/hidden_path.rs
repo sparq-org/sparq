@@ -49,9 +49,11 @@
 //! realized chain *never* revealed. We therefore GROUP tuples by their disclosed
 //! endpoint pair and **OR-fold** their chain bits into one connected-bit per
 //! distinct `(a, b)` (`OR(x,y) = 1 − (1−x)(1−y)`, one more `mul_shares_raw` +
-//! `degree_reduce`). Grouping is over the DISCLOSED endpoint terms — never over any
-//! secret intermediate key — so it leaks nothing the result does not already
-//! disclose.
+//! `degree_reduce_through`). Grouping is over the DISCLOSED endpoint terms — never
+//! over any secret intermediate key. It is not free of disclosure, though: the
+//! grouping key is the endpoint pair of EVERY enumerated tuple, matched or not, so
+//! every evaluating party knows the ordered candidate pair sequence and where each
+//! tuple folds — see the disclosure list below.
 //!
 //! The one connected-bit per distinct endpoint pair becomes a
 //! [`crate::oblivious_join::Candidate`] with a
@@ -71,20 +73,54 @@
 //!   connected a pair and the realized chain length (the OR-fold collapses
 //!   multiplicity). The NUMBER of distinct endpoint pairs is NOT in this list —
 //!   see the schedule bullet below.
-//! - **Disclosed by the SCHEDULE (every branch):** the distinct endpoint-pair
-//!   count `D`. `build_candidates` allocates one candidate per distinct pair and
-//!   runs `T − D` secure ORs over the `T` edge-tuples, and the output stage pads
-//!   from `D` up to `B` — so the number of multiplications, the allocation sizes
-//!   and the timing of any run reveal `D` to anyone who observes them. This has
-//!   always been so. The bound decision below is taken on public sizes and its
-//!   error text carries public sizes only, but neither of those hides `D`, and
-//!   this module does not claim they do. Hiding `D` would need oblivious grouping
-//!   with a schedule uniform in the edge count, which is NOT built.
+//! - **Disclosed by the SCHEDULE (every successful run):** the OR-fold POSITIONS —
+//!   which tuple positions repeat an endpoint pair — and therefore the distinct
+//!   endpoint-pair count `D`. Who learns them:
+//!   - **In the model as built**, a single process simulates every party. The
+//!     evaluator that groups does so on plaintext `Term`s, so it sees the ORDERED
+//!     candidate pair sequence, unmatched pairs included — strictly more than the
+//!     result, which names the MATCHED pairs only.
+//!   - **In a real multi-party run**, every party evaluates the same circuit
+//!     wiring, including which accumulator each tuple's bit folds into. Every
+//!     evaluating party therefore knows the fold positions. This is not an
+//!     artefact of the simulation.
+//!   - **Over a transport**, the ORs are not batched — each is one
+//!     `mul_shares_raw` followed by one `degree_reduce_through`, inline in the
+//!     enumeration — so a sequential transport would expose the positions through
+//!     the gate boundaries themselves. The hidden paths have no live transport
+//!     yet, so that is a property of the construction, not a measured
+//!     observation.
+//!   - Independently of any of that, each repeat costs one extra multiplication,
+//!     so the multiplication COUNT carries `D`, the public tuple total `T` being
+//!     known: `T − D` ORs over the `T` tuples, or `T + N₀ − D` when a bounded form
+//!     has `min == 0` and folds in one entry per node of the `N₀`-node disclosed
+//!     domain, plus the output stage's padding from `D` up to `B`. `T` is `|E|^k`
+//!     for the exactly-`k` chain and `Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths
+//!     `ℓ >= 1` for a bounded form, `a` being the alternation width.
+//!
+//!   These are the views this module can account for; it does NOT claim a complete
+//!   enumeration of what an arbitrary party or an arbitrary transport learns.
+//!   Hiding `D` would need oblivious grouping with a schedule uniform in the edge
+//!   count, which is NOT built. Two precisions: "every successful run" is meant
+//!   literally — a refusal from `check_params` or from the public half of the bound
+//!   contract happens before any candidate exists, and a tight-bound refusal runs
+//!   the data-dependent projection but no build, so neither produces a draw
+//!   schedule to read; and the padding also discloses the uniform payload WIDTH
+//!   (next bullet).
+//! - **Disclosed: the uniform payload width.** The output stage packs every slot
+//!   to one width — the longest encoding over ALL candidates, the unmatched ones
+//!   included, rounded up to whole limbs — and that width is the per-slot limb
+//!   count in the opens and one multiplication per limb per slot, so it is visible
+//!   to the parties and it drives the per-slot work. An unmatched candidate with a
+//!   long endpoint term therefore widens every slot. A cap on that width is
+//!   follow-up work, as [`crate::bounded_path`] also records; this stage provides
+//!   none.
 //! - **Disclosed by a REFUSAL:** that a parameter or bound was rejected, and which
 //!   one. The output-bound check is taken on [`public_candidate_pair_bound`] /
 //!   [`public_bounded_candidate_pair_bound`] — functions of `|E|` and the public
-//!   hop counts — whenever `B` reaches them, and the real candidate count is not
-//!   computed at all on that branch. A caller that chooses a `B` BELOW the public
+//!   hop counts — whenever `B` reaches them, and the exact-count projection is not
+//!   run on that branch, so `D` stays out of the DECISION (the run itself still
+//!   materialises `D` candidates, as the schedule above says). A caller that chooses a `B` BELOW the public
 //!   bound puts `D` in the RESULT of the call as well: that branch accepts exactly
 //!   when `D <= B`, and a refusal draws nothing, so repeated calls with different
 //!   `B` recover `D` exactly by binary search. Given the schedule above that is no
@@ -212,20 +248,28 @@ pub const MAX_HOP_COUNT: usize = MAX_CHAIN_TUPLES.ilog2() as usize; // 18
 
 /// One node of the secret graph: its PRIVATE join key (an `F_p` element — the
 /// holder's injective encoding of the node, exactly the contract
-/// [`crate::join::HiddenValueJoin`] documents) plus its DISCLOSED term (used ONLY
-/// when the node is an ENDPOINT of a matched chain — never for an intermediate).
-/// `Debug` is hand-written: `key` is the private join key, and `term` is disclosed
-/// only when this node is the ENDPOINT of a matched chain — a `Debug` rendering is
-/// neither of those conditions, and a derived one printed both from every container
-/// that holds a node. Both fields are redacted in `Debug`; both stay `pub` for the
-/// callers that legitimately read them, including the `Term`-keyed groupings in
-/// this module.
+/// [`crate::join::HiddenValueJoin`] documents) plus its term.
+///
+/// The term is NOT used only for matched endpoints. Every edge's subject and object
+/// term is read in the clear by the evaluator: as the grouping key of every tuple
+/// that starts or ends at this node, as an input to the uniform payload width, and
+/// by the candidate-count projections. What the RESULT discloses is narrower than
+/// that — only the matched pairs — so the term of an unmatched endpoint is visible
+/// to the grouping evaluator without appearing in any answer. The key is the part
+/// that is never reconstructed, for an intermediate node or any other.
+///
+/// `Debug` is hand-written and redacts BOTH fields: a derived one printed the key
+/// from every container that holds a node, and a `Debug` rendering is not one of
+/// the clear-text uses above. Both fields stay `pub` for the callers that
+/// legitimately read them, including the `Term`-keyed groupings in this module.
 #[derive(Clone)]
 pub struct HiddenNode {
     /// The private join key. Compared via secure equality; never reconstructed
     /// for an intermediate node.
     pub key: Fp,
-    /// The disclosed term, emitted only if this node is a matched chain endpoint.
+    /// The node's term. Read in the clear by the grouping, the width sizing and
+    /// the projections; emitted in the RESULT only if this node is a matched chain
+    /// endpoint.
     pub term: Term,
 }
 
@@ -254,11 +298,15 @@ pub struct HiddenEdge {
 ///
 /// **Exactly what is disclosed.** The keys are private. Disclosed: the edge count
 /// `|E|` and the candidate-tuple count `|E|^k` (public input sizes), the matched
-/// endpoint TERMS (the result), the public bound `B`, and — through the run's
-/// SCHEDULE, on every branch (one candidate plus `T − D` secure ORs for `D`
-/// distinct pairs, then padding up to `B`) — the distinct endpoint-pair count `D`.
-/// NOT disclosed: any intermediate key, any per-hop or per-pair match bit, which
-/// tuples connected a pair, or the realized chain length. A `B` at or above
+/// endpoint TERMS (the result), the public bound `B`, the uniform payload width
+/// (the longest encoding over ALL candidates, unmatched included), and — through
+/// the run's SCHEDULE, on every successful run — the OR-fold positions and hence
+/// the distinct endpoint-pair count `D`: the grouping key is the disclosed endpoint
+/// pair of every enumerated tuple, and each repeat costs one extra secure OR.
+/// **Unmatched endpoint terms are visible to the grouping evaluator**, which reads
+/// every tuple's endpoint pair in the clear, although they appear in no answer. NOT
+/// disclosed: any intermediate key, any per-hop or per-pair match bit, which tuples
+/// connected a pair, or the realized chain length. A `B` at or above
 /// [`public_candidate_pair_bound`] is decided without computing `D`, which keeps
 /// `D` out of the DECISION and out of the error text — not out of the schedule.
 #[derive(Debug, Clone)]
@@ -436,8 +484,9 @@ fn build_candidates(
 /// above it is decided on public sizes alone, so the decision and its error text
 /// never consult the edge data; a tighter `B` is still accepted when the distinct
 /// endpoint-pair count `D` fits, at the cost of disclosing that comparison (see
-/// `eval_exact_k_chain_hidden`). Neither choice hides `D` itself — the run's
-/// schedule reveals it either way.
+/// `eval_exact_k_chain_hidden`). Neither choice hides `D` itself: the grouping
+/// reads every tuple's endpoint pair in the clear and each repeat costs one extra
+/// multiplication, on either branch.
 ///
 /// `build_candidates` groups the `|E|^k` edge-tuples by their first subject and
 /// last object, so:
@@ -498,7 +547,8 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 /// passes `MAX_OUTPUT_BOUND`, and the diagonal arm adds the declared domain on
 /// top — and then no admissible `B` reaches it, so the caller
 /// has only the data-dependent branch. Neither branch hides the distinct
-/// endpoint-pair count from an observer of the run's schedule.
+/// endpoint-pair count: the grouping reads every tuple's endpoint pair in the clear
+/// and each repeat costs one extra multiplication, whichever branch decided `B`.
 ///
 /// Returns `MpcError::Protocol` if the sum overflows `usize`.
 pub fn public_bounded_candidate_pair_bound(
@@ -713,11 +763,22 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 /// rest on public sizes only. A `B` below it is accepted exactly when `D <= B`, so
 /// success-or-refusal discloses that comparison; and because a refusal draws
 /// nothing, repeated calls with different `B` recover `D` exactly by binary search.
-/// Either way the refusal message names
-/// only `B` and the public bound — and NEITHER branch hides `D` from an observer of
-/// the run: the schedule (one candidate plus `T − D` secure ORs, then padding up to
-/// `B`) reveals `D`, as it always has. Hiding `D` would need oblivious grouping with
-/// a uniform schedule, which is not built.
+/// The search only pins `D` up to
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`], since a larger `B` is refused by the
+/// cap before either branch; past that the caller learns only that `D` is larger.
+/// Either way the refusal message names only `B` and the public bound — and NEITHER
+/// branch hides `D` from a successful run. The grouping keys every enumerated tuple
+/// by its endpoint pair, read in the clear: in the model as built one process
+/// simulates every party, so the grouping evaluator sees the ordered candidate pair
+/// sequence; in a real multi-party run every party evaluates the same wiring,
+/// including which accumulator each tuple folds into, so every evaluating party
+/// knows the fold positions. The `T = |E|^k` tuples cost `T − D` ORs, and the output
+/// pads from `D` to `B`, so the multiplication count carries `D` regardless. Hiding
+/// `D` would need oblivious grouping with a uniform schedule, which is not built;
+/// see the module docs for the transport note and the limits of this account. A
+/// public-half refusal happens before any candidate exists, and a tight-bound
+/// refusal runs the data-dependent projection but no build — neither leaves a draw
+/// schedule.
 ///
 /// One fresh dealer covers the chain stage AND the output
 /// stage: this is `eval_exact_k_chain_hidden_slots_through` on that one dealer,
@@ -1330,11 +1391,25 @@ fn build_bounded_candidates(
 /// rest on public sizes only. A `B` below it is accepted exactly when `D <= B`, so
 /// success-or-refusal discloses that comparison; and because a refusal draws
 /// nothing, repeated calls with different `B` recover `D` exactly by binary search.
-/// Either way the refusal message names
-/// only `B` and the public bound — and NEITHER branch hides `D` from an observer of
-/// the run: the schedule (one candidate plus `T − D` secure ORs, then padding up to
-/// `B`) reveals `D`, as it always has. Hiding `D` would need oblivious grouping with
-/// a uniform schedule, which is not built.
+/// The search only pins `D` up to
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`], since a larger `B` is refused by the
+/// cap before either branch; past that the caller learns only that `D` is larger.
+/// Either way the refusal message names only `B` and the public bound — and NEITHER
+/// branch hides `D` from a successful run. The grouping keys every enumerated tuple
+/// by its endpoint pair, read in the clear: in the model as built one process
+/// simulates every party, so the grouping evaluator sees the ordered candidate pair
+/// sequence; in a real multi-party run every party evaluates the same wiring,
+/// including which accumulator each tuple folds into, so every evaluating party
+/// knows the fold positions. For a bounded form the tuple total is
+/// `T = Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths `ℓ >= 1`, with `a` the
+/// alternation width; the OR count is `T + N₀ − D` when `min == 0`, the reflexive
+/// diagonal folding in one entry per node of the `N₀`-node disclosed domain, and
+/// `T − D` otherwise. The output then pads from `D` to `B`, so the multiplication
+/// count carries `D` regardless. Hiding `D` would need oblivious grouping with a
+/// uniform schedule, which is not built; see the module docs for the transport note
+/// and the limits of this account. A public-half refusal happens before any
+/// candidate exists, and a tight-bound refusal runs the data-dependent projection
+/// but no build — neither leaves a draw schedule.
 ///
 /// **The public bound can be out of reach here.**
 /// [`public_bounded_candidate_pair_bound`] sums the arms the form admits, and for
