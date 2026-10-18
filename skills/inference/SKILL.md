@@ -116,39 +116,26 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // holds, notIncludes fails), as before; full matching is
 // https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
 // containment matches its blanks afresh (no witness carries over to the next one).
-// A quoted formula a BACKWARD (<=) rule RETURNS carries the bindings its proof made for
-// it (GH #6943): a formula is opaque to substitution, so a variable the proof produced
-// used to survive the projection onto the goal with nothing left to bind it —
-// `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }` proved for `:c` returned
-// `{ ?__bw<n>_x :p :b }` and now returns `{ :c :p :b }`. Only what the proof produced is
-// instantiated: a name the CALLER binds and a name the GOAL writes are the caller's to
-// resolve and are left as they are, so a formula a caller supplies or one read from the
-// store comes back as it went in. A variable no premise binds keeps its name (still the
-// one __bw<fold>_ fingerprint of the derivation), and a quoted formula's own @forAll
-// binder is never bound by a proof, so it is untouched. A log:collectAllIn / log:forAllIn
-// clause, template or pattern given through a variable is NOT resolved into the reading
-// rule's variables: behind a <= the rule's own atoms are standardized apart, so a ?y
-// arriving from elsewhere is a different variable from the rule's own ?y and binds nothing
-// of it, whatever either spells. Inside a backward proof that shape is now REFUSED rather
-// than answered: collectAllIn, forAllIn, includes, notIncludes and supports fail the run
-// with "a pattern bound through a variable inside a backward rule must be ground" when the
-// arriving clause, template or pattern still holds a free variable after every variable in
-// it is followed to the end of its chain. Unrefused, forAllIn held vacuously and FIRED a
-// rule that must not fire, collectAllIn collected nothing, and a containment pattern fell
-// back to the EMPTY pattern (includes holding of everything, notIncludes of nothing) — all
-// wrong answers, given silently. The test is GROUNDNESS, not whose a variable is, so two
-// callers differing only in what they name their variables reach the same verdict.
-// Not refused: a slot the rule writes inline (its own text, renamed with it); a slot whose
-// variable is still unbound (the rule's own variable, which its matching binds — the
-// ordinary spelling of a collectAllIn template); a GROUND pattern, including one ground
-// only through an alias chain — which is then MATCHED through that same resolver, deep
-// substituted before the builtin runs, so the gate and the matcher agree on what ground
-// means; a quoted formula's own
-// @forAll binder, which is bound inside its formula and is not free; and the SCOPE of
-// collectAllIn/forAllIn, which is searched data rather than a pattern that must match and is
-// never required to be ground. Forward rules are unaffected — their atoms are never renamed,
-// so the same premise shares and answers. Whether a backward rule should SHARE the way a
-// forward rule does is the open half of GH #6943.
+// Inside a BACKWARD (<=) proof, GH #6943: a clause, template or pattern given through a
+// variable is resolved to the VALUE its chain reaches and then matched as that formula,
+// with the value's own variables renamed apart (__bp.<fold>., one prefix per atom, so
+// slots of one atom still share). So `:cfg :cl { ?x :type :T }` read through ?cl works as
+// a clause, and a containment pattern no longer falls back to the EMPTY pattern (which
+// made includes hold of everything and notIncludes of nothing). Only names the ENGINE
+// minted (__bw<fold>_, __bp.) are substituted: a variable written in data or by a caller
+// belongs to the formula it is written in, so the answer never turns on what some other
+// rule happens to name a variable. Resolution STOPS at the value — an inline clause is
+// never spliced with a formula bound beside it, which would turn that formula from a term
+// compared by identity into a structural pattern. Untouched: a `{ … }` the rule wrote, a
+// variable with no binding (a collectAllIn template), an aggregation SCOPE (searched data,
+// never required to be ground), a formula's own @forAll binder; an arriving @forAll
+// antecedent is still refused. The projection of a backward answer resolves inside a
+// landed value too, and follows an alias chain wherever it sits — in a list or a triple
+// term as well as in a formula — for engine names only; a DAG-shaped binding unfolds
+// exponentially, so
+// the built size is checked first and the run is refused past its term-size limit. Forward
+// rules are unaffected (their atoms are never renamed), and whether a backward rule should
+// SHARE the way a forward rule does is the open half of GH #6943.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
