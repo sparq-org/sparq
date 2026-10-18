@@ -84,12 +84,20 @@ fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
 
 /// Both operands must fit the [`COMPARE_BITS`] bit-decomposition so equality of the
 /// recovered bits is equality of the field values (no wrap). Fail-closed.
+///
+/// **What the refusal discloses.** The same as the semi-honest twin
+/// `compare::check_in_range`: that an operand was out of range and which one (by
+/// `label`), never its value.
+///
+/// As in [`crate::compare`]'s twin, the operand is PRIVATE, so the range error
+/// reports the bound only: the public bit-width / exclusive bound and `label` — the
+/// operand POSITION, a fixed parameter name from the call site, never caller data.
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= (1u64 << COMPARE_BITS) {
         return Err(MpcError::Protocol(format!(
-            "tamper-evident comparison operand `{label}` = {} is out of range (must be < 2^{} = \
-             {}); the bit-decomposition would wrap and the verdict would be wrong",
-            v.value(),
+            "tamper-evident comparison operand `{}` is out of range (must be < 2^{} = {}); the \
+             bit-decomposition would wrap and the verdict would be wrong",
+            label,
             COMPARE_BITS,
             1u64 << COMPARE_BITS
         )));
@@ -308,11 +316,11 @@ fn verdict_bit(bit: Fp) -> Result<bool, MpcError> {
     } else if bit == Fp::one() {
         Ok(true)
     } else {
-        Err(MpcError::Protocol(format!(
-            "tamper-evident comparison verdict reconstructed to a non-boolean field element {} \
-             (expected 0 or 1) — refusing to coerce",
-            bit.value()
-        )))
+        Err(MpcError::Protocol(
+            "tamper-evident comparison verdict reconstructed to a non-boolean field element \
+             (expected 0 or 1) — refusing to coerce"
+                .to_string(),
+        ))
     }
 }
 
@@ -782,6 +790,41 @@ mod tests {
         ));
     }
 
+    /// The range error reports the bound only: the public bit-width / exclusive
+    /// bound and the operand POSITION, never the private operand's own value in
+    /// decimal or hex.
+    #[test]
+    fn range_error_message_carries_no_operand_value() {
+        const DISTINCTIVE: u64 = 0x1DEA_DBEE_FCAF_E777;
+        const { assert!(DISTINCTIVE >= (1u64 << COMPARE_BITS) && DISTINCTIVE < P) };
+        let forbidden = [
+            format!("{}", DISTINCTIVE),
+            format!("{:x}", DISTINCTIVE),
+            format!("{:X}", DISTINCTIVE),
+        ];
+        let backend = ShamirBackend::new_seeded(5, 1).unwrap();
+        let refusals = [
+            malicious_greater_than(&backend, Fp::new(DISTINCTIVE), Fp::new(1)),
+            malicious_greater_than(&backend, Fp::new(1), Fp::new(DISTINCTIVE)),
+        ];
+        for refusal in refusals {
+            let msg = match refusal.unwrap_err() {
+                MpcError::Protocol(m) => m,
+                other => panic!("expected a Protocol range error, got {:?}", other),
+            };
+            assert!(msg.contains("out of range"), "not a range error: {}", msg);
+            assert!(msg.contains("2^60"), "the bound is missing from: {}", msg);
+            for form in &forbidden {
+                assert!(
+                    !msg.contains(form.as_str()),
+                    "the range error carried the operand value {}: {}",
+                    form,
+                    msg
+                );
+            }
+        }
+    }
+
     /// The empty MAC-check is a no-op pass (nothing to verify before nothing is
     /// opened) — the OWA-safe boundary.
     #[test]
@@ -846,5 +889,31 @@ mod tests {
             })
             .collect();
         crate::authenticated::AuthenticatedShare::new(av.value_shares().to_vec(), mac).unwrap()
+    }
+
+    /// The tamper-evident path's twin refusals are value-free as well: the
+    /// operand range check and the non-boolean verdict coercion.
+    #[test]
+    fn tamper_evident_refusals_render_no_field_element() {
+        let shown = |e: &MpcError| format!("{} || {:?}", e, e);
+
+        let operand = (1u64 << COMPARE_BITS) + 838_383;
+        let err = check_in_range("threshold", Fp::new(operand)).unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("838383") && !text.contains(&operand.to_string()),
+            "the operand must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("`threshold`") && text.contains("out of range"),
+            "{}",
+            text
+        );
+
+        let err = verdict_bit(Fp::new(515_151)).unwrap_err();
+        let text = shown(&err);
+        assert!(!text.contains("515151"), "{}", text);
+        assert!(text.contains("non-boolean"), "{}", text);
     }
 }

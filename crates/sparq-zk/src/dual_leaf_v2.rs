@@ -74,17 +74,22 @@
 //! lies inside the band, so V1 retains the in-band sentinel and V2 discharges
 //! this §14.1 requirement ON THE HOST SIDE.
 //!
-//! The §14.1 requirement also has an IN-CIRCUIT half, and that half is PARTLY
-//! discharged. `zk/dual-leaf-v2/src/lib.nr` now carries the sentinel and the
-//! scale-free lane constants as Noir `global`s, re-checks the band exclusion in
-//! Noir (`nargo test`), and exports the `assert_handle_not_value_none` /
-//! `assert_handle_in_band` assertions a leaf recompute would call;
-//! `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs` pins each Noir literal to
-//! its host derivation here. What is still OPEN is the ENFORCEMENT: no member
-//! in `zk/compose` imports that library, so no shipped circuit asserts the band
-//! exclusion on a witnessed hook. The committer does, and the members reject
-//! the out-of-band value only because their `u64` range decomposition (and
-//! `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
+//! The §14.1 requirement also has an IN-CIRCUIT half, and that half has SHIPPED.
+//! `zk/dual-leaf-v2/src/lib.nr` carries the sentinel and the scale-free lane
+//! constants as Noir `global`s and re-checks the band exclusion in Noir
+//! (`nargo test`); `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs` pins each Noir
+//! literal to its host derivation here. `compose_core::dual_leaf_v2_leaf` imports
+//! those constants and its `recompute_term` asserts, at each witnessed component
+//! site, that a slot declaring a value handle carries one inside the band and that
+//! a slot declaring none carries exactly `VALUE_NONE_V2` — reached by the
+//! component-witnessed `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members.
+//!
+//! What is still OPEN is REACHABILITY: no `CircuitId` names either V2 member
+//! (pinned by `sparq-zk-compose/tests/v2_dual_leaf_members_unreachable.rs`), so no
+//! verify path selects one and those asserts are not yet enforced on any
+//! verification. On the value-lane FILTER members, which have no such assert, an
+//! out-of-band value is still refused only because their `u64` range decomposition
+//! (and `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
 //!
 //! The §14.1 **`LANG_NONE` separation** is enforced on the HOST side, not by
 //! construction: the no-language slot still folds the V1
@@ -93,8 +98,13 @@
 //! [`degenerate_value_component`] (and every encoder above it) refuses a tag
 //! whose [`lang_const`] equals `LANG_NONE` with
 //! [`DualLeafError::ReservedLanguageConstant`] — the same gate as V1
-//! ([`checked_lang_const`]). The in-circuit mirror §14.1 also names is still
-//! open: no Noir member asserts `LANG_CONST != LANG_NONE`.
+//! ([`checked_lang_const`]). The in-circuit mirror §14.1 also names has shipped:
+//! `compose_core::dual_leaf_v2_leaf::recompute_term` asserts that a slot declaring
+//! a language tag carries `LANG_CONST != LANG_NONE` and that a language-free slot
+//! carries exactly `LANG_NONE`, at the witnessed component sites of the
+//! `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members. No `CircuitId` names
+//! either member, so no verify path selects one and that assert is not yet
+//! enforced on any verification.
 //!
 //! ## 3. The bit-domain boolean lane
 //!

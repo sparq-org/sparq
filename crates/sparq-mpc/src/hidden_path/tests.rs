@@ -305,6 +305,44 @@ fn oversized_k_is_rejected() {
     assert!(matches!(err, MpcError::Protocol(m) if m.contains("chain")));
 }
 
+/// Hop counts are capped before evaluation: a `k` past [`MAX_HOP_COUNT`] — up to
+/// `usize::MAX`, where the per-hop counting loop and the `k`-wide odometer would
+/// otherwise run — is refused by the hop guard with NO draw made, so the refusal
+/// does not wait on the enumeration being sized. Finishing the test at all is the
+/// no-hang witness; nothing here asserts a timing.
+#[test]
+fn huge_hop_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+    let (edges, _i) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    // A single self-loop edge too: with |E| = 1 the projected tuple count stays 1
+    // for ANY k, so MAX_CHAIN_TUPLES never fires and only the hop cap refuses.
+    let (one_edge, _j) = hidden_edges(&[("http://ex/a", "http://ex/a")]);
+    let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+
+    for edge_set in [&edges, &one_edge] {
+        for k in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err =
+                eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, edge_set, k, 8)
+                    .expect_err("a hop count past the cap must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+                "k={}: expected the hop-count refusal, got {:?}",
+                k,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+        }
+    }
+    // The cap itself is still a legal `k` as far as the hop guard goes (|E| = 1
+    // keeps the tuple count at 1, so nothing else refuses it).
+    assert!(eval_exact_k_chain_hidden(&backend, &one_edge, MAX_HOP_COUNT, 8).is_ok());
+}
+
 // =====================================================================
 // Determinism of the disclosed result across shuffle seeds
 // =====================================================================
@@ -688,5 +726,426 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     assert_eq!(
         suffix,
         [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
+    );
+}
+
+/// The two caps are pinned by VALUE, not only by their relation.
+///
+/// `MAX_HOP_COUNT` is DEFINED as `MAX_CHAIN_TUPLES.ilog2()`, so asserting that
+/// relation would be a tautology that passes however either moves. What is
+/// load-bearing is the numbers themselves: a reviewer reading a cost argument
+/// about "18 hops" and "2^18 tuples" should find that claim pinned somewhere, and
+/// changing either constant should make a test say so rather than quietly
+/// rescaling every bound in the module.
+#[test]
+fn the_hop_and_tuple_caps_are_pinned_by_value() {
+    use crate::hidden_path::{MAX_CHAIN_TUPLES, MAX_HOP_COUNT};
+    assert_eq!(MAX_HOP_COUNT, 18, "the documented hop cap");
+    assert_eq!(MAX_CHAIN_TUPLES, 1u64 << 18, "the documented tuple cap");
+    // And the relation the definition expresses, so a future hand-written value
+    // cannot drift from it.
+    assert_eq!(MAX_HOP_COUNT, MAX_CHAIN_TUPLES.ilog2() as usize);
+}
+
+/// Both exactly-`k` entries — the public slot path and the test-only instrumented
+/// one — refuse an over-cap output bound before ANY draw, on a NON-EMPTY edge set.
+/// `build_candidates` draws per hop equality and the output stage materialises `B`
+/// slots, so the refusal has to precede both.
+#[test]
+fn an_over_cap_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C01).unwrap();
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+        ("http://ex/c", "http://ex/d"),
+    ]);
+
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, bound)
+            .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(counted.draws(), 0, "slots_through B={bound}");
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, bound)
+                .expect_err("the instrumented entry must refuse it too");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(counted.draws(), 0, "candidates_and_opened_rows B={bound}");
+    }
+
+    // A legal bound over the same edges still runs.
+    let legal = eval_exact_k_chain_hidden(&backend, &edges, 2, 16);
+    assert!(legal.is_ok(), "a legal bound must still run: {:?}", legal);
+}
+
+/// The OTHER half of the bound contract — `B` covering the candidate count — is
+/// also settled before any draw.
+///
+/// This is the half that used to be left to the output stage: with `|E| = 2` and
+/// `k = 18` the builder drew one secure equality per hop of every one of the
+/// `2^18` tuples, about 2.1 billion draws over roughly seventeen minutes, and only
+/// THEN discovered that `B = 1` could not hold the answer. The count is decidable
+/// from the disclosed endpoint terms in `O(|E| log |E|)`, so it is now decided
+/// first. A `k = 18` fixture is used deliberately: with the guard in place the test
+/// finishes instantly, and without it the enumeration is the cost being avoided.
+#[test]
+fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C07).unwrap();
+    // Two edges over three nodes: 2 distinct subjects x 2 distinct objects = 4
+    // endpoint pairs for any k >= 2, so B = 1 cannot cover it.
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    assert_eq!(
+        projected_candidate_count(&edges, 18).unwrap(),
+        4,
+        "the projection must agree with the builder's grouping"
+    );
+
+    for k in [2usize, 18] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, k, 1)
+            .expect_err("a bound below the candidate count must be refused");
+        match &err {
+            MpcError::Protocol(m) => {
+                assert!(
+                    m.contains("does not cover the candidate set"),
+                    "k={}: {}",
+                    k,
+                    m
+                );
+                // The message names B and the PUBLIC bound, and no candidate count.
+                assert!(
+                    m.contains("B=1") && m.contains("public candidate bound 4"),
+                    "k={}: {}",
+                    k,
+                    m
+                );
+                assert!(!m.contains("count 4"), "k={}: {}", k, m);
+            }
+            other => panic!("k={}: expected a Protocol refusal, got {:?}", k, other),
+        }
+        assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+    }
+
+    // k = 1 groups by the edges' own (subject, object) pairs, so the count is 2 and
+    // B = 1 is still short — the projection must track `k`, not assume the product.
+    assert_eq!(projected_candidate_count(&edges, 1).unwrap(), 2);
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    assert!(
+        eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 1, 1).is_err(),
+        "B=1 below the k=1 count must be refused"
+    );
+    assert_eq!(counted.draws(), 0);
+
+    // And the projection is EXACT, not merely an upper bound: a bound equal to it
+    // runs, for both the k = 1 and the k >= 2 grouping.
+    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = exact count runs at k=1");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = exact count runs at k=2");
+
+    // The test-only instrumentation entry carries the SAME bound contract, so a
+    // short `B` cannot reach the builder through it either.
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    assert!(
+        exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, 1).is_err(),
+        "the instrumentation entry must refuse a short B too"
+    );
+    assert_eq!(counted.draws(), 0);
+}
+
+/// `public_candidate_pair_bound` is the value a caller provisions `B` against: it
+/// is a function of the edge COUNT and `k`, and of nothing in the edges.
+#[test]
+fn the_public_candidate_pair_bound_is_a_function_of_the_public_sizes() {
+    // k = 1 keys at most one pair per edge.
+    assert_eq!(public_candidate_pair_bound(7, 1).unwrap(), 7);
+    // k >= 2 is the product of the two endpoint positions, capped by |E|^k.
+    assert_eq!(public_candidate_pair_bound(7, 2).unwrap(), 49);
+    assert_eq!(public_candidate_pair_bound(7, 9).unwrap(), 49);
+    // |E|^k is the tighter bound while it is below |E|^2 — it never is for k >= 2,
+    // but k = 2 over two edges shows the two agreeing.
+    assert_eq!(public_candidate_pair_bound(2, 2).unwrap(), 4);
+    // Degenerate inputs produce no candidates at all.
+    assert_eq!(public_candidate_pair_bound(0, 5).unwrap(), 0);
+    assert_eq!(public_candidate_pair_bound(5, 0).unwrap(), 0);
+    // `|E|^2` overflowing `usize` is a refusal, not a wrap.
+    assert!(public_candidate_pair_bound(usize::MAX, 2).is_err());
+
+    // Two edge sets of the SAME size but different contents give the same bound —
+    // that is the property that makes a decision taken on it data-independent.
+    let (a, _ia) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/c", "http://ex/d"),
+    ]);
+    let (b, _ib) = hidden_edges(&[
+        ("http://ex/x", "http://ex/x"),
+        ("http://ex/x", "http://ex/x"),
+    ]);
+    assert_eq!(
+        public_candidate_pair_bound(a.len(), 3).unwrap(),
+        public_candidate_pair_bound(b.len(), 3).unwrap()
+    );
+    // Their EXACT counts differ (4 pairs vs 1), which is exactly why the public
+    // bound is what the decision is taken on.
+    assert_ne!(
+        projected_candidate_count(&a, 3).unwrap(),
+        projected_candidate_count(&b, 3).unwrap()
+    );
+}
+
+/// The two branches of the exactly-`k` bound contract, at the entry point.
+///
+/// A `B` at or above the public bound is accepted whatever the edges are; a `B`
+/// below it is accepted when the real count fits and refused when it does not —
+/// after the data-dependent projection, but before any build and before any draw.
+/// The second branch is the one whose outcome discloses whether the distinct
+/// endpoint-pair count is at most `B`, and it exists so that a caller choosing a
+/// tight `B` is not refused work the data allows. Neither branch hides that count
+/// from a successful run; see the module docs for who learns what.
+#[test]
+fn both_branches_of_the_exact_k_bound_contract() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C09).unwrap();
+    // One edge pair, a self-loop and a chain: 2 distinct subjects x 2 distinct
+    // objects = 4 pairs at k >= 2, while the public bound is |E|^2 = 4 as well, so
+    // a second fixture is used below for the strictly-tighter case.
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    let public = public_candidate_pair_bound(edges.len(), 2).unwrap();
+    assert_eq!(public, 4);
+
+    // Branch 1: B at the public bound, and above it — accepted.
+    eval_exact_k_chain_hidden(&backend, &edges, 2, public).expect("B = the public bound runs");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, public + 3)
+        .expect("B above the public bound runs");
+
+    // Branch 2: a strictly tighter B than the public bound, with a count that
+    // FITS — must be accepted, not refused. Three parallel edges share one subject
+    // and one object, so k >= 2 yields a single pair while the public bound is 9.
+    let (narrow, _i2) = hidden_edges(&[
+        ("http://ex/s", "http://ex/o"),
+        ("http://ex/s", "http://ex/o"),
+        ("http://ex/s", "http://ex/o"),
+    ]);
+    let narrow_public = public_candidate_pair_bound(narrow.len(), 2).unwrap();
+    assert_eq!(narrow_public, 9);
+    assert_eq!(projected_candidate_count(&narrow, 2).unwrap(), 1);
+    eval_exact_k_chain_hidden(&backend, &narrow, 2, 1)
+        .expect("a B far below the public bound runs when the real count fits");
+
+    // Branch 2, the other way: the count does not fit, so it is refused before any
+    // draw, with a message carrying only B and the public bound.
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 3)
+        .expect_err("B below both the public bound and the count must be refused");
+    assert_eq!(counted.draws(), 0, "refused before any draw");
+    match &err {
+        MpcError::Protocol(m) => {
+            assert!(
+                m.contains("B=3") && m.contains("public candidate bound 4"),
+                "{}",
+                m
+            );
+            assert!(
+                !m.contains("count 4"),
+                "the count itself is not rendered: {}",
+                m
+            );
+        }
+        other => panic!("expected a Protocol refusal, got {:?}", other),
+    }
+}
+
+/// Build `n` predicated edges `(s_i -> o_i)`, all under one predicate.
+fn predicated_chain(n: usize, predicate: &str) -> PredicatedEdges {
+    let mut interner = Interner::new();
+    let mut edges = Vec::with_capacity(n);
+    for i in 0..n {
+        let s = format!("http://ex/s{}", i);
+        let o = format!("http://ex/o{}", i);
+        edges.push(PredicatedEdge {
+            predicate: predicate.to_string(),
+            subject: HiddenNode {
+                key: interner.key(&s),
+                term: iri_term(&s),
+            },
+            object: HiddenNode {
+                key: interner.key(&o),
+                term: iri_term(&o),
+            },
+        });
+    }
+    PredicatedEdges::new(edges)
+}
+
+/// The bounded entry's PUBLIC bound can exceed `MAX_OUTPUT_BOUND` for inputs
+/// `check_bounded_params` ACCEPTS — the public bound sums the arms, while `B` is
+/// capped. For those shapes no admissible `B` reaches the public bound, so the
+/// caller has only the data-dependent branch. This pins the two cases the entry
+/// doc and `skills/mpc/SKILL.md` quote.
+#[test]
+fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+    let backend = ShamirBackend::new_seeded(5, 0x51A3).unwrap();
+
+    // `{0,2}` over 511 edges: 2|E| diagonal + |E| at length 1 + |E|^2 at length 2.
+    let two = HiddenBoundedPath::range("http://ex/p", 0, 2);
+    let edges = predicated_chain(511, "http://ex/p");
+    check_bounded_params(&backend, &edges, &two).expect("{0,2} over 511 edges is accepted");
+    let public = public_bounded_candidate_pair_bound(edges.len(), &two).unwrap();
+    assert_eq!(public, 2 * 511 + 511 + 511 * 511);
+    assert!(
+        public > MAX_OUTPUT_BOUND,
+        "the public bound {} must be out of B's range {}",
+        public,
+        MAX_OUTPUT_BOUND
+    );
+
+    // `{0,1}` over 87_382 edges: the diagonal plus length 1 is already `3·|E|`.
+    let one = HiddenBoundedPath::range("http://ex/p", 0, 1);
+    let wide = predicated_chain(87_382, "http://ex/p");
+    check_bounded_params(&backend, &wide, &one).expect("{0,1} over 87_382 edges is accepted");
+    let public_one = public_bounded_candidate_pair_bound(wide.len(), &one).unwrap();
+    assert_eq!(public_one, 3 * 87_382);
+    assert!(
+        public_one > MAX_OUTPUT_BOUND,
+        "the public bound {} must be out of B's range {}",
+        public_one,
+        MAX_OUTPUT_BOUND
+    );
+    // One edge fewer still fits, so 87_382 is where the reach is actually lost.
+    assert!(public_bounded_candidate_pair_bound(87_381, &one).unwrap() <= MAX_OUTPUT_BOUND);
+}
+
+/// A DRAW-COUNT regression on the fold count, and nothing wider.
+///
+/// What it inspects is one projection of a whole call: the sequence of
+/// `DistributedRandomness` calls, each reduced to its seam method and its width.
+/// That projection is coarse on purpose and is NOT an operation or communication
+/// schedule — sharing an input bit and resharing a multiplication both surface as
+/// `vss_own_input`, so two runs with equal draw sequences can still differ in which
+/// operation each draw served and in what a transport would carry.
+///
+/// Within that projection: fixtures agreeing on the public sizes, the distinct
+/// endpoint-pair count `D`, the payload width and the (empty) result are equal
+/// whatever their nodes are, while a fixture with a smaller `D` is longer, because
+/// every repeated pair costs one extra secure OR. So the projection tracks `T − D`,
+/// hence `D`.
+///
+/// It does not separate the fold POSITIONS, and the equality on `folds_late` below
+/// says so. That is a statement about this projection only: the positions are
+/// disclosed elsewhere — the grouping reads every tuple's endpoint pair in the
+/// clear, and every party in a real run evaluates the same wiring — as the module
+/// docs set out.
+#[test]
+fn the_draw_method_count_projection_tracks_the_fold_count() {
+    use crate::randomness::test_sources::RecordingSource;
+
+    // The method/count projection of one whole call's randomness calls: each
+    // draw's seam method and its width. The drawn VALUES are deliberately excluded
+    // — they are sharings of the secrets, so they differ between any two distinct
+    // inputs and would say nothing about the call sequence. The seam method does
+    // not identify the OPERATION either (see the doc comment), which is why this is
+    // a draw-count regression and not a schedule comparison.
+    fn projection(pairs: &[(&str, &str)]) -> Vec<(&'static str, usize)> {
+        let backend = ShamirBackend::new_seeded(5, 0x5C4E).unwrap();
+        let (edges, _interner) = hidden_edges(pairs);
+        let mut recorder = RecordingSource::new(backend.dealer());
+        // |E| = 3, k = 2: T = 9 tuples, and B = 9 is the public bound, so the bound
+        // decision takes the public branch and no exact count is computed.
+        let (slots, _cost) =
+            eval_exact_k_chain_hidden_slots_through(&mut recorder, &backend, &edges, 2, 9)
+                .expect("the fixtures are legal");
+        // Every fixture below has an empty result, so the transcripts being compared
+        // belong to calls that disclose the same answer.
+        assert!(
+            partial_result_from_slots(slots, chain_out_vars())
+                .rows
+                .is_empty(),
+            "fixture {:?} must have an empty result for the comparison to be about the \
+             projection",
+            pairs
+        );
+        recorder.log.iter().map(|(m, v)| (*m, v.len())).collect()
+    }
+
+    // Subjects (a, a, d) x objects (b, c, b): D = 4 distinct pairs, so 5 of the 9
+    // tuples fold — at positions 3, 4, 5, 6 and 9.
+    let folds_early = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/a", "http://ex/c"),
+        ("http://ex/d", "http://ex/b"),
+    ];
+    // The same shape over four different nodes, every IRI the same length so the
+    // payload width is unchanged.
+    let folds_early_relabelled = [
+        ("http://ex/p", "http://ex/q"),
+        ("http://ex/p", "http://ex/r"),
+        ("http://ex/s", "http://ex/q"),
+    ];
+    // Same |E|, same D = 4, same width, same empty result — but the repeats fall at
+    // positions 3, 6, 7, 8 and 9 instead.
+    let folds_late = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/d", "http://ex/c"),
+        ("http://ex/a", "http://ex/b"),
+    ];
+    // Same |E|, same width, same empty result, but objects (b, b, b) leave only
+    // D = 2 distinct pairs, so 7 tuples fold instead of 5.
+    let fewer_pairs = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/d", "http://ex/b"),
+    ];
+
+    let early = projection(&folds_early);
+    let relabelled = projection(&folds_early_relabelled);
+    let late = projection(&folds_late);
+    let fewer = projection(&fewer_pairs);
+
+    assert_eq!(
+        early, relabelled,
+        "fixtures agreeing on the public sizes, D, the width and the result must have the same \
+         draw projection"
+    );
+    assert_eq!(
+        early, late,
+        "this projection does not separate the fold positions — if this ever differs, it \
+         carries more than the docs say and they must be widened"
+    );
+    assert_ne!(
+        early, fewer,
+        "a different D must change the draw projection: that is the count the module docs \
+         attribute to it"
+    );
+    assert!(
+        fewer.len() > early.len(),
+        "fewer distinct pairs means more folds, so more draws: {} vs {}",
+        fewer.len(),
+        early.len()
     );
 }

@@ -493,6 +493,27 @@
         }
       }
     },
+    "join_eq_v2dl_na16_nb16": {
+      "circuit_size": 45233,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": true
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
     "path_reach_d2_k1_n16": {
       "circuit_size": 5156,
       "lane": "string",
@@ -1241,6 +1262,48 @@
         }
       }
     },
+    "result_v5_k1_n16_p3_r4_f0_d10": {
+      "circuit_size": 32290,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v5_k2_n16_p3_r4_f0_d10": {
+      "circuit_size": 59104,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
     "revoke_hidden_ref_d10_a4": {
       "circuit_size": 4308,
       "lane": "string",
@@ -1430,6 +1493,27 @@
           "reason": "IllegalPair"
         }
       }
+    },
+    "scan_v2dl_k1_n16_r4": {
+      "circuit_size": 25095,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": true
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
     }
   },
   "comparison": {
@@ -1468,10 +1552,10 @@
     }
   },
   "summary": {
-    "circuits": 70,
+    "circuits": 74,
     "methods": 4,
-    "configs": 280,
-    "legal_configs": 146,
-    "illegal_configs": 134
+    "configs": 296,
+    "legal_configs": 150,
+    "illegal_configs": 146
   }
 }

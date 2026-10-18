@@ -166,6 +166,43 @@ fn write_share(buf: &mut Vec<u8>, s: &Share) {
     buf.extend_from_slice(&s.y.value().to_be_bytes());
 }
 
+/// Refuse a declared item count that the bytes still in the frame cannot possibly
+/// hold, BEFORE anything is reserved for it.
+///
+/// A length-prefixed decode reads its count from the frame, so the count is
+/// attacker-chosen while the frame is not: a `u32` count of `0xffffffff` at
+/// `8 + FIELD_BYTES` bytes an item asks for about 64 GiB, and
+/// `Vec::with_capacity` on that aborts the process rather than returning an error.
+/// Reading item by item and letting the short-frame check fail is not enough,
+/// because the reserve happens first.
+///
+/// The test is `declared <= remaining / per_item`. Dividing rather than
+/// multiplying `declared` by `per_item` means there is no product to overflow, and
+/// a `per_item` of zero — which no caller has, but which would make the division
+/// meaningless — is refused rather than panicking.
+fn checked_item_count(
+    what: &str,
+    declared: usize,
+    remaining: usize,
+    per_item: usize,
+) -> Result<usize, MpcError> {
+    if per_item == 0 {
+        return Err(MpcError::Protocol(format!(
+            "{}: zero-width items cannot be counted from a frame",
+            what
+        )));
+    }
+    let affordable = remaining / per_item;
+    if declared > affordable {
+        return Err(MpcError::Protocol(format!(
+            "{}: frame declares {} item(s) but its remaining {} byte(s) hold at most \
+             {} at {} byte(s) each — refusing before reserving",
+            what, declared, remaining, affordable, per_item
+        )));
+    }
+    Ok(declared)
+}
+
 fn read_share(bytes: &[u8], off: &mut usize) -> Result<Share, MpcError> {
     let need = 8 + FIELD_BYTES;
     if *off + need > bytes.len() {
@@ -179,6 +216,23 @@ fn read_share(bytes: &[u8], off: &mut usize) -> Result<Share, MpcError> {
 }
 
 impl Message {
+    /// The message's KIND, as a fixed string — never its contents.
+    ///
+    /// A `Shares` or `Open` message carries share POINTS, so Debug-formatting an
+    /// unexpected message into a protocol error would put those values in the
+    /// error text. Every "expected X, got Y" refusal in this module names the
+    /// kind through this accessor instead; the kind is what the reader needs to
+    /// diagnose a desynchronised exchange.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Message::Shares(_) => "Shares",
+            Message::Open(_) => "Open",
+            Message::Step(_) => "Step",
+            Message::Swap { .. } => "Swap",
+            Message::Done => "Done",
+        }
+    }
+
     /// Serialise to a length-prefixed frame: `[u32 len][u8 tag][payload]`. `len`
     /// covers the tag + payload, so a reader frames on the prefix alone.
     pub fn encode(&self) -> Vec<u8> {
@@ -229,6 +283,14 @@ impl Message {
                 }
                 let count = u32::from_be_bytes(body[off..off + 4].try_into().unwrap()) as usize;
                 off += 4;
+                // The count came from the frame; the frame's remaining length did
+                // not. Refuse a count those bytes cannot hold BEFORE reserving.
+                let count = checked_item_count(
+                    "share-vec frame",
+                    count,
+                    body.len() - off,
+                    8 + FIELD_BYTES,
+                )?;
                 let mut v = Vec::with_capacity(count);
                 for _ in 0..count {
                     v.push(read_share(body, &mut off)?);
@@ -362,7 +424,8 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
                     Message::Shares(v) => v,
                     other => {
                         return Err(MpcError::Protocol(format!(
-                            "expected Shares, got {other:?}"
+                            "expected Shares, got {}",
+                            other.kind()
                         )))
                     }
                 };
@@ -402,7 +465,8 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
                     Message::Shares(v) => v,
                     other => {
                         return Err(MpcError::Protocol(format!(
-                            "expected Shares, got {other:?}"
+                            "expected Shares, got {}",
+                            other.kind()
                         )))
                     }
                 };
@@ -434,7 +498,8 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
                     Message::Shares(v) => v,
                     other => {
                         return Err(MpcError::Protocol(format!(
-                            "SwapNetworkAndOpen: expected Shares, got {other:?}"
+                            "SwapNetworkAndOpen: expected Shares, got {}",
+                            other.kind()
                         )))
                     }
                 };
@@ -468,7 +533,8 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
                         Message::Done => break,
                         other => {
                             return Err(MpcError::Protocol(format!(
-                                "SwapNetworkAndOpen: expected Swap or Done, got {other:?}"
+                                "SwapNetworkAndOpen: expected Swap or Done, got {}",
+                                other.kind()
                             )))
                         }
                     }
@@ -478,7 +544,8 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
             Message::Done => return Ok(()),
             other => {
                 return Err(MpcError::Protocol(format!(
-                    "party got unexpected {other:?}"
+                    "party got an unexpected {} message",
+                    other.kind()
                 )))
             }
         }
@@ -648,9 +715,12 @@ impl<S: Read + Write> Coordinator<S> {
             )));
         }
         // Build all candidate (d, r) sharings. d = keyL - keyR; r = fresh nonzero
-        // mask. Keys 0..scale on both sides. Pair count = scale².
-        let mut d_sharings: Vec<Vec<Share>> = Vec::with_capacity(scale * scale);
-        let mut r_sharings: Vec<Vec<Share>> = Vec::with_capacity(scale * scale);
+        // mask. Keys 0..scale on both sides. Pair count = scale², which is a product
+        // of a caller-chosen number with itself: counted with checked arithmetic and
+        // capped before either vector is reserved or a single mask is drawn.
+        let pairs = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+        let mut d_sharings: Vec<Vec<Share>> = Vec::with_capacity(pairs);
+        let mut r_sharings: Vec<Vec<Share>> = Vec::with_capacity(pairs);
         for lkey in 0..scale {
             for rkey in 0..scale {
                 let d = Fp::new(lkey as u64).sub(Fp::new(rkey as u64));
@@ -747,7 +817,7 @@ impl<S: Read + Write> Coordinator<S> {
             return Err(MpcError::Protocol("shuffle: no rows (empty column)".into()));
         }
         let n_rows = values.len();
-        let net = crate::oblivious::WaksmanNetwork::new(n_rows);
+        let net = crate::oblivious::WaksmanNetwork::try_new(n_rows)?;
         // Sample the fresh secret permutation + route it to per-switch control bits.
         // Same unbiased sampler the in-process `shuffle` uses (no second RNG path).
         let perm = crate::oblivious::sample_random_permutation(dealer, n_rows)?;
@@ -784,7 +854,7 @@ impl<S: Read + Write> Coordinator<S> {
             return Err(MpcError::Protocol("sort: no rows (empty column)".into()));
         }
         let n_rows = values.len();
-        let net = crate::oblivious::SortingNetwork::new(n_rows);
+        let net = crate::oblivious::SortingNetwork::try_new(n_rows)?;
         // Disclosed keys = the row values (matches the in-process `sort_with_keys`
         // gate, which swaps on strict greater-than → stable ascending). The keys are
         // tracked in lockstep with the swap decisions so each gate's bit is the
@@ -876,7 +946,12 @@ impl<S: Read + Write> Coordinator<S> {
                         columns[i].push(s);
                     }
                 }
-                other => return Err(MpcError::Protocol(format!("expected Open, got {other:?}"))),
+                other => {
+                    return Err(MpcError::Protocol(format!(
+                        "expected Open, got {}",
+                        other.kind()
+                    )))
+                }
             }
         }
         Ok(columns)
@@ -942,6 +1017,28 @@ pub fn run_cell_networked(
             "run_cell_networked: QueryClass::ObliviousShuffle drives the transport shuffle, whose PERMUTATION IS PUBLIC - every party is sent each switch's endpoints and its control bit in the clear. A caller that accepts that passes `Some(PublicPermutation::acknowledged())`; a private-output path needs secret control bits, which this tier does not have"
                 .to_string(),
         ));
+    }
+    // `scale` sizes the canonical input column each class builds, so cap it HERE —
+    // before the listener is bound and before `n` party threads are spawned, let
+    // alone before `(0..scale)` is collected. An uncapped `scale` is not a slow run
+    // but a dead process: `usize::MAX` overflows the column build and `1 << 35`
+    // exhausts memory. Each class is capped against the bound its own work is
+    // proportional to; the two classes that do not read `scale` are capped by
+    // nothing, which is stated rather than left to inference.
+    match query_class {
+        // Both build a `scale`-row column and route it through a network of that
+        // width, so the network cap is the one that fits.
+        QueryClass::ObliviousShuffle | QueryClass::ObliviousSort => {
+            crate::oblivious::check_network_width("run_cell_networked", scale)?;
+        }
+        // All-pairs over `scale x scale` rows: the candidate cardinality is the
+        // bound, and it is checked here as well as inside `Coordinator::hidden_join`.
+        QueryClass::HiddenValueEquiJoin => {
+            crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+        }
+        // `CumulativeSumAggregate` is sized by the caller's own `values` slice and
+        // ignores `scale`; `HiddenBoundedPath` has no wire driver and refuses below.
+        QueryClass::CumulativeSumAggregate | QueryClass::HiddenBoundedPath => {}
     }
     let n = backend.parties();
     // Bind a loopback listener; parties connect to it. Port 0 ⇒ OS-assigned.
@@ -1119,6 +1216,91 @@ mod tests {
         assert!(Message::decode(&[]).is_err());
     }
 
+    /// A declared item count is refused when the frame's remaining bytes cannot
+    /// hold it, BEFORE anything is reserved for it.
+    ///
+    /// The nine-byte frame `00 00 00 05 01 ff ff ff ff` is a share-vec header
+    /// declaring `0xffffffff` items with no item bytes behind it. Reading item by
+    /// item would have failed too, but only after `Vec::with_capacity` had asked
+    /// for about 64 GiB, which aborts the process instead of returning an error —
+    /// so "it returns `Err`" is the whole point, and a test that only checked the
+    /// `Err` while the reserve still happened would have passed before this fix.
+    #[test]
+    fn a_declared_count_beyond_the_frame_is_refused_before_reserving() {
+        let per_item = 8 + FIELD_BYTES;
+
+        // The crafted frame's body, exactly as it arrives after the length prefix.
+        for tag in [TAG_SHARES, TAG_OPEN] {
+            let mut body = vec![tag];
+            body.extend_from_slice(&u32::MAX.to_be_bytes());
+            let err = Message::decode(&body).expect_err("an impossible count is refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("refusing before reserving")),
+                "tag={}: {:?}",
+                tag,
+                err
+            );
+
+            // One item's worth of bytes present, many more declared.
+            let mut body = vec![tag];
+            body.extend_from_slice(&1000u32.to_be_bytes());
+            body.extend_from_slice(&1u64.to_be_bytes());
+            body.extend_from_slice(&[0u8; FIELD_BYTES]);
+            assert!(
+                Message::decode(&body).is_err(),
+                "tag={}: a count past the payload is refused",
+                tag
+            );
+
+            // Exactly affordable decodes; one more than affordable does not. This
+            // is the boundary, so an off-by-one in the check shows up here.
+            let mut exact = vec![tag];
+            exact.extend_from_slice(&2u32.to_be_bytes());
+            for x in 1..=2u64 {
+                exact.extend_from_slice(&x.to_be_bytes());
+                exact.extend_from_slice(&[0u8; FIELD_BYTES]);
+            }
+            Message::decode(&exact).expect("a count the frame can hold decodes");
+            let mut over = exact.clone();
+            over[1..5].copy_from_slice(&3u32.to_be_bytes());
+            assert!(
+                Message::decode(&over).is_err(),
+                "tag={}: one item more than the frame holds is refused",
+                tag
+            );
+        }
+
+        // The validator itself, including the boundary and the degenerate width.
+        assert_eq!(
+            checked_item_count("t", 4, 4 * per_item, per_item).unwrap(),
+            4
+        );
+        assert!(checked_item_count("t", 5, 4 * per_item, per_item).is_err());
+        assert!(checked_item_count("t", 1, 0, per_item).is_err());
+        assert_eq!(checked_item_count("t", 0, 0, per_item).unwrap(), 0);
+        assert!(
+            checked_item_count("t", 1, 8, 0).is_err(),
+            "a zero item width is refused, not divided by"
+        );
+
+        // Every other tag is fixed-width and already length-checked; a truncated
+        // body of each must still be an Err and never a panic.
+        for body in [
+            vec![TAG_STEP],
+            vec![TAG_SWAP],
+            vec![TAG_SWAP, 0, 0, 0, 1, 0, 0, 0],
+            vec![TAG_SHARES],
+            vec![TAG_OPEN, 0, 0],
+            vec![0xFE],
+        ] {
+            assert!(
+                Message::decode(&body).is_err(),
+                "a truncated or unknown frame must be an Err: {:?}",
+                body
+            );
+        }
+    }
+
     // --- THE load-bearing test: networked result == in-process result. -----
     #[test]
     fn networked_aggregate_matches_in_process() {
@@ -1282,6 +1464,47 @@ mod tests {
         (coord, handles)
     }
 
+    /// `Coordinator::hidden_join`'s OWN cap, tested directly on a Coordinator
+    /// rather than through `run_cell_networked`.
+    ///
+    /// Through the wire cell the two caps mask each other: the cell's own
+    /// preflight refuses first, so disabling either one alone leaves the other to
+    /// catch it and neither mutant shows. Driving the Coordinator directly isolates
+    /// this one, so it is pinned on its own terms.
+    #[test]
+    fn the_coordinators_hidden_join_caps_its_own_scale() {
+        let backend = ShamirBackend::new_seeded(3, 0xE9).unwrap();
+        let (mut coord, handles) = loopback_coordinator(&backend);
+        let mut dealer = backend.dealer();
+
+        // `scale^2` over the cap with `scale` itself under it, and the overflowing
+        // case. Both must be a typed refusal, not a wrapped length or an allocation.
+        // `scale` itself is legal (1024 is far below MAX_OUTPUT_BOUND); it is the
+        // SQUARE that is not, which is what distinguishes this cap from a width one.
+        for scale in [1usize << 10, usize::MAX] {
+            let err = coord
+                .hidden_join(&mut dealer, scale)
+                .expect_err("an over-cap pair count must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("MAX_OUTPUT_BOUND") || m.contains("overflows usize")),
+                "scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+        // A legal scale still runs the real wire join over the same Coordinator, so
+        // the cap refuses a size and not the operation.
+        let matches = coord
+            .hidden_join(&mut dealer, 4)
+            .expect("a legal scale still runs");
+        assert_eq!(matches, 4, "keys 0..4 on both sides match pairwise");
+
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+    }
+
     #[test]
     fn networked_shuffle_preserves_multiset_over_the_wire() {
         // A networked oblivious shuffle must open to a PERMUTATION of the input
@@ -1398,6 +1621,100 @@ mod tests {
     /// `run_cell_networked` is public and drives the public-permutation shuffle, so
     /// it must not manufacture the acknowledgement for its caller. Without the token
     /// the shuffle class is refused, and the refusal lands before any wire work.
+    /// `scale` sizes the canonical column each class builds, so an uncapped one is
+    /// not a slow cell but a dead process: `usize::MAX` overflows the `(0..scale)`
+    /// build and a merely large value exhausts memory. The cap sits at the top of
+    /// the function, ahead of the listener and the party threads, so the refusal
+    /// costs no socket and no thread — which is also why this test can afford to
+    /// try `usize::MAX` at all.
+    #[test]
+    fn run_cell_networked_refuses_an_over_cap_scale_without_panicking() {
+        use crate::oblivious::MAX_NETWORK_WIDTH;
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+        let backend = ShamirBackend::new_seeded(3, 0xE8).unwrap();
+
+        for scale in [MAX_NETWORK_WIDTH + 1, usize::MAX] {
+            // Both network classes cap on the width. The shuffle class is passed its
+            // opt-in token, so the refusal under test is the size one and not the
+            // acknowledgement one.
+            for (class, token) in [
+                (
+                    QueryClass::ObliviousShuffle,
+                    Some(PublicPermutation::acknowledged()),
+                ),
+                (QueryClass::ObliviousSort, None),
+            ] {
+                let mut dealer = backend.dealer();
+                let err = run_cell_networked(class, &backend, &mut dealer, &[], scale, token)
+                    .expect_err("an over-cap scale must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_NETWORK_WIDTH")),
+                    "{:?} scale={}: {:?}",
+                    class,
+                    scale,
+                    err
+                );
+            }
+
+            // The all-pairs class caps on the candidate cardinality instead.
+            let mut dealer = backend.dealer();
+            let err = run_cell_networked(
+                QueryClass::HiddenValueEquiJoin,
+                &backend,
+                &mut dealer,
+                &[],
+                scale,
+                None,
+            )
+            .expect_err("an over-cap scale must be refused");
+            // `usize::MAX` squared refuses on the overflow; a merely over-cap
+            // scale refuses on the cap. Both are the same guard, reached by its
+            // two arms, and both must be a typed refusal rather than a wrap.
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("MAX_OUTPUT_BOUND") || m.contains("overflows usize")),
+                "HiddenValueEquiJoin scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+
+        // `scale` below the cap but whose SQUARE is above it: the join class must
+        // still refuse, which is what distinguishes its cap from the width one.
+        let square_over = 1usize << 10;
+        assert!(
+            square_over <= MAX_NETWORK_WIDTH && square_over * square_over > MAX_OUTPUT_BOUND,
+            "the fixture must be legal as a width but illegal as a pair count"
+        );
+        let mut dealer = backend.dealer();
+        assert!(
+            run_cell_networked(
+                QueryClass::HiddenValueEquiJoin,
+                &backend,
+                &mut dealer,
+                &[],
+                square_over,
+                None,
+            )
+            .is_err(),
+            "scale^2 above the cap must be refused even though scale is not"
+        );
+
+        // And a legal scale still runs the real wire cell, so the caps refuse a
+        // size rather than the class.
+        let mut dealer = backend.dealer();
+        run_cell_networked(
+            QueryClass::ObliviousSort,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            None,
+        )
+        .expect("a legal scale still runs");
+    }
+
     #[test]
     fn run_cell_networked_refuses_the_shuffle_class_without_the_opt_in() {
         let backend = ShamirBackend::new_seeded(3, 0xE7).unwrap();
@@ -1476,6 +1793,173 @@ mod tests {
                 "expected a 'no shared inputs' protocol error, got: {msg}"
             ),
             other => panic!("expected Protocol error, got {other:?}"),
+        }
+    }
+
+    /// A desynchronised exchange is refused by NAMING THE MESSAGE KIND, never by
+    /// rendering the message.
+    ///
+    /// `Shares` and `Open` carry share points, so Debug-formatting an unexpected
+    /// message into the refusal would put those points in the error text. Each
+    /// case below sends a wrong-but-well-formed message whose share value is
+    /// distinctive, and asserts the value appears in neither `Display` nor
+    /// `Debug` of the resulting error while the kind does.
+    #[test]
+    fn a_wrong_message_is_refused_by_kind_without_rendering_its_shares() {
+        let marked = |y: u64| {
+            vec![Share {
+                x: 1,
+                y: Fp::new(y),
+            }]
+        };
+        let shown = |e: &MpcError| format!("{} || {:?}", e, e);
+
+        // (a) Party side, mid-step: a `Step` is acknowledged, then the party is
+        // handed `Open` where it expects `Shares`.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let party = std::thread::spawn(move || -> Result<(), MpcError> {
+            let stream = TcpStream::connect(addr).unwrap();
+            stream.set_nodelay(true).ok();
+            run_party(&mut Channel::new(stream))
+        });
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_nodelay(true).ok();
+        let mut chan = Channel::new(stream);
+        chan.send(&Message::Step(StepCode::SumAndOpen)).unwrap();
+        chan.send(&Message::Open(marked(121_212))).unwrap();
+        let err = party.join().unwrap().unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("121212"),
+            "the unexpected message's share value must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("expected Shares, got Open"),
+            "the kind is named instead: {}",
+            text
+        );
+
+        // (b) Party side, at the top of the loop: a `Shares` frame where only a
+        // `Step` or `Done` is legal.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let party = std::thread::spawn(move || -> Result<(), MpcError> {
+            let stream = TcpStream::connect(addr).unwrap();
+            stream.set_nodelay(true).ok();
+            run_party(&mut Channel::new(stream))
+        });
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_nodelay(true).ok();
+        let mut chan = Channel::new(stream);
+        chan.send(&Message::Shares(marked(343_434))).unwrap();
+        let err = party.join().unwrap().unwrap_err();
+        let text = shown(&err);
+        assert!(!text.contains("343434"), "{}", text);
+        assert!(
+            text.contains("unexpected Shares message"),
+            "the kind is named instead: {}",
+            text
+        );
+
+        // (b2) The same refusal on the other two step opcodes, so each site is
+        // pinned on its own: `MulAndOpen` expects `Shares`, and the swap network
+        // expects first `Shares` and then `Swap`/`Done`.
+        for (step, then, expected) in [
+            (
+                StepCode::MulAndOpen,
+                Message::Open(marked(454_545)),
+                "expected Shares, got Open",
+            ),
+            (
+                StepCode::SwapNetworkAndOpen,
+                Message::Open(marked(676_767)),
+                "SwapNetworkAndOpen: expected Shares, got Open",
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let party = std::thread::spawn(move || -> Result<(), MpcError> {
+                let stream = TcpStream::connect(addr).unwrap();
+                stream.set_nodelay(true).ok();
+                run_party(&mut Channel::new(stream))
+            });
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_nodelay(true).ok();
+            let mut chan = Channel::new(stream);
+            chan.send(&Message::Step(step)).unwrap();
+            let marker = match &then {
+                Message::Open(v) | Message::Shares(v) => v[0].y.value().to_string(),
+                _ => unreachable!("the wrong-kind messages above all carry shares"),
+            };
+            chan.send(&then).unwrap();
+            let err = party.join().unwrap().unwrap_err();
+            let text = shown(&err);
+            assert!(!text.contains(&marker), "{}", text);
+            assert!(text.contains(expected), "{}", text);
+        }
+
+        // (b3) Mid-swap-phase: a well-formed column, then a message that is
+        // neither `Swap` nor `Done`.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let party = std::thread::spawn(move || -> Result<(), MpcError> {
+            let stream = TcpStream::connect(addr).unwrap();
+            stream.set_nodelay(true).ok();
+            run_party(&mut Channel::new(stream))
+        });
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_nodelay(true).ok();
+        let mut chan = Channel::new(stream);
+        chan.send(&Message::Step(StepCode::SwapNetworkAndOpen))
+            .unwrap();
+        chan.send(&Message::Shares(marked(1))).unwrap();
+        chan.send(&Message::Open(marked(898_989))).unwrap();
+        let err = party.join().unwrap().unwrap_err();
+        let text = shown(&err);
+        assert!(!text.contains("898989"), "{}", text);
+        assert!(
+            text.contains("SwapNetworkAndOpen: expected Swap or Done, got Open"),
+            "{}",
+            text
+        );
+
+        // (c) Coordinator side: a party answers the open round with `Shares`.
+        let backend = ShamirBackend::new_seeded(3, 0x0FEE).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut fakes = Vec::new();
+        for _ in 0..backend.parties() {
+            fakes.push(std::thread::spawn(move || {
+                let stream = TcpStream::connect(addr).unwrap();
+                stream.set_nodelay(true).ok();
+                let mut chan = Channel::new(stream);
+                // The wrong KIND, with a distinctive share value.
+                chan.send(&Message::Shares(vec![Share {
+                    x: 1,
+                    y: Fp::new(565_656),
+                }]))
+                .unwrap();
+            }));
+        }
+        let mut channels = Vec::new();
+        for _ in 0..backend.parties() {
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_nodelay(true).ok();
+            channels.push(Channel::new(stream));
+        }
+        let mut coord = Coordinator::new(channels, backend).unwrap();
+        let err = coord.collect_opens(1).unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("565656"),
+            "the share value must not be rendered: {}",
+            text
+        );
+        assert!(text.contains("expected Open, got Shares"), "{}", text);
+        for f in fakes {
+            f.join().unwrap();
         }
     }
 }

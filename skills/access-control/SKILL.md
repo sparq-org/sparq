@@ -114,7 +114,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `urn:skolem:`/`urn:sparq:` IRI anywhere, name no reserved principal (`auth:`/`solidx:`, or
   an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
   `auth:`/`solidx:` predicate or class. Under ACP, an `.acr` that uses (as an access
-  control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
+  control, policy or matcher) a node of a rejected `.acr`, **or a node no loaded document
+  defines**, is withheld with it, to a fixpoint (see
+  [Unresolved references](#unresolved-references-and-cross-pod-policy-links)). `put_acl*` and
   `update_as*` refuse a write that would add such a triple to a control document the active
   view reads (`.acr` under ACP, `.acl` under WAC, neither reserved nor authority-less),
   judged in the state the write leaves (a statement an update adds and removes again is not
@@ -126,7 +128,19 @@ Materialize the authorization view from the access-control documents, then enfor
   attached, bridged or trust. So a writer who embeds `<r> solidx:creator <self>` in a
   content document OR in the `.acr` they control cannot self-grant (this also blocks forged
   `solidx:appliesToResource` policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
-  granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
+  granted `R2`), and so is every role a provenance matcher plays: in `allOf`, `anyOf` and
+  `noneOf` it is decided against the resource being accessed (an `allOf` of
+  `CreatorAgent` and `OwnerAgent` needs both on the same resource, and a `noneOf`
+  `CreatorAgent` excepts that resource's creator) and composes with `acp:client`/`acp:issuer`
+  constraints on the matcher itself AND on a sibling matcher of the same policy (the
+  resource's creator/owner is crossed with every client and issuer value the policy's
+  matchers name).
+  Provenance is THREE-VALUED: on a resource the caller supplied no creator (resp. owner)
+  for, a `CreatorAgent` (resp. `OwnerAgent`) matcher is UNDECIDED in all three roles — no
+  agent can be ruled out as that resource's creator — so an `acp:allow` whose conditions
+  include it does NOT apply, and an `acp:deny` whose conditions include it DOES, for every
+  agent. That holds for a resource that is absent from the view but has its own `.acr`, and
+  for one whose provenance was forgotten.
   The store keeps the provenance and credentials of its last successful ACP
   materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
   `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
@@ -141,19 +155,30 @@ Materialize the authorization view from the access-control documents, then enfor
   installed, and is not removed at any point in it; it loses them otherwise (so an `.acr`
   stored by an edit the store was not told of keeps nothing). So the facts of a dropped document, or of an emptied container, are
   kept with its `.acr` and come back with the resource only while that `.acr` stays stored
-  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update and the MCP
-  server never record a creator; a direct edit (below)
-  records its agent as creator of a new resource whose own `.acr` was not already
-  stored. A commit refused at its
+  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update never records a
+  creator; a direct edit (below) records its agent as creator of the resources it names that
+  the edit brings into being, unless the resource's own `.acr` was already stored. A container
+  the edit brings into being alongside a resource it names — an ancestor with nothing stored
+  below it before — is not one of them, so a writer never becomes the creator of a container
+  above what it wrote. A commit refused at its
   commit point unwritten changes nothing; any other failed commit (part of the update may be
   applied, or journaled for a reopen to replay) drops the view, and `materialize_acp()`
-  refuses until the context is passed again. A caller that edits `store.graph` directly
-  takes `store.stored_graphs()` first and then calls
-  `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does, with no
-  creator), which
-  applies the same rule and installs the view and provenance together only on success.
+  refuses until the context is passed again. The dataset is read through `store.graph()`; a
+  caller that edits it through `store.graph_unchecked_mut()` takes `store.stored_graphs()`
+  first and then calls
+  `store.rematerialize_after_edit(&before, creator, created, acp)` — `created` naming the
+  resources `creator` created — which
+  applies the same rule and installs the view and provenance together only on success. It
+  refuses when `acp` is not the model the view in force was built under, rather than replacing
+  that view. Every entry point that installs a view does, and before it changes anything, so
+  the refusal leaves the dataset, the stored provenance and the view as they were:
+  every `update_as*` (whether or not the update changes the access-control documents: what it
+  writes and the facts it stages are installed over the view in force either way), and
+  `put_acl*`/`delete_acl*` (the MCP server passes its session agent and the
+  resource its call created). `store.holds_resource(iri)` asks whether `iri` is a resource of
+  the view, the store's own enumeration.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing
-  `store.graph` without that call is forgotten at the next rebuild, WAC or ACP (unless its
+  the dataset without that call is forgotten at the next rebuild, WAC or ACP (unless its
   own `.acr` is stored and was at the previous install; facts passed back unchanged to
   `materialize_acp_with*` are judged the same way), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
   documents name `acp:CreatorAgent` or `acp:OwnerAgent`.
@@ -595,10 +620,16 @@ discovery; neither is itself a conformance-tested HTTP layer.
   dimension. sq-3jtd.5: matchers may also use `acp:agent acp:CreatorAgent` /
   `acp:OwnerAgent` — the context agent must be the resource's creator / owner, resolved
   against the TRUSTED per-resource provenance supplied via `materialize_acp_with` (above),
-  resource-scoped and fail-closed. sq-ysv3u: matchers may also constrain on
+  resource-scoped, three-valued (undecided where the resource has no recorded creator /
+  owner: an allow needing it does not apply, a deny needing it does) and fail-closed. sq-ysv3u: matchers may also constrain on
   **`acp:vc`** — the context agent must hold a verified credential satisfying the named
   requirement, resolved against the TRUSTED holdings supplied via
   `materialize_acp_with_credentials` (above), and fail-closed with none supplied.
+  A matcher's attributes are FLAT — `acp:allOf`/`anyOf`/`noneOf` combine a policy's
+  matchers, and each matcher is a conjunction across its attributes and a disjunction
+  within one (so one matcher naming `acp:CreatorAgent`, `acp:OwnerAgent` and a concrete
+  WebID is satisfied by any of the three, and is undecided only when none of them accepts
+  and at least one is unrecorded). A matcher that nests another matcher is NOT supported.
   A matcher with no supported attribute (`acp:agent`, `acp:client`,
   `acp:issuer`, or `acp:vc`) is unsatisfied, as required by
   [ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher). Removing its final
@@ -614,6 +645,36 @@ discovery; neither is itself a conformance-tested HTTP layer.
   `AnyClient` as the client component when no client was supplied), for ≤12 grant lookups.
   Only an issuer-CONSTRAINED grant mints a triple principal; an issuer-unconstrained grant
   (`AnyIssuer`) reuses the agent / pair term, so issuer-blind pods are unaffected.
+
+### Unresolved references and cross-pod policy links
+
+An `.acr` may name an access control, a policy or a matcher that another document defines.
+What happens then turns on whether that document is in the **loaded set** — the `.acr`
+graphs the ACP loader reads (outside the reserved and skolem spaces, below an authority):
+
+- **Target loaded** (this pod or another) — the reference applies, and the resource is
+  decided by statements the target document's editor controls. This is **intended**: an
+  explicit cross-pod policy link **delegates trust to the linked document's editor**, the
+  same delegation WAC's `acl:agentGroup` makes. Pointing at a document is the referring
+  document's own choice; what the loader removes (via the admissibility check above) is a
+  document *describing* nodes it does not define.
+- **Target not loaded** — another pod's document, or one a partial load left out. Nothing
+  is known about what the named node says, and an unknown statement may be an `acp:deny`,
+  an `acp:noneOf` exception or a condition on an allow. So the **referring document
+  contributes nothing**, exactly like one the loader rejects: its resource and everything
+  below it get **no grant from any source** (static, attached, bridged or trust), and no
+  ancestor's member policy takes over. This propagates to a fixpoint, so a shared policy
+  document with one unresolved reference withholds every `.acr` that applies it.
+
+The two cases differ because a loaded document is known in full: a node it simply does not
+describe is a **known-empty** access control, policy or matcher and decides as ACP §6.5
+says (an attribute-free matcher never matches, so an empty `noneOf` blocks nothing). An
+absent document is not known-empty — it is unknown.
+
+`put_acl*`/`update_as*` refuse a write that would add such a reference to a control
+document the active view reads, because the written document would be withheld with it,
+Control included, leaving the writer unable to repair it. Order writes so a document is
+stored before one that uses its nodes.
 
 ## ACP conformance harness — sq-3jtd.9
 

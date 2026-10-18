@@ -211,6 +211,34 @@ impl<S: Store> NotifyState<S> {
             .is_some_and(|rest| rest.starts_with('/'))
     }
 
+    /// The one form a subscription topic is reserved, authorized, bound into a receive token and
+    /// dispatched under: the IRI [`crate::ldp::target::parse_target`] gives the topic's path, so
+    /// its query and fragment are dropped exactly as for an LDP request, and a topic that names no
+    /// LDP resource has none. That is a topic `parse_target` refuses — a linkset record
+    /// (`X.meta`, in any case, as sent or %-decoded), anything in the `/.lws/` service namespace
+    /// or the reserved identity namespace, an empty interior segment or a dot segment — and a
+    /// topic with a segment that is `.` or `..` once %-decoded. A topic off this storage
+    /// ([`NotifyState::is_on_this_storage`]) has none either.
+    fn canonical_topic(&self, topic: &str) -> Result<String, TopicRefusal> {
+        if !self.is_on_this_storage(topic) {
+            return Err(TopicRefusal::OffStorage);
+        }
+        let base = self.base_url.trim_end_matches('/');
+        let path = &topic[base.len()..];
+        let target =
+            crate::ldp::target::parse_target(base, path).map_err(|_| TopicRefusal::NotAResource)?;
+        let dot_segment = target.iri[base.len()..].split('/').any(|seg| {
+            matches!(
+                crate::identity::percent_decode_lossy(seg).as_str(),
+                "." | ".."
+            )
+        });
+        if dot_segment {
+            return Err(TopicRefusal::NotAResource);
+        }
+        Ok(target.iri)
+    }
+
     /// The `receiveFrom` WebSocket URL for a topic, carrying the minted receive `token`. The base
     /// URL's scheme is mapped http→ws / https→wss (WebSocketChannel2023 §receiveFrom — the receive
     /// endpoint is a WebSocket URL). The token authorizes the WS upgrade for this topic (a browser
@@ -233,6 +261,14 @@ impl<S: Store> NotifyState<S> {
             encode_query_value(token),
         )
     }
+}
+
+/// Why a subscription topic has no canonical form ([`NotifyState::canonical_topic`]).
+enum TopicRefusal {
+    /// It is not under this storage's root.
+    OffStorage,
+    /// It is on this storage, but names no LDP resource.
+    NotAResource,
 }
 
 /// The JSON-LD subscription request body a client POSTs. Per WebSocketChannel2023 the client sends a
@@ -308,13 +344,24 @@ pub async fn subscribe_handler<S: Store>(
     // otherwise inherit the root ACL's `acl:default` grant. Nothing is ever emitted for such a topic,
     // so refuse it up front. This depends only on the request body and the server's own base URL, so
     // it discloses nothing about any resource.
-    if !state.is_on_this_storage(topic) {
-        return (
-            StatusCode::BAD_REQUEST,
-            "topic is not a resource on this storage",
-        )
-            .into_response();
-    }
+    //
+    // A topic on this storage is taken in its canonical form from here on: the WAC gate, the
+    // receive token, the answer and the dispatch all use it. One with no canonical form (a linkset
+    // record, the `/.lws/` service namespace, a dot segment) is answered exactly as one this caller
+    // may not watch: the same `403`, no token minted, so which of the two a topic is cannot be
+    // told apart from the response.
+    let topic = match state.canonical_topic(topic) {
+        Ok(topic) => topic,
+        Err(TopicRefusal::OffStorage) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "topic is not a resource on this storage",
+            )
+                .into_response();
+        }
+        Err(TopicRefusal::NotAResource) => return topic_denied(),
+    };
+    let topic = topic.as_str();
 
     // Per-resource WAC: this authenticated WebID must be able to READ the topic. A denial returns
     // before anything is minted or registered.
@@ -408,7 +455,15 @@ pub async fn receive_handler<S: Store + 'static>(
                 .into_response()
         }
     };
-    let Some(web_id) = state.hub.authorize_receive_token(&token, &topic).await else {
+    // The token is checked against the topic's canonical form, the one it was minted for, which
+    // the socket is then registered under. A topic with no canonical form had no token minted for
+    // it, and is answered as an invalid token is.
+    let topic = state.canonical_topic(&topic).ok();
+    let web_id = match &topic {
+        Some(topic) => state.hub.authorize_receive_token(&token, topic).await,
+        None => None,
+    };
+    let (Some(topic), Some(web_id)) = (topic, web_id) else {
         return (
             StatusCode::UNAUTHORIZED,
             "a valid receive token is required",
@@ -794,6 +849,161 @@ mod tests {
         }
         // The pod's own root is on this storage.
         assert!(s.is_on_this_storage("https://pod.example/"));
+    }
+
+    /// A topic naming a linkset record (`X.meta`, in any case, with or without a query or
+    /// fragment), the `/.lws/` service namespace, or a path through a dot segment has no
+    /// canonical form, so it is answered exactly as one the caller may not watch — byte for byte
+    /// the denial — and nothing is minted or registered for it.
+    #[tokio::test]
+    async fn subscribe_handler_refuses_a_reserved_topic_as_a_denial() {
+        // Alice owns the pod, so nothing but the topic's own name refuses her.
+        let s = state_owned_by(ALICE).await;
+        let denied = body_to_string(topic_denied()).await;
+        for topic in [
+            "https://pod.example/alice/doc.meta",
+            "https://pod.example/alice/DOC.META",
+            "https://pod.example/alice/doc%2Emeta",
+            "https://pod.example/.lws/grants/g1",
+            "https://pod.example/.LWS/subscriptions/s1",
+            "https://pod.example//.lws/grants/g1",
+            // The query and fragment are dropped before the name is checked, as for an LDP
+            // request, and a dot segment names no resource.
+            "https://pod.example/alice/doc.meta?x",
+            "https://pod.example/alice/doc.meta#x",
+            "https://pod.example/.lws?x",
+            "https://pod.example/a/../.lws/g",
+            "https://pod.example/a/%2E%2E/.lws/g",
+        ] {
+            let resp = subscribe_handler(
+                State(s.clone()),
+                Extension(web_id_token(ALICE)),
+                HeaderMap::new(),
+                Json(subscribe_to(topic)),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{topic}");
+            assert_eq!(body_to_string(resp).await, denied, "{topic}");
+            assert_eq!(s.hub.subscriber_count(topic).await, 0, "{topic}");
+        }
+        // The same owner subscribing to an ordinary topic is answered with a channel, so it is
+        // the name that refuses, not the caller.
+        let resp = subscribe_handler(
+            State(s.clone()),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/alice/doc")),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// Every reserved form is refused by the one canonical form, and an ordinary topic's
+    /// canonical form drops its query and fragment as `parse_target` does.
+    #[test]
+    fn a_topic_has_one_canonical_form() {
+        let s = state();
+        for topic in [
+            "https://pod.example/alice/doc.meta?x",
+            "https://pod.example/alice/doc.meta#x",
+            "https://pod.example/.lws?x",
+            "https://pod.example/a/../.lws/g",
+            "https://pod.example/a/./b",
+            "https://pod.example/a/%2e/b",
+            "https://pod.example/a//b",
+        ] {
+            assert!(
+                matches!(s.canonical_topic(topic), Err(TopicRefusal::NotAResource)),
+                "{topic}"
+            );
+        }
+        assert!(matches!(
+            s.canonical_topic("https://elsewhere.example/a"),
+            Err(TopicRefusal::OffStorage)
+        ));
+        for topic in [
+            "https://pod.example/alice/doc",
+            "https://pod.example/alice/doc?x",
+            "https://pod.example/alice/doc#x",
+            "https://pod.example/alice/doc?x#y",
+        ] {
+            assert_eq!(
+                s.canonical_topic(topic).ok().as_deref(),
+                Some("https://pod.example/alice/doc"),
+                "{topic}"
+            );
+        }
+    }
+
+    /// A subscription is authorized, answered, bound into its receive token and dispatched under
+    /// the topic's canonical form: a topic sent with a query is the resource's own topic, and the
+    /// receive endpoint takes it under that form too, while a reserved topic never passes its
+    /// token check.
+    #[tokio::test]
+    async fn a_subscription_is_bound_to_the_canonical_topic() {
+        use tower::ServiceExt;
+        let s = state_owned_by(ALICE).await;
+        let canonical = "https://pod.example/alice/doc";
+        let resp = subscribe_handler(
+            State(s.clone()),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/alice/doc?x#y")),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_str(&body_to_string(resp).await).unwrap();
+        assert_eq!(body["topic"], canonical);
+        let receive_from = body["receiveFrom"].as_str().unwrap();
+        let token = receive_from.split("&token=").nth(1).unwrap();
+        assert!(
+            receive_from.contains(&format!("?topic={}&", encode_query_value(canonical))),
+            "{receive_from}"
+        );
+        // The token is bound to the canonical topic, not to the form sent.
+        assert_eq!(
+            s.hub
+                .authorize_receive_token(token, canonical)
+                .await
+                .as_deref(),
+            Some(ALICE)
+        );
+        let app = axum::Router::new()
+            .route(RECEIVE_PATH, axum::routing::get(receive_handler))
+            .with_state(s.clone());
+        let receive = |topic: &str, token: &str| {
+            let uri = format!(
+                "{RECEIVE_PATH}?topic={}&token={}",
+                encode_query_value(topic),
+                encode_query_value(token)
+            );
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    axum::http::Request::builder()
+                        .uri(uri)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+            }
+        };
+        // The same topic with a query passes the token and WAC gates: what refuses it is only the
+        // missing upgrade.
+        let status = receive("https://pod.example/alice/doc?x", token).await;
+        assert_ne!(status, StatusCode::UNAUTHORIZED);
+        assert_ne!(status, StatusCode::FORBIDDEN);
+        // A reserved topic never passes the token check, whatever token is sent.
+        let reserved = s
+            .hub
+            .mint_receive_token(ALICE, "https://pod.example/.lws")
+            .await;
+        assert_eq!(
+            receive("https://pod.example/.lws?x", &reserved).await,
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     /// Fail-closed: with NO ACL anywhere, even an authenticated caller is denied (WAC grants nothing

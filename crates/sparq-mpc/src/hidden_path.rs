@@ -49,9 +49,11 @@
 //! realized chain *never* revealed. We therefore GROUP tuples by their disclosed
 //! endpoint pair and **OR-fold** their chain bits into one connected-bit per
 //! distinct `(a, b)` (`OR(x,y) = 1 − (1−x)(1−y)`, one more `mul_shares_raw` +
-//! `degree_reduce`). Grouping is over the DISCLOSED endpoint terms — never over any
-//! secret intermediate key — so it leaks nothing the result does not already
-//! disclose.
+//! `degree_reduce_through`). Grouping is over the DISCLOSED endpoint terms — never
+//! over any secret intermediate key. It is not free of disclosure, though: the
+//! grouping key is the endpoint pair of EVERY enumerated tuple, matched or not, so
+//! every evaluating party knows the ordered candidate pair sequence and where each
+//! tuple folds — see the disclosure list below.
 //!
 //! The one connected-bit per distinct endpoint pair becomes a
 //! [`crate::oblivious_join::Candidate`] with a
@@ -67,8 +69,63 @@
 //! ## What stays hidden / what is disclosed (state it precisely)
 //!
 //! - **Hidden:** every intermediate node key `z_i` (never reconstructed); every
-//!   per-hop and per-pair match bit (secret-shared, never opened); the realized
-//!   chain that connected a pair (the OR-fold collapses multiplicity).
+//!   per-hop and per-pair match bit (secret-shared, never opened); WHICH tuples
+//!   connected a pair and the realized chain length (the OR-fold collapses
+//!   multiplicity). The NUMBER of distinct endpoint pairs is NOT in this list —
+//!   see the schedule bullet below.
+//! - **Disclosed by the SCHEDULE (every successful run):** the OR-fold POSITIONS —
+//!   which tuple positions repeat an endpoint pair — and therefore the distinct
+//!   endpoint-pair count `D`. Who learns them:
+//!   - **In the model as built**, a single process simulates every party. The
+//!     evaluator that groups does so on plaintext `Term`s, so it sees the ORDERED
+//!     candidate pair sequence, unmatched pairs included — strictly more than the
+//!     result, which names the MATCHED pairs only.
+//!   - **In a real multi-party run**, every party evaluates the same circuit
+//!     wiring, including which accumulator each tuple's bit folds into. Every
+//!     evaluating party therefore knows the fold positions. This is not an
+//!     artefact of the simulation.
+//!   - **Over a transport**, the ORs are not batched — each is one
+//!     `mul_shares_raw` followed by one `degree_reduce_through`, inline in the
+//!     enumeration — so a sequential transport would expose the positions through
+//!     the gate boundaries themselves. The hidden paths have no live transport
+//!     yet, so that is a property of the construction, not a measured
+//!     observation.
+//!   - Independently of any of that, each repeat costs one extra multiplication,
+//!     so the multiplication COUNT carries `D`, the public tuple total `T` being
+//!     known: `T − D` ORs over the `T` tuples, or `T + N₀ − D` when a bounded form
+//!     has `min == 0` and folds in one entry per node of the `N₀`-node disclosed
+//!     domain, plus the output stage's padding from `D` up to `B`. `T` is `|E|^k`
+//!     for the exactly-`k` chain and `Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths
+//!     `ℓ >= 1` for a bounded form, `a` being the alternation width.
+//!
+//!   These are the views this module can account for; it does NOT claim a complete
+//!   enumeration of what an arbitrary party or an arbitrary transport learns.
+//!   Hiding `D` would need oblivious grouping with a schedule uniform in the edge
+//!   count, which is NOT built. Two precisions: "every successful run" is meant
+//!   literally — a refusal from `check_params` or from the public half of the bound
+//!   contract happens before any candidate exists, and a tight-bound refusal runs
+//!   the data-dependent projection but no build, so neither produces a draw
+//!   schedule to read; and the padding also discloses the uniform payload WIDTH
+//!   (next bullet).
+//! - **Disclosed: the uniform payload width.** The output stage packs every slot
+//!   to one width — the longest encoding over ALL candidates, the unmatched ones
+//!   included, rounded up to whole limbs — and that width is the per-slot limb
+//!   count in the opens and one multiplication per limb per slot, so it is visible
+//!   to the parties and it drives the per-slot work. An unmatched candidate with a
+//!   long endpoint term therefore widens every slot. A cap on that width is
+//!   follow-up work, as [`crate::bounded_path`] also records; this stage provides
+//!   none.
+//! - **Disclosed by a REFUSAL:** that a parameter or bound was rejected, and which
+//!   one. The output-bound check is taken on [`public_candidate_pair_bound`] /
+//!   [`public_bounded_candidate_pair_bound`] — functions of `|E|` and the public
+//!   hop counts — whenever `B` reaches them, and the exact-count projection is not
+//!   run on that branch, so `D` stays out of the DECISION (the run itself still
+//!   materialises `D` candidates, as the schedule above says). A caller that chooses a `B` BELOW the public
+//!   bound puts `D` in the RESULT of the call as well: that branch accepts exactly
+//!   when `D <= B`, and a refusal draws nothing, so repeated calls with different
+//!   `B` recover `D` exactly by binary search. Given the schedule above that is no
+//!   new disclosure, but the public-only error text must not be read as hiding it.
+//!   Range refusals name the operand POSITION, never its value.
 //! - **Disclosed:** the public bound `k`; the public candidate-tuple count `|E|^k`
 //!   (standard MPC assumption); the endpoint TERMS of the matched pairs (the result
 //!   the recipient asked for); the public padded bound `B`. The true result
@@ -127,7 +184,7 @@ use crate::partial::{MpcError, PartialResult};
 use crate::randomness::{require_source_matches, DistributedRandomness};
 use crate::shamir::{self, ShamirBackend, Share};
 use oxrdf::{Term, Variable};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Reserved subject-end / object-end variable names the operator projects onto.
 const SUBJECT_VAR: &str = "__pp_a";
@@ -149,19 +206,80 @@ fn chain_out_vars() -> Vec<Variable> {
 /// `|E|` and `k` are PUBLIC, the count is computable in closed form WITHOUT touching
 /// any secret key, so we reject an over-cap path BEFORE any crypto runs. A protocol
 /// guard, not a tuning knob: a path that exceeds it is abusive for this regime.
+///
+/// ## What this module's caps do and do not bound
+///
+/// Every cap here bounds a COUNT: the hop count, the enumerated tuple count, the
+/// candidate count and the output bound `B`. None of them bounds a WIDTH. The
+/// payload arity, the byte length of an endpoint term's IRI or literal, and the
+/// per-slot limb count the output stage derives from the longest candidate
+/// encoding are all unbounded, as is the cost of building a network of a given
+/// width. So a caller can still present a small count of very large things. Width
+/// caps are follow-up work; no claim is made here that they exist.
 pub const MAX_CHAIN_TUPLES: u64 = 1 << 18; // 262_144
+
+/// Maximum hop count the operator will consider — the exactly-`k` chain's `k`, and
+/// the bounded form's upper bound (`HiddenBoundedPath::max`). A larger one is an
+/// [`MpcError::Protocol`] refusal raised BEFORE any enumeration, counting or draw.
+///
+/// [`MAX_CHAIN_TUPLES`] alone does not bound the hop count. Two loops grow with the
+/// hop count and run *while computing* the tuple count that cap is compared
+/// against: `projected_tuple_count` multiplies once per hop, and
+/// `check_bounded_params` accumulates `Σ_ℓ (a^ℓ·|E|^ℓ)` with an inner loop per
+/// length — quadratic in the upper bound. So hop counts are capped before
+/// evaluation, on the hop count itself, which is a PUBLIC plan parameter.
+///
+/// The value is `log2(`[`MAX_CHAIN_TUPLES`]`)`, which makes this guard agree with
+/// the tuple guard instead of adding an independent number: for `|E| >= 2` — the
+/// only case where a `k`-hop chain has more than one edge-tuple — `|E|^k >= 2^k`,
+/// so [`MAX_CHAIN_TUPLES`] already refuses every `k` above this. What the hop cap
+/// adds is the `|E| <= 1` corner, where the tuple count stays `1` (or `0`) for any
+/// `k` while the per-chain work — `k − 1` secure equalities, and a `k`-wide
+/// odometer allocation — still grows with `k`.
+///
+/// Hops beyond the number of distinct nodes are redundant for path EXISTENCE, which
+/// would permit capping the effective bound at the node count instead of refusing.
+/// This operator refuses instead: truncating the bound would silently change the
+/// evaluated form (the bounded union runs over `min..=max`, so a `min` above the
+/// node count is not a no-op), and a fail-closed refusal on a public parameter is
+/// the discipline the module's other guards follow. A protocol guard, not a tuning
+/// knob.
+pub const MAX_HOP_COUNT: usize = MAX_CHAIN_TUPLES.ilog2() as usize; // 18
 
 /// One node of the secret graph: its PRIVATE join key (an `F_p` element — the
 /// holder's injective encoding of the node, exactly the contract
-/// [`crate::join::HiddenValueJoin`] documents) plus its DISCLOSED term (used ONLY
-/// when the node is an ENDPOINT of a matched chain — never for an intermediate).
-#[derive(Debug, Clone)]
+/// [`crate::join::HiddenValueJoin`] documents) plus its term.
+///
+/// The term is NOT used only for matched endpoints. Every edge's subject and object
+/// term is read in the clear by the evaluator: as the grouping key of every tuple
+/// that starts or ends at this node, as an input to the uniform payload width, and
+/// by the candidate-count projections. What the RESULT discloses is narrower than
+/// that — only the matched pairs — so the term of an unmatched endpoint is visible
+/// to the grouping evaluator without appearing in any answer. The key is the part
+/// that is never reconstructed, for an intermediate node or any other.
+///
+/// `Debug` is hand-written and redacts BOTH fields: a derived one printed the key
+/// from every container that holds a node, and a `Debug` rendering is not one of
+/// the clear-text uses above. Both fields stay `pub` for the callers that
+/// legitimately read them, including the `Term`-keyed groupings in this module.
+#[derive(Clone)]
 pub struct HiddenNode {
     /// The private join key. Compared via secure equality; never reconstructed
     /// for an intermediate node.
     pub key: Fp,
-    /// The disclosed term, emitted only if this node is a matched chain endpoint.
+    /// The node's term. Read in the clear by the grouping, the width sizing and
+    /// the projections; emitted in the RESULT only if this node is a matched chain
+    /// endpoint.
     pub term: Term,
+}
+
+impl std::fmt::Debug for HiddenNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HiddenNode")
+            .field("key", &"<redacted>")
+            .field("term", &"<redacted>")
+            .finish()
+    }
 }
 
 /// One directed edge of the secret graph for the path predicate: `(subject,
@@ -176,9 +294,21 @@ pub struct HiddenEdge {
 }
 
 /// The federated secret edge relation the chain operator traverses — the union of
-/// all holders' `(subject, object)` edges for one path predicate. The keys are
-/// private; only the candidate-tuple COUNT (`|E|^k`) and matched endpoint TERMS are
-/// ever disclosed.
+/// all holders' `(subject, object)` edges for one path predicate.
+///
+/// **Exactly what is disclosed.** The keys are private. Disclosed: the edge count
+/// `|E|` and the candidate-tuple count `|E|^k` (public input sizes), the matched
+/// endpoint TERMS (the result), the public bound `B`, the uniform payload width
+/// (the longest encoding over ALL candidates, unmatched included), and — through
+/// the run's SCHEDULE, on every successful run — the OR-fold positions and hence
+/// the distinct endpoint-pair count `D`: the grouping key is the disclosed endpoint
+/// pair of every enumerated tuple, and each repeat costs one extra secure OR.
+/// **Unmatched endpoint terms are visible to the grouping evaluator**, which reads
+/// every tuple's endpoint pair in the clear, although they appear in no answer. NOT
+/// disclosed: any intermediate key, any per-hop or per-pair match bit, which tuples
+/// connected a pair, or the realized chain length. A `B` at or above
+/// [`public_candidate_pair_bound`] is decided without computing `D`, which keeps
+/// `D` out of the DECISION and out of the error text — not out of the schedule.
 #[derive(Debug, Clone)]
 pub struct HiddenEdges {
     edges: Vec<HiddenEdge>,
@@ -346,11 +476,238 @@ fn build_candidates(
     }
 }
 
-/// Fail-closed parameter checks shared by both entry points. `k >= 1`,
-/// `n >= 2t+1` (the AND/OR chain's degree reduction needs it), and the projected
-/// `|E|^k` tuple count must be within [`MAX_CHAIN_TUPLES`] — all computed from
-/// PUBLIC parameters, before any crypto runs.
+/// An upper bound on the candidate count of [`eval_exact_k_chain_hidden`],
+/// computed from the PUBLIC input sizes alone — the edge count and `k`, both of
+/// which this module already discloses. Nothing here looks at an endpoint term.
+///
+/// This is the value to provision the public padded bound `B` against. A `B` at or
+/// above it is decided on public sizes alone, so the decision and its error text
+/// never consult the edge data; a tighter `B` is still accepted when the distinct
+/// endpoint-pair count `D` fits, at the cost of disclosing that comparison (see
+/// `eval_exact_k_chain_hidden`). Neither choice hides `D` itself: the grouping
+/// reads every tuple's endpoint pair in the clear and each repeat costs one extra
+/// multiplication, on either branch.
+///
+/// `build_candidates` groups the `|E|^k` edge-tuples by their first subject and
+/// last object, so:
+///
+/// - `k == 1` — one position, so at most one key per edge: `|E|`.
+/// - `k >= 2` — the two positions are independent odometer digits, so at most the
+///   product of the distinct subjects with the distinct objects, each at most
+///   `|E|`: `|E|^2`. The tuple count `|E|^k` bounds it too, so the answer is the
+///   smaller of the two.
+///
+/// Returns `MpcError::Protocol` if `|E|^2` overflows `usize`.
+pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize, MpcError> {
+    if edge_count == 0 || k == 0 {
+        return Ok(0);
+    }
+    if k == 1 {
+        return Ok(edge_count);
+    }
+    let squared = edge_count.checked_mul(edge_count).ok_or_else(|| {
+        MpcError::Protocol(format!(
+            "hidden exactly-k chain: the public endpoint-pair bound |E|^2 overflows usize for \
+             |E|={}",
+            edge_count
+        ))
+    })?;
+    Ok(
+        match projected_tuple_count(edge_count, k).map(usize::try_from) {
+            Some(Ok(tuples)) => squared.min(tuples),
+            // `|E|^k` either overflowed `u64` or does not fit a `usize` on this
+            // target; it cannot be the smaller of the two bounds.
+            _ => squared,
+        },
+    )
+}
+
+/// An upper bound on the candidate count of [`eval_bounded_path_hidden`], from the
+/// PUBLIC input sizes alone — the edge count and the form's public `min`/`max`.
+///
+/// Same contract as [`public_candidate_pair_bound`], for the bounded union. The
+/// builder keys every enumerated tuple's endpoint pair plus, when `min == 0`, the
+/// reflexive diagonal over the node domain, so the arms are bounded publicly by
+///
+/// - `min == 0` — at most `2*|E|` nodes in the domain, so at most `2*|E|` diagonal
+///   pairs;
+/// - length `1` in range — at most `|E|` pairs;
+/// - any length `>= 2` in range — at most `|E|^2` pairs.
+///
+/// The answer is their SUM, which over-counts the pairs the arms share. That is
+/// deliberate: the bound must not depend on the edge data, and over-counting only
+/// raises the `B` at which the decision becomes data-independent. For inputs
+/// `check_bounded_params` accepts, that sum can exceed
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`, or
+/// `{0,2}` with `|E| = 511` — and then no admissible `B` reaches it, so the caller
+/// has only the data-dependent branch. Neither branch hides the distinct
+/// endpoint-pair count: the grouping reads every tuple's endpoint pair in the clear
+/// and each repeat costs one extra multiplication, whichever branch decided `B`.
+///
+/// Returns `MpcError::Protocol` if the sum overflows `usize`.
+pub fn public_bounded_candidate_pair_bound(
+    edge_count: usize,
+    form: &HiddenBoundedPath,
+) -> Result<usize, MpcError> {
+    if edge_count == 0 {
+        return Ok(0);
+    }
+    let overflow = || {
+        MpcError::Protocol(format!(
+            "hidden bounded path: the public endpoint-pair bound overflows usize for |E|={}",
+            edge_count
+        ))
+    };
+    let mut total = 0usize;
+    if form.min == 0 {
+        total = total
+            .checked_add(edge_count.checked_mul(2).ok_or_else(overflow)?)
+            .ok_or_else(overflow)?;
+    }
+    if form.min <= 1 && form.max >= 1 {
+        total = total.checked_add(edge_count).ok_or_else(overflow)?;
+    }
+    if form.max >= 2 {
+        total = total
+            .checked_add(edge_count.checked_mul(edge_count).ok_or_else(overflow)?)
+            .ok_or_else(overflow)?;
+    }
+    Ok(total)
+}
+
+/// The number of candidates [`build_candidates`] will produce, computed from the
+/// DISCLOSED endpoint terms alone in `O(|E| log |E|)` — before a single sharing is
+/// drawn.
+///
+/// `build_candidates` groups the `|E|^k` edge-tuples by
+/// `endpoint_key(tuple[0].subject, tuple[k-1].object)`, and the odometer runs
+/// positions `0` and `k-1` independently, so the key set is determined by the edge
+/// endpoints and `k` alone:
+///
+/// - `k == 1` — one position, so the keys are the distinct `(subject, object)`
+///   pairs of the edges themselves.
+/// - `k >= 2` — positions `0` and `k-1` are different odometer digits and every
+///   combination is enumerated, so the keys are the full product of the distinct
+///   subject terms with the distinct object terms.
+///
+/// Counting is done over the same `{:?}` representation the grouping key is built
+/// from, so the result is the builder's own candidate count — EXCEPT in the one
+/// degenerate case where a term's representation contains the key's NUL separator,
+/// which would make two distinct pairs share a key; the count is then an upper
+/// bound. Either way it never UNDER-counts, so refusing on it is fail-closed, and
+/// the exact post-build check stays.
+fn projected_candidate_count(edges: &HiddenEdges, k: usize) -> Result<usize, MpcError> {
+    if edges.is_empty() || k == 0 {
+        return Ok(0);
+    }
+    if k == 1 {
+        let keys: BTreeSet<String> = edges
+            .edges
+            .iter()
+            .map(|e| endpoint_key(&e.subject.term, &e.object.term))
+            .collect();
+        return Ok(keys.len());
+    }
+    let subjects: BTreeSet<String> = edges
+        .edges
+        .iter()
+        .map(|e| format!("{:?}", e.subject.term))
+        .collect();
+    let objects: BTreeSet<String> = edges
+        .edges
+        .iter()
+        .map(|e| format!("{:?}", e.object.term))
+        .collect();
+    subjects.len().checked_mul(objects.len()).ok_or_else(|| {
+        MpcError::Protocol(format!(
+            "hidden exactly-k chain: the endpoint-pair count {} x {} overflows usize — \
+             refusing before any draw",
+            subjects.len(),
+            objects.len()
+        ))
+    })
+}
+
+/// The number of candidates [`build_bounded_candidates`] will produce, computed
+/// from the DISCLOSED endpoint terms alone and before any draw.
+///
+/// The builder folds every enumerated tuple's endpoint pair in regardless of
+/// whether the tuple's predicates matched the chain (a mismatch contributes a
+/// constant `0` bit, but the PAIR is still keyed), so the key set does not depend
+/// on the alternation at all. It is the UNION of:
+///
+/// - the reflexive diagonal `(x, x)` over the disclosed node domain, when
+///   `min == 0`;
+/// - the distinct `(subject, object)` edge pairs, when length `1` is in range;
+/// - the full product of distinct subjects with distinct objects, when any length
+///   `>= 2` is in range.
+///
+/// The union is materialised rather than estimated, because a sum of the three
+/// arms double-counts the pairs they share and would refuse a `bound` the operator
+/// should accept. It costs at most the keys the builder's own accumulator will
+/// hold: the product arm is `|A| x |B| <= |E|^2`, and `check_bounded_params` —
+/// which runs first — has already capped `Σ_ℓ a^ℓ·|E|^ℓ` at
+/// [`MAX_CHAIN_TUPLES`], so for any form that reaches the product arm `|E|^2` is
+/// within that cap. What it avoids is the `Σ_ℓ |E|^ℓ` secure equalities the build
+/// would have drawn before the same refusal.
+fn projected_bounded_candidate_count(
+    edges: &PredicatedEdges,
+    form: &HiddenBoundedPath,
+) -> Result<usize, MpcError> {
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    if form.min == 0 {
+        for node in edges.node_domain() {
+            keys.insert(endpoint_key(&node, &node));
+        }
+    }
+    if !edges.is_empty() {
+        let lo = form.min.max(1);
+        if lo <= form.max {
+            if lo == 1 {
+                for e in &edges.edges {
+                    keys.insert(endpoint_key(&e.subject.term, &e.object.term));
+                }
+            }
+            if form.max >= 2 {
+                // `Term` is not `Ord`, so dedup on the same `{:?}` representation
+                // `endpoint_key` is built from.
+                let mut subjects: BTreeMap<String, &Term> = BTreeMap::new();
+                let mut objects: BTreeMap<String, &Term> = BTreeMap::new();
+                for e in &edges.edges {
+                    subjects
+                        .entry(format!("{:?}", e.subject.term))
+                        .or_insert(&e.subject.term);
+                    objects
+                        .entry(format!("{:?}", e.object.term))
+                        .or_insert(&e.object.term);
+                }
+                for a in subjects.values() {
+                    for b in objects.values() {
+                        keys.insert(endpoint_key(a, b));
+                    }
+                }
+            }
+        }
+    }
+    Ok(keys.len())
+}
+
+/// Fail-closed parameter checks shared by both entry points. `k >= 1`, `k` within
+/// [`MAX_HOP_COUNT`], `n >= 2t+1` (the AND/OR chain's degree reduction needs it),
+/// and the projected `|E|^k` tuple count within [`MAX_CHAIN_TUPLES`] — all computed
+/// from PUBLIC parameters, before any crypto runs.
+///
+/// The hop cap is checked BEFORE the tuple count, because `projected_tuple_count`
+/// itself loops once per hop: hop counts are capped before evaluation.
 fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Result<(), MpcError> {
+    if k > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden exactly-k chain with k={} exceeds the MAX_HOP_COUNT cap of {} — refusing \
+             (each hop adds a secure equality to every enumerated chain, so the hop count is \
+             bounded before the enumeration is sized)",
+            k, MAX_HOP_COUNT
+        )));
+    }
     if k == 0 {
         return Err(MpcError::Protocol(
             "hidden exactly-k chain: k must be >= 1 (the reflexive length-0 arm is the {0,k} \
@@ -387,8 +744,33 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 /// oblivious output's `B`-slot reveal.
 ///
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
-/// candidate count (fail-closed in `oblivious_set_output_through` — never
-/// truncates a match). One fresh dealer covers the chain stage AND the output
+/// candidate count (fail-closed BEFORE any draw — never truncates a match).
+///
+/// **How `B` is decided, and what the decision discloses.** `B` is first compared
+/// against [`public_candidate_pair_bound`], an upper bound from the PUBLIC
+/// input sizes. A `B` at or above it is accepted on those sizes alone: the distinct
+/// endpoint-pair count `D` is not even computed, so the DECISION and its error text
+/// rest on public sizes only. A `B` below it is accepted exactly when `D <= B`, so
+/// success-or-refusal discloses that comparison; and because a refusal draws
+/// nothing, repeated calls with different `B` recover `D` exactly by binary search.
+/// The search only pins `D` up to
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`], since a larger `B` is refused by the
+/// cap before either branch; past that the caller learns only that `D` is larger.
+/// Either way the refusal message names only `B` and the public bound — and NEITHER
+/// branch hides `D` from a successful run. The grouping keys every enumerated tuple
+/// by its endpoint pair, read in the clear: in the model as built one process
+/// simulates every party, so the grouping evaluator sees the ordered candidate pair
+/// sequence; in a real multi-party run every party evaluates the same wiring,
+/// including which accumulator each tuple folds into, so every evaluating party
+/// knows the fold positions. The `T = |E|^k` tuples cost `T − D` ORs, and the output
+/// pads from `D` to `B`, so the multiplication count carries `D` regardless. Hiding
+/// `D` would need oblivious grouping with a uniform schedule, which is not built;
+/// see the module docs for the transport note and the limits of this account. A
+/// public-half refusal happens before any candidate exists, and a tight-bound
+/// refusal runs the data-dependent projection but no build — neither leaves a draw
+/// schedule.
+///
+/// One fresh dealer covers the chain stage AND the output
 /// stage: this is `eval_exact_k_chain_hidden_slots_through` on that one dealer,
 /// narrowed to the disclosed rows — a single code path, so nothing here can mint a
 /// second dealer. See the module docs for the full construction and security tier.
@@ -441,8 +823,29 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
+    // BOTH halves of the bound contract are settled before any draw, and the PUBLIC
+    // half is tried first: a `B` at or above `public_candidate_pair_bound` is
+    // accepted on the edge count and `k` alone, and the data-dependent projection
+    // below is never run. Only a tighter `B` needs the real count, which is then
+    // computed from the disclosed endpoint terms in O(|E| log |E|). This keeps the
+    // count out of the DECISION and the error text; the build below still allocates
+    // and multiplies per distinct pair, so the count remains visible in the
+    // schedule. Leaving the
+    // coverage half to the output stage meant `build_candidates` had already drawn
+    // one equality per hop of every one of the `|E|^k` tuples before a `B` too small
+    // to hold the answer was refused — up to billions of draws for a refusal that
+    // was decidable without any. Both checks sit after `check_params` so the
+    // operator's own parameter refusals keep precedence; neither of those draws.
+    crate::oblivious_join::check_bound_public_first(
+        "hidden exactly-k chain",
+        bound,
+        public_candidate_pair_bound(edges.len(), k)?,
+        || projected_candidate_count(edges, k),
+    )?;
     let candidates = build_candidates(backend, source, edges, k)?;
     // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
+    // The stage re-checks the bound against the EXACT candidate count, which is what
+    // catches the degenerate case where the projection above could only bound it.
     oblivious_set_output_through(source, backend, &candidates, 2, bound)
 }
 
@@ -463,6 +866,12 @@ pub(crate) fn exact_k_chain_candidates_and_opened_rows(
 ) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
     require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
+    crate::oblivious_join::check_bound_public_first(
+        "hidden exactly-k chain",
+        bound,
+        public_candidate_pair_bound(edges.len(), k)?,
+        || projected_candidate_count(edges, k),
+    )?;
     let candidates = build_candidates(backend, source, edges, k)?;
     let slots =
         crate::oblivious_join::opened_slot_rows_through(source, backend, &candidates, 2, bound)?;
@@ -595,9 +1004,13 @@ impl HiddenBoundedPath {
 /// Every fixed predicate sequence of `length` hops obtained by choosing one of the
 /// `alternatives` at each position (design §2.4). For a single-predicate step this is
 /// the one `length`-long sequence. Grows the chain set amortised (no
-/// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll);
-/// the genuine size limit is enforced upstream by [`check_bounded_params`] BEFORE this
-/// runs.
+/// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll).
+///
+/// `check_bounded_params` runs first and caps the chain COUNT — `Σ_ℓ a^ℓ·|E|^ℓ`
+/// against [`MAX_CHAIN_TUPLES`] — so the number of sequences this returns is
+/// bounded. It does NOT bound their WIDTHS: a predicate IRI's length is unbounded,
+/// as are the payload arity and the endpoint terms' lengths downstream. Width caps
+/// are follow-up work and are not claimed here.
 fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> {
     let mut chains: Vec<Vec<String>> = vec![Vec::new()];
     for _ in 0..length {
@@ -670,6 +1083,16 @@ fn check_bounded_params(
             form.min, form.max
         )));
     }
+    // Hop counts are capped before evaluation — and before the Σ_ℓ accumulation
+    // below, whose own cost is quadratic in `form.max`.
+    if form.max > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden bounded path {{{},{}}} exceeds the MAX_HOP_COUNT cap of {} — refusing (the \
+             union runs one fixed-length chain family per length up to the upper bound, so the \
+             hop count is bounded before the enumeration is sized)",
+            form.min, form.max, MAX_HOP_COUNT
+        )));
+    }
     let t = backend.threshold();
     if backend.parties() < 2 * t + 1 {
         return Err(MpcError::Protocol(format!(
@@ -715,7 +1138,7 @@ fn check_bounded_params(
     Ok(())
 }
 
-/// The controlled over-cap refusal shared by [`check_bounded_params`]'s overflow and
+/// The controlled over-cap refusal shared by `check_bounded_params`'s overflow and
 /// over-limit branches.
 fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Result<T, MpcError> {
     Err(MpcError::Protocol(format!(
@@ -840,8 +1263,45 @@ fn build_bounded_candidates(
 /// chaining and the landed oblivious output path verbatim.
 ///
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
-/// candidate count (fail-closed in `oblivious_set_output_through` — never
-/// truncates a match). One fresh dealer covers the union stage AND the output
+/// candidate count (fail-closed BEFORE any draw — never truncates a match).
+///
+/// **How `B` is decided, and what the decision discloses.** `B` is first compared
+/// against [`public_bounded_candidate_pair_bound`], an upper bound from the PUBLIC
+/// input sizes. A `B` at or above it is accepted on those sizes alone: the distinct
+/// endpoint-pair count `D` is not even computed, so the DECISION and its error text
+/// rest on public sizes only. A `B` below it is accepted exactly when `D <= B`, so
+/// success-or-refusal discloses that comparison; and because a refusal draws
+/// nothing, repeated calls with different `B` recover `D` exactly by binary search.
+/// The search only pins `D` up to
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`], since a larger `B` is refused by the
+/// cap before either branch; past that the caller learns only that `D` is larger.
+/// Either way the refusal message names only `B` and the public bound — and NEITHER
+/// branch hides `D` from a successful run. The grouping keys every enumerated tuple
+/// by its endpoint pair, read in the clear: in the model as built one process
+/// simulates every party, so the grouping evaluator sees the ordered candidate pair
+/// sequence; in a real multi-party run every party evaluates the same wiring,
+/// including which accumulator each tuple folds into, so every evaluating party
+/// knows the fold positions. For a bounded form the tuple total is
+/// `T = Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths `ℓ >= 1`, with `a` the
+/// alternation width; the OR count is `T + N₀ − D` when `min == 0`, the reflexive
+/// diagonal folding in one entry per node of the `N₀`-node disclosed domain, and
+/// `T − D` otherwise. The output then pads from `D` to `B`, so the multiplication
+/// count carries `D` regardless. Hiding `D` would need oblivious grouping with a
+/// uniform schedule, which is not built; see the module docs for the transport note
+/// and the limits of this account. A public-half refusal happens before any
+/// candidate exists, and a tight-bound refusal runs the data-dependent projection
+/// but no build — neither leaves a draw schedule.
+///
+/// **The public bound can be out of reach here.**
+/// [`public_bounded_candidate_pair_bound`] sums the arms the form admits, and for
+/// inputs `check_bounded_params` accepts that sum can exceed
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`
+/// (`3·|E|`), or `{0,2}` with `|E| = 511` (`3·|E| + |E|^2`), for instance. No `B` is
+/// then both at or above the public bound and within `MAX_OUTPUT_BOUND`, so such a
+/// call can only run on the data-dependent branch, with the comparison that branch
+/// discloses.
+///
+/// One fresh dealer covers the union stage AND the output
 /// stage: this is `eval_bounded_path_hidden_slots_through` on that one dealer,
 /// narrowed to the disclosed rows — a single code path, so nothing here can mint a
 /// second dealer. Security tier is identical to [`eval_exact_k_chain_hidden`]:
@@ -884,6 +1344,20 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
     check_bounded_params(backend, edges, form)?;
+    // Both halves of the bound contract before any draw, public half first, exactly
+    // as in the exactly-k entry: a `B` at or above `public_bounded_candidate_pair_bound`
+    // is accepted on the edge count and the form's public min/max alone, and the
+    // union projection below is never run; a tighter `B` is checked against the
+    // exact union, which is the materialised key set rather than a sum of the arms,
+    // so no `B` the data allows is refused. The stage re-checks after the build.
+    // As above, the public-first order moves the count out of the decision, not out
+    // of the schedule.
+    crate::oblivious_join::check_bound_public_first(
+        "hidden bounded path",
+        bound,
+        public_bounded_candidate_pair_bound(edges.len(), form)?,
+        || projected_bounded_candidate_count(edges, form),
+    )?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
     oblivious_set_output_through(source, backend, &candidates, 2, bound)
 }

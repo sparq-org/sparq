@@ -109,7 +109,9 @@ pub use model::{Rule, Term};
 pub use serialize::{RuleKind, RuleVars};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// One forward-chaining derivation step: `(derived ground fact, rule index, premise facts
 /// that justified it)`. Collected during closure so a proof can be reconstructed.
@@ -517,7 +519,20 @@ mod run_shared {
         /// standardize-apart spaces, and growing the table without an allowance would let
         /// a search of unbounded width keep memory.
         pub(super) fn node(&mut self, key: NodeKey, room: usize) -> Result<u64, NodeFault> {
-            let fold = key.fold();
+            self.node_at(key, key.fold(), room)
+        }
+
+        /// [`RunShared::node`] with `key`'s fold already computed, for the one caller that
+        /// has to check the fold before it uses it and then register it after
+        /// ([`super::backward_prove`]): folding the same key three times per candidate site
+        /// was pure repeat work. `fold` must be `key.fold()`, which the assert pins.
+        pub(super) fn node_at(
+            &mut self,
+            key: NodeKey,
+            fold: u64,
+            room: usize,
+        ) -> Result<u64, NodeFault> {
+            debug_assert_eq!(fold, key.fold(), "node_at was given a fold that is not this key's");
             if let Some(prev) = self.nodes.get(&fold) {
                 return if *prev == key { Ok(fold) } else { Err(NodeFault::Collision) };
             }
@@ -532,23 +547,29 @@ mod run_shared {
         /// would refuse, asked without charging the allowance or inserting anything, so a
         /// caller that uses a fold before it registers it can refuse the collision at the
         /// point of USE ([`super::BwCtx::conflicts`]).
-        pub(super) fn conflicts(&self, key: &NodeKey) -> bool {
-            self.nodes.get(&key.fold()).is_some_and(|prev| prev != key)
+        /// `fold` must be `key.fold()`, which the assert pins.
+        pub(super) fn conflicts(&self, key: &NodeKey, fold: u64) -> bool {
+            debug_assert_eq!(fold, key.fold(), "conflicts was given a fold that is not this key's");
+            self.nodes.get(&fold).is_some_and(|prev| prev != key)
         }
 
         /// The id of the string identity `canon`, registered against it so it can never
         /// name a second, different string ([`RunShared::ids`]). The same refusals as
         /// [`RunShared::node`], and the same allowance: this is how a goal or a nested
         /// closure's formula enters a [`NodeKey`] EXACTLY rather than as a bare fold.
-        pub(super) fn intern(&mut self, canon: &str, room: usize) -> Result<u64, NodeFault> {
-            let fold = super::serialize::fnv1a64(canon);
+        ///
+        /// `canon` is taken BY VALUE because the table keeps it on the registering call:
+        /// borrowing it meant copying the whole canonical key again into the table, once
+        /// per distinct goal of the run, and every caller here builds it to hand over.
+        pub(super) fn intern(&mut self, canon: String, room: usize) -> Result<u64, NodeFault> {
+            let fold = super::serialize::fnv1a64(&canon);
             if let Some(prev) = self.ids.get(&fold) {
-                return if prev == canon { Ok(fold) } else { Err(NodeFault::Collision) };
+                return if *prev == canon { Ok(fold) } else { Err(NodeFault::Collision) };
             }
             if self.registered() >= room {
                 return Err(NodeFault::Full);
             }
-            self.ids.insert(fold, canon.to_string());
+            self.ids.insert(fold, canon);
             Ok(fold)
         }
 
@@ -562,6 +583,13 @@ mod run_shared {
         #[cfg(test)]
         pub(super) fn node_count(&self) -> usize {
             self.nodes.len()
+        }
+
+        /// Everything this run has registered, nodes and string identities together: what
+        /// the allowance counts ([`RunShared::registered`]).
+        #[cfg(test)]
+        pub(super) fn registered_count(&self) -> usize {
+            self.registered()
         }
 
         /// Registers `canon` under `fold`, whatever its own fold is: how a test forces an
@@ -831,7 +859,7 @@ impl<'a> BwCtx<'a> {
     /// ([`run_shared::RunShared::intern`]): how a goal and a nested closure's formula enter
     /// a [`NodeKey`] exactly instead of as a bare, unchecked fold. The same refusals as
     /// [`BwCtx::node`].
-    fn intern(&self, canon: &str) -> Option<u64> {
+    fn intern(&self, canon: String) -> Option<u64> {
         let made = self.visited.borrow_mut().intern(canon, bounded::proof_nodes(&self.truncated));
         self.registered(made)
     }
@@ -890,12 +918,19 @@ impl<'a> BwCtx<'a> {
     /// would be the ancestor's, the caller's inherited bindings would capture them,
     /// unification would fail and the site would be skipped with no error at all
     /// (GH #6844 review round 5).
-    fn conflicts(&self, key: NodeKey) -> bool {
-        if self.unnamed() || !self.visited.borrow().conflicts(&key) {
+    fn conflicts(&self, key: NodeKey, fold: u64) -> bool {
+        if self.unnamed() || !self.visited.borrow().conflicts(&key, fold) {
             return false;
         }
         self.registered(Err(run_shared::NodeFault::Collision));
         true
+    }
+
+    /// [`BwCtx::node`] with `key`'s fold already in hand ([`run_shared::RunShared::node_at`]).
+    fn node_at(&self, key: NodeKey, fold: u64) -> Option<u64> {
+        let made =
+            self.visited.borrow_mut().node_at(key, fold, bounded::proof_nodes(&self.truncated));
+        self.registered(made)
     }
 }
 
@@ -2731,7 +2766,113 @@ fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
     }
 }
 
-type Binding = HashMap<String, Term>;
+/// A variable substitution — the `name → term` map a premise evaluation or a backward proof
+/// carries — with its KEY made cheap to copy.
+///
+/// It is still one flat [`HashMap`] keyed by the variable's name under SipHash. What changed
+/// is that the name is held as an `Rc<str>` instead of a `String`, so copying a substitution
+/// copies the table and bumps one reference count per entry where it used to allocate a
+/// fresh name string for each. (The VALUE is still a plain [`Term`] and is still deep-cloned
+/// by a copy — reference-counting it as well was implemented and measured, and is recorded
+/// below as the reason it is not here.)
+///
+/// Copying is what the engine does most. The backward path copies the inherited
+/// substitution once per candidate site and once per solution ([`backward_prove`]), the
+/// join path once per candidate fact ([`unify`]), and a formula multiset match once per
+/// pairing it tries ([`formula_search`]) — while the number of entries a copy carries grows
+/// with the DEPTH of the proof, because a backward step's renamed variables
+/// ([`rename_vars`]) stay in the substitution its whole subtree inherits. So the copies were
+/// quadratic in the proof depth in ALLOCATION COUNT, not merely in bytes: an entry cost two
+/// allocations and two frees per copy, one pair for the name and one for the term, and that
+/// allocator traffic dominated a recursive backward proof. This removes the name's pair and
+/// leaves the term's (GH #7080, and the residual GH #7095 left behind, which made every
+/// renamed name longer and so every key larger).
+///
+/// Reference-counting the VALUE too removes the other pair, and on a recursive backward proof
+/// it is a much larger saving still. It is nevertheless NOT done here, because it costs a
+/// heap box on every `insert` and a forward closure inserts once per bound variable per join
+/// row while copying substitutions that hold almost nothing: measured, a closure with no
+/// backward rule at all came out slower for it, which is a regression this is not worth. The
+/// saving it would unlock is real but belongs in [`Term`]'s own leaf payloads, where a bound
+/// value would already be cheap to clone and an insert would have nothing to box.
+///
+/// **The hashing is unchanged, deliberately.** A key is hashed as the `str` it holds, since
+/// `Rc<str>` both [`Hash`](std::hash::Hash)es and [`Borrow`](std::borrow::Borrow)s as its
+/// `str`: a lookup computes the same SipHash over the same name bytes, and the table lands
+/// every key in the same bucket a `HashMap<String, Term>` would. These names come from
+/// untrusted N3 input and SipHash is what stops a crafted document degrading the map, so the
+/// hasher is NOT changed — the saving is in what a COPY costs, not in what a lookup costs,
+/// and the count of key hashes a workload performs is the same either way.
+///
+/// **No output depends on iteration order.** Each table is seeded by its own `RandomState`, so
+/// its order was never fixed, before or after this representation. Every reader of a whole
+/// binding is order-free: [`canonical_new_firings`]'s proof-mode tie-break sorts the encoding
+/// it collects, and [`independent_firing`] and the depth check (`bounded::generated`) ask a
+/// question of every entry.
+#[derive(Clone, Default, Debug, PartialEq)]
+pub(crate) struct Binding {
+    map: HashMap<Rc<str>, Term>,
+}
+
+impl Binding {
+    /// An empty substitution.
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// How many variables are bound. [`walk_ref`] reads this as its cycle bound, so it
+    /// counts entries exactly as the map it replaced did.
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Whether nothing is bound.
+    fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// What `v` is bound to, or `None` — the same term the map it replaced handed back,
+    /// found by the same hash of the same name bytes.
+    fn get(&self, v: &str) -> Option<&Term> {
+        self.map.get(v)
+    }
+
+    /// Bind `v` to `t`, replacing any binding it had.
+    ///
+    /// ONE probe of the table, as [`HashMap::insert`] is: a pre-probe to reuse the key of an
+    /// already-bound variable was measured and removed, because it hashed the name a second
+    /// time on every insert and inserts are overwhelmingly of names not yet bound — it cost
+    /// a forward closure more than the key allocation it occasionally saved.
+    ///
+    /// `v` is taken as anything a key can be made of, so a caller that had to own the name
+    /// before it could reach for `&mut self` — [`unify_walked`], whose name is borrowed out
+    /// of this very map until the walk's borrow ends — hands over the key it already made
+    /// instead of allocating a second one.
+    fn insert(&mut self, v: impl Into<Rc<str>>, t: Term) {
+        self.map.insert(v.into(), t);
+    }
+
+    /// Drop every binding whose variable `keep` rejects.
+    fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.map.retain(|k, _| keep(k));
+    }
+
+    /// Every binding, as the name and the term, in the table's (unspecified) order.
+    fn iter(&self) -> impl Iterator<Item = (&str, &Term)> {
+        self.map.iter().map(|(k, v)| (&**k, v))
+    }
+
+    /// Every bound value.
+    fn values(&self) -> impl Iterator<Item = &Term> {
+        self.map.values()
+    }
+}
+
+impl bounded::Subst for Binding {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        self.get(v)
+    }
+}
 
 /// Which facts a premise evaluation's join atoms may match, and which atom (if any) is
 /// already bound into the seed. The atoms KEEP THEIR ORIGINAL premise indices under every
@@ -2808,8 +2949,9 @@ fn match_premise_admitted(
     // instead of letting a non-delta atom do a full predicate-index scan.
     if let JoinMode::Delta(delta, k) = join {
         let mut seeds = Vec::new();
+        let keys = atom_keys(&premise[k]);
         for fact in delta {
-            if let Some(nb) = unify(&premise[k], fact, seed, &bw.truncated) {
+            if let Some(nb) = unify(&premise[k], &keys, fact, seed, &bw.truncated) {
                 if !bw.work.charge(1, &bw.truncated) {
                     return Vec::new();
                 }
@@ -2940,7 +3082,7 @@ fn match_premise_admitted(
                 // blank nodes) stay inside it: each test gets fresh ones.
                 let mut matches = matches;
                 for nb in &mut matches {
-                    nb.retain(|k, _| !k.starts_with(PATTERN_WILDCARD));
+                    nb.retain(|k| !k.starts_with(PATTERN_WILDCARD));
                 }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
@@ -3145,6 +3287,7 @@ fn match_premise_admitted(
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
             let mut next = Vec::new();
+            let keys = atom_keys(pat);
             for b in &bindings {
                 let run = &bw.truncated;
                 let (Some(s_a), Some(p_a), Some(o_a)) = (
@@ -3179,7 +3322,7 @@ fn match_premise_admitted(
                 }
                 let cands = facts.candidates(&s_a, &p_a, &o_a);
                 for fact in &cands {
-                    if let Some(nb) = unify(pat, fact, b, &bw.truncated) {
+                    if let Some(nb) = unify(pat, &keys, fact, b, &bw.truncated) {
                         // Each row is charged before it is kept ([`bounded::JoinWork`]).
                         if !bw.work.charge(1, run) {
                             return Vec::new();
@@ -3407,7 +3550,10 @@ fn backward_prove(
                     // substituted one binding deep, while the `unify_walked` below follows
                     // the whole chain, so two goals this resolution tells apart can
                     // substitute alike and one identity over both would merge them.
-                    let Some(resolved) = bounded::walked_atom(&goal, b, &bw.truncated) else {
+                    // `walked_atom_cow`: the walked goal is only READ here, to build its
+                    // canonical key, so its terms come back borrowed where the walk left
+                    // them as it found them instead of copied.
+                    let Some(resolved) = bounded::walked_atom_cow(&goal, b, &bw.truncated) else {
                         // The walker refused the goal for its depth or its size, so the
                         // goal has NO identity and no name can be minted for its proof.
                         // The run fails with that reason: an empty proof here reads as
@@ -3429,13 +3575,17 @@ fn backward_prove(
                         }
                         return Vec::new();
                     };
-                    let Some(id) = bw.intern(&serialize::goal_key(&resolved)) else {
+                    let Some(id) = bw.intern(serialize::goal_key_of(&resolved)) else {
                         return Vec::new();
                     };
                     *goal_id.insert(id)
                 }
             };
             let key = NodeKey::Site { parent: path.fold, goal: id, site: at };
+            // Folded ONCE for this site: the collision check below, the renaming prefix and
+            // the registration after unification all read this one value, where each used
+            // to fold the key again.
+            let fold = key.fold();
             // The fold is COMPUTED here and REGISTERED below, once the conclusion has
             // unified. A site whose conclusion does not unify mints no name that survives
             // (`rc` and `subst` are dropped), so registering it would only charge the run's
@@ -3446,12 +3596,11 @@ fn backward_prove(
             // names the inherited bindings already hold, so unification fails on the capture
             // and `continue` below would leave the collision unseen and the proof lost with
             // no error (GH #6844 review round 5).
-            if bw.conflicts(key) {
+            if bw.conflicts(key, fold) {
                 return Vec::new();
             }
-            let fold = key.fold();
-            let pfx = format!("__bw{fold}_");
-            let n = pfx.as_str();
+            let mut pfx = BwPrefix::EMPTY;
+            let n = pfx.render(fold);
             let rc = [rename_vars(&concl[0], n), rename_vars(&concl[1], n), rename_vars(&concl[2], n)];
             let mut subst = b.clone();
             if !(unify_walked(&goal[0], &rc[0], &mut subst)
@@ -3462,7 +3611,7 @@ fn backward_prove(
             }
             // Registered now: this node's name is about to go into a proof, so a second,
             // different key on this fold must fail the run ([`BwCtx::node`]).
-            if bw.node(key).is_none() {
+            if bw.node_at(key, fold).is_none() {
                 return Vec::new();
             }
             let prem: Vec<[Term; 3]> = rule
@@ -3479,7 +3628,11 @@ fn backward_prove(
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let Some(val) = bounded::substitute(&walk(g, &sol), &sol, &bw.truncated)
+                        // `walk_ref`, not `walk`: `substitute` reads the resolved term and
+                        // builds its own, so cloning it first was a deep copy of whatever
+                        // the proof bound — a quoted formula, on the path this rule leaks
+                        // its renamed variables through.
+                        let Some(val) = bounded::substitute(walk_ref(g, &sol), &sol, &bw.truncated)
                         else {
                             ok = false;
                             break;
@@ -3629,6 +3782,41 @@ impl NodeKey {
     }
 }
 
+/// The buffer a node's renaming prefix `__bw<fold>_` is rendered into, on the STACK: the
+/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `_`, so it has a
+/// fixed upper bound and never needed a heap `String` of its own. One per candidate site on
+/// the backward path, where `format!` took an allocation and a free each time.
+///
+/// It renders the same bytes as `format!("__bw{fold}_")`, which `rename_vars` prefixes and
+/// `serialize::universal_base` reads back.
+struct BwPrefix([u8; 25]);
+
+impl BwPrefix {
+    const EMPTY: BwPrefix = BwPrefix([0u8; 25]);
+
+    /// `__bw<fold>_`, borrowed from this buffer.
+    fn render(&mut self, fold: u64) -> &str {
+        self.0[..4].copy_from_slice(b"__bw");
+        let mut at = self.0.len();
+        let mut rest = fold;
+        loop {
+            at -= 1;
+            self.0[at] = b'0' + (rest % 10) as u8;
+            rest /= 10;
+            if rest == 0 {
+                break;
+            }
+        }
+        // The digits were written to the END of the buffer, so shift them up against the
+        // `__bw` and put the trailing `_` after them.
+        let digits = self.0.len() - at;
+        self.0.copy_within(at.., 4);
+        self.0[4 + digits] = b'_';
+        // ASCII by construction, so the `from_utf8` cannot fail.
+        std::str::from_utf8(&self.0[..4 + digits + 1]).unwrap_or_default()
+    }
+}
+
 impl BwPath {
     /// The path that is just the node `fold` names.
     fn at(fold: u64) -> BwPath {
@@ -3649,12 +3837,30 @@ impl BwPath {
 }
 
 /// Resolve `t` through any chain of variable bindings in `s` (bounded against cycles).
+///
+/// The OWNING form, kept as what this module's tests pin the walk through. No caller in the
+/// engine needs it any more: each one only READS the term the walk lands on — to compare it,
+/// or to build something else from it — so they all take [`walk_ref`] and none of them copies
+/// the resolved term to look at it (GH #7080).
+#[cfg(test)]
 fn walk(t: &Term, s: &Binding) -> Term {
-    let mut cur = t.clone();
+    walk_ref(t, s).clone()
+}
+
+/// [`walk`] without copying anything: the term at the END of `t`'s binding chain in `s`,
+/// BORROWED from `t` or from `s`. The same chain, the same cycle bound, the same answer —
+/// `walk` is this plus one clone.
+///
+/// It exists because `walk` cloned at every hop and then again for its result, so a caller
+/// that only reads the resolved term (or only needs it to build something else) paid a deep
+/// copy of a quoted formula or a list for nothing. That is on the per-goal backward-naming
+/// path and on the per-solution projection below (GH #6844 follow-up).
+fn walk_ref<'a>(t: &'a Term, s: &'a Binding) -> &'a Term {
+    let mut cur = t;
     for _ in 0..s.len() + 1 {
-        match &cur {
+        match cur {
             Term::Var(v) => match s.get(v) {
-                Some(next) => cur = next.clone(),
+                Some(next) => cur = next,
                 None => break,
             },
             _ => break,
@@ -3667,37 +3873,73 @@ fn walk(t: &Term, s: &Binding) -> Term {
 /// chain-resolving each side through `s` first. Unbound-vs-unbound binds left → right, so a
 /// free goal variable points AT the rule variable and is grounded by the premise proof.
 fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
-    let aw = walk(a, s);
-    let cw = walk(c, s);
-    if aw == cw {
-        return true;
+    // What the two resolved sides ask for, decided while `s` is only BORROWED. `walk_ref`
+    // leaves each side where the walk found it, so the cases that decide the unification on
+    // the spot — the two sides already equal, or either one an unbound variable — look at
+    // the resolved terms without copying them; only the term that is actually BOUND is
+    // copied, as it was before. The compound cases are the exception: the member-wise
+    // recursion needs `s` mutable while it reads both sides, so those two own their sides.
+    // That is the trade this split exists for — a goal unifying against a rule conclusion is
+    // overwhelmingly leaves and variables, and both sides used to be deep-cloned every time
+    // (GH #7080).
+    enum Next {
+        /// The two sides are already equal, or one was bound to the other.
+        Done(bool),
+        /// Bind this variable to this term.
+        Bind(Rc<str>, Term),
+        /// Recurse member-wise into these two compounds.
+        Deep(Term, Term),
     }
-    match (&aw, &cw) {
-        (Term::Var(v), _) if !unbindable_var(v) => {
-            if frees_quoted_universal(&cw) {
-                return false;
+    let next = {
+        let aw = walk_ref(a, s);
+        let cw = walk_ref(c, s);
+        if aw == cw {
+            Next::Done(true)
+        } else {
+            match (aw, cw) {
+                (Term::Var(v), _) if !unbindable_var(v) => {
+                    if frees_quoted_universal(cw) {
+                        Next::Done(false)
+                    } else {
+                        Next::Bind(Rc::from(v.as_str()), cw.clone())
+                    }
+                }
+                (_, Term::Var(v)) if !unbindable_var(v) => {
+                    if frees_quoted_universal(aw) {
+                        Next::Done(false)
+                    } else {
+                        Next::Bind(Rc::from(v.as_str()), aw.clone())
+                    }
+                }
+                // Structural list unification, member by member (either side may hold
+                // variables — backward goals over list arguments). Lengths that differ
+                // fail here, where the owning form failed on its own `xs.len() == ys.len()`.
+                (Term::List(xs), Term::List(ys)) if xs.len() == ys.len() => {
+                    Next::Deep(aw.clone(), cw.clone())
+                }
+                // Structural quoted-triple unification (backward goals over
+                // quoted-triple arguments). [FABLE-5]
+                (Term::Triple(_), Term::Triple(_)) => Next::Deep(aw.clone(), cw.clone()),
+                _ => Next::Done(false),
             }
-            s.insert(v.clone(), cw.clone());
+        }
+    };
+    match next {
+        Next::Done(ok) => ok,
+        Next::Bind(v, t) => {
+            s.insert(v, t);
             true
         }
-        (_, Term::Var(v)) if !unbindable_var(v) => {
-            if frees_quoted_universal(&aw) {
-                return false;
+        Next::Deep(aw, cw) => match (&aw, &cw) {
+            (Term::List(xs), Term::List(ys)) => {
+                xs.iter().zip(ys).all(|(x, y)| unify_walked(x, y, s))
             }
-            s.insert(v.clone(), aw.clone());
-            true
-        }
-        // Structural list unification, member by member (either side may hold
-        // variables — backward goals over list arguments).
-        (Term::List(xs), Term::List(ys)) => {
-            xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| unify_walked(x, y, s))
-        }
-        // Structural quoted-triple unification (backward goals over
-        // quoted-triple arguments). [FABLE-5]
-        (Term::Triple(xs), Term::Triple(ys)) => {
-            xs.iter().zip(ys.iter()).all(|(x, y)| unify_walked(x, y, s))
-        }
-        _ => false,
+            (Term::Triple(xs), Term::Triple(ys)) => {
+                xs.iter().zip(ys.iter()).all(|(x, y)| unify_walked(x, y, s))
+            }
+            // `Next::Deep` is produced by those two arms alone.
+            _ => unreachable!("Deep holds two compounds of the same kind"),
+        },
     }
 }
 
@@ -3746,19 +3988,71 @@ fn rename_blanks(t: &[Term; 3], map: &FxHashMap<String, String>) -> [Term; 3] {
     [go(&t[0], map), go(&t[1], map), go(&t[2], map)]
 }
 
+/// The substitution key for each top-level variable of a premise atom, made at most ONCE
+/// per atom however many candidate facts that atom is matched against.
+///
+/// Binding a variable puts its name in the substitution, and a [`Binding`] holds that name
+/// reference-counted. Minting the name per candidate fact allocates and frees it once per
+/// bound variable per join row, and that per-row allocation is what a bare forward closure —
+/// rules over many facts, no backward rule at all — was paying for the reference-counted key:
+/// with the name made once per atom instead, that shape's allocation count, L1 data-read
+/// misses and wall clock all fall below what they were before the key was reference-counted.
+/// An atom's variable names do not change while its candidates are matched, so each row binds
+/// a CLONE of the one key — a reference-count bump, no allocation, and nothing to free while
+/// the atom is matched.
+///
+/// The key is minted on the first row that BINDS its position rather than when the atom is
+/// entered: minting all three up front measured as a cost on the recursive backward shape,
+/// which enters an atom far more often than the forward shapes do relative to how many rows
+/// it binds, and minting lazily per position costs that shape nothing.
+///
+/// This is only a cache of the name's bytes. A position with no slot — anything that is not a
+/// bindable top-level variable, including a variable nested inside a list, a quoted formula
+/// or a triple term — is bound from its own name, exactly as it was.
+type AtomKeys<'a> = [Option<(&'a str, OnceCell<Rc<str>>)>; 3];
+
+/// [`AtomKeys`] for `pat`: an empty slot for each position holding a bindable top-level
+/// variable, which the first row to bind that position fills. Allocates nothing.
+fn atom_keys(pat: &[Term; 3]) -> AtomKeys<'_> {
+    std::array::from_fn(|i| match &pat[i] {
+        Term::Var(v) if !unbindable_var(v) => Some((v.as_str(), OnceCell::new())),
+        _ => None,
+    })
+}
+
 /// Try to unify pattern triple `pat` with ground fact `f`, extending binding `b`. When the
 /// unification runs out of steps it fails, and the cut is recorded on `run`.
-fn unify(pat: &[Term; 3], f: &[Term; 3], b: &Binding, run: &Truncation) -> Option<Binding> {
+///
+/// `keys` must be [`atom_keys`] of `pat`: a position it has a slot for is a bindable top-level
+/// variable, and binds under that slot's shared key instead of a freshly made one. The
+/// positions are tried in order and the first failure stops the rest, as matching the three as
+/// a whole does.
+fn unify(
+    pat: &[Term; 3],
+    keys: &AtomKeys<'_>,
+    f: &[Term; 3],
+    b: &Binding,
+    run: &Truncation,
+) -> Option<Binding> {
     let mut nb = b.clone();
     let mut steps = bounded::StepBudget::unification();
-    match unify_all(pat, f, &mut nb, &mut steps) {
-        Some(true) => Some(nb),
-        Some(false) => None,
-        None => {
-            bounded::unification_exhausted(run);
-            None
+    for i in 0..3 {
+        let decided = match (&pat[i], &keys[i]) {
+            (Term::Var(v), Some((name, cell))) => Some(unify_var_in(v, &f[i], &mut nb, || {
+                Rc::clone(cell.get_or_init(|| Rc::from(*name)))
+            })),
+            _ => unify_term_in(&pat[i], &f[i], &mut nb, &mut steps),
+        };
+        match decided {
+            Some(true) => {}
+            Some(false) => return None,
+            None => {
+                bounded::unification_exhausted(run);
+                return None;
+            }
         }
     }
+    Some(nb)
 }
 
 /// Is `v` a quoted formula's own `@forAll` universal (GH #6754)? Such a variable is bound
@@ -4060,6 +4354,23 @@ fn unify_term(pat: &Term, val: &Term, b: &mut Binding, run: &Truncation) -> bool
     })
 }
 
+/// Unify the BINDABLE variable `v` with `val`, extending `b`: the one place a match binds a
+/// variable. `key` makes the substitution key, and is called only when the variable is not
+/// bound already and the binding is admitted — so a caller holding a ready key spends
+/// nothing on the names it does not bind.
+fn unify_var_in(v: &str, val: &Term, b: &mut Binding, key: impl FnOnce() -> Rc<str>) -> bool {
+    match b.get(v) {
+        Some(existing) => existing == val,
+        None => {
+            if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
+                return false;
+            }
+            b.insert(key(), val.clone());
+            true
+        }
+    }
+}
+
 /// Unify `pat` with `val`, extending `b`. Matching two quoted formulae takes steps from
 /// `steps` ([`formula_unify`]); `None` when they run out.
 fn unify_term_in(
@@ -4070,16 +4381,11 @@ fn unify_term_in(
 ) -> Option<bool> {
     Some(match (pat, val) {
         (Term::Var(v), _) if unbindable_var(v) => pat == val,
-        (Term::Var(v), _) => match b.get(v) {
-            Some(existing) => existing == val,
-            None => {
-                if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
-                    return Some(false);
-                }
-                b.insert(v.clone(), val.clone());
-                true
-            }
-        },
+        // `v.as_str()`, not `v.clone()`: the key is made straight from the name's bytes.
+        // Handing over an owned `String` made the allocation twice, because the key it
+        // becomes is a separate allocation it has to be copied into. A premise atom's
+        // candidates come through [`unify`] instead, which makes the key once per atom.
+        (Term::Var(v), _) => unify_var_in(v, val, b, || Rc::from(v.as_str())),
         // First-class lists unify STRUCTURALLY: same length, members pairwise
         // (so `(?x)` matches `(17)` binding ?x=17 — cwm/EYE list unification).
         (Term::List(ps), Term::List(vs)) => {
@@ -5234,20 +5540,6 @@ fn with_formula_closure<R>(
     // depth, one after the other, and would otherwise number their rules into the same
     // names while both sets of derived facts reach the outer substitution.
     //
-    // It is NOT `key` above. That one is `FxHasher` over `[[Term; 3]]::hash`, whose value
-    // depends on the target's pointer width, which is exactly the dependence GH #6844
-    // removes — it is fine for the cycle guard, which only has to agree with itself inside
-    // one run, and wrong for anything a name is built from. The salt is the INTERNED
-    // `serialize::formula_canonical_key` instead: explicit `u64` arithmetic over `term_key`s,
-    // the same on `wasm32` as on a 64-bit target, and registered exactly so it cannot be a
-    // bare fold two formulas share. `_salt` puts the enclosing closure's salt back however
-    // this function leaves.
-    let Some(salt) = bw.intern(&serialize::formula_canonical_key(ts)) else {
-        bw.visited.borrow_mut().docs.remove(&key);
-        return f(&ts.iter().collect::<Vec<_>>());
-    };
-    let _salt = ScopeSalt::swapped_in(&bw.visited, salt);
-
     let mut facts: Vec<[Term; 3]> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
     let mut backward: Vec<Rule> = Vec::new();
@@ -5275,6 +5567,44 @@ fn with_formula_closure<R>(
             _ => facts.push(row),
         }
     }
+    // This document's own canonical identity salts the root identities the nested closure
+    // mints ([`BwCtx::scope_salt`]). Nesting DEPTH alone does not tell two closures apart:
+    // two sibling `log:conclusion` formulas of one outer document are closed at the same
+    // depth, one after the other, and would otherwise number their rules into the same
+    // names while both sets of derived facts reach the outer substitution.
+    //
+    // It is NOT `key` above. That one is `FxHasher` over `[[Term; 3]]::hash`, whose value
+    // depends on the target's pointer width, which is exactly the dependence GH #6844
+    // removes — it is fine for the cycle guard, which only has to agree with itself inside
+    // one run, and wrong for anything a name is built from. The salt is
+    // `serialize::formula_canonical_key`'s fold instead: explicit `u64` arithmetic over
+    // `term_key`s, the same on `wasm32` as on a 64-bit target.
+    //
+    // It is REGISTERED ([`BwCtx::intern`], which refuses a fold a different identity
+    // already holds and fails the run) exactly when this nested document has a `<=` rule,
+    // and so can mint a name the registration has to keep apart from every other. With no
+    // backward rule the closure renames nothing — its `BwCtx` is `unnamed()` and hands its
+    // paths out unregistered — so registering the salt only spent the run's backward
+    // identity allowance on a purely forward closure, and a run inside its own join-work
+    // limit WAS refused for it: each nested closure gets a fresh join/round allowance, but
+    // the salts accumulate run-wide against `bounded::proof_nodes`, so a deep CHAIN of
+    // forward-only closures was refused with the backward proof-node cut in a document
+    // that cannot mint a single name (`a_deep_forward_only_closure_chain_answers_at_a_
+    // tight_limit`). The fold is the SAME either way, so what any name minted elsewhere in
+    // the run is built from does not move.
+    //
+    // `_salt` puts the enclosing closure's salt back however this function leaves.
+    let canon = serialize::formula_canonical_key(ts);
+    let salt = if backward.is_empty() {
+        serialize::fnv1a64(&canon)
+    } else {
+        let Some(salt) = bw.intern(canon) else {
+            bw.visited.borrow_mut().docs.remove(&key);
+            return f(&ts.iter().collect::<Vec<_>>());
+        };
+        salt
+    };
+    let _salt = ScopeSalt::swapped_in(&bw.visited, salt);
     let parsed =
         parser::Parsed { facts, rules, backward_rules: backward, base: bw.base.clone() };
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
@@ -10186,15 +10516,15 @@ mod tests {
         let tight =
             BwCtx::new(&rules, Truncation::top_level_with(limits), RunShared::for_sources(&[]));
         tight.root_path(0).expect("a root");
-        tight.intern("G1").expect("the second entry");
-        assert_eq!(tight.intern("G2"), None, "interning is charged to the same allowance");
+        tight.intern("G1".to_string()).expect("the second entry");
+        assert_eq!(tight.intern("G2".to_string()), None, "interning is charged to the same allowance");
         // The DEFAULT allowance is the unbounded sentinel: nothing is refused.
         let open = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
         let open_root = open.root_path(0).expect("a root");
         for g in 0..64 {
             open.node(NodeKey::Site { parent: open_root.fold, goal: g, site: 0 })
                 .expect("the default refuses nothing");
-            open.intern(&format!("G{}", g)).expect("nor any identity");
+            open.intern(format!("G{}", g)).expect("nor any identity");
         }
         assert!(open.nested_error.borrow().is_none());
     }
@@ -10218,11 +10548,11 @@ mod tests {
             Term::Var("y".into()),
         ]);
         assert_ne!(mine, theirs, "two different goals");
-        let id = bw.intern(&mine).expect("the first goal interns");
-        assert_eq!(bw.intern(&mine), Some(id), "and interns to the same id again");
+        let id = bw.intern(mine.clone()).expect("the first goal interns");
+        assert_eq!(bw.intern(mine.clone()), Some(id), "and interns to the same id again");
         // Force the fold collision: the other goal's fold is already taken by this one.
         bw.visited.borrow_mut().force_id_fold(serialize::fnv1a64(&theirs), &mine);
-        assert_eq!(bw.intern(&theirs), None, "a goal-fold collision is refused");
+        assert_eq!(bw.intern(theirs.clone()), None, "a goal-fold collision is refused");
         assert!(
             bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("64-bit fold")),
             "{:?}",
@@ -10424,6 +10754,737 @@ mod tests {
         assert_eq!(named.borrow().node_count(), 2, "registered, because a name can be minted");
     }
 
+    /// The lazy nested-closure salt DOES change which runs are refused, and this pins the
+    /// direction: strictly fewer. A document with NO `<=` rule anywhere, built as a CHAIN of
+    /// nested forward-only `log:conclusion` closures, used to be refused with the
+    /// `backward proof-node limit exceeded` cut and now answers.
+    ///
+    /// Why a chain and not siblings: each nested closure gets a FRESH join/round allowance
+    /// (`bounded::enter_closure`), but the salts every level registered accumulated
+    /// RUN-WIDE against `bounded::proof_nodes` — `max_join_rows × max_rounds`. So ten
+    /// levels of nesting registered ten identities against an allowance of three, and were
+    /// refused for backward naming in a document that cannot mint a single name. Sibling
+    /// closures do not show this, which is why the first version of this work reported the
+    /// refusal as unreachable; it is reachable, by depth.
+    ///
+    /// The answers are unchanged wherever both sides answer — what changes is only that
+    /// fewer runs are refused.
+    #[test]
+    fn a_deep_forward_only_closure_chain_answers_at_a_tight_limit() {
+        // Ten levels, each wrapping the one below in a `log:conclusion` whose outer rule
+        // concludes from it. No `<=` rule at any level.
+        let depth = 10;
+        let mut inner = format!(":k{depth} :p :v .");
+        for k in (0..depth).rev() {
+            inner = format!(
+                ":k{k} :p :v . {{ {{ {inner} }} log:conclusion ?c{k} }} => {{ :r{k} :is ?c{k} }} ."
+            );
+        }
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n{inner}\n"
+        );
+        // Tight enough that ten accumulated salts would exceed the allowance
+        // (`proof_nodes` = 1 × 3 = 3), and loose enough for the closure's own forward work.
+        let limits =
+            ClosureLimits { max_rounds: 3, max_join_rows: 1, ..ClosureLimits::default() };
+        let out = reason_n3_terms_with_limits(
+            &src,
+            None,
+            None,
+            NegationCycles::Reject,
+            limits,
+        )
+        .expect("a document that can mint no name is not refused for backward naming");
+        // The outer rule fired from the nested closure's result, and that result is the
+        // formula term the closure built.
+        let concluded = out
+            .facts
+            .iter()
+            .find(|[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is"))
+            .expect("the outer rule concluded :r0 :is <the nested closure>");
+        assert!(
+            matches!(&concluded[0], Term::Iri(i) if i == "http://ex/r0"),
+            "concluded about :r0, got {:?}",
+            concluded[0]
+        );
+        assert!(
+            matches!(&concluded[2], Term::Formula(rows) if !rows.is_empty()),
+            "log:conclusion is formula-valued and the closure is not empty: {:?}",
+            concluded[2]
+        );
+        // And the document's own asserted fact is still there, so this is the whole answer
+        // and not a truncated one.
+        assert!(
+            out.facts.iter().any(|[sub, p, o]| matches!((sub, p, o), (Term::Iri(a), Term::Iri(b), Term::Iri(c))
+                if a == "http://ex/k0" && b == "http://ex/p" && c == "http://ex/v")),
+            "the top-level asserted fact survives"
+        );
+    }
+
+    /// `walk_ref` resolves the chain `walk` resolved, and `walk` is it plus a clone: the
+    /// same answer for an unbound variable, a one-hop chain, a long chain, a chain ending
+    /// in a compound, a non-variable, and a CYCLE — where the answer is whatever the
+    /// shared iteration bound (`s.len() + 1` hops) lands on, so the two must agree there
+    /// too or a cyclic binding would resolve differently than it used to.
+    #[test]
+    fn walk_ref_resolves_what_walk_resolved() {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let var = |s: &str| Term::Var(s.to_string());
+        let mut b = Binding::default();
+        b.insert("one", iri("http://ex/v"));
+        b.insert("two", var("one"));
+        b.insert("three", var("two"));
+        b.insert("deep", Term::List(vec![var("three"), iri("http://ex/w")]));
+        b.insert("toDeep", var("deep"));
+        // A two-variable cycle, and a self-cycle.
+        b.insert("loopA", var("loopB"));
+        b.insert("loopB", var("loopA"));
+        b.insert("self", var("self"));
+        let probes = vec![
+            var("one"),
+            var("two"),
+            var("three"),
+            var("deep"),
+            var("toDeep"),
+            var("unbound"),
+            var("loopA"),
+            var("loopB"),
+            var("self"),
+            iri("http://ex/plain"),
+            Term::List(vec![var("two")]),
+            Term::Formula(vec![[var("two"), iri("http://ex/p"), var("one")]]),
+        ];
+        // The reference is the cloning loop `walk` WAS, spelled out: `walk` now delegates
+        // to `walk_ref`, so comparing the two against each other would pass whatever
+        // `walk_ref` did.
+        let reference = |t: &Term| -> Term {
+            let mut cur = t.clone();
+            for _ in 0..b.len() + 1 {
+                match &cur {
+                    Term::Var(v) => match b.get(v) {
+                        Some(next) => cur = next.clone(),
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
+            cur
+        };
+        for t in &probes {
+            assert_eq!(walk_ref(t, &b), &reference(t), "walk_ref disagreed on {t:?}");
+            assert_eq!(walk(t, &b), reference(t), "walk disagreed on {t:?}");
+        }
+    }
+
+
+    /// The substitution answers every question the `HashMap<String, Term>` it replaced
+    /// answered, over a randomized sequence of operations.
+    ///
+    /// The reference is a `HashMap<String, Term>` driven by the operations the REPLACED type
+    /// supported directly — `insert` / `get` / `len` / `retain` / `values` on a map keyed by
+    /// an owned `String` — not by the new type, which would pass whatever the new type did.
+    /// What is compared is every answer AND the whole contents after every step, so a
+    /// difference in `insert`'s replace semantics (an existing variable must take the new
+    /// value, not keep the old one) or in `retain`'s predicate shows up immediately.
+    #[test]
+    fn the_substitution_answers_what_the_string_keyed_map_answered() {
+        let mut r = rng(0x7080);
+        // Names that collide on prefixes, plus the long `__bw<fold>_` shape a backward
+        // renaming actually produces, so the keys under test are the keys the engine uses.
+        let names: Vec<String> = (0..12)
+            .map(|i| match i % 4 {
+                0 => format!("x{i}"),
+                1 => format!("x{i}x"),
+                2 => format!("__bw1844674407370955161{i}_y"),
+                _ => format!("__up.{i}"),
+            })
+            .collect();
+        let term = |i: u64| -> Term {
+            match i % 5 {
+                0 => Term::Iri(format!("http://example.org/shared/path/s{}", i / 5)),
+                1 => Term::Blank(format!("b{}", i / 5)),
+                2 => Term::Lit(format!("l{}", i / 5), "http://x/dt".into(), None),
+                3 => Term::List(vec![Term::Iri(format!("http://x/{}", i / 5))]),
+                _ => Term::Formula(vec![[
+                    Term::Var(format!("v{}", i / 5)),
+                    Term::Iri("http://x/p".into()),
+                    Term::Iri("http://x/o".into()),
+                ]]),
+            }
+        };
+        // The whole contents, as a sorted list so the comparison does not depend on either
+        // table's iteration order (which is what the engine's own encodings do too).
+        let sorted = |mut rows: Vec<String>| {
+            rows.sort();
+            rows
+        };
+        let mut subst = Binding::new();
+        let mut reference: HashMap<String, Term> = HashMap::new();
+        for step in 0..4000u64 {
+            let v = &names[(r(names.len() as u64)) as usize];
+            match r(10) {
+                // Bind, including re-binding a variable that is already bound.
+                0..=5 => {
+                    let t = term(r(20));
+                    subst.insert(v.as_str(), t.clone());
+                    reference.insert(v.clone(), t);
+                }
+                // Drop a class of bindings, as a negation's wildcard cleanup does.
+                6 => {
+                    let drop = names[(r(names.len() as u64)) as usize].clone();
+                    subst.retain(|k| k != drop.as_str());
+                    reference.retain(|k, _| k != &drop);
+                }
+                _ => {}
+            }
+            assert_eq!(subst.get(v), reference.get(v), "step {step}: get({v})");
+            assert_eq!(subst.len(), reference.len(), "step {step}: len");
+            assert_eq!(subst.is_empty(), reference.is_empty(), "step {step}: is_empty");
+            assert_eq!(
+                sorted(subst.iter().map(|(k, t)| format!("{k:?}={t:?}")).collect()),
+                sorted(reference.iter().map(|(k, t)| format!("{k:?}={t:?}")).collect()),
+                "step {step}: the whole contents, as `canonical_new_firings` encodes them"
+            );
+            assert_eq!(
+                sorted(subst.values().map(|t| format!("{t:?}")).collect()),
+                sorted(reference.values().map(|t| format!("{t:?}")).collect()),
+                "step {step}: the values, as `within_depth` reads them"
+            );
+        }
+        // A name that was never bound is unbound in both, and asking does not bind it.
+        assert_eq!(subst.get("never-bound"), reference.get("never-bound"));
+    }
+
+    /// `unify_walked` decides, and extends the substitution, exactly as the CLONING form it
+    /// replaced did.
+    ///
+    /// The reference below is that form spelled out — `walk`-and-clone both sides, then
+    /// match on the two owned terms — because the shipped version decides the common cases
+    /// on BORROWED terms and owns only the two compound arms, and comparing it against
+    /// itself would pass whatever it did. Both the verdict and the resulting substitution
+    /// are compared, over randomized pairs that reach every arm: equal terms, a variable
+    /// against a value, a value against a variable, two unbound variables (which bind left
+    /// to right), lists of equal and unequal length, triple terms, a quoted formula's own
+    /// universal (which no matcher may bind), a value that would free one, and chains and
+    /// cycles through the substitution.
+    #[test]
+    fn unify_walked_decides_what_the_cloning_form_decided() {
+        /// The implementation this replaced, verbatim apart from the key type `insert` now
+        /// takes: both sides walked to owned terms before anything is matched.
+        fn reference(a: &Term, c: &Term, s: &mut Binding) -> bool {
+            let aw = walk(a, s);
+            let cw = walk(c, s);
+            if aw == cw {
+                return true;
+            }
+            match (&aw, &cw) {
+                (Term::Var(v), _) if !unbindable_var(v) => {
+                    if frees_quoted_universal(&cw) {
+                        return false;
+                    }
+                    s.insert(v.as_str(), cw.clone());
+                    true
+                }
+                (_, Term::Var(v)) if !unbindable_var(v) => {
+                    if frees_quoted_universal(&aw) {
+                        return false;
+                    }
+                    s.insert(v.as_str(), aw.clone());
+                    true
+                }
+                (Term::List(xs), Term::List(ys)) => {
+                    xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| reference(x, y, s))
+                }
+                (Term::Triple(xs), Term::Triple(ys)) => {
+                    xs.iter().zip(ys.iter()).all(|(x, y)| reference(x, y, s))
+                }
+                _ => false,
+            }
+        }
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let var = |s: &str| Term::Var(s.to_string());
+        // One universal of a quoted formula at nesting depth 0, which `unbindable_var`
+        // refuses to bind and `frees_quoted_universal` refuses to let out of its formula.
+        let universal = Term::Var(format!("{}0.http://ex/u", serialize::FORMULA_UNIVERSAL));
+        let terms: Vec<Term> = vec![
+            iri("a"),
+            iri("b"),
+            var("x"),
+            var("y"),
+            var("chain"),
+            var("mid"),
+            var("loopA"),
+            var("loopB"),
+            var("selfy"),
+            universal.clone(),
+            Term::Lit("7".into(), "http://x/int".into(), None),
+            Term::Blank("bn".into()),
+            Term::List(vec![var("x"), iri("a")]),
+            Term::List(vec![iri("a"), iri("b")]),
+            // A different LENGTH, so the list arm's length check is exercised both ways.
+            Term::List(vec![iri("a")]),
+            Term::List(vec![Term::List(vec![var("y")]), iri("b")]),
+            Term::Triple(Box::new([var("x"), iri("p"), iri("b")])),
+            Term::Triple(Box::new([iri("a"), iri("p"), var("y")])),
+            Term::Formula(vec![[var("x"), iri("p"), iri("b")]]),
+            // A value that would take a quoted universal out of the formula binding it.
+            Term::Formula(vec![[universal.clone(), iri("p"), iri("b")]]),
+            universal,
+        ];
+        // The seed substitutions the pairs are unified under: empty, a chain, and a cycle
+        // (where the answer is whatever the shared `s.len() + 1` iteration bound lands on).
+        let seeds: Vec<Binding> = {
+            let mut empty = Binding::new();
+            let mut chain = Binding::new();
+            chain.insert("chain", var("mid"));
+            chain.insert("mid", iri("a"));
+            let mut cyclic = Binding::new();
+            cyclic.insert("loopA", var("loopB"));
+            cyclic.insert("loopB", var("loopA"));
+            cyclic.insert("selfy", var("selfy"));
+            let mut bound = Binding::new();
+            bound.insert("x", iri("a"));
+            bound.insert("y", Term::List(vec![iri("b")]));
+            empty.retain(|_| true); // keep `empty` mutable-used and genuinely empty
+            vec![empty, chain, cyclic, bound]
+        };
+        let mut r = rng(0x7080_7095);
+        let mut reached_bind = 0usize;
+        let mut reached_deep = 0usize;
+        let mut reached_false = 0usize;
+        for case in 0..6000u64 {
+            let a = &terms[r(terms.len() as u64) as usize];
+            let c = &terms[r(terms.len() as u64) as usize];
+            let seed = &seeds[r(seeds.len() as u64) as usize];
+            let mut mine = seed.clone();
+            let mut theirs = seed.clone();
+            let got = unify_walked(a, c, &mut mine);
+            let want = reference(a, c, &mut theirs);
+            assert_eq!(got, want, "case {case}: verdict on {a:?} vs {c:?} under {seed:?}");
+            assert_eq!(
+                mine, theirs,
+                "case {case}: the substitution after {a:?} vs {c:?} under {seed:?}"
+            );
+            // Count which arms the corpus actually reached, so a future edit that stops
+            // reaching one of them fails here instead of silently testing less.
+            if mine.len() > seed.len() {
+                reached_bind += 1;
+            }
+            if matches!((a, c), (Term::List(_), Term::List(_)) | (Term::Triple(_), Term::Triple(_)))
+            {
+                reached_deep += 1;
+            }
+            if !got {
+                reached_false += 1;
+            }
+        }
+        assert!(reached_bind > 100, "the binding arms are reached: {reached_bind}");
+        assert!(reached_deep > 100, "the compound arms are reached: {reached_deep}");
+        assert!(reached_false > 100, "the refusing arms are reached: {reached_false}");
+    }
+
+    /// Every fact a backward proof derives is BYTE IDENTICAL to what the
+    /// `HashMap<String, Term>`-keyed substitution derived, and so is every proof step.
+    ///
+    /// The expectations are not computed: they are the literal output of the engine as it
+    /// stood BEFORE this change, captured from the parent commit and pasted in. That is
+    /// what makes this a differential and not a tautology — the new representation cannot
+    /// talk its way into agreeing with itself.
+    ///
+    /// What they pin is exactly the part a representation change could move. A backward
+    /// renaming's `__bw<fold>_` name is a function of the goal with its variables resolved
+    /// to the END of their binding chains, so it reads the substitution's whole contents;
+    /// and a quoted formula is opaque to substitution, so that name survives into a derived
+    /// fact, where it becomes part of the fact's term identity, its `why()` string and its
+    /// `sparq-prov` IRI (GH #6844 item 2, GH #7095). The twenty-digit folds below are
+    /// therefore the sharpest available statement that the substitution holds the same
+    /// bindings in the same chains as before: one entry wrong, missing, or resolved one hop
+    /// instead of to the end, and these names move.
+    ///
+    /// The documents cover the arms a substitution is reachable through: a renamed variable
+    /// leaked into an answer, a recursive proof deep enough to accumulate a large
+    /// substitution, two sites concluding one shape, a goal over a LIST and one over a
+    /// TRIPLE TERM (the two compound arms of [`unify_walked`]), a goal whose variables
+    /// ALIAS one another, a formula multiset match (which copies the substitution once per
+    /// pairing it tries), builtins and a list generator over a backward-proved binding, and
+    /// a document that derives NOTHING at all.
+    #[test]
+    fn a_backward_proof_derives_the_bytes_the_string_keyed_substitution_derived() {
+        let recursive_chain = {
+            let mut s = String::from("@prefix : <http://ex/> .\n");
+            for i in 0..7 {
+                s.push_str(&format!(":n{i} :par :n{}.\n", i + 1));
+            }
+            s.push_str(
+                ":n7 :reaches :end .\n{ ?x :reaches ?y } <= { ?x :par ?m . ?m :reaches ?y } .\n",
+            );
+            s
+        };
+        let cases: Vec<(&str, &str, &str, &[&str])> = vec![
+            (
+                "a renamed variable leaked into the answer",
+                "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n:s2 :p :v2 .\n\
+                 { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n",
+                "@prefix : <http://ex/> .\n{ ?x :p ?any . ?x :has ?f } => { ?x :vals ?f } .\n",
+                &[
+                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Var("__bw13293826320743913544_y"), Iri("http://ex/inner"), Var("__bw13293826320743913544_z")]])"#,
+                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Var("__bw14225706374877674727_y"), Iri("http://ex/inner"), Var("__bw14225706374877674727_z")]])"#,
+                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Var("__bw8776505594191193573_y"), Iri("http://ex/inner"), Var("__bw8776505594191193573_z")]])"#,
+                ],
+            ),
+            (
+                "a recursive proof over a chain",
+                &recursive_chain,
+                "@prefix : <http://ex/> .\n{ ?x :reaches ?y } => { ?x :out ?y } .\n",
+                &[
+                    r#"Iri("http://ex/n0") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n1") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n2") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n3") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n4") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n5") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n6") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n7") Iri("http://ex/out") Iri("http://ex/end")"#,
+                ],
+            ),
+            (
+                "two sites concluding one shape for one goal",
+                "@prefix : <http://ex/> .\n:a :p :v .\n:a :q :w .\n\
+                 { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n\
+                 { ?x :has { ?y :inner ?z } } <= { ?x :q ?y } .\n",
+                "@prefix : <http://ex/> .\n{ :a :has ?f } => { :all :vals ?f } .\n",
+                &[
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Var("__bw17784778144888223834_y"), Iri("http://ex/inner"), Var("__bw17784778144888223834_z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Var("__bw17784779244399852045_y"), Iri("http://ex/inner"), Var("__bw17784779244399852045_z")]])"#,
+                ],
+            ),
+            (
+                "a backward goal over a LIST argument",
+                "@prefix : <http://ex/> .\n:a :pair ( :l :r ) .\n\
+                 { ?x :swapped ( ?b ?a ) } <= { ?x :pair ( ?a ?b ) } .\n",
+                "@prefix : <http://ex/> .\n{ ?x :swapped ?s } => { ?x :out ?s } .\n",
+                &[
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Iri("http://ex/r"), Iri("http://ex/l")])"#,
+                ],
+            ),
+            (
+                "a backward goal over a TRIPLE TERM argument",
+                "@prefix : <http://ex/> .\n:a :says << :s :p :o >> .\n\
+                 { ?x :echo << ?s ?p ?o >> } <= { ?x :says << ?s ?p ?o >> } .\n",
+                "@prefix : <http://ex/> .\n{ ?x :echo ?e } => { ?x :out ?e } .\n",
+                &[
+                    r#"Iri("http://ex/a") Iri("http://ex/out") Triple([Iri("http://ex/s"), Iri("http://ex/p"), Iri("http://ex/o")])"#,
+                ],
+            ),
+            (
+                "a goal whose variables alias one another, which derives nothing",
+                "@prefix : <http://ex/> .\n:t :p :t .\n\
+                 { ( ?a ?b ) :outer { ?a :held ?b } } <= { ?a :p ?b } .\n",
+                "@prefix : <http://ex/> .\n{ ( ?x ?y ) :outer ?f } => { ?x :got ?f } .\n",
+                &[],
+            ),
+            (
+                "a formula multiset match",
+                "@prefix : <http://ex/> .\n:d :says { :a :p :b . :c :q :d } .\n",
+                "@prefix : <http://ex/> .\n\
+                 { ?d :says { ?x :p ?y . ?u :q ?v } } => { ?d :saw ?x ; :saw ?v } .\n",
+                &[
+                    r#"Iri("http://ex/d") Iri("http://ex/saw") Iri("http://ex/a")"#,
+                    r#"Iri("http://ex/d") Iri("http://ex/saw") Iri("http://ex/d")"#,
+                ],
+            ),
+            (
+                "builtins and a list generator over a backward-proved binding",
+                "@prefix : <http://ex/> .\n:a :val 3 .\n:a :items ( 1 2 3 ) .\n\
+                 { ?x :double ?d } <= { ?x :val ?v . ( ?v 2 ) \
+                 <http://www.w3.org/2000/10/swap/math#product> ?d } .\n",
+                "@prefix : <http://ex/> .\n\
+                 @prefix list: <http://www.w3.org/2000/10/swap/list#> .\n\
+                 { ?x :double ?d . ?x :items ?l . ?l list:member ?m } => { ?x :out ( ?d ?m ) } .\n",
+                &[
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Lit("6", "http://www.w3.org/2001/XMLSchema#integer", None), Lit("1", "http://www.w3.org/2001/XMLSchema#integer", None)])"#,
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Lit("6", "http://www.w3.org/2001/XMLSchema#integer", None), Lit("2", "http://www.w3.org/2001/XMLSchema#integer", None)])"#,
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Lit("6", "http://www.w3.org/2001/XMLSchema#integer", None), Lit("3", "http://www.w3.org/2001/XMLSchema#integer", None)])"#,
+                ],
+            ),
+        ];
+        for (what, data, query, want) in cases {
+            assert_eq!(derived_rows(data, query), want, "{what}");
+        }
+
+        // And the PROOF a backward derivation records: the rule it fired, the premise facts
+        // it rests on, and the term keys of both.
+        let proofed = "@prefix : <http://ex/> .\n:a :par :b .\n:b :par :c .\n:c :reaches :end .\n\
+                       { ?x :reaches ?y } <= { ?x :par ?m . ?m :reaches ?y } .\n\
+                       { ?x :reaches ?y } => { ?x :out ?y } .\n";
+        let mut dict = Dict::default();
+        let (facts, steps) = reason_n3_proof(&mut dict, proofed).expect("proof");
+        assert_eq!(facts.len(), 6, "the facts the proof run closes over");
+        let mut rendered: Vec<String> = steps.iter().map(|s| format!("{s:?}")).collect();
+        rendered.sort();
+        assert_eq!(
+            rendered,
+            vec![
+                r#"ProofStep { conclusion: [1, 2, 3], rule: 0, premises: [[1, 4, 3]], conclusion_key: ["I\"http://ex/c\"", "I\"http://ex/out\"", "I\"http://ex/end\""], premise_keys: [["I\"http://ex/c\"", "I\"http://ex/reaches\"", "I\"http://ex/end\""]] }"#,
+                r#"ProofStep { conclusion: [5, 2, 3], rule: 0, premises: [], conclusion_key: ["I\"http://ex/b\"", "I\"http://ex/out\"", "I\"http://ex/end\""], premise_keys: [] }"#,
+                r#"ProofStep { conclusion: [6, 2, 3], rule: 0, premises: [], conclusion_key: ["I\"http://ex/a\"", "I\"http://ex/out\"", "I\"http://ex/end\""], premise_keys: [] }"#,
+            ],
+            "the proof steps, byte for byte"
+        );
+    }
+
+    /// A premise atom's candidates unify to the SAME binding whether each top-level variable
+    /// binds under its [`atom_keys`] key or under a name made per candidate. Randomized over
+    /// atoms that exercise both of `unify`'s branches at every position: a key the table has
+    /// (a bindable top-level variable, bound and still unbound, the same variable twice so
+    /// the second occurrence must compare instead of bind, and a `?_` wildcard) and a
+    /// position it declines a key for (a constant, a quoted formula's own universal, a list,
+    /// a triple term, and a variable nested inside each of those). The reference is the
+    /// implementation this replaced, spelled out: one walk of all three positions through
+    /// `unify_all` under one budget, on a copy of the inherited binding.
+    #[test]
+    fn a_keyed_atom_unifies_what_the_unkeyed_atom_unified() {
+        fn reference(pat: &[Term; 3], f: &[Term; 3], b: &Binding, run: &Truncation) -> Option<Binding> {
+            let mut nb = b.clone();
+            let mut steps = bounded::StepBudget::unification();
+            match unify_all(pat, f, &mut nb, &mut steps) {
+                Some(true) => Some(nb),
+                Some(false) => None,
+                None => {
+                    bounded::unification_exhausted(run);
+                    None
+                }
+            }
+        }
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let var = |s: &str| Term::Var(s.to_string());
+        let names = ["x", "y", "shared"];
+        let ground: Vec<Term> = vec![
+            iri("a"),
+            iri("b"),
+            Term::Lit("7".into(), parser::XSD_INTEGER.into(), None),
+            Term::List(vec![iri("a")]),
+        ];
+        let pool: Vec<Term> = vec![
+            var("x"),
+            var("y"),
+            var("shared"),
+            Term::Var(format!("{}u", serialize::FORMULA_UNIVERSAL)),
+            Term::Var(format!("{PATTERN_WILDCARD}w")),
+            iri("a"),
+            iri("b"),
+            Term::Lit("7".into(), parser::XSD_INTEGER.into(), None),
+            Term::List(vec![var("x"), iri("a")]),
+            Term::List(vec![iri("a")]),
+            Term::Triple(Box::new([var("y"), iri("a"), iri("b")])),
+            Term::Formula(vec![[var("x"), iri("a"), iri("b")]]),
+        ];
+        // A small deterministic generator: equivalence must not depend on a seed.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as usize
+        };
+        let (mut same, mut bound, mut declined, mut matched, mut refused) = (0, 0, 0, 0, 0);
+        for _ in 0..6_000 {
+            let pat: [Term; 3] = std::array::from_fn(|_| pool[next() % pool.len()].clone());
+            // Half the facts are drawn from the pool, which mostly refuse — that is where a
+            // key must NOT be spent. Half are built from the pattern by grounding each
+            // top-level variable, which reaches the binding branch as often.
+            let f: [Term; 3] = if next() % 2 == 0 {
+                std::array::from_fn(|_| pool[next() % pool.len()].clone())
+            } else {
+                std::array::from_fn(|i| match &pat[i] {
+                    Term::Var(_) => ground[next() % ground.len()].clone(),
+                    t => t.clone(),
+                })
+            };
+            // Inherit a binding sometimes, so the "already bound" compare is reached.
+            let mut seed = Binding::new();
+            for n in names {
+                if next() % 3 == 0 {
+                    seed.insert(n, pool[next() % pool.len()].clone());
+                }
+            }
+            let keys = atom_keys(&pat);
+            declined += keys.iter().filter(|k| k.is_none()).count();
+            bound += keys.iter().filter(|k| k.is_some()).count();
+            let run = Truncation::top_level();
+            let got = unify(&pat, &keys, &f, &seed, &run);
+            let want = reference(&pat, &f, &seed, &Truncation::top_level());
+            assert_eq!(got, want, "pat {pat:?} fact {f:?} seed {seed:?}");
+            if got.is_some() {
+                matched += 1;
+            } else {
+                refused += 1;
+            }
+            same += 1;
+        }
+        assert_eq!(same, 6_000);
+        // Both of `unify`'s branches, and both outcomes, reached often.
+        assert!(bound > 1_000, "keyed positions reached {bound} times");
+        assert!(declined > 1_000, "unkeyed positions reached {declined} times");
+        assert!(matched > 100, "unified {matched} times");
+        assert!(refused > 100, "refused {refused} times");
+    }
+
+    /// An atom's candidates share ONE substitution key per bound position, and that key is
+    /// minted only once a row actually binds it. Both halves of what [`AtomKeys`] claims:
+    ///
+    /// - every row of a 500-candidate atom binds a key POINTER-IDENTICAL to the slot's, so
+    ///   the name is allocated once for the whole atom rather than once per row;
+    /// - an atom whose candidates all refuse leaves its slots EMPTY, so entering an atom that
+    ///   binds nothing allocates no name at all;
+    /// - a position that is not a bindable top-level variable gets no slot.
+    #[test]
+    fn an_atoms_candidates_share_one_key_minted_on_the_first_row_that_binds() {
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let run = Truncation::top_level();
+        let pat = [Term::Var("a".into()), iri("p"), Term::Var("b".into())];
+        let keys = atom_keys(&pat);
+
+        // The constant position is declined a slot; the two variables get an EMPTY one.
+        assert!(keys[1].is_none(), "a constant position must not take a key slot");
+        for i in [0, 2] {
+            let (name, cell) = keys[i].as_ref().expect("a bindable variable takes a slot");
+            assert_eq!(*name, if i == 0 { "a" } else { "b" });
+            assert!(cell.get().is_none(), "position {i} minted a key before any row bound it");
+        }
+
+        // 500 candidates that all match, so both positions bind on every row.
+        for i in 0..500 {
+            let fact = [iri(&format!("s{i}")), iri("p"), iri(&format!("o{i}"))];
+            let got = unify(&pat, &keys, &fact, &Binding::new(), &run).expect("must unify");
+            for (i, v) in [(0usize, "a"), (2, "b")] {
+                let (_, cell) = keys[i].as_ref().unwrap();
+                let minted = cell.get().expect("a bound position must have minted its key");
+                let (held, _) = got.map.get_key_value(v).expect("the variable must be bound");
+                assert!(
+                    Rc::ptr_eq(held, minted),
+                    "row for {v} allocated its own key instead of sharing the atom's",
+                );
+            }
+        }
+
+        // Laziness is PER POSITION, and the positions are tried in order. On candidates whose
+        // predicate does not match, `?a` at position 0 binds and then position 1 refuses, so
+        // the object's key is never needed — and is never minted.
+        let partial = atom_keys(&pat);
+        for i in 0..100 {
+            let fact = [iri(&format!("s{i}")), iri("other"), iri(&format!("o{i}"))];
+            assert!(unify(&pat, &partial, &fact, &Binding::new(), &run).is_none());
+        }
+        assert!(
+            partial[0].as_ref().unwrap().1.get().is_some(),
+            "the subject bound on every candidate, so its key must have been minted",
+        );
+        assert!(
+            partial[2].as_ref().unwrap().1.get().is_none(),
+            "the object never bound, so minting its key is work the atom did not need",
+        );
+
+        // An atom that refuses at its FIRST position mints nothing at all, so entering it
+        // for a candidate that cannot match allocates no name.
+        let lead = [iri("s"), Term::Var("a".into()), Term::Var("b".into())];
+        let none = atom_keys(&lead);
+        for i in 0..100 {
+            let fact = [iri(&format!("other{i}")), iri("p"), iri("o")];
+            assert!(unify(&lead, &none, &fact, &Binding::new(), &run).is_none());
+        }
+        for i in [1, 2] {
+            assert!(
+                none[i].as_ref().unwrap().1.get().is_none(),
+                "position {i} minted a key although no candidate ever bound it",
+            );
+        }
+    }
+
+    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
+    /// the one `__bw<n>_` chunk `serialize::universal_base` reads back and that every
+    /// renamed variable carries, so a drift here would rename every standardize-apart
+    /// space. Checked at the digit-count boundaries and at both extremes of a `u64`.
+    #[test]
+    fn the_renaming_prefix_renders_what_format_rendered() {
+        let mut folds: Vec<u64> = vec![0, 1, 9, 10, 11, 99, 100, 999, 1000, u64::MAX, u64::MAX - 1];
+        // A spread of wide values, including one of every digit count.
+        let mut at = 1u64;
+        while at <= u64::MAX / 10 {
+            folds.push(at);
+            folds.push(at * 9);
+            at *= 10;
+        }
+        for f in folds {
+            let mut pfx = BwPrefix::EMPTY;
+            assert_eq!(pfx.render(f), format!("__bw{f}_"), "BwPrefix::render({f})");
+        }
+    }
+
+    /// A purely FORWARD nested closure must not spend the run's backward identity
+    /// allowance. `with_formula_closure` interned the nested document's scope salt before
+    /// it knew whether that document had a `<=` rule at all, so a forward-only
+    /// `log:conclusion` closure registered an identity no name could ever be built from —
+    /// charging `bounded::proof_nodes` and growing the run's table — and a run inside its
+    /// own join-work limit could be refused for it.
+    ///
+    /// This is the same shape as `a_forward_only_evaluation_registers_no_proof_nodes` and
+    /// asserts the same thing: the ACCOUNTING. What that accounting lets through is pinned
+    /// separately, by `a_deep_forward_only_closure_chain_answers_at_a_tight_limit` — the
+    /// refusal here is reachable, by nesting DEPTH rather than by sibling count. The salt's
+    /// VALUE is unchanged, which is the
+    /// other half — a closure that does have a `<=` rule registers that same fold, so no
+    /// name minted anywhere in the run moves.
+    #[test]
+    fn a_forward_only_nested_closure_registers_no_identity() {
+        let nested = |rule: &str| {
+            format!(
+                "@prefix : <http://ex/> .\n\
+                 @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                 {{ {{ :a :p :v . {rule} }} log:conclusion ?c }} => {{ :result :is ?c }} .\n"
+            )
+        };
+        // A run's registrations are not reachable from the public entry points, so the
+        // closure is driven through one and the table read from the run it was given.
+        let registered = |src: &str| {
+            let shared = run_shared::RunShared::for_sources(&[]);
+            let parsed = bounded::parse_n3(src, "", &Truncation::top_level()).expect("parses");
+            let out = run_closure_in(
+                parsed,
+                None,
+                Some(shared.clone()),
+                &Truncation::top_level(),
+                StepMode::None,
+                NegationCycles::Reject,
+                None,
+                "",
+            )
+            .expect("closes");
+            drop(out);
+            // Bound, not returned straight out: the `Ref` has to be dropped before
+            // `shared` is.
+            let registered = shared.borrow().registered_count();
+            registered
+        };
+        let fwd_src = nested("{ ?x :p :v } => { ?x :q :w } .");
+        assert_eq!(registered(&fwd_src), 0, "a forward-only nested closure registers nothing");
+        // And it still answers: the closure runs, and the outer rule concludes from it.
+        let out = reason_n3_terms(&fwd_src, None).expect("the forward-only document reasons");
+        assert!(
+            out.facts.iter().any(
+                |[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is")
+            ),
+            "the nested closure's result reached the outer conclusion"
+        );
+        // The same document with a BACKWARD rule in the nested formula DOES register the
+        // salt, because a name can then be minted inside that closure.
+        assert!(
+            registered(&nested("{ ?x :q :w } <= { ?x :p :v } .")) > 0,
+            "a nested closure that can mint a name registers its salt"
+        );
+    }
+
     /// The other half of finding R4-1: a goal the walker REFUSES — it has no identity, so
     /// no name can be minted for its proof — fails the run, rather than coming back as an
     /// empty proof that reads as "not provable". The goal here is admitted by the
@@ -10445,7 +11506,7 @@ mod tests {
         for i in 0..1_000u32 {
             chain.insert(format!("x{}", i), Term::List(vec![var(&format!("x{}", i + 1))]));
         }
-        chain.insert("x1000".into(), iri("a"));
+        chain.insert("x1000", iri("a"));
         let goal = [var("x0"), iri("has"), var("z")];
         let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
         let proved = backward_prove(

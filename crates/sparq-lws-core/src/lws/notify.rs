@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 
@@ -298,11 +298,37 @@ pub struct Subscription {
     /// when the subscription goes, and a delivery that finishes later finds nothing to count.
     #[serde(skip)]
     pub failures: u32,
+    /// Whether it has been seen expired, in memory only (see `Subscription::expired`).
+    #[serde(skip)]
+    pub lapsed: Lapsed,
+}
+
+/// Set once a [`Subscription`] is seen expired, shared by its copies: from then on it stays
+/// expired, whatever the clock says later.
+#[derive(Debug, Clone, Default)]
+pub struct Lapsed(Arc<AtomicBool>);
+
+impl PartialEq for Lapsed {
+    /// What a subscription is, not what has been seen of it.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl Subscription {
+    /// Whether it has expired by `now`, or was seen expired before: expiry is never undone, so
+    /// a clock stepped back cannot list again one whose removal began while it was expired
+    /// (that removal holds no listing's lock, and would then change a listing a conditional
+    /// create holds).
     fn expired(&self, now: i64) -> bool {
-        self.expires_at.is_some_and(|t| t <= now)
+        if self.lapsed.0.load(Ordering::Acquire) {
+            return true;
+        }
+        let expired = self.expires_at.is_some_and(|t| t <= now);
+        if expired {
+            self.lapsed.0.store(true, Ordering::Release);
+        }
+        expired
     }
 
     fn covers(&self, uri: &str) -> bool {
@@ -495,7 +521,7 @@ pub struct Notifier {
     sweep_now: Arc<tokio::sync::Notify>,
     /// Keeps the expiry sweeper from sweeping, for a test that sweeps itself.
     #[cfg(test)]
-    sweeper_off: Arc<std::sync::atomic::AtomicBool>,
+    sweeper_off: Arc<AtomicBool>,
     /// Stored subscriptions the start did not load because a change to them was still being
     /// settled, or their removal failed. Each is counted against both shares until the next
     /// start, as it may still be stored.
@@ -523,6 +549,7 @@ impl Notifier {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         self.subs.write().expect("lock").insert("test".into(), sub);
     }
@@ -1752,6 +1779,9 @@ struct Sweeper {
     /// The subscriptions whose removal did not go through: when each may be tried again, and how
     /// many times it has not.
     backoff: HashMap<String, (tokio::time::Instant, u32)>,
+    /// Holds whose release failed, being released again (one task at a time; see
+    /// [`LwsState::release_unreleased`]), owned here so it goes with the sweeper.
+    releases: tokio::task::JoinSet<()>,
 }
 
 impl Sweeper {
@@ -1766,6 +1796,12 @@ impl Sweeper {
         let clock = tokio::time::Instant::now();
         while let Some(ended) = self.removals.try_join_next_with_id() {
             self.ended(ended, clock);
+        }
+        while self.releases.try_join_next().is_some() {}
+        if self.releases.is_empty() && state.has_unreleased() {
+            let state = state.clone();
+            self.releases
+                .spawn(async move { state.release_unreleased().await });
         }
         // Counted from the removals it owns, not from the places free now: a removal spawned
         // but not yet run has not taken its place, and one more started for it would find
@@ -2116,6 +2152,7 @@ async fn subscribe<S: Store + 'static>(
         expires,
         expires_at,
         failures: 0,
+        lapsed: Lapsed::default(),
     };
     let stored = serde_json::to_vec(&sub).unwrap_or_default();
     let doc = document(state, &sub);
@@ -2179,6 +2216,7 @@ mod tests {
             expires: None,
             expires_at: Some(1),
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         let iri = format!("{container}old");
         let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
@@ -2275,6 +2313,45 @@ mod tests {
         let r = handle(&state, &post(&body), &reader).await;
         assert_eq!(r.status(), StatusCode::CREATED);
         assert!(!state.notify.subs.read().unwrap().contains_key(&mine));
+    }
+
+    /// Review finding: a removal of an expired subscription holds no listing's lock; with the
+    /// clock stepped back while it waited on the store, the subscription was listed again, and
+    /// its removal then changed a listing a conditional create held. Once seen expired, it
+    /// stays expired.
+    #[tokio::test]
+    async fn an_expiry_is_never_undone() {
+        let (state, _store) = test_store::state(4).await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let reader = Agent {
+            subject: Some("https://reader.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let r = handle(&state, &post, &reader).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let me = &state.notify;
+        let id = me.subs.read().unwrap().keys().next().cloned().unwrap();
+        let set_expiry = |at: i64| {
+            me.subs.write().unwrap().get_mut(&id).unwrap().expires_at = Some(at);
+        };
+        set_expiry(1);
+        assert!(!me.is_live(&id));
+        // The clock steps back past its expiry: as if it had not come yet.
+        set_expiry(jose::now_secs() + 3600);
+        assert!(!me.is_live(&id), "listed again");
+        assert!(me.live_for(reader.subject.as_deref(), false).is_empty());
+        assert!(me.live_for(None, true).is_empty());
     }
 
     /// Review finding: expired subscriptions kept their subscriber's places, and a conditional
@@ -2468,6 +2545,7 @@ mod tests {
                         expires: None,
                         expires_at: None,
                         failures: 0,
+                        lapsed: Lapsed::default(),
                     },
                 );
             }
@@ -2542,6 +2620,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state
                 .notify
@@ -2652,6 +2731,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         // A first boot makes the containers; the subscription is stored after it and before
         // the boot under test, which loads it.
@@ -2726,6 +2806,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -2791,6 +2872,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .notify
@@ -2846,6 +2928,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         let iri = format!("{container}{id}");
         state
@@ -3238,6 +3321,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .store
@@ -3404,6 +3488,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .notify
@@ -3465,6 +3550,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3512,6 +3598,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3619,6 +3706,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3709,6 +3797,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3940,6 +4029,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3997,6 +4087,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
             store
@@ -4099,6 +4190,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             let iri = format!("{}s{:04}", container, i);
             if subscriber == alice {
@@ -4285,6 +4377,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state
                 .notify
@@ -4791,6 +4884,113 @@ mod tests {
         drop(gate);
     }
 
+    /// Review finding: the owner's conditional create, evaluated on the whole listing, dropped
+    /// the container's lock once the store left its outcome unknown, so a second one with the
+    /// same entity tag passed and both could register. The settlement keeps that lock shared:
+    /// the owner's plain creates go on, and another conditional create waits for the outcome.
+    #[tokio::test(start_paused = true)]
+    async fn an_unsettled_owner_create_keeps_the_whole_listing_shared() {
+        use test_store::{agent, closed_state, OWNER};
+        let (state, store) = closed_state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let owner = agent(OWNER);
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |headers: Vec<(&'static str, String)>| {
+            let (state, body, owner) = (state.clone(), body.clone(), owner.clone());
+            async move {
+                let mut h = vec![("content-type", LWS_JSON.to_string())];
+                h.extend(headers);
+                let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                let req = test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body);
+                handle(&state, &req, &owner).await.status()
+            }
+        };
+        assert_eq!(post(vec![]).await, StatusCode::CREATED);
+        let req = test_store::request(Method::GET, SUBSCRIPTIONS_PATH, &[], "");
+        let etag = test_store::route_as(&state, req, &owner).await.headers()["etag"]
+            .to_str()
+            .unwrap()
+            .to_string();
+        // Its write never settles: the fence that would settle it never answers.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store.hang_fence.store(true, Ordering::SeqCst);
+        let status = post(vec![("if-match", etag.clone())]).await;
+        assert!(status.is_server_error(), "{status}");
+        assert_ne!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            post(vec![]).await,
+            StatusCode::CREATED,
+            "a plain create waited"
+        );
+        // Another conditional create on the same listing waits for the outcome.
+        assert_eq!(
+            post(vec![("if-match", etag)]).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        drop(gate);
+    }
+
+    /// Once the owner's unsettled conditional create is settled, stored or not, the listing's
+    /// lock is released: a later conditional create is decided on the listing as it then is,
+    /// no longer told to wait.
+    #[tokio::test(start_paused = true)]
+    async fn a_settled_owner_create_releases_the_whole_listing() {
+        use test_store::{agent, closed_state, OWNER};
+        for stored in [false, true] {
+            let (state, store) = closed_state(100).await;
+            state.notify.sweeper_off.store(true, Ordering::SeqCst);
+            let owner = agent(OWNER);
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [state.cfg.storage()],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let post = |headers: Vec<(&'static str, String)>| {
+                let (state, body, owner) = (state.clone(), body.clone(), owner.clone());
+                async move {
+                    let mut h = vec![("content-type", LWS_JSON.to_string())];
+                    h.extend(headers);
+                    let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                    let req = test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body);
+                    handle(&state, &req, &owner).await.status()
+                }
+            };
+            let req = test_store::request(Method::GET, SUBSCRIPTIONS_PATH, &[], "");
+            let etag = test_store::route_as(&state, req, &owner).await.headers()["etag"]
+                .to_str()
+                .unwrap()
+                .to_string();
+            // Its write is left unsettled, and the fence that would settle it fails for now.
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+            store.fail_fence.store(true, Ordering::SeqCst);
+            let status = post(vec![("if-match", etag.clone())]).await;
+            assert!(status.is_server_error(), "{status}");
+            assert_eq!(
+                post(vec![("if-match", etag.clone())]).await,
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+            if stored {
+                gate.add_permits(1);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            store.fail_fence.store(false, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let expected = match stored {
+                true => StatusCode::PRECONDITION_FAILED,
+                false => StatusCode::CREATED,
+            };
+            assert_eq!(post(vec![("if-match", etag)]).await, expected, "stored: {stored}");
+        }
+    }
+
     /// `n` expired subscriptions, of `n` subscribers, put in force directly; their ids, in order.
     fn expired_subscriptions<S: Store>(state: &LwsState<S>, n: usize) -> Vec<String> {
         let mut subs = state.notify.subs.write().unwrap();
@@ -4808,6 +5008,7 @@ mod tests {
                         expires: None,
                         expires_at: Some(1),
                         failures: 0,
+                        lapsed: Lapsed::default(),
                     },
                 );
                 id
@@ -4917,6 +5118,32 @@ mod tests {
             state.notify.subs.read().unwrap().len(),
             2 * MAINTENANCE_PLACES
         );
+    }
+
+    /// A hold whose release failed stays only until the sweeper releases it again.
+    #[tokio::test]
+    async fn a_hold_whose_release_failed_is_released_by_the_sweeper() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let d = format!("{}doc", state.cfg.storage());
+        store
+            .write(&d, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        store.fail_release.store(true, Ordering::SeqCst);
+        let mut journal = state.journal();
+        journal.stage(&d).await.unwrap();
+        assert!(journal.commit(None).await.is_ok());
+        assert_eq!(state.store.holds().await.unwrap().len(), 1);
+        let mut sweeper = Sweeper::default();
+        // Failing still: kept for the next sweep.
+        sweeper.sweep(&state);
+        while sweeper.releases.join_next().await.is_some() {}
+        assert_eq!(state.store.holds().await.unwrap().len(), 1);
+        store.fail_release.store(false, Ordering::SeqCst);
+        sweeper.sweep(&state);
+        while sweeper.releases.join_next().await.is_some() {}
+        assert!(state.store.holds().await.unwrap().is_empty());
     }
 
     /// A removal that fails is tried again only once its wait is over, and waits twice as long
@@ -5596,6 +5823,7 @@ mod tests {
             expires: None,
             expires_at: Some(1),
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .store

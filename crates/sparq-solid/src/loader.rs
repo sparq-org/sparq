@@ -177,16 +177,18 @@ fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
 /// (`.acr` under ACP, `.acl` under WAC, outside the reserved and skolem spaces and below an
 /// authority; the loader filters any other per triple): [`refuse_inadmissible`], and, in an
 /// ACP store, a statement that uses (as an access control, a policy or a matcher) a node of
-/// another access-control resource the loader would reject in the state the write leaves,
-/// which would reject the written one with it. The rejected set is computed at most once per
-/// write.
+/// another access-control resource the loader would reject in the state the write leaves, or
+/// of one it would not read at all, either of which would withhold the written one with it.
+/// The view of the control documents is computed at most once per
+/// write. The refusal names the statement the write sent and says nothing about the state of
+/// the document it reaches into.
 pub(crate) struct ControlWrites<'g> {
     graph: &'g Graph,
     acp: bool,
     /// A document whose content the write replaces, with its new content, when `graph` does
     /// not hold it yet.
     replaced: Option<(&'g str, Vec<[Term; 3]>)>,
-    rejected: std::cell::OnceCell<FxHashSet<&'g str>>,
+    documents: std::cell::OnceCell<Documents<'g>>,
 }
 
 impl<'g> ControlWrites<'g> {
@@ -196,7 +198,7 @@ impl<'g> ControlWrites<'g> {
             graph,
             acp,
             replaced: None,
-            rejected: std::cell::OnceCell::new(),
+            documents: std::cell::OnceCell::new(),
         }
     }
 
@@ -249,30 +251,42 @@ impl<'g> ControlWrites<'g> {
         if !self.acp || !added.iter().any(&depends) {
             return Ok(());
         }
-        let rejected = self
-            .rejected
-            .get_or_init(|| rejected_documents(&self.control_graphs(None), System::Acp));
+        let documents = self
+            .documents
+            .get_or_init(|| document_view(&self.control_graphs(None), System::Acp));
         // A document the store rejects now may be under repair: what it would depend on is
         // judged without it.
         let without_doc;
-        let rejected = if rejected.contains(doc) {
-            without_doc = rejected_documents(&self.control_graphs(Some(doc)), System::Acp);
+        let documents = if documents.rejected.contains(doc) {
+            without_doc = document_view(&self.control_graphs(Some(doc)), System::Acp);
             &without_doc
         } else {
-            rejected
+            documents
         };
-        let uses_rejected = |t: &&[Term; 3]| {
+        // A reference the view does not resolve — to a document it rejects, or to one it does
+        // not read at all — would withhold `doc` too (see [`document_view`]), Control
+        // included, so the writer could not repair it. `depends` has already excluded a
+        // reference to `doc`'s own nodes, which the state the write leaves always resolves.
+        let unresolved = |t: &&[Term; 3]| {
             depends(t)
-                && matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
+                && matches!(&t[2], Term::NamedNode(o)
+                    if !documents.loaded.contains(group_doc_of(o.as_str()))
+                        || documents.rejected.contains(group_doc_of(o.as_str())))
         };
-        match added.iter().find(uses_rejected) {
-            None => Ok(()),
-            Some(t) => Err(format!(
-                "the access-control document <{doc}> may not state `{} {} {}`: it uses a node \
-                 of an access-control document that is not admitted; nothing was changed",
-                t[0], t[1], t[2]
-            )),
+        if !added.iter().any(|t| unresolved(&t)) {
+            return Ok(());
         }
+        // One body for every such refusal. It names neither the statement nor the reference
+        // that failed: WHICH of the writer's references the view does not resolve is a fact
+        // about ANOTHER resource, and a writer holding Control of `doc` need hold nothing over
+        // that one. One bit remains — this write is refused where an otherwise identical one
+        // is accepted — and is not closed here; a caller that must not expose even that
+        // orders its own writes so that a document is stored before one that uses its nodes.
+        Err(format!(
+            "the access-control document <{}> may not use a node of another \
+             access-control document; nothing was changed",
+            doc
+        ))
     }
 }
 
@@ -318,13 +332,36 @@ const ACP_DEPENDENCY_PREDICATES: [&str; 6] = [
     "http://www.w3.org/ns/solid/acp#noneOf",
 ];
 
-/// The control documents that contribute nothing: each with a triple it may not state
-/// ([`admits`]) and, for ACP, each that uses a node of a rejected document as an access
-/// control, a policy or a matcher, to a fixpoint.
-fn rejected_documents<'a>(
+/// What the loader makes of the control documents of one store state.
+struct Documents<'a> {
+    /// The control documents the loader reads, by graph IRI. A node whose
+    /// fragment-stripped document is not in here is one no loaded document defines: its
+    /// statements are not available, so neither is what they would have decided.
+    loaded: FxHashSet<&'a str>,
+    /// The control documents that contribute nothing (see [`document_view`]).
+    rejected: FxHashSet<&'a str>,
+}
+
+/// The control documents the loader reads, and those among them that contribute nothing:
+/// each with a triple it may not state ([`admits`]) and, for ACP, each that names, as an
+/// access control, a policy or a matcher, a node of such a document OR a node of a
+/// document that is not loaded at all, to a fixpoint.
+///
+/// The second case is the one a reference out of the loaded set falls into — another pod's
+/// document, or a document a partial load left out. What such a node says is unknown, and
+/// an unknown statement may be an `acp:deny`, an `acp:noneOf` exception or a condition on
+/// an allow; a loaded document, by contrast, is known in full, so a node it simply does
+/// not describe is a known-empty access control, policy or matcher and decides as ACP
+/// §6.5 says it does. So a document that names a node no loaded document defines is
+/// withheld like a rejected one, through every referrer, and the resources it governs get
+/// no grant from any source. A reference whose target IS loaded, in this pod or another,
+/// keeps applying: naming it delegates to whoever may edit that document, which is the
+/// referring document's own choice (see [`admits`]).
+fn document_view<'a>(
     control_graphs: &[(&'a str, Vec<[Term; 3]>)],
     system: System,
-) -> FxHashSet<&'a str> {
+) -> Documents<'a> {
+    let loaded: FxHashSet<&'a str> = control_graphs.iter().map(|(iri, _)| *iri).collect();
     let mut rejected: FxHashSet<&str> = control_graphs
         .iter()
         .filter(|(iri, triples)| !triples.iter().all(|t| admits(t, iri)))
@@ -333,7 +370,8 @@ fn rejected_documents<'a>(
     if system == System::Acp {
         // Referenced document -> the control documents that use a node of it as an access
         // control, a policy or a matcher. A principal or any other value named as an object
-        // is not a dependency.
+        // is not a dependency. A reference to a document outside the loaded set resolves to
+        // nothing, so it withholds its referrer straight away.
         let mut referrers: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
         for (iri, triples) in control_graphs {
             for t in triples {
@@ -342,7 +380,12 @@ fn rejected_documents<'a>(
                     continue;
                 }
                 if let Term::NamedNode(o) = &t[2] {
-                    referrers.entry(group_doc_of(o.as_str())).or_default().push(iri);
+                    let target = group_doc_of(o.as_str());
+                    if loaded.contains(target) {
+                        referrers.entry(target).or_default().push(iri);
+                    } else {
+                        rejected.insert(iri);
+                    }
                 }
             }
         }
@@ -355,7 +398,7 @@ fn rejected_documents<'a>(
             }
         }
     }
-    rejected
+    Documents { loaded, rejected }
 }
 
 /// Drop ALL named graphs in the reserved IRI space — including a pre-existing
@@ -476,11 +519,12 @@ pub(crate) fn assemble_facts(
         .collect();
     // A control document with a triple it may not state contributes nothing. For ACP,
     // whose policies also deny, so does every ACR that references a node of a rejected
-    // document (transitively), and the resources a rejected ACR governs, with everything
+    // document or a node no loaded document defines (transitively — see [`document_view`]),
+    // and the resources a rejected ACR governs, with everything
     // below them, get no grants at all: a deny or exception it held can never be lost
     // while an allow elsewhere still applies. A rejected WAC ACL keeps governing its
     // resource with no authorizations, so no ancestor's default takes over.
-    let rejected = rejected_documents(&control_graphs, system);
+    let rejected = document_view(&control_graphs, system).rejected;
     let blocked: FxHashSet<&str> = if system == System::Acp {
         rejected.iter().map(|iri| &iri[..iri.len() - suffix.len()]).collect()
     } else {
@@ -1173,7 +1217,7 @@ mod tests {
 
     fn skolem_iris(store: &PodStore) -> FxHashSet<Term> {
         assemble_facts(
-            &store.graph,
+            store.graph(),
             System::Acp,
             &AccessProvenance::new(),
             &VerifiedCredentials::default(),
@@ -1194,7 +1238,7 @@ mod tests {
             assert_eq!(before.len(), 2, "both anonymous matchers are present");
             let old_auth = store.auth.clone();
             let auth_graph = &store
-                .graph
+                .graph()
                 .named
                 .iter()
                 .find(|(n, _)| *n == named(AUTH_GRAPH))

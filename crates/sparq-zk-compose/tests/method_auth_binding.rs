@@ -35,10 +35,12 @@ use sparq_zk_compose::manifest::{
     AttestedStatusRef, BindingMode, CommitmentAttestation, EntailmentRegime, FieldHex,
     HiddenIssuerAttestation, ProofManifest, RevocationStatus, StatusListSnapshot, SubProof,
 };
+#[cfg(feature = "dual-leaf")]
+use sparq_zk_compose::manifest::ProofInputs;
 use sparq_zk_compose::verifier::{
     prefilter_manifest_structure, CheckError, KeySet, RevocationPolicy,
 };
-use sparq_zk_compose::MethodPolicy;
+use sparq_zk_compose::{AuthenticatedMethod, MethodAuthError, MethodPolicy};
 
 const STATUS_LIST: &str = "http://ex/status/1";
 const STATUS_INDEX: u64 = 3;
@@ -95,6 +97,61 @@ fn fixture_status_ref() -> Fr {
 /// A one-scan manifest over the fixture credential graph, with NO attestation
 /// yet. Returns it alongside the scan commitment and the salt, so a test can
 /// attach whichever attestation shape it is probing.
+/// The non-default method the "a method-bound attestation" fixtures stand in
+/// for. sq-j506 refuses a scan whose authenticated method has no
+/// pattern-constant encoding IN THIS BUILD
+/// (`CheckError::ScanPatternMethodNotEncodable`), and the host dual-leaf
+/// encoders live behind the `dual-leaf` feature -- so in a DEFAULT build the
+/// method-bound fixtures must name a method this build can encode under. These
+/// tests are about the signed MESSAGE and the policy, not about dual-leaf
+/// semantics, so the substitution does not weaken them;
+/// `a_dual_leaf_scan_is_refused_without_the_dual_leaf_feature` covers the
+/// refusal itself.
+fn bound_method() -> CommitmentMethod {
+    #[cfg(feature = "dual-leaf")]
+    {
+        CommitmentMethod::DualLeafV2
+    }
+    #[cfg(not(feature = "dual-leaf"))]
+    {
+        CommitmentMethod::StringCanonicalV1
+    }
+}
+
+/// sq-j506: re-encode a scan's pattern constants under `method`.
+///
+/// `build_scan` binds them with the STRING-CANONICAL encoder, and the verifier
+/// now compares them under the encoder of the scan's AUTHENTICATED method, so a
+/// fixture attesting another method has to carry that method's encoding — which
+/// is the point of the gate. The whole-graph commitment value is not re-derived:
+/// these structural tests bind the attested commitment VALUE, and no sub-proof is
+/// verified here.
+#[cfg(feature = "dual-leaf")]
+fn reencode_pattern_constants(m: &mut ProofManifest, method: CommitmentMethod) {
+    let salt = Fr::from(0u64);
+    let encoded = match method {
+        CommitmentMethod::DualLeafV1 => {
+            sparq_zk::dual_leaf::encode_term_dual(&Term::NamedNode(iri("http://ex/age")), &salt)
+        }
+        CommitmentMethod::DualLeafV2 => {
+            sparq_zk::dual_leaf_v2::encode_term(&Term::NamedNode(iri("http://ex/age")), &salt)
+        }
+        // The string-canonical encoding is what `build_scan` already bound.
+        _ => return,
+    }
+    .expect("the encoder accepts an IRI")
+    .expect("an IRI encodes under every dual-leaf version");
+    for sp in &mut m.sub_proofs {
+        if let ProofInputs::Scan { pattern_const_enc, pattern_is_const, .. } = &mut sp.inputs {
+            for slot in 0..3 {
+                if pattern_is_const[slot] {
+                    pattern_const_enc[slot] = FieldHex(sparq_zk::field::field_to_hex(&encoded));
+                }
+            }
+        }
+    }
+}
+
 fn scan_manifest() -> (ProofManifest, Fr, Fr) {
     let salt = salt_from_bytes(&GRAPH_SALT);
     let commit = commit_triples(&credential_graph(), salt).unwrap();
@@ -183,17 +240,31 @@ fn trusted(sk: &SecretKey) -> KeySet {
 
 // ---------------------------------------------------------------- back-compat
 
-/// BACK-COMPAT: the attestation shape every existing manifest carries — a
-/// signature over the method-unbound `ZKSIG_C3` message — still passes the
-/// pre-filter under the DEFAULT policy, with no attestation field added or
-/// changed.
+/// The attestation shape every pre-method-binding manifest carries — a
+/// signature over the method-unbound `ZKSIG_C3` message — is now REFUSED under
+/// the DEFAULT policy, and passes the pre-filter only under the explicit
+/// `MethodPolicy::admit_unbound` opt-in.
+///
+/// Nothing about the attestation changes: no field is added or removed. What
+/// changed is the relying party's default answer to "this issuer attested no
+/// commitment method".
 #[test]
-fn an_existing_method_unbound_attestation_still_prefilters() {
+fn an_existing_method_unbound_attestation_needs_the_explicit_opt_in() {
     let sk = SecretKey::from_seed(1);
     let (mut m, c, salt) = scan_manifest();
     m.commitment_attestations.push(attest_unbound(c, salt, &sk));
-    prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy())
-        .expect("a method-unbound attestation is accepted under the default policy");
+
+    // Refused by default, and the refusal names its own cause rather than
+    // masquerading as a bad signature.
+    match prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy()) {
+        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        other => panic!("expected a method-not-authenticated refusal, got {:?}", other),
+    }
+
+    // Accepted under the written-down downgrade.
+    let permissive = trusted(&sk).with_method_policy(MethodPolicy::current().admit_unbound());
+    prefilter_manifest_structure(&m, &permissive, &fresh_policy())
+        .expect("admit_unbound accepts already-issued method-unbound material");
 }
 
 /// PRECEDENCE: a genuinely bad signature still yields `InvalidIssuerSignature`.
@@ -236,9 +307,14 @@ fn an_untrusted_issuer_is_still_reported_before_any_method_refusal() {
 #[test]
 fn a_method_bound_attestation_passes_the_strict_policy() {
     let sk = SecretKey::from_seed(1);
-    for method in [CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV2] {
+    for method in [CommitmentMethod::StringCanonicalV1, bound_method()] {
         let (mut m, c, salt) = scan_manifest();
         m.commitment_attestations.push(attest_bound(c, salt, method, &sk));
+        // sq-j506: the pattern constants must be encoded under the method the
+        // attestation names, because that is the encoder the verifier compares
+        // them under now.
+        #[cfg(feature = "dual-leaf")]
+        reencode_pattern_constants(&mut m, method);
         let strict =
             trusted(&sk).with_method_policy(MethodPolicy::current().require_method_bound());
         prefilter_manifest_structure(&m, &strict, &fresh_policy()).unwrap_or_else(|e| {
@@ -274,6 +350,8 @@ fn an_attested_legacy_method_needs_the_written_down_opt_in() {
     let (mut m, c, salt) = scan_manifest();
     m.commitment_attestations
         .push(attest_bound(c, salt, CommitmentMethod::DualLeafV1, &sk));
+    #[cfg(feature = "dual-leaf")]
+    reencode_pattern_constants(&mut m, CommitmentMethod::DualLeafV1);
     match prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy()) {
         Err(CheckError::MethodNotAdmitted { method_iri, .. }) => {
             assert_eq!(method_iri, CommitmentMethod::DualLeafV1.scheme_iri());
@@ -282,26 +360,96 @@ fn an_attested_legacy_method_needs_the_written_down_opt_in() {
     }
     let permissive =
         trusted(&sk).with_method_policy(MethodPolicy::current().admit_legacy_dual_leaf_v1());
-    prefilter_manifest_structure(&m, &permissive, &fresh_policy())
-        .expect("the legacy opt-in admits it");
+    let admitted = prefilter_manifest_structure(&m, &permissive, &fresh_policy());
+    // The opt-in admits the METHOD. Whether the manifest then passes depends on
+    // the BUILD: sq-j506 refuses a scan whose authenticated method has no
+    // pattern-constant encoding here, and the host dual-leaf encoders are behind
+    // the `dual-leaf` feature.
+    #[cfg(feature = "dual-leaf")]
+    admitted.expect("the legacy opt-in admits it, and this build can encode its pattern constants");
+    #[cfg(not(feature = "dual-leaf"))]
+    match admitted {
+        Err(CheckError::ScanPatternMethodNotEncodable { .. }) => {}
+        other => panic!(
+            "without the dual-leaf feature an admitted V1 scan must be refused as non-encodable, got {:?}",
+            other
+        ),
+    }
+}
+
+/// sq-j506 BEHAVIOUR CHANGE, stated as its own guard: a scan whose authenticated
+/// method is a dual-leaf one is REFUSED in a build without the `dual-leaf`
+/// feature, because the verifier has no encoder to re-check its pattern
+/// constants under and must not compare them string-canonically. The policy
+/// ADMITS the method; this refusal is about the build, and it is additive --
+/// nothing that was refused becomes accepted.
+#[cfg(not(feature = "dual-leaf"))]
+#[test]
+fn a_dual_leaf_scan_is_refused_without_the_dual_leaf_feature() {
+    let sk = SecretKey::from_seed(1);
+    let (mut m, c, salt) = scan_manifest();
+    m.commitment_attestations
+        .push(attest_bound(c, salt, CommitmentMethod::DualLeafV2, &sk));
+    match prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy()) {
+        Err(CheckError::ScanPatternMethodNotEncodable { proof, method }) => {
+            assert_eq!(proof, 0);
+            assert!(
+                method.contains("DualLeafV2"),
+                "the refusal must name the method it could not encode under, got {}",
+                method
+            );
+        }
+        other => panic!("expected ScanPatternMethodNotEncodable, got {:?}", other),
+    }
 }
 
 /// The policy rides the `KeySet`, so the default is what an existing caller that
-/// never heard of it gets.
+/// never heard of it gets — and that default is now FAIL-CLOSED: an attestation
+/// that attests no commitment method is REFUSED unless the relying party says
+/// otherwise.
+///
+/// This is the sq-j506 prerequisite. A commitment whose method is not
+/// issuer-attested has no authenticated leaf shape, so there is nothing to pin a
+/// lane constant or a pattern-slot encoding against. It opens no value-lane
+/// gate: the Stage-0 value-lane refusals are untouched.
 #[test]
-fn the_key_sets_default_policy_is_the_back_compatible_one() {
+fn the_key_sets_default_policy_refuses_an_unbound_attestation() {
     assert_eq!(KeySet::empty().method_policy(), MethodPolicy::current());
-    assert!(KeySet::empty().method_policy().accepts_unbound());
+    assert!(
+        !KeySet::empty().method_policy().accepts_unbound(),
+        "the default policy must refuse a method-UNBOUND attestation"
+    );
+    // The refusal is a POLICY decision, so it names its own cause rather than
+    // being folded into an invalid-signature refusal.
+    assert_eq!(
+        MethodPolicy::current().admit(AuthenticatedMethod::Unbound),
+        Err(MethodAuthError::MethodNotAuthenticated)
+    );
+    // `admit_unbound` is the written-down opt-in back to the old behaviour, and
+    // `require_method_bound` takes the requirement back again.
+    let permissive = MethodPolicy::current().admit_unbound();
+    assert!(permissive.accepts_unbound());
+    assert_eq!(
+        permissive.admit(AuthenticatedMethod::Unbound),
+        Ok(AuthenticatedMethod::Unbound)
+    );
+    assert!(!permissive.require_method_bound().accepts_unbound());
+    // Opting in to unbound material does NOT also admit the superseded
+    // dual-leaf version: the two dials are independent.
+    assert_eq!(
+        permissive.admit(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV1)),
+        Err(MethodAuthError::MethodNotAdmitted(CommitmentMethod::DualLeafV1))
+    );
     assert_eq!(
         KeySet::empty()
-            .with_method_policy(MethodPolicy::current().require_method_bound())
+            .with_method_policy(MethodPolicy::current().admit_unbound())
             .method_policy(),
-        MethodPolicy::current().require_method_bound()
+        MethodPolicy::current().admit_unbound()
     );
     // `with_method_policy` does not disturb the keys or the hidden-issuer depth.
     let sk = SecretKey::from_seed(1);
     let ks = trusted(&sk).with_hidden_issuer_depth(4);
-    let with_policy = ks.clone().with_method_policy(MethodPolicy::current().require_method_bound());
+    let with_policy = ks.clone().with_method_policy(MethodPolicy::current().admit_unbound());
     assert_eq!(ks.signature_modes(), with_policy.signature_modes());
 }
 
@@ -325,14 +473,14 @@ fn a_registry_signature_is_not_a_presentation_attestation() {
         iri("http://ex/vc/1"),
         c,
         salt,
-        CommitmentMethod::DualLeafV2,
+        bound_method(),
         iri(STATUS_LIST),
         STATUS_INDEX,
         STATUS_VERSION,
         sparq_zk::registry::Status::Active,
         &sk,
     )
-    .expect("DualLeafV2 is selectable for new issuance");
+    .expect("the fixture method is selectable for new issuance");
     assert!(
         entry.verify_commitment_signature_with_status(),
         "the fixture entry's own registry signature must verify as a registry one"
@@ -372,9 +520,12 @@ fn a_registry_signature_is_not_a_presentation_attestation() {
     ok.commitment_attestations.push(attest_bound(
         c,
         salt,
-        CommitmentMethod::DualLeafV2,
+        bound_method(),
         &sk,
     ));
+    // sq-j506: encoded under the attested method, as the comparison sites require.
+    #[cfg(feature = "dual-leaf")]
+    reencode_pattern_constants(&mut ok, bound_method());
     let strict = trusted(&sk).with_method_policy(MethodPolicy::current().require_method_bound());
     prefilter_manifest_structure(&ok, &strict, &fresh_policy())
         .expect("the issuer's presentation attestation over the same values passes");
@@ -408,19 +559,24 @@ fn an_unmatched_hidden_only_message_is_refused() {
         }];
         m
     };
-    let hidden_keys = || trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
-    let strict =
-        || hidden_keys().with_method_policy(MethodPolicy::current().require_method_bound());
+    let strict = || trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
+    let permissive =
+        || strict().with_method_policy(MethodPolicy::current().admit_unbound());
     let honest = sparq_zk::sig::commitment_message_with_status(&c, &salt, &fixture_status_ref());
 
-    prefilter_manifest_structure(&hidden(honest), &hidden_keys(), &fresh_policy())
-        .expect("the honest method-unbound hidden message still passes by default");
+    // An unbound hidden message is refused by the DEFAULT policy, and passes
+    // only under the explicit `admit_unbound` downgrade.
     match prefilter_manifest_structure(&hidden(honest), &strict(), &fresh_policy()) {
         Err(CheckError::MethodNotAuthenticated { .. }) => {}
         other => panic!("expected MethodNotAuthenticated for an unbound hidden message, got {other:?}"),
     }
+    prefilter_manifest_structure(&hidden(honest), &permissive(), &fresh_policy())
+        .expect("admit_unbound accepts the honest method-unbound hidden message");
 
-    for (label, ks) in [("default", hidden_keys()), ("require_method_bound", strict())] {
+    // The message-mismatch refusal precedes the method policy either way: a
+    // declared message matching no candidate is refused for THAT reason, under
+    // the strict default and under the downgrade alike.
+    for (label, ks) in [("default", strict()), ("admit_unbound", permissive())] {
         match prefilter_manifest_structure(&hidden(Fr::from(1u64)), &ks, &fresh_policy()) {
             Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
             other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
@@ -432,9 +588,16 @@ fn an_unmatched_hidden_only_message_is_refused() {
         &c,
         &salt,
         &fixture_status_ref(),
-        &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+        &scheme_iri_to_field(bound_method().scheme_iri()),
     );
-    prefilter_manifest_structure(&hidden(bound), &strict(), &fresh_policy())
+    // sq-j506: a hidden-only commitment's method comes from its declared message,
+    // and the pattern constants are compared under that method's encoder, so this
+    // half re-encodes them the same way the clear-attestation fixtures do.
+    #[cfg_attr(not(feature = "dual-leaf"), allow(unused_mut))]
+    let mut bound_manifest = hidden(bound);
+    #[cfg(feature = "dual-leaf")]
+    reencode_pattern_constants(&mut bound_manifest, bound_method());
+    prefilter_manifest_structure(&bound_manifest, &strict(), &fresh_policy())
         .expect("a method-bound hidden message passes the strict policy");
 }
 
@@ -489,7 +652,7 @@ fn each_hidden_only_commitment_gets_its_own_policy_decision() {
         &c1,
         &salt1,
         &fixture_status_ref(),
-        &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+        &scheme_iri_to_field(bound_method().scheme_iri()),
     );
     let unbound2 = sparq_zk::sig::commitment_message_with_status(&c2, &salt2, &fixture_status_ref());
     m.hidden_issuer_attestations = vec![
@@ -524,7 +687,7 @@ fn a_hidden_only_commitment_without_a_status_reference_is_refused_when_a_method_
         &c,
         &salt,
         &fixture_status_ref(),
-        &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+        &scheme_iri_to_field(bound_method().scheme_iri()),
     );
     m.hidden_issuer_attestations = vec![hidden_entry(c, salt, FieldHex::from_field(&bound))];
     let strict = trusted(&sk)
@@ -536,13 +699,16 @@ fn a_hidden_only_commitment_without_a_status_reference_is_refused_when_a_method_
             "expected MethodNotAuthenticated with no candidate set to bind a method, got {other:?}"
         ),
     }
-    // Control: the refusal is the policy's. The default policy does not refuse
-    // this commitment's method in the pre-filter.
-    let default = trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
-    let r = prefilter_manifest_structure(&m, &default, &fresh_policy());
+    // Control: the refusal is the POLICY's, not something structural about a
+    // hidden-only commitment. Under the `admit_unbound` downgrade the same
+    // manifest is not refused for its method.
+    let permissive = trusted(&sk)
+        .with_hidden_issuer_depth(HIDDEN_DEPTH)
+        .with_method_policy(MethodPolicy::current().admit_unbound());
+    let r = prefilter_manifest_structure(&m, &permissive, &fresh_policy());
     assert!(
         !matches!(r, Err(CheckError::MethodNotAuthenticated { .. })),
-        "the default policy accepts an unbound method, got {r:?}"
+        "admit_unbound accepts an unbound method, got {r:?}"
     );
 }
 
@@ -567,7 +733,7 @@ fn every_hidden_entry_declared_message_is_checked_in_either_order() {
             &c,
             &salt,
             &fixture_status_ref(),
-            &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+            &scheme_iri_to_field(bound_method().scheme_iri()),
         ),
     );
     let unmatched = FieldHex::from_field(&Fr::from(1u64));
@@ -657,7 +823,7 @@ fn live_verify_manifest_with_an_m5_attestation() {
     m.commitment_attestations.push(attest_bound(
         commitment,
         salt,
-        CommitmentMethod::DualLeafV2,
+        bound_method(),
         &sk,
     ));
     let strict = trusted(&sk).with_method_policy(MethodPolicy::current().require_method_bound());
@@ -705,7 +871,12 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         return;
     }
     const DEPTH: u32 = 4;
-    let method = CommitmentMethod::DualLeafV2;
+    // sq-j506: the scan proved below is over a STRING-CANONICAL commitment, so
+    // that is the method its attestation may name: the verifier compares the
+    // proved pattern constants under the attested method's encoder, and this
+    // test's subject is the method-BOUND (`ZKSIG_M5`) message, not which method
+    // it binds.
+    let method = CommitmentMethod::StringCanonicalV1;
     // ONE trusted issuer, so its canonical index is 0 and the order is trivial.
     let sk = SecretKey::from_seed(1);
     let keyset = trusted(&sk)
@@ -833,7 +1004,12 @@ fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() 
         return;
     }
     const DEPTH: u32 = 4;
-    let method = CommitmentMethod::DualLeafV2;
+    // sq-j506: the scan proved below is over a STRING-CANONICAL commitment, so
+    // that is the method its attestation may name: the verifier compares the
+    // proved pattern constants under the attested method's encoder, and this
+    // test's subject is the method-BOUND (`ZKSIG_M5`) message, not which method
+    // it binds.
+    let method = CommitmentMethod::StringCanonicalV1;
     // ONE trusted issuer, so its canonical index is 0 and the order is trivial.
     let sk = SecretKey::from_seed(1);
     let keyset = trusted(&sk)

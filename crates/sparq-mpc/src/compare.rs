@@ -220,13 +220,23 @@ pub const RABBIT_VALUE_MAX_EXCLUSIVE: u64 = 1u64 << RABBIT_VALUE_BITS;
 /// Fail-closed range check: an operand must be a canonical field element strictly
 /// below `2^COMPARE_BITS`, else the bit-decomposition comparison could wrap the
 /// modulus and silently return a wrong verdict.
+///
+/// **What the refusal discloses:** that one operand was out of range, and WHICH
+/// one — the validity of an operand and its position, both already implied by the
+/// call being refused at all — and never the operand's value.
+///
+/// The operand is a PRIVATE value, so the range error reports the bound only: the
+/// public bit-width / exclusive bound and `label` — the operand POSITION, a fixed
+/// parameter name supplied by the call site (`"a"`, `"b"`, `"secret"`,
+/// `"threshold"`), never caller data. `v` itself is not formatted into the message.
+/// The caller already knows which position it passed, so the position plus the
+/// bound is everything it needs to correct the call.
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= COMPARE_MAX_EXCLUSIVE {
         return Err(MpcError::Protocol(format!(
-            "secure comparison: {label} = {} is out of range (must be < 2^{COMPARE_BITS} = {} so \
-             the bit-decomposition comparison cannot wrap the field modulus)",
-            v.value(),
-            COMPARE_MAX_EXCLUSIVE
+            "secure comparison: operand `{}` is out of range (must be < 2^{} = {} so the \
+             bit-decomposition comparison cannot wrap the field modulus)",
+            label, COMPARE_BITS, COMPARE_MAX_EXCLUSIVE
         )));
     }
     Ok(())
@@ -544,13 +554,14 @@ fn square_protocol_random_bit(
         if d.mul(d) != c {
             // c was not a residue — impossible for c = a² with a ≠ 0, so this only
             // fires on a corrupted open; fail closed rather than emit a bad bit.
-            return Err(MpcError::Protocol(format!(
-                "square-protocol random bit: c = {} is not a quadratic residue (its sqrt d = {} \
-                 has d² = {} ≠ c) — the open of a² was corrupted; refusing to emit a bit",
-                c.value(),
-                d.value(),
-                d.mul(d).value()
-            )));
+            // `c` is the one opened quantity on this path and `d` is derived
+            // from it, so neither is rendered: the fact that the check failed is
+            // the whole diagnosis.
+            return Err(MpcError::Protocol(
+                "square-protocol random bit: the opened c = a² is not a quadratic residue (its \
+                 sqrt d has d² ≠ c) — the open of a² was corrupted; refusing to emit a bit"
+                    .to_string(),
+            ));
         }
         // [s] = d⁻¹ · [a] ∈ {+1, −1} as a sharing (d⁻¹ is a PUBLIC constant since
         // c and d are public, so this is a free local scale on the secret [a]).
@@ -1376,11 +1387,11 @@ pub fn open_verdict(backend: &ShamirBackend, verdict: &[Share]) -> Result<bool, 
         // A correct run always reconstructs to exactly 0 or 1. Anything else means
         // a tampered/inconsistent share survived reconstruction — refuse rather
         // than coerce a non-boolean to a verdict.
-        Err(MpcError::Protocol(format!(
-            "secure comparison verdict reconstructed to a non-boolean field element {} \
-             (expected 0 or 1) — refusing to coerce",
-            bit.value()
-        )))
+        Err(MpcError::Protocol(
+            "secure comparison verdict reconstructed to a non-boolean field element (expected 0 \
+             or 1) — refusing to coerce"
+                .to_string(),
+        ))
     }
 }
 
@@ -1807,6 +1818,52 @@ mod tests {
         assert!(
             secure_greater_than(&mut d2, Fp::new(COMPARE_MAX_EXCLUSIVE - 1), Fp::new(0)).is_ok()
         );
+    }
+
+    /// The range error reports the bound only. The operands are PRIVATE, so the
+    /// message carries the public bit-width / exclusive bound and the operand
+    /// POSITION and nothing else — in particular not the operand's own value, in
+    /// either decimal or hex form.
+    #[test]
+    fn range_error_message_carries_no_operand_value() {
+        // Distinctive: `>= 2^COMPARE_BITS` so the check fires, and `< p` so
+        // `Fp::new` is the identity on it (the value in the error, had it been
+        // formatted, would be exactly this one).
+        const DISTINCTIVE: u64 = 0x1DEA_DBEE_FCAF_E777;
+        const { assert!(DISTINCTIVE >= COMPARE_MAX_EXCLUSIVE && DISTINCTIVE < crate::field::P) };
+        let forbidden = [
+            format!("{}", DISTINCTIVE),
+            format!("{:x}", DISTINCTIVE),
+            format!("{:X}", DISTINCTIVE),
+        ];
+
+        let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+        let mut dealer = backend.dealer();
+        let refusals = [
+            secure_greater_than(&mut dealer, Fp::new(DISTINCTIVE), Fp::new(0)),
+            secure_greater_than(&mut dealer, Fp::new(0), Fp::new(DISTINCTIVE)),
+            secure_threshold(&mut dealer, Fp::new(DISTINCTIVE), Fp::new(0)),
+            secure_threshold(&mut dealer, Fp::new(0), Fp::new(DISTINCTIVE)),
+            secure_equal_to_bit(&mut dealer, Fp::new(DISTINCTIVE), Fp::new(0)),
+            secure_equal_to_bit(&mut dealer, Fp::new(0), Fp::new(DISTINCTIVE)),
+        ];
+        for refusal in refusals {
+            let msg = match refusal.unwrap_err() {
+                MpcError::Protocol(m) => m,
+                other => panic!("expected a Protocol range error, got {:?}", other),
+            };
+            assert!(msg.contains("out of range"), "not a range error: {}", msg);
+            // The bound IS public and must still be reported.
+            assert!(msg.contains("2^60"), "the bound is missing from: {}", msg);
+            for form in &forbidden {
+                assert!(
+                    !msg.contains(form.as_str()),
+                    "the range error carried the operand value {}: {}",
+                    form,
+                    msg
+                );
+            }
+        }
     }
 
     #[test]
@@ -3416,5 +3473,45 @@ mod randomness_seam_tests {
         );
         assert!(secret_is_zero(&mut source, &zero).unwrap());
         assert!(square_protocol_random_bit(&mut source).is_ok());
+    }
+
+    /// The comparison path's two refusals that used to render a field element —
+    /// the operand range check and the non-boolean verdict open — carry no value.
+    ///
+    /// Both quantities are secret: the range check sees the operand itself, and
+    /// the verdict open sees whatever a tampered sharing reconstructed to. Each
+    /// case uses a distinctive value and asserts it appears in neither `Display`
+    /// nor `Debug`.
+    #[test]
+    fn comparison_refusals_render_no_field_element() {
+        let shown = |e: &MpcError| format!("{} || {:?}", e, e);
+
+        // (a) The operand range check. The value is out of range AND distinctive.
+        let operand = COMPARE_MAX_EXCLUSIVE + 919_191;
+        let err = check_in_range("sum", Fp::new(operand)).unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("919191") && !text.contains(&operand.to_string()),
+            "the operand must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("`sum`") && text.contains("out of range"),
+            "the operand's NAME and the bound are still named: {}",
+            text
+        );
+
+        // (b) The verdict open. A sharing of a non-boolean reconstructs to it, and
+        // the refusal must not echo what it reconstructed to.
+        let backend = ShamirBackend::new_seeded(3, 0x5A1D).unwrap();
+        let bogus = backend.dealer().share(Fp::new(606_060));
+        let err = open_verdict(&backend, &bogus).unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("606060"),
+            "the reconstructed non-boolean must not be rendered: {}",
+            text
+        );
+        assert!(text.contains("non-boolean"), "{}", text);
     }
 }

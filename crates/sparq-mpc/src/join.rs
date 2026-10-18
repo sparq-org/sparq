@@ -334,7 +334,12 @@ fn canonicalize_rows(rows: &mut [Vec<Option<Term>>]) {
 /// false-match collision before any key is shared. The in-circuit proof that the
 /// opened key equals `encode_term(term)` for the holder's real term stays the M4
 /// collaborative-proof job (the encoder is its on-ramp).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written: `rows` pairs each PRIVATE join key with that row's
+/// payload terms, so a derived `Debug` would route the keys to `Fp`'s rendering and
+/// print the payload beside them. What is kept is the public shape — the holder,
+/// the disclosed payload column names, and the row count, which this join already
+/// treats as public (input cardinality, L3).
+#[derive(Clone)]
 pub struct HiddenKeyedRows {
     /// The holder that owns these rows.
     pub holder: HolderId,
@@ -342,6 +347,17 @@ pub struct HiddenKeyedRows {
     pub payload_vars: Vec<Variable>,
     /// One entry per row: `(private_key_fp, disclosed_payload_terms)`.
     pub rows: Vec<(Fp, Vec<Option<Term>>)>,
+}
+
+impl std::fmt::Debug for HiddenKeyedRows {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HiddenKeyedRows")
+            .field("holder", &self.holder)
+            .field("payload_vars", &self.payload_vars)
+            .field("rows", &"<redacted>")
+            .field("row_count", &self.rows.len())
+            .finish()
+    }
 }
 
 /// The hidden-value cross-holder join over PRIVATE join keys (M3).
@@ -648,7 +664,10 @@ impl HiddenValueJoin {
 /// and are NEVER reconstructed from shares — exactly as the four-flatmates aggregate
 /// uses its salary column. The DISCLOSED payload columns ride alongside in the clear
 /// (disclosure-minimisation, convention #4 — only the *key* is hidden).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written for the same reason as [`HiddenKeyedRows`]: `rows`
+/// carries the private key of each row next to its payload. The binding IS printed
+/// — a [`RowBinding::Keyed`] holds the DISCLOSED public row keys (convention #4).
+#[derive(Clone)]
 pub struct BatchedHiddenInput {
     /// The holder that owns this column.
     pub holder: HolderId,
@@ -659,6 +678,18 @@ pub struct BatchedHiddenInput {
     pub rows: Vec<(Fp, Vec<Option<Term>>)>,
     /// How row `i` correlates across holders (see [`RowBinding`]).
     pub binding: RowBinding,
+}
+
+impl std::fmt::Debug for BatchedHiddenInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchedHiddenInput")
+            .field("holder", &self.holder)
+            .field("payload_vars", &self.payload_vars)
+            .field("rows", &"<redacted>")
+            .field("row_count", &self.rows.len())
+            .field("binding", &self.binding)
+            .finish()
+    }
 }
 
 impl BatchedHiddenInput {
@@ -737,6 +768,31 @@ impl BatchedHiddenInput {
 pub type BatchedJoinOutput = (PartialResult, ObliviousOutputCost);
 
 impl HiddenValueJoin {
+    /// The bound contract every candidate-materialising entry runs FIRST: refuse an
+    /// over-cap `B`, then count the candidates the binding permits without
+    /// enumerating them, then require `B` to cover that count.
+    ///
+    /// Each candidate costs one equality sharing on the way to the output stage and
+    /// one materialised slot inside it, so leaving the cardinality to the output
+    /// stage's own check means the work is already done by the time it refuses.
+    ///
+    /// The `B` cap comes FIRST and on its own, because counting is not free: a
+    /// `Keyed` binding counts the fan-out through a map keyed by the right-hand
+    /// rows, so an over-cap `B` would otherwise allocate that map before being
+    /// refused. Once the cap has passed, the map is sized by the caller's own row
+    /// count — work they asked for — and the coverage check follows the count.
+    fn preflight_candidate_bound(
+        &self,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+        bound: usize,
+    ) -> Result<usize, MpcError> {
+        oblivious_join::check_output_bound_cap(bound)?;
+        let count = candidate_pair_count(&left.binding, &right.binding, left.len(), right.len())?;
+        oblivious_join::check_output_bound(bound, count)?;
+        Ok(count)
+    }
+
     /// **The batched hidden-value join (sq-khf9).** Join two holders' BATCHED
     /// row-columns on a PRIVATE key, ranging over MANY rows per holder rather than
     /// the single bag [`Self::join`] consumed, and route the result through the
@@ -818,6 +874,9 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // Preflight before a dealer exists: minting one is cheap, but it is still
+        // keystream state created for a run that is about to be refused.
+        self.preflight_candidate_bound(left, right, bound)?;
         // Mint ONE fresh dealer for this protocol run (production: a fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across joins
         // — and one source for the whole run: the key sharings, the equality masks
@@ -840,6 +899,12 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // Validated before any draw or allocation: the candidates this entry builds
+        // below cost a draw each, and the output stage sizes its allocations and its
+        // shuffle network from `bound`. So the candidate CARDINALITY is counted
+        // without materialising the pairs, and `B` must be within the cap and cover
+        // it (see `candidate_pair_count`).
+        self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
         let n = self.backend.parties();
 
@@ -979,6 +1044,8 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // Preflight before a dealer exists, as in `batched_join`.
+        self.preflight_candidate_bound(left, right, bound)?;
         // ONE fresh dealer for this protocol run (production: fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across
         // joins — and now one source for the whole run: the equality bits AND the
@@ -1000,6 +1067,8 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // Validated before any draw or allocation, as in `batched_join_through`.
+        self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
 
         // Output schema: left payload vars then right payload vars (key NOT projected).
@@ -1084,6 +1153,7 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+        self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
         let payload_arity = left.payload_vars.len() + right.payload_vars.len();
         let candidates = self.fully_oblivious_candidates(source, left, right)?;
@@ -1142,6 +1212,67 @@ fn candidate_pairs(
                 }
             }
             Ok(pairs)
+        }
+        _ => Err(MpcError::Protocol(
+            "batched_join: mixed row-bindings (one Positional, one Keyed) — \
+             both holders must share the same correlation contract"
+                .into(),
+        )),
+    }
+}
+
+/// The candidate count [`candidate_pairs`] would enumerate, computed WITHOUT
+/// materialising the pairs — the preflight every builder runs before it allocates
+/// a candidate or draws a sharing.
+///
+/// A `Keyed` binding fans out: the pair count is `Σ_i |bucket(key_i)|`, which can
+/// reach `llen · rlen`. Materialising the pairs to learn that count is the DoS
+/// itself, and the output stage's own `B >= candidates` check comes too late — one
+/// equality sharing is drawn per pair on the way there. So this counts with
+/// [`usize::checked_add`] and refuses on overflow, touching no holder data and
+/// allocating only the key buckets a clear-text equi-join needs anyway.
+///
+/// Those buckets ARE an allocation, sized by the caller's own row count, so the
+/// caller runs the `B` cap before calling this — see `preflight_candidate_bound`.
+///
+/// It mirrors [`candidate_pairs`] exactly, and
+/// `candidate_pair_count_matches_candidate_pairs` pins that it does.
+fn candidate_pair_count(
+    left: &RowBinding,
+    right: &RowBinding,
+    llen: usize,
+    rlen: usize,
+) -> Result<usize, MpcError> {
+    match (left, right) {
+        (RowBinding::Positional, RowBinding::Positional) => {
+            if llen != rlen {
+                return Err(MpcError::Protocol(format!(
+                    "batched_join (Positional): left has {} rows but right has {} — \
+                     index-correlated columns must be equal length",
+                    llen, rlen
+                )));
+            }
+            Ok(llen)
+        }
+        (RowBinding::Keyed(lkeys), RowBinding::Keyed(rkeys)) => {
+            let mut right_counts: BTreeMap<&str, usize> = BTreeMap::new();
+            for k in rkeys.iter() {
+                *right_counts.entry(k.as_str()).or_default() += 1;
+            }
+            let mut total: usize = 0;
+            for k in lkeys.iter() {
+                if let Some(c) = right_counts.get(k.as_str()) {
+                    total = total.checked_add(*c).ok_or_else(|| {
+                        MpcError::Protocol(
+                            "batched_join (Keyed): the candidate fan-out overflows usize \
+                             — refusing before any candidate is materialised or any \
+                             sharing drawn"
+                                .to_string(),
+                        )
+                    })?;
+                }
+            }
+            Ok(total)
         }
         _ => Err(MpcError::Protocol(
             "batched_join: mixed row-bindings (one Positional, one Keyed) — \
@@ -1859,6 +1990,191 @@ mod batched_hidden_value_tests {
 
     fn lit(s: &str) -> Option<Term> {
         Some(Term::Literal(oxrdf::Literal::new_simple_literal(s)))
+    }
+
+    /// Every candidate-materialising entry refuses an over-cap `B` with ZERO draws,
+    /// on a NON-EMPTY input — the point is that the refusal precedes the work, not
+    /// that an empty input does nothing. One equality sharing per candidate would
+    /// otherwise be drawn before the output stage's own check ran.
+    ///
+    /// Also pinned: an over-cap CANDIDATE count (not just an over-cap `B`) is
+    /// refused the same way, and so is a `Keyed` fan-out that overflows. The three
+    /// entries are `batched_join_through`, `fully_oblivious_batched_join_through`
+    /// and the test-only `fully_oblivious_candidates_and_opened_rows`.
+    /// The `B` cap runs before `candidate_pair_count` is CALLED, not just before
+    /// the draws — and the only way to observe "before the call" from outside is
+    /// the refusal's identity. So each case below is invalid in TWO ways at once:
+    /// the bound is over the cap, and the bindings are something the counter itself
+    /// would reject. A cap-first preflight names `MAX_OUTPUT_BOUND`; a
+    /// count-first one names the binding instead. That distinction is what pins the
+    /// ordering, and with it the fact that the counter's key-bucket map — the one
+    /// allocation in the preflight, sized by the caller's rows — is never built for
+    /// a run that is already refused.
+    #[test]
+    fn the_bound_cap_precedes_the_candidate_count_and_its_allocation() {
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+        use crate::randomness::test_sources::DrawCountingSource;
+
+        let backend = ShamirBackend::new_seeded(5, 0xB0C1).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+
+        // (a) Positional columns of DIFFERENT length: the counter's own refusal.
+        let short = positional("l", &["x"], &[(7, vec![lit("a")])]);
+        let long = positional(
+            "r",
+            &["y"],
+            &[
+                (7, vec![lit("c")]),
+                (9, vec![lit("d")]),
+                (11, vec![lit("e")]),
+            ],
+        );
+        // (b) MIXED bindings: also the counter's own refusal.
+        let as_keyed = keyed("r", &["y"], &[("k", 7, vec![lit("c")])]);
+
+        for (label, l, r) in [
+            ("positional length mismatch", &short, &long),
+            ("mixed bindings", &short, &as_keyed),
+        ] {
+            // The counter really does refuse these on its own, with its own words —
+            // otherwise the discriminator below would prove nothing.
+            let legal = join
+                .batched_join_through(&mut DrawCountingSource::new(&mut backend.dealer()), l, r, 4)
+                .expect_err("a legal bound still leaves the binding invalid");
+            assert!(
+                matches!(&legal, MpcError::Protocol(m) if !m.contains("MAX_OUTPUT_BOUND")),
+                "{}: the binding refusal should not mention the cap: {:?}",
+                label,
+                legal
+            );
+
+            for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+                let mut dealer = backend.dealer();
+                let mut counted = DrawCountingSource::new(&mut dealer);
+                let err = join
+                    .batched_join_through(&mut counted, l, r, bound)
+                    .expect_err("an over-cap bound must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                    "{} B={}: the cap must refuse BEFORE the count, got {:?}",
+                    label,
+                    bound,
+                    err
+                );
+                assert_eq!(
+                    counted.draws(),
+                    0,
+                    "{} B={}: refused before any draw",
+                    label,
+                    bound
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_batched_entry_refuses_an_over_cap_bound_before_any_draw() {
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+        use crate::randomness::test_sources::DrawCountingSource;
+
+        let backend = ShamirBackend::new_seeded(5, 0xB0FF).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let left = positional("l", &["x"], &[(7, vec![lit("a")]), (8, vec![lit("b")])]);
+        let right = positional("r", &["y"], &[(7, vec![lit("c")]), (9, vec![lit("d")])]);
+
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = join
+                .batched_join_through(&mut counted, &left, &right, bound)
+                .expect_err("batched_join_through must refuse an over-cap bound");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "batched_join_through B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "batched_join_through B={}", bound);
+
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = join
+                .fully_oblivious_batched_join_through(&mut counted, &left, &right, bound)
+                .expect_err("fully_oblivious_batched_join_through must refuse it too");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "fully_oblivious B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "fully_oblivious B={}", bound);
+
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = join
+                .fully_oblivious_candidates_and_opened_rows(&mut counted, &left, &right, bound)
+                .expect_err("the instrumented entry must refuse it too");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "candidates_and_opened_rows B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "candidates_and_opened_rows B={}", bound);
+        }
+
+        // An over-cap CANDIDATE count, with a `B` that is itself within the cap: the
+        // Keyed fan-out is counted without enumerating the pairs, so this refuses
+        // before the pair vector exists.
+        let many = (MAX_OUTPUT_BOUND / 8) + 1;
+        let lrows: Vec<(&str, u64, Vec<Option<Term>>)> =
+            (0..8).map(|_| ("k", 1u64, vec![lit("a")])).collect();
+        let rrows: Vec<(&str, u64, Vec<Option<Term>>)> =
+            (0..many).map(|_| ("k", 1u64, vec![lit("c")])).collect();
+        let lk = keyed("l", &["x"], &lrows);
+        let rk = keyed("r", &["y"], &rrows);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = join
+            .batched_join_through(&mut counted, &lk, &rk, MAX_OUTPUT_BOUND)
+            .expect_err("an over-cap candidate count must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+            "over-cap candidate count: {:?}",
+            err
+        );
+        assert_eq!(
+            counted.draws(),
+            0,
+            "the candidate count must be refused before any draw"
+        );
+
+        // The same shapes at a legal bound still run, so the guard is not refusing
+        // everything.
+        assert!(join.batched_join(&left, &right, 4).is_ok());
+    }
+
+    /// The non-materialising counter must agree with the enumeration it stands in
+    /// for, or the preflight would guard a different number than the builders use.
+    #[test]
+    fn candidate_pair_count_matches_candidate_pairs() {
+        let pos = RowBinding::Positional;
+        let k_l = RowBinding::Keyed(vec!["a".into(), "b".into(), "a".into()]);
+        let k_r = RowBinding::Keyed(vec!["a".into(), "a".into(), "c".into(), "b".into()]);
+        let cases: Vec<(&RowBinding, &RowBinding, usize, usize)> =
+            vec![(&pos, &pos, 3, 3), (&k_l, &k_r, 3, 4), (&k_r, &k_l, 4, 3)];
+        for (l, r, llen, rlen) in cases {
+            let counted = candidate_pair_count(l, r, llen, rlen).unwrap();
+            let enumerated = candidate_pairs(l, r, llen, rlen).unwrap().len();
+            assert_eq!(
+                counted, enumerated,
+                "the counter and the enumeration disagree for {} x {} rows",
+                llen, rlen
+            );
+        }
+        // And the refusals agree too.
+        assert!(candidate_pair_count(&pos, &pos, 2, 3).is_err());
+        assert!(candidate_pair_count(&pos, &k_r, 1, 1).is_err());
     }
 
     /// Build a POSITIONAL batched input from `(key, payload)` rows.

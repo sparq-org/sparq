@@ -127,6 +127,10 @@ pub(crate) struct Clause {
     pub head: Vec<Head>,
     /// The source triples of the axiom this clause came from.
     pub source: u32,
+    /// `Some(scoped)`: the clause applies only in the tableau attempts that choose an
+    /// at-most filler's superset atom where the restriction counts, or only in those that
+    /// choose it at every node ([`define_superset`](Builder::define_superset)).
+    pub scoped: Option<bool>,
 }
 
 /// The ABox, in terms of [`Atom`]s and [`Role`]s over individual indices.
@@ -300,9 +304,12 @@ struct Builder<'a> {
     at_least_atoms: FxHashMap<(u32, Role, Option<Atom>), Atom>,
     define_pos: FxHashMap<Nnf, Atom>,
     define_neg: FxHashMap<Nnf, Atom>,
+    /// The roles each [`define_superset`](Self::define_superset) atom is scoped to.
+    superset_roles: FxHashSet<(Atom, Role)>,
     chain_all: FxHashMap<(Role, Nnf), Atom>,
     /// GCIs `⊤ ⊑ C` waiting for clausification, with their axiom index.
-    gcis: Vec<(Nnf, u32)>,
+    /// The scoping of each top clause ([`Clause::scoped`]).
+    gcis: Vec<(Nnf, u32, Option<bool>)>,
     /// The axiom whose clause would exceed [`MAX_CLAUSE_VARS`], if any.
     too_wide: Option<usize>,
     axiom: usize,
@@ -392,6 +399,7 @@ pub(crate) fn clausify(
         at_least_atoms: FxHashMap::default(),
         define_pos: FxHashMap::default(),
         define_neg: FxHashMap::default(),
+        superset_roles: FxHashSet::default(),
         chain_all: FxHashMap::default(),
         gcis: Vec::new(),
         too_wide: None,
@@ -437,8 +445,8 @@ pub(crate) fn clausify(
     }
     // Class axioms may mention properties no role axiom does: close over all of them.
     b.close_hierarchy();
-    while let Some((c, src)) = b.gcis.pop() {
-        b.clausify_gci(c, src);
+    while let Some((c, src, scoped)) = b.gcis.pop() {
+        b.clausify_gci(c, src, scoped);
         if let Some(axiom) = b.too_wide {
             return Err(Unsupported {
                 construct: "an axiom whose clause needs more than MAX_CLAUSE_VARS successors",
@@ -1063,7 +1071,7 @@ impl Builder<'_> {
 
     fn gci(&mut self, c: Nnf) {
         let src = self.src();
-        self.gcis.push((c, src));
+        self.gcis.push((c, src, None));
     }
 
     fn class_axiom(&mut self, ax: &Axiom) -> Result<(), Unsupported> {
@@ -1527,15 +1535,38 @@ impl Builder<'_> {
         q
     }
 
-    /// A fresh `Q` with `c ⊑ Q`.
-    fn define_superset(&mut self, c: Nnf) -> Atom {
-        if let Some(&q) = self.define_neg.get(&c) {
-            return q;
+    /// A fresh `Q` with `c ⊑ Q`, the filler of an at-most restriction over `r`. `Q` occurs
+    /// nowhere else, so any superset of `c` will do, and tableau attempts define it one of
+    /// two ways: by `⊤ ⊑ ¬c ⊔ Q`, a choice at every node, or by `∃r⁻.⊤ ⊓ c ⊑ Q` for each
+    /// such `r`, a choice only at the nodes the restriction can count. The scoped choice
+    /// settles graphs the global one floods with branch points; the global one settles some
+    /// the scoped one leaves to merges, or whose model only it confirms.
+    fn define_superset(&mut self, c: Nnf, r: Role) -> Atom {
+        let q = match self.define_neg.get(&c) {
+            Some(&q) => q,
+            None => {
+                let q = self.fresh(AtomKind::Fresh);
+                self.define_neg.insert(c.clone(), q);
+                self.gci_in(Nnf::Or(vec![negate(&c), Nnf::Atom(q)]), false);
+                q
+            }
+        };
+        if self.superset_roles.insert((q, r)) {
+            // Centred at the counted neighbour, so no auxiliary atom joins its label.
+            let scoped = Nnf::Or(vec![
+                Nnf::All(r.inverse(), Box::new(Nnf::Bottom)),
+                negate(&c),
+                Nnf::Atom(q),
+            ]);
+            self.gci_in(scoped, true);
         }
-        let q = self.fresh(AtomKind::Fresh);
-        self.define_neg.insert(c.clone(), q);
-        self.gci(Nnf::Or(vec![negate(&c), Nnf::Atom(q)]));
         q
+    }
+
+    /// A GCI whose top clause applies only in the attempts that are `scoped` or not.
+    fn gci_in(&mut self, c: Nnf, scoped: bool) {
+        let src = self.src();
+        self.gcis.push((c, src, Some(scoped)));
     }
 
     fn at_least_atom(&mut self, n: u32, r: Role, f: Option<Atom>) -> Atom {
@@ -1562,11 +1593,14 @@ impl Builder<'_> {
         self.out.clauses.push(c);
     }
 
-    fn clausify_gci(&mut self, c: Nnf, src: u32) {
+    fn clausify_gci(&mut self, c: Nnf, src: u32, scoped: Option<bool>) {
         self.axiom = src as usize;
         let mut ds = Vec::new();
         flatten_or(c, &mut ds);
-        let mut cl = Clause::default();
+        let mut cl = Clause {
+            scoped,
+            ..Clause::default()
+        };
         for d in ds {
             match d {
                 Nnf::Top => return,
@@ -1631,7 +1665,7 @@ impl Builder<'_> {
                         Nnf::Top => None,
                         Nnf::Bottom => return,
                         Nnf::Atom(a) => Some(a),
-                        other => Some(self.define_superset(other)),
+                        other => Some(self.define_superset(other, r)),
                     };
                     if u32::from(cl.n_y) + n + 1 > MAX_CLAUSE_VARS {
                         self.too_wide = Some(self.axiom);

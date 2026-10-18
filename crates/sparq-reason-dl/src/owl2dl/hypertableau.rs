@@ -24,15 +24,20 @@
 //! individual `s` counts the blockable node `w`, the **NI-rule** applies: `w` is one of at
 //! most `n` elements, so a branch point chooses which, `i ≤ n`, and merges `w` into a root
 //! introduced for (`s`, the restriction, `i`) with the restriction's roles from `s` and its
-//! filler. Only at-most clauses with nothing else in their head take part (the restriction
-//! must hold at `s`). Otherwise the branch is closed and, if no branch gives a model, the run
-//! returns [`Stop::Unconfirmed`], never a verdict.
+//! filler. A clause takes part when its head is one at-most restriction and disjuncts at
+//! `s` ([`NiShape`]): those disjuncts are further alternatives, since the restriction holds
+//! at `s` unless one of them does. Otherwise the branch is closed and, if no branch gives a
+//! model, the run returns [`Stop::Unconfirmed`], never a verdict. When a plain attempt runs
+//! out or cannot confirm its model, [`Tableau::run`] starts over with the rule also applied
+//! as HermiT applies it, where the at-most restriction at `s` would merge `w` with another
+//! neighbour (`eager_ni`); the first choice among slots not introduced yet is the only one
+//! tried, since they are interchangeable.
 //!
 //! **Termination.** HermiT's NI-rule (Motik, Shearer and Horrocks, JAIR 36, 2009) fires on
 //! an annotated equality: an at-most restriction at a root forcing two nodes to merge. This
-//! one fires at completion, on an edge [`Tableau::unravels`] refuses. The roots it
-//! introduces can introduce further roots, so the JAIR termination argument does not carry
-//! over as it stands. Termination is backed by the [`Budget`]: every rule application and
+//! one fires there in the eager attempt and at completion, on an edge [`Tableau::unravels`]
+//! refuses. The roots it introduces can introduce further roots, so the JAIR termination
+//! argument does not carry over as it stands. Termination is backed by the [`Budget`]: every rule application and
 //! every new node counts against it, and running out is [`Stop::Exhausted`]
 //! (`Unknown(ResourceBudget)`), never a verdict.
 //!
@@ -68,7 +73,7 @@
 //! [`Stop::Undecided`] instead of "unsatisfiable" when one of them was undecided. Only a
 //! clash-free, complete branch whose datatype check succeeded is reported satisfiable.
 
-use super::clausify::{Atom, AtomKind, Clauses, Head, Key, Role, Var};
+use super::clausify::{Atom, AtomKind, Clause, Clauses, Head, Key, Role, Var};
 use super::data_ranges::{self, DataRangeExpr, Tri};
 use super::datatypes::Value;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -183,8 +188,8 @@ pub(crate) enum Stop {
     /// Every branch closed, but at least one only because its completion graph could not
     /// be confirmed to be a model: nominals connect a copied or blocked part of the graph
     /// to a node whose number restrictions the copies could break, where the NI-rule does
-    /// not apply (the restriction shares its clause with other disjuncts, or none counts the
-    /// node), or two individuals might share a key's data value that is not fixed.
+    /// not apply (the clause is not an [`NiShape`], or none counts the node), or two
+    /// individuals might share a key's data value that is not fixed.
     Unconfirmed,
 }
 
@@ -193,7 +198,7 @@ pub(crate) enum Stop {
 type YVar = (Vec<Role>, Vec<Atom>, bool);
 
 /// Where the NI-rule applies: a root, a blockable neighbour, the at-most clause counting
-/// it, and what that match depends on.
+/// it (an index into `ClauseIndex::ni`), and what that match depends on.
 type NiMatch = (Node, Node, u32, Dep);
 
 /// Where the clauses applicable at a central node are found.
@@ -210,10 +215,63 @@ pub(crate) struct ClauseIndex {
     ys: Vec<Vec<YVar>>,
     /// The clauses with two or more neighbour variables (number restrictions).
     multi_y: Vec<u32>,
-    /// The clauses that are only an at-most restriction `≤n R.A`: one group of
-    /// interchangeable neighbour variables with the same atoms, a head of their equalities.
-    /// The NI-rule applies to these.
-    pure_at_most: Vec<u32>,
+    /// The clauses the NI-rule applies to, in clause order, with their shape.
+    ni: Vec<(u32, NiShape)>,
+}
+
+/// An at-most restriction `≤n R.A` inside a clause: `body → ≤n R.A ∨ D₁(x) ∨ …`, where the
+/// body may also bind neighbour variables of its own (context) that no head mentions.
+#[derive(Debug, Clone)]
+struct NiShape {
+    /// The restriction's `n + 1` interchangeable neighbour variables (same roles and atoms).
+    group: Vec<u16>,
+    /// The other neighbour variables, bound by the body only.
+    context: Vec<u16>,
+    /// The head disjuncts that are not equalities of the group: concepts or a self-loop at
+    /// the central node.
+    extra: Vec<Head>,
+}
+
+impl NiShape {
+    /// The shape of `cl`, when it has exactly one at-most group and nothing else in its
+    /// head but disjuncts at the central node.
+    fn of(cl: &Clause, ys: &[YVar]) -> Option<NiShape> {
+        // A group starts at `v - 1` for every ordered `v` whose predecessor is not ordered.
+        let starts: Vec<u16> = cl
+            .ordered
+            .iter()
+            .filter(|&&v| !cl.ordered.contains(&(v - 1)))
+            .map(|&v| v - 1)
+            .collect();
+        let [start] = starts[..] else {
+            return None;
+        };
+        let mut group = vec![start];
+        while cl.ordered.contains(&(group[group.len() - 1] + 1)) {
+            group.push(group[group.len() - 1] + 1);
+        }
+        let (roles, atoms, _) = &ys[start as usize];
+        if group
+            .iter()
+            .any(|&v| ys[v as usize].0 != *roles || ys[v as usize].1 != *atoms)
+        {
+            return None;
+        }
+        let mut extra = Vec::new();
+        for h in &cl.head {
+            match *h {
+                Head::Eq(Var::Y(a), Var::Y(b)) if group.contains(&a) && group.contains(&b) => {}
+                Head::Concept(_, Var::X) | Head::SelfLoop(_) => extra.push(h.clone()),
+                _ => return None,
+            }
+        }
+        let context = (0..cl.n_y).filter(|v| !group.contains(v)).collect();
+        Some(NiShape {
+            group,
+            context,
+            extra,
+        })
+    }
 }
 
 impl ClauseIndex {
@@ -246,14 +304,8 @@ impl ClauseIndex {
             idx.ys.push(ys);
             if cl.n_y >= 2 {
                 idx.multi_y.push(i);
-                let ys = &idx.ys[i as usize];
-                let (roles, atoms, _) = &ys[0];
-                if cl.body_self.is_empty()
-                    && cl.ordered.len() + 1 == ys.len()
-                    && cl.head.iter().all(|h| matches!(h, Head::Eq(..)))
-                    && ys.iter().all(|(r, a, _)| r == roles && a == atoms)
-                {
-                    idx.pure_at_most.push(i);
+                if let Some(shape) = NiShape::of(cl, &idx.ys[i as usize]) {
+                    idx.ni.push((i, shape));
                 }
             }
         }
@@ -281,7 +333,7 @@ struct Instance {
     deps: Dep,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Undo {
     Concept(Node, Atom),
     Role(u32, Node, Node),
@@ -299,17 +351,18 @@ enum Undo {
 enum Choice {
     /// The disjuncts of a clause's head.
     Clause(Instance),
-    /// The NI-rule: which of root `s`'s at most `n` neighbours that `clause` (an at-most
-    /// restriction) counts blockable node `w` is; `deps` is what the match depends on.
+    /// The NI-rule: which of root `s`'s at most `n` neighbours that clause `ClauseIndex::ni[ni]`
+    /// (an at-most restriction) counts blockable node `w` is, or which of the clause's other
+    /// disjuncts holds at `s` instead; `deps` is what the match depends on.
     Ni {
         s: Node,
         w: Node,
-        clause: u32,
+        ni: u32,
         deps: Dep,
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Branch {
     mark: usize,
     choice: Choice,
@@ -318,6 +371,7 @@ struct Branch {
 }
 
 /// One tableau run over a fixed clause set.
+#[derive(Clone)]
 pub(crate) struct Tableau<'c> {
     c: &'c Clauses,
     index: &'c ClauseIndex,
@@ -359,6 +413,12 @@ pub(crate) struct Tableau<'c> {
     named: Vec<Node>,
     /// The roots the NI-rule introduced, by (root, at-most clause, index).
     ni_nodes: FxHashMap<(Node, u32, u32), Node>,
+    /// Whether the NI-rule also applies when an at-most restriction merges (see
+    /// [`Tableau::run`]).
+    eager_ni: bool,
+    /// Whether an at-most filler's superset atom is chosen only where the restriction counts
+    /// ([`Clause::scoped`]).
+    scoped: bool,
 }
 
 /// What the key rule did.
@@ -435,6 +495,8 @@ impl<'c> Tableau<'c> {
             unconfirmed: false,
             named: Vec::new(),
             ni_nodes: FxHashMap::default(),
+            eager_ni: false,
+            scoped: false,
         }
     }
 
@@ -509,6 +571,27 @@ impl<'c> Tableau<'c> {
         }
     }
 
+    /// After a satisfiable run, the distinct labels of the model's elements: the active
+    /// abstract nodes not blocked (a directly blocked node has its blocker's label), each
+    /// sorted.
+    pub(crate) fn element_labels(&self) -> Vec<Vec<Atom>> {
+        let blocked = self.blocked();
+        let mut out: Vec<Vec<Atom>> = (0..self.nodes.len())
+            .filter(|&n| {
+                let node = &self.nodes[n];
+                node.active && !node.concrete && !blocked[n]
+            })
+            .map(|n| {
+                let mut l: Vec<Atom> = self.nodes[n].label.keys().copied().collect();
+                l.sort_unstable();
+                l
+            })
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
@@ -543,9 +626,49 @@ impl<'c> Tableau<'c> {
         (n, d)
     }
 
+    /// Whether the run ended in (or started with) the eager attempt (see [`Tableau::run`]).
+    pub(crate) fn eager(&self) -> bool {
+        self.eager_ni
+    }
+
+    /// Skips the plain attempt: the run starts with the eager one.
+    pub(crate) fn start_eager(&mut self) {
+        self.eager_ni = true;
+        self.scoped = true;
+    }
+
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
-    /// built, `Ok(false)` when every branch closed on a clash.
+    /// built, `Ok(false)` when every branch closed on a clash. With nominals and at-most
+    /// restrictions, a first attempt on a third of the budget merges the neighbours an
+    /// at-most restriction at a root counts as usual; when it runs out or cannot confirm its
+    /// model, the run starts over with the NI-rule applied to those merges too (`eager_ni`,
+    /// as HermiT does), on the rest of the budget. The eager rule settles graphs whose
+    /// merges at a root would otherwise keep joining parts of the tree, but slows some that
+    /// the plain attempt decides. The eager attempt also chooses an at-most filler's
+    /// superset atom only where the restriction counts ([`Clause::scoped`]).
     pub(crate) fn run(&mut self) -> Result<bool, Stop> {
+        let (full, done) = (self.budget.max_steps, self.work());
+        // A budget already spent (by loading the ABox, say) is left to the run to report;
+        // the plain attempt's limit stays within the budget.
+        if self.index.ni.is_empty() || self.eager_ni || done >= full {
+            return self.run_inner();
+        }
+        let start = self.clone();
+        self.budget.max_steps = done + (full - done) / 3;
+        let r = self.run_inner();
+        self.budget.max_steps = full;
+        if !matches!(r, Err(Stop::Exhausted | Stop::Unconfirmed)) {
+            return r;
+        }
+        let spent = self.work() - start.work();
+        *self = start;
+        self.eager_ni = true;
+        self.scoped = true;
+        self.probes.set(self.probes.get() + spent);
+        self.run_inner()
+    }
+
+    fn run_inner(&mut self) -> Result<bool, Stop> {
         loop {
             if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
                 return Err(Stop::Exhausted);
@@ -600,8 +723,8 @@ impl<'c> Tableau<'c> {
             }
             match unravels {
                 Ok(()) => return Ok(true),
-                Err(Some((s, w, clause, deps))) => {
-                    self.open(Choice::Ni { s, w, clause, deps });
+                Err(Some((s, w, ni, deps))) => {
+                    self.open(Choice::Ni { s, w, ni, deps });
                 }
                 Err(None) => self.close_unconfirmed(),
             }
@@ -1183,25 +1306,25 @@ impl<'c> Tableau<'c> {
         self.mark_with_neighbours(s);
     }
 
+    /// Deactivates `t`'s descendants. A child is always adjacent to its parent (the edge
+    /// that created it), so the walk follows edges: work proportional to the subtree.
     fn prune_descendants(&mut self, t: Node) {
-        let len = self.nodes.len();
-        self.charge(len);
-        let mut desc = vec![false; len];
-        for n in (t as usize + 1)..len {
-            let node = &self.nodes[n];
-            if !node.active || node.root {
-                continue;
-            }
-            if let Some(p) = node.parent {
-                if p == t || desc[p as usize] {
-                    desc[n] = true;
-                }
-            }
-        }
-        for (n, &is_desc) in desc.iter().enumerate() {
-            if is_desc {
-                self.nodes[n].active = false;
-                self.trail.push(Undo::Deactivate(n as Node));
+        let mut stack = vec![t];
+        while let Some(u) = stack.pop() {
+            let adj = &self.nodes[u as usize].adj;
+            self.charge(adj.len());
+            let children: Vec<Node> = adj
+                .keys()
+                .copied()
+                .filter(|&n| {
+                    let node = &self.nodes[n as usize];
+                    node.active && !node.root && node.parent == Some(u)
+                })
+                .collect();
+            for n in children {
+                self.nodes[n as usize].active = false;
+                self.trail.push(Undo::Deactivate(n));
+                stack.push(n);
             }
         }
     }
@@ -1251,10 +1374,13 @@ impl<'c> Tableau<'c> {
             let head = &self.c.clauses[inst.clause as usize].head;
             match head.len() {
                 0 => self.set_clash(inst.deps.clone()),
-                1 => {
-                    let h = head[0].clone();
-                    self.apply(&inst, &h, &inst.deps.clone());
-                }
+                1 => match self.ni_trigger(&inst) {
+                    Some(choice) => self.open(choice),
+                    None => {
+                        let h = head[0].clone();
+                        self.apply(&inst, &h, &inst.deps.clone());
+                    }
+                },
                 _ => {
                     self.pending.push(inst);
                     self.trail.push(Undo::PendingPush);
@@ -1265,6 +1391,9 @@ impl<'c> Tableau<'c> {
 
     fn match_clause(&self, ci: u32, x: Node, found: &mut Vec<Instance>) {
         let cl = &self.c.clauses[ci as usize];
+        if cl.scoped.is_some_and(|scoped| scoped != self.scoped) {
+            return;
+        }
         let node = &self.nodes[x as usize];
         let mut deps = Dep::default();
         for a in &cl.body_x {
@@ -1278,6 +1407,15 @@ impl<'c> Tableau<'c> {
                 return;
             }
             deps = deps.union(&self.role_dep(r, x, x));
+        }
+        // A head disjunct about `x` alone that holds satisfies every match of the clause.
+        let at_x = |h: &Head| match *h {
+            Head::Concept(a, Var::X) => node.label.contains_key(&a),
+            Head::SelfLoop(r) => self.has_role(r, x, x),
+            _ => false,
+        };
+        if cl.n_y > 0 && cl.head.iter().any(at_x) {
+            return;
         }
         let mut nodes = vec![x];
         self.match_ys(ci, 0, &mut nodes, deps, found);
@@ -1387,7 +1525,67 @@ impl<'c> Tableau<'c> {
     // ---- branching --------------------------------------------------------------------
 
     fn branch(&mut self, inst: Instance) {
-        self.open(Choice::Clause(inst));
+        let choice = self.ni_trigger(&inst).unwrap_or(Choice::Clause(inst));
+        self.open(choice);
+    }
+
+    /// The NI-rule where an at-most clause applies at root `s` to a blockable node `w` that
+    /// is not `s`'s child: instead of merging `w` with another neighbour, `w` becomes one
+    /// of the restriction's at most `n` named neighbours (or another disjunct holds at `s`).
+    fn ni_trigger(&self, inst: &Instance) -> Option<Choice> {
+        if !self.eager_ni {
+            return None;
+        }
+        let k = self
+            .index
+            .ni
+            .binary_search_by_key(&inst.clause, |(c, _)| *c)
+            .ok()?;
+        let s = inst.nodes[0];
+        if !self.nodes[s as usize].root {
+            return None;
+        }
+        let w = self.index.ni[k]
+            .1
+            .group
+            .iter()
+            .map(|&v| inst.nodes[1 + v as usize])
+            .find(|&w| {
+                let n = &self.nodes[w as usize];
+                !n.root && !n.concrete && n.parent != Some(s)
+            })?;
+        // The choice depends on the restriction holding at `s` and counting `w`, not on the
+        // other neighbours it counted.
+        let (ci, shape) = &self.index.ni[k];
+        let (cl, ys) = (&self.c.clauses[*ci as usize], &self.index.ys[*ci as usize]);
+        let sn = &self.nodes[s as usize];
+        let mut deps = Dep::default();
+        for a in &cl.body_x {
+            deps = deps.union(sn.label.get(a)?);
+        }
+        for &r in &cl.body_self {
+            deps = deps.union(&self.role_dep(r, s, s));
+        }
+        for &v in shape.context.iter().chain(&shape.group[..1]) {
+            let u = if shape.group[0] == v {
+                w
+            } else {
+                inst.nodes[1 + v as usize]
+            };
+            let (roles, atoms, _) = &ys[v as usize];
+            for &r in roles {
+                deps = deps.union(&self.role_dep(r, s, u));
+            }
+            for a in atoms {
+                deps = deps.union(self.nodes[u as usize].label.get(a)?);
+            }
+        }
+        Some(Choice::Ni {
+            s,
+            w,
+            ni: k as u32,
+            deps,
+        })
     }
 
     /// Opens a branch point over `choice` and takes its first alternative (a single
@@ -1414,7 +1612,10 @@ impl<'c> Tableau<'c> {
         match choice {
             Choice::Clause(inst) => self.c.clauses[inst.clause as usize].head.len(),
             // `≤n R.A` has `n + 1` neighbour variables.
-            Choice::Ni { clause, .. } => self.c.clauses[*clause as usize].n_y as usize - 1,
+            Choice::Ni { ni, .. } => {
+                let shape = &self.index.ni[*ni as usize].1;
+                shape.group.len() - 1 + shape.extra.len()
+            }
         }
     }
 
@@ -1431,7 +1632,16 @@ impl<'c> Tableau<'c> {
                 let h = self.c.clauses[inst.clause as usize].head[alt].clone();
                 self.apply(inst, &h, d);
             }
-            Choice::Ni { s, w, clause, .. } => self.ni_merge(*s, *w, *clause, alt as u32, d),
+            &Choice::Ni { s, w, ni, .. } => {
+                let shape = &self.index.ni[ni as usize].1;
+                let n = shape.group.len() - 1;
+                // Past the restriction's `n` alternatives, a disjunct at `s` holds instead.
+                match alt.checked_sub(n).map(|e| shape.extra[e].clone()) {
+                    Some(Head::Concept(a, _)) => self.add_concept(s, a, d),
+                    Some(Head::SelfLoop(r)) => self.add_role(r, s, s, d),
+                    _ => self.ni_merge(s, w, ni, alt as u32, d),
+                }
+            }
         }
     }
 
@@ -1568,7 +1778,9 @@ impl<'c> Tableau<'c> {
     /// pairwise blocking unravels the graph: each blocked node is replaced by a copy of its
     /// blocker's subtree. A nominal merges a blockable node into a root, which leaves an edge
     /// between a root and a blockable node that is not its child. Such an edge is copied with
-    /// the subtree it hangs from, and the model is still one as long as
+    /// the subtree it hangs from. A child of a root is blocked only by a child of the same
+    /// root ([`signature`](Self::signature)), so the copy hung from the root in its place
+    /// has the blocker's edges to roots and no more. The model is still one as long as
     ///
     /// - a blocked node's edge is kept when its direct blocker has the same edge to the same
     ///   root (the copy of the blocker that takes its place gives the root the same
@@ -1640,7 +1852,7 @@ impl<'c> Tableau<'c> {
                     // the root's few neighbours: the NI-rule names them.
                     match self.ni_clause(u as Node, v) {
                         Some((clause, deps)) => return Err(Some((u as Node, v, clause, deps))),
-                        None if self.index.pure_at_most.is_empty() => return Err(None),
+                        None if self.index.ni.is_empty() => return Err(None),
                         None => unconfirmed = true,
                     }
                 }
@@ -1681,21 +1893,31 @@ impl<'c> Tableau<'c> {
         true
     }
 
-    /// A clause that is only an at-most restriction `≤n R.A` (one group of interchangeable
-    /// neighbour variables, a head of their equalities) whose body holds at root `s` and
-    /// whose neighbour variables match `w`, with what that depends on. The restriction then
-    /// holds at `s`, so `w` is one of at most `n` elements.
+    /// A clause with an at-most restriction `≤n R.A` (see [`NiShape`]) whose body holds at
+    /// root `s`, whose other disjuncts do not hold there yet, and whose restriction's
+    /// variables match `w`, with what that depends on. Unless another disjunct comes to hold
+    /// at `s`, the restriction holds there, so `w` is one of at most `n` elements.
     fn ni_clause(&self, s: Node, w: Node) -> Option<(u32, Dep)> {
         let (sn, wn) = (&self.nodes[s as usize], &self.nodes[w as usize]);
         let rs = sn.adj.get(&w)?;
-        'clause: for &ci in &self.index.pure_at_most {
+        'clause: for (k, (ci, shape)) in self.index.ni.iter().enumerate() {
             if self.probe() {
                 return None;
             }
-            let cl = &self.c.clauses[ci as usize];
-            let (roles, atoms, _) = &self.index.ys[ci as usize][0];
+            let cl = &self.c.clauses[*ci as usize];
+            // A clause of the other attempt is sound to apply but costs branches here.
+            if cl.scoped.is_some_and(|scoped| scoped != self.scoped) {
+                continue;
+            }
+            let ys = &self.index.ys[*ci as usize];
+            let (roles, atoms, _) = &ys[shape.group[0] as usize];
             if !roles.iter().all(|r| rs.contains(r))
                 || !atoms.iter().all(|a| wn.label.contains_key(a))
+                || shape.extra.iter().any(|h| match *h {
+                    Head::Concept(a, _) => sn.label.contains_key(&a),
+                    Head::SelfLoop(r) => self.has_role(r, s, s),
+                    _ => false,
+                })
             {
                 continue;
             }
@@ -1706,21 +1928,64 @@ impl<'c> Tableau<'c> {
                     None => continue 'clause,
                 }
             }
+            for &r in &cl.body_self {
+                if !self.has_role(r, s, s) {
+                    continue 'clause;
+                }
+                d = d.union(&self.role_dep(r, s, s));
+            }
+            for &v in &shape.context {
+                match self.context_match(s, &ys[v as usize]) {
+                    Some(dv) => d = d.union(&dv),
+                    None => continue 'clause,
+                }
+            }
             for &r in roles {
                 d = d.union(&self.role_dep(r, s, w));
             }
             for a in atoms {
                 d = d.union(&wn.label[a]);
             }
-            return Some((ci, d));
+            return Some((k as u32, d));
+        }
+        None
+    }
+
+    /// A neighbour of `s` that body-only variable `y` binds, with what the binding depends on.
+    fn context_match(&self, s: Node, (roles, atoms, _): &YVar) -> Option<Dep> {
+        let sn = &self.nodes[s as usize];
+        for (&u, rs) in &sn.adj {
+            self.charge(1);
+            let un = &self.nodes[u as usize];
+            if roles.iter().all(|r| rs.contains(r))
+                && atoms.iter().all(|a| un.label.contains_key(a))
+            {
+                let mut d = Dep::default();
+                for &r in roles {
+                    d = d.union(&self.role_dep(r, s, u));
+                }
+                for a in atoms {
+                    d = d.union(&un.label[a]);
+                }
+                return Some(d);
+            }
         }
         None
     }
 
     /// The NI-rule's `i`-th alternative: `w` is the `i`-th of root `s`'s neighbours that
-    /// at-most `clause` counts, a root introduced for it (once per branch) with the
-    /// clause's roles from `s` and its filler.
-    fn ni_merge(&mut self, s: Node, w: Node, clause: u32, i: u32, d: &Dep) {
+    /// at-most clause `ClauseIndex::ni[ni]` counts, a root introduced for it (once per
+    /// branch) with the restriction's roles from `s` and its filler.
+    fn ni_merge(&mut self, s: Node, w: Node, ni: u32, i: u32, d: &Dep) {
+        let (clause, ref shape) = self.index.ni[ni as usize];
+        let v = shape.group[0];
+        // Slots not introduced yet are interchangeable: only the first of them is tried, the
+        // others fail as the alternatives before them did.
+        let fresh = |k: u32| !self.ni_nodes.contains_key(&(s, clause, k));
+        if i > 0 && fresh(i) && fresh(i - 1) {
+            self.set_clash(d.clone());
+            return;
+        }
         let (z, dz) = match self.ni_nodes.get(&(s, clause, i)) {
             Some(&z) => self.canonical_dep(z),
             None => {
@@ -1731,7 +1996,7 @@ impl<'c> Tableau<'c> {
             }
         };
         let d = d.union(&dz);
-        let (roles, atoms, _) = self.index.ys[clause as usize][0].clone();
+        let (roles, atoms, _) = self.index.ys[clause as usize][v as usize].clone();
         for r in roles {
             self.add_role(r, s, z, &d);
         }
@@ -1769,24 +2034,31 @@ impl<'c> Tableau<'c> {
         for &ci in &self.index.multi_y {
             self.probe();
             let cl = &self.c.clauses[ci as usize];
-            // A clause whose body fails at `s`, or whose head already holds there, counts
-            // nothing.
-            if !cl.body_x.iter().all(|a| sn.label.contains_key(a))
-                || cl
-                    .head
-                    .iter()
-                    .any(|h| matches!(*h, Head::Concept(a, Var::X) if sn.label.contains_key(&a)))
+            // A clause inactive in this attempt counts nothing, nor does one whose body
+            // (concepts or self-loops) fails at `s` or whose head already holds there.
+            if cl.scoped.is_some_and(|scoped| scoped != self.scoped)
+                || !cl.body_x.iter().all(|a| sn.label.contains_key(a))
+                || !cl.body_self.iter().all(|&r| self.has_role(r, s, s))
+                || cl.head.iter().any(|h| match *h {
+                    Head::Concept(a, Var::X) => sn.label.contains_key(&a),
+                    Head::SelfLoop(r) => self.has_role(r, s, s),
+                    _ => false,
+                })
             {
                 continue;
             }
-            let fits = self.index.ys[ci as usize]
-                .iter()
-                .filter(|(roles, atoms, _)| {
-                    roles.iter().all(|r| rs.contains(r))
-                        && atoms.iter().all(|a| wn.label.contains_key(a))
-                })
-                .count();
-            if fits >= 2 {
+            let ys = &self.index.ys[ci as usize];
+            let fit = |(roles, atoms, _): &YVar| {
+                roles.iter().all(|r| rs.contains(r))
+                    && atoms.iter().all(|a| wn.label.contains_key(a))
+            };
+            // The variables `w` cannot bind need a neighbour of `s` (copies have the labels
+            // and edges of the nodes they copy).
+            if ys.iter().filter(|y| fit(y)).count() >= 2
+                && ys
+                    .iter()
+                    .all(|y| fit(y) || self.context_match(s, y).is_some())
+            {
                 return true;
             }
         }
@@ -1810,6 +2082,13 @@ impl<'c> Tableau<'c> {
             .unwrap_or_default();
         rs.sort_unstable();
         sig.extend(rs);
+        // A root parent itself: the copy of a blocker hangs from the blocked node's parent,
+        // so a blocker under another root, or joined to this one off the tree, would gain or
+        // merge an edge to a root.
+        if self.nodes[p as usize].root {
+            sig.push(u32::MAX);
+            sig.push(p);
+        }
         sig
     }
 
@@ -2320,5 +2599,105 @@ fn remove_role(adj: &mut FxHashMap<Node, Vec<Role>>, n: Node, r: Role) {
         if rs.is_empty() {
             adj.remove(&n);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::clausify::clausify;
+    use super::super::model::Individual;
+    use super::*;
+    use crate::owl2dl::extract;
+    use oxrdf::{NamedNode, Term};
+    use sparq_core::Graph;
+
+    /// The NI-rule names a root's neighbours only for an at-most clause of the running
+    /// attempt. `≤1 r.(≥2 s.D)` at `o` defines a superset atom of its filler twice: for
+    /// the eager attempt where the restriction counts (`∃r⁻.⊤ ⊓ ≥2 s.D`), for the plain one
+    /// at every node. Both definitions are at-most clauses `≤1 s.D`, the eager one first.
+    /// With an `r`-predecessor of `o` both match an `s`-neighbour of `o`; the plain attempt
+    /// must take its own.
+    #[test]
+    fn the_ni_rule_skips_an_at_most_of_the_other_attempt() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :D a owl:Class . :r a owl:ObjectProperty . :s a owl:ObjectProperty .
+            :q a owl:NamedIndividual ; :r :o .
+            :o a owl:NamedIndividual , [ a owl:Restriction ; owl:onProperty :r ;
+                owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass
+                [ a owl:Restriction ; owl:onProperty :s ;
+                  owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] ] .
+        "#;
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let onto = extract(&d, &triples).unwrap();
+        let c = clausify(&d, &onto, Budget::default().max_steps).unwrap();
+        let index = ClauseIndex::new(&c);
+        let id = |frag: &str| {
+            d.lookup(&Term::NamedNode(NamedNode::new_unchecked(format!(
+                "http://ex/{frag}"
+            ))))
+        };
+        let class = c.classes.iter().find(|&&(i, _)| i == id("D")).unwrap().1;
+        let s = Role {
+            idx: c.roles.iter().position(|&i| i == id("s")).unwrap() as u32,
+            inv: false,
+        };
+        let scope = |k: usize| c.clauses[index.ni[k].0 as usize].scoped;
+        let eager = (0..index.ni.len()).position(|k| scope(k) == Some(true));
+        let plain = (0..index.ni.len()).position(|k| scope(k) == Some(false));
+        assert!(eager < plain, "{eager:?} {plain:?}");
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        for _ in &c.abox.individuals {
+            t.add_root();
+        }
+        for &(a, n, _) in &c.abox.concepts {
+            t.assert_concept(n, a);
+        }
+        for &(r, a, b, _) in &c.abox.roles {
+            t.assert_role(r, a, b);
+        }
+        // `w` hangs from another root and joins `o` off the tree.
+        let o = c
+            .abox
+            .individuals
+            .iter()
+            .position(|i| matches!(i, Individual::Named(n) if *n == id("o")))
+            .unwrap() as Node;
+        let p = t.add_root();
+        let w = t.new_node(Some(p));
+        t.add_role(s, o, w, &Dep::default());
+        t.add_concept(w, class, &Dep::default());
+        let (k, _) = t.ni_clause(o, w).expect("an at-most at o counts w");
+        assert_eq!(Some(k as usize), plain);
+    }
+
+    /// A blocked child of a root is replaced by a copy of its blocker hung from that root.
+    /// A blocker under another root that also joins this one off the tree would give its
+    /// copy two edges to the same root collapsed into one, so only children of the same
+    /// root block each other.
+    #[test]
+    fn children_of_different_roots_do_not_block_each_other() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :D a owl:Class . :s a owl:ObjectProperty .
+            :D owl:equivalentClass [ a owl:Restriction ; owl:onProperty :s ; owl:someValuesFrom :D ] .
+        "#;
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let onto = extract(&d, &triples).unwrap();
+        let c = clausify(&d, &onto, Budget::default().max_steps).unwrap();
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let s = Role { idx: 0, inv: false };
+        let (p, q) = (t.add_root(), t.add_root());
+        let b = t.new_node(Some(q));
+        t.add_role(s, q, b, &Dep::default());
+        t.add_role(s, p, b, &Dep::default());
+        let w = t.new_node(Some(p));
+        t.add_role(s, p, w, &Dep::default());
+        assert!(!t.blocked()[w as usize]);
+        let v = t.new_node(Some(p));
+        t.add_role(s, p, v, &Dep::default());
+        assert!(t.blocked()[v as usize], "a sibling still blocks");
     }
 }

@@ -31,7 +31,7 @@ fn sess(agent: Option<&str>) -> Session<'_> {
 fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
-        .graph
+        .graph()
         .named
         .iter()
         .find(|(n, _)| *n == term)
@@ -446,8 +446,8 @@ fn store_snapshot(store: &PodStore) -> StoreSnapshot {
         v.sort_unstable();
         v
     }
-    let mut out: StoreSnapshot = vec![(String::new(), dump_graph(&store.graph))];
-    for (name, sub) in &store.graph.named {
+    let mut out: StoreSnapshot = vec![(String::new(), dump_graph(store.graph()))];
+    for (name, sub) in &store.graph().named {
         out.push((name.to_string(), dump_graph(sub)));
     }
     // Snapshot is only compared for equality; an unstable sort is faster.

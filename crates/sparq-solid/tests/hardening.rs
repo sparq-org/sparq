@@ -15,7 +15,7 @@ fn sentinel_graph_cannot_be_smuggled() {
     let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
     // BOTH reserved graphs are dropped at construction (incl. the forged auth view —
     // only install_auth_view may create <urn:sparq:auth>)
-    assert!(!s.graph.named.iter().any(|(n, _)| match n {
+    assert!(!s.graph().named.iter().any(|(n, _)| match n {
         oxrdf::Term::NamedNode(n) => n.as_str().starts_with("urn:sparq:"),
         _ => false,
     }));

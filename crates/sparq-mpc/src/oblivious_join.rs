@@ -114,8 +114,22 @@
 //!   CLOSED (we never silently drop matches — a candidate count `> B` is an error,
 //!   never a truncation that would corrupt the result); choosing it loose costs `B`
 //!   opens. `B` leaks an upper bound on the result size by construction.
+//! - **What a REFUSAL discloses.** The refusals on this module's open/decode path
+//!   carry no opened VALUE — not the opened tag, not a presence byte, a decoded
+//!   term, a length prefix, a limb value or a byte count. What they do carry is
+//!   WHERE decoding stopped: the failing column index and the failing data limb's
+//!   index. Those two positions are themselves functions of the opened block — each
+//!   says the earlier columns or limbs decoded and this one did not — so a refusal
+//!   localises the malformation without describing it. The rest of what a refusal
+//!   carries is public by construction and independent of the block: the two
+//!   permitted tag constants, the payload's declared column arity, the block's
+//!   uniform byte width, and `BYTES_PER_LIMB`. Where even the count of offending bytes
+//!   is a function of the block, the refusal carries no number at all.
 //! - **L3 (input cardinalities `|L|`, `|R|`) and the candidate count** are public
 //!   (standard MPC assumption; research record §4.1). We do not claim to hide them.
+//!   The padding step is where the candidate count shows: it allocates `B − C`
+//!   dummy slots for `C` candidates, so the schedule and allocation reveal `C` to
+//!   anyone observing the run, whatever a producer's bound check consulted.
 //! - **The packed payload WIDTH is public.** Every slot is packed to one uniform
 //!   width, and that width is the longest candidate encoding, rounded up to whole
 //!   limbs, so it is visible to the parties: it is the per-slot limb count in the
@@ -223,13 +237,28 @@ type ShuffledColumn = (
 /// match). Whether this candidate matched is carried as a [`MatchBit`], which is
 /// either a public bit (disclosed-key regime, sound today) or a secret-shared bit
 /// (hidden-key regime, gated on secure-compare — see module docs).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written: the payload terms are the row content, and they are
+/// carried for EVERY candidate — the rejected ones included — so a derived `Debug`
+/// would print rows that no match ever disclosed. The rendering keeps the column
+/// count, which is the payload arity the output stage already treats as public,
+/// and redacts the terms.
+#[derive(Clone)]
 pub struct Candidate {
     /// The payload terms emitted if this candidate matches (the join's disclosed
     /// output columns for this `(i, j)` pair).
     pub payload: Vec<Option<Term>>,
     /// Whether this candidate is a match — see [`MatchBit`].
     pub matched: MatchBit,
+}
+
+impl std::fmt::Debug for Candidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Candidate")
+            .field("payload", &"<redacted>")
+            .field("columns", &self.payload.len())
+            .field("matched", &self.matched)
+            .finish()
+    }
 }
 
 /// The match decision for a [`Candidate`].
@@ -253,6 +282,175 @@ pub enum MatchBit {
     /// one [`Share`] per party. Must be a sharing of exactly 0 or 1; this is the
     /// caller's obligation (a secure equality-to-bit guarantees it by construction).
     SecretShared(Vec<Share>),
+}
+
+/// Maximum padded output bound `B` the oblivious output stage accepts before
+/// refusing with an [`MpcError::Protocol`] error.
+///
+/// `B` is the number of slots the stage MATERIALISES: each one allocates a tag
+/// sharing and `limb_capacity` payload-limb sharings of `n` [`Share`]s each, costs
+/// a select multiplication per limb plus an open, and enters the oblivious
+/// shuffle's Waksman/Beneš network. `B` is a PUBLIC plan parameter, so the
+/// guard is a closed-form check on a public number — the bound is validated before
+/// any allocation or draw, so an over-cap `B` (including `usize::MAX`) is a
+/// controlled refusal rather than an allocation the stage cannot satisfy.
+///
+/// The value is set to cover the in-tree producers of candidates for this stage: it
+/// matches [`crate::hidden_path::MAX_CHAIN_TUPLES`], the chain-tuple ceiling of the
+/// hidden path operator, and sits well above
+/// [`crate::hidden_distinct::MAX_DISTINCT_ROWS`]. It is NOT derived from those
+/// ceilings, though, and must not be read as "every producer is guaranteed to fit":
+/// a reflexive form such as `{0,k}` presents the chain tuples PLUS up to `|V|`
+/// identity pairs, so a producer's candidate count can exceed its own tuple
+/// ceiling. What is checked is the ACTUAL candidate count, here and in
+/// `check_output_bound`, never a producer's assumed maximum. A protocol guard,
+/// not a tuning knob: `B` beyond it is not a workload this stage is built to run.
+pub const MAX_OUTPUT_BOUND: usize = 1 << 18; // 262_144
+
+/// The cap half of the fail-closed bound contract, callable before a candidate set
+/// exists — so a public entry that BUILDS its candidates (and draws while doing so)
+/// can validate its bound first. See [`MAX_OUTPUT_BOUND`].
+pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
+    if bound > MAX_OUTPUT_BOUND {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: padded bound B={} exceeds the MAX_OUTPUT_BOUND cap of {} — \
+             refusing (B slots are materialised, shuffled and opened, so B is bounded before \
+             anything is allocated or drawn)",
+            bound, MAX_OUTPUT_BOUND
+        )));
+    }
+    Ok(())
+}
+
+/// The bound contract, decided from the PUBLIC input sizes FIRST and from the
+/// exact candidate count only if it has to be.
+///
+/// `public_bound` is an upper bound on the candidate count derived from public
+/// sizes alone (an edge count, a hop count) — never a statistic over the caller's
+/// data. `exact_count` computes the real count, and is called ONLY on the branch
+/// where it is needed.
+///
+/// - `B >= public_bound`: accepted on public sizes alone. `exact_count` is not
+///   called, so the DECISION consults no statistic over the data, and no `B` the
+///   data would have allowed is ever refused.
+/// - `B < public_bound`: the caller has chosen a tighter `B` than the public
+///   worst case, so coverage can only be settled against the real count. It is
+///   computed here, before any draw, and a `B` that cannot cover it is refused.
+///   Success-or-refusal therefore discloses whether the candidate count is at most
+///   `B`; and since a refusal draws nothing, repeated calls with different `B`
+///   recover the count exactly by binary search — up to [`MAX_OUTPUT_BOUND`], past
+///   which every probe is refused by the cap and the caller learns only that the
+///   count is larger. That is the caller's own trade for the tighter bound.
+///
+/// Either way the message names `B` and `public_bound`, both already public, and
+/// never the candidate count. **This is a check contract, not a hiding mechanism:**
+/// it keeps the candidate count out of the decision and the error text, and says
+/// nothing about what the producer itself discloses. The hidden-path producers
+/// group on every enumerated tuple's endpoint pair, read in the clear, and multiply
+/// once more per repeat, so for them the fold POSITIONS — and hence that count —
+/// are disclosed on BOTH branches of this contract, to the grouping evaluator here
+/// and to every evaluating party in a real run; see [`crate::hidden_path`] for who
+/// learns what, and for the limits of that account. A count above [`MAX_OUTPUT_BOUND`] needs no branch of
+/// its own: `B` is capped first, so a count that large cannot be covered and falls
+/// out of the same refusal.
+pub(crate) fn check_bound_public_first(
+    what: &str,
+    bound: usize,
+    public_bound: usize,
+    exact_count: impl FnOnce() -> Result<usize, MpcError>,
+) -> Result<(), MpcError> {
+    check_output_bound_cap(bound)?;
+    if bound >= public_bound {
+        return Ok(());
+    }
+    if bound < exact_count()? {
+        return Err(MpcError::Protocol(format!(
+            "{}: padded bound B={} is below the public candidate bound {} AND does not cover \
+             the candidate set — refusing before any draw (a B at or above the public bound is \
+             decided from the public input sizes alone)",
+            what, bound, public_bound
+        )));
+    }
+    Ok(())
+}
+
+/// The whole fail-closed bound contract: `B` within [`MAX_OUTPUT_BOUND`] (checked
+/// first, since it is the one that would otherwise reach an allocation), the
+/// candidate COUNT within the same cap, and `B` covering every candidate so no
+/// match is ever silently truncated.
+///
+/// Its messages name the candidate count, so call it only where that count is
+/// something the CALLER already holds — it owns the candidate slice, or the count
+/// is a product of public input lengths. Where the count is a statistic over
+/// hidden or unmatched data, use `check_bound_public_first` instead: it decides
+/// from the public sizes whenever `B` allows, keeps the count out of the message
+/// either way, and leaves the one-bit disclosure to callers that ask for a
+/// tighter `B`.
+pub(crate) fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
+    check_output_bound_cap(bound)?;
+    if candidates > MAX_OUTPUT_BOUND {
+        // A count above the cap can never be served: it would need a `B` at least
+        // that large, which the cap refuses. Saying so names the cap rather than
+        // leaving the caller with a `B < candidates` message it cannot act on.
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: candidate count {} exceeds the MAX_OUTPUT_BOUND cap \
+             of {} — refusing (every candidate becomes one materialised slot, so no \
+             legal B could cover this many)",
+            candidates, MAX_OUTPUT_BOUND
+        )));
+    }
+    if bound < candidates {
+        return Err(MpcError::Protocol(format!(
+            "oblivious_set_output: padded bound B={} < candidate count {} — would truncate \
+             candidates and could drop a true match",
+            bound, candidates
+        )));
+    }
+    Ok(())
+}
+
+/// The number of candidates an ALL-PAIRS builder would materialise, computed with
+/// CHECKED arithmetic and capped — callable before the candidate set exists.
+///
+/// `left · right` is a product of two caller-supplied lengths, so it can overflow
+/// `usize` (and an overflowed `Vec::with_capacity` is an allocation nobody asked
+/// for) and it can be enormous while still fitting. Both are refused here, so a
+/// builder can preflight the cardinality it is ABOUT to enumerate before it
+/// allocates a slot or draws a sharing. The cap is [`MAX_OUTPUT_BOUND`], the same
+/// ceiling the stage's own `B` has: each candidate becomes one materialised slot.
+pub(crate) fn checked_candidate_pairs(left: usize, right: usize) -> Result<usize, MpcError> {
+    let count = left.checked_mul(right).ok_or_else(|| {
+        MpcError::Protocol(format!(
+            "oblivious output stage: candidate count {} x {} overflows usize — refusing \
+             before any allocation or draw (each candidate pair becomes one \
+             materialised slot)",
+            left, right
+        ))
+    })?;
+    if count > MAX_OUTPUT_BOUND {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: candidate count {} (= {} x {}) exceeds the \
+             MAX_OUTPUT_BOUND cap of {} — refusing before any allocation or draw \
+             (each candidate is materialised, selected, shuffled and opened)",
+            count, left, right, MAX_OUTPUT_BOUND
+        )));
+    }
+    Ok(count)
+}
+
+/// [`checked_candidate_pairs`] plus the caller's own bound contract: the whole
+/// preflight an all-pairs builder needs before it enumerates anything.
+pub(crate) fn check_candidate_pairs_within_bound(
+    bound: usize,
+    left: usize,
+    right: usize,
+) -> Result<usize, MpcError> {
+    // The bound's own cap first, so the ordering is the same at every entry: no
+    // caller-sized work of any kind happens ahead of it.
+    check_output_bound_cap(bound)?;
+    let count = checked_candidate_pairs(left, right)?;
+    check_output_bound(bound, count)?;
+    Ok(count)
 }
 
 /// MODELLED communication / round cost of one [`oblivious_set_output`] over `bound`
@@ -371,12 +569,20 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 /// result). A `B < candidates.len()` is a [`MpcError::Protocol`] error. (The
 /// caller sizes `B` from the public candidate count `|L|·|R|`, optionally padded,
 /// so `B` never tracks the true MATCH count.)
+///
+/// `B` must also be `<= `[`MAX_OUTPUT_BOUND`]. Both halves are checked **before any
+/// allocation or draw** — the stage materialises `B` slots, so the bound is
+/// validated first and an over-cap `B` is a [`MpcError::Protocol`] error.
 pub fn oblivious_set_output(
     backend: &ShamirBackend,
     candidates: &[Candidate],
     payload_arity: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    // Preflight the bound BEFORE a dealer exists: `output_stage_shuffled_through`
+    // checks it again as its first statement, so this only keeps a refused run from
+    // creating keystream state.
+    check_output_bound(bound, candidates.len())?;
     // Mint ONE fresh dealer for this run (production: a fresh OS-seeded CSPRNG,
     // sq-1vt) and draw every sharing and the shuffle through the seam on it.
     oblivious_set_output_through(
@@ -592,6 +798,10 @@ pub fn oblivious_set_output_to_recipient(
     bound: usize,
     recipient: HolderId,
 ) -> Result<(RecipientOutputShares, ObliviousOutputCost), MpcError> {
+    // Same pre-dealer preflight as the all-party path: `B` sizes every per-slot
+    // allocation and the shuffle network, and the recipient-only mode runs the very
+    // same stage, so an over-cap or short `B` is refused here and again inside it.
+    check_output_bound(bound, candidates.len())?;
     oblivious_set_output_to_recipient_through(
         &mut backend.dealer(),
         backend,
@@ -743,10 +953,12 @@ fn open_and_decode_slots(
             classes.push(false);
         } else {
             return Err(MpcError::Tampered {
+                // The opened tag is a reconstructed quantity, so the refusal
+                // names the two values it was allowed to be — both public
+                // constants — and not the one it actually was.
                 detail: format!(
-                    "oblivious_set_output: opened slot tag {} is neither REAL_TAG ({}) nor 0 — \
+                    "oblivious_set_output: an opened slot tag is neither REAL_TAG ({}) nor 0 — \
                      malformed selector or corrupted share; refusing rather than dropping a match",
-                    tag.value(),
                     Fp::one().value()
                 ),
                 cheaters: Vec::new(),
@@ -878,19 +1090,13 @@ fn output_stage_shuffled_through(
     payload_arity: usize,
     bound: usize,
 ) -> Result<ShuffledStage, MpcError> {
-    // Up front, before anything is drawn: a source whose (n, t) disagrees with the
-    // backend would deal sharings that do not compose with the backend's products
-    // and opens.
+    // FIRST, before anything is drawn or allocated: the bound is validated. Every
+    // `Vec::with_capacity(bound)` below and the shuffle network are sized from it,
+    // so the cap check precedes even the source check (see the contract above).
+    check_output_bound(bound, candidates.len())?;
+    // A source whose (n, t) disagrees with the backend would deal sharings that do
+    // not compose with the backend's products and opens.
     require_source_matches(source, backend)?;
-    // Fail closed: the bound must cover every candidate so no match is ever
-    // silently dropped (see the contract above).
-    if bound < candidates.len() {
-        return Err(MpcError::Protocol(format!(
-            "oblivious_set_output: padded bound B={bound} < candidate count {} — \
-             would truncate candidates and could drop a true match",
-            candidates.len()
-        )));
-    }
     // Validate payload arity up front (the recipient relies on a uniform schema).
     for (k, c) in candidates.iter().enumerate() {
         if c.payload.len() != payload_arity {
@@ -1113,23 +1319,34 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
                             "decode_payload_row: column {col} term not NUL-terminated (corrupt entry)"
                         ))
                     })?;
-                let s = std::str::from_utf8(&bytes[pos..end]).map_err(|e| {
+                // The decoded bytes are a joined row's PAYLOAD. Neither the text
+                // nor the underlying parse error (which quotes it) may appear in
+                // the refusal — the column position is the diagnosis.
+                let s = std::str::from_utf8(&bytes[pos..end]).map_err(|_| {
                     MpcError::Protocol(format!(
-                        "decode_payload_row: column {col} term is not valid UTF-8: {e}"
+                        "decode_payload_row: column {} term is not valid UTF-8",
+                        col
                     ))
                 })?;
-                let term = Term::from_str(s).map_err(|e| {
+                let term = Term::from_str(s).map_err(|_| {
                     MpcError::Protocol(format!(
-                        "decode_payload_row: column {col} term {s:?} did not re-parse: {e}"
+                        "decode_payload_row: column {} term did not re-parse",
+                        col
                     ))
                 })?;
                 out.push(Some(term));
                 pos = end + 1; // skip the NUL
             }
-            other => {
+            _ => {
+                // The flag byte came out of an opened limb block, so it is not
+                // named. The column index is not public either: which column fails
+                // first is a function of the opened block, and reporting it says
+                // the earlier columns decoded. The error class plus that boundary
+                // is the whole diagnosis.
                 return Err(MpcError::Protocol(format!(
-                    "decode_payload_row: column {col} has invalid presence flag {other} (corrupt entry)"
-                )))
+                    "decode_payload_row: column {} has an invalid presence flag (corrupt entry)",
+                    col
+                )));
             }
         }
     }
@@ -1137,9 +1354,13 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
     // Trailing bytes mean the stream is not one `encode_payload_row` produced, so two
     // different streams could decode to the same row; refuse instead.
     if pos != bytes.len() {
+        // How MANY bytes trail is a function of the opened block, so it is not
+        // named. The column arity IS public — it is the payload's declared width,
+        // the same for every slot — and the fact that anything trails it is the
+        // whole diagnosis.
         return Err(MpcError::Protocol(format!(
-            "decode_payload_row: {} trailing byte(s) after {arity} column(s) (corrupt entry)",
-            bytes.len() - pos
+            "decode_payload_row: trailing byte(s) after {} column(s) (corrupt entry)",
+            arity
         )));
     }
     Ok(out)
@@ -1183,17 +1404,28 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     let byte_len = len_limb.value() as usize;
     let available = (limbs.len() - 1) * BYTES_PER_LIMB;
     if byte_len > available {
+        // The prefix itself is an opened limb, so it is not named. The capacity it
+        // overran is the block's uniform width — public, a function of the slot
+        // layout rather than of this block's contents — so that is what the message
+        // names.
         return Err(MpcError::Protocol(format!(
-            "limbs_to_bytes: length prefix {byte_len} exceeds available {available} bytes \
-             (corrupt shuffle entry)"
+            "limbs_to_bytes: the length prefix exceeds the block's {} available byte(s) \
+             (corrupt shuffle entry)",
+            available
         )));
     }
     let mut bytes = Vec::with_capacity(byte_len);
-    for limb in &limbs[1..] {
+    for (index, limb) in limbs[1..].iter().enumerate() {
         let v = limb.value();
         if v >= (1u64 << (8 * BYTES_PER_LIMB)) {
+            // `v` is an opened limb, so it is not named. The index is NOT public
+            // either: which limb fails first is a function of the opened block, and
+            // saying so reports that the earlier limbs were in range and this one
+            // was not. `BYTES_PER_LIMB` is a compile-time constant.
             return Err(MpcError::Protocol(format!(
-                "limbs_to_bytes: data limb {v} exceeds the 7-byte range (corrupt shuffle entry)"
+                "limbs_to_bytes: data limb at index {} exceeds the {}-byte range (corrupt \
+                 shuffle entry)",
+                index, BYTES_PER_LIMB
             )));
         }
         for k in 0..BYTES_PER_LIMB {
@@ -1206,11 +1438,13 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     // account for — a limb block that is not one this encoder could have produced.
     // Accepting it would let two different limb blocks decode to the same row.
     if bytes[byte_len..].iter().any(|&b| b != PAD_BYTE) {
-        return Err(MpcError::Protocol(format!(
-            "limbs_to_bytes: {} byte(s) past the length prefix {byte_len} are not the pad byte \
-             (corrupt shuffle entry)",
-            bytes[byte_len..].iter().filter(|&&b| b != PAD_BYTE).count()
-        )));
+        // Both the count of offending bytes and the prefix they sit past are
+        // functions of the opened block; neither is named.
+        return Err(MpcError::Protocol(
+            "limbs_to_bytes: byte(s) past the length prefix are not the pad byte (corrupt \
+             shuffle entry)"
+                .to_string(),
+        ));
     }
     bytes.truncate(byte_len);
     Ok(bytes)
@@ -1424,6 +1658,8 @@ pub fn oblivious_join_output(
     out_vars: Vec<Variable>,
     bound: usize,
 ) -> Result<(PartialResult, ObliviousOutputCost), MpcError> {
+    // Preflight the bound before the dealer exists; the stage re-checks it first.
+    check_output_bound(bound, candidates.len())?;
     // One fresh dealer for this run; every draw and the shuffle go through the seam.
     oblivious_join_output_through(&mut backend.dealer(), backend, candidates, out_vars, bound)
 }
@@ -1518,6 +1754,10 @@ pub fn oblivious_set_output_hidden_keys(
     right_keys: &[Fp],
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    // Preflight the bound and the all-pairs cardinality BEFORE a dealer exists —
+    // minting one is cheap but it is still keystream state created for a run that
+    // is about to be refused.
+    check_candidate_pairs_within_bound(bound, left_keys.len(), right_keys.len())?;
     // ONE fresh dealer for this run (production: a fresh OS-seeded CSPRNG, sq-1vt)
     // covering BOTH the per-pair equality bits and the output stage.
     oblivious_set_output_hidden_keys_through(
@@ -1550,12 +1790,16 @@ pub(crate) fn oblivious_set_output_hidden_keys_through(
     right_keys: &[Fp],
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    // Up front, before anything is drawn (the equality chain below draws before
-    // the output stage's own check would run).
+    // Up front, before anything is drawn OR allocated: `B` within the cap, the
+    // all-pairs cardinality computed with checked arithmetic, and `B` covering it.
+    // The equality chain below draws once per pair and the candidate vector is
+    // sized from the product, so neither may be reached on an over-cap or
+    // overflowing input.
+    let pairs = check_candidate_pairs_within_bound(bound, left_keys.len(), right_keys.len())?;
     require_source_matches(source, backend)?;
     // All-pairs candidates: each (i, j) becomes one slot whose match bit is the
     // SECRET-SHARED equality of the two private keys — never opened.
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(left_keys.len() * right_keys.len());
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(pairs);
     for (i, &lk) in left_keys.iter().enumerate() {
         for (j, &rk) in right_keys.iter().enumerate() {
             let match_bit = crate::compare::secure_equal_to_bit_through(source, lk, rk)?;
@@ -1717,6 +1961,88 @@ mod tests {
         // And the recipient, who may reconstruct, does see the difference.
         assert_eq!(real_multiset(&s1.reconstruct().unwrap()).len(), 1);
         assert_eq!(real_multiset(&s3.reconstruct().unwrap()).len(), 3);
+    }
+
+    /// The recipient-only entry carries the SAME bound guard as the all-party one,
+    /// and it refuses before any draw or allocation: `B` sizes every per-slot
+    /// vector and the shuffle network, so a `usize::MAX` or over-cap `B` must not
+    /// reach them. Covered on both the `_through` entry (where the count is
+    /// observable) and the public wrapper.
+    #[test]
+    fn the_recipient_entry_refuses_an_over_cap_bound_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x8E0B).unwrap();
+        let cands = recipient_candidates();
+        assert!(
+            !cands.is_empty(),
+            "a non-empty input, so draws are possible"
+        );
+
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = oblivious_set_output_to_recipient_through(
+                &mut counted,
+                &backend,
+                &cands,
+                1,
+                bound,
+                HolderId::new("recipient"),
+            )
+            .expect_err("an over-cap bound must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "B={}: refused before any draw", bound);
+
+            let err = oblivious_set_output_to_recipient(
+                &backend,
+                &cands,
+                1,
+                bound,
+                HolderId::new("recipient"),
+            )
+            .expect_err("the public wrapper must refuse it too");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "wrapper B={}: {:?}",
+                bound,
+                err
+            );
+        }
+
+        // A short `B` is the other half of the contract: never truncate a match.
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_to_recipient_through(
+            &mut counted,
+            &backend,
+            &cands,
+            1,
+            cands.len() - 1,
+            HolderId::new("recipient"),
+        )
+        .expect_err("a bound below the candidate count must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("bound")),
+            "short bound: {:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "the short bound precedes every draw");
+
+        // And a legal bound over the same input still runs, so the guard is not
+        // refusing everything.
+        oblivious_set_output_to_recipient(
+            &backend,
+            &cands,
+            1,
+            cands.len(),
+            HolderId::new("recipient"),
+        )
+        .expect("a legal bound runs");
     }
 
     /// The recipient's reconstruction is not a weaker open: it applies the same
@@ -2152,6 +2478,155 @@ mod tests {
         let cands = public_candidates(&[(true, vec![lit("a")]), (true, vec![lit("b")])]);
         let err = oblivious_set_output(&backend, &cands, 1, 1).unwrap_err();
         assert!(matches!(err, MpcError::Protocol(m) if m.contains("truncate")));
+    }
+
+    /// The all-pairs hidden-keys builder refuses before ANY draw on a NON-EMPTY key
+    /// pair: an over-cap `B`, an over-cap `|L|·|R|`, and a product that overflows
+    /// `usize`. One equality sharing per pair would otherwise be drawn, and the
+    /// candidate vector is reserved from the product.
+    #[test]
+    fn the_hidden_keys_builder_refuses_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x8F01).unwrap();
+        let left = [Fp::new(1), Fp::new(2)];
+        let right = [Fp::new(2), Fp::new(3)];
+
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = oblivious_set_output_hidden_keys_through(
+                &mut counted,
+                &backend,
+                &left,
+                &right,
+                bound,
+            )
+            .expect_err("an over-cap bound must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "B={}: refused before any draw", bound);
+        }
+
+        // An over-cap all-pairs cardinality, with `B` itself inside the cap.
+        let big: Vec<Fp> = vec![Fp::new(5); 1024];
+        let also_big: Vec<Fp> = vec![Fp::new(5); 1024];
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_hidden_keys_through(
+            &mut counted,
+            &backend,
+            &big,
+            &also_big,
+            MAX_OUTPUT_BOUND,
+        )
+        .expect_err("an over-cap pair count must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+            "pair count: {:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "the pair count precedes every draw");
+
+        // And an OVERFLOWING product is a controlled refusal, not a wrapped length
+        // or an allocation nobody asked for. The lengths come from slice lengths, so
+        // the overflow case is exercised on the validator directly.
+        let err = checked_candidate_pairs(usize::MAX, 2).expect_err("must refuse on overflow");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("overflows usize")),
+            "overflow: {:?}",
+            err
+        );
+        assert!(
+            checked_candidate_pairs(512, 512).is_ok(),
+            "the cap is a cap"
+        );
+
+        // The combined preflight the builders call: it refuses the overflow, the
+        // over-cap product and a `B` that cannot cover the product, and hands back
+        // the count on the way through.
+        assert!(
+            check_candidate_pairs_within_bound(MAX_OUTPUT_BOUND, usize::MAX, 2).is_err(),
+            "the preflight must refuse an overflowing product"
+        );
+        assert!(
+            check_candidate_pairs_within_bound(MAX_OUTPUT_BOUND, 1024, 1024).is_err(),
+            "the preflight must refuse an over-cap product"
+        );
+        assert!(
+            check_candidate_pairs_within_bound(3, 2, 2).is_err(),
+            "the preflight must refuse a bound that cannot cover the product"
+        );
+        assert_eq!(
+            check_candidate_pairs_within_bound(4, 2, 2).unwrap(),
+            4,
+            "and it hands back the count it checked"
+        );
+    }
+
+    /// A bound past [`MAX_OUTPUT_BOUND`] — including `usize::MAX`, which would
+    /// otherwise reach the stage's `Vec::with_capacity(bound)` — is a Protocol
+    /// error, not a panic. The bound is validated before allocation.
+    #[test]
+    fn bound_above_cap_is_protocol_error_not_a_panic() {
+        let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+        let cands = public_candidates(&[(true, vec![lit("a")])]);
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                oblivious_set_output(&backend, &cands, 1, bound)
+            }));
+            let err = outcome
+                .unwrap_or_else(|_| panic!("B={} panicked instead of returning Err", bound))
+                .expect_err("an over-cap bound must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "B={}: expected the cap refusal, got {:?}",
+                bound,
+                err
+            );
+        }
+        // The cap itself is still accepted as a parameter — it is a cap, not an
+        // off-by-one. Checked on the validator so the test costs no `B`-slot run.
+        assert!(check_output_bound(MAX_OUTPUT_BOUND, 1).is_ok());
+    }
+
+    /// The over-cap bound is refused before ANYTHING is drawn — on the dealer
+    /// source and on PRSS alike, so the refusal does not depend on which source is
+    /// driving the stage nor on that source's own refusals.
+    #[test]
+    fn bound_above_cap_is_refused_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+        let cands = public_candidates(&[(true, vec![lit("a")])]);
+
+        let mut dealer = backend.dealer();
+        let mut prss = crate::prss::PrssRandomness::with_simulated_setup(3).unwrap();
+        let mut sources: Vec<(&str, &mut dyn DistributedRandomness)> =
+            vec![("dealer", &mut dealer), ("prss", &mut prss)];
+        for (name, inner) in sources.iter_mut() {
+            for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+                let mut counted = DrawCountingSource::new(*inner);
+                let err = oblivious_set_output_through(&mut counted, &backend, &cands, 1, bound)
+                    .expect_err("an over-cap bound must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                    "{} B={}: {:?}",
+                    name,
+                    bound,
+                    err
+                );
+                assert_eq!(
+                    counted.draws(),
+                    0,
+                    "{} B={}: the bound must be validated before any draw",
+                    name,
+                    bound
+                );
+            }
+        }
     }
 
     /// Wrong payload arity is rejected (uniform schema for the recipient).
@@ -3015,6 +3490,107 @@ mod tests {
         );
     }
 
+    // ---- Decode refusals name no opened value -----------------------------------
+
+    /// Check one decode refusal in BOTH renderings: `Display` and `Debug` (the
+    /// variant's payload is the same string, and a caller may log either).
+    fn assert_decode_refusal(what: &str, err: &MpcError, forbidden: &[&str], expected: &[&str]) {
+        for (how, rendered) in [
+            ("Display", err.to_string()),
+            ("Debug", format!("{:?}", err)),
+        ] {
+            for bad in forbidden {
+                assert!(
+                    !rendered.contains(bad),
+                    "{} ({}) renders the opened value {}: {}",
+                    what,
+                    how,
+                    bad,
+                    rendered
+                );
+            }
+            for good in expected {
+                assert!(
+                    rendered.contains(good),
+                    "{} ({}) dropped the public detail {}: {}",
+                    what,
+                    how,
+                    good,
+                    rendered
+                );
+            }
+        }
+    }
+
+    /// The bytes and limbs these two decoders inspect come out of an OPENED limb
+    /// block, so every refusal must describe the error class and the position it
+    /// occurred at — the public column index, limb index or block width — and never
+    /// the opened byte, limb value or byte count itself.
+    #[test]
+    fn the_decode_refusals_name_the_position_but_no_opened_value() {
+        // 1. An out-of-set presence flag: the flag byte is opened, the column is public.
+        let err = decode_payload_row(&[91u8], 1).unwrap_err();
+        assert_decode_refusal(
+            "an invalid presence flag",
+            &err,
+            &["91"],
+            &["presence flag", "column 0"],
+        );
+
+        // 2. Trailing bytes: HOW MANY trail is opened, the column arity is public.
+        let mut bytes = encode_payload_row(&[lit("v")]);
+        bytes.extend(std::iter::repeat_n(0u8, 37));
+        let err = decode_payload_row(&bytes, 1).unwrap_err();
+        assert_decode_refusal(
+            "a trailing-byte stream",
+            &err,
+            &["37"],
+            &["trailing byte", "1 column"],
+        );
+
+        // 3. An over-long length prefix: the prefix is opened, the block's uniform
+        //    width (one data limb here, so 7 bytes) is public.
+        let err = limbs_to_bytes(&[Fp::new(93), Fp::new(0)]).unwrap_err();
+        assert_decode_refusal(
+            "an over-long length prefix",
+            &err,
+            &["93"],
+            &["length prefix", "7 available"],
+        );
+
+        // 4. An out-of-range data limb: the limb VALUE is opened, its index is public.
+        let wide = (1u64 << (8 * BYTES_PER_LIMB)) | 0x1234;
+        let err = limbs_to_bytes(&[Fp::new(1), Fp::new(0), Fp::new(wide)]).unwrap_err();
+        assert_decode_refusal(
+            "an out-of-range data limb",
+            &err,
+            &[&format!("{}", wide)],
+            &["data limb at index 1", "7-byte range"],
+        );
+
+        // 5. Content past the length prefix: both the count of offending bytes and
+        //    the prefix they sit past are opened, so this refusal carries no number
+        //    at all.
+        let err = limbs_to_bytes(&[Fp::new(1), Fp::new(0xAB_CD_EF_00)]).unwrap_err();
+        assert_decode_refusal(
+            "content past the length prefix",
+            &err,
+            &[],
+            &["past the length prefix", "not the pad byte"],
+        );
+        for (how, rendered) in [
+            ("Display", err.to_string()),
+            ("Debug", format!("{:?}", err)),
+        ] {
+            assert!(
+                !rendered.chars().any(|c| c.is_ascii_digit()),
+                "content past the length prefix ({}) renders a number: {}",
+                how,
+                rendered
+            );
+        }
+    }
+
     // ---- Fail-closed on an out-of-set opened tag (Copilot #93, thread 3) ---------
 
     /// A `MatchBit::SecretShared` selector that is NOT a sharing of 0/1 makes the
@@ -3439,5 +4015,135 @@ mod output_randomness_seam_tests {
             oblivious_set_output_through(&mut prss, &b, &padded_candidates(), 1, 5),
             Err(MpcError::NotYetImplemented { .. })
         ));
+    }
+
+    /// The output-stage refusals carry no opened or decoded value.
+    ///
+    /// Two sites: the opened slot TAG (a reconstructed quantity) and the payload
+    /// decode (the joined row's own content). Both use a distinctive value and
+    /// assert it appears in neither `Display` nor `Debug` of the error.
+    #[test]
+    fn output_stage_refusals_render_no_opened_or_decoded_value() {
+        // (a) The opened tag. A selector sharing of a distinctive non-{0,1} value
+        // makes this slot's tag open to it.
+        let b = ShamirBackend::new_seeded(5, 0xE6).unwrap();
+        let mut dealer = b.dealer();
+        let odd_tag = dealer.share(Fp::new(313_131));
+        let cands = vec![
+            Candidate {
+                payload: vec![lit("fine")],
+                matched: MatchBit::Public(true),
+            },
+            Candidate {
+                payload: vec![lit("malformed-selector")],
+                matched: MatchBit::SecretShared(odd_tag),
+            },
+        ];
+        let err = oblivious_set_output_through(&mut dealer, &b, &cands, 1, 5).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("313131"),
+            "the opened tag must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("neither REAL_TAG"),
+            "the two permitted PUBLIC constants are still named: {}",
+            text
+        );
+
+        // (b) The payload decode. `flag = 1` then a NUL-terminated string that is
+        // not a term: the string IS the payload, so it must not be echoed.
+        let mut bytes = vec![1u8];
+        bytes.extend_from_slice(b"PATIENT-575757");
+        bytes.push(0);
+        let err = decode_payload_row(&bytes, 1).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("575757") && !text.contains("PATIENT"),
+            "the undecodable payload must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("column 0") && text.contains("did not re-parse"),
+            "the column position is still named: {}",
+            text
+        );
+
+        // The non-UTF-8 branch of the same column, likewise.
+        let err = decode_payload_row(&[1u8, 0xff, 0xfe, 0x00], 1).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("255") && !text.contains("xff") && !text.contains("\\xff"),
+            "the offending bytes must not be rendered: {}",
+            text
+        );
+        assert!(text.contains("not valid UTF-8"), "{}", text);
+    }
+
+    /// The bound contract tries the PUBLIC half first, and the data-dependent count
+    /// is not even computed when the public half settles it.
+    ///
+    /// The closure stands in for the caller's exact projection: it panics if
+    /// called, so "accepted without computing the count" is asserted by the test
+    /// completing rather than by inspecting anything after the fact.
+    #[test]
+    fn a_bound_at_or_above_the_public_bound_never_computes_the_exact_count() {
+        use std::cell::Cell;
+
+        let called = Cell::new(0usize);
+        let counting = |n: usize| {
+            let called = &called;
+            move || {
+                called.set(called.get() + 1);
+                Ok(n)
+            }
+        };
+
+        // B above, and B exactly at, the public bound: accepted, closure untouched.
+        for bound in [8usize, 7] {
+            check_bound_public_first("t", bound, 7, || {
+                panic!("the exact count must not be computed when B covers the public bound")
+            })
+            .expect("a B at or above the public bound is accepted");
+        }
+
+        // B below the public bound: the count decides, and is computed exactly once.
+        check_bound_public_first("t", 5, 7, counting(5))
+            .expect("a tighter B is still accepted when the count fits");
+        assert_eq!(
+            called.get(),
+            1,
+            "the count is computed once, on this branch only"
+        );
+
+        let err = check_bound_public_first("t", 5, 7, counting(6))
+            .expect_err("a tighter B that cannot cover the count is refused");
+        assert_eq!(called.get(), 2);
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            text.contains("B=5") && text.contains("public candidate bound 7"),
+            "{}",
+            text
+        );
+        // The count that decided it is NOT in the message.
+        assert!(
+            !text.contains("count 6") && !text.contains(" 6 "),
+            "{}",
+            text
+        );
+
+        // The cap is still checked first, before either branch.
+        assert!(check_bound_public_first("t", MAX_OUTPUT_BOUND + 1, 1, || Ok(0)).is_err());
+
+        // A count above the cap needs no branch of its own: B is capped, so it
+        // cannot cover such a count and falls out of the same refusal.
+        assert!(
+            check_bound_public_first("t", MAX_OUTPUT_BOUND, MAX_OUTPUT_BOUND + 1, || Ok(
+                MAX_OUTPUT_BOUND + 1
+            ))
+            .is_err(),
+            "a count above the cap is refused"
+        );
     }
 }

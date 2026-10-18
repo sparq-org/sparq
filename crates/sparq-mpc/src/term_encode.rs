@@ -115,7 +115,11 @@ pub fn encode_term(term: &Term) -> Fp {
 /// SAME field element. Surfacing this is the whole point of the [`KeyEncoder`]
 /// detection path — a collision is a *false match* the hidden-value join cannot
 /// otherwise see, so it is an error, never silently tolerated.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Debug` is hand-written, not derived: the derive would print the colliding
+/// terms, and both of this type's renderings are value-free (see the `Display`
+/// impl below). The payload's fields stay public, so a caller that needs the
+/// terms reads them from [`Collision`] directly.
+#[derive(Clone, PartialEq, Eq)]
 pub enum EncodeError {
     /// Two distinct terms encoded to the same field element. The holder MUST
     /// resolve this (it is a soundness break for the hidden join) before any key
@@ -130,7 +134,13 @@ pub enum EncodeError {
 /// The payload of an [`EncodeError::Collision`]: the colliding key and the two
 /// distinct terms that produced it. Boxed inside the error so the common
 /// `Ok(Fp)` result stays cheap.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The fields are public — the holder that hit the collision already holds both
+/// terms and needs them to resolve it. What is deliberately NOT available is a
+/// *rendering*: `Debug` and `Display` are hand-written and print neither the
+/// terms nor the key, so the payload cannot reach a log line or a peer's error
+/// body just by being formatted.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Collision {
     /// The colliding field element both terms encode to.
     pub key: Fp,
@@ -140,19 +150,42 @@ pub struct Collision {
     pub second: Term,
 }
 
+/// A fixed, value-free rendering shared by `Display` and `Debug` on both this
+/// error and its payload. It names the condition and what to do about it, and
+/// carries nothing derived from the terms or the key — not the terms, not the
+/// key, and not a count or a hash prefix of either, since those are themselves
+/// functions of the inputs.
+const COLLISION_MESSAGE: &str = "Term->Fp join-key collision: two distinct terms encode to the \
+                                 same join key (a false-match soundness break for the \
+                                 hidden-value join). Resolve it before any key is \
+                                 secret-shared; the colliding terms are on the Collision \
+                                 payload, which this message deliberately does not render";
+
 impl std::fmt::Display for EncodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EncodeError::Collision(c) => write!(
-                f,
-                "Term->Fp join-key collision at field element {}: distinct terms \
-                 {} and {} encode to the same key (a false-match soundness break \
-                 for the hidden-value join)",
-                c.key.value(),
-                c.first,
-                c.second
-            ),
+            EncodeError::Collision(_) => f.write_str(COLLISION_MESSAGE),
         }
+    }
+}
+
+impl std::fmt::Debug for EncodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EncodeError::Collision(_) => write!(f, "EncodeError::Collision({})", COLLISION_MESSAGE),
+        }
+    }
+}
+
+impl std::fmt::Display for Collision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(COLLISION_MESSAGE)
+    }
+}
+
+impl std::fmt::Debug for Collision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Collision({})", COLLISION_MESSAGE)
     }
 }
 
@@ -168,10 +201,26 @@ impl std::error::Error for EncodeError {}
 /// soundness break) instead of a key, so the caller stops BEFORE the bad key
 /// crosses the wire. With no collision the recorded map is also a proof obligation
 /// the M4 in-circuit encoding-correctness check will later discharge.
-#[derive(Debug, Default, Clone)]
+/// `Debug` is hand-written: the derive printed the whole `key -> term` map, which
+/// is every join key this holder has encoded together with the term that produced
+/// it — the entire key domain in one log line.
+///
+/// The rendering carries no entry count either. The map is keyed by the ENCODED
+/// key, so duplicate terms collapse into one entry: the count is the number of
+/// DISTINCT keys, a statistic over the holder's data rather than the row count the
+/// hidden-value join already discloses.
+#[derive(Default, Clone)]
 pub struct KeyEncoder {
     /// `key -> the (first) term that produced it`, for collision detection.
     seen: HashMap<u64, Term>,
+}
+
+impl std::fmt::Debug for KeyEncoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyEncoder")
+            .field("seen", &"<redacted>")
+            .finish()
+    }
 }
 
 impl KeyEncoder {
@@ -513,5 +562,60 @@ mod tests {
                 term
             );
         }
+    }
+
+    /// A collision error renders NOTHING derived from the colliding terms — not
+    /// the terms, not the key, and not a count or hash prefix of either — in
+    /// `Display` or in `Debug`. The payload keeps both terms as public fields for
+    /// the holder that must resolve the collision.
+    #[test]
+    fn collision_error_renders_no_term_or_key_content() {
+        let real = iri("http://example.org/patients/alice-444555666");
+        let key = encode_term(&real);
+        let mut enc = KeyEncoder::new();
+        let other = iri("http://example.org/patients/bob-777888999");
+        enc.seen.insert(key.value(), other.clone());
+        let err = enc.encode(&real).unwrap_err();
+
+        for rendered in [format!("{}", err), format!("{:?}", err)] {
+            assert!(
+                !rendered.contains("444555666") && !rendered.contains("777888999"),
+                "a colliding term's content must not be rendered: {}",
+                rendered
+            );
+            assert!(
+                !rendered.contains("alice") && !rendered.contains("bob"),
+                "nor any part of it: {}",
+                rendered
+            );
+            assert!(
+                !rendered.contains(&key.value().to_string()),
+                "nor the colliding key, which is a function of both terms: {}",
+                rendered
+            );
+            assert!(
+                rendered.contains("collision"),
+                "the condition is still named: {}",
+                rendered
+            );
+        }
+
+        // Same for the payload rendered on its own, and the fields are still there.
+        let EncodeError::Collision(c) = &err;
+        for rendered in [format!("{}", c), format!("{:?}", c)] {
+            assert!(
+                !rendered.contains("444555666") && !rendered.contains("777888999"),
+                "{}",
+                rendered
+            );
+            assert!(
+                !rendered.contains(&c.key.value().to_string()),
+                "{}",
+                rendered
+            );
+        }
+        assert_eq!(c.first, other);
+        assert_eq!(c.second, real);
+        assert_eq!(c.key, key);
     }
 }
