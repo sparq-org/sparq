@@ -6,12 +6,18 @@
 //!
 //! This module resolves **increment #1** of the bounded property-path design
 //! (`research/mpc-bounded-property-path-design.md` §6 step 1, §2.1 DISCLOSED
-//! regime). It evaluates a **bounded** path `?a (p){m,k} ?b` whose endpoints AND
-//! intermediate join keys are **disclosed global IRIs** by *unrolling* the
-//! bounded path — statically, on the PUBLIC bound `k` — into a finite set of
+//! regime). It evaluates a **bounded** path `?a (p){m,k} ?b` whose EDGE join keys
+//! — and so every chain intermediate reached through an edge — are **disclosed
+//! global IRIs**, by *unrolling* the bounded path — statically, on the PUBLIC bound `k` — into a finite set of
 //! fixed-length BGP chains, evaluating each chain as a left-to-right fold of the
 //! existing [`crate::join::DisclosedKeyJoin`], then UNION-ing and DEDUP-ing the
 //! endpoint pairs.
+//!
+//! A RESULT endpoint, and a [`PathForm::Sequence`] MIDPOINT, may additionally be
+//! a literal or blank node: those come from a zero-length arm over the caller's
+//! declared node domain ([`DisclosedEdges::with_node_domain`]), which is a set of
+//! `Term`s and is independent of the IRI-only edge regime. Only the keys EDGES
+//! are joined on are restricted to global IRIs.
 //!
 //! Because the EDGE join key on every hop is a disclosed global IRI, the whole
 //! computation runs **OUTSIDE the cryptographic core** (architecture convention
@@ -314,6 +320,15 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// The value leaves room for a repetition at BOTH shape caps at once
 /// (`MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS` is `2^26`), so it does not make an
 /// expensive-but-legal single repetition illegal.
+///
+/// ## What this projection does NOT cover
+///
+/// It reads the form's own public shape and nothing else, so a zero-length arm's
+/// `(x, x)` diagonal over the caller's DECLARED node domain
+/// ([`DisclosedEdges::with_node_domain`]) is not in it — the walk never sees the
+/// edge set or the domain. Those rows are charged to [`MAX_PATH_FORM_ROWS`] as
+/// they are produced, which is what bounds a `{0,k}` over a large declared
+/// domain.
 pub const MAX_PATH_FORM_WORK: u64 = 1 << 28; // 268_435_456
 
 /// Validate a whole [`PathForm`]'s SHAPE before anything evaluates it: the nesting
@@ -345,7 +360,10 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
     while let Some((f, depth)) = stack.pop() {
         if depth > MAX_PATH_FORM_DEPTH {
             return Err(MpcError::Protocol(format!(
-                "bounded path form: nesting depth {} exceeds the MAX_PATH_FORM_DEPTH cap of                  {} — refusing (a nested Sequence is evaluated by recursion, so nesting                  depth is stack depth, and this check is itself iterative so it cannot                  overflow on the forms it refuses)",
+                "bounded path form: nesting depth {} exceeds the MAX_PATH_FORM_DEPTH cap of \
+                 {} — refusing (a nested Sequence is evaluated by recursion, so nesting \
+                 depth is stack depth, and this check is itself iterative so it cannot \
+                 overflow on the forms it refuses)",
                 depth, MAX_PATH_FORM_DEPTH
             )));
         }
@@ -376,7 +394,10 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
         }
         if work > MAX_PATH_FORM_WORK {
             return Err(MpcError::Protocol(format!(
-                "bounded path form: static unroll work {} exceeds the MAX_PATH_FORM_WORK                  budget of {} — refusing before any edge is touched (the per-repetition                  chain and hop caps bound one part's shape; a Sequence composes                  arbitrarily many parts that each pass them)",
+                "bounded path form: static unroll work {} exceeds the MAX_PATH_FORM_WORK \
+                 budget of {} — refusing before any edge is touched (the per-repetition \
+                 chain and hop caps bound one part's shape; a Sequence composes \
+                 arbitrarily many parts that each pass them)",
                 work, MAX_PATH_FORM_WORK
             )));
         }
@@ -500,8 +521,8 @@ pub struct DisclosedEdges {
     node_domain: Option<Vec<Term>>,
 }
 
-/// `Debug` prints SIZES only — the per-predicate row counts and the declared
-/// domain's size — not the terms.
+/// `Debug` prints the public predicate IRIs and sizes — the per-predicate row
+/// count and the declared domain's size — and no endpoint or domain values.
 ///
 /// Nothing here is secret: this is the disclosed-key regime, every edge endpoint
 /// and every declared node is a term the federation published, and the sibling
@@ -685,15 +706,32 @@ impl DisclosedEdges {
     /// "exactly the domain" precondition above — the widened set is no longer the
     /// active graph's domain, and every arm of the form sees it.
     ///
-    /// So it OVER-answers as soon as two or more NULLABLE arms are chained in a
-    /// [`PathForm::Sequence`], because the Sequence's midpoint ranges over the
-    /// declared domain. Concretely, on `ex:a ex:p ex:b . ex:b ex:q ex:c` with the
-    /// active nodes plus `ex:absent` declared, `Sequence[p{0,1}, q{0,1}]` yields
-    /// `(absent, absent)` — it composes the two diagonals through the midpoint
-    /// `absent` — while the engine's `ex:absent ex:p?/ex:q? ?b` returns NOTHING:
-    /// its inner `q?` arm sees a VARIABLE midpoint, so that arm ranges over the
-    /// graph's own nodes, which do not include `ex:absent`. Pinned by
-    /// `an_absent_constant_over_answers_a_nested_nullable_sequence`.
+    /// So it OVER-answers when a [`PathForm::Sequence`] is nullable THROUGHOUT —
+    /// every arm admits length 0 — and the bound endpoint is that constant,
+    /// because the Sequence's midpoints then range over the declared domain.
+    /// Concretely, on `ex:a ex:p ex:b . ex:b ex:q ex:c` with the active nodes plus
+    /// `ex:absent` declared, `Sequence[p{0,1}, q{0,1}]` yields `(absent, absent)`
+    /// — it composes the two diagonals through the midpoint `absent` — while the
+    /// engine's `ex:absent ex:p?/ex:q? ?b` returns NOTHING: its inner `q?` arm
+    /// sees a VARIABLE midpoint, so that arm ranges over the graph's own nodes,
+    /// which do not include `ex:absent`.
+    ///
+    /// Two things bound that. **It is at most ONE extra pair,** `(absent,
+    /// absent)`: no disclosed edge touches the widened term, so the only row that
+    /// can carry it is a zero-length arm's own diagonal entry, and chaining those
+    /// composes to `(absent, absent)` and to nothing else. And **one arm with
+    /// `min >= 1` anywhere in the sequence removes it**, because that arm needs an
+    /// EDGE out of the midpoint — `p?/q?/r` does not over-answer at all.
+    ///
+    /// A `{0,k}` RANGE is not a case of this. It is ONE repetition, evaluated as
+    /// the union over the admitted lengths, so it behaves like `p?|p|p/p…` and not
+    /// like the sequence `p?/p?`: a wider `k` admits more lengths of the same
+    /// repetition rather than chaining nullable arms through a midpoint. The
+    /// engine self-matches a bound constant on a zero-length arm too, so there the
+    /// operator and the engine AGREE — that is the query this widening is for.
+    ///
+    /// All three shapes are pinned by
+    /// `an_absent_constant_over_answers_only_a_fully_nullable_sequence`.
     ///
     /// The whole HIDDEN regime is unaffected: [`crate::hidden_path`] evaluates a
     /// single repetition and has no Sequence form at all.

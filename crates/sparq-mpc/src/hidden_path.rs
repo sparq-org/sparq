@@ -1068,9 +1068,13 @@ impl PredicatedEdges {
     /// this module has no sequence form at all.
     ///
     /// The caveat therefore belongs to the disclosed-key module, whose
-    /// [`crate::bounded_path::PathForm::Sequence`] can chain two or more nullable
-    /// arms: the Sequence's midpoint then ranges over the declared domain and the
-    /// widened constant over-answers. See
+    /// [`crate::bounded_path::PathForm::Sequence`] can chain nullable arms: when
+    /// such a sequence is nullable THROUGHOUT and the bound endpoint is the
+    /// widened constant, its midpoints range over the declared domain and the
+    /// operator answers `(absent, absent)` where the engine answers nothing — at
+    /// most that one extra pair, and not at all once any arm has `min >= 1`. A
+    /// `{0,k}` range is one repetition, not a chain of `p?` arms, so it is not a
+    /// case of it. See
     /// [`crate::bounded_path::DisclosedEdges::with_node_domain`].
     ///
     /// Duplicates are collapsed and the stored order is canonical, so the

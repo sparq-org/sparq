@@ -1631,22 +1631,48 @@ fn an_absent_bound_endpoint_self_matches_when_declared() {
 }
 
 /// THE scope limit on the advice above: a per-query widening of the domain with
-/// an absent constant OVER-answers as soon as two or more NULLABLE arms are
-/// chained in a [`PathForm::Sequence`].
+/// an absent constant OVER-answers exactly when the WHOLE `Sequence` is nullable
+/// and the bound endpoint is that constant — and then by at most ONE extra pair,
+/// `(absent, absent)`.
 ///
-/// `Sequence[p{0,1}, q{0,1}]` composes the two diagonals through a midpoint that
-/// ranges over the DECLARED domain, so the widened `ex:absent` reaches itself via
-/// itself and `(absent, absent)` appears. The engine's `ex:absent ex:p?/ex:q? ?b`
-/// returns NOTHING: its inner `q?` arm sees a VARIABLE midpoint, so that arm
-/// ranges over the graph's own nodes (`graph_nodes`), which do not contain
-/// `ex:absent`. This test pins both halves, so the doc's caveat is backed rather
-/// than asserted.
+/// Why that is the condition, and why the bound is one pair: no disclosed edge
+/// touches the widened term, so the only row that can ever carry it is a
+/// zero-length arm's own `(absent, absent)` diagonal entry. Chaining those
+/// through a `Sequence` midpoint composes to `(absent, absent)` and to nothing
+/// else; and the first arm with `min >= 1` needs an EDGE out of `absent`, which
+/// does not exist, so one non-nullable arm anywhere in the sequence removes the
+/// extra pair entirely (`p?/q?/r` below).
+///
+/// A `{0,k}` RANGE is not a case of this: it is ONE repetition, evaluated as the
+/// union over the admitted lengths — it behaves like `p?|p|p/p…`, not like the
+/// sequence `p?/p?`. The engine self-matches a bound constant on a zero-length
+/// arm too, so there the operator and the engine AGREE: that is precisely the
+/// query the widening is declared for.
+///
+/// This test pins all three shapes, so the doc's caveat is backed rather than
+/// asserted.
 #[test]
-fn an_absent_constant_over_answers_a_nested_nullable_sequence() {
-    let h1 = "ex:a ex:p ex:b . ex:b ex:q ex:c .";
-    let preds: &[&str] = &["http://ex/p", "http://ex/q"];
+fn an_absent_constant_over_answers_only_a_fully_nullable_sequence() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:q ex:c . ex:c ex:r ex:d .";
+    let preds: &[&str] = &["http://ex/p", "http://ex/q", "http://ex/r"];
     let absent = format!("{:?}", Term::from(nn("http://ex/absent")));
+    let widen = || {
+        disclosed_edges_only(&[(h1, preds)])
+            .with_node_domain(
+                active_graph_nodes(&[h1])
+                    .into_iter()
+                    .chain([t(nn("http://ex/absent"))]),
+            )
+            .unwrap()
+    };
+    let exactly = || {
+        disclosed_edges_only(&[(h1, preds)])
+            .with_node_domain(active_graph_nodes(&[h1]))
+            .unwrap()
+    };
 
+    // (1) THE over-answering shape: every arm nullable.
+    //
     // The ENGINE side, both shapes: the bound-endpoint query binds nothing, and
     // the variable-endpoint path never names ex:absent either.
     let u = union_graph(&[h1]);
@@ -1665,69 +1691,152 @@ fn an_absent_constant_over_answers_a_nested_nullable_sequence() {
     assert!(!engine.contains(&(absent.clone(), absent.clone())));
 
     // The MPC side with the widened domain: (absent, absent) appears.
-    let widened = disclosed_edges_only(&[(h1, preds)])
-        .with_node_domain(
-            active_graph_nodes(&[h1])
-                .into_iter()
-                .chain([t(nn("http://ex/absent"))]),
-        )
-        .unwrap();
-    let form = PathForm::Sequence(vec![
+    let nullable = PathForm::Sequence(vec![
         PathForm::range(nn("http://ex/p"), 0, 1),
         PathForm::range(nn("http://ex/q"), 0, 1),
     ]);
-    let over = federated_pairs(&widened, &form);
+    let over = federated_pairs(&widen(), &nullable);
     assert!(
         over.contains(&(absent.clone(), absent.clone())),
         "the widened constant reaches itself through the Sequence midpoint: {over:?}"
     );
     assert_eq!(
         &over - &engine,
-        BTreeSet::from([(absent.clone(), absent)]),
+        BTreeSet::from([(absent.clone(), absent.clone())]),
         "and (absent, absent) is the ONLY over-answer — the widening adds nothing else"
     );
 
     // Without the widening the two sides agree exactly, so the over-answer is
-    // caused by the widening and by nothing else in the nested form.
-    let exact = disclosed_edges_only(&[(h1, preds)])
-        .with_node_domain(active_graph_nodes(&[h1]))
-        .unwrap();
+    // caused by the widening and by nothing else in the form.
     assert_eq!(
-        federated_pairs(&exact, &form),
+        federated_pairs(&exactly(), &nullable),
         engine,
-        "an exactly-declared domain matches the engine on the same nested form"
+        "an exactly-declared domain matches the engine on the same form"
     );
+
+    // (2) ONE non-nullable arm removes the extra pair: `p?/q?/r` needs an edge
+    // out of the midpoint, and no disclosed edge touches the widened term.
+    let with_mandatory = PathForm::Sequence(vec![
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::range(nn("http://ex/q"), 0, 1),
+        PathForm::exact(nn("http://ex/r"), 1),
+    ]);
+    let engine_mandatory = clear_text_pairs(&[h1], "ex:p?/ex:q?/ex:r");
+    let bound_mandatory = query(
+        &u,
+        "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p?/ex:q?/ex:r ?b }",
+    )
+    .unwrap();
+    assert!(
+        bound_mandatory.rows.is_empty(),
+        "the engine returns nothing for an absent bound endpoint here either: {:?}",
+        bound_mandatory.rows
+    );
+    let mandatory = federated_pairs(&widen(), &with_mandatory);
+    assert_eq!(
+        mandatory, engine_mandatory,
+        "a sequence with one mandatory arm does not over-answer even widened"
+    );
+    assert!(
+        !mandatory.iter().any(|(a, b)| *a == absent || *b == absent),
+        "and no row mentions the widened term at all: {mandatory:?}"
+    );
+
+    // (3) A `{0,k}` RANGE is ONE repetition, not `p?/p?`: the engine self-matches
+    // the bound constant on the zero-length arm, so the operator and the engine
+    // agree — this is the query the widening is declared for, not an over-answer.
+    // (The engine's path syntax has no `{m,k}`, so the engine half is pinned on
+    // `p?`, which IS `{0,1}`.)
+    let bound_range = query(
+        &u,
+        "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p? ?b }",
+    )
+    .unwrap();
+    assert_eq!(
+        bound_range.rows.len(),
+        1,
+        "the engine self-matches a bound constant on the zero-length arm: {:?}",
+        bound_range.rows
+    );
+    // And the extra pair stays ONE for every k: a wider range admits more
+    // LENGTHS of the same repetition, it does not chain `p?` arms through a
+    // midpoint, so nothing composes the widened term with anything else.
+    for k in 1..=3 {
+        let form = PathForm::range(nn("http://ex/p"), 0, k);
+        let ranged = federated_pairs(&widen(), &form);
+        assert!(
+            ranged.contains(&(absent.clone(), absent.clone())),
+            "the operator self-matches the declared constant at k={k}: {ranged:?}"
+        );
+        assert_eq!(
+            &ranged - &federated_pairs(&exactly(), &form),
+            BTreeSet::from([(absent.clone(), absent.clone())]),
+            "one repetition adds exactly the declared constant's own diagonal \
+             entry, whatever k is (k={k})"
+        );
+    }
 }
 
-/// A BLANK NODE in the active graph is a subject/object term, so it is in the
-/// zero-length domain and a `{0,k}` arm must bind its `(x,x)` pair. The EDGE
-/// relations stay IRI-only — `from_holder_edges` still refuses a blank-node
-/// endpoint — so the blank node reaches the answer only through the declaration,
-/// and its `(x,x)` row can only ever meet another diagonal row for the same
-/// declared term.
+/// A BLANK NODE of the LOADED graph, against the real engine. The fixture puts a
+/// blank node in the active graph under a predicate the path does not traverse,
+/// so it is a subject/object term of the domain while the EDGE relations stay
+/// IRI-only, and the declared domain is the graph's own — nothing synthetic is
+/// added. A `{0,1}` arm must then bind the blank node's `(x,x)` pair exactly as
+/// the engine does.
+///
+/// The second half pins the edge regime: `from_holder_edges` still refuses a
+/// blank-node EDGE endpoint, which is why a diagonal row for a blank node can
+/// only ever meet another diagonal row for the same declared term.
 #[test]
-fn a_blank_node_in_the_declared_domain_yields_its_identity_pair() {
-    let h1 = "ex:a ex:p ex:b .";
-    let b = Term::BlankNode(BlankNode::new("b0").unwrap());
+fn a_blank_node_of_the_loaded_graph_yields_its_identity_pair() {
+    // `ex:q` is in the graph but is NOT a disclosed edge predicate of the path,
+    // so its blank-node object reaches the operator only through the domain.
+    let h1 = "ex:a ex:p ex:b . ex:c ex:q [ ] .";
+
+    // ONE load for both sides: a blank node's identity is per-load, so the
+    // declared domain and the engine's answer must come from the SAME graph for
+    // the differential to be about the operator rather than about labelling.
+    let g = union_graph(&[h1]);
+    let mut domain: BTreeMap<String, Term> = BTreeMap::new();
+    for row in &query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap().rows {
+        for slot in row.iter().flatten() {
+            domain
+                .entry(format!("{:?}", slot))
+                .or_insert_with(|| slot.clone());
+        }
+    }
+    let engine_res = query(
+        &g,
+        "PREFIX ex: <http://ex/> SELECT ?a ?b WHERE { ?a ex:p? ?b }",
+    )
+    .unwrap();
+    let engine = pair_set(&engine_res.vars, &engine_res.rows);
+
     let edges = disclosed_edges_only(&[(h1, &["http://ex/p"])])
-        .with_node_domain(active_graph_nodes(&[h1]).into_iter().chain([b.clone()]))
-        .expect("a blank node is a legal DOMAIN term");
+        .with_node_domain(domain.into_values())
+        .expect("the loaded graph's own domain, blank node included");
 
     let form = PathForm::range(nn("http://ex/p"), 0, 1);
     let got = federated_pairs(&edges, &form);
-    let key = format!("{b:?}");
-    assert!(
-        got.contains(&(key.clone(), key)),
-        "the blank node's identity pair must be present: {got:?}"
+    assert_eq!(
+        got, engine,
+        "the operator must agree with the engine on the loaded graph's domain"
     );
-    // (a,a), (b,b), (_:b0,_:b0) and the (a,b) edge.
-    assert_eq!(got.len(), 4, "{got:?}");
+    let blanks = got
+        .iter()
+        .filter(|(a, b)| a.starts_with("BlankNode") && a == b)
+        .count();
+    assert_eq!(
+        blanks, 1,
+        "the loaded graph's blank node must contribute its identity pair: {got:?}"
+    );
 
     // The EDGE regime is untouched: a blank-node edge endpoint is still refused.
+    let b = Term::BlankNode(BlankNode::new("b0").unwrap());
     let bad = PartialResult {
         holder: HolderId::new("h0"),
         vars: vec![Variable::new_unchecked("s"), Variable::new_unchecked("o")],
-        rows: vec![vec![Some(b.clone()), Some(Term::from(nn("http://ex/x")))]],
+        rows: vec![vec![Some(b), Some(Term::from(nn("http://ex/x")))]],
     };
     let err = DisclosedEdges::from_holder_edges([(nn("http://ex/p"), bad)]).unwrap_err();
     assert!(matches!(err, MpcError::Protocol(_)));
@@ -1896,6 +2005,45 @@ fn the_row_budget_binds_on_a_real_form_at_the_cap() {
     // With exactly enough left it runs, and returns the same answer.
     let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - spend);
     let got = eval_with_budget(&edges, &form, &mut exact).expect("exactly enough budget runs");
+    assert_eq!(got.rows, baseline.rows);
+}
+
+/// The ZERO-LENGTH arm's diagonal is charged to the same budget as a chain's
+/// rows. The declared node domain is a public plan input, but the `(x, x)` rows it
+/// contributes are rows this form materialises, so a `{0,k}` over a large
+/// declared domain cannot walk past the cap on the quiet.
+#[test]
+fn the_row_budget_charges_the_zero_length_diagonal_too() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let domain = active_graph_nodes(&[h1]).len();
+    assert!(domain > 0, "the fixture declares a non-empty domain");
+    let nullable = PathForm::range(nn("http://ex/p"), 0, 2);
+    let mandatory = PathForm::range(nn("http://ex/p"), 1, 2);
+
+    let mut with_diagonal = PathFormBudget::new();
+    let baseline = eval_with_budget(&edges, &nullable, &mut with_diagonal).unwrap();
+    let mut without_diagonal = PathFormBudget::new();
+    eval_with_budget(&edges, &mandatory, &mut without_diagonal).unwrap();
+    assert_eq!(
+        with_diagonal.charged(),
+        without_diagonal.charged() + domain,
+        "the zero-length arm must charge exactly one row per declared node"
+    );
+
+    // And the charge BINDS: one row less than the form needs is refused.
+    let spend = with_diagonal.charged();
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (spend - 1));
+    let err = eval_with_budget(&edges, &nullable, &mut tight)
+        .expect_err("a nullable form that would pass the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+    let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - spend);
+    let got =
+        eval_with_budget(&edges, &nullable, &mut exact).expect("exactly enough budget runs");
     assert_eq!(got.rows, baseline.rows);
 }
 
