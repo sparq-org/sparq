@@ -115,9 +115,11 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
      ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?nm . } .
 
 # ── [OPUS-4.8] sq-3jtd.5: RESOURCE-SCOPED provenance conditional grants (noneOf present) ──
+# A provenance exception matcher is excepted through its instance for the grant's resource.
 { ?pol solidx:provTriple ?k . ?k solidx:satisfied true .
   ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
   ?k solidx:provForResource ?r . ?pol acp:allow ?mode . ?pol acp:noneOf ?nm .
+  ?UNSCOPED log:notIncludes { ?nm solidx:provMatcher ?kind . } .
   ?k log:uri ?ks . ?mode log:uri ?modes . ?r log:uri ?rs .
   ("urn:sparq:grant?cand=" ?ks "&mode=" ?modes "&effect=allow&graph=" ?rs)
       string:concatenation ?gs .
@@ -127,7 +129,19 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
      ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?nm . } .
 { ?pol solidx:provTriple ?k . ?k solidx:satisfied true .
   ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
+  ?k solidx:provForResource ?r . ?pol acp:allow ?mode . ?pol acp:noneOf ?nm .
+  ?nm solidx:provMatcher ?kind . ?mi solidx:instanceOf ?nm . ?mi solidx:instanceRes ?r .
+  ?k log:uri ?ks . ?mode log:uri ?modes . ?r log:uri ?rs .
+  ("urn:sparq:grant?cand=" ?ks "&mode=" ?modes "&effect=allow&graph=" ?rs)
+      string:concatenation ?gs .
+  ?g log:uri ?gs . }
+=> { ?g a auth:ConditionalGrant . ?g auth:effect auth:Allow .
+     ?g auth:agent ?pa . ?g auth:client ?pc . ?g auth:issuer ?pi .
+     ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?mi . } .
+{ ?pol solidx:provTriple ?k . ?k solidx:satisfied true .
+  ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
   ?k solidx:provForResource ?r . ?pol acp:deny ?mode . ?pol acp:noneOf ?nm .
+  ?UNSCOPED log:notIncludes { ?nm solidx:provMatcher ?kind . } .
   ?k log:uri ?ks . ?mode log:uri ?modes . ?r log:uri ?rs .
   ("urn:sparq:grant?cand=" ?ks "&mode=" ?modes "&effect=deny&graph=" ?rs)
       string:concatenation ?gs .
@@ -135,3 +149,14 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
 => { ?g a auth:ConditionalGrant . ?g auth:effect auth:Deny .
      ?g auth:agent ?pa . ?g auth:client ?pc . ?g auth:issuer ?pi .
      ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?nm . } .
+{ ?pol solidx:provTriple ?k . ?k solidx:satisfied true .
+  ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
+  ?k solidx:provForResource ?r . ?pol acp:deny ?mode . ?pol acp:noneOf ?nm .
+  ?nm solidx:provMatcher ?kind . ?mi solidx:instanceOf ?nm . ?mi solidx:instanceRes ?r .
+  ?k log:uri ?ks . ?mode log:uri ?modes . ?r log:uri ?rs .
+  ("urn:sparq:grant?cand=" ?ks "&mode=" ?modes "&effect=deny&graph=" ?rs)
+      string:concatenation ?gs .
+  ?g log:uri ?gs . }
+=> { ?g a auth:ConditionalGrant . ?g auth:effect auth:Deny .
+     ?g auth:agent ?pa . ?g auth:client ?pc . ?g auth:issuer ?pi .
+     ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?mi . } .

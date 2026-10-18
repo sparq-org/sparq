@@ -15,7 +15,14 @@
 
 # an allOf matcher that does not accept the triple's agent (resp. client, issuer) dimension
 { ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?pol acp:allOf ?m .
+  ?UNSCOPED log:notIncludes { ?m solidx:provMatcher ?kind . } .
   ?UNSCOPED log:notIncludes { ?m solidx:acceptsAgentP ?pa . } . }
+=> { ?k solidx:allOfRejected true . } .
+# A provenance matcher is evaluated through its instance for the candidate's resource.
+{ ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?pol acp:allOf ?m .
+  ?m solidx:provMatcher ?kind . ?k solidx:provForResource ?r .
+  ?UNSCOPED log:notIncludes { ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r .
+                              ?mi solidx:acceptsAgentP ?pa . } . }
 => { ?k solidx:allOfRejected true . } .
 
 # [OPUS-4.8] sq-az1b: a PROVENANCE (CreatorAgent/OwnerAgent) allOf matcher's agent
@@ -45,4 +52,9 @@
   ?k solidx:pairIssuer ?pi .
   ?pol acp:anyOf ?m . ?m solidx:acceptsAgentP ?pa . ?m solidx:acceptsClientP ?pc .
   ?m solidx:acceptsIssuerP ?pi . }
+=> { ?k solidx:anyOfSat true . } .
+{ ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc .
+  ?k solidx:pairIssuer ?pi . ?k solidx:provForResource ?r .
+  ?pol acp:anyOf ?m . ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r .
+  ?mi solidx:acceptsAgentP ?pa . ?mi solidx:acceptsClientP ?pc . ?mi solidx:acceptsIssuerP ?pi . }
 => { ?k solidx:anyOfSat true . } .
