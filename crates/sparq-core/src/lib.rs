@@ -3969,16 +3969,11 @@ impl Graph {
     /// re-opened memory-mapped from the new base with a fresh, empty WAL.
     #[cfg(feature = "mmap")]
     fn persist_swap(&mut self, dir: &std::path::Path) -> Result<(), String> {
-        // Close THIS graph's WAL before the directory swap (its `wal.log` is about to be renamed
-        // away with `dir`), then run the shared crash-safe swap, writing `self`'s CURRENT image as
-        // the new base. Adopt the re-opened directory-backed graph in place. (sq-ft7u)
-        self.wal = None;
-        let lock = self.lock.clone();
-        let reopened =
-            swap_dir_to_new_base(dir, lock, |new_dir, role| self.save_unlocked(new_dir, role))
-                .map_err(|e| e.error.to_string())?;
-        *self = reopened;
-        Ok(())
+        // The shared crash-safe swap, writing `self`'s CURRENT image as the new base, then
+        // adopting the re-opened directory-backed graph in place. (sq-ft7u)
+        debug_assert_eq!(self.persist_dir().as_deref(), Some(dir));
+        self.publish_staged_base_or_freeze(|this, new_dir, role| this.save_unlocked(new_dir, role))
+            .map_err(|e| e.to_string())
     }
 
     /// (sq-ft7u) PUBLIC crash-safe RESTORE-INTO-DURABLE seam. Atomically REPLACE the
@@ -4023,9 +4018,10 @@ impl Graph {
     ///
     /// On an error the directory is the old store or, if the swap got as far as its second
     /// rename, the restored one; it is never lost. When it is still the old store (the swap
-    /// failed before its renames, or was rolled back) this graph keeps writing to it as before.
-    /// Otherwise this graph refuses every later write (an error, never a silently dropped
-    /// update): drop it and re-open the directory.
+    /// failed before its renames, or was rolled back) this graph keeps writing to it as before
+    /// (re-opened from it, when the swap had got as far as releasing its files). Otherwise this
+    /// graph refuses every later write (an error, never a silently dropped update): drop it and
+    /// re-open the directory.
     #[cfg(feature = "mmap")]
     pub fn restore_in_place(&mut self, fresh: Graph) -> std::io::Result<()> {
         self.refuse_if_detached().map_err(std::io::Error::other)?;
@@ -4035,11 +4031,14 @@ impl Graph {
     /// Publish a staged base, or freeze: replace this directory-backed graph's base with the
     /// image `write_new_base` writes into the staging directory it is handed (given this graph,
     /// to write its own image, and the store's role for its marker), through the crash-safe
-    /// swap, keeping this graph's lock. Its log is closed for the swap (on
-    /// Windows a directory with an open file cannot be renamed). On failure, when the directory
-    /// is still the old store, the log is re-opened, so the graph keeps writing durably as
-    /// before; otherwise the graph and its named graphs are detached: every later write is
-    /// refused, never applied in memory only.
+    /// swap, keeping this graph's lock. Once the new base is staged, the graph releases every
+    /// file it has in the directory (its maps, its logs, its named graphs), since Windows refuses
+    /// to rename a directory with a file in it open or mapped; any other holder of those files
+    /// (a fork, a snapshot, a named graph taken out of `named`) makes the rename fail there. On
+    /// failure, when the directory is still the old store, the graph is re-opened from it and
+    /// keeps writing durably as before; otherwise it is detached (every later write refused,
+    /// never applied in memory only), re-opened read-only from what the directory holds if that
+    /// opens, and empty if not.
     #[cfg(feature = "mmap")]
     fn publish_staged_base_or_freeze<F>(&mut self, write_new_base: F) -> std::io::Result<()>
     where
@@ -4048,38 +4047,46 @@ impl Graph {
         let dir = self.persist_dir().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "the graph is not directory-backed")
         })?;
-        self.wal = None;
         let lock = self.lock.clone();
-        let swapped = {
+        let staged = {
             let this: &Graph = self;
-            swap_dir_to_new_base(&dir, lock, |new_dir, role| {
-                write_new_base(this, new_dir, role)
-            })
+            stage_new_base(&dir, |new_dir, role| write_new_base(this, new_dir, role))
         };
-        match swapped {
+        let staged = match staged {
+            Ok(staged) => staged,
+            // Nothing in the directory changed, and this graph still holds all of it.
+            Err(failure) => return Err(failure.error),
+        };
+        let role = staged.role;
+        // Release every file this graph has in the directory; `lock` keeps the directory locked.
+        *self = Graph::new();
+        match staged.publish(lock.clone()) {
             Ok(reopened) => {
                 *self = reopened;
                 Ok(())
             }
             Err(failure) => {
-                let kept = failure.dir_unchanged && self.reattach_wal(&dir).is_ok();
-                if !kept {
-                    self.detach(&format!(
-                        "a swap of {} failed ({}): drop this graph and re-open the directory",
-                        dir.display(),
-                        failure.error
-                    ));
+                if failure.dir_unchanged {
+                    if let Ok(reopened) = Graph::open_dir(&dir, lock.clone(), true, role) {
+                        *self = reopened;
+                        return Err(failure.error);
+                    }
                 }
+                let mut frozen =
+                    Graph::open_dir(&dir, lock.clone(), false, role).unwrap_or_else(|_| {
+                        let mut empty = Graph::new();
+                        empty.lock = lock;
+                        empty
+                    });
+                frozen.detach(&format!(
+                    "a swap of {} failed ({}): drop this graph and re-open the directory",
+                    dir.display(),
+                    failure.error
+                ));
+                *self = frozen;
                 Err(failure.error)
             }
         }
-    }
-
-    /// Re-open this graph's log in `dir`, after a swap that left `dir` as it was.
-    #[cfg(feature = "mmap")]
-    fn reattach_wal(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
-        self.wal = Some(Wal::open(dir)?);
-        Ok(())
     }
 
     /// Refuse every later write to this graph and its named graphs, saying `why`.
@@ -4169,18 +4176,18 @@ impl Graph {
         // term orphaned by a prior delete/drop is dropped (it is never re-interned).
         let mut fresh = self.reintern_live()?;
         #[cfg(feature = "mmap")]
-        if let Some(dir) = dir {
-            // Close THIS graph's WAL before the directory swap (its `wal.log` is about to be
-            // renamed away). `persist_swap` writes `fresh`'s image to `dir` and re-opens
-            // `fresh` memory-mapped from the new base with a fresh WAL; adopt that re-opened,
-            // directory-backed graph back into `self` so subsequent updates WAL-append to it.
-            // The replacement takes this graph's lock (the same `Arc`): the directory stays
-            // locked through the swap and after it, never left to a graph without the lock.
-            self.wal = None;
-            fresh.lock = self.lock.clone();
-            fresh.persist_swap(&dir)?;
+        if dir.is_some() {
+            // `fresh`'s image becomes the new base through the crash-safe swap: `self` releases
+            // its files in the directory before the renames, keeps its lock (the same `Arc`)
+            // throughout, and adopts the graph re-opened from the new base with a fresh WAL, so
+            // subsequent updates WAL-append to it (`publish_staged_base_or_freeze`).
+            return self
+                .publish_staged_base_or_freeze(|_, new_dir, role| {
+                    fresh.save_unlocked(new_dir, role)
+                })
+                .map_err(|e| e.to_string());
         }
-        // Adopt the freshly re-interned (and, when persisted, re-opened) image in place.
+        // Adopt the freshly re-interned image in place.
         std::mem::swap(self, &mut fresh);
         Ok(())
     }
@@ -4188,7 +4195,7 @@ impl Graph {
     /// (sq-x32t) Builds a fresh in-memory [`Graph`] holding exactly this graph's LIVE
     /// triples (default + named, recursively), re-interned into a brand-new [`Dict`] — so terms
     /// orphaned by a delete/drop are absent from the result. Carries NO directory/WAL association
-    /// (the caller's [`persist_swap`](Self::persist_swap) gives the swapped-in graph its own).
+    /// (the caller's swap gives the swapped-in graph its own).
     fn reintern_live(&self) -> Result<Graph, String> {
         // Dump the live default-graph triples as Terms (overlay already merged by `scan`).
         let live: Vec<[Term; 3]> = {
@@ -5132,6 +5139,30 @@ fn swap_dir_to_new_base<F>(
 where
     F: FnOnce(&std::path::Path, Role) -> std::io::Result<()>,
 {
+    stage_new_base(dir, write_new_base)?.publish(lock)
+}
+
+/// A new base written and synced beside the directory it is to replace (the first half of
+/// [`swap_dir_to_new_base`]), holding its staging paths' locks. Nothing in the directory has
+/// changed yet. Whoever holds files inside the directory releases them before
+/// [`publish`](Self::publish): Windows refuses to rename a directory with a file in it open or
+/// mapped.
+#[cfg(feature = "mmap")]
+struct StagedBase {
+    dir: std::path::PathBuf,
+    new_dir: std::path::PathBuf,
+    old_dir: std::path::PathBuf,
+    id: String,
+    role: Role,
+    _locks: (dir_lock::DirLock, dir_lock::DirLock),
+}
+
+/// Writes the new base for `dir` into its `compact-new` staging ([`StagedBase`]).
+#[cfg(feature = "mmap")]
+fn stage_new_base<F>(dir: &std::path::Path, write_new_base: F) -> Result<StagedBase, SwapFailure>
+where
+    F: FnOnce(&std::path::Path, Role) -> std::io::Result<()>,
+{
     let unchanged = |error| SwapFailure {
         error,
         dir_unchanged: true,
@@ -5142,10 +5173,6 @@ where
         .map_err(unchanged)?
         .unwrap_or(Role::Root);
     let id = store_id(dir, role).map_err(unchanged)?;
-    let changed = |error| SwapFailure {
-        error,
-        dir_unchanged: false,
-    };
     let new_dir = staging_path(dir, "compact-new");
     let old_dir = staging_path(dir, "compact-old");
     // The staging paths' own locks first, so no one claims them while the swap uses them.
@@ -5163,31 +5190,67 @@ where
     write_marker(&new_dir, role, &id).map_err(unchanged)?;
     write_new_base(&new_dir, role).map_err(unchanged)?;
     fsync_dir(&new_dir).map_err(unchanged)?;
-    let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
-    // The live directory never carries a staging record: the old base is marked once it is
-    // aside, and the new one loses its record before it is renamed into place (recovery takes
-    // an unmarked half whose own marker carries the store's identity).
-    publish_rename(dir, &old_dir).map_err(unchanged)?;
-    fsync_dir(parent).map_err(changed)?;
-    mark_staging(&old_dir, "compact-old", &id).map_err(changed)?;
-    clear_staging_mark(&new_dir).map_err(changed)?;
-    if let Err(e) = publish_rename(&new_dir, dir) {
-        // Put the old base back: when that works the directory is as it was.
-        let rolled_back = clear_staging_mark(&old_dir).is_ok()
-            && publish_rename(&old_dir, dir).is_ok()
-            && fsync_dir(parent).is_ok();
-        return Err(SwapFailure {
-            error: e,
-            dir_unchanged: rolled_back,
-        });
+    Ok(StagedBase {
+        dir: dir.to_path_buf(),
+        new_dir,
+        old_dir,
+        id,
+        role,
+        _locks: staging_locks,
+    })
+}
+
+#[cfg(feature = "mmap")]
+impl StagedBase {
+    /// The second half of [`swap_dir_to_new_base`]: the two renames, then the re-open from the
+    /// new base under `lock`.
+    fn publish(
+        self,
+        lock: Option<std::sync::Arc<dir_lock::DirLock>>,
+    ) -> Result<Graph, SwapFailure> {
+        let StagedBase {
+            dir,
+            new_dir,
+            old_dir,
+            id,
+            role,
+            _locks: locks,
+        } = self;
+        let dir = dir.as_path();
+        let changed = |error| SwapFailure {
+            error,
+            dir_unchanged: false,
+        };
+        let unchanged = |error| SwapFailure {
+            error,
+            dir_unchanged: true,
+        };
+        let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
+        // The live directory never carries a staging record: the old base is marked once it is
+        // aside, and the new one loses its record before it is renamed into place (recovery takes
+        // an unmarked half whose own marker carries the store's identity).
+        publish_rename(dir, &old_dir).map_err(unchanged)?;
+        fsync_dir(parent).map_err(changed)?;
+        mark_staging(&old_dir, "compact-old", &id).map_err(changed)?;
+        clear_staging_mark(&new_dir).map_err(changed)?;
+        if let Err(e) = publish_rename(&new_dir, dir) {
+            // Put the old base back: when that works the directory is as it was.
+            let rolled_back = clear_staging_mark(&old_dir).is_ok()
+                && publish_rename(&old_dir, dir).is_ok()
+                && fsync_dir(parent).is_ok();
+            return Err(SwapFailure {
+                error: e,
+                dir_unchanged: rolled_back,
+            });
+        }
+        fsync_dir(parent).map_err(changed)?;
+        drop(locks);
+        // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
+        // The lock the caller holds goes with the re-opened graph (and its named graphs).
+        let reopened = Graph::open_dir(dir, lock, true, role).map_err(changed)?;
+        std::fs::remove_dir_all(&old_dir).ok();
+        Ok(reopened)
     }
-    fsync_dir(parent).map_err(changed)?;
-    drop(staging_locks);
-    // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
-    // The lock the caller holds goes with the re-opened graph (and its named graphs).
-    let reopened = Graph::open_dir(dir, lock, true, role).map_err(changed)?;
-    std::fs::remove_dir_all(&old_dir).ok();
-    Ok(reopened)
 }
 
 /// A failed [`swap_dir_to_new_base`]: the error, and whether the directory is still the old
@@ -13290,7 +13353,18 @@ mod tests {
         let err = g.publish_staged_base_or_freeze(|_, new_dir, _| std::fs::create_dir_all(new_dir));
         assert!(err.is_err());
         assert!(g.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "a write was accepted");
-        assert!(g.named[0].1.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "named too");
+        // The graph released its files for the renames and could not re-open the directory
+        // (empty here): it holds whatever opened read-only, nothing at all here, and its lock.
+        for (_, sub) in &mut g.named {
+            assert!(
+                sub.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+                "named too"
+            );
+        }
+        assert!(
+            matches!(Graph::open(&dir), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "the frozen graph lost the directory's lock"
+        );
         assert!(g.apply_delta_nquads("<http://ex/x> <http://ex/p> <http://ex/o> <http://ex/g9> .", "").is_err());
         assert!(g.ensure_named(&named("g9")).is_err());
         assert!(g.commit_txn(&[(true, None, t.clone())]).is_err());

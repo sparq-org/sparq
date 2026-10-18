@@ -727,9 +727,15 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   `sparq_engine::update`; `Graph::check_writable` says so). One is refused while the directory has
   updates still to fold in (a non-empty WAL or txn journal, or the residue of an interrupted
   swap): open it writable and `compact` first. It can be saved to another directory.
-- **A failed `restore_in_place`** leaves the directory old-or-new, never lost. When it is still
-  the old store the graph keeps logging there; otherwise the graph refuses every later write
-  (re-open the directory).
+- **A swap releases the graph's files first.** `compact`, `vacuum` and `restore_in_place`
+  stage the new base, then the graph lets go of every file it has in the directory (maps, logs,
+  named graphs) before the renames, since Windows refuses to rename a directory with a file in
+  it open or mapped. On Windows, a fork, snapshot or named graph taken out of `named` that is
+  still alive makes the swap fail (the directory is left as it was).
+- **A failed swap** (`compact`, `vacuum`, `restore_in_place`) leaves the directory old-or-new,
+  never lost. When it is still the old store the graph re-opens it and keeps logging there;
+  otherwise the graph refuses every later write and holds the directory's contents opened
+  read-only, or nothing if they do not open (re-open the directory).
 - **The lock file** is `<resolved dir>.lock` beside the directory, so the parent must be
   writable. A swap also leaves the lock files of its staging paths (`<dir>.compact-new.lock`,
   `<dir>.compact-old.lock`). Never delete one as stale while the directory may be in use.
