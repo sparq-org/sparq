@@ -323,3 +323,93 @@ fn a_mismatched_update_that_rebuilds_no_rules_is_refused_and_changes_nothing() {
         }
     }
 }
+
+/// Every quad of every stored graph — the reserved authorization view included — as sorted
+/// text. A refusal must leave each one in place, and a count cannot see that: an update that
+/// replaced one triple with another, or rebuilt the view into a different set of the same
+/// size, would pass a count comparison unchanged.
+fn all_quads(store: &PodStore) -> Vec<String> {
+    fn dump(g: &Graph, name: &str, out: &mut Vec<String>) {
+        let scan = g.store.scan(&[None, None, None]);
+        for r in scan.rows.iter() {
+            let [s, p, o] = scan.to_spo(r);
+            out.push(format!(
+                "{} {} {} {}",
+                name,
+                g.dict.term(s),
+                g.dict.term(p),
+                g.dict.term(o)
+            ));
+        }
+    }
+    let mut out = Vec::new();
+    dump(store.graph(), "<default>", &mut out);
+    for (name, g) in &store.graph().named {
+        dump(g, &format!("{}", name), &mut out);
+    }
+    out.sort();
+    out
+}
+
+/// The PATCH shape — a `DELETE`/`INSERT` with a `WHERE`, which the update path commits
+/// in place instead of on a fork.
+fn patch_doc() -> String {
+    format!(
+        "DELETE {{ GRAPH <{DOC}> {{ <{DOC}#it> <https://ex.dev/ns#k> ?v }} }} \
+         INSERT {{ GRAPH <{DOC}> {{ <{DOC}#it> <https://ex.dev/ns#k> \"patched\" }} }} \
+         WHERE {{ GRAPH <{DOC}> {{ <{DOC}#it> <https://ex.dev/ns#k> ?v }} }}"
+    )
+}
+
+/// Two shapes the fork-based cases above do not cover, compared on every stored QUAD rather
+/// than on graph sizes:
+///
+/// * a mismatched PATCH — a `DELETE`/`INSERT ... WHERE`, which commits in place rather than on
+///   a fork, so the model check is the only thing standing between it and the live store; and
+/// * a mismatched `DROP` and then a mismatched `INSERT DATA` on the SAME store, in sequence:
+///   the first refusal must not leave the store in a state the second one can change (the
+///   `DROP` would end the resource the creator facts are about, and the `INSERT DATA` would
+///   bring it back under the acting agent as its creator).
+#[test]
+fn a_mismatched_patch_and_a_sequential_drop_then_insert_change_no_quad() {
+    let mut store = PodStore::new(Graph::load_dataset(&creator_pod(), "nquads").expect("parses"));
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(DOC, ALICE);
+    prov.set_owner(DOC, ALICE);
+    store
+        .materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())
+        .expect("acp materializes");
+    assert!(store.decide(&alice(), DOC, Mode::Write).allow, "the creator writes");
+    let before = all_quads(&store);
+    assert!(
+        before.iter().any(|q| q.contains("urn:sparq:auth")),
+        "the view is in force"
+    );
+
+    // The PATCH: refused for the model, with no quad touched.
+    let err = store
+        .update_as(&alice(), &patch_doc())
+        .expect_err("a WAC-named PATCH is refused on an ACP view");
+    assert!(err.contains("ACP") && err.contains("authorization view was built under"), "{}", err);
+    assert_eq!(all_quads(&store), before, "a refused PATCH changed a quad");
+
+    // Then, on the same store: the DROP, and after it the INSERT DATA that would store the
+    // dropped resource again. Each is refused, and neither changes a quad.
+    for sparql in [
+        format!("DROP GRAPH <{DOC}>"),
+        format!("INSERT DATA {{ GRAPH <{DOC}> {{ <{DOC}#it> <https://ex.dev/ns#k> \"again\" }} }}"),
+    ] {
+        let err = store
+            .update_as(&alice(), &sparql)
+            .expect_err("a WAC-named update is refused on an ACP view");
+        assert!(err.contains("ACP"), "{}: {}", sparql, err);
+        assert_eq!(all_quads(&store), before, "{} changed a quad", sparql);
+        assert_eq!(store.acp_provenance().creator(DOC), Some(ALICE), "{}", sparql);
+    }
+
+    // The matching entry point still goes through, so the refusals left a working store.
+    store
+        .update_as_acp(&alice(), &patch_doc())
+        .expect("the ACP entry point patches");
+    assert!(store.decide(&alice(), DOC, Mode::Write).allow);
+}

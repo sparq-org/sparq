@@ -24,6 +24,9 @@ mod credentials;
 mod lifecycle;
 mod loader;
 mod materialize;
+// The model-check token: its own private module, so `PodStore::matching_model` is the only
+// thing in the crate that can build one (see `model_checked`).
+mod model_checked;
 // sq-3jtd.5: TRUSTED per-resource creator/owner provenance — the channel by
 // which the storage layer (PSS) supplies the `acp:CreatorAgent`/`acp:OwnerAgent` facts.
 mod provenance;
@@ -74,10 +77,16 @@ pub use decide::{is_control_document_name, AclScope, AclStatus, EffectiveAcl, Wa
 pub use wac_conformance::{AclBuilder, AuthBuilder, WacScenario};
 pub use fixture::{acp_fixture, wac_fixture};
 pub use materialize::{
-    materialize_acp, materialize_acp_with, materialize_acp_with_credentials, materialize_wac,
-    MaterializeStats,
+    auth_allowance_refusal, default_auth_limits, is_auth_allowance_refusal, materialize_acp,
+    materialize_acp_with, materialize_acp_with_credentials, materialize_wac, AuthAllowance,
+    MaterializeStats, AUTH_ALLOWANCE_REFUSAL,
 };
+/// The reasoning allowance of an authorization materialization
+/// ([`PodStore::set_auth_limits`], [`default_auth_limits`]) — the reasoner's own limits
+/// type, re-exported so a caller needs no direct `sparq-reason` dependency to raise one.
+pub use sparq_reason::ClosureLimits;
 pub use provenance::AccessProvenance;
+pub(crate) use model_checked::ModelChecked;
 /// The Solid slash-semantics parent container of an IRI (`None` at or above the authority
 /// root): the one container traversal the auth view and the store's provenance use.
 pub use loader::parent_iri as parent_container;
@@ -193,13 +202,6 @@ fn wrap_read(sparql: &str) -> Result<String, String> {
         rewrite::wrap_for_view(sparql)
     }
 }
-
-/// Evidence that the model a rebuild is about to install is the model the authorization view
-/// in force was built under: `PodStore::matching_model` is the only thing that can make one
-/// (the field is private and the type is zero-sized), and every helper that installs a model
-/// takes one. So no rebuild path can skip that check, release build or not.
-#[derive(Clone, Copy)]
-pub(crate) struct ModelChecked(());
 
 /// The names of a store's graphs at one moment ([`PodStore::stored_graphs`]), for
 /// [`PodStore::rematerialize_after_edit`].
@@ -339,6 +341,9 @@ pub struct PodStore {
     /// installs by such an edit cannot be told apart). Empty after a commit that fails past
     /// its commit point, until the next install.
     acr_controlled: FxHashSet<String>,
+    /// The reasoning allowance every authorization materialization this store runs applies
+    /// ([`PodStore::set_auth_limits`]); [`default_auth_limits`] until it is set.
+    auth_limits: ClosureLimits,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -519,7 +524,37 @@ impl PodStore {
             acp_context_stale: false,
             installed_acp: None,
             acr_controlled: FxHashSet::default(),
+            auth_limits: default_auth_limits(),
         }
+    }
+
+    /// Set the reasoning allowance every later authorization materialization of this store
+    /// runs under, in place of [`default_auth_limits`].
+    ///
+    /// Raise it for a pod whose policies the default allowance refuses (the refusal names
+    /// the limit it reached, and [`is_auth_allowance_refusal`] tells it from any other
+    /// materialization error); lower it to cap the work one materialization may do. It
+    /// applies to the WAC and ACP views alike, and to every rebuild the store makes on its
+    /// own after an access-control write or an update — the view in force is not rebuilt, so
+    /// a lowered allowance takes effect at the next materialization, not retroactively.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut limits = sparq_solid::default_auth_limits();
+    /// limits.max_join_rows = 1 << 30;
+    /// let mut store = sparq_solid::PodStore::new(sparq_core::Graph::default());
+    /// store.set_auth_limits(limits);
+    /// assert_eq!(store.auth_limits().max_join_rows, 1 << 30);
+    /// ```
+    pub fn set_auth_limits(&mut self, limits: ClosureLimits) {
+        self.auth_limits = limits;
+    }
+
+    /// The reasoning allowance this store materializes under
+    /// ([`PodStore::set_auth_limits`]).
+    pub fn auth_limits(&self) -> ClosureLimits {
+        self.auth_limits
     }
 
     /// (Re-)materialize the WAC auth view from the `.acl` graphs. Call again after any
@@ -546,7 +581,7 @@ impl PodStore {
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
-        let stats = materialize_wac(&mut self.graph)?;
+        let stats = materialize::materialize_wac_limited(&mut self.graph, self.auth_limits)?;
         // Stored creator and owner facts of resources gone with their access control resource
         // go at any rebuild, so an ACP view built later never revives them.
         let provenance = std::mem::take(&mut self.acp_context.0);
@@ -627,41 +662,18 @@ impl PodStore {
         &self.acp_context.0
     }
 
-    /// Refuse a rebuild under the WAC model on a store whose view is ACP, or the other way
-    /// round: it would drop the view in force and with it every grant and deny the other
-    /// model's rules decide. A store with no view in force (before the first materialization,
-    /// or after the view was dropped) is left to the caller, as it is today. An update that
-    /// rebuilds no rules is refused just the same: its effects and the facts it stages are
-    /// installed over the view in force, which the other model's rules did not build.
-    ///
-    /// This is the one check, and every entry point that installs a view calls it before it
-    /// changes anything: `PodStore::commit_update` (which every `update_as*` passes through,
-    /// rebuilding or not), `PodStore::put_acl_inner` (`put_acl`/`put_acl_acp`),
-    /// `PodStore::delete_acl_inner`
-    /// (`delete_acl`/`delete_acl_acp`) and [`PodStore::rematerialize_after_edit`]. A refusal
-    /// therefore leaves the dataset, the stored provenance and the view all as they were.
-    ///
-    /// It hands back a `ModelChecked`, which every helper that installs a model takes, so a
-    /// rebuild cannot reach the view without this check having run — in any build profile.
-    fn matching_model(&self, acp: bool) -> Result<ModelChecked, String> {
-        match self.installed_acp {
-            Some(installed) if installed != acp => Err(format!(
-                "this store's authorization view was built under {}: use its {} write entry \
-                 point, or materialize the view under {} first; nothing was changed",
-                if installed { "ACP" } else { "WAC" },
-                if installed { "ACP" } else { "WAC" },
-                if acp { "ACP" } else { "WAC" },
-            )),
-            _ => Ok(ModelChecked(())),
-        }
-    }
-
     /// Install the WAC or ACP view, the model having been checked (`checked`).
+    ///
+    /// The token says a check ran; it does not say which model it ran for, and this helper
+    /// is the last thing before the view is replaced — so the check is re-run here against
+    /// the `acp` actually being installed. A caller that took its token for the other model
+    /// is refused, with nothing installed.
     fn install_model(
         &mut self,
         acp: bool,
         _checked: ModelChecked,
     ) -> Result<MaterializeStats, String> {
+        self.matching_model(acp)?;
         if acp {
             self.materialize_acp()
         } else {
@@ -1008,7 +1020,12 @@ impl PodStore {
         scope: ReindexScope,
         supplied: bool,
     ) -> Result<MaterializeStats, String> {
-        let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        let stats = materialize::materialize_acp_limited(
+            &mut self.graph,
+            provenance,
+            credentials,
+            self.auth_limits,
+        )?;
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
         self.acp_context = (self.existing_provenance(provenance, supplied), credentials.clone());
         self.acp_uses_provenance = loader::control_documents_name_provenance(&self.graph);
@@ -2206,14 +2223,15 @@ impl PodStore {
             let rebuilt = if acp {
                 let provenance = staged.as_ref().unwrap_or(&self.acp_context.0);
                 self.usable_acp_context().and_then(|()| {
-                    materialize_acp_with_credentials(
+                    materialize::materialize_acp_limited(
                         &mut candidate,
                         provenance,
                         &self.acp_context.1,
+                        self.auth_limits,
                     )
                 })
             } else {
-                materialize_wac(&mut candidate)
+                materialize::materialize_wac_limited(&mut candidate, self.auth_limits)
             };
             if let Err(e) = rebuilt {
                 return Err(format!(
