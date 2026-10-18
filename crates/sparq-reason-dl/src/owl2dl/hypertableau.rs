@@ -571,6 +571,27 @@ impl<'c> Tableau<'c> {
         }
     }
 
+    /// After a satisfiable run, the distinct labels of the model's elements: the active
+    /// abstract nodes not blocked (a directly blocked node has its blocker's label), each
+    /// sorted.
+    pub(crate) fn element_labels(&self) -> Vec<Vec<Atom>> {
+        let blocked = self.blocked();
+        let mut out: Vec<Vec<Atom>> = (0..self.nodes.len())
+            .filter(|&n| {
+                let node = &self.nodes[n];
+                node.active && !node.concrete && !blocked[n]
+            })
+            .map(|n| {
+                let mut l: Vec<Atom> = self.nodes[n].label.keys().copied().collect();
+                l.sort_unstable();
+                l
+            })
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
