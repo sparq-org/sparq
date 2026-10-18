@@ -705,10 +705,18 @@ async fn encoded_separators_are_literal_names_and_dot_segments_are_not_written()
         .await
         .expect("seed the root");
     store
-        .create_in_container("https://pod.example/", alice, axum::body::Bytes::new(), "text/turtle")
+        .create_in_container(
+            "https://pod.example/",
+            alice,
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
         .await
         .expect("seed a container");
-    for left in ["https://pod.example/alice/%2E%2E", "https://pod.example/alice/%2e"] {
+    for left in [
+        "https://pod.example/alice/%2E%2E",
+        "https://pod.example/alice/%2e",
+    ] {
         store
             .create_in_container(alice, left, axum::body::Bytes::from(TURTLE), "text/turtle")
             .await

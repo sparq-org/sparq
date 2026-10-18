@@ -482,9 +482,10 @@ pub(crate) enum Removed {
 ///   has succeeded, whatever the listing shows. The fence is tried in the steps, and once it
 ///   succeeds the listing read after it settles the removal, every lock still held. One that
 ///   does not succeed within [`LOCK_WAIT`] (or a listing that cannot be read after it) is
-///   settled in the background: the record stays out of force, and its own lock, its own
-///   listing's and the container's (shared, unless it is listed nowhere) stay held, never given
-///   up and taken again, until the delete is fenced and the listing read again; `settle` is then
+///   settled in the background (each attempt at the fence allowed longer, up to the store's own
+///   call timeout, [`fence_in_background`]): the record stays out of force, and its own lock, its
+///   own listing's and the container's (shared, unless it is listed nowhere) stay held, never
+///   given up and taken again, until the delete is fenced and the listing read again; `settle` is then
 ///   told the outcome, and a record gone is announced. The answer is `500`, saying this is not
 ///   known yet, and it does not wait on a fence that stalls.
 /// - As for a create, the removal holds a place among those being made or settled

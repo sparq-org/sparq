@@ -1584,7 +1584,9 @@ mod tests {
         let (s, store) = faulting_state().await;
         let topic = format!("{BASE}/doc");
         let mut ws = open_for_bob(&s, &topic).await;
-        store.fail_meta.store(true, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_meta
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         s.tick_now();
         assert_eq!(
             next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
@@ -1600,7 +1602,9 @@ mod tests {
         let (s, store) = faulting_state().await;
         let topic = format!("{BASE}/doc");
         let mut ws = open_for_bob(&s, &topic).await;
-        store.fail_meta.store(true, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_meta
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         s.hub
             .notify(&topic, crate::notifications::ActivityType::Update, None)
             .await;
@@ -1609,7 +1613,9 @@ mod tests {
             None,
             "an event that could not be checked was sent"
         );
-        store.fail_meta.store(false, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_meta
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         s.tick_now();
         assert_eq!(
             next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
@@ -1624,12 +1630,16 @@ mod tests {
         let (s, store) = faulting_state().await;
         let topic = format!("{BASE}/doc");
         let mut ws = open_for_bob(&s, &topic).await;
-        store.fail_meta.store(true, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_meta
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         s.hub
             .notify(&topic, crate::notifications::ActivityType::Update, None)
             .await;
         assert_eq!(next_frame(&mut ws, QUIET).await, None);
-        store.fail_meta.store(false, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_meta
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         revoke_bob(&s).await;
         s.tick_now();
         assert_eq!(

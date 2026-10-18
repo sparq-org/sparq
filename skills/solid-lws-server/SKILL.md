@@ -136,19 +136,26 @@ before every notification it sends — so a revoked grant is not replayable thro
 an already-issued `receiveFrom` URL. Notifications follow the subscriber's current
 access: one it may no longer read is not sent (nor does it close the socket, or
 decide a lag close, `1011`), and an access timer (every 30 seconds) closes the
-socket (code 1008) once its subscriber loses read access, so when a socket closes
-never turns on changes it may not read. A channel lasts as long as its receive
-token: the subscribe response's `endAt` says until when, and at that instant the
-socket is closed (code 1008); a channel once expired never delivers again, even
-when its `receiveFrom` URL is used again in the same process. Subscribe again for
-a new channel. With the `odrl-authz` gate attached, its deny
+socket (code 1008) once its subscriber loses read access, up to one timer period
+after the loss, so when a socket closes never turns on changes it may not read. A
+check that cannot be made (a backend fault) is no denial: on the timer it closes
+the socket (`1011`); for a notification, the notification is held back and, at
+the next tick where the subscriber may read the topic, the socket is closed
+(`1011`) for the client to reconnect and reconcile (a subscriber that may not read
+it is not told). The receive token gates connecting only: its 5-minute window is
+for connecting and reconnecting, and a socket opened within it stays open until
+the client closes it, its subscriber loses read access, or its backlog overflows.
+A token that has expired never connects again, even when its `receiveFrom` URL is
+used again in the same process; subscribe again for a new one. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
 server's storage root is refused with `400` before the WAC gate runs. A topic on it is taken
 in one canonical form, the IRI `parse_target` gives its path (query and fragment dropped), for
 the WAC check, the receive token and the notifications alike; a topic with none — a linkset
-record (`X.meta`, in any case), anything under `/.lws/`, a dot segment (%-decoded too) — gets the same `403`
-as a topic the caller may not read.
+record (`X.meta`, in any case), anything under `/.lws/`, a dot segment (%-decoded or between
+backslashes too) — gets the same `403` as a topic the caller may not read. (A resource stored
+under an encoded dot segment before writes refused one can still be read and deleted, but not
+subscribed to.)
 
 ## Serve provider WebIDs off the pod (optional)
 
@@ -234,7 +241,7 @@ whichever surfaces are enabled. A container of that name (`X.meta/`) and what li
 ordinary resources: a stored record never lists as a member, conflicts with that container or
 serves as a group document, and a container whose only members are such records is empty. So
 is any path under `/.lws/` below the storage root, where the LWS surface keeps its grants, access
-requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`), or a dot segment (`.` or `..`, as sent or %-decoded, so `%2E%2E` too), is a `400`; an encoded separator (`%2F`) is part of a name; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
+requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`), or a raw dot segment (`.` or `..`), is a `400`; an encoded separator (`%2F`) is part of a name; a `PUT`, `PATCH` or `POST` (a `POST`'s container included) naming a dot segment a URL normaliser could resolve away (%-decoded, `%2E%2E`, or between raw backslashes, `..\x`) is a `400`, while what is stored under such a name from before can still be read and deleted; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
 
 ## Negotiate RDF representations
 
@@ -415,9 +422,9 @@ process alone, and a halt shows no expiry, so a subscription never durably expir
 between the clock passing its expiry and the mark being stored, or a stop while halted after a
 failed raise, or a create whose store outcome was unknown, answered `500`, and committed late)
 may be delivered to again after a restart whose clock was stepped back before its expiry; nothing
-outside saw it expire. A WebSocket channel's expiry is a latch held in memory: its receive token
-expires by the process's monotonic clock, and once expired the channel never delivers again in
-that process; none survives a restart. A
+outside saw it expire. A WebSocket receive token's expiry is a latch held in memory: it expires
+by the process's monotonic clock, and once expired it never connects again in that process
+(a socket it opened is not closed by it); none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
 registered (when the store leaves the create's outcome unknown, it holds that listing shared
@@ -604,7 +611,10 @@ What the server exposes, all discoverable from the storage description
   stays out of force, and it is removed or put back once the listing read after the fence
   says which. A request waits for its fence at most as long as for a lock (two seconds, shared
   between the fences it writes), then answers so and leaves the fence to the background; the
-  container stays held until that background settling is done. A removal the store refuses for
+  container stays held until that background settling is done. In the background each attempt
+  at the fence is given longer, from two seconds doubling up to the store's own call timeout
+  (30 seconds), so a slow store's fence still lands; removing a record outside a request
+  (putting a change back, clearing an intent) waits for its fence as the store's call allows. A removal the store refuses for
   want of room answers `507`, the record still stored and back in force. A subscription
   being cancelled hears of no change from the moment its removal begins until it is back in
   force. A record holds its place in the request
@@ -802,11 +812,13 @@ What the server exposes, all discoverable from the storage description
   KiB) is too complex to answer (`422`), as one with too many groups is; a QUERY body past 32 KiB
   is refused as it is read, and a page link carrying a filter past 8 KiB, which this server never
   makes, gets `413`. Whether the caller may read a resource is decided before anything else
-  is asked of it: one it may not read is passed over as one that is not there (only a
-  container's listing is read, for what under it may be readable), so neither the answer nor
-  the walk turns on whether it is there. When any listing, permission check or metadata read
-  fails, the whole index fails with one generic `500` that names no resource; a resource whose
-  access cannot be decided is passed over unless a grant names the caller for it. Names of
+  is asked of it but its lock (a resource set aside gets the `503` below first, whoever
+  asks): a document it may not read is passed over as one that is not there, with nothing
+  asked of whether it is; a container it may not read is still listed (for what under it may
+  be readable), its listing read and charged to the walk's budget as any is. When any listing,
+  permission check or metadata read fails, the whole index fails with one generic `500` that
+  names no resource; a resource whose access cannot be decided is passed over unless a grant
+  names the caller itself for it (a grant to everyone does not count). Names of
   linkset records a listing holds are not followed and not charged to the walk's budget. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
   While walking the storage they keep only what they return (a search its matches, the index

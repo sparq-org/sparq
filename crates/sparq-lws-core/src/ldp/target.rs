@@ -84,7 +84,8 @@ pub(crate) fn has_normalisable_dot_segment(path: &str) -> bool {
     let is_dots = |s: &str| s == "." || s == "..";
     let any_dots = |s: &str| s.split('\\').any(is_dots);
     path.split('/').any(|seg| {
-        any_dots(seg) || (seg.contains('%') && any_dots(&crate::identity::percent_decode_lossy(seg)))
+        any_dots(seg)
+            || (seg.contains('%') && any_dots(&crate::identity::percent_decode_lossy(seg)))
     })
 }
 
@@ -95,8 +96,8 @@ pub(crate) fn has_normalisable_dot_segment(path: &str) -> bool {
 ///
 /// The query string and fragment are stripped (the DPoP `htu` is path-only per RFC 9449 §4.3, and
 /// LDP targets are query-independent). Path traversal (`..`, `.`) is rejected (a 400), as are
-/// non-absolute paths. An encoded dot segment is refused only on a write
-/// ([`has_normalisable_dot_segment`]).
+/// non-absolute paths. An encoded dot segment (or one between backslashes) is refused only on a
+/// write, by the LDP handlers.
 pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     let base = base.trim_end_matches('/');
     if base.is_empty() {
@@ -197,7 +198,14 @@ mod tests {
         ] {
             assert!(super::has_normalisable_dot_segment(path), "{path}");
         }
-        for path in ["/a/%2E%2E%2E", "/a/x%2E", "/a/...", "/a/%2Ex", "/a/x\\y", "/a/b"] {
+        for path in [
+            "/a/%2E%2E%2E",
+            "/a/x%2E",
+            "/a/...",
+            "/a/%2Ex",
+            "/a/x\\y",
+            "/a/b",
+        ] {
             assert!(!super::has_normalisable_dot_segment(path), "{path}");
             assert!(super::parse_target(base, path).is_ok(), "{path}");
         }
