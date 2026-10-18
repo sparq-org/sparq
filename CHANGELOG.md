@@ -248,8 +248,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (4) `verify_fragment_manifest` refuses a presentation carrying NO `BranchWitness`
   (`CheckError::FragmentNoBranchWitness`): every branch-local layer iterates the witnesses, so an
   empty vector left all four of them with nothing to check and the accept would have rested on the
-  crypto stage alone. `dispatch_fragment` called on its own stays a deliberate no-op over such a
-  manifest, since it is also used over stage-1-style presentations.
+  crypto stage alone. `dispatch_fragment`'s per-branch ROUTING stays a deliberate no-op over such a
+  manifest, since it is also used over stage-1-style presentations; its query-hygiene, FILTER
+  and id checks still run.
   All four ADD refusals and open nothing; default builds are byte-identical (the feature is OFF by
   default) and no new dependency is added. Research grade, NOT externally audited (`sq-qhy4`). No
   soundness or privacy claim.

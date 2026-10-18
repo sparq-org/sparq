@@ -2190,10 +2190,11 @@ pub enum CheckError {
     /// routing, the disclosed-term binding, the scan-slot binding and the join
     /// coherence are each a no-op, and the presentation would be accepted on the
     /// crypto stage alone — sub-proofs that verify but are tied to no branch of
-    /// the query. [`dispatch_fragment`] stays a deliberate no-op on such a
-    /// manifest (it is also callable on its own, over a stage-1-style
-    /// presentation); this refusal is the end-to-end entry point's, where the
-    /// claim being accepted is a query answer.
+    /// the query. [`dispatch_fragment`]'s per-branch ROUTING stays a deliberate
+    /// no-op on such a manifest (it is also callable on its own, over a
+    /// stage-1-style presentation, and its query-hygiene, FILTER and id checks
+    /// still run); this refusal is the end-to-end entry point's, where the claim
+    /// being accepted is a query answer.
     /// Opt-in (`extended-fragment`).
     #[cfg(feature = "extended-fragment")]
     FragmentNoBranchWitness,
@@ -8383,8 +8384,10 @@ pub fn dispatch_fragment(
     }
 
     // A manifest with no branch attribution carries no extended-fragment claim to
-    // route (a stage-1 presentation): the query-hygiene + id checks above are all
-    // that apply. This keeps the gate a strict no-op on stage-1 manifests.
+    // route (a stage-1 presentation): the query-hygiene, FILTER and id checks
+    // above are all that apply. So the per-branch ROUTING is a no-op on stage-1
+    // manifests — not the whole gate. `verify_fragment_manifest` additionally
+    // refuses such a manifest outright, because an accept there is a query answer.
     if fm.branch_witnesses.is_empty() {
         return Ok(());
     }
