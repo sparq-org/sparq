@@ -639,6 +639,9 @@ pub struct Inner<S: Store> {
     /// Holds whose release failed, each with its holder: tried again by the maintenance
     /// sweeper (see [`LwsState::unreleased`]).
     unreleased: std::sync::Mutex<Vec<(String, StoredMeta)>>,
+    /// How many failed releases were not kept for the sweeper, the wait list being full (see
+    /// [`LwsState::release_later`]).
+    dropped_releases: std::sync::atomic::AtomicU64,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -725,6 +728,7 @@ impl<S: Store + 'static> LwsState<S> {
                 owed_touches: Default::default(),
                 settlements: Default::default(),
                 unreleased: Default::default(),
+                dropped_releases: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -758,12 +762,33 @@ impl<S: Store + 'static> LwsState<S> {
     /// `uri` is next touched: a stop before then leaves it, and the next start touches the
     /// container (see the `intents` module).
     /// Keep `holder`'s hold on `meta`'s bytes, whose release failed, for the maintenance
-    /// sweeper to release ([`LwsState::release_unreleased`]).
+    /// sweeper to release ([`LwsState::release_unreleased`]). Past [`UNRELEASED_LIMIT`] the hold
+    /// is not kept: it is counted ([`LwsState::dropped_releases`]) and reported, and left to the
+    /// next start's sweep ([`intents::recover`]), which fails the start rather than drop one.
     pub(crate) fn release_later(&self, holder: &str, meta: &StoredMeta) {
         let mut unreleased = self.unreleased.lock().unwrap_or_else(|e| e.into_inner());
         if unreleased.len() < UNRELEASED_LIMIT {
             unreleased.push((holder.to_string(), meta.clone()));
+            return;
         }
+        drop(unreleased);
+        let dropped = 1 + self
+            .dropped_releases
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        // Reported at the first and at each doubling, so an outage does not flood the log.
+        if dropped.is_power_of_two() {
+            eprintln!(
+                "lws: {dropped} failed releases could not be kept to be tried again; \
+                 their holds wait for the next start"
+            );
+        }
+    }
+
+    /// How many failed releases were not kept to be tried again (see
+    /// [`LwsState::release_later`]).
+    pub(crate) fn dropped_releases(&self) -> u64 {
+        self.dropped_releases
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Whether a hold waits to be released again.
@@ -1162,6 +1187,10 @@ const STAGED_ENTRY_BYTES: usize = 512;
 /// store step goes through one: a write or delete that fails leaves content, metadata and
 /// membership as they were, validators included (records are put back with
 /// [`Store::reinstate`], pointing at the bytes the store held for them, see [`Journal::stage`]).
+/// The one exception is the edge a container holds to a linkset record already gone, which
+/// [`Journal::remove_member`] detaches in a step of its own: that edge is not put back when the
+/// change is, since it names nothing and no LWS listing shows it, so a failed change can leave a
+/// container one dangling record edge lighter than it began.
 /// What a journal holds to put things back is bounded (`limit` bytes); a change that would need
 /// more is refused, and one that knows its whole extent up front ([`Journal::stage`]) is refused
 /// before it changes anything.
@@ -1221,9 +1250,10 @@ impl Holding {
     }
 }
 
-/// How many failed releases wait to be tried again at most: past it, one is left to the next
-/// start's sweep ([`intents::recover`]), as a hold that outlives its change only keeps bytes.
-const UNRELEASED_LIMIT: usize = 4096;
+/// How many failed releases wait to be tried again at most: past it, one is counted and left to
+/// the next start's sweep ([`intents::recover`]), as a hold that outlives its change only keeps
+/// bytes.
+pub(crate) const UNRELEASED_LIMIT: usize = 4096;
 
 impl<S: Store + 'static> Holds<S> {
     fn take(&mut self) -> Holding {
@@ -2772,6 +2802,8 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
+        /// How many more `holds` listings fail with a backend error.
+        pub failing_holds: Arc<std::sync::atomic::AtomicUsize>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
@@ -2931,6 +2963,7 @@ pub(crate) mod test_store {
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
                 fail_release: Default::default(),
+                failing_holds: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
@@ -3240,6 +3273,13 @@ pub(crate) mod test_store {
             self.inner.release(held, holder).await
         }
         async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
+            if self
+                .failing_holds
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.holds().await
         }
         async fn finish_reclaims(&self) -> ServerResult<()> {

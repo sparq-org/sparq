@@ -287,8 +287,9 @@ impl MacKey {
 /// message, an `assert_eq!` failure) would exfiltrate the MAC shares and back-door
 /// the `pub(crate)` restriction on `Self::mac_shares`, undermining the "α is never
 /// reconstructable" guarantee. Instead [`AuthenticatedShare`] has a MANUAL [`Debug`]
-/// that surfaces the openable value sharing `[x]` (already public via
-/// [`Self::value_shares`]) but REDACTS the MAC shares.
+/// that REDACTS both sharings and prints only the party count. `[α·x]` is key
+/// material, and `[x]` is openable only through the MAC-checked path — a `Debug`
+/// rendering is not that path, so it carries neither.
 #[derive(Clone)]
 pub struct AuthenticatedShare {
     /// `[x]` — the degree-`t` Shamir sharing of the value.
@@ -297,17 +298,18 @@ pub struct AuthenticatedShare {
     mac: ShareVec,
 }
 
-// Manual `Debug` that REDACTS the MAC shares. The `mac` vector is the
-// `[α·x]` sharing; for `authenticated_share(1)` it is a sharing of `α` itself, and
-// any `t+1` of those shares reconstruct `α` — so a derived `Debug` would leak the
-// MAC key through a back door round the `pub(crate)` `mac_shares()` accessor. We
-// print the openable value sharing `[x]` (already public via `value_shares()`) and
-// an explicit `<redacted>` for the MAC shares, keeping the struct printable for
-// diagnostics without ever exposing `[α·x]`.
+// Manual `Debug` that REDACTS both sharings. The `mac` vector is the `[α·x]`
+// sharing; for `authenticated_share(1)` it is a sharing of `α` itself, and any
+// `t+1` of those shares reconstruct `α` — so a derived `Debug` would leak the MAC
+// key through a back door round the `pub(crate)` `mac_shares()` accessor. The
+// `value` sharing `[x]` is redacted as well: it is openable through the
+// MAC-checked path, and a Debug rendering is not that path. What remains is the
+// party count, which is deployment configuration. `Share`'s own `Debug` redacts
+// `y` too, so this impl is belt-and-braces at the owning type.
 impl std::fmt::Debug for AuthenticatedShare {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthenticatedShare")
-            .field("value", &self.value)
+            .field("value", &"<redacted>")
             .field("mac", &"<redacted>")
             .field("parties", &self.value.len())
             .finish()
@@ -925,5 +927,72 @@ mod tests {
         let l_new = weight(views.len());
         let y_new = target.sub(acc).mul(l_new.inv());
         Share { x: xnew, y: y_new }
+    }
+
+    /// Both sharings of an [`AuthenticatedShare`] are redacted, in `{:?}` and in
+    /// `{:#?}`, directly and inside the batched container.
+    ///
+    /// The companion suite `tests/debug_redaction.rs` covers the types that can be
+    /// built without a dealer; these two need a `MacSession`, so they are pinned
+    /// here with the same sentinel discipline.
+    #[test]
+    fn the_authenticated_sharings_are_redacted_in_both_debug_formats() {
+        const SENTINEL: u64 = 987_654_321_987;
+        let backend = ShamirBackend::new_seeded(5, 0xD00D).unwrap();
+        let mut dealer = backend.dealer();
+        let mut session = dealer.new_mac_session();
+        let auth = session.authenticated_share(Fp::new(SENTINEL));
+
+        // The value and MAC share points for this secret, which must appear nowhere.
+        let mut secrets: Vec<String> = vec![SENTINEL.to_string()];
+        for share in auth.value_shares().iter().chain(auth.mac_shares()) {
+            secrets.push(share.y.value().to_string());
+        }
+
+        let batched = crate::batched::BatchedAuthShares::new(
+            vec![auth.clone()],
+            crate::batched::RowBinding::Positional,
+        )
+        .unwrap();
+
+        for (what, rendered) in [
+            ("AuthenticatedShare {:?}", format!("{:?}", auth)),
+            ("AuthenticatedShare {:#?}", format!("{:#?}", auth)),
+            ("BatchedAuthShares {:?}", format!("{:?}", batched)),
+            ("BatchedAuthShares {:#?}", format!("{:#?}", batched)),
+            (
+                "Vec<AuthenticatedShare>",
+                format!("{:?}", vec![auth.clone()]),
+            ),
+        ] {
+            for secret in &secrets {
+                assert!(
+                    !rendered.contains(secret.as_str()),
+                    "{} rendered the secret {}: {}",
+                    what,
+                    secret,
+                    rendered
+                );
+            }
+            assert!(
+                rendered.contains("<redacted>"),
+                "{} must say what it withheld: {}",
+                what,
+                rendered
+            );
+            // Beyond the share VALUES (which `Share`'s own `Debug` already
+            // withholds), this impl withholds the sharings' SHAPE: neither
+            // sharing is rendered as a list of share points, so the evaluation
+            // points the deployment uses do not appear either.
+            assert!(
+                !rendered.contains("x: "),
+                "{} rendered the sharing's share points: {}",
+                what,
+                rendered
+            );
+        }
+
+        // The party count is deployment configuration and still prints.
+        assert!(format!("{:?}", auth).contains("parties: 5"), "{:?}", auth);
     }
 }

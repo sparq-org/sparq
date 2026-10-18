@@ -559,12 +559,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 
     /// [`SparqClient::get_meta`] with the read path's error mapping (absent ⇒ [`ServerError::NotFound`]).
     async fn get_meta_mapped(&self, iri: &str) -> ServerResult<ResourceMeta> {
-        self.sparq.get_meta(iri).await.map_err(|e| match e {
-            SparqError::NotFound => ServerError::NotFound,
-            SparqError::QuotaExceeded => ServerError::InsufficientStorage,
-            SparqError::Backend(e) => ServerError::Storage(e),
-            SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
-        })
+        self.sparq.get_meta(iri).await.map_err(map_sparq)
     }
 
     /// Reclaim a blob no record names any longer, best effort.
@@ -1016,10 +1011,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // misses it.
             self.count_hold(&meta.blob_key, true);
             if let Err(e) = self.publish_hold(&meta.blob_key, holder).await {
-                // It may have landed (a lost reply): withdrawn, best effort, as the holder is
-                // told nothing is held (else the next start's sweep withdraws it).
-                let _ = self.withdraw_hold(&meta.blob_key, holder).await;
-                self.count_hold(&meta.blob_key, false);
+                // It may have landed (a lost reply): released, best effort, as the holder is
+                // told nothing is held (else the next start's sweep releases it). Released, not
+                // only withdrawn: a reclaim through this instance meanwhile skipped these bytes
+                // for the count, and they are reclaimed here unless a record names them.
+                let _ = self.release(&meta, holder).await;
                 return Err(e);
             }
             match self.sparq.get_meta(iri).await {
@@ -1130,16 +1126,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
         // pointing at missing bytes. The byte delete is best effort: the resource is already gone
         // from the index, so a failed blob delete must not fail the request; it stays an orphan.
+        // Either step's failure is reported as what it was (`map_sparq`), as the metadata
+        // read above is: a refused admission and a write that failed unsettled (which the caller
+        // settles through the fence it carries) are not flattened into a backend fault.
         if let Some(p) = parent {
-            self.sparq
-                .remove_child(p, iri)
-                .await
-                .map_err(|e| ServerError::Storage(format!("{e}")))?;
+            self.sparq.remove_child(p, iri).await.map_err(map_sparq)?;
         }
-        self.sparq
-            .delete_meta(iri)
-            .await
-            .map_err(|e| ServerError::Storage(format!("{e}")))?;
+        self.sparq.delete_meta(iri).await.map_err(map_sparq)?;
         if let Some(key) = blob_key {
             self.reclaim_blob(&key).await;
         }
@@ -1173,15 +1166,14 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 return Err(ServerError::Unsettled { detail, fence })
             }
         };
+        // A failure is reported as what it was (`map_sparq`): a refused admission stays
+        // `InsufficientStorage`, and one not known yet keeps its fence, so the caller can
+        // settle it.
         let outcome = self
             .sparq
             .delete_meta_if_empty(iri, parent)
             .await
-            .map_err(|e| match e {
-                // Not known yet: kept apart, so the caller can settle it (`fence`).
-                SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
-                e => ServerError::Storage(format!("{e}")),
-            })?;
+            .map_err(map_sparq)?;
         // NotEmpty / NotFound: nothing was deleted, so the bytes stay. Deleted: the record AND the parent
         // edge are gone atomically (above), so the bytes are unreferenced — reclaim them now.
         if outcome == DeleteOutcome::Deleted {
@@ -1288,7 +1280,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
     }
 }
 
-/// A [`SparqError`] as the server reports it.
+/// An index error as the server reports it: an absent record is [`ServerError::NotFound`], a
+/// refused admission [`ServerError::InsufficientStorage`], and a write that failed unsettled
+/// keeps its detail and its fence, so the caller can settle it ([`Store::fence`]) rather than
+/// read the failure as a plain backend fault.
 fn map_sparq(e: SparqError) -> ServerError {
     match e {
         SparqError::NotFound => ServerError::NotFound,
@@ -1754,6 +1749,156 @@ mod tests {
         );
         one.release(&held, "urn:a").await.unwrap();
         assert!(!blob.exists(&held.blob_key).await.unwrap());
+    }
+
+    /// An index whose detaching steps fail with the error set for each (taken when it is used),
+    /// every other call answered by a working in-memory index.
+    struct FailsDetaching {
+        inner: InMemorySparqClient,
+        on_remove_child: std::sync::Mutex<Option<SparqError>>,
+        on_delete_meta: std::sync::Mutex<Option<SparqError>>,
+        on_delete_meta_if_empty: std::sync::Mutex<Option<SparqError>>,
+    }
+
+    impl FailsDetaching {
+        fn new() -> Self {
+            Self {
+                inner: InMemorySparqClient::new(),
+                on_remove_child: std::sync::Mutex::new(None),
+                on_delete_meta: std::sync::Mutex::new(None),
+                on_delete_meta_if_empty: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SparqClient for FailsDetaching {
+        async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+            self.inner.get_meta(iri).await
+        }
+        async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+            self.inner.put_meta(iri, meta).await
+        }
+        async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+            self.inner.exists(iri).await
+        }
+        async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+            let set = self.on_delete_meta.lock().unwrap().take();
+            match set {
+                Some(e) => Err(e),
+                None => self.inner.delete_meta(iri).await,
+            }
+        }
+        async fn delete_meta_if_empty(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<crate::store::sparq::DeleteOutcome, SparqError> {
+            let set = self.on_delete_meta_if_empty.lock().unwrap().take();
+            match set {
+                Some(e) => Err(e),
+                None => self.inner.delete_meta_if_empty(iri, parent).await,
+            }
+        }
+        async fn create_child(
+            &self,
+            container: &str,
+            child: &str,
+            meta: ResourceMeta,
+        ) -> Result<(), SparqError> {
+            self.inner.create_child(container, child, meta).await
+        }
+        async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+            let set = self.on_remove_child.lock().unwrap().take();
+            match set {
+                Some(e) => Err(e),
+                None => self.inner.remove_child(container, child).await,
+            }
+        }
+        async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+            self.inner.list_children(container).await
+        }
+        async fn referenced_blob_keys(
+            &self,
+        ) -> Result<std::collections::HashSet<String>, SparqError> {
+            self.inner.referenced_blob_keys().await
+        }
+    }
+
+    /// A delete whose detach or record step fails reports the failure as what it was, as the
+    /// metadata read that precedes them does: a refused admission stays `InsufficientStorage`,
+    /// and a write that failed unsettled keeps its fence, so the caller can settle it.
+    #[tokio::test]
+    async fn a_delete_reports_each_failure_as_what_it_was() {
+        let container = "https://pod.example/c/";
+        let child = "https://pod.example/c/note";
+        let build = || async {
+            let store = CompositeStore::new(FailsDetaching::new(), InMemoryBlobStore::new());
+            store
+                .write(container, Bytes::from_static(b""), "text/turtle")
+                .await
+                .expect("mint container");
+            store
+                .create_in_container(container, child, Bytes::from_static(b"x"), "text/turtle")
+                .await
+                .expect("add child");
+            store
+        };
+        // A refused admission stays one.
+        let store = build().await;
+        *store.sparq.on_remove_child.lock().unwrap() = Some(SparqError::QuotaExceeded);
+        let r = store.delete(child, Some(container)).await;
+        assert!(matches!(r, Err(ServerError::InsufficientStorage)), "{r:?}");
+        // A write that failed unsettled keeps its fence, so the caller can settle it.
+        let store = build().await;
+        *store.sparq.on_delete_meta.lock().unwrap() = Some(SparqError::Unsettled {
+            detail: "the update timed out".into(),
+            fence: Fence::new("n1".to_string(), vec![child.to_string()]),
+        });
+        let r = store.delete(child, Some(container)).await;
+        match r {
+            Err(ServerError::Unsettled { fence, .. }) => assert_eq!(fence.nonce(), "n1"),
+            other => panic!("{:?}", other),
+        }
+    }
+
+    /// The atomic removal (`delete_container_if_empty`) reports its index step's failure as
+    /// what it was, as `delete` does: a refused admission stays `InsufficientStorage`, a write
+    /// that failed unsettled keeps its fence, and the resource is left in place either way.
+    #[tokio::test]
+    async fn an_atomic_removal_reports_each_failure_as_what_it_was() {
+        let container = "https://pod.example/c/";
+        let child = "https://pod.example/c/note";
+        let store = CompositeStore::new(FailsDetaching::new(), InMemoryBlobStore::new());
+        store
+            .write(container, Bytes::from_static(b""), "text/turtle")
+            .await
+            .expect("mint container");
+        store
+            .create_in_container(container, child, Bytes::from_static(b"x"), "text/turtle")
+            .await
+            .expect("add child");
+        *store.sparq.on_delete_meta_if_empty.lock().unwrap() = Some(SparqError::QuotaExceeded);
+        let r = store
+            .delete_container_if_empty(child, Some(container))
+            .await;
+        assert!(matches!(r, Err(ServerError::InsufficientStorage)), "{r:?}");
+        *store.sparq.on_delete_meta_if_empty.lock().unwrap() = Some(SparqError::Unsettled {
+            detail: "the update timed out".into(),
+            fence: Fence::new("n2".to_string(), vec![child.to_string()]),
+        });
+        let r = store
+            .delete_container_if_empty(child, Some(container))
+            .await;
+        match r {
+            Err(ServerError::Unsettled { fence, .. }) => assert_eq!(fence.nonce(), "n2"),
+            other => panic!("{:?}", other),
+        }
+        assert!(store.exists(child).await.unwrap());
+        let r = store
+            .delete_container_if_empty(child, Some(container))
+            .await;
+        assert!(matches!(r, Ok(DeleteOutcome::Deleted)), "{r:?}");
     }
 
     #[test]
