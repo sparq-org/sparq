@@ -574,7 +574,9 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 /// Inference: `.acr` present in the dataset -> ACP; otherwise WAC. This is a convenience only; a
 /// caller that knows its model should set `"view"` explicitly.
 // `Response` is large; same `result_large_err` allow as `parse_request` / the crate's
-// other handler helpers.
+// other handler helpers. Only the trust lane and the tests take a whole request; the
+// stateless lane owns the fields instead ([`resolve_store`]).
+#[cfg(any(test, feature = "solid-authz-trust"))]
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
     build_store_from(&req.dataset, req.view)

@@ -9,7 +9,7 @@
     "Re-seed (scripts/unsafe-gate.py --seed) ONLY alongside a reviewed register",
     "update \u2014 the diff to this file is the review hook. Smaller is always allowed."
   ],
-  "total": 104,
+  "total": 118,
   "crates": {
     "sparq-bench": 1,
     "sparq-cli": 2,
@@ -18,7 +18,8 @@
     "sparq-lws-core": 12,
     "sparq-lws-wasm": 4,
     "sparq-py": 4,
-    "sparq-reason": 7,
+    "sparq-reason": 14,
+    "sparq-solid": 7,
     "sparq-vectors": 12,
     "sparq-zk-compose": 3
   }
