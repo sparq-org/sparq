@@ -36,7 +36,7 @@ const TTL: &str = "@prefix ex: <http://ex/> .\n\
         ex:n3 ex:age 30 .\n";
 
 fn id(g: &Graph, iri: &str) -> Id {
-    g.dict.lookup(&Term::NamedNode(NamedNode::new(iri).unwrap()))
+    g.dict().lookup(&Term::NamedNode(NamedNode::new(iri).unwrap()))
 }
 
 /// Runs `bind_join` of `result` (one column `?k`, subject position) with
@@ -59,7 +59,7 @@ fn expected(g: &Graph, subjects: &[Id]) -> Vec<(Id, Id)> {
         .iter()
         .zip(["10", "20", "21", "30"])
         .map(|(s, a)| {
-            (id(g, s), g.dict.lookup_lit(a, "http://www.w3.org/2001/XMLSchema#integer", None))
+            (id(g, s), g.dict().lookup_lit(a, "http://www.w3.org/2001/XMLSchema#integer", None))
         })
         .collect();
     let mut out: Vec<(Id, Id)> =
@@ -201,7 +201,7 @@ enum Fault {
 /// emission order.
 fn naive_bind_join(g: &Graph, rows: &[Row], age: Id, fault: Fault) -> Vec<[Id; 3]> {
     let pat: IdPattern = [None, Some(age), None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     let triples: Vec<[Id; 3]> = scan.rows.iter().map(|r| scan.to_spo(r)).collect();
     let mut out: Vec<[Id; 3]> = Vec::new();
     let mut emitted_keys: Vec<Id> = Vec::new();

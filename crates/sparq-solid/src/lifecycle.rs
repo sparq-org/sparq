@@ -77,7 +77,7 @@ pub(crate) fn update_events<'e>(
     // An update that only adds to graphs already stored changes no resource; most do.
     let stored = |name: &str| {
         graph
-            .named
+            .named()
             .iter()
             .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
     };
@@ -100,7 +100,7 @@ pub(crate) fn edit_events<'a>(
     after: &'a Graph,
 ) -> Vec<GraphEvent<'a>> {
     let now: FxHashSet<&str> = after
-        .named
+        .named()
         .iter()
         .filter_map(|(n, _)| match n {
             Term::NamedNode(n) => Some(n.as_str()),
@@ -137,7 +137,7 @@ pub(crate) fn provenance_after(
     }
     let stored = |name: &str| {
         before
-            .named
+            .named()
             .iter()
             .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
     };

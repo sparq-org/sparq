@@ -18,7 +18,7 @@ fn graph_of(literals: &[&str]) -> Graph {
 /// The lexical values of the hits, best-first.
 fn values(graph: &Graph, hits: &[Hit]) -> Vec<String> {
     hits.iter()
-        .map(|h| match graph.dict.term(h.id) {
+        .map(|h| match graph.dict().term(h.id) {
             Term::Literal(l) => l.value().to_string(),
             other => panic!("hit {} is not a literal: {other}", h.id),
         })

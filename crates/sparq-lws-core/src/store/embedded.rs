@@ -290,23 +290,51 @@ impl EmbeddedSparqClient {
         T: Send + 'static,
     {
         self.round_trips.fetch_add(1, Ordering::Relaxed);
-        self.actor.call(f).await
+        self.actor
+            .call(move |graph| {
+                refuse_frozen(graph)?;
+                f(graph)
+            })
+            .await
     }
 
     /// Snapshot the current graph to `dir` (the durable seam for the in-memory path). Runs on the
     /// actor thread, so the snapshot cannot interleave with a write — but is deliberately NOT counted
     /// as an engine round-trip (it is an operator/persistence action, not a data-path query), keeping
     /// [`Self::engine_round_trips`] the same metric the counter tests pin.
+    ///
+    /// Into the directory the graph is open from (by file identity, whatever the spelling) the
+    /// snapshot is a compaction: that directory already holds the graph's state, and a plain
+    /// save there is refused (it would truncate files the graph still maps).
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
             .call(move |graph| {
-                graph.save(&dir).map_err(|e| {
+                refuse_frozen(graph)?;
+                let saved = if graph.is_backed_by(&dir) {
+                    graph.compact()
+                } else {
+                    graph.save(&dir).map_err(|e| e.to_string())
+                };
+                saved.map_err(|e| {
                     SparqError::Backend(format!("fatal: graph save({}) failed: {e}", dir.display()))
                 })
             })
             .await
     }
+}
+
+/// A graph a failed directory swap froze ([`Graph::is_frozen`]) is reported as failed, never
+/// served: what it still reads may be empty or older than its directory. The store has to be
+/// re-opened.
+fn refuse_frozen(graph: &Graph) -> Result<(), SparqError> {
+    if !graph.is_frozen() {
+        return Ok(());
+    }
+    let why = graph.check_writable().err().unwrap_or_default();
+    Err(SparqError::Backend(format!(
+        "fatal: the embedded graph is frozen and must be re-opened from its directory: {why}"
+    )))
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -368,6 +396,12 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
 
 #[async_trait]
 impl SparqClient for EmbeddedSparqClient {
+    /// The graph is this process's: held in its memory, or opened from a directory it holds
+    /// locked for as long as the graph lives ([`Graph::open`]).
+    fn exclusive(&self) -> Result<(), SparqError> {
+        Ok(())
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         // SAME query as the HTTP/in-mem paths — the injection-safe `select_meta` builder VERBATIM.
         let q = sparql::select_meta(iri)?;
@@ -635,7 +669,7 @@ impl SparqClient for EmbeddedSparqClient {
             };
             let id = |iri: &str| {
                 let id = g
-                    .dict
+                    .dict()
                     .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
                         iri,
                     )));
@@ -645,16 +679,16 @@ impl SparqClient for EmbeddedSparqClient {
                 return Ok(Some(Vec::new()));
             };
             let pattern = [Some(s), Some(p), None];
-            if g.store.estimate(&pattern) > rows {
+            if g.store().estimate(&pattern) > rows {
                 return Ok(None);
             }
-            let scan = g.store.scan(&pattern);
+            let scan = g.store().scan(&pattern);
             let mut children = Vec::with_capacity(scan.rows.len());
             let mut bytes = 0usize;
             for row in scan.rows.iter() {
                 let [_, _, o] = scan.to_spo(row);
                 // A member is an IRI; anything else is a malformed index (see `children`).
-                let oxrdf::Term::NamedNode(child) = g.dict.term(o) else {
+                let oxrdf::Term::NamedNode(child) = g.dict().term(o) else {
                     return Err(SparqError::Backend(
                         "fatal: a containment member is not an IRI".into(),
                     ));
@@ -825,6 +859,33 @@ mod tests {
 
     fn client() -> EmbeddedSparqClient {
         EmbeddedSparqClient::in_memory().expect("empty in-memory graph")
+    }
+
+    /// A graph a failed directory swap froze is reported as failed by every data-path call and
+    /// by `save`, never served (what it still reads may be empty or older than its directory).
+    #[test]
+    fn a_frozen_graph_is_reported_not_served() {
+        block_on(async {
+            let c = client();
+            c.put_meta("http://pod/alice/doc", meta("text/turtle", "b", "\"e\""))
+                .await
+                .unwrap();
+            c.actor
+                .call(|g| {
+                    g.freeze_for_test("injected swap failure");
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let read = c.get_meta("http://pod/alice/doc").await;
+            let Err(SparqError::Backend(msg)) = read else {
+                panic!("a frozen graph was served: {read:?}");
+            };
+            assert!(msg.contains("frozen") && msg.contains("injected swap failure"), "{msg}");
+            let dir = std::env::temp_dir().join(format!("sparq-lws-frozen-{}", std::process::id()));
+            assert!(c.save(&dir).await.is_err(), "a frozen graph was saved");
+            assert!(!dir.exists(), "a refused save wrote {}", dir.display());
+        });
     }
 
     fn meta(ct: &str, bk: &str, etag: &str) -> ResourceMeta {
@@ -1080,7 +1141,9 @@ mod tests {
                 .unwrap();
             let before = c.engine_round_trips();
 
-            let dir = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            // The store and its lock file (`store.lock`, beside it) share one scratch root.
+            let root = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            let dir = root.join("store");
             c.save(&dir).await.expect("snapshot written");
             assert_eq!(
                 c.engine_round_trips(),
@@ -1094,7 +1157,47 @@ mod tests {
                 meta("text/turtle", "blob-1", "\"e1\""),
                 "the snapshot round-trips the record"
             );
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(reopened);
+            let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    /// A directory is opened by one client at a time, whichever process: a second open (or a
+    /// save into it from another graph) fails while the first client's graph lives, and the lock
+    /// goes with the graph, on its actor's thread, not with the last handle to it.
+    #[test]
+    fn a_directory_is_opened_by_one_client_at_a_time() {
+        block_on(async {
+            // The store and its lock file (`store.lock`, beside it) share one scratch root.
+            let root = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            let dir = root.join("store");
+            client().save(&dir).await.expect("snapshot written");
+            let first = EmbeddedSparqClient::open(&dir).expect("opened");
+            assert!(first.exclusive().is_ok());
+            assert!(EmbeddedSparqClient::open(&dir).is_err(), "opened twice");
+            assert!(client().save(&dir).await.is_err(), "written while open");
+            // Its own directory it may save into: a compaction, under any spelling of it.
+            first
+                .save(&dir)
+                .await
+                .expect("saved over its own directory");
+            first
+                .save(&dir.join("..").join(dir.file_name().unwrap()))
+                .await
+                .expect("saved over its own directory, spelled differently");
+            drop(first);
+            // The actor drops the graph, and with it the lock, once its last handle goes.
+            let mut reopened = None;
+            for _ in 0..200 {
+                if let Ok(c) = EmbeddedSparqClient::open(&dir) {
+                    reopened = Some(c);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(reopened.is_some(), "the lock outlived the graph");
+            drop(reopened);
+            let _ = std::fs::remove_dir_all(&root);
         });
     }
 

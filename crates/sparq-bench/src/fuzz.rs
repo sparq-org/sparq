@@ -1889,15 +1889,15 @@ pub fn run(seed_start: u64, count: u64, category: &str) {
         // to N-Triples (the only format the spill path accepts; the generated Turtle is
         // triple-term-free, so terms round-trip exactly).
         let g = if std::env::var("SPARQ_FUZZ_DICTSPILL").is_ok() {
-            let scan = g.store.scan(&[None, None, None]);
+            let scan = g.store().scan(&[None, None, None]);
             let mut nt = String::new();
             for r in scan.rows.iter() {
                 let spo = scan.to_spo(r);
                 nt.push_str(&format!(
                     "{} {} {} .\n",
-                    g.dict.term(spo[0]),
-                    g.dict.term(spo[1]),
-                    g.dict.term(spo[2])
+                    g.dict().term(spo[0]),
+                    g.dict().term(spo[1]),
+                    g.dict().term(spo[2])
                 ));
             }
             let dir = std::env::temp_dir().join(format!("sparq_fuzz_dsp_{}", std::process::id()));

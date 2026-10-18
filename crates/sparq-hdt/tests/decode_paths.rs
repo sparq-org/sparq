@@ -80,7 +80,7 @@ fn splice_triples_control_info(bytes: &[u8], ci: &ControlInfo) -> Vec<u8> {
 /// be used directly; this also makes the rejection-message assertions read cleanly.
 fn load_outcome(bytes: Vec<u8>) -> Result<usize, String> {
     sparq_hdt::load_reader(std::io::Cursor::new(bytes))
-        .map(|g| g.store.len())
+        .map(|g| g.store().len())
         .map_err(|e| e.to_string())
 }
 
@@ -89,7 +89,7 @@ fn load_outcome(bytes: Vec<u8>) -> Result<usize, String> {
 #[test]
 fn pristine_archive_loads_so_splices_are_meaningful() {
     let g = sparq_hdt::load_reader(std::io::Cursor::new(valid_hdt_bytes())).expect("pristine load");
-    assert_eq!(g.store.len(), 4, "the 4-triple fixture must load");
+    assert_eq!(g.store().len(), 4, "the 4-triple fixture must load");
 }
 
 /// A re-serialised but UNCHANGED triples control info still loads — proving the splice
@@ -101,7 +101,7 @@ fn identity_splice_still_loads() {
     let (_, _, ci) = find_triples_control_info(&bytes);
     let spliced = splice_triples_control_info(&bytes, &ci);
     let g = sparq_hdt::load_reader(std::io::Cursor::new(spliced)).expect("identity-splice load");
-    assert_eq!(g.store.len(), 4);
+    assert_eq!(g.store().len(), 4);
 }
 
 /// A control info whose TYPE is not `Triples` (here: `Dictionary`) at the triples-section
@@ -215,28 +215,28 @@ fn single_threaded_pool_decode_matches_default() {
         .expect("single-threaded-pool decode");
 
     let triples = |g: &sparq_core::Graph| {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         scan.rows
             .iter()
             .map(|r| {
                 let [s, p, o] = scan.to_spo(r);
                 [
-                    g.dict.term(s).to_string(),
-                    g.dict.term(p).to_string(),
-                    g.dict.term(o).to_string(),
+                    g.dict().term(s).to_string(),
+                    g.dict().term(p).to_string(),
+                    g.dict().term(o).to_string(),
                 ]
             })
             .collect::<std::collections::BTreeSet<_>>()
     };
-    assert_eq!(single.store.len(), default.store.len());
+    assert_eq!(single.store().len(), default.store().len());
     assert_eq!(
         triples(&single),
         triples(&default),
         "the single-threaded dict-decode fast path must produce the identical triple set"
     );
     assert_eq!(
-        single.dict.len(),
-        default.dict.len(),
+        single.dict().len(),
+        default.dict().len(),
         "same distinct-term count on both decode arms"
     );
 }

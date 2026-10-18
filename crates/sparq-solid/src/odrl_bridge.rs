@@ -709,7 +709,7 @@ fn append_bridged_triples(graph: &mut Graph, new_triples: &[[Term; 3]]) {
 /// sub-graph dictionary and swap it in (matches `install_auth_view`'s rebuild shape).
 fn extend_named_graph(graph: &mut Graph, name: &str, additions: &[[Term; 3]]) {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
-    let mut terms: Vec<[Term; 3]> = match graph.named.iter().find(|(n, _)| *n == g_name) {
+    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
@@ -751,8 +751,10 @@ fn extend_named_graph(graph: &mut Graph, name: &str, additions: &[[Term; 3]]) {
 fn reset_auth_view(graph: &mut Graph, terms: Vec<[Term; 3]>, preserve_empty_marker: bool) {
     if terms.is_empty() && preserve_empty_marker {
         let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-        if let Some(slot) = graph.named.iter_mut().find(|(n, _)| *n == g_name) {
-            slot.1 = Graph::from_parts(Dict::new(), Vec::new());
+        if graph.named_graph(&g_name).is_some() {
+            graph
+                .set_named(g_name, Graph::from_parts(Dict::new(), Vec::new()))
+                .expect(crate::WRITABLE);
         }
         return;
     }
@@ -767,7 +769,7 @@ fn reset_auth_view(graph: &mut Graph, terms: Vec<[Term; 3]>, preserve_empty_mark
 fn install_triples(graph: &mut Graph, name: &str, terms: Vec<[Term; 3]>) {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
     if terms.is_empty() {
-        graph.named.retain(|(n, _)| *n != g_name);
+        graph.retain_named(|n, _| *n != g_name).expect(crate::WRITABLE);
         return;
     }
     let mut dict = Dict::new();
@@ -776,17 +778,13 @@ fn install_triples(graph: &mut Graph, name: &str, terms: Vec<[Term; 3]>) {
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
         .collect();
     let sub = Graph::from_parts(dict, ids);
-    if let Some(slot) = graph.named.iter_mut().find(|(n, _)| *n == g_name) {
-        slot.1 = sub;
-    } else {
-        graph.named.push((g_name, sub));
-    }
+    graph.set_named(g_name, sub).expect(crate::WRITABLE);
 }
 
 /// The triples currently in a named graph (empty if absent).
 fn named_graph_triples(graph: &Graph, name: &str) -> Vec<[Term; 3]> {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
-    match graph.named.iter().find(|(n, _)| *n == g_name) {
+    match graph.named().iter().find(|(n, _)| *n == g_name) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     }

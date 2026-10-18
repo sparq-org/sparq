@@ -78,13 +78,13 @@ fn synthetic_nt(n: u32) -> String {
 /// Sorted term-level dump of the default graph — the equality oracle (same shape the existing
 /// differential tests use).
 fn dump(g: &Graph) -> Vec<[String; 3]> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     let mut v: Vec<[String; 3]> = scan
         .rows
         .iter()
         .map(|r| {
             let spo = scan.to_spo(r);
-            [g.dict.term(spo[0]).to_string(), g.dict.term(spo[1]).to_string(), g.dict.term(spo[2]).to_string()]
+            [g.dict().term(spo[0]).to_string(), g.dict().term(spo[1]).to_string(), g.dict().term(spo[2]).to_string()]
         })
         .collect();
     v.sort();
@@ -196,13 +196,13 @@ fn spill_built_store_mmap_reload_round_trip() {
 
     // Counts + full term-level content.
     assert_eq!(mem.len(), ext.len(), "triple count differs (mem vs spill-mmap)");
-    assert_eq!(mem.dict.len(), ext.dict.len(), "dict size differs (mem vs spill-mmap)");
+    assert_eq!(mem.dict().len(), ext.dict().len(), "dict size differs (mem vs spill-mmap)");
     assert_eq!(dump(&mem), dump(&ext), "term-level content differs (mem vs spill-mmap)");
 
     // Bound-predicate scans over the mmap'd store match the in-memory store's, term for term.
     let pred = |g: &Graph, p: &str| -> usize {
         match g.id_of(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(p.to_string()))) {
-            Some(pid) => g.store.scan(&[None, Some(pid), None]).rows.len(),
+            Some(pid) => g.store().scan(&[None, Some(pid), None]).rows.len(),
             None => 0,
         }
     };
@@ -258,7 +258,7 @@ fn spill_built_store_mmap_reload_round_trip() {
 /// the two dicts assign ids in different orders, so a value-cache comparison must go through the
 /// shared term identity, not the raw id.
 fn remap_id(to: &Graph, from: &Graph, from_id: sparq_core::dict::Id) -> sparq_core::dict::Id {
-    let term = from.dict.term(from_id);
+    let term = from.dict().term(from_id);
     to.id_of(&term).unwrap_or(from_id)
 }
 
@@ -272,6 +272,6 @@ fn spill_build_empty_input_opens_empty() {
     Graph::build_external_spill("".as_bytes(), "ntriples", &dir, 64, &cfg).unwrap();
     let g = Graph::open(&dir).unwrap();
     assert_eq!(g.len(), 0, "empty spill build has no triples");
-    assert_eq!(g.dict.len(), 0, "empty spill build interns no terms");
+    assert_eq!(g.dict().len(), 0, "empty spill build interns no terms");
     let _ = std::fs::remove_dir_all(&dir);
 }

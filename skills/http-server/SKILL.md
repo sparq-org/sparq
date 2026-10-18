@@ -816,8 +816,12 @@ to a sibling and swapped in with a **two-rename directory swap** (parent dir fsy
 that an interrupted crash heals deterministically (`Graph::restore_into_durable` reuses the exact WAL
 compaction swap + `recover_compaction` healer). **Fail-closed throughout:** the artifact is imported
 + validated **before** any on-disk change, so a corrupt artifact is `400` with the durable store
-**untouched** and no swap-sibling leftovers; a swap I/O error leaves the OLD store intact and the
-writer alive. `?persist=true` on an **in-memory** server is `409` (no durable dir). **Restore-on-start:**
+**untouched** and no swap-sibling leftovers. A swap I/O error is recovered at once under the
+store's lock: rolled back, the OLD store is intact and the writer appends to it; completed, the
+restore succeeded. Only if neither works is the durable graph frozen (every later update refused
+until a restart re-opens the directory, which heals it to old-or-new); the writer stays alive. A
+store whose parent directory is not writable (no `<dir>.lock` beside it) serves, but its restores
+and compactions are refused: they rename the directory. `?persist=true` on an **in-memory** server is `409` (no durable dir). **Restore-on-start:**
 `--restore <FILE>` / `SPARQ_RESTORE` seeds the in-memory store before binding (bootstrap for
 horizontal-scaling stage-2 + PITR base); with `--persist DIR` it is **refused unless** you add
 **`--restore-persist`** / `SPARQ_RESTORE_PERSIST=1`, which writes the artifact through to `DIR`
@@ -1921,6 +1925,17 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **One server per `--persist DIR`.** The server holds `DIR`'s exclusive lock (sparq-core
+  `dir_lock`; `Graph::open_or_create`) for its lifetime: a second server, `sparq-cli compact`, or a
+  read-only `sparq-cli query-mmap` on the same `DIR` fails at once (`WouldBlock`) while it runs.
+  The lock files are `DIR.lock` **beside** `DIR` (taken when it exists or can be created) and
+  `DIR/sparq.lock` inside it. `/admin/restore?persist=true` and `/admin/compact` swap `DIR` under
+  that same lock (`Graph::restore_in_place`, `Graph::vacuum`), and a swap renames `DIR`, so it
+  needs `DIR.lock`: with `--persist` at a volume root on a read-only root filesystem (`/data`,
+  whose `DIR.lock` would go in `/`) the server starts and keeps one writer through the inside
+  lock, but those two endpoints are refused with an error naming the parent; point `--persist`
+  at a subdirectory (`/data/store`) to have both. Never delete either lock file as stale while
+  `DIR` may be in use.
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with
   `--features backup` to mount the WRITE-gated, POST-only `/admin/backup` (stream a
   self-describing snapshot artifact of the live store WITHOUT stopping the world) and

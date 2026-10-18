@@ -135,9 +135,9 @@ fn triples(graph: &Graph) -> BTreeSet<(String, String, String)> {
         .iter_ids()
         .map(|[subject, predicate, object]| {
             (
-                graph.dict.term(subject).to_string(),
-                graph.dict.term(predicate).to_string(),
-                graph.dict.term(object).to_string(),
+                graph.dict().term(subject).to_string(),
+                graph.dict().term(predicate).to_string(),
+                graph.dict().term(object).to_string(),
             )
         })
         .collect()

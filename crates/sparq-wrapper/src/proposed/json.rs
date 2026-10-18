@@ -249,13 +249,13 @@ fn outgoing(graph: &Graph, focus: &Term) -> BTreeMap<String, Vec<Term>> {
     let Some(focus) = graph.id_of(focus) else {
         return edges;
     };
-    let scan = graph.store.scan(&[Some(focus), None, None]);
+    let scan = graph.store().scan(&[Some(focus), None, None]);
     for row in scan.rows.iter() {
         let triple = scan.to_spo(row);
         edges
-            .entry(term_id(&graph.dict.term(triple[1])))
+            .entry(term_id(&graph.dict().term(triple[1])))
             .or_default()
-            .push(graph.dict.term(triple[2]));
+            .push(graph.dict().term(triple[2]));
     }
     for objects in edges.values_mut() {
         objects.sort_by_cached_key(ToString::to_string);

@@ -124,7 +124,7 @@ fn all_dict_build_paths_agree_on_bench_suite() {
     // Identical sizes (same dedup, same distinct-term count) ...
     for (name, g) in &stores[1..] {
         assert_eq!(g.len(), serial.len(), "{name}: triple count differs from serial reference");
-        assert_eq!(g.dict.len(), serial.dict.len(), "{name}: dict size differs from serial reference");
+        assert_eq!(g.dict().len(), serial.dict().len(), "{name}: dict size differs from serial reference");
     }
     // ... identical term-level content ...
     let reference = canon_triples(&serial);

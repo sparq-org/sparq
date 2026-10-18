@@ -862,6 +862,301 @@ fn recompress_same_src_dst_exits_2() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The same directory spelled differently (a trailing slash, a `..` detour) is still the same
+/// directory: refused before anything is written, never recompressed over itself.
+#[test]
+fn recompress_same_dir_by_another_spelling_exits_2() {
+    let dir = scratch("err-recompress-alias");
+    let src = dir.join("src");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&src)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let before = std::fs::read(src.join("perm0.bin")).unwrap();
+    for alias in [
+        format!("{}/", src.display()),
+        dir.join("src").join("..").join("src").display().to_string(),
+    ] {
+        let (code, _stdout, stderr) = run3(&["recompress", s(&src), &alias]);
+        assert_eq!(code, 2, "{alias}: stderr: {stderr}");
+        assert!(stderr.contains("dirs must differ"), "stderr: {stderr}");
+    }
+    assert_eq!(
+        std::fs::read(src.join("perm0.bin")).unwrap(),
+        before,
+        "the source was rewritten"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An output file inside a graph store (here over a store's own `perm0.bin`) is refused
+/// before anything is computed or written: a store's files belong to the graph holding it.
+#[test]
+fn reason_output_inside_a_store_exits_2() {
+    let dir = scratch("err-reason-into-store");
+    let store = dir.join("store");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let perm = store.join("perm0.bin");
+    let before = std::fs::read(&perm).unwrap();
+    for out in [perm.clone(), store.join("named").join("new.nt")] {
+        let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&out)]);
+        assert_eq!(code, 2, "{}: stderr: {stderr}", out.display());
+        assert!(stderr.contains("inside a graph store"), "stderr: {stderr}");
+    }
+    assert_eq!(
+        std::fs::read(&perm).unwrap(),
+        before,
+        "the store's file was written"
+    );
+    assert!(
+        !store.join("named").exists(),
+        "a directory was created inside the store"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An output path that leads into a store by a link never writes into it. A hard link to a
+/// store's file (which no check of the path can tell from any other file) is replaced by the
+/// output, never written through; a symbolic link that does not resolve is refused, never
+/// checked as spelled.
+#[cfg(all(unix, feature = "mmap"))]
+#[test]
+fn reason_output_through_a_link_never_writes_into_a_store() {
+    let dir = scratch("err-reason-link-into-store");
+    let store = dir.join("store");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let perm = store.join("perm0.bin");
+    let before = std::fs::read(&perm).unwrap();
+
+    let hard = dir.join("hard.nt");
+    std::fs::hard_link(&perm, &hard).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&hard)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        std::fs::read(&perm).unwrap(),
+        before,
+        "the store's file was written through"
+    );
+    assert!(std::fs::read_to_string(&hard)
+        .unwrap()
+        .contains("<http://ex/s>"));
+
+    let dangling = dir.join("dangling.nt");
+    std::os::unix::fs::symlink(store.join("new.nt"), &dangling).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&dangling)]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        !store.join("new.nt").exists(),
+        "a file was created inside the store"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An output never replaces a store's lock file or a name a store reserves beside itself (a
+/// swap's staging sibling, a marker, scratch), and never a symbolic link inside a store, even
+/// one pointing outside it: replacing a live store's `<dir>.lock` would hand its lock to the
+/// next opener while the holder still writes.
+#[cfg(feature = "mmap")]
+#[test]
+fn an_output_never_replaces_a_stores_lock_or_reserved_names() {
+    let dir = scratch("err-reason-reserved");
+    let store = dir.join("g");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let lock = dir.join("g.lock");
+    assert!(
+        lock.is_file(),
+        "the save left no lock file beside the store"
+    );
+    let lock_before = std::fs::read(&lock).unwrap();
+    for name in [
+        "g.lock",
+        "g.compact-new",
+        "g.compact-old",
+        "named.drop-new",
+        "sparq-store",
+        "sparq-staging",
+        ".sparq-build-0",
+    ] {
+        let out = dir.join(name);
+        let existed = out.exists();
+        let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&out)]);
+        assert_eq!(code, 2, "{name}: stderr: {stderr}");
+        assert_eq!(out.exists(), existed, "{name} was created");
+    }
+    assert_eq!(
+        std::fs::read(&lock).unwrap(),
+        lock_before,
+        "the lock file changed"
+    );
+    // The lock file of any directory (a store may be created there).
+    std::fs::create_dir(dir.join("plain")).unwrap();
+    let (code, _stdout, stderr) = run3(&[
+        "reason",
+        s(&ttl),
+        "turtle",
+        "rdfs",
+        s(&dir.join("plain.lock")),
+    ]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(!dir.join("plain.lock").exists());
+    // A `.lock` name with nothing beside it is an ordinary output.
+    let (code, _stdout, stderr) = run3(&[
+        "reason",
+        s(&ttl),
+        "turtle",
+        "rdfs",
+        s(&dir.join("out.lock")),
+    ]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let lock_ino = std::fs::metadata(&lock).unwrap().ino();
+        // A link inside the store pointing out of it, and a link outside pointing at the lock.
+        let outside = dir.join("outside.nt");
+        std::fs::write(&outside, b"outside").unwrap();
+        let inner = store.join("link.nt");
+        std::os::unix::fs::symlink(&outside, &inner).unwrap();
+        let to_lock = dir.join("to-lock.nt");
+        std::os::unix::fs::symlink(&lock, &to_lock).unwrap();
+        for out in [&inner, &to_lock] {
+            let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(out)]);
+            assert_eq!(code, 2, "{}: stderr: {stderr}", out.display());
+            assert!(out.symlink_metadata().unwrap().file_type().is_symlink());
+        }
+        assert_eq!(
+            std::fs::read(&outside).unwrap(),
+            b"outside",
+            "written through a link inside the store"
+        );
+        assert_eq!(
+            std::fs::metadata(&lock).unwrap().ino(),
+            lock_ino,
+            "the lock file was replaced"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `reason … /dev/stdout > out.nt` (the documented way to stream the closure into a file):
+/// `/dev/stdout` is a link to the process's standard output, which is written through, never
+/// replaced; the closure ends up in the file the shell redirected stdout to.
+#[cfg(unix)]
+#[test]
+fn reason_to_dev_stdout_redirected_to_a_file_writes_the_file() {
+    let dir = scratch("reason-stdout-file");
+    let data = write(&dir, "data.nt", NT);
+    let out = dir.join("out.nt");
+    let file = std::fs::File::create(&out).unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_sparq-cli"))
+        .args(["reason", s(&data), "ntriples", "rdfs", "/dev/stdout"])
+        .stdout(file)
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let written = std::fs::read_to_string(&out).unwrap();
+    assert!(!written.is_empty() && written.lines().all(|l| l.ends_with(" .")), "{written:?}");
+    #[cfg(target_os = "linux")]
+    assert!(
+        std::path::Path::new("/dev/stdout").symlink_metadata().unwrap().file_type().is_symlink(),
+        "/dev/stdout was replaced"
+    );
+    let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left.len(), 2, "left {left:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An output to a symbolic link replaces the file the link leads to; the link stays a link.
+#[cfg(unix)]
+#[test]
+fn an_output_to_a_symbolic_link_replaces_its_target() {
+    let dir = scratch("reason-out-link");
+    let data = write(&dir, "data.nt", NT);
+    std::fs::create_dir_all(dir.join("real")).unwrap();
+    let target = dir.join("real").join("closure.nt");
+    std::fs::write(&target, b"old").unwrap();
+    let link = dir.join("closure.nt");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&data), "ntriples", "rdfs", s(&link)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink(), "the link was replaced");
+    let written = std::fs::read_to_string(&target).unwrap();
+    assert!(written.contains(" ."), "{written}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A store's lock file is refused as an output in any case (`g.LOCK` on a case-insensitive
+/// filesystem is `g.lock`).
+#[cfg(feature = "mmap")]
+#[test]
+fn an_output_never_replaces_a_lock_file_named_in_another_case() {
+    let dir = scratch("reason-out-case");
+    let data = write(&dir, "data.nt", NT);
+    let store = dir.join("g");
+    let (rc, _o, e) = run3(&["save", s(&data), "ntriples", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    for name in ["g.LOCK", "g.Lock", "SPARQ-STORE"] {
+        let out = dir.join(name);
+        let (code, _stdout, stderr) = run3(&["reason", s(&data), "ntriples", "rdfs", s(&out)]);
+        assert_eq!(code, 2, "{name}: stderr: {stderr}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An output that replaces an existing regular file keeps that file's permissions.
+#[cfg(unix)]
+#[test]
+fn reason_output_keeps_the_mode_of_the_file_it_replaces() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("reason-out-mode");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let out = dir.join("out.nt");
+    std::fs::write(&out, b"old").unwrap();
+    std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&out)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let written = std::fs::read_to_string(&out).unwrap();
+    assert!(written.contains("<http://ex/s>"), "{written}");
+    let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o640, "the replaced file's mode was {mode:o}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `probe-compress` maps a store's permutation file only under the store's lock: refused while
+/// the store is open for writing, fine once it is not.
+#[cfg(feature = "mmap")]
+#[test]
+fn probe_compress_maps_a_store_file_under_its_lock() {
+    let dir = scratch("probe-compress-lock");
+    let store = dir.join("store");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let perm = store.join("perm0.bin");
+    let held = sparq_core::Graph::open(&store).unwrap();
+    let (code, _stdout, stderr) = run3(&["probe-compress", s(&perm)]);
+    assert_ne!(
+        code, 0,
+        "mapped a store's file while its store was open: {stderr}"
+    );
+    drop(held);
+    let (code, _stdout, stderr) = run3(&["probe-compress", s(&perm)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---------------------------------------------------------------------------
 // Algebra-rewrite pass is LIT in this binary (sq-7d3dj.30.13)
 // ---------------------------------------------------------------------------

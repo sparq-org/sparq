@@ -1088,6 +1088,46 @@ mod tests {
         store(st, &record, false, &[], touch).await.unwrap();
     }
 
+    /// A start over a store whose index other processes may write changes nothing: no root, no
+    /// recovery, and the start fails.
+    #[tokio::test]
+    async fn a_start_over_a_shared_index_changes_nothing() {
+        let store = FlakyStore::new();
+        store.shared.store(true, Ordering::SeqCst);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let refused = LwsState::new(store.clone(), cfg.clone())
+            .await
+            .err()
+            .expect("refused");
+        assert!(refused.contains("cannot be served"), "{refused}");
+        assert!(!store.exists(&cfg.storage()).await.unwrap(), "the root was written");
+        store.shared.store(false, Ordering::SeqCst);
+        LwsState::new(store, cfg).await.expect("starts");
+    }
+
+    /// The HTTP SPARQL backend (a remote index other processes may write) is refused before the
+    /// start touches the store: the endpoint gets no request at all, so no recovery, hold or
+    /// intent path has run.
+    #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn a_start_over_the_http_backend_sends_it_nothing() {
+        use crate::store::{CompositeStore, HttpSparqClient, InMemoryBlobStore};
+        let endpoint = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        endpoint.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/sparql", endpoint.local_addr().unwrap());
+        let store = CompositeStore::new(HttpSparqClient::new(url), InMemoryBlobStore::new());
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let refused = LwsState::new(store, cfg).await.err().expect("refused");
+        assert!(refused.contains("cannot be served"), "{refused}");
+        assert_eq!(
+            endpoint.accept().err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::WouldBlock),
+            "the endpoint was contacted"
+        );
+    }
+
     /// Review finding: recovery set aside what it could not yet put back, in tasks that outlived
     /// a start that then failed on a later intent, and could put an old state back over writes
     /// made after a later start. Every intent is read before anything is settled or started.

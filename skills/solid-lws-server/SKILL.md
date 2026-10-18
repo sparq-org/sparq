@@ -705,7 +705,17 @@ What the server exposes, all discoverable from the storage description
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
-  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
+  storage is served by one process at a time. The LWS service starts only over a store whose
+  index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
+  whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
+  by the graph on its actor's thread). If that thread panics the graph, and with it the lock,
+  is dropped, and every later store call fails (`5xx`): the index is never used without the
+  lock. Over any other index (a remote SPARQL endpoint, or a store that does not say; the wasm
+  host's persistent store does not say) the start fails before anything is read or written.
+  The lock is `<dir>.lock` beside the index directory, when it exists or can be created, and
+  `sparq.lock` inside it; an index directory whose parent is not writable is held by the inside
+  lock alone and serves, but cannot be compacted. A graph a failed compaction froze is reported
+  as a failed store call (`5xx`), never served: restart to re-open the directory. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees

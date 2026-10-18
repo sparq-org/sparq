@@ -50,12 +50,15 @@ fn emit(case: &str, warm_perms: usize, rep: usize, generation: usize, row: Sampl
 
 fn prime(graph: &Graph, permutations: usize) {
     let pattern = [
-        Some(graph.dict.lookup(&iri("urn:s:49999"))),
-        Some(graph.dict.lookup(&iri("urn:p:0"))),
-        Some(graph.dict.lookup(&iri("urn:o:49999"))),
+        Some(graph.dict().lookup(&iri("urn:s:49999"))),
+        Some(graph.dict().lookup(&iri("urn:p:0"))),
+        Some(graph.dict().lookup(&iri("urn:o:49999"))),
     ];
     for &perm in &Perm::ALL[..permutations] {
-        assert_eq!(graph.store.scan_perm(&pattern, perm).unwrap().rows.len(), 1);
+        assert_eq!(
+            graph.store().scan_perm(&pattern, perm).unwrap().rows.len(),
+            1
+        );
     }
 }
 
@@ -85,7 +88,7 @@ fn check_multi(graph: &Graph) {
 
 pub(super) fn run_all() {
     let pristine = base();
-    let base_heap = pristine.store.heap_bytes();
+    let base_heap = pristine.store().heap_bytes();
     let deletions = delta(D, false);
     let inserts: Vec<_> = (0..GENERATIONS)
         .map(|i| {
@@ -106,10 +109,10 @@ pub(super) fn run_all() {
         })
         .collect();
     let oracle = fork(&pristine, &deletions, false);
-    let before = oracle.store.heap_bytes();
+    let before = oracle.store().heap_bytes();
     check_multi(&oracle);
     // This records actual multi-query projection engagement outside measured forks.
-    println!("{{\"kind\":\"lifecycle_fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"deletions\":{D},\"generations\":{GENERATIONS},\"multi_query_heap_delta\":{},\"counting\":{},\"setup_process_peak_rss_bytes\":{}}}", oracle.store.heap_bytes()-before,cfg!(feature="count-alloc"),rss());
+    println!("{{\"kind\":\"lifecycle_fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"deletions\":{D},\"generations\":{GENERATIONS},\"multi_query_heap_delta\":{},\"counting\":{},\"setup_process_peak_rss_bytes\":{}}}", oracle.store().heap_bytes()-before,cfg!(feature="count-alloc"),rss());
     drop(oracle);
     let cases = [
         ("snapshot", 1),
@@ -132,7 +135,7 @@ pub(super) fn run_all() {
             } else if warm_perms > 0 {
                 prime(&initial, warm_perms);
             }
-            let initial_heap = initial.store.heap_bytes() - base_heap;
+            let initial_heap = initial.store().heap_bytes() - base_heap;
             let mut records = [Sample::default(); GENERATIONS];
             let count = if matches!(case, "multi-cold" | "multi-warm" | "concurrent-cold") {
                 1
@@ -201,14 +204,14 @@ pub(super) fn run_all() {
                     [cloned, delta, read]
                 });
                 sample.initial_heap = initial_heap;
-                sample.retained_heap = initial.store.heap_bytes() - base_heap
+                sample.retained_heap = initial.store().heap_bytes() - base_heap
                     + generations
                         .iter()
-                        .map(|g| g.store.heap_bytes() - base_heap)
+                        .map(|g| g.store().heap_bytes() - base_heap)
                         .sum::<usize>()
                     + snapshots
                         .iter()
-                        .map(|g| g.store.heap_bytes() - base_heap)
+                        .map(|g| g.store().heap_bytes() - base_heap)
                         .sum::<usize>();
                 records[generation] = sample;
             }
@@ -216,14 +219,14 @@ pub(super) fn run_all() {
             for (i, graph) in generations.iter().enumerate() {
                 check_query(graph);
                 assert_eq!(
-                    graph.store.len(),
+                    graph.store().len(),
                     SUBJECTS * PREDICATES - D + if case == "fork-insert" { i + 1 } else { 0 }
                         - if case == "fork-tombstone" { i + 1 } else { 0 }
                 );
             }
             for graph in &snapshots {
                 check_query(graph);
-                assert_eq!(graph.store.len(), SUBJECTS * PREDICATES - D);
+                assert_eq!(graph.store().len(), SUBJECTS * PREDICATES - D);
             }
             if rep >= 2 {
                 for (generation, &record) in records[..count].iter().enumerate() {
@@ -238,7 +241,7 @@ pub(super) fn run_all() {
 /// decision: fixed deletion lineage, varying only reads per retained generation.
 pub(super) fn run_reads() {
     let pristine = base();
-    let base_heap = pristine.store.heap_bytes();
+    let base_heap = pristine.store().heap_bytes();
     let deletions = delta(D, false);
     let tombstones: Vec<_> = (0..GENERATIONS)
         .map(|i| {
@@ -262,7 +265,7 @@ pub(super) fn run_reads() {
         for rep in 0..reps + 2 {
             let initial = fork(&pristine, &deletions, false);
             prime(&initial, 6);
-            let initial_heap = initial.store.heap_bytes() - base_heap;
+            let initial_heap = initial.store().heap_bytes() - base_heap;
             let mut generations: Vec<Graph> = Vec::with_capacity(GENERATIONS);
             let mut records = [Sample::default(); GENERATIONS];
             for generation in 0..GENERATIONS {
@@ -284,20 +287,20 @@ pub(super) fn run_reads() {
                 sample.retained_heap = initial_heap
                     + generations
                         .iter()
-                        .map(|g| g.store.heap_bytes() - base_heap)
+                        .map(|g| g.store().heap_bytes() - base_heap)
                         .sum::<usize>();
                 records[generation] = sample;
             }
             for (generation, graph) in generations.iter().enumerate() {
                 check_query(graph);
                 assert_eq!(
-                    graph.store.len(),
+                    graph.store().len(),
                     SUBJECTS * PREDICATES - D - generation - 1
                 );
                 for (i, tombstone) in tombstones.iter().enumerate() {
-                    let pattern = tombstone.clone().map(|t| Some(graph.dict.lookup(&t)));
+                    let pattern = tombstone.clone().map(|t| Some(graph.dict().lookup(&t)));
                     assert_eq!(
-                        graph.store.scan(&pattern).rows.len(),
+                        graph.store().scan(&pattern).rows.len(),
                         usize::from(i > generation)
                     );
                 }

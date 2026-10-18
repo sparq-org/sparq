@@ -1048,12 +1048,12 @@ fn assemble_response(
     loop {
         let before = (prov.len(), seeds.len());
         for [si, pi, oi] in holder.iter_ids() {
-            let s = holder.dict.term(si);
+            let s = holder.dict().term(si);
             if !seeds.contains(&s.to_string()) {
                 continue;
             }
-            let p = holder.dict.term(pi);
-            let o = holder.dict.term(oi);
+            let p = holder.dict().term(pi);
+            let o = holder.dict().term(oi);
             if prov.insert(format!("{} {} {} .", s, p, o))
                 && matches!(&p, Term::NamedNode(n) if n.as_str() == TRUSTX_COVERED_BY)
             {

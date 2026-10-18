@@ -1048,9 +1048,9 @@ mod tests {
         g.iter_ids()
             .map(|spo| {
                 [
-                    g.dict.term(spo[0]).to_string(),
-                    g.dict.term(spo[1]).to_string(),
-                    g.dict.term(spo[2]).to_string(),
+                    g.dict().term(spo[0]).to_string(),
+                    g.dict().term(spo[1]).to_string(),
+                    g.dict().term(spo[2]).to_string(),
                 ]
             })
             .collect()

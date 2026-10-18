@@ -55,7 +55,7 @@ impl CompletionIndex {
     /// Builds a completion index for `graph` without adding dependencies to a ranker.
     pub fn build(graph: &Graph) -> Self {
         let mut index = Self::default();
-        for (id, parts) in graph.dict.iter() {
+        for (id, parts) in graph.dict().iter() {
             if let TermParts::Iri { prefix, suffix } = parts {
                 index.insert_iri(id, prefix, suffix);
             }
@@ -67,15 +67,15 @@ impl CompletionIndex {
                 continue;
             };
             let predicate_id = pattern[1].expect("predicate-bound pattern");
-            let scan = graph.store.scan(&pattern);
+            let scan = graph.store().scan(&pattern);
             for row in scan.rows.iter() {
                 let [subject, _, object] = scan.to_spo(row);
-                if let TermParts::Lit { value, .. } = graph.dict.term_parts(object) {
+                if let TermParts::Lit { value, .. } = graph.dict().term_parts(object) {
                     index.insert(subject, value, CandidateKind::Label(predicate_id));
                 }
             }
         }
-        index.indexed_dict_len = graph.dict.len();
+        index.indexed_dict_len = graph.dict().len();
         index
     }
 
@@ -131,17 +131,17 @@ impl CompletionIndex {
                 CandidateKind::Label(predicate_id),
             );
         }
-        self.indexed_dict_len = graph.dict.len();
+        self.indexed_dict_len = graph.dict().len();
     }
 
     /// Whether this index has observed the graph's current dictionary length.
     pub fn is_consistent_with(&self, graph: &Graph) -> bool {
-        self.indexed_dict_len == graph.dict.len()
+        self.indexed_dict_len == graph.dict().len()
     }
 
     /// Whether a shorter dictionary makes append-only reconciliation unsafe.
     pub fn needs_rebuild(&self, graph: &Graph) -> bool {
-        graph.dict.len() < self.indexed_dict_len
+        graph.dict().len() < self.indexed_dict_len
     }
 
     /// Indexes completion data introduced since the previous dictionary watermark.
@@ -171,25 +171,25 @@ impl CompletionIndex {
                 continue;
             };
             let predicate_id = pattern[1].expect("predicate-bound pattern");
-            let scan = graph.store.scan(&pattern);
+            let scan = graph.store().scan(&pattern);
             for row in scan.rows.iter() {
                 let [subject, _, object] = scan.to_spo(row);
                 if subject as usize <= old_watermark && object as usize <= old_watermark {
                     continue;
                 }
-                if let TermParts::Lit { value, .. } = graph.dict.term_parts(object) {
+                if let TermParts::Lit { value, .. } = graph.dict().term_parts(object) {
                     self.insert(subject, value, CandidateKind::Label(predicate_id));
                 }
             }
         }
-        self.indexed_dict_len = graph.dict.len();
+        self.indexed_dict_len = graph.dict().len();
         self.len() - before
     }
 
     fn index_appended_iris(&mut self, graph: &Graph, old_watermark: usize) {
-        for i in old_watermark..graph.dict.len() {
+        for i in old_watermark..graph.dict().len() {
             let id = (i + 1) as Id;
-            if let TermParts::Iri { prefix, suffix } = graph.dict.term_parts(id) {
+            if let TermParts::Iri { prefix, suffix } = graph.dict().term_parts(id) {
                 self.insert_iri(id, prefix, suffix);
             }
         }

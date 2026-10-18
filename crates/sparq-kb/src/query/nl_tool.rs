@@ -457,7 +457,7 @@ pub fn nearest_known(graph: &Graph, iri: &str) -> Vec<String> {
     let prefix = &iri[..=split];
     let suffix = &iri[split + 1..];
     let mut scored: Vec<(usize, String)> = Vec::new();
-    for (_, parts) in graph.dict.iter() {
+    for (_, parts) in graph.dict().iter() {
         if let TermParts::Iri {
             prefix: p,
             suffix: s,

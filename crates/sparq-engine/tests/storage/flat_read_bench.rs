@@ -72,8 +72,8 @@ fn flat_read_hot_paths() {
     for i in 0..probes {
         let sid = subj_ids[i % subj_ids.len()];
         let pat = [Some(sid), None, None];
-        found += g.store.estimate(&pat);
-        let scan = g.store.scan(&pat);
+        found += g.store().estimate(&pat);
+        let scan = g.store().scan(&pat);
         found += scan.rows.len();
     }
     let probe = t.elapsed();
@@ -91,8 +91,8 @@ fn flat_read_hot_paths() {
     // dict term materialisation (result-serialisation shape).
     let t = Instant::now();
     let mut bytes = 0usize;
-    for id in 1..=(g.dict.len() as Id) {
-        bytes += g.dict.term(id).to_string().len();
+    for id in 1..=(g.dict().len() as Id) {
+        bytes += g.dict().term(id).to_string().len();
     }
     let dict_t = t.elapsed();
     eprintln!("dict terms:   {dict_t:?} ({bytes} bytes)");
