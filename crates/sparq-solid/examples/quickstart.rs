@@ -41,7 +41,7 @@ fn main() -> Result<(), String> {
 
     // 4. The auth view is plain triples — query it directly.
     let who = sparq_engine::query(
-        &store.graph,
+        store.graph(),
         "SELECT (COUNT(*) AS ?grants) WHERE { GRAPH <urn:sparq:auth> {
            ?principal <https://sparq.dev/ns/auth#read> ?graph } }",
     )?;

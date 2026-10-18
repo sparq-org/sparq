@@ -55,6 +55,8 @@ env:
 
 jobs:
   test:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: maturin build + pytest
     runs-on: ubuntu-latest
     steps:
@@ -98,6 +100,8 @@ jobs:
         run: pytest crates/sparq-py/tests -q -m "not bench"
 
   arrow:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     # sq-lt1ml (gh-910): the opt-in Arrow export lane. Builds the wheel WITH
     # `--features arrow` (the `Graph.query_arrow -> pyarrow.Table` surface), installs
     # pyarrow (the consumer side of the Arrow C Data Interface), and runs the arrow-only

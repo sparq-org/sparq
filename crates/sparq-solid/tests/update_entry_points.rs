@@ -14,14 +14,16 @@ const NOTE: &str = "https://pod.ex/notes/n1";
 
 type Entry = fn(&mut PodStore, &Session, &str) -> Result<(), String>;
 
-/// Every public update entry point, by name.
-const ENTRY_POINTS: &[(&str, Entry)] = &[
-    ("update_as", |p, s, q| p.update_as(s, q)),
-    ("update_as_acp", |p, s, q| p.update_as_acp(s, q)),
-    ("update_as_with_budget", |p, s, q| {
+/// Every public update entry point, by name, with the access-control model it names (a
+/// store's view is materialized under that model before the entry point is driven: an entry
+/// point rebuilds under the model it names, and the store refuses the other one).
+const ENTRY_POINTS: &[(&str, bool, Entry)] = &[
+    ("update_as", false, |p, s, q| p.update_as(s, q)),
+    ("update_as_acp", true, |p, s, q| p.update_as_acp(s, q)),
+    ("update_as_with_budget", false, |p, s, q| {
         p.update_as_with_budget(s, q, &QueryBudget::unlimited())
     }),
-    ("update_as_acp_with_budget", |p, s, q| {
+    ("update_as_acp_with_budget", true, |p, s, q| {
         p.update_as_acp_with_budget(s, q, &QueryBudget::unlimited())
     }),
 ];
@@ -81,12 +83,44 @@ fn fixture() -> String {
     for m in ["Read", "Write"] {
         nq += &rule(bob, "own", &format!("{ACL}mode"), &format!("{ACL}{m}"));
     }
+    nq += &acrs();
     nq
 }
 
-fn store() -> PodStore {
+const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+
+/// The same grants as the `.acl` documents above, stated as `.acr` documents, so one fixture
+/// serves an entry point of either model.
+fn acrs() -> String {
+    let mut nq = String::new();
+    for (acr, grants) in [
+        (
+            "https://pod.ex/.acr",
+            &[(ADMIN, &["Read", "Write", "Control"][..]), (ALICE, &["Read"][..])][..],
+        ),
+        ("https://pod.ex/bob/.acr", &[(BOB, &["Read", "Write"][..])][..]),
+    ] {
+        nq += &format!("<{acr}> <{ACP}memberAccessControl> <{acr}#c> <{acr}> .\n");
+        nq += &format!("<{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n");
+        for (i, (agent, modes)) in grants.iter().enumerate() {
+            nq += &format!("<{acr}#c> <{ACP}apply> <{acr}#p{i}> <{acr}> .\n");
+            nq += &format!("<{acr}#p{i}> <{ACP}anyOf> <{acr}#m{i}> <{acr}> .\n");
+            nq += &format!("<{acr}#m{i}> <{ACP}agent> <{agent}> <{acr}> .\n");
+            for m in *modes {
+                nq += &format!("<{acr}#p{i}> <{ACP}allow> <{ACL}{m}> <{acr}> .\n");
+            }
+        }
+    }
+    nq
+}
+
+fn store(acp: bool) -> PodStore {
     let mut s = PodStore::new(Graph::load_dataset(&fixture(), "nquads").expect("fixture loads"));
-    s.materialize_wac().expect("wac materializes");
+    if acp {
+        s.materialize_acp().expect("acp materializes");
+    } else {
+        s.materialize_wac().expect("wac materializes");
+    }
     s
 }
 
@@ -98,7 +132,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 
 fn graph_len(store: &PodStore, name: &str) -> usize {
     store
-        .graph
+        .graph()
         .named
         .iter()
         .find(|(n, _)| matches!(n, oxrdf::Term::NamedNode(n) if n.as_str() == name))
@@ -109,7 +143,7 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
 /// fork, so what it wrote was lost at the next open. Every entry point commits to the store.
 #[test]
 fn every_entry_point_persists_what_it_writes() {
-    for (i, (name, entry)) in ENTRY_POINTS.iter().enumerate() {
+    for (i, (name, acp, entry)) in ENTRY_POINTS.iter().enumerate() {
         let dir = tmp(&format!("persist{i}"));
         Graph::load_dataset(&fixture(), "nquads")
             .unwrap()
@@ -118,7 +152,11 @@ fn every_entry_point_persists_what_it_writes() {
         let triple = format!("<{NOTE}#it> <https://ex.dev/ns#via> \"{name}\"");
         {
             let mut store = PodStore::new(Graph::open(&dir).unwrap());
-            store.materialize_wac().unwrap();
+            if *acp {
+                store.materialize_acp().unwrap();
+            } else {
+                store.materialize_wac().unwrap();
+            }
             let before = graph_len(&store, NOTE);
             entry(
                 &mut store,
@@ -148,8 +186,8 @@ fn every_entry_point_authorizes_what_the_update_wrote() {
         <https://pod.ex/bob/b1#it> <https://ex.dev/ns#ptr> <https://pod.ex/.acl> } } ; \
         INSERT { GRAPH ?g { <https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> } } \
         WHERE { GRAPH <https://pod.ex/bob/b1> { <https://pod.ex/bob/b1#it> <https://ex.dev/ns#ptr> ?g } }";
-    for (name, entry) in ENTRY_POINTS {
-        let mut store = store();
+    for (name, acp, entry) in ENTRY_POINTS {
+        let mut store = store(*acp);
         let rules = graph_len(&store, "https://pod.ex/.acl");
         let bobs = graph_len(&store, "https://pod.ex/bob/b1");
         let err = entry(&mut store, &sess(BOB), attack).expect_err(name);
@@ -167,8 +205,8 @@ fn every_entry_point_authorizes_what_the_update_wrote() {
 fn every_wac_entry_point_rebuilds_the_view_it_changes() {
     let revoke = "DELETE DATA { GRAPH <https://pod.ex/.acl> { \
         <https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> } }";
-    for (name, entry) in ENTRY_POINTS.iter().filter(|(n, _)| !n.contains("acp")) {
-        let mut store = store();
+    for (name, acp, entry) in ENTRY_POINTS.iter().filter(|(n, _, _)| !n.contains("acp")) {
+        let mut store = store(*acp);
         assert!(reads(&store, ALICE, NOTE), "{name}");
         entry(&mut store, &sess(ADMIN), revoke).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(

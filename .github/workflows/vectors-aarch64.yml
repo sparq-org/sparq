@@ -114,6 +114,8 @@ env:
 
 jobs:
   neon:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: sparq-vectors tests (aarch64/NEON)
     # GitHub-hosted aarch64 Linux runner — the EXACT label build-matrix.yml's `arm64-linux`
     # release tier and gui.yml's `arm64-linux` row already use, so this lane cannot drift onto

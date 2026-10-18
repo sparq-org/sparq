@@ -55,7 +55,7 @@ fn materialization_preserves_pss_written_contains_verbatim() {
     let mut store = PodStore::new(g);
     store.materialize_wac().expect("wac materializes");
 
-    let after = all_contains(&store.graph);
+    let after = all_contains(store.graph());
     assert_eq!(
         before, after,
         "ldp:contains is PSS-written content; materialization must not add, drop, or move any"
@@ -72,7 +72,7 @@ fn no_contains_is_derived_into_the_auth_view() {
     store.materialize_wac().expect("wac materializes");
 
     let derived = rows(
-        &store.graph,
+        store.graph(),
         &format!("SELECT ?s ?o WHERE {{ GRAPH <{AUTH_GRAPH}> {{ ?s <{LDP_CONTAINS}> ?o }} }}"),
     );
     assert_eq!(
@@ -90,7 +90,7 @@ fn contains_lives_only_in_pss_content_graphs() {
     let mut store = PodStore::new(g);
     store.materialize_wac().expect("wac materializes");
 
-    for (s, _o, graph) in all_contains(&store.graph) {
+    for (s, _o, graph) in all_contains(store.graph()) {
         assert!(
             !graph.contains("urn:sparq:"),
             "ldp:contains for {s} leaked into a reserved sparq graph ({graph}); \
