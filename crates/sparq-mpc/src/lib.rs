@@ -436,7 +436,8 @@ pub use federated_binding::{
 pub use oblivious_join::{
     oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys,
     oblivious_set_output_to_recipient, Candidate, MatchBit, ObliviousOutput, ObliviousOutputCost,
-    OutputSlot, RecipientOutputShares, MAX_OUTPUT_BOUND,
+    OutputSlot, RecipientOutputShares, MAX_OUTPUT_BOUND, MAX_PAYLOAD_ARITY,
+    MAX_PAYLOAD_TERM_BYTES, MAX_SLOT_LIMBS, MAX_SLOT_WORK,
 };
 pub use rng::{MpcRng, SecureRng};
 // sq-yyro: the dealer-less correlated-randomness seam surface.

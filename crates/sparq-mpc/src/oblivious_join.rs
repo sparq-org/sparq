@@ -127,9 +127,9 @@
 //!   opens, in [`ObliviousOutputCost::payload_select_mults`] and in the shuffle's
 //!   switch count. The maximum is taken over ALL candidates, the rejected ones
 //!   included, so the width is an upper bound on the length of a candidate
-//!   encoding and does not say which candidate reached it. A caller-agreed public
-//!   width bound, failing closed above it, is a follow-up; this stage does not
-//!   have one.
+//!   encoding and does not say which candidate reached it. The width is now
+//!   BOUNDED, failing closed above its cap — see the width-cap section below — but
+//!   bounding it does not hide it: a public width is still public.
 //! - Malicious security is unchanged from the Shamir layer. The opens themselves
 //!   carry the degree-`t` sharing's own RS redundancy: `n` points on a degree-`t`
 //!   polynomial leave `n - t - 1` redundant shares, which at `n = 2t + 1` is `t`,
@@ -155,6 +155,38 @@
 //!   well-formed degree-`t` sharing of a different value that no open can flag, so
 //!   the protocol stays **semi-honest only** (research record §4.1 D×A; bead
 //!   sq-6d6g IT-MAC is the named fix).
+//!
+//! ## The output-stage WIDTH caps — what is now bounded, and what is not
+//!
+//! The padded bound `B` has been capped ([`MAX_OUTPUT_BOUND`]) since this stage
+//! landed. The per-slot WIDTHS were not, so the following are now capped too, and
+//! every one of them is checked **before any sharing is drawn and before any slot
+//! is allocated**:
+//!
+//! - **Payload arity** — [`MAX_PAYLOAD_ARITY`]. Closed form on a public number,
+//!   ahead of everything, including the all-unbound dummy row of that arity.
+//! - **Per-term serialized byte length** — [`MAX_PAYLOAD_TERM_BYTES`], applied to
+//!   each term as it is serialized, so at most the one over-cap term is serialized
+//!   before the refusal. A term's length cannot be known without serializing it;
+//!   that is the exact ordering claim, no stronger.
+//! - **Uniform packed limb width** — [`MAX_SLOT_LIMBS`], on the width that every
+//!   slot pays a sharing, a select, a degree reduction and an open per limb for.
+//! - **Aggregate slot work `B × arity × limbs`** — [`MAX_SLOT_WORK`], in checked
+//!   `u64` arithmetic. Three individually-legal factors still multiply past what
+//!   the stage is built to run, so the PRODUCT is bounded in its own right and an
+//!   overflowing product is a refusal, not a wrapped number under the budget.
+//!
+//! Each refusal names PUBLIC quantities only: the cap, the public factors (`B`,
+//! the arity, the width) and, for the per-term cap, the public COLUMN position.
+//! No term text, no term length and no candidate index appears in any of them.
+//!
+//! **What is still NOT bounded here.** The uniform width is still decided by the
+//! longest candidate rather than agreed in advance, so a caller cannot pin the
+//! width its plan will pay before it assembles its candidates; and every slot is
+//! still padded to that width, so a single long candidate still widens the whole
+//! column (bounding the width does not make it adaptive). The number of candidates
+//! is bounded only through `B` and the producers' own ceilings, not by a cap of
+//! its own on this surface.
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
@@ -282,6 +314,128 @@ pub enum MatchBit {
 /// `check_output_bound`, never a producer's assumed maximum. A protocol guard,
 /// not a tuning knob: `B` beyond it is not a workload this stage is built to run.
 pub const MAX_OUTPUT_BOUND: usize = 1 << 18; // 262_144
+
+/// Maximum payload ARITY (number of payload columns per slot) the oblivious output
+/// stage accepts before refusing with an [`MpcError::Protocol`] error.
+///
+/// The arity is a PUBLIC schema width: every slot carries exactly this many
+/// nullable terms, the all-unbound dummy row of this arity is materialised once as
+/// the public pad every slot is selected against, and the decode walks exactly this
+/// many columns. So the guard is a closed-form check on a public number and it runs
+/// before the dummy row is built — which is what keeps a `payload_arity` of
+/// `usize::MAX` a controlled refusal instead of a `vec![None; usize::MAX]` the
+/// allocator cannot satisfy.
+///
+/// A protocol guard, not a tuning knob: the in-tree producers of candidates for
+/// this stage emit two payload columns (the endpoint pair), and a result row
+/// thousands of columns wide is not a workload this stage is built to run.
+pub const MAX_PAYLOAD_ARITY: usize = 4096;
+
+/// Maximum serialized byte length of ONE payload term before the oblivious output
+/// stage refuses with an [`MpcError::Protocol`] error.
+///
+/// A payload term is carried through the shuffle as its canonical N-Triples form
+/// (see `encode_payload_row`), so a term's byte length drives the packed limb width
+/// of EVERY slot: the width is uniform over the whole column, so one long term
+/// widens all `B` slots, each paying a sharing, a select multiplication, a degree
+/// reduction and an open per limb. The cap therefore bounds a per-term quantity
+/// that has a per-column cost.
+///
+/// ## Where the cap is applied, exactly
+///
+/// A term's serialized length cannot be known without serializing it — there is no
+/// cheaper bound on `Term::to_string()`. So the cap is applied to each term AS it
+/// is serialized (`encode_payload_row_checked`), one term at a time: at most the
+/// single over-cap term is serialized before the refusal, and no slot is
+/// allocated, no sharing is drawn and no limb is packed ahead of it. That is the
+/// honest statement of the ordering — "before any sharing or randomness draw", not
+/// "before any byte is touched".
+pub const MAX_PAYLOAD_TERM_BYTES: usize = 1 << 16; // 65_536
+
+/// Maximum uniform packed limb width (limbs per slot) the oblivious output stage
+/// accepts before refusing with an [`MpcError::Protocol`] error.
+///
+/// The width is the max over all candidates of `1 + ⌈bytes / 7⌉` (see
+/// `limb_count_for`) and is applied to every slot, real or dummy. Each limb of
+/// each slot costs one sharing, one select multiplication, one degree reduction
+/// (itself `2t + 1` re-sharings through the randomness seam), one position in the
+/// shuffle network's entry width and one degree-`t` open — so the width is the
+/// per-slot work multiplier and is bounded on its own, not only through the term
+/// cap it follows from.
+pub const MAX_SLOT_LIMBS: usize = 1 << 15; // 32_768
+
+/// Maximum aggregate slot work `B × payload_arity × limb_capacity` the oblivious
+/// output stage accepts before refusing with an [`MpcError::Protocol`] error.
+///
+/// Capping the three FACTORS does not cap their PRODUCT: a `B`, an arity and a
+/// limb width that are each individually legal multiply to an amount of sharing,
+/// selecting, reducing and opening work no combination of the three caps alone
+/// would exclude. The product is what the stage actually performs, so it is
+/// bounded in its own right, with checked arithmetic in `u64` (so the budget means
+/// the same on every target width) — an overflowing product is a refusal, never a
+/// wrapped number that would slip under the budget.
+///
+/// All three factors are PUBLIC plan quantities (`B` and the arity are given by the
+/// caller; the width is the public max over the candidate encodings), so the check
+/// and its refusal are closed form over public numbers.
+pub const MAX_SLOT_WORK: u64 = 1 << 36; // 68_719_476_736
+
+/// The payload-arity cap, callable before a candidate set or a dummy row exists.
+/// See [`MAX_PAYLOAD_ARITY`].
+pub(crate) fn check_payload_arity_cap(payload_arity: usize) -> Result<(), MpcError> {
+    if payload_arity > MAX_PAYLOAD_ARITY {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: payload arity {} exceeds the MAX_PAYLOAD_ARITY cap of {} \
+             — refusing (the arity is the public per-slot column count and the all-unbound \
+             dummy row of that arity is materialised, so it is bounded before anything is \
+             allocated or drawn)",
+            payload_arity, MAX_PAYLOAD_ARITY
+        )));
+    }
+    Ok(())
+}
+
+/// The uniform packed-limb-width cap. See [`MAX_SLOT_LIMBS`].
+pub(crate) fn check_slot_limbs_cap(limb_capacity: usize) -> Result<(), MpcError> {
+    if limb_capacity > MAX_SLOT_LIMBS {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: packed payload width {} limbs exceeds the MAX_SLOT_LIMBS \
+             cap of {} — refusing before any sharing or draw (the width is uniform over the \
+             column, so every slot pays a sharing, a select, a degree reduction and an open \
+             per limb)",
+            limb_capacity, MAX_SLOT_LIMBS
+        )));
+    }
+    Ok(())
+}
+
+/// The aggregate slot-work budget `B × payload_arity × limb_capacity`, computed
+/// with checked arithmetic. See [`MAX_SLOT_WORK`].
+pub(crate) fn check_slot_work_budget(
+    bound: usize,
+    payload_arity: usize,
+    limb_capacity: usize,
+) -> Result<(), MpcError> {
+    let work = (bound as u64)
+        .checked_mul(payload_arity as u64)
+        .and_then(|v| v.checked_mul(limb_capacity as u64));
+    match work {
+        Some(w) if w <= MAX_SLOT_WORK => Ok(()),
+        other => Err(MpcError::Protocol(format!(
+            "oblivious output stage: aggregate slot work B={} x arity={} x limbs={} is {}, \
+             exceeding the MAX_SLOT_WORK budget of {} — refusing before any sharing or draw \
+             (each of the three factors is within its own cap; their product is the work the \
+             stage performs and is bounded in its own right)",
+            bound,
+            payload_arity,
+            limb_capacity,
+            other
+                .map(|w| w.to_string())
+                .unwrap_or_else(|| "an amount that overflows u64".to_string()),
+            MAX_SLOT_WORK
+        ))),
+    }
+}
 
 /// The cap half of the fail-closed bound contract, callable before a candidate set
 /// exists — so a public entry that BUILDS its candidates (and draws while doing so)
@@ -1060,6 +1214,10 @@ fn output_stage_shuffled_through(
     // `Vec::with_capacity(bound)` below and the shuffle network are sized from it,
     // so the cap check precedes even the source check (see the contract above).
     check_output_bound(bound, candidates.len())?;
+    // Then the PUBLIC arity cap, also closed form and also ahead of the source
+    // check: the all-unbound dummy row of this arity is materialised below, so an
+    // `usize::MAX` arity must refuse before anything tries to allocate it.
+    check_payload_arity_cap(payload_arity)?;
     // A source whose (n, t) disagrees with the backend would deal sharings that do
     // not compose with the backend's products and opens.
     require_source_matches(source, backend)?;
@@ -1072,6 +1230,14 @@ fn output_stage_shuffled_through(
             )));
         }
     }
+
+    // Decide the PUBLIC packing plan — every slot's encoded bytes, the uniform limb
+    // width and the public dummy block — and apply the per-term, limb-width and
+    // aggregate slot-work caps, all BEFORE the first sharing is drawn below. The
+    // widths were previously decided inside `shuffle_with_payloads`, i.e. AFTER the
+    // per-candidate selector, real-tag and degree-reduction draws; deciding them
+    // here is what lets an over-width run refuse with zero draws.
+    let plan = SlotWidthPlan::decide(candidates, payload_arity, bound)?;
 
     let (n, t) = (backend.parties(), backend.threshold());
     // The select multiplication AND the degree reduction that re-randomises it both
@@ -1094,10 +1260,8 @@ fn output_stage_shuffled_through(
     // DEGREE-REDUCED to a fresh degree-`t` sharing of the same value before it goes
     // anywhere. The selector is kept alongside so the SAME bit can select the
     // payload limbs against the dummy encoding in step 3's payload half
-    // (`shuffle_with_payloads`); the payload itself travels co-indexed in cleartext
-    // only until it is encoded there.
+    // (`shuffle_with_payloads`); the payload's own bytes are already in `plan`.
     let mut tag_col: SecretColumn = Vec::with_capacity(bound);
-    let mut payloads: Vec<Vec<Option<Term>>> = Vec::with_capacity(bound);
     let mut selectors: Vec<Vec<Share>> = Vec::with_capacity(bound);
     let mut degree_reductions = 0usize;
 
@@ -1108,19 +1272,16 @@ fn output_stage_shuffled_through(
         let tag_out = shamir::mul_shares_raw(&sel, &real_tag_share)?;
         tag_col.push(shamir::degree_reduce_through(source, &tag_out)?);
         degree_reductions += 1;
-        payloads.push(c.payload.clone());
         selectors.push(sel);
     }
     // Pure-dummy padding slots: selector = shared 0 → tag opens to 0 → Dummy, and
     // the same shared 0 selects the payload limbs to the dummy encoding.
-    let dummy_payload: Vec<Option<Term>> = vec![None; payload_arity];
     for _ in candidates.len()..bound {
         let zero_sel = checked_vss_own_input(source, n, Fp::zero())?;
         let real_tag_share = checked_vss_own_input(source, n, real_tag)?;
         let tag_out = shamir::mul_shares_raw(&zero_sel, &real_tag_share)?;
         tag_col.push(shamir::degree_reduce_through(source, &tag_out)?);
         degree_reductions += 1;
-        payloads.push(dummy_payload.clone());
         selectors.push(zero_sel);
     }
 
@@ -1136,7 +1297,7 @@ fn output_stage_shuffled_through(
         shuffle_cost,
         payload_select_mults,
         limb_reductions,
-    ) = shuffle_with_payloads(source, n, tag_col, payloads, &selectors, payload_arity)?;
+    ) = shuffle_with_payloads(source, n, tag_col, &plan, &selectors)?;
     degree_reductions += limb_reductions;
 
     let cost = ObliviousOutputCost {
@@ -1257,6 +1418,125 @@ fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
         }
     }
     bytes
+}
+
+/// [`encode_payload_row`] with the per-term byte cap applied AS each term is
+/// serialized ([`MAX_PAYLOAD_TERM_BYTES`]).
+///
+/// Each bound column's term is serialized once and its length checked immediately,
+/// so an over-cap row refuses having serialized exactly one over-cap term and
+/// nothing else: no further column is serialized, no slot is allocated, no limb is
+/// packed and no sharing is drawn. The refusal names the cap and the public COLUMN
+/// position — the schema position is public, the term's text and its length are
+/// not, and neither appears.
+fn encode_payload_row_checked(row: &[Option<Term>]) -> Result<Vec<u8>, MpcError> {
+    let mut bytes = Vec::new();
+    for (col, cell) in row.iter().enumerate() {
+        match cell {
+            None => bytes.push(0u8),
+            Some(term) => {
+                let text = term.to_string();
+                if text.len() > MAX_PAYLOAD_TERM_BYTES {
+                    return Err(MpcError::Protocol(format!(
+                        "oblivious output stage: payload column {} holds a term longer than \
+                         the MAX_PAYLOAD_TERM_BYTES cap of {} — refusing before any sharing \
+                         or draw (the packed limb width is uniform, so one long term widens \
+                         every slot)",
+                        col, MAX_PAYLOAD_TERM_BYTES
+                    )));
+                }
+                bytes.push(1u8);
+                bytes.extend_from_slice(text.as_bytes());
+                bytes.push(0u8); // NUL terminator (never occurs inside the term)
+            }
+        }
+    }
+    Ok(bytes)
+}
+
+/// The PUBLIC packing plan for one output-stage run, decided before a single
+/// sharing is drawn: every slot's encoded byte stream, the public dummy limb block
+/// and the uniform limb width — with the arity, per-term, limb-width and aggregate
+/// slot-work caps all applied while deciding it.
+struct SlotWidthPlan {
+    /// One encoded byte stream per CANDIDATE, in candidate order.
+    candidate_encoded: Vec<Vec<u8>>,
+    /// The all-unbound row of the public arity, encoded once — the byte stream
+    /// every pure-dummy padding slot carries. Shared by reference rather than
+    /// cloned per padding slot, so the plan costs `O(candidates × arity)` and not
+    /// `O(B × arity)`: `B` is the caller's number, and materialising a row per slot
+    /// ahead of the work budget would be work the budget is supposed to gate.
+    dummy_encoded: Vec<u8>,
+    /// The public dummy limb block, padded out to [`Self::limb_capacity`], that
+    /// every slot's limbs are selected against.
+    dummy_block: Vec<Fp>,
+    /// The slot count — the padded bound `B`.
+    slots: usize,
+}
+
+impl SlotWidthPlan {
+    /// The uniform packed limb width — `0` only when there is no slot at all.
+    fn limb_capacity(&self) -> usize {
+        self.dummy_block.len()
+    }
+
+    /// Slot `i`'s encoded byte stream: its candidate's row, or the all-unbound
+    /// dummy row for a pure-dummy padding slot.
+    fn slot_bytes(&self, i: usize) -> &[u8] {
+        self.candidate_encoded
+            .get(i)
+            .map(|b| b.as_slice())
+            .unwrap_or(&self.dummy_encoded)
+    }
+
+    /// Decide the plan and apply every width cap, in this order: the PUBLIC arity
+    /// cap (closed form, nothing allocated); the per-term cap as each term is
+    /// serialized; then — once the uniform width is known, and still before any
+    /// sharing or draw — the limb-width cap and the aggregate `B × arity × limbs`
+    /// budget.
+    ///
+    /// `bound` and the per-candidate arity agreement are the caller's checks and
+    /// have already run.
+    fn decide(
+        candidates: &[Candidate],
+        payload_arity: usize,
+        bound: usize,
+    ) -> Result<Self, MpcError> {
+        check_payload_arity_cap(payload_arity)?;
+        // The all-unbound row of this arity: the public dummy encoding. Safe to
+        // materialise only because the arity cap above has already run.
+        let dummy_encoded = encode_payload_row(&vec![None; payload_arity]);
+
+        let mut candidate_encoded: Vec<Vec<u8>> = Vec::with_capacity(candidates.len());
+        for c in candidates {
+            candidate_encoded.push(encode_payload_row_checked(&c.payload)?);
+        }
+
+        // The uniform width is the max over every slot's encoding and the dummy
+        // encoding, so the dummy block always fits. With no slot at all there is
+        // nothing to pack and the width is 0.
+        let limb_capacity = if bound == 0 {
+            0
+        } else {
+            candidate_encoded
+                .iter()
+                .map(|b| limb_count_for(b.len()))
+                .chain(std::iter::once(limb_count_for(dummy_encoded.len())))
+                .max()
+                .unwrap_or(0)
+        };
+        check_slot_limbs_cap(limb_capacity)?;
+        check_slot_work_budget(bound, payload_arity, limb_capacity)?;
+
+        let mut dummy_block = bytes_to_limbs(&dummy_encoded);
+        dummy_block.resize(limb_capacity, Fp::new(PAD_LIMB));
+        Ok(SlotWidthPlan {
+            candidate_encoded,
+            dummy_encoded,
+            dummy_block,
+            slots: bound,
+        })
+    }
 }
 
 /// Inverse of [`encode_payload_row`]: parse a byte stream back into `arity`
@@ -1453,39 +1733,22 @@ fn shuffle_with_payloads(
     source: &mut dyn DistributedRandomness,
     nparties: usize,
     tag_col: SecretColumn,
-    payloads: Vec<PayloadRow>,
+    plan: &SlotWidthPlan,
     selectors: &[Vec<Share>],
-    payload_arity: usize,
 ) -> Result<ShuffledColumn, MpcError> {
     let n = tag_col.len();
-    debug_assert_eq!(payloads.len(), n);
+    debug_assert_eq!(plan.slots, n);
     debug_assert_eq!(selectors.len(), n);
 
-    // Serialize every payload row and size a UNIFORM limb capacity = the max limb
-    // count (length prefix + data limbs) over all rows, rejected candidates
-    // included. Uniform width is required by the shuffle network. The width is
-    // public to the parties and is documented as residual leakage in the module
-    // docs; it is an upper bound over all candidates, so it does not identify
-    // which candidate is the longest.
-    let encoded: Vec<Vec<u8>> = payloads.iter().map(|p| encode_payload_row(p)).collect();
-    // The dummy limb block every slot is selected against: the encoding of the
-    // all-unbound row of this arity. It depends only on the PUBLIC arity.
-    let dummy_limbs = bytes_to_limbs(&encode_payload_row(&vec![None; payload_arity]));
-    let mut limb_capacity = encoded
-        .iter()
-        .map(|b| limb_count_for(b.len()))
-        .max()
-        .unwrap_or(0);
-    if !encoded.is_empty() {
-        // Every real encoding is at least `payload_arity` bytes (one presence flag
-        // per column), so this is already the max; take it explicitly so the dummy
-        // block always fits the uniform width.
-        limb_capacity = limb_capacity.max(dummy_limbs.len());
-    }
-    // The dummy block padded out to the uniform width, so limb `i` has a public
-    // pad value for every `i < limb_capacity`.
-    let mut dummy_block = dummy_limbs;
-    dummy_block.resize(limb_capacity, Fp::new(PAD_LIMB));
+    // The UNIFORM limb capacity and the public dummy block come from the plan the
+    // caller decided and capped before any sharing was drawn
+    // ([`SlotWidthPlan::decide`]): the width is the max limb count (length prefix +
+    // data limbs) over all rows, rejected candidates included, since uniform width
+    // is required by the shuffle network. The width is public to the parties and is
+    // documented as residual leakage in the module docs; it is an upper bound over
+    // all candidates, so it does not identify which candidate is the longest.
+    let limb_capacity = plan.limb_capacity();
+    let dummy_block = plan.dummy_block.clone();
 
     // Pack each entry: [tag shares | limb shares...]. Each limb is shared at
     // degree `t`, then selected against its dummy value — a single multiplication
@@ -1498,9 +1761,9 @@ fn shuffle_with_payloads(
     let mut packed: SecretColumn = Vec::with_capacity(n);
     let mut payload_select_mults = 0usize;
     let mut limb_reductions = 0usize;
-    for ((tag, enc), sel) in tag_col.into_iter().zip(&encoded).zip(selectors) {
+    for ((slot, tag), sel) in tag_col.into_iter().enumerate().zip(selectors) {
         let mut entry = tag; // tag shares first (already degree-reduced)
-        let limbs = bytes_to_limbs(enc);
+        let limbs = bytes_to_limbs(plan.slot_bytes(slot));
         // `dummy_block` is exactly `limb_capacity` long, so iterating it walks the
         // uniform width and supplies each limb's public pad value.
         for (i, &pad) in dummy_block.iter().enumerate() {
@@ -3459,6 +3722,186 @@ mod tests {
             other => panic!("expected Tampered on an out-of-set tag, got {other:?}"),
         }
     }
+    // ---- Output-stage WIDTH caps (arity / term bytes / limbs / slot work) ----
+
+    /// Every width cap is pinned BY VALUE, so a change to one is a change to this
+    /// test and not a silent relaxation of a protocol guard.
+    #[test]
+    fn the_width_caps_are_pinned_by_value() {
+        assert_eq!(MAX_PAYLOAD_ARITY, 4096);
+        assert_eq!(MAX_PAYLOAD_TERM_BYTES, 1 << 16);
+        assert_eq!(MAX_SLOT_LIMBS, 1 << 15);
+        assert_eq!(MAX_SLOT_WORK, 1 << 36);
+    }
+
+    /// A row whose payload arity is one past [`MAX_PAYLOAD_ARITY`] is refused with
+    /// ZERO draws, and an arity exactly AT the cap runs. The over-cap side also
+    /// covers `usize::MAX`, which used to reach `vec![None; usize::MAX]`.
+    #[test]
+    fn the_payload_arity_cap_refuses_just_over_and_runs_at_the_cap() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A11).unwrap();
+
+        for arity in [MAX_PAYLOAD_ARITY + 1, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            // No candidate, so nothing but the arity itself can be refused on.
+            let err = oblivious_set_output_through(&mut counted, &backend, &[], arity, 1)
+                .expect_err("an over-cap payload arity must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_ARITY")),
+                "arity={}: {:?}",
+                arity,
+                err
+            );
+            assert_eq!(
+                counted.draws(),
+                0,
+                "arity={}: refused before any draw",
+                arity
+            );
+            assert!(oblivious_set_output(&backend, &[], arity, 1).is_err());
+        }
+
+        // AT the cap the stage still runs: one all-unbound row of the widest legal
+        // arity, revealed at B = 1.
+        let cands = public_candidates(&[(true, vec![None; MAX_PAYLOAD_ARITY])]);
+        let (slots, cost) = oblivious_set_output(&backend, &cands, MAX_PAYLOAD_ARITY, 1)
+            .expect("the widest legal arity runs");
+        assert_eq!(slots.len(), 1);
+        assert!(cost.payload_select_mults > 0);
+    }
+
+    /// A payload term one byte past [`MAX_PAYLOAD_TERM_BYTES`] is refused with ZERO
+    /// draws; a term exactly AT the cap runs and round-trips.
+    #[test]
+    fn the_term_byte_cap_refuses_just_over_and_runs_at_the_cap() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A12).unwrap();
+
+        // A simple literal serialises as `"<text>"`, so the N-Triples form is two
+        // bytes longer than its text.
+        let at_cap = lit(&"x".repeat(MAX_PAYLOAD_TERM_BYTES - 2));
+        let over_cap = lit(&"x".repeat(MAX_PAYLOAD_TERM_BYTES - 1));
+        assert_eq!(
+            at_cap.as_ref().unwrap().to_string().len(),
+            MAX_PAYLOAD_TERM_BYTES
+        );
+
+        let cands = public_candidates(&[(true, vec![over_cap])]);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_through(&mut counted, &backend, &cands, 1, 2)
+            .expect_err("an over-cap payload term must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_TERM_BYTES")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+        // The refusal is value-free: the cap and the public column position only,
+        // never the term's text or its length.
+        let text = format!("{}", err);
+        assert!(text.contains("column 0"), "{}", text);
+        assert!(!text.contains("xxxx"), "the term's text must not appear");
+
+        // AT the cap it runs, and the row survives the round-trip intact.
+        let cands = public_candidates(&[(true, vec![at_cap.clone()])]);
+        let (slots, _cost) = oblivious_set_output(&backend, &cands, 1, 2)
+            .expect("the longest legal term runs");
+        let rows: Vec<&Vec<Option<Term>>> = slots
+            .iter()
+            .filter_map(|s| match s {
+                OutputSlot::Row(r) => Some(r),
+                OutputSlot::Dummy => None,
+            })
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], at_cap);
+    }
+
+    /// The uniform packed limb width is capped in its own right. The closed-form
+    /// guard is exercised exactly at and just past [`MAX_SLOT_LIMBS`]; the real
+    /// stage is exercised on a row whose columns, each individually within the term
+    /// cap, push the width past it — which is the point of a separate width cap.
+    #[test]
+    fn the_slot_limb_cap_refuses_just_over_and_runs_at_the_cap() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A13).unwrap();
+
+        assert!(check_slot_limbs_cap(MAX_SLOT_LIMBS).is_ok());
+        let err = check_slot_limbs_cap(MAX_SLOT_LIMBS + 1)
+            .expect_err("one limb past the cap is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_LIMBS")),
+            "{:?}",
+            err
+        );
+
+        // Four columns each holding a term AT the per-term cap: every term is
+        // legal, their combined packed width is not.
+        let long = lit(&"x".repeat(MAX_PAYLOAD_TERM_BYTES - 2));
+        let row = vec![long.clone(), long.clone(), long.clone(), long];
+        let cands = public_candidates(&[(true, row)]);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_through(&mut counted, &backend, &cands, 4, 1)
+            .expect_err("an over-width packed payload must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_LIMBS")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+    }
+
+    /// The aggregate slot-work budget bounds the PRODUCT, not just the factors: a
+    /// `B`, an arity and a width that are each individually legal are refused when
+    /// they multiply past [`MAX_SLOT_WORK`], exactly at the budget they are not,
+    /// and a product that overflows `u64` is a refusal rather than a wrapped
+    /// number that would slip under it.
+    #[test]
+    fn the_slot_work_budget_bounds_the_product_not_just_the_factors() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        // 2^18 x 2^8 x 2^10 == 2^36 == MAX_SLOT_WORK, with every factor inside its
+        // own cap: exactly at the budget is accepted.
+        // B = 2^18 is MAX_OUTPUT_BOUND, 256 is inside MAX_PAYLOAD_ARITY and 1024
+        // inside MAX_SLOT_LIMBS — all three pinned in `the_width_caps_are_pinned_by_value`.
+        assert!(check_slot_work_budget(1 << 18, 256, 1024).is_ok());
+        // One limb more over the same B and arity is past it.
+        let err = check_slot_work_budget(1 << 18, 256, 1025)
+            .expect_err("one limb past the budget is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+            "{:?}",
+            err
+        );
+        // An overflowing product refuses rather than wrapping under the budget.
+        let err = check_slot_work_budget(usize::MAX, usize::MAX, usize::MAX)
+            .expect_err("an overflowing product is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("overflows u64")),
+            "{:?}",
+            err
+        );
+
+        // And on the real stage: one widest-arity candidate at the largest legal
+        // `B`. Arity and B are both exactly at their caps and the width follows
+        // from the arity, so only their product can refuse this.
+        let backend = ShamirBackend::new_seeded(5, 0x7A14).unwrap();
+        let cands = public_candidates(&[(true, vec![None; MAX_PAYLOAD_ARITY])]);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            oblivious_set_output_through(&mut counted, &backend, &cands, MAX_PAYLOAD_ARITY, MAX_OUTPUT_BOUND)
+                .expect_err("the product of three legal factors must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+    }
 }
 
 #[cfg(test)]
@@ -3988,4 +4431,5 @@ mod output_randomness_seam_tests {
             "a count above the cap is refused"
         );
     }
+
 }
