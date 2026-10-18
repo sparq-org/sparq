@@ -2234,9 +2234,12 @@ async fn write_validator<S: Store>(
 /// trailing-slash container record being absent while the slash-less resource record is present.
 /// A name with a repeated slash (only a leading or trailing one gets past `parse_target`) has no
 /// chain of containers to write in: authorization walks its key as named, while containment and
-/// the slash rule would read it with the slashes folded. So nothing is written under one (a `PUT`,
-/// `PATCH` or `POST` target, or the container a `POST` names), refused on the name alone before
-/// anything is authorized or looked up; what is stored under one can still be read and deleted.
+/// the slash rule would read it with the slashes folded. Nor has a name with a dot segment a URL
+/// normaliser could resolve away ([`has_normalisable_dot_segment`]: `%2E%2E`, `..\x`), which
+/// names one resource to this server and another to a client that normalises it. So nothing is
+/// written under either (a `PUT`, `PATCH` or `POST` target, or the container a `POST` names),
+/// refused on the name alone before anything is authorized or looked up; what is stored under
+/// one can still be read and deleted.
 fn refuse_repeated_slash_write(base: &str, target: &LdpTarget) -> Result<(), ServerError> {
     target
         .iri
@@ -2249,6 +2252,11 @@ fn refuse_repeated_slash(rest: &str) -> Result<(), ServerError> {
     if rest.contains("//") {
         return Err(ServerError::BadRequest(
             "a repeated slash names no container to create a resource in".into(),
+        ));
+    }
+    if crate::ldp::target::has_normalisable_dot_segment(rest) {
+        return Err(ServerError::BadRequest(
+            "a dot segment names no resource to write".into(),
         ));
     }
     Ok(())

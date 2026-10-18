@@ -73,12 +73,19 @@ pub(crate) fn names_lws_service_record(key: &str, base: &str) -> bool {
         .is_some_and(names_lws_service)
 }
 
-/// Whether the path segment `seg` is a dot segment (`.` or `..`), as sent or %-decoded (`%2E`,
-/// `%2e%2E`, `.%2E`): a name that a client or intermediary normalising the URL would resolve away
-/// is never a resource name.
-fn is_dot_segment(seg: &str) -> bool {
+/// Whether `path` (a path from the storage root, without query or fragment) holds a dot segment
+/// (`.` or `..`) as a URL normaliser could see one: a segment between slashes or raw backslashes
+/// (a WHATWG URL parser takes `\` as `/` in an `http` path, so `/a/..\b` resolves to `/b`), as
+/// sent or %-decoded (`%2E`, `%2e%2E`, `.%2E`, `%2E%2E%5Cb`). A write never creates a name with
+/// one, since a client or intermediary normalising the URL would resolve it away; `parse_target`
+/// refuses only a raw `.` or `..` between slashes, so a name stored with an encoded one (before
+/// writes refused it) can still be read and deleted.
+pub(crate) fn has_normalisable_dot_segment(path: &str) -> bool {
     let is_dots = |s: &str| s == "." || s == "..";
-    is_dots(seg) || (seg.contains('%') && is_dots(&crate::identity::percent_decode_lossy(seg)))
+    let any_dots = |s: &str| s.split('\\').any(is_dots);
+    path.split('/').any(|seg| {
+        any_dots(seg) || (seg.contains('%') && any_dots(&crate::identity::percent_decode_lossy(seg)))
+    })
 }
 
 /// Parse a request path against the public base URL into an [`LdpTarget`].
@@ -87,8 +94,9 @@ fn is_dot_segment(seg: &str) -> bool {
 /// `path` is the request path (e.g. `/alice/data`), which MUST start with `/`.
 ///
 /// The query string and fragment are stripped (the DPoP `htu` is path-only per RFC 9449 §4.3, and
-/// LDP targets are query-independent). Path traversal (`..`, `.`, as sent or %-decoded) is
-/// rejected (a 400), as are non-absolute paths.
+/// LDP targets are query-independent). Path traversal (`..`, `.`) is rejected (a 400), as are
+/// non-absolute paths. An encoded dot segment is refused only on a write
+/// ([`has_normalisable_dot_segment`]).
 pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     let base = base.trim_end_matches('/');
     if base.is_empty() {
@@ -141,7 +149,7 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
                     "empty path segment rejected".into(),
                 ));
             }
-            if is_dot_segment(seg) {
+            if seg == ".." || seg == "." {
                 return Err(ServerError::BadRequest("path traversal rejected".into()));
             }
         }
@@ -169,10 +177,11 @@ mod tests {
         }
     }
 
-    /// A dot segment is refused as sent and %-decoded, in any case; a name merely containing
-    /// dots or an encoded dot is not one.
+    /// A dot segment a normaliser could see is found as sent and %-decoded, in any case, and
+    /// between backslashes; a name merely containing dots or an encoded dot is not one. Only a
+    /// raw one between slashes is refused by `parse_target`, for every method.
     #[test]
-    fn an_encoded_dot_segment_is_refused() {
+    fn a_normalisable_dot_segment_is_found() {
         let base = "https://pod.example";
         for path in [
             "/a/%2E/b",
@@ -180,19 +189,23 @@ mod tests {
             "/a/.%2E/b",
             "/a/%2E.",
             "/%2E%2E/",
+            "/a/..\\b",
+            "/a/x\\.\\b",
+            "/a/%2E%2E%5Cb",
             "/a/..",
             "/a/./b",
         ] {
-            assert!(
-                matches!(
-                    super::parse_target(base, path),
-                    Err(crate::error::ServerError::BadRequest(_))
-                ),
-                "{path}"
-            );
+            assert!(super::has_normalisable_dot_segment(path), "{path}");
         }
-        for path in ["/a/%2E%2E%2E", "/a/x%2E", "/a/...", "/a/%2Ex"] {
+        for path in ["/a/%2E%2E%2E", "/a/x%2E", "/a/...", "/a/%2Ex", "/a/x\\y", "/a/b"] {
+            assert!(!super::has_normalisable_dot_segment(path), "{path}");
             assert!(super::parse_target(base, path).is_ok(), "{path}");
+        }
+        for path in ["/a/%2E/b", "/a/%2e%2E/b", "/a/..\\b"] {
+            assert!(super::parse_target(base, path).is_ok(), "{path}");
+        }
+        for path in ["/a/..", "/a/./b"] {
+            assert!(super::parse_target(base, path).is_err(), "{path}");
         }
     }
 

@@ -270,9 +270,12 @@ impl<S: Store> NotifyState<S> {
     /// its query and fragment are dropped exactly as for an LDP request, and a topic that names no
     /// LDP resource has none. That is a topic `parse_target` refuses — a linkset record
     /// (`X.meta`, in any case, as sent or %-decoded), anything in the `/.lws/` service namespace
-    /// or the reserved identity namespace, an empty interior segment, or a dot segment (`.` or
-    /// `..`, as sent or %-decoded). A topic off this storage
-    /// ([`NotifyState::is_on_this_storage`]) has none either.
+    /// or the reserved identity namespace, an empty interior segment or a dot segment — and a
+    /// topic with a dot segment a URL normaliser could see
+    /// ([`crate::ldp::target::has_normalisable_dot_segment`]: %-decoded, or between
+    /// backslashes). No write creates such a name, so a topic naming one is refused, on its name
+    /// alone, though a resource stored under one before writes refused it can still be read and
+    /// deleted. A topic off this storage ([`NotifyState::is_on_this_storage`]) has none either.
     fn canonical_topic(&self, topic: &str) -> Result<String, TopicRefusal> {
         if !self.is_on_this_storage(topic) {
             return Err(TopicRefusal::OffStorage);
@@ -281,6 +284,9 @@ impl<S: Store> NotifyState<S> {
         let path = &topic[base.len()..];
         let target =
             crate::ldp::target::parse_target(base, path).map_err(|_| TopicRefusal::NotAResource)?;
+        if crate::ldp::target::has_normalisable_dot_segment(&target.iri[base.len()..]) {
+            return Err(TopicRefusal::NotAResource);
+        }
         Ok(target.iri)
     }
 
