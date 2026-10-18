@@ -17,30 +17,39 @@
 
 # an allOf matcher that does not accept the triple's agent (resp. client, issuer) dimension
 { ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?pol acp:allOf ?m .
-  ?UNSCOPED log:notIncludes { ?m solidx:provMatcher ?kind . } .
+  ?UNSCOPED log:notIncludes { ?m solidx:isProvMatcher true . } .
   ?UNSCOPED log:notIncludes { ?m solidx:acceptsAgentP ?pa . } . }
 => { ?k solidx:allOfRejected true . } .
-# A provenance matcher is evaluated through its instance for the candidate's resource —
-# UNLESS that instance is undecided (the resource has no recorded creator/owner of the
-# matcher's kind, acp-a.n3), in which case the matcher neither accepts nor rejects and the
-# candidate is marked undecided instead, by the rule below.
+# A provenance matcher is evaluated through its instance for the candidate's resource, and
+# its AGENT dimension is decided ONCE for the whole matcher, jointly over ALL of its
+# acp:agent alternatives (both provenance kinds and any concrete WebID together), because
+# ACP values within one attribute are disjunctive. The instance's acceptsAgentP IS that
+# union over the DECIDED alternatives, so this rule rejects only when no alternative
+# accepts AND no alternative is undecided (`?ku` ranges over every kind, so an undecided
+# owner blocks the rejection even where the creator is recorded). When some alternative is
+# undecided instead, the candidate is marked undecided by the rule below. Three-valued OR:
+# true if any alternative accepts, undecided if none accepts but any is undecided, false
+# only when every alternative is decided and none accepts.
 { ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?pol acp:allOf ?m .
-  ?m solidx:provMatcher ?kind . ?k solidx:provForResource ?r .
+  ?m solidx:isProvMatcher true . ?k solidx:provForResource ?r .
   ?UNSCOPED log:notIncludes { ?mu solidx:instanceOf ?m . ?mu solidx:instanceRes ?r .
-                              ?mu solidx:provUndecided ?kind . } .
+                              ?mu solidx:provUndecided ?ku . } .
   ?UNSCOPED log:notIncludes { ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r .
                               ?mi solidx:acceptsAgentP ?pa . } . }
 => { ?k solidx:allOfRejected true . } .
 
 # ── UNDECIDED conjuncts / disjuncts: the third truth value ─────────────────────────────
-# An allOf provenance matcher whose instance is undecided for the candidate's resource, and
-# whose own client/issuer constraints DO accept the candidate (otherwise the matcher is
-# plainly unsatisfied and the dimension rules below reject it), leaves the conjunction
-# undecided rather than false. Stratum C withholds the ALLOW and keeps the DENY.
+# An allOf provenance matcher ANY of whose agent alternatives is undecided for the
+# candidate's resource, where no alternative accepts the candidate's agent, and whose own
+# client/issuer constraints DO accept the candidate (otherwise the matcher is plainly
+# unsatisfied and the dimension rules below reject it), leaves the conjunction undecided
+# rather than false. Stratum C withholds the ALLOW and keeps the DENY. The agent guard is
+# the same joint one as above, so a matcher mixing a recorded creator with an unrecorded
+# owner is undecided for a session that is not that creator — never rejected.
 { ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc .
   ?k solidx:pairIssuer ?pi . ?k solidx:provForResource ?r .
-  ?pol acp:allOf ?m . ?m solidx:provMatcher ?kind .
-  ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?mi solidx:provUndecided ?kind .
+  ?pol acp:allOf ?m . ?m solidx:isProvMatcher true .
+  ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?mi solidx:provUndecided ?ku .
   ?mi solidx:acceptsClientP ?pc . ?mi solidx:acceptsIssuerP ?pi .
   ?UNSCOPED log:notIncludes { ?mj solidx:instanceOf ?m . ?mj solidx:instanceRes ?r .
                               ?mj solidx:acceptsAgentP ?pa . } . }
@@ -50,8 +59,8 @@
 # is not re-checked here.
 { ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc .
   ?k solidx:pairIssuer ?pi . ?k solidx:provForResource ?r .
-  ?pol acp:anyOf ?m . ?m solidx:provMatcher ?kind .
-  ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?mi solidx:provUndecided ?kind .
+  ?pol acp:anyOf ?m . ?m solidx:isProvMatcher true .
+  ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?mi solidx:provUndecided ?ku .
   ?mi solidx:acceptsClientP ?pc . ?mi solidx:acceptsIssuerP ?pi .
   ?UNSCOPED log:notIncludes { ?mj solidx:instanceOf ?m . ?mj solidx:instanceRes ?r .
                               ?mj solidx:acceptsAgentP ?pa . } . }
@@ -66,7 +75,7 @@
 # could not reach a provenance policy's grant rules, and so a sibling concrete-WebID
 # `acp:agent` matcher naming the same creator/owner WebID can never introduce a
 # resource-unbound candidate that the agent-dimension rule above would not reject.
-{ ?pol solidx:candTriple ?k . ?pol acp:allOf ?m . ?m solidx:provMatcher ?kind .
+{ ?pol solidx:candTriple ?k . ?pol acp:allOf ?m . ?m solidx:isProvMatcher true .
   ?UNSCOPED log:notIncludes { ?pol solidx:provTriple ?k . } . }
 => { ?k solidx:allOfRejected true . } .
 { ?pol solidx:candTriple ?k . ?k solidx:pairClient ?pc . ?pol acp:allOf ?m .

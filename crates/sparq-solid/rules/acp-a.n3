@@ -60,6 +60,12 @@
 # the resource-scoped grant in acp-c.n3 joins it back to the specific (resource, creator).
 { ?m solidx:isMatcher true . ?m acp:agent acp:CreatorAgent . } => { ?m solidx:provMatcher solidx:creator . } .
 { ?m solidx:isMatcher true . ?m acp:agent acp:OwnerAgent . }   => { ?m solidx:provMatcher solidx:owner . } .
+# A matcher may name SEVERAL agent alternatives — both provenance kinds, and concrete
+# WebIDs alongside them — and ACP values within one attribute are DISJUNCTIVE. So the
+# agent dimension is decided once per matcher, jointly over all its alternatives; only
+# the rules that need the kind itself (to join `?r ?kind ?w`) range over provMatcher,
+# and every other rule uses this kind-free flag so it fires ONCE per matcher.
+{ ?m solidx:provMatcher ?kind . } => { ?m solidx:isProvMatcher true . } .
 { ?m solidx:isMatcher true . ?m acp:client ?c . ?c log:notEqualTo acp:PublicClient . }
 => { ?m solidx:clientValP ?c . } .
 { ?m acp:client acp:PublicClient . }      => { ?m solidx:clientValP auth:AnyClient . } .
@@ -169,9 +175,9 @@
 { ?pol acp:allOf ?m . }  => { ?pol solidx:usesMatcher ?m . } .
 { ?pol acp:anyOf ?m . }  => { ?pol solidx:usesMatcher ?m . } .
 { ?pol acp:noneOf ?m . } => { ?pol solidx:usesMatcher ?m . } .
-{ ?pol solidx:usesMatcher ?m . ?m solidx:provMatcher ?kind . }
+{ ?pol solidx:usesMatcher ?m . ?m solidx:isProvMatcher true . }
 => { ?pol solidx:resourceScoped true . } .
-{ ?pol solidx:usesMatcher ?m . ?m solidx:provMatcher ?kind . ?pol solidx:appliesToResource ?r .
+{ ?pol solidx:usesMatcher ?m . ?m solidx:isProvMatcher true . ?pol solidx:appliesToResource ?r .
   ?m log:uri ?ms . ?r log:uri ?rs . ?ms string:encodeForUri ?me . ?rs string:encodeForUri ?re .
   ("urn:sparq:matcher?m=" ?me "&res=" ?re) string:concatenation ?is .
   ?mi log:uri ?is . }

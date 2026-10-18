@@ -586,3 +586,289 @@ fn policies_without_a_provenance_matcher_decide_unchanged() {
 /// Pinned so a change to the auth view of a provenance-free policy set has to be
 /// deliberate. Not a performance number: it is the shape of the materialized view.
 const AUTH_TRIPLES_WITHOUT_PROVENANCE: usize = 38;
+
+// ---------------------------------------------------------------------------
+// The agent dimension is decided ONCE per matcher, jointly over all of its `acp:agent`
+// alternatives (ACP values within one attribute are disjunctive): true if any accepts,
+// undecided if none accepts but any is undecided, false only when every alternative is
+// decided and none accepts. A matcher naming both provenance kinds on a resource that
+// records only one of them is therefore undecided, not false.
+// ---------------------------------------------------------------------------
+
+/// `acp:CreatorAgent` AND `acp:OwnerAgent` on one matcher.
+fn creator_or_owner_matcher(name: &str) -> String {
+    format!(
+        "{}{}",
+        matcher(name, &format!("{ACP}CreatorAgent")),
+        matcher(name, &format!("{ACP}OwnerAgent")),
+    )
+}
+
+/// `acp:allow Write` to alice alone — an independent grant that no provenance matcher
+/// gates, so every test below can show it surviving.
+fn alice_writes() -> String {
+    format!(
+        "<{DOCS}#aw> <{ACP}allow> <{ACL}Write>\n\
+         <{DOCS}#aw> <{ACP}allOf> <{DOCS}#maw>\n{}",
+        matcher("maw", ALICE),
+    )
+}
+
+/// r1 records only a creator, r2 only an owner, r3 both — so one fixture covers both
+/// mixes and the fully-decided control.
+fn mixed_provenance() -> AccessProvenance {
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(R1, BOB);
+    prov.set_owner(R2, BOB);
+    prov.set_creator(R3, BOB);
+    prov.set_owner(R3, BOB);
+    prov
+}
+
+fn writes(store: &PodStore, agent: &str, r: &str) -> bool {
+    allows(store, agent, None, None, r, Mode::Write)
+}
+
+#[test]
+fn an_all_of_matcher_naming_both_kinds_is_undecided_where_one_is_unrecorded() {
+    let deny = format!(
+        "<{DOCS}#d> <{ACP}deny> <{ACL}Read>\n\
+         <{DOCS}#d> <{ACP}allOf> <{DOCS}#m>\n{}",
+        creator_or_owner_matcher("m"),
+    );
+    let s = store(
+        &[
+            ("all", &public_read("all")),
+            ("aw", &alice_writes()),
+            ("d", &deny),
+        ],
+        &mixed_provenance(),
+    );
+    // r1 records a creator but no owner: the owner alternative is undecided, so the
+    // matcher is undecided for everyone who is not that creator and the deny applies.
+    assert!(!reads(&s, BOB, R1), "r1's recorded creator is denied r1");
+    assert!(
+        !reads(&s, ALICE, R1),
+        "and so is an agent the unrecorded owner could be"
+    );
+    assert!(!reads(&s, DAVE, R1), "for every agent");
+    // r2 is the mirror: an owner but no creator.
+    assert!(!reads(&s, BOB, R2), "r2's recorded owner is denied r2");
+    assert!(
+        !reads(&s, ALICE, R2),
+        "and so is an agent the unrecorded creator could be"
+    );
+    // r3 records both, so every alternative is decided: only bob is denied.
+    assert!(!reads(&s, BOB, R3), "r3's creator and owner is denied r3");
+    assert!(
+        reads(&s, ALICE, R3),
+        "the independent public read survives on r3"
+    );
+    assert!(
+        reads(&s, DAVE, R3),
+        "for everyone the matcher decides against"
+    );
+    // The independent Write allow is untouched throughout.
+    assert!(
+        writes(&s, ALICE, R1),
+        "alice's own write grant survives on r1"
+    );
+    assert!(writes(&s, ALICE, R2), "on r2");
+    assert!(writes(&s, ALICE, R3), "and on r3");
+    assert!(!writes(&s, DAVE, R1), "and grants nobody else");
+}
+
+#[test]
+fn an_any_of_matcher_naming_both_kinds_is_undecided_where_one_is_unrecorded() {
+    let deny = format!(
+        "<{DOCS}#d> <{ACP}deny> <{ACL}Read>\n\
+         <{DOCS}#d> <{ACP}anyOf> <{DOCS}#m>\n{}",
+        creator_or_owner_matcher("m"),
+    );
+    let s = store(
+        &[
+            ("all", &public_read("all")),
+            ("aw", &alice_writes()),
+            ("d", &deny),
+        ],
+        &mixed_provenance(),
+    );
+    assert!(!reads(&s, BOB, R1), "r1's recorded creator is denied r1");
+    assert!(
+        !reads(&s, ALICE, R1),
+        "and so is an agent the unrecorded owner could be"
+    );
+    assert!(!reads(&s, BOB, R2), "r2's recorded owner is denied r2");
+    assert!(
+        !reads(&s, ALICE, R2),
+        "and so is an agent the unrecorded creator could be"
+    );
+    assert!(!reads(&s, BOB, R3), "r3's creator and owner is denied r3");
+    assert!(
+        reads(&s, ALICE, R3),
+        "the independent public read survives on r3"
+    );
+    assert!(writes(&s, ALICE, R1), "and alice's write grant throughout");
+    assert!(writes(&s, ALICE, R3), "on r3 too");
+
+    // The allow side of the same matcher: an undecided alternative withholds the grant,
+    // a decided-accepting one gives it.
+    let allow = format!(
+        "<{DOCS}#p> <{ACP}allow> <{ACL}Read>\n\
+         <{DOCS}#p> <{ACP}anyOf> <{DOCS}#m>\n{}",
+        creator_or_owner_matcher("m"),
+    );
+    let s = store(
+        &[("p", &allow), ("aw", &alice_writes())],
+        &mixed_provenance(),
+    );
+    assert!(reads(&s, BOB, R1), "r1's recorded creator reads r1");
+    assert!(
+        !reads(&s, ALICE, R1),
+        "the undecided owner alternative grants nobody else"
+    );
+    assert!(reads(&s, BOB, R2), "r2's recorded owner reads r2");
+    assert!(
+        !reads(&s, ALICE, R2),
+        "nor does the undecided creator alternative"
+    );
+    assert!(
+        reads(&s, BOB, R3),
+        "and bob reads r3, where both are recorded"
+    );
+    assert!(
+        writes(&s, ALICE, R1),
+        "alice's independent write grant survives"
+    );
+}
+
+#[test]
+fn a_none_of_matcher_naming_both_kinds_is_undecided_where_one_is_unrecorded() {
+    let allow = format!(
+        "<{DOCS}#p> <{ACP}allow> <{ACL}Read>\n\
+         <{DOCS}#p> <{ACP}anyOf> <{DOCS}#anyone>\n\
+         <{DOCS}#p> <{ACP}noneOf> <{DOCS}#m>\n{}{}",
+        matcher("anyone", &format!("{ACP}PublicAgent")),
+        creator_or_owner_matcher("m"),
+    );
+    let s = store(
+        &[("p", &allow), ("aw", &alice_writes())],
+        &mixed_provenance(),
+    );
+    // r1 records a creator but no owner, r2 the mirror: the exception is undecided for
+    // anyone who is not the recorded one, so the allow it guards does not apply.
+    assert!(
+        !reads(&s, BOB, R1),
+        "r1's recorded creator is excepted on r1"
+    );
+    assert!(
+        !reads(&s, ALICE, R1),
+        "and the undecided owner alternative withholds the allow"
+    );
+    assert!(!reads(&s, BOB, R2), "r2's recorded owner is excepted on r2");
+    assert!(
+        !reads(&s, DAVE, R2),
+        "and the undecided creator alternative withholds it"
+    );
+    // r3 records both, so the exception is decided: it excepts bob and nobody else.
+    assert!(!reads(&s, BOB, R3), "bob is excepted on r3");
+    assert!(reads(&s, ALICE, R3), "everyone else keeps the allow on r3");
+    assert!(reads(&s, DAVE, R3), "whom the matcher decides against");
+    assert!(
+        writes(&s, ALICE, R1),
+        "alice's independent write grant survives on r1"
+    );
+    assert!(writes(&s, ALICE, R3), "and on r3");
+}
+
+// ---------------------------------------------------------------------------
+// A write that changes ONLY whether a matcher instance is undecided still drops the warm
+// session cache: `AuthIndex::matchers_eq` compares `matcher_undecided` too.
+// ---------------------------------------------------------------------------
+
+/// `/docs/.acr` as n-triples: everyone reads, except `#m`, which names `acp:OwnerAgent`
+/// plus whatever `extra` adds.
+fn docs_acr(extra: &str) -> String {
+    format!(
+        "<{DOCS}> <{ACP}memberAccessControl> <{DOCS}#c> .\n\
+         <{DOCS}#c> <{ACP}apply> <{DOCS}#p> .\n\
+         <{DOCS}#p> <{ACP}allow> <{ACL}Read> .\n\
+         <{DOCS}#p> <{ACP}anyOf> <{DOCS}#anyone> .\n\
+         <{DOCS}#p> <{ACP}noneOf> <{DOCS}#m> .\n\
+         <{DOCS}#anyone> <{ACP}agent> <{ACP}PublicAgent> .\n\
+         <{DOCS}#m> <{ACP}agent> <{ACP}OwnerAgent> .\n{extra}"
+    )
+}
+
+/// The same pod as n-quads, with `acr` installed as `/docs/.acr`.
+fn pod_with(acr: &str) -> String {
+    let mut nq = format!("<{R1}#it> <https://ex.dev/ns#k> \"v\" <{R1}> .\n");
+    for line in acr.lines().filter(|l| !l.trim().is_empty()) {
+        nq += &format!("{} <{DOCS}> .\n", line.trim().trim_end_matches('.').trim());
+    }
+    nq
+}
+
+#[test]
+fn an_acr_write_that_only_flips_an_undecided_instance_drops_the_warm_cache() {
+    // r1 records an owner and NO creator.
+    let mut prov = AccessProvenance::new();
+    prov.set_owner(R1, BOB);
+    let added = format!("<{DOCS}#m> <{ACP}agent> <{ACP}CreatorAgent> .\n");
+    let mut s = store_nq(&pod_with(&docs_acr("")), &prov);
+    let alice = Session {
+        agent: Some(ALICE),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    let sel = format!("SELECT ?o WHERE {{ GRAPH <{R1}> {{ ?s <https://ex.dev/ns#k> ?o }} }}");
+
+    // Warm BOTH cached paths while `#m` names only the recorded owner.
+    let warm = s.accessible(&alice, Mode::Read);
+    assert!(
+        warm.iter().any(|g| g.as_str() == R1),
+        "alice reads r1 to start with"
+    );
+    assert_eq!(
+        s.query_as(&alice, Mode::Read, &sel)
+            .expect("query")
+            .rows
+            .len(),
+        1,
+        "and her query sees r1's triple",
+    );
+
+    // The write adds `acp:agent acp:CreatorAgent` to that SAME matcher. r1 has no
+    // recorded creator, so the matcher's accept-sets, the conditional grant's head and
+    // its exception list, and every allow/deny bucket are all unchanged — the one thing
+    // that moves in the index is whether that instance is undecided.
+    s.put_acl_acp(DOCS, &docs_acr(&added), "ntriples")
+        .expect("the authoritative write is accepted");
+
+    // A store built from the final document and never warmed is the reference answer.
+    let fresh = store_nq(&pod_with(&docs_acr(&added)), &prov);
+    assert_eq!(
+        s.accessible(&alice, Mode::Read),
+        fresh.accessible(&alice, Mode::Read),
+        "the cached accessible set equals a fresh decision",
+    );
+    assert_eq!(
+        s.query_as(&alice, Mode::Read, &sel)
+            .expect("query")
+            .rows
+            .len(),
+        fresh
+            .query_as(&alice, Mode::Read, &sel)
+            .expect("query")
+            .rows
+            .len(),
+        "and so does the cached query visibility",
+    );
+    assert!(
+        !s.accessible(&alice, Mode::Read)
+            .iter()
+            .any(|g| g.as_str() == R1),
+        "the exception is undecided now, so the allow it guards no longer applies",
+    );
+}

@@ -623,6 +623,11 @@ discovery; neither is itself a conformance-tested HTTP layer.
   **`acp:vc`** — the context agent must hold a verified credential satisfying the named
   requirement, resolved against the TRUSTED holdings supplied via
   `materialize_acp_with_credentials` (above), and fail-closed with none supplied.
+  A matcher's attributes are FLAT — `acp:allOf`/`anyOf`/`noneOf` combine a policy's
+  matchers, and each matcher is a conjunction across its attributes and a disjunction
+  within one (so one matcher naming `acp:CreatorAgent`, `acp:OwnerAgent` and a concrete
+  WebID is satisfied by any of the three, and is undecided only when none of them accepts
+  and at least one is unrecorded). A matcher that nests another matcher is NOT supported.
   A matcher with no supported attribute (`acp:agent`, `acp:client`,
   `acp:issuer`, or `acp:vc`) is unsatisfied, as required by
   [ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher). Removing its final

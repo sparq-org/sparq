@@ -543,18 +543,40 @@ impl AuthIndex {
     }
 
     /// Does `matcher` accept this session? (Used for ACP noneOf exceptions: an
-    /// accepting exception matcher suppresses the conditional grant.) Three-valued: a
-    /// provenance matcher whose resource has no recorded creator/owner is `Undecided`
-    /// once the session clears its other dimensions — it neither accepts nor rejects.
+    /// accepting exception matcher suppresses the conditional grant.)
+    ///
+    /// Three-valued, and the AGENT dimension is decided ONCE for the whole matcher,
+    /// jointly over all of its `acp:agent` alternatives — `acp:CreatorAgent`,
+    /// `acp:OwnerAgent` and concrete WebIDs together — as a three-valued OR, because ACP
+    /// values within one attribute are disjunctive. `matcher_agents` already holds the
+    /// union of the alternatives that ARE decided for this resource (a recorded creator or
+    /// owner, plus the matcher's own concrete/lattice values), and `matcher_undecided`
+    /// holds the matcher iff ANY of its alternatives is undecided there. So: `Yes` if some
+    /// alternative accepts the session; `Undecided` if none accepts but some alternative is
+    /// undecided; `No` only when every alternative is decided and none accepts. A matcher
+    /// mixing a recorded creator with an unrecorded owner is therefore `Undecided` for a
+    /// session that is not that creator — never `No`.
+    ///
+    /// The client and issuer dimensions are conjunctive with the agent one and always
+    /// decided, so a session they reject makes the whole matcher `No` whatever the agent
+    /// dimension says.
     fn matcher_accepts(&self, matcher: &str, s: &Session) -> Accepts {
-        let agent_ok = match self.matcher_agents.get(matcher) {
-            None => false, // no accept-set materialized -> cannot accept
+        let agent_accepts = match self.matcher_agents.get(matcher) {
+            None => false, // no decided alternative accepts (the set may not exist at all)
             Some(set) => {
                 set.contains(PUBLIC)
                     || s.agent
                         .map(|a| set.contains(AUTHENTICATED) || set.contains(a))
                         .unwrap_or(false)
             }
+        };
+        // The joint three-valued OR over the matcher's agent alternatives.
+        let agent = if agent_accepts {
+            Accepts::Yes
+        } else if self.matcher_undecided.contains(matcher) {
+            Accepts::Undecided
+        } else {
+            Accepts::No
         };
         let client_ok = match self.matcher_clients.get(matcher) {
             None => false,
@@ -569,16 +591,10 @@ impl AuthIndex {
                 set.contains(ANY_ISSUER) || s.issuer.map(|i| set.contains(i)).unwrap_or(false)
             }
         };
-        if agent_ok && client_ok && issuer_ok {
-            Accepts::Yes
-        } else if client_ok && issuer_ok && self.matcher_undecided.contains(matcher) {
-            // The agent dimension is the undecided one: with no recorded creator/owner
-            // this matcher's accept-set names no agent at all, so `agent_ok` being false
-            // carries no information.
-            Accepts::Undecided
-        } else {
-            Accepts::No
+        if !(client_ok && issuer_ok) {
+            return Accepts::No;
         }
+        agent
     }
 
     /// Does a conditional grant's (agent, client, issuer) head apply to this session,
@@ -728,16 +744,26 @@ impl AuthIndex {
         self_conds == other_conds
     }
 
-    /// Returns `true` iff `matcher_agents`, `matcher_clients`, and `matcher_issuers` are
-    /// identical between `self` and `other`. These matcher maps are **not** origin-bucketed:
-    /// a change in any matcher can affect conditional-grant outcomes in any origin, so a
-    /// matcher difference triggers full cache invalidation in `reindex_with` (the
-    /// diff-based approach falls back to `Full` when matchers change).
+    /// Returns `true` iff every piece of matcher state [`AuthIndex::matcher_accepts`]
+    /// reads — `matcher_agents`, `matcher_clients`, `matcher_issuers` AND
+    /// `matcher_undecided` — is identical between `self` and `other`. These matcher maps
+    /// are **not** origin-bucketed: a change in any matcher can affect conditional-grant
+    /// outcomes in any origin, so a matcher difference triggers full cache invalidation in
+    /// `reindex_with` (the diff-based approach falls back to `Full` when matchers change).
     /// sq-b7k7u fix.
+    ///
+    /// `matcher_undecided` belongs here for the same reason the accept-sets do: a write
+    /// can leave every accept-set and every conditional-grant head untouched and change
+    /// only whether a provenance matcher instance is undecided (e.g. an `.acr` that adds
+    /// `acp:agent acp:CreatorAgent` to an existing `acp:OwnerAgent` matcher on a resource
+    /// with no recorded creator). That flips `matcher_accepts` from `No` to `Undecided`
+    /// and so flips the decision, with nothing else in the index moving — omitting it
+    /// leaves a warmed session answering from a cache the write should have dropped.
     pub(crate) fn matchers_eq(&self, other: &AuthIndex) -> bool {
         self.matcher_agents == other.matcher_agents
             && self.matcher_clients == other.matcher_clients
             && self.matcher_issuers == other.matcher_issuers
+            && self.matcher_undecided == other.matcher_undecided
             && self.withheld == other.withheld
     }
 
