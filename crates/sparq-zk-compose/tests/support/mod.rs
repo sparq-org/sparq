@@ -61,27 +61,18 @@ fn allow_missing() -> bool {
     std::env::var_os(ALLOW_MISSING_ENV).is_some_and(|v| !v.is_empty() && v != "0")
 }
 
-/// A [`std::process::Command`] for a live tool, for use AFTER
-/// [`require_toolchain`] has confirmed the tool is on `PATH`.
-///
-/// Call sites spawn through this instead of naming the executable to
-/// `Command::new` themselves, so the acquisition of `nargo` / `bb` stays inside this
-/// module. `scripts/check-zk-toolchain-gate.py` lints the ZK test trees for any
-/// other acquisition path (an executable literal or a non-literal argument to
-/// `Command::new`, an `ErrorKind::NotFound` arm, a `which` probe), so a fresh
-/// private copy of the gate cannot be added without a declared, reasoned exemption.
-/// This helper does NOT gate: it is [`require_toolchain`] that turns a missing tool
-/// into a hard failure or a declared, printed skip.
-
 /// Names the file the gate appends to when a live body is allowed to run.
 ///
-/// PRIVATE to this module on purpose: a test must not be able to name, read or
-/// redirect the ledger. `zk-toolchain.yml` sets it at JOB level and its final step
-/// verifies that every gate call site in the ZK test sources left an entry. A skip
-/// appends nothing and a panic appends nothing, so a lane that skipped past the gate
-/// cannot produce a complete ledger. The ledger records at GATE ENTRY: it proves the
-/// gate was entered with the tools present, NOT that the body ran to completion or
-/// asserted anything.
+/// Private to this module so no test NAMES it by accident, but it is not a security
+/// boundary: the variable is in the job environment and the path is in the workflow,
+/// so test code that set out to forge an entry could. What the ledger is evidence
+/// for is the accident — a live test that no step runs, or that returns before the
+/// gate. `zk-toolchain.yml` sets it at JOB level and its final step verifies that
+/// every gate call site in the ZK test sources left an entry. A skip appends nothing
+/// and a panic appends nothing, so a lane that skipped past the gate cannot produce
+/// a complete ledger. The ledger records at GATE ENTRY: it proves the gate was
+/// entered with the tools present, NOT that the body ran to completion or asserted
+/// anything.
 const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";
 
 /// Evidence that [`require_toolchain`]/[`gate`] found every requested tool on
@@ -132,10 +123,8 @@ fn record(path: &std::path::Path, loc: &std::panic::Location<'static>) {
 fn ledger_path() -> Option<std::path::PathBuf> {
     #[cfg(test)]
     {
-        if let Ok(guard) = TEST_LEDGER.lock() {
-            if let Some(path) = guard.clone() {
-                return Some(path);
-            }
+        if let Some(path) = TEST_LEDGER.with(|cell| cell.borrow().clone()) {
+            return Some(path);
         }
     }
     match std::env::var_os(LEDGER_ENV) {
@@ -144,10 +133,21 @@ fn ledger_path() -> Option<std::path::PathBuf> {
     }
 }
 
-/// A ledger path for this module's own tests only. Private, and `cfg(test)`-only.
+// A ledger path for this module's own tests only. Private, `cfg(test)`-only, and
+// THREAD-LOCAL.
+//
+// libtest runs tests on worker threads (or, under `--test-threads=1`, one after
+// another on the main thread), so a thread-local redirect reaches only the test
+// that set it: a live test running in parallel keeps writing to the real ledger.
+// A process-wide override could divert that live test's entry into a temporary
+// file and turn the lane's ledger check red for the wrong reason — the compose lib
+// step `cargo test --lib driver::` runs without `--test-threads=1`, so this is a
+// real ordering, not a hypothetical one.
 #[cfg(test)]
-static TEST_LEDGER: std::sync::Mutex<Option<std::path::PathBuf>> =
-    std::sync::Mutex::new(None);
+thread_local! {
+    static TEST_LEDGER: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 /// A [`std::process::Command`] for a live tool.
 ///
@@ -254,20 +254,17 @@ mod gate_identity_tests {
         path
     }
 
-    /// The redirect is ONE global, so these three tests take turns. Without this
-    /// lock they overwrite each other's path and each one's entry lands in another
-    /// one's file. A poisoned lock is still usable here: the state it guards is
-    /// reset on entry.
-    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    /// Run `body` with this THREAD's ledger pointed at `path`.
+    ///
+    /// The override is thread-local, so these tests cannot overwrite each other's
+    /// path and cannot divert a live test running in parallel. The one test that
+    /// provokes a panic catches it INSIDE `body`, so `body()` returns normally and
+    /// the redirect is always cleared; a panic escaping `body` would leave it set
+    /// for this thread, which reaches nothing but these tests.
     fn redirected<T>(path: &std::path::Path, body: impl FnOnce() -> T) -> T {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        let set = |value: Option<std::path::PathBuf>| {
-            *TEST_LEDGER.lock().unwrap_or_else(|e| e.into_inner()) = value;
-        };
-        set(Some(path.to_path_buf()));
+        TEST_LEDGER.with(|cell| *cell.borrow_mut() = Some(path.to_path_buf()));
         let out = body();
-        set(None);
+        TEST_LEDGER.with(|cell| *cell.borrow_mut() = None);
         out
     }
 

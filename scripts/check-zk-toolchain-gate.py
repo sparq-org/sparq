@@ -43,7 +43,9 @@ THE LEDGER
     a panic appends nothing. The lane's final step runs `--verify-ledger` with a
     LITERAL path, which fails when any inventoried call site left no entry, when
     the ledger is missing or empty, or when the inventory does not parse. It
-    reports unknown entries without failing on them.
+    It fails on an entry matching NO inventoried call site too: an unpredicted key
+    means the inventory missed a site, and reporting that without failing would
+    leave exactly the hole this check exists to close.
 
     The ledger proves the gate was REACHED for each inventoried call site. It does
     NOT prove the body went on to assert anything, and it is not a coverage metric.
@@ -66,12 +68,15 @@ CHECK A - acquisition lint (fail-closed)
           and a test must not be able to redirect its path. This is a check on the
           SPELLING of that name; the structural protection is that the gate module's
           const is private, so there is nothing to name.
-      A8  the gate reached INDIRECTLY: `use ... gate as <alias>`,
-          `use ... require_toolchain as ...`, `use ... live_tool as ...`, or either
-          name referenced without being called (taken as a function value). The
-          ledger key is the line the call is written on, so a call made from
-          somewhere the inventory does not read would record an entry no inventoried
-          site can account for.
+      A8  the gate reached INDIRECTLY. ANY `use` that mentions `support` is an
+          error - a brace list (`use ...support::{gate, live_tool};`), a glob, an
+          item alias, or an alias on the MODULE (`use ...support as tc;`) - as is
+          `use ... gate as <alias>` and either name referenced without being called.
+          Every ZK test declares `mod support;` and calls `support::gate(...)`
+          qualified, so an import is never needed, and each of those shapes makes
+          the call read as `gate(` or `tc::gate(` instead. The inventory also
+          over-matches any path prefix (below), so the two rules cover the class
+          from both ends.
 
     A line is exempt ONLY when a `// zk-toolchain-gate: allow <reason>` comment with
     a non-empty reason sits ON it, or in the comment block immediately above it (so a
@@ -126,8 +131,12 @@ CHECK D - the verify step is wired and cannot be skipped
     Exactly one step named VERIFY_STEP, in the job that carries `id: changes` and the
     two toolchain installs, as that job's LAST step; its `run` exactly the one verify
     command with the ledger path as a LITERAL (not read from the environment, which a
-    test could rewrite); no `if:`, `continue-on-error`, `env:` or
-    `working-directory` on it; the job's `if:` exactly ACCEPTED_JOB_IF and no
+    reordering or an override could change); ONLY the keys `name` and `run` on it -
+    an allow-list, because `shell: "true {0}"` would run the command through a
+    program that ignores it and `timeout-minutes` could cut it short; no `defaults:`
+    block at workflow or job level, which would set the step's shell and working
+    directory from a distance; no `shell:` other than `bash` on any step of the job;
+    the job's `if:` exactly ACCEPTED_JOB_IF and no
     `continue-on-error` on the job; job-level `SPARQ_ZK_LIVE_LEDGER` equal to that
     literal; at least one runnable step in the job; and
     `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN` mentioned on no non-comment line of the
@@ -144,6 +153,12 @@ INVENTORY
     Every gate call site in the scan trees, keyed `<file>:<line>` exactly as the gate
     records one:
 
+      * the match is deliberately OVER-matching: any path prefix, or none, ending
+        in `gate(` or `require_toolchain(`. `tc::gate(` and a bare `gate(` are call
+        sites, so an import or a module alias cannot hide one. It is matched against
+        text with comments AND string literals blanked, so a panic message that
+        mentions "the holder gate (...)" is not a call site. A false site costs an
+        INV error, or a key nothing records - loud, never silent;
       * two gate calls on ONE line share a key, so one could not be told from the
         other in the ledger; that is an error;
       * the first argument must still be a STRING LITERAL, on the call's line or in a
@@ -160,9 +175,14 @@ INVENTORY
 
 SCAN TREES
     `tests/` in both crates (every `*.rs`, whole file), each `[[test]] path` named by
-    either Cargo.toml wherever it points, and the `#[cfg(test)]` REGIONS of both
-    crates' `src/` (the lib test target runs them). Only the regions are linted and
-    inventoried, so production code - the driver's own nargo/bb spawns - is not. The
+    either Cargo.toml wherever it points, and both crates' `src/` (the lib test
+    target runs their `#[cfg(test)]` code). The two scopes over `src/` differ on
+    purpose: the acquisition LINT reads only the test-only regions, because the
+    driver's production code spawns nargo/bb for real and linting that is
+    meaningless; the INVENTORY reads every `src/**/*.rs` in FULL, because a gate call
+    anywhere there is a call the lane must reach, and `crate::support` compiles only
+    under `cfg(test)`. A file pulled in by `#[cfg(test)] mod NAME;` is test code in
+    its entirety, and so is anything IT declares with a plain `mod NAME;`. The
     region reader models `#[cfg(test)]` and `#[cfg(all(test, ...))]` on an item
     (brace-matched, or to the terminating `;`), `#[cfg(test)] mod NAME;` (the named
     file, in its entirety), and a file-level `#![cfg(test)]`. Any other cfg attribute
@@ -290,7 +310,15 @@ ALLOW_RATCHET: dict[str, int] = {
     "crates/sparq-zk/tests/toolchain_gate.rs": 1,
 }
 
-GATE_SITE_RE = re.compile(r"\b(?:support\s*::\s*gate|require_toolchain)\s*\(")
+# Deliberately OVER-MATCHING: any path prefix (or none) ending in `gate(` or
+# `require_toolchain(`. `support::gate(`, `crate::support::gate(`, `tc::gate(` and a
+# bare `gate(` all count, so an import or a module alias cannot hide a call site.
+# The cost is a false site, which is an INV error or a ledger key nothing records -
+# loud, not silent. Matched against text with comments AND string literals blanked,
+# so prose naming "the holder gate (...)" is not a call site.
+GATE_SITE_RE = re.compile(
+    r"(?:[A-Za-z_]\w*\s*::\s*)*\b(?:gate|require_toolchain)\s*\("
+)
 NEW_RE = re.compile(
     r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*::\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*::\s*new\s*\("
 )
@@ -315,8 +343,15 @@ EXEMPT_RE = re.compile(r"//\s*zk-toolchain-gate:\s*allow\s+(\S.*)")
 # The gate taken INDIRECTLY: renamed in a `use`, or referenced as a function value.
 # Either would let a call site record a ledger entry from a line the inventory does
 # not read, so both are rejected outright.
+# ANY `use` that reaches the gate module. A brace list (`use ...support::{gate,
+# live_tool};`), a glob, an `as` alias on an item, and an alias on the MODULE all
+# make the call site read as a bare `gate(` or `tc::gate(`, which is a different
+# spelling from the one the inventory looks for. Every ZK test today declares
+# `mod support;` and calls `support::gate(...)` / `crate::support::gate(...)`
+# qualified, so this rule costs nothing and closes the whole class.
 GATE_ALIAS_RE = re.compile(
-    r"^\s*use\s+[^;]*\b(?:gate|require_toolchain|live_tool)\s+as\s+\w+"
+    r"^\s*(?:pub\s+)?use\s+[^;]*\bsupport\b"
+    r"|^\s*(?:pub\s+)?use\s+[^;]*\b(?:gate|require_toolchain|live_tool)\s+as\s+\w+"
 )
 GATE_VALUE_RE = re.compile(
     r"\b(?:support\s*::\s*(?:gate|live_tool)|require_toolchain)\b\s*(?!\()"
@@ -632,13 +667,74 @@ def _item_span(lines: list[str], code_lines: list[str],
     return (attr, span[1])
 
 
+def _mod_file(root: Path, rel: str, name: str,
+              explicit_path: str | None) -> Path | None:
+    """The file a `mod NAME;` in `rel` resolves to, or None."""
+    here = (root / rel).parent
+    if explicit_path is not None:
+        cand = here / explicit_path
+        return cand if cand.is_file() else None
+    stem = Path(rel).stem
+    if stem not in ("lib", "mod", "main"):
+        here = here / stem
+    for cand in (here / f"{name}.rs", here / name / "mod.rs"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _rel_to(root: Path, path: Path) -> str | None:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return None
+
+
+MOD_DECL_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;")
+PATH_ATTR_RE = re.compile(r'^\s*#\[path\s*=\s*"([^"]+)"\]')
+
+
+def _mod_targets(root: Path, rel: str, text: str, out: Trees) -> list[str]:
+    """Every `mod NAME;` child file of `rel`, as repository-relative paths.
+
+    Used on a file that is test code in FULL: its children are too, and nothing in
+    them carries a `cfg(test)` attribute of its own to find them by.
+    """
+    found: list[str] = []
+    pending_path: str | None = None
+    for i, line in enumerate(text.splitlines()):
+        code = code_of(line)
+        pm = PATH_ATTR_RE.match(code)
+        if pm:
+            pending_path = pm.group(1)
+            continue
+        m = MOD_DECL_RE.match(code)
+        if not m:
+            if code.strip() and not code.lstrip().startswith("#"):
+                pending_path = None
+            continue
+        target = _mod_file(root, rel, m.group(1), pending_path)
+        pending_path = None
+        if target is None:
+            out.findings.append(
+                Finding(f"{rel}:{i + 1}", "SCAN",
+                        f"`mod {m.group(1)};` in a test-only file resolves to no "
+                        "file; the module's tests would not be scanned")
+            )
+            continue
+        erel = _rel_to(root, target)
+        if erel is not None:
+            found.append(erel)
+    return found
+
+
 def _src_scope(root: Path, pkg: str, rel: str, text: str,
-               out: Trees) -> tuple[set[int], list[tuple[str, str]]]:
-    """The test-only line numbers of a `src` file, plus any `mod NAME;` files it
-    pulls in (which are test-only in their entirety)."""
+               out: Trees) -> tuple[set[int], list[str]]:
+    """The test-only line numbers of a `src` file, plus the files it pulls in with
+    `#[cfg(test)] mod NAME;` (which are test code in their entirety)."""
     lines = text.splitlines()
     scope: set[int] = set()
-    extra: list[tuple[str, str]] = []
+    extra: list[str] = []
     if not CFG_TEST_ANY_RE.search(text):
         # No cfg attribute names `test` anywhere, so there is no region to find and
         # no reason to pay for the whole-file literal scan.
@@ -668,7 +764,7 @@ def _src_scope(root: Path, pkg: str, rel: str, text: str,
         # is how a crate compiles in the shared gate file (CHECK F).
         explicit_path = None
         for attr in region:
-            pm = re.match(r'\s*#\[path\s*=\s*"([^"]+)"\]', attr)
+            pm = PATH_ATTR_RE.match(attr)
             if pm:
                 explicit_path = pm.group(1)
         body = "\n".join(
@@ -676,31 +772,17 @@ def _src_scope(root: Path, pkg: str, rel: str, text: str,
         ).strip()
         m = re.match(r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;", body)
         if m:
-            name = m.group(1)
-            here = (root / rel).parent
-            stem = Path(rel).stem
-            if stem not in ("lib", "mod", "main"):
-                here = here / stem
-            if explicit_path is not None:
-                cands = [(root / rel).parent / explicit_path]
-            else:
-                cands = [here / f"{name}.rs", here / name / "mod.rs"]
-            for cand in cands:
-                if cand.is_file():
-                    try:
-                        erel = str(cand.resolve().relative_to(root.resolve()))
-                    except ValueError:
-                        break
-                    extra.append((erel, cand.read_text(
-                        encoding="utf-8", errors="replace")))
-                    break
-            else:
-                where = explicit_path or str(here.relative_to(root))
+            target = _mod_file(root, rel, m.group(1), explicit_path)
+            erel = None if target is None else _rel_to(root, target)
+            if erel is None:
                 out.findings.append(
                     Finding(f"{rel}:{i + 1}", "SCAN",
-                            f"`#[cfg(test)] mod {name};` resolves to no file at "
-                            f"{where}; the module's tests would not be scanned")
+                            f"`#[cfg(test)] mod {m.group(1)};` resolves to no file "
+                            f"at {explicit_path or 'the module path'}; the module's "
+                            "tests would not be scanned")
                 )
+            else:
+                extra.append(erel)
         scope.update(range(start + 1, end + 2))
     return scope, extra
 
@@ -771,8 +853,15 @@ def collect(root: Path) -> Trees:
                 out.binary_of[relp] = path.parent.name
             # Otherwise the file is not a target; a gate call in it is an INV error.
 
-    # `src` trees: the lib test target runs these, so a live test here needs the gate
-    # exactly as one under `tests/` does. Only the `#[cfg(test)]` regions are scanned.
+    # `src` trees. The lib test target runs this crate's `#[cfg(test)]` code, so a
+    # live test here needs the gate exactly as one under `tests/` does. Two different
+    # scopes apply, on purpose:
+    #   * the ACQUISITION LINT reads only the test-only regions, because the driver's
+    #     production code spawns nargo/bb for real and linting that is meaningless;
+    #   * the INVENTORY reads every file in FULL, because a gate call anywhere in
+    #     `src` is a call the lane must reach. `crate::support` exists only under
+    #     `cfg(test)`, so a gate call outside a region either is test code the region
+    #     reader did not recognise, or does not compile.
     for pkg, rel in SRC_DIRS:
         d = root / rel
         if not d.is_dir():
@@ -782,22 +871,35 @@ def collect(root: Path) -> Trees:
                         "unscanned")
             )
             continue
-        pulled: dict[str, str] = {}
+        texts: dict[str, str] = {}
+        scopes: dict[str, set[int]] = {}
+        pulled: list[str] = []
         for path in sorted(d.rglob("*.rs")):
             relp = str(path.relative_to(root))
-            text = path.read_text(encoding="utf-8", errors="replace")
-            scope, extra = _src_scope(root, pkg, relp, text, out)
-            for erel, etext in extra:
-                pulled[erel] = etext
-            if scope:
-                out.files.append(Unit(pkg, relp, text, scope))
-                out.binary_of[relp] = f"{pkg} lib"
-        for erel, etext in pulled.items():
-            if any(u.rel == erel for u in out.files):
+            texts[relp] = path.read_text(encoding="utf-8", errors="replace")
+            scope, extra = _src_scope(root, pkg, relp, texts[relp], out)
+            scopes[relp] = scope
+            pulled.extend(extra)
+        # A file pulled in by `#[cfg(test)] mod NAME;` is test code in FULL, and so
+        # is anything IT declares with a plain `mod NAME;` — the child module of a
+        # test-only file is not reached by any `cfg(test)` attribute of its own.
+        full: set[str] = set()
+        while pulled:
+            erel = pulled.pop()
+            if erel in full:
                 continue
-            n = len(etext.splitlines())
-            out.files.append(Unit(pkg, erel, etext, set(range(1, n + 1))))
-            out.binary_of[erel] = f"{pkg} lib"
+            full.add(erel)
+            if erel not in texts:
+                p_abs = root / erel
+                if not p_abs.is_file():
+                    continue
+                texts[erel] = p_abs.read_text(encoding="utf-8", errors="replace")
+            pulled.extend(_mod_targets(root, erel, texts[erel], out))
+        for relp, text in sorted(texts.items()):
+            out.files.append(
+                Unit(pkg, relp, text, None if relp in full else scopes.get(relp, set()))
+            )
+            out.binary_of[relp] = f"{pkg} lib"
     return out
 
 
@@ -813,8 +915,7 @@ def check_src_gate_decl(root: Path, trees: Trees) -> list[Finding]:
     for pkg, lib_rel in LIB_ROOTS.items():
         uses_gate = any(
             u.rel.startswith(f"crates/{pkg}/src/")
-            and GATE_SITE_RE.search("\n".join(
-                code_of(line) for line in u.scoped_text().splitlines()))
+            and GATE_SITE_RE.search(strip_noncode(u.scoped_text()))
             for u in trees.files
         )
         p = root / lib_rel
@@ -883,9 +984,11 @@ def lint_file(rel: str, text: str) -> list[Finding]:
         if GATE_ALIAS_RE.search(code):
             findings.append(
                 Finding(at, "A8",
-                        "the gate renamed in a `use`; the inventory reads gate CALL "
-                        "SITES by spelling, so a renamed gate would record an entry "
-                        "from a line it never read")
+                        "a `use` that reaches the gate module (a brace list, a "
+                        "glob, an item alias or a module alias). The inventory reads "
+                        "gate CALL SITES by spelling, so an import makes the call "
+                        "read as something it does not look for. Declare "
+                        "`mod support;` and call `support::gate(...)` qualified")
             )
         elif GATE_VALUE_RE.search(code):
             findings.append(
@@ -917,17 +1020,17 @@ def lint_file(rel: str, text: str) -> list[Finding]:
                             "spawn result must not be discarded")
                 )
 
-    code_only = "\n".join(code_of(line) for line in lines)
     # CHECK C1, scoped to ONE `#[test]` function — that is what libtest RUNS. A test
     # that reaches the prover/driver route without the gate is safe only while every
     # arm it accepts names a SPECIFIC error variant; a sibling test's permissive arm
     # is a different function and is not it. A local helper is followed one fixpoint
     # deep, so building the prover (or calling the gate) in a helper counts.
-    if not DRIVER_REF_RE.search(code_only):
+    if not DRIVER_REF_RE.search(strip_noncode(text)):
         return findings
     spans = fn_spans(text)
+    stripped = strip_noncode(text).splitlines()
     bodies = {
-        name: "\n".join(code_of(line) for line in lines[a : b + 1])
+        name: "\n".join(stripped[a : b + 1])
         for a, b, name in spans
     }
     routed = _reaching(bodies, DRIVER_REF_RE)
@@ -1014,9 +1117,16 @@ def inventory(trees: Trees) -> tuple[list[Site], list[Finding]]:
     for unit in trees.files:
         if unit.rel in helper_rels:
             continue
-        lines = unit.scoped_text().splitlines()
-        for i, line in enumerate(lines):
-            for m in GATE_SITE_RE.finditer(code_of(line)):
+        # The INVENTORY reads the whole file, never the lint scope: a gate call the
+        # region reader did not see is still a call the lane must reach.
+        scoped = unit.text
+        lines = scoped.splitlines()
+        # Match on text with comments AND string literals blanked: the over-matching
+        # regex would otherwise read a panic message that says "the holder gate (..."
+        # as a call site. Blanking preserves every offset, so the argument below is
+        # still read from the real line.
+        for i, code in enumerate(strip_noncode(scoped).splitlines()):
+            for m in GATE_SITE_RE.finditer(code):
                 # The ledger key is the CALL SITE, exactly as `#[track_caller]` and
                 # `std::panic::Location` record it: the workspace-relative path of
                 # this file and the line the call starts on.
@@ -1120,10 +1230,33 @@ def check_workflow(root: Path) -> list[Finding]:
                     "ledger path as a literal; got "
                     f"{str(verify.get('run', '')).strip()!r}")
         )
-    for key in ("if", "continue-on-error", "env", "working-directory"):
-        if key in verify:
+    # An allow-list, not a deny-list: `shell: "true {0}"` would run the command
+    # through a program that ignores it, `timeout-minutes` could cut it short, and a
+    # key nobody thought of is exactly how this step gets neutralised next time.
+    extra_keys = sorted(set(verify) - {"name", "run"})
+    if extra_keys:
+        findings.append(
+            Finding(VERIFY_STEP, "D",
+                    f"may carry only `name:` and `run:`; it also carries "
+                    f"{', '.join(extra_keys)}")
+        )
+
+    # `defaults` sets `shell:` and `working-directory:` for every step that does not
+    # override them, so it reaches the verify step without appearing on it.
+    for where, holder in ((WORKFLOW_REL, doc), (jid, job)):
+        if holder.get("defaults") is not None:
             findings.append(
-                Finding(VERIFY_STEP, "D", f"must not carry `{key}:` — it must always run")
+                Finding(where, "D",
+                        "`defaults:` would set the verify step's shell and working "
+                        "directory from a distance; declare neither")
+            )
+    for i, step in enumerate(steps):
+        shell = step.get("shell")
+        if shell is not None and str(shell).strip() != "bash":
+            findings.append(
+                Finding(f"{jid} step {i + 1} ({step.get('name')!r})", "D",
+                        f"`shell: {shell!r}` — a step in this job may only use "
+                        "`bash`; any other shell can swallow a non-zero exit")
             )
 
     if str(job.get("if", ACCEPTED_JOB_IF)).strip() != ACCEPTED_JOB_IF:
@@ -1236,8 +1369,20 @@ def verify_ledger(root: Path, ledger: Path) -> int:
     missing = sorted(expected - recorded)
     unknown = sorted(recorded - keys)
     print(f"note: {len(recorded)} distinct ledger entries, {len(expected)} expected")
-    for key in unknown:
-        print(f"note: ledger entry with no matching call site: {key}")
+    if unknown:
+        # An entry the inventory did not predict means the inventory MISSED a call
+        # site - an import or an alias the lint does not read, or a file outside the
+        # scan trees. Reporting that without failing would leave exactly the hole
+        # this check exists to close.
+        print("\nFAIL: these ledger entries match no inventoried gate call site, so "
+              "the inventory is not reading every site:", file=sys.stderr)
+        for key in unknown:
+            print(f"  {key}", file=sys.stderr)
+        print("\nEither the call site is spelled in a way CHECK A8 and the inventory "
+              "do not read (an import, a module alias, a macro), or its file is "
+              "outside the scan trees. Fix the spelling or widen the scan - do not "
+              "exclude it.", file=sys.stderr)
+        return 1
     if missing:
         where = {s.key: s.where for s in sites}
         print("\nFAIL: these gate call sites left no ledger entry, so their live bodies "
@@ -1249,7 +1394,8 @@ def verify_ledger(root: Path, ledger: Path) -> int:
               "LEDGER_EXCLUSIONS in this script with a reason — one entry per named "
               "test.", file=sys.stderr)
         return 1
-    print("\nOK: every inventoried gate call site left a ledger entry. That proves the "
+    print("\nOK: every inventoried gate call site left a ledger entry, and the ledger "
+          "holds nothing else. That proves the "
           "gate was REACHED for each one; it says nothing about what the bodies "
           "asserted.")
     return 0
@@ -1494,6 +1640,22 @@ EVASIONS: dict[str, tuple[str, str]] = {
         '|| !support::require_toolchain("y", &["nargo"]) { return; }\n}\n',
     ),
     # The gate reached indirectly: renamed in a `use`, or taken as a function value.
+    "the gate in a brace import": (
+        "evade_brace.rs",
+        "mod support;\nuse support::{gate, live_tool};\n#[test]\nfn case() {\n"
+        '    let g = gate("case", &["nargo"]).unwrap();\n'
+        '    let _ = live_tool(&g, "nargo").output().expect("runs");\n}\n',
+    ),
+    "the gate in a glob import": (
+        "evade_glob.rs",
+        "mod support;\nuse support::*;\n#[test]\nfn case() {\n"
+        '    let _ = gate("case", &["nargo"]);\n}\n',
+    ),
+    "the gate module aliased": (
+        "evade_modalias.rs",
+        "mod support;\nuse support as tc;\n#[test]\nfn case() {\n"
+        '    let _ = tc::gate("case", &["nargo"]);\n}\n',
+    ),
     "the gate renamed in a use": (
         "evade_alias.rs",
         "mod support;\nuse support::gate as g;\n#[test]\nfn case() {\n"
@@ -1704,6 +1866,56 @@ def self_test() -> int:
         encoding="utf-8")
     expect_red(root, "a src test reading the ledger variable", "A7")
 
+    # A gate call at FILE level, outside any `#[cfg(test)]` region: the lint scope
+    # would not see it, the inventory reads the whole file and does.
+    root = fresh()
+    (root / "crates/sparq-zk-compose/src/stray.rs").write_text(
+        "fn helper() {\n"
+        '    let _ = crate::support::gate("stray_site", &["nargo"]);\n}\n',
+        encoding="utf-8")
+    sites, inv = inventory(collect(root))
+    if not any(s.key == "crates/sparq-zk-compose/src/stray.rs:2" for s in sites):
+        failures.append(
+            "a gate call outside a cfg(test) region must still be inventoried, got: "
+            + "; ".join(s.key for s in sites)
+        )
+    reds += 1
+    del inv
+
+    # A call through a path that is neither `support::` nor bare. A8 catches the
+    # `use` that would create such an alias, but only if the `use` is in a file the
+    # lint reads; the inventory over-matches any path prefix so the SITE is seen
+    # either way, and a key nothing records is then reported by --verify-ledger.
+    root = fresh()
+    (root / "crates/sparq-zk-compose/tests/aliased_call.rs").write_text(
+        "#[test]\nfn case() {\n"
+        '    let _ = tc::gate("aliased_call", &["nargo"]);\n}\n',
+        encoding="utf-8",
+    )
+    sites, _ = inventory(collect(root))
+    if not any(
+        s.key == "crates/sparq-zk-compose/tests/aliased_call.rs:3" for s in sites
+    ):
+        failures.append(
+            "a gate call through an aliased path must still be inventoried, got: "
+            + "; ".join(s.key for s in sites)
+        )
+    reds += 1
+
+    # A child `mod` of a `#[cfg(test)] mod NAME;` FILE is test code too, with no
+    # cfg attribute of its own to find it by.
+    root = fresh()
+    (root / "crates/sparq-zk-compose/src/thing.rs").write_text(
+        "#[cfg(test)]\nmod inner;\n", encoding="utf-8")
+    inner = root / "crates/sparq-zk-compose/src/thing"
+    (inner / "inner").mkdir(parents=True, exist_ok=True)
+    (inner / "inner.rs").write_text("mod deeper;\n", encoding="utf-8")
+    (inner / "inner" / "deeper.rs").write_text(
+        "#[test]\nfn case() {\n"
+        '    let _ = std::process::Command::new("nargo").output();\n}\n',
+        encoding="utf-8")
+    expect_red(root, "a grandchild module of a src test module", "A1")
+
     root = fresh()
     (root / HELPER_MODULES[0]).write_text(_SUPPORT + "// drift\n", encoding="utf-8")
     expect_red(root, "helper-module drift", "B")
@@ -1775,6 +1987,21 @@ def self_test() -> int:
          (f"      - name: {VERIFY_STEP}\n        run: {VERIFY_CMD}\n",
           f"      - name: {VERIFY_STEP}\n        run: {VERIFY_CMD}\n"
           "      - name: One more live step\n        run: cargo test -p sparq-zk\n")),
+        ("a shell that swallows the exit code",
+         (f"      - name: {VERIFY_STEP}\n        run:",
+          f"      - name: {VERIFY_STEP}\n        shell: \"true {{0}}\"\n        run:")),
+        ("a timeout on it",
+         (f"      - name: {VERIFY_STEP}\n        run:",
+          f"      - name: {VERIFY_STEP}\n        timeout-minutes: 1\n        run:")),
+        ("job-level defaults",
+         ("    runs-on: ubuntu-latest",
+          "    defaults:\n      run:\n        shell: \"true {0}\"\n"
+          "    runs-on: ubuntu-latest")),
+        ("workflow-level defaults",
+         ("jobs:\n", "defaults:\n  run:\n    working-directory: crates\njobs:\n")),
+        ("a non-bash shell on another step of the job",
+         ("      - name: Detect zk changes\n        id: changes\n",
+          "      - name: Detect zk changes\n        id: changes\n        shell: pwsh\n")),
         ("the toolchain installs in another job",
          (f"      - name: {INSTALL_STEPS[0]}\n        run: noirup --version 1.0.0\n", "")),
     ):
@@ -1801,8 +2028,8 @@ def self_test() -> int:
     expect_ledger(
         root,
         _FIXTURE_KEYS + ["crates/sparq-zk/tests/plain.rs:999"],
-        "an unknown entry (reported, not fatal)",
-        0,
+        "an entry matching no inventoried call site",
+        1,
     )
     root = fresh()
     (root / "crates/sparq-zk-compose/tests/evade_dup.rs").write_text(

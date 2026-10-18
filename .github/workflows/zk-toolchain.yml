@@ -149,12 +149,14 @@ jobs:
     timeout-minutes: 60
     env:
       # The RUNTIME LEDGER. The shared gate in crates/sparq-zk*/tests/support/mod.rs
-      # appends one line, `<package>/<binary>::<test>`, each time it lets a live body
-      # run; a skip or a panic appends nothing. The job's final step compares the file
-      # against every gate call site in the ZK test trees, so a live test that no step
-      # runs — or that returned before reaching the gate — is a RED check rather than a
-      # silent pass. Set here, at JOB level, and read by that step as a literal path:
-      # a test must not be able to redirect it.
+      # appends one line, the CALL SITE as `<file>:<line>`, each time it lets a live
+      # body run; a skip or a panic appends nothing. The job's final step compares the
+      # file against every gate call site in the ZK test sources, so a live test that no
+      # step runs — or that returned before reaching the gate — is a RED check rather
+      # than a silent pass. Set here, at JOB level, and read by that step as a literal
+      # path. Evidence against the ACCIDENT, not a boundary against hostile test code:
+      # the variable is in this environment and the path is right here, so a test that
+      # set out to forge an entry could.
       SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -567,16 +569,19 @@ jobs:
 
       # The ledger check: the proof that the live tests above RAN.
       #
-      # Every `gate()`/`require_toolchain()` call site in crates/sparq-zk*/tests/ is
-      # expected to have appended its key to SPARQ_ZK_LIVE_LEDGER. A missing entry means
-      # the live body did not run — no step covers it, or it returned before the gate —
-      # and this step fails naming each one. A missing or empty ledger fails too. The
-      # path is a LITERAL here, not `$SPARQ_ZK_LIVE_LEDGER`, so a test that rewrote the
-      # variable could not point this step at a file it had prepared.
+      # Every `gate()`/`require_toolchain()` call site in crates/sparq-zk*/tests/ AND in
+      # those crates' `src/` test code is expected to have appended its key to
+      # SPARQ_ZK_LIVE_LEDGER. A missing entry means the live body did not run — no step
+      # covers it, or it returned before the gate — and this step fails naming each one.
+      # A missing or empty ledger fails too, and so does an entry matching NO
+      # inventoried call site, because that means the inventory missed a site. The path
+      # is a LITERAL here, not `$SPARQ_ZK_LIVE_LEDGER`, so a step reordering or an
+      # overridden variable cannot point this step at another file.
       #
-      # It carries no `if:`, no `continue-on-error`, no `env:` and no
-      # `working-directory`, and must stay the LAST step of this job; the checker's own
-      # CHECK D reds on any of those changing. The ledger proves the gate was REACHED
-      # for each call site; it does not prove what the bodies asserted.
+      # It may carry ONLY `name:` and `run:`, and must stay the LAST step of this job;
+      # the checker's own CHECK D reds on any other key, on a `defaults:` block at job
+      # or workflow level, and on a non-bash `shell:` anywhere in this job. The ledger
+      # proves the gate was REACHED for each call site; it does not prove what the
+      # bodies asserted.
       - name: Verify every live ZK test ran
         run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"

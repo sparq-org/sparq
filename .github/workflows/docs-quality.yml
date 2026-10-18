@@ -184,7 +184,7 @@ jobs:
         # sha256 against .github/requirements/docs-quality.txt before use. PyYAML has no
         # runtime deps, so that file is the full closure. See its header to bump/regenerate.
         # Consumers here: skill-frontmatter + the ci-scripts selection-wiring inspection.
-        run: pip install --require-hashes -r .github/requirements/docs-quality.txt
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Install typos
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:

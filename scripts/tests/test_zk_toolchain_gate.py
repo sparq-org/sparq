@@ -60,6 +60,7 @@ pass (`GateIsTheOnlyPath`, `AcquisitionLint`).
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -193,6 +194,19 @@ EVASIONS: dict[str, str] = {
         "mod support;\n#[test]\nfn a() {\n"
         '    if !support::require_toolchain("x", &["nargo"]) '
         '|| !support::require_toolchain("y", &["nargo"]) { return; }\n}\n'
+    ),
+    "the gate in a brace import": (
+        "mod support;\nuse support::{gate, live_tool};\n#[test]\nfn case() {\n"
+        '    let g = gate("case", &["nargo"]).unwrap();\n'
+        '    let _ = live_tool(&g, "nargo").output().expect("runs");\n}\n'
+    ),
+    "the gate in a glob import": (
+        "mod support;\nuse support::*;\n#[test]\nfn case() {\n"
+        '    let _ = gate("case", &["nargo"]);\n}\n'
+    ),
+    "the gate module aliased": (
+        "mod support;\nuse support as tc;\n#[test]\nfn case() {\n"
+        '    let _ = tc::gate("case", &["nargo"]);\n}\n'
     ),
     "the gate renamed in a use": (
         "mod support;\nuse support::gate as g;\n#[test]\nfn case() {\n"
@@ -345,6 +359,21 @@ class LedgerVerification(unittest.TestCase):
         p.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
         return p
 
+    @staticmethod
+    def a_real_key(root: Path) -> str:
+        """A key that IS a real call site, read from the checker's own output.
+
+        An unknown entry is fatal now, so a ledger seeded with an invented key
+        short-circuits before the missing-list is reached. The excluded sites are
+        real call sites and are not in the expected set, which makes one of them the
+        seed that leaves the rest of the inventory missing.
+        """
+        proc = run_script("--check", "--root", str(root))
+        for line in proc.stdout.splitlines():
+            if line.startswith("note: excluded "):
+                return line[len("note: excluded ") :].split(" — ")[0].strip()
+        raise AssertionError(f"no excluded key in:\n{proc.stdout}")
+
     def test_a_missing_file_is_red(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp)
@@ -365,7 +394,7 @@ class LedgerVerification(unittest.TestCase):
     def test_a_partial_ledger_names_the_missing_call_sites(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp, full_src=True)
-            first = POSEIDON + ":15"
+            first = self.a_real_key(root)
             p = self._ledger(root, [first])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 1)
@@ -374,7 +403,7 @@ class LedgerVerification(unittest.TestCase):
             self.assertIn("crates/sparq-zk-compose/src/result.rs:", proc.stderr)
             self.assertNotIn(first + " ", proc.stderr)
 
-    def test_a_complete_ledger_is_green_and_an_unknown_entry_is_only_reported(self):
+    def test_a_complete_ledger_is_green(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp, full_src=True)
             # Build a complete ledger from the checker's own missing-list.
@@ -387,7 +416,7 @@ class LedgerVerification(unittest.TestCase):
             ]
             self.assertFalse(keys, "an empty ledger short-circuits before the key list")
             # Instead, take the keys from a one-entry run, which does reach the list.
-            p = self._ledger(root, ["crates/sparq-zk/tests/plain.rs:1"])
+            p = self._ledger(root, [self.a_real_key(root)])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             keys = [
                 line.strip().split("  ")[0]
@@ -395,10 +424,20 @@ class LedgerVerification(unittest.TestCase):
                 if line.strip().startswith("crates/")
             ]
             self.assertGreater(len(keys), 50, proc.stderr)
-            p = self._ledger(root, keys + ["crates/sparq-zk/tests/plain.rs:999"])
+            p = self._ledger(root, keys)
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 0, f"{proc.stdout}\n{proc.stderr}")
-            self.assertIn("no matching call site", proc.stdout)
+
+    def test_an_entry_matching_no_call_site_is_red(self):
+        """An unpredicted key means the inventory missed a site — an import, an
+        alias, or a file outside the scan trees."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            p = self._ledger(root, ["crates/sparq-zk/tests/plain.rs:999"])
+            proc = run_script("--verify-ledger", str(p), "--root", str(root))
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("match no inventoried gate call site", proc.stderr)
+            self.assertIn("crates/sparq-zk/tests/plain.rs:999", proc.stderr)
 
     def test_two_gate_calls_on_one_line_block_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -446,6 +485,29 @@ class GateSource(unittest.TestCase):
         self.assertIn("missing.is_empty()", allowed, "recording happens on the run path")
         self.assertNotIn("record(", rest.split("pub fn require_toolchain", 1)[0],
                          "a skip or a panic must record nothing")
+
+    def test_no_orphaned_doc_block(self):
+        """A `///` block followed by a blank line documents nothing and trips
+        clippy::empty_line_after_doc_comments under the nightly -D warnings lane."""
+        lines = self.text.splitlines()
+        for i, line in enumerate(lines[:-1]):
+            if line.strip().startswith("///") and not lines[i + 1].strip():
+                self.fail(f"orphaned doc comment at line {i + 1}: {line.strip()!r}")
+
+    def test_no_doc_comment_on_a_macro_invocation(self):
+        """`///` on a `macro!` invocation documents nothing: rustdoc cannot see
+        through the expansion, so clippy's `unused_doc_comments` fires and the
+        nightly workspace lane (`-D warnings`) goes red."""
+        lines = self.text.splitlines()
+        for i, line in enumerate(lines):
+            if not re.match(r"^\s*[\w:]+!\s*[{(\[]", line):
+                continue
+            j = i - 1
+            while j >= 0 and lines[j].strip().startswith("#["):
+                j -= 1
+            if j >= 0 and lines[j].strip().startswith("///"):
+                self.fail(f"doc comment on the macro invocation at line {i + 1}: "
+                          f"{line.strip()!r}")
 
     def test_the_ledger_env_var_is_private_to_the_gate_module(self):
         self.assertIn('const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";', self.text)
@@ -656,10 +718,49 @@ class SrcTestRegions(unittest.TestCase):
             self.assertIn("crates/sparq-zk-compose/src/driver.rs:", proc.stderr)
             self.assertIn("crates/sparq-zk-compose/src/result/signed.rs:", proc.stderr)
 
+    def test_a_gate_call_outside_a_cfg_test_region_is_inventoried(self):
+        """The lint scope stops at the region; the inventory does not."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            (root / "crates/sparq-zk-compose/src/stray.rs").write_text(
+                "fn helper() {\n"
+                '    let _ = crate::support::gate("stray_site", &["nargo"]);\n}\n',
+                encoding="utf-8",
+            )
+            p = self._partial(root)
+            proc = run_script("--verify-ledger", str(p), "--root", str(root))
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("crates/sparq-zk-compose/src/stray.rs:2", proc.stderr)
+
+    def test_a_grandchild_of_a_src_test_module_is_linted(self):
+        """`#[cfg(test)] mod inner;` makes inner.rs test code in full, and its own
+        plain `mod deeper;` child too — nothing there carries a cfg attribute."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            base = root / "crates/sparq-zk-compose/src"
+            (base / "stray.rs").write_text(
+                "#[cfg(test)]\nmod inner;\n", encoding="utf-8")
+            (base / "stray" / "inner").mkdir(parents=True)
+            (base / "stray" / "inner.rs").write_text(
+                "mod deeper;\n", encoding="utf-8")
+            (base / "stray" / "inner" / "deeper.rs").write_text(
+                "#[test]\nfn case() {\n"
+                '    let _ = std::process::Command::new("nargo").output();\n}\n',
+                encoding="utf-8",
+            )
+            proc = run_script("--check", "--root", str(root))
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("deeper.rs", proc.stderr)
+            self.assertIn("[A1]", proc.stderr)
+
     @staticmethod
     def _partial(root: Path) -> Path:
+        """A ledger holding ONE real call site, so verification reaches the
+        missing-list instead of short-circuiting on an unknown entry."""
         p = root / "ledger.txt"
-        p.write_text("crates/sparq-zk/tests/plain.rs:1\n", encoding="utf-8")
+        p.write_text(
+            LedgerVerification.a_real_key(root) + "\n", encoding="utf-8"
+        )
         return p
 
 
@@ -682,6 +783,42 @@ class LaneWiring(unittest.TestCase):
             "the verify step must be exactly that one command, with the path as a "
             "literal rather than $SPARQ_ZK_LIVE_LEDGER, which a test could rewrite",
         )
+
+    def test_the_verify_step_carries_only_name_and_run(self):
+        import yaml  # noqa: PLC0415
+
+        doc = yaml.safe_load(self.text)
+        self.assertIsNone(doc.get("defaults"), "no workflow-level defaults")
+        for jid, job in (doc.get("jobs") or {}).items():
+            steps = [s or {} for s in (job.get("steps") or [])]
+            verify = [s for s in steps if s.get("name") == VERIFY_STEP]
+            if not verify:
+                continue
+            self.assertEqual(set(verify[0]), {"name", "run"})
+            self.assertIsNone(job.get("defaults"), f"no defaults on {jid}")
+            for step in steps:
+                if "shell" in step:
+                    self.assertEqual(step["shell"], "bash", step.get("name"))
+
+    def test_a_shell_or_defaults_on_the_verify_step_turns_the_check_red(self):
+        for label, old, new in (
+            ("a swallowing shell",
+             f"      - name: {VERIFY_STEP}\n        run:",
+             f'      - name: {VERIFY_STEP}\n        shell: "true {{0}}"\n        run:'),
+            ("job-level defaults",
+             "    runs-on: ubuntu-latest",
+             '    defaults:\n      run:\n        shell: "true {0}"\n'
+             "    runs-on: ubuntu-latest"),
+        ):
+            with self.subTest(label), tempfile.TemporaryDirectory() as tmp:
+                root = copy_tree(tmp)
+                wf = root / WORKFLOW
+                text = wf.read_text(encoding="utf-8")
+                self.assertIn(old, text, label)
+                wf.write_text(text.replace(old, new, 1), encoding="utf-8")
+                proc = run_script("--check", "--root", str(root))
+                self.assertEqual(proc.returncode, 1, f"{label}: {proc.stdout}")
+                self.assertIn("[D]", proc.stderr)
 
     def test_the_verify_step_is_last_and_unconditional(self):
         self.assertTrue(
