@@ -502,6 +502,20 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1
 
+      # The step above passes NO `--features`, so an `#[ignore]`d case that is also
+      # `#[cfg(feature = "dual-leaf")]` compiles to nothing there, and the
+      # feature-matrix `dual-leaf` leg has no toolchain and does not run ignored
+      # cases — so such a case would execute in NO lane. This step is the executor
+      # for that intersection: the ignored dual-leaf cases of `tests/e2e.rs` (the
+      # DEFERRED member resolution over a hidden-only commitment, which needs a
+      # real `scan_k2` proof AND a real hidden-issuer proof). Named explicitly so a
+      # silently-skipped body cannot report PASS.
+      - name: Run the ignored dual-leaf e2e cases (real bb, default-off feature)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
+            -- --ignored --test-threads=1 a_deferred_member_resolution
+
       # The live tests that are NOT `#[ignore]`d (e2e forge-reject cases, the signed
       # filter bindings, the family members, the differential fuzz, the car-hire capture)
       # run in the default lanes only as declared skips, because those lanes have no
