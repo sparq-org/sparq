@@ -2287,6 +2287,10 @@ mod tests {
     /// `ResultPolicy::admit_unbound_legacy` the same call gets past member
     /// selection and fails only later, on the absent proof — which is what makes
     /// the refusal above attributable to the policy and nothing else.
+    ///
+    /// For the unsigned family this refusal comes from the `bound_package` arm
+    /// of `NumericContract::package`, not from `require_method_bound_or_opt_in`:
+    /// a refactor that drops that arm must keep this test red.
     #[test]
     fn verify_result_refuses_a_legacy_member_under_the_default_policy() {
         let (credentials, policy, nonce, rows) = fixture();
