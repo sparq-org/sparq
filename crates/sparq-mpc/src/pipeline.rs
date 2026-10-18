@@ -354,12 +354,15 @@ fn verdict_from_partial(p: &PartialResult) -> Result<bool, MpcError> {
         Some(oxrdf::Term::Literal(l)) => match l.value() {
             "true" => Ok(true),
             "false" => Ok(false),
-            other => Err(MpcError::Protocol(format!(
-                "verdict partial carried a non-boolean literal {other:?}"
-            ))),
+            _ => Err(MpcError::Protocol(
+                // The lexical form is the holder's own datum; "not boolean" is
+                // the whole diagnosis.
+                "verdict partial carried a literal that is not `true` or `false`".to_string(),
+            )),
         },
         other => Err(MpcError::Protocol(format!(
-            "verdict partial must carry a boolean literal, got {other:?}"
+            "verdict partial must carry a boolean literal, got {}",
+            crate::partial::term_slot_kind(other.as_ref())
         ))),
     }
 }
@@ -845,5 +848,37 @@ mod tests {
             "same logical key-set in a different caller order must yield the SAME canonical \
              disclosed_key_set (and thus the same statement shape)"
         );
+    }
+
+    /// The verdict-partial refusals name the binding's kind, never its content.
+    #[test]
+    fn verdict_partial_refusals_are_value_free() {
+        use crate::partial::{HolderId, PartialResult};
+        use oxrdf::{Literal, NamedNode, Term, Variable};
+        let one = |slot: Option<Term>| PartialResult {
+            holder: HolderId::new("h"),
+            vars: vec![Variable::new("v").unwrap()],
+            rows: vec![vec![slot]],
+        };
+        let shown = |e: &MpcError| format!("{} || {:?}", e, e);
+
+        let err = verdict_from_partial(&one(Some(Term::Literal(Literal::new_simple_literal(
+            "maybe-313131",
+        )))))
+        .unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("313131") && !text.contains("maybe"),
+            "{}",
+            text
+        );
+
+        let err = verdict_from_partial(&one(Some(Term::NamedNode(
+            NamedNode::new("http://ex/v-424242").unwrap(),
+        ))))
+        .unwrap_err();
+        let text = shown(&err);
+        assert!(!text.contains("424242"), "{}", text);
+        assert!(text.contains("got an IRI"), "{}", text);
     }
 }
