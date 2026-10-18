@@ -17,7 +17,6 @@
 use sparq_zk_compose::build::{encode_decimal_literal, encode_signed_int_literal};
 use sparq_zk_compose::manifest::FieldHex;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod support;
 
@@ -85,7 +84,7 @@ fn decimal_toml(
 /// Returns Ok(true) if `nargo execute` produced a witness (relation satisfiable),
 /// Ok(false) if it didn't (unsatisfiable / mismatched binding). `tag` isolates
 /// the Prover.toml + witness file so concurrent tests don't race.
-fn try_witness(pkg: &str, toml: &str, tag: &str) -> bool {
+fn try_witness(gate: &support::LiveToolchain, pkg: &str, toml: &str, tag: &str) -> bool {
     let dir = compose_dir();
     let prover_name = format!("Prover_{tag}");
     let witness_name = format!("{pkg}_w_{tag}");
@@ -94,14 +93,14 @@ fn try_witness(pkg: &str, toml: &str, tag: &str) -> bool {
     let witness_path = dir.join("target").join(format!("{witness_name}.gz"));
     let _ = std::fs::remove_file(&witness_path);
     // Compile is idempotent; required so target/<pkg>.json exists.
-    let _ = Command::new("nargo")
+    let _ = support::live_tool(gate, "nargo")
         .arg("compile")
         .arg("--package")
         .arg(pkg)
         .current_dir(&dir)
         .output()
         .expect("nargo compile runs");
-    let _ = Command::new("nargo")
+    let _ = support::live_tool(gate, "nargo")
         .arg("execute")
         .arg(&witness_name)
         .arg("--package")
@@ -119,16 +118,17 @@ fn try_witness(pkg: &str, toml: &str, tag: &str) -> bool {
 
 #[test]
 fn signed_int_binding_matches_real_encode() {
-    if !support::require_toolchain("signed_int_binding_matches_real_encode", &["nargo"]) {
-        return;
-    }
+    let gate = match support::gate("signed_int_binding_matches_real_encode", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
     // value = -42 committed by the REAL pipeline; the circuit must re-derive its
     // encoding from the witnessed sign + magnitude digits ("42", neg=true).
     let enc = encode_signed_int_literal(-42);
     // -42 < +1 => lt true. Satisfiable iff the token rebuild byte-matches encode.
     let toml = signed_int_toml(&enc, 0, false, 1, true, true, b"42");
     assert!(
-        try_witness("filter_signed_int_d2", &toml, "sq1q9h_neg42_ok"),
+        try_witness(&gate, "filter_signed_int_d2", &toml, "sq1q9h_neg42_ok"),
         "signed-int -42 binding must satisfy the relation (token rebuild must \
          byte-match sparq_zk::encode)"
     );
@@ -136,31 +136,33 @@ fn signed_int_binding_matches_real_encode() {
 
 #[test]
 fn signed_int_binding_rejects_sign_lie() {
-    if !support::require_toolchain("signed_int_binding_rejects_sign_lie", &["nargo"]) {
-        return;
-    }
+    let gate = match support::gate("signed_int_binding_rejects_sign_lie", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
     // Anchor encoding is for -42, but the prover witnesses +42 (neg=false). The
     // operand binding (h2(LITERAL, blake3("42"^^int)) != enc_for_"-42") must make
     // this UNSATISFIABLE — the sign cannot be forged against a committed value.
     let enc_neg = encode_signed_int_literal(-42);
     let toml = signed_int_toml(&enc_neg, 2, false, 0, true, false, b"42");
     assert!(
-        !try_witness("filter_signed_int_d2", &toml, "sq1q9h_signlie"),
+        !try_witness(&gate, "filter_signed_int_d2", &toml, "sq1q9h_signlie"),
         "claiming +42 against the -42 anchor encoding must be unsatisfiable"
     );
 }
 
 #[test]
 fn decimal_binding_matches_real_encode() {
-    if !support::require_toolchain("decimal_binding_matches_real_encode", &["nargo"]) {
-        return;
-    }
+    let gate = match support::gate("decimal_binding_matches_real_encode", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
     // value = 123.45 committed by the REAL pipeline (ID=3, FD=2).
     let enc = encode_decimal_literal(false, 123, "45");
     // 123.45 > 123.40 (bound_scaled = 12340) => gt true.
     let toml = decimal_toml(&enc, 2, false, 12340, true, false, b"123", b"45");
     assert!(
-        try_witness("filter_decimal_i3_f2", &toml, "sq1q9h_dec_ok"),
+        try_witness(&gate, "filter_decimal_i3_f2", &toml, "sq1q9h_dec_ok"),
         "decimal 123.45 binding must satisfy the relation (token rebuild must \
          byte-match sparq_zk::encode)"
     );
@@ -168,15 +170,16 @@ fn decimal_binding_matches_real_encode() {
 
 #[test]
 fn decimal_binding_rejects_fraction_lie() {
-    if !support::require_toolchain("decimal_binding_rejects_fraction_lie", &["nargo"]) {
-        return;
-    }
+    let gate = match support::gate("decimal_binding_rejects_fraction_lie", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
     // Anchor encoding is for 123.45; prover witnesses 123.99 fraction digits. The
     // binding (different token bytes => different enc) must be UNSATISFIABLE.
     let enc_45 = encode_decimal_literal(false, 123, "45");
     let toml = decimal_toml(&enc_45, 2, false, 0, true, false, b"123", b"99");
     assert!(
-        !try_witness("filter_decimal_i3_f2", &toml, "sq1q9h_dec_fraclie"),
+        !try_witness(&gate, "filter_decimal_i3_f2", &toml, "sq1q9h_dec_fraclie"),
         "claiming .99 against the .45 anchor encoding must be unsatisfiable"
     );
 }

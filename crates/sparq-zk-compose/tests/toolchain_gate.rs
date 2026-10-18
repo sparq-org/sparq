@@ -26,6 +26,7 @@ const ABSENT_TOOL: &str = "sparq-zk-compose-no-such-tool";
 /// `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN` set to `allow` (or removed when `None`).
 fn run_child(allow: Option<&str>) -> std::process::Output {
     let exe = std::env::current_exe().expect("the running test binary has a path");
+    // zk-toolchain-gate: allow re-exec of this test binary, not a tool acquisition
     let mut cmd = std::process::Command::new(exe);
     // NOT `--nocapture`: libtest DISCARDS a passing test's captured output, so the
     // skip line is only observable here because the gate writes it to the process's
