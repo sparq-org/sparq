@@ -79,6 +79,14 @@ jobs:
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # This lane is routinely dispatched on a branch
+          # (`gh workflow run datalog-souffle.yml --ref <branch>`), and a cache entry
+          # saved from a branch ref is visible to that ref alone while churning the
+          # repo-wide Actions-cache budget. Save from `main` only; RESTORE is
+          # untouched, and branches read main's entry. Pinned by
+          # scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Datalog differential vs Soufflé
         env:

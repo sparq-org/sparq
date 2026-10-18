@@ -37,6 +37,7 @@ not on pull requests:
 | `supply-chain.yml` (cargo-deny, cargo-vet, SBOM, VEX) | push to `main` + nightly + `workflow_dispatch` |
 | `bench.yml` (benchmarks + regression ratchet) | push to `main` + nightly + `workflow_dispatch` + PRs labelled `bench` |
 | `nightly-full-sweep.yml` (site a11y / full-surface visual / cross-browser, tauri smoke) | nightly + `workflow_dispatch` |
+| `datalog-souffle.yml` (stratified-Datalog differential against a pinned Soufflé binary, run with `SPARQ_DATALOG_SOUFFLE_REQUIRED=1` so a missing binary fails instead of skipping) | nightly + `workflow_dispatch` |
 | `container-scan.yml`, `vectorized-feature-off.yml` | push to `main` (path-filtered) + `workflow_dispatch` (container-scan also nightly) |
 
 To run a heavy suite on a branch before merging, dispatch it on that branch, e.g.

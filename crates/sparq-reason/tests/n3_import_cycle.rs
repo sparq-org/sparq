@@ -14,7 +14,10 @@
 //!
 //! Every cyclic case runs on a watchdog thread: a regression (the guard removed) would hang or
 //! crash the whole suite, so the watchdog turns non-termination into an explicit, bounded
-//! FAILURE rather than a hang. Documents use the `doc:`/`ex:` IRI spaces; the resolver maps a
+//! FAILURE rather than a hang. The watchdog is EVENT-DRIVEN — a worker that finishes, or that
+//! panics, is observed as soon as it does so (its result arrives, or the channel closes) and
+//! the thread is joined — so the timeout below is a last-resort hang guard, never a time budget
+//! a slow runner can trip. Documents use the `doc:`/`ex:` IRI spaces; the resolver maps a
 //! `doc:` IRI to that document's N3 text (the production analogue of a deref).
 
 use sparq_reason::n3::{reason_n3_terms_with_resolver, Resolver, Term};
@@ -24,15 +27,69 @@ use std::time::Duration;
 const DOC: &str = "http://doc/";
 const EX: &str = "http://ex/";
 
-/// Run `f` on a worker thread, failing the test if it does not finish within `secs`. A
-/// non-terminating reasoner (the bug this guards) would otherwise hang CI indefinitely.
-fn with_watchdog<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+/// Last-resort hang guard for the watchdog worker, in seconds.
+///
+/// NOT a performance budget and NOT a measurement: a healthy run — including one that fails by
+/// panicking — never waits on this value, because `with_watchdog` observes the worker's result
+/// or its panic as it happens and joins the thread. The guard exists only so a genuine
+/// NON-TERMINATION (the import-cycle guard removed) fails the suite instead of hanging CI
+/// forever, and is deliberately far above any plausible honest runtime so a slow, heavily
+/// loaded runner cannot trip it.
+const HANG_GUARD_SECS: u64 = 300;
+
+/// Run `f` on a worker thread and return its value, joining the thread.
+///
+/// A worker panic is re-raised on the test thread as soon as it happens (the panicking worker
+/// drops the sender, which closes the channel), so a failing assertion inside `f` reports its
+/// own message rather than a timeout. Only an actual hang reaches [`HANG_GUARD_SECS`].
+fn with_watchdog<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker = std::thread::spawn(move || {
         let _ = tx.send(f());
     });
-    rx.recv_timeout(Duration::from_secs(secs))
-        .expect("reasoning did not terminate within the watchdog window (import cycle not broken)")
+    match rx.recv_timeout(Duration::from_secs(HANG_GUARD_SECS)) {
+        // Event-driven: the worker has produced its result, so this join returns at once.
+        Ok(value) => {
+            if let Err(payload) = worker.join() {
+                std::panic::resume_unwind(payload);
+            }
+            value
+        }
+        // The sender was dropped without a result: the worker panicked. Join to re-raise that
+        // panic here, so the real failure surfaces instead of a timeout that never happened.
+        Err(mpsc::RecvTimeoutError::Disconnected) => match worker.join() {
+            Err(payload) => std::panic::resume_unwind(payload),
+            Ok(()) => unreachable!("watchdog worker closed the channel without sending a result"),
+        },
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!(
+            "reasoning did not terminate within the {HANG_GUARD_SECS}s hang guard (import cycle \
+             not broken). This guard bounds a HANG; it does not measure performance."
+        ),
+    }
+}
+
+#[test]
+fn watchdog_reraises_worker_panic_promptly() {
+    // The event-driven contract. `HANG_GUARD_SECS` is minutes long, so a watchdog that only
+    // waited on the timeout — or that reported a timeout instead of the worker's own panic —
+    // fails one of these two assertions.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {})); // the panic below is expected; keep the log clean
+    let started = std::time::Instant::now();
+    let caught = std::panic::catch_unwind(|| with_watchdog(|| panic!("worker exploded")));
+    std::panic::set_hook(hook);
+
+    let payload = caught.expect_err("a panicking worker must fail the test");
+    let msg = payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    assert!(msg.contains("worker exploded"), "the worker's own panic must surface, got {msg:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(HANG_GUARD_SECS),
+        "a panicking worker must be reported promptly, not after the hang guard"
+    );
 }
 
 fn has(facts: &[[Term; 3]], s: &str, p: &str, o: &str) -> bool {
@@ -46,7 +103,7 @@ const PRE: &str = "@prefix : <http://ex/> .\n\
 
 /// Reason `src` with a `(iri, text)` resolver, on a watchdog. Returns the closure facts.
 fn reason_with_docs(src: &'static str, docs: Vec<(String, String)>) -> Vec<[Term; 3]> {
-    with_watchdog(30, move || {
+    with_watchdog(move || {
         let resolver =
             move |iri: &str| docs.iter().find(|(d, _)| d == iri).map(|(_, t)| t.clone());
         let r = &resolver;
