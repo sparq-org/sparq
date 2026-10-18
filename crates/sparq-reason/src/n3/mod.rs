@@ -3021,6 +3021,20 @@ fn match_premise_admitted(
                         }
                     }
                 }
+                // ANSWER SAFETY: the same rule for the containment operators. A pattern that
+                // arrived through a variable and is not ground used to fall back to the
+                // EMPTY pattern inside a backward proof, which makes `log:includes` hold of
+                // everything and `log:notIncludes` of nothing — a wrong answer either way.
+                // Refused ([`BOUND_PATTERN_NOT_GROUND`]); the scope (`pat[0]`) is searched
+                // data and is not required to be ground.
+                if path.in_backward
+                    && arrived_non_ground(Some(&pat[2]), walk_ref(&pat[2], &b), &b)
+                {
+                    bw.nested_error
+                        .borrow_mut()
+                        .get_or_insert_with(|| BOUND_PATTERN_NOT_GROUND.into());
+                    continue;
+                }
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
                 };
@@ -3175,40 +3189,37 @@ fn match_premise_admitted(
                     bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                     continue;
                 }
-                // ANSWER SAFETY: a clause, template or scope that arrived through a variable
-                // and names one of the applying rule's own source variables was written to
-                // share that variable with the rule and cannot, because the rule's atoms were
-                // standardized apart around it. The aggregation would then read a clause
-                // nothing constrains — `forAllIn` holding vacuously and FIRING a rule that
-                // must not fire, `collectAllIn` collecting nothing — so the shape fails
-                // closed ([`BOUND_AGGREGATION_SHARES_RULE_VAR`]) rather than answer wrongly.
-                // Narrow by construction: a slot the rule wrote as a `{ … }` formula is
-                // renamed with the rule and shares correctly; a clause with no shared name
-                // aggregates as before; a value the application itself minted names no source
-                // variable; and `applying` is `None` outside a backward application, so a
-                // forward rule and a formula a caller passes in are untouched.
-                if let Some(rule) = path.applying.and_then(|i| bw.rules.get(i as usize)) {
+                // ANSWER SAFETY: inside a backward proof, a CLAUSE or TEMPLATE that arrived
+                // through a variable and is not ground once the binding is followed out is
+                // refused ([`BOUND_PATTERN_NOT_GROUND`]). Its free variable is one the
+                // surrounding proof cannot bind, because the rule's atoms were standardized
+                // apart around the arriving formula, and its own matching will not bind it
+                // either, so `forAllIn` would hold VACUOUSLY and fire a rule that must not
+                // fire and `collectAllIn` would collect nothing — wrong answers, not
+                // incomplete ones.
+                //
+                // The SCOPE (`pat[2]`) is deliberately NOT required to be ground: it is the
+                // data the clause is searched against, not a pattern that has to match, and
+                // a stored scope carrying a variable is answered correctly today both on the
+                // forward path and before this change.
+                if path.in_backward {
                     let written = aggregation_clauses(op, &pat[0]);
-                    let shares = aggregation_clauses(op, &subj)
+                    let non_ground = aggregation_clauses(op, &subj)
                         .iter()
                         .enumerate()
-                        .any(|(i, c)| arrived_sharing_rule_var(written.get(i), c, rule, &b))
+                        .any(|(i, c)| arrived_non_ground(written.get(i), c, &b))
                         // `collectAllIn`'s template: instantiated once per solution of the
-                        // clause, so a source name here is the same unshared variable.
+                        // clause, so a variable left free in it is never filled either.
                         || matches!((op, &subj), (CollectOp::CollectAll, Term::List(ms)) if ms.len() == 3
-                            && arrived_sharing_rule_var(
+                            && arrived_non_ground(
                                 match &pat[0] { Term::List(w) => w.first(), _ => None },
                                 &ms[0],
-                                rule,
                                 &b,
-                            ))
-                        // The scope: read where the binding left it, so an unbound or ground
-                        // scope costs no substitution.
-                        || arrived_sharing_rule_var(Some(&pat[2]), walk_ref(&pat[2], &b), rule, &b);
-                    if shares {
+                            ));
+                    if non_ground {
                         bw.nested_error
                             .borrow_mut()
-                            .get_or_insert_with(|| BOUND_AGGREGATION_SHARES_RULE_VAR.into());
+                            .get_or_insert_with(|| BOUND_PATTERN_NOT_GROUND.into());
                         continue;
                     }
                 }
@@ -3565,7 +3576,7 @@ fn backward_prove(
     // over every site whether or not the gate below skips it, so a site's index does not
     // depend on the goal ([`BwPath`]).
     let mut site = 0u64;
-    for (ri, rule) in bw.rules.iter().enumerate() {
+    for rule in bw.rules {
         for concl in &rule.conclusion {
             let at = site;
             site += 1;
@@ -3663,7 +3674,7 @@ fn backward_prove(
                 JoinMode::All,
                 bw,
                 depth,
-                BwPath::at(fold).applying(ri),
+                BwPath::at(fold).in_backward(),
             ) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
@@ -3809,20 +3820,44 @@ impl<'a> Produced<'a> {
     }
 }
 
+impl Produced<'_> {
+    /// Is `v` a name only the CALLER may resolve — one its binding already values, or one
+    /// the goal atom itself writes at any depth?
+    ///
+    /// The goal is read as it stands, rather than its names collected up front: a goal has
+    /// three terms and this is asked only of a variable that reached a quoted formula and
+    /// is bound by the proof, so collecting them would be a per-goal allocation on the
+    /// proof-search path for a question almost no goal asks ([`mentions_var`] descends into
+    /// a quoted formula, which is where a caller's own name sits).
+    fn callers(&self, v: &str) -> bool {
+        self.caller.get(v).is_some()
+            || self.goal.iter().any(|t| mentions_var(t, &|n: &str| n == v))
+    }
+}
+
 impl bounded::Subst for Produced<'_> {
     fn bound(&self, v: &str) -> Option<&Term> {
-        // The goal is read as it stands, rather than its names collected up front: a goal
-        // has three terms and this is asked only of a variable that reached a quoted
-        // formula and is bound by the proof and not by the caller, so collecting them
-        // would be a per-goal allocation on the proof-search path for a question almost no
-        // goal asks ([`mentions_var`] descends into a quoted formula, which is where a
-        // caller's own name sits).
-        if self.caller.get(v).is_some()
-            || self.goal.iter().any(|t| mentions_var(t, &|n: &str| n == v))
-        {
-            return None;
+        // The chain is followed to its end, not read one hop deep. A variable is routinely
+        // bound to ANOTHER variable — head unification aliases a goal's name to an
+        // application's, and the premise then binds that one to a value — so a one-hop read
+        // returns the alias and the answer carries a variable name where the proof found a
+        // term (GH #6943: `{ (?x ?y) :cl { :a :q ?x } } <= { :seed :value ?y }` asked as
+        // `( ?t ?t ) :cl ?cl` returned the alias instead of the value). Bounded by the
+        // binding's own length, so a cycle ends the walk.
+        let mut name = v;
+        for _ in 0..self.sol.len() + 1 {
+            if self.callers(name) {
+                return None;
+            }
+            match self.sol.get(name) {
+                // One more link of the same chain: keep walking, and apply the SAME
+                // exclusions to the name it lands on, so a chain that reaches the caller's
+                // is still left to the caller.
+                Some(Term::Var(next)) => name = next,
+                landed => return landed,
+            }
         }
-        self.sol.get(v)
+        None
     }
 }
 
@@ -3893,16 +3928,15 @@ impl bounded::Subst for Produced<'_> {
 struct BwPath {
     /// The fingerprint of the proof-tree node this path names.
     fold: u64,
-    /// The backward rule whose own premise is being matched under this path, as its index
-    /// into [`BwCtx::rules`] — set by [`BwPath::applying`] where `backward_prove` renames a
-    /// rule and evaluates its premise, and `None` everywhere else.
+    /// Whether evaluation under this path is happening inside a backward proof at all —
+    /// set where `backward_prove` renames a rule and evaluates its premise, and INHERITED by
+    /// every [`BwPath::child`] below it.
     ///
-    /// It is what [`BOUND_AGGREGATION_SHARES_RULE_VAR`] measures an arriving formula
-    /// against, and it does not descend: [`BwPath::child`] builds its result through
-    /// [`BwPath::at`], so a step into a clause or a containment pattern — whose atoms are
-    /// that formula's, not the rule's — leaves it unset. An index, not a `&Rule`, so the
-    /// path stays `Copy` and free of a lifetime.
-    applying: Option<u32>,
+    /// It descends because the shape [`BOUND_PATTERN_NOT_GROUND`] refuses is unsound
+    /// wherever it occurs under a backward application, not only in the applying rule's own
+    /// premise: an aggregation nested inside an outer clause is standardized apart just the
+    /// same, and a guard that stopped at the first step would skip it.
+    in_backward: bool,
 }
 
 /// What a proof-tree node's fingerprint is folded from ([`BwPath`]). Each shape carries the
@@ -3977,15 +4011,15 @@ impl BwPrefix {
 const _: () = assert!(std::mem::size_of::<BwPath>() == 16);
 
 impl BwPath {
-    /// The path that is just the node `fold` names, inside no rule application.
+    /// The path that is just the node `fold` names, outside any backward proof.
     fn at(fold: u64) -> BwPath {
-        BwPath { fold, applying: None }
+        BwPath { fold, in_backward: false }
     }
 
-    /// `self` as the root of the premise evaluation of rule `ri`, whose atoms this path's
-    /// subtree therefore are ([`BwPath::applying`]).
-    fn applying(self, ri: usize) -> BwPath {
-        BwPath { applying: u32::try_from(ri).ok(), ..self }
+    /// `self` as the root of a backward rule's premise evaluation, which every path below it
+    /// is then inside ([`BwPath::in_backward`]).
+    fn in_backward(self) -> BwPath {
+        BwPath { in_backward: true, ..self }
     }
 
     /// The path one `step` further down, as its own registered node
@@ -3994,10 +4028,14 @@ impl BwPath {
     /// is already another key's is a capture too.
     fn child(&self, bw: &BwCtx, step: u64) -> Option<BwPath> {
         let key = NodeKey::Step { parent: self.fold, step };
+        // `in_backward` is carried down: a step is deeper INSIDE whatever the parent was
+        // inside, so an aggregation reached through an outer clause is still inside the
+        // backward proof that renamed the atoms around it.
+        let keep = |fold| BwPath { fold, in_backward: self.in_backward };
         if bw.unnamed() {
-            return Some(BwPath::at(key.fold()));
+            return Some(keep(key.fold()));
         }
-        bw.node(key).map(BwPath::at)
+        bw.node(key).map(keep)
     }
 }
 
@@ -4270,50 +4308,90 @@ fn frees_quoted_universal(t: &Term) -> bool {
 /// [`premise_universals_matchable`]); every other quantified antecedent is refused.
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
-/// The refusal for a bound aggregation subject that was written to share variables with
-/// the backward rule aggregating over it, but cannot (GH #6943).
+/// The refusal for an executable pattern that reached a builtin through a VARIABLE and is
+/// still not ground once the binding is followed out (GH #6943).
 ///
-/// Inside a backward application the rule's own atoms are standardized apart
-/// ([`rename_vars`]), while a formula arriving through a variable carries the names its
-/// document wrote. If the two name the same source variable they were written to share it
-/// and do not, and the aggregation reads a clause nothing constrains: `log:forAllIn` then
-/// holds VACUOUSLY and fires a rule that must not fire, and `log:collectAllIn` collects
-/// nothing. Both are wrong ANSWERS, so the shape fails closed here instead.
-const BOUND_AGGREGATION_SHARES_RULE_VAR: &str =
-    "N3: a formula bound through a variable cannot share variables with the backward rule \
-     that aggregates over it";
+/// Inside a backward proof the rule's own atoms are standardized apart ([`rename_vars`]),
+/// while a formula arriving through a variable carries the names its document wrote. A free
+/// variable left in such a pattern is therefore a variable the surrounding proof cannot
+/// bind and the pattern's own matching will not bind either, so the builtin reads a pattern
+/// nothing constrains. Every answer that follows is wrong rather than merely incomplete:
+/// `log:forAllIn` holds VACUOUSLY and fires a rule that must not fire, `log:collectAllIn`
+/// collects nothing, and a containment pattern falls back to the EMPTY pattern, which makes
+/// `log:includes` hold of everything and `log:notIncludes` of nothing. There is no sound
+/// reading available, so the shape fails closed.
+///
+/// A GROUND arriving pattern has nothing to share and is matched as stored, exactly as
+/// before. Forward evaluation is untouched: its atoms are never renamed, so the document's
+/// variable is one variable there and genuinely does share.
+const BOUND_PATTERN_NOT_GROUND: &str =
+    "N3: a pattern bound through a variable inside a backward rule must be ground; refused \
+     rather than matched against variables the proof cannot bind";
 
-/// Does `rule` write a variable named `v`, under the name its DOCUMENT spells — the name a
-/// formula stored elsewhere would have to use to share it?
+/// Does `t` still hold a FREE variable once every variable in it is followed through `b` as
+/// far as the binding goes?
 ///
-/// Read from the rule's own source premise and conclusion, so the answer is a property of
-/// the rule rather than of any name's text: a variable the application MINTED is not in
-/// this set (it is `v` under a [`BwPath::prefix`], a different name), which is what keeps a
-/// clause the proof built from the rule's own terms out of the refusal below.
-fn rule_writes(rule: &Rule, v: &str) -> bool {
-    let hit = |n: &str| n == v;
-    rule.premise.iter().chain(&rule.conclusion).any(|t| t.iter().any(|m| mentions_var(m, &hit)))
+/// The walk is transitive, because a variable is routinely bound to another variable: a
+/// goal's name aliased to an application's by head unification, then that one to a value.
+/// A one-hop test reads such a chain as a free variable and refuses a pattern the proof did
+/// in fact ground. [`walk_ref`] bounds each chain by the binding's own length, so a cycle
+/// ends the walk instead of spinning, and `depth` bounds the descent into what the chain
+/// lands on.
+///
+/// A quoted formula's OWN binder ([`quoted_universal`]) is NOT free: it is bound inside its
+/// formula, no substitution reaches it, and matching treats it as a constant. Counting it
+/// would refuse `( { @forAll :u. :u :p :b } { … } ) log:forAllIn`, which is valid and which
+/// the engine matches correctly.
+fn holds_free_var(t: &Term, b: &Binding) -> bool {
+    fn go(t: &Term, b: &Binding, depth: usize) -> bool {
+        if depth == 0 {
+            // Out of descent: report it as non-ground, which refuses. Fail-closed, like
+            // every other limit this module reaches.
+            return true;
+        }
+        match t {
+            Term::Var(v) if quoted_universal(v) => false,
+            Term::Var(_) => match walk_ref(t, b) {
+                // Still a variable at the end of its chain: free, unless its own formula
+                // binds it.
+                Term::Var(w) => !quoted_universal(w),
+                landed => go(landed, b, depth - 1),
+            },
+            Term::Formula(ts) => ts.iter().flatten().any(|m| go(m, b, depth - 1)),
+            Term::List(ms) => ms.iter().any(|m| go(m, b, depth - 1)),
+            Term::Triple(tr) => tr.iter().any(|m| go(m, b, depth - 1)),
+            _ => false,
+        }
+    }
+    go(t, b, bounded::backward_depth())
 }
 
-/// Whether a term that ARRIVED through a variable names a source variable of the rule
-/// applying around it ([`rule_writes`]) — the shape
-/// [`BOUND_AGGREGATION_SHARES_RULE_VAR`] refuses.
+/// Whether a builtin's executable slot ARRIVED through a variable and is not ground
+/// ([`holds_free_var`]) — the shape [`BOUND_PATTERN_NOT_GROUND`] refuses.
 ///
-/// `written` is the slot as the rule spells it. A slot written as a `{ … }` formula (or
-/// `{}`) is the rule's own text, renamed with the rest of it, so it shares correctly and is
-/// never refused; only a slot that came through a variable is checked, exactly as the
-/// quantifier check beside it decides what was invisible to `validate_rule_quantifiers`.
+/// `written` is the slot as the document spells it, and `val` the slot after the subject was
+/// resolved. Three cases, and only the last is the refusable shape:
 ///
-/// A shared name ALREADY BOUND in `b` is not the unsound shape and is not refused: its
-/// value came from the caller, which constrained it before passing the formula in, so the
-/// aggregation reads a real value rather than a variable nothing will bind. That is also
-/// what keeps the decision out of the caller's hands — were it left out, a caller whose own
-/// premise happens to spell its variable the way the callee spells one of its own would be
-/// refused where a caller spelling it anything else is answered, which is a caller's
-/// arbitrary choice of name deciding a callee's behaviour.
-fn arrived_sharing_rule_var(written: Option<&Term>, val: &Term, rule: &Rule, b: &Binding) -> bool {
-    !matches!(written, Some(Term::Formula(_) | Term::Lit(..)))
-        && mentions_var(val, &|n: &str| b.get(n).is_none() && rule_writes(rule, n))
+/// * written as a `{ … }` formula (or `{}`) — the rule's own text, renamed with the rest of
+///   it, so it shares correctly. Never refused.
+/// * written as a variable that is still UNBOUND at the end of its chain — nothing arrived.
+///   This is the ordinary spelling of a `collectAllIn` TEMPLATE (`( ?t { ?t :type :T } ?l )`)
+///   and of a clause the rule means its own matching to bind, so refusing it would refuse
+///   documents the engine answers correctly. Never refused.
+/// * written as a variable whose chain LANDS on a term — a value arrived from elsewhere, and
+///   it is refused if that value still holds a free variable.
+///
+/// A slot with no `written` counterpart at all is one whose whole subject list arrived
+/// through a variable, so the resolved slot is itself the value that arrived.
+fn arrived_non_ground(written: Option<&Term>, val: &Term, b: &Binding) -> bool {
+    match written {
+        Some(Term::Formula(_) | Term::Lit(..)) => false,
+        Some(w @ Term::Var(_)) => match walk_ref(w, b) {
+            Term::Var(_) => false,
+            landed => holds_free_var(landed, b),
+        },
+        _ => holds_free_var(val, b),
+    }
 }
 
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the

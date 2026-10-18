@@ -126,21 +126,27 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // store comes back as it went in. A variable no premise binds keeps its name (still the
 // one __bw<fold>_ fingerprint of the derivation), and a quoted formula's own @forAll
 // binder is never bound by a proof, so it is untouched. A log:collectAllIn / log:forAllIn
-// clause, template or scope given through a variable is NOT resolved into the reading
+// clause, template or pattern given through a variable is NOT resolved into the reading
 // rule's variables: behind a <= the rule's own atoms are standardized apart, so a ?y
 // arriving from elsewhere is a different variable from the rule's own ?y and binds nothing
-// of it, whatever either spells. Where that would make the aggregation read a clause
-// nothing constrains, it is now REFUSED rather than answered: a bound clause, template or
-// scope naming a variable the applying rule itself writes fails the run with "a formula
-// bound through a variable cannot share variables with the backward rule that aggregates
-// over it". Unrefused, log:forAllIn held vacuously and FIRED a rule that must not fire and
-// log:collectAllIn collected nothing — wrong answers given silently. Narrow: a clause the
-// rule writes inline shares correctly and still answers; a bound clause sharing no name
-// with the rule aggregates as before; and a shared name the CALLER already bound is a value
-// the caller constrained, so a formula a caller passes in is never refused (which also
-// keeps a caller's choice of name from deciding a callee's behaviour). A forward rule is
-// unaffected — its atoms are never renamed, so the same premise shares and answers. Whether
-// a backward rule should share the same way is the open half of GH #6943.
+// of it, whatever either spells. Inside a backward proof that shape is now REFUSED rather
+// than answered: collectAllIn, forAllIn, includes, notIncludes and supports fail the run
+// with "a pattern bound through a variable inside a backward rule must be ground" when the
+// arriving clause, template or pattern still holds a free variable after every variable in
+// it is followed to the end of its chain. Unrefused, forAllIn held vacuously and FIRED a
+// rule that must not fire, collectAllIn collected nothing, and a containment pattern fell
+// back to the EMPTY pattern (includes holding of everything, notIncludes of nothing) — all
+// wrong answers, given silently. The test is GROUNDNESS, not whose a variable is, so two
+// callers differing only in what they name their variables reach the same verdict.
+// Not refused: a slot the rule writes inline (its own text, renamed with it); a slot whose
+// variable is still unbound (the rule's own variable, which its matching binds — the
+// ordinary spelling of a collectAllIn template); a GROUND pattern, including one ground
+// only through an alias chain, which is matched as stored as before; a quoted formula's own
+// @forAll binder, which is bound inside its formula and is not free; and the SCOPE of
+// collectAllIn/forAllIn, which is searched data rather than a pattern that must match and is
+// never required to be ground. Forward rules are unaffected — their atoms are never renamed,
+// so the same premise shares and answers. Whether a backward rule should SHARE the way a
+// forward rule does is the open half of GH #6943.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares

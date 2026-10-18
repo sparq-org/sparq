@@ -611,23 +611,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from a leaked name to the term the proof bound; forward rules, the containment operators
   and every name the chainer mints are unchanged.
 
-- **sparq-reason (N3):** a `log:collectAllIn` / `log:forAllIn` clause, template or scope
-  that arrives through a VARIABLE inside a backward (`<=`) rule, and names a variable the
-  applying rule itself writes under its source name, is now REFUSED with "a formula bound
-  through a variable cannot share variables with the backward rule that aggregates over
-  it". The two were written to share that variable and cannot, because the rule's own atoms
-  were standardized apart around the arriving formula, so the aggregation read a clause
-  nothing constrains: `log:forAllIn` held VACUOUSLY and fired a rule that must not fire,
-  and `log:collectAllIn` collected nothing. Both were wrong answers given silently, and a
-  refusal is the only sound reading available. The refusal is narrow by construction. A
-  clause the rule writes inline is renamed with the rule and shares correctly; a bound
-  clause that shares no name with the rule aggregates as before; a shared name the caller
-  has ALREADY BOUND is a value the caller constrained, not an unbound variable, so a
-  formula a caller passes in is untouched — which is also what keeps a caller's arbitrary
-  choice of variable name from deciding a callee's behaviour. Forward rules are unaffected:
-  their atoms are never standardized apart, so the same premise still shares and still
-  answers. That forward/backward difference is the remaining half of the issue and stays
-  open.
+- **sparq-reason (N3):** inside a backward (`<=`) proof, an aggregation or containment
+  builtin — `log:collectAllIn`, `log:forAllIn`, `log:includes`, `log:notIncludes`,
+  `log:supports` — is now REFUSED when its clause, template or pattern arrived through a
+  VARIABLE and is still not ground once every variable in it is followed to the end of its
+  chain: "a pattern bound through a variable inside a backward rule must be ground; refused
+  rather than matched against variables the proof cannot bind". A free variable left in such
+  a pattern is one the surrounding proof cannot bind, because the rule's atoms were
+  standardized apart around the arriving formula, and the pattern's own matching will not
+  bind it either, so every answer that followed was wrong rather than merely incomplete:
+  `log:forAllIn` held VACUOUSLY and fired a rule that must not fire, `log:collectAllIn`
+  collected nothing, and a containment pattern fell back to the EMPTY pattern, which made
+  `log:includes` hold of everything and `log:notIncludes` of nothing. There is no sound
+  reading of any of them, so the shape fails closed.
+
+  Five things are deliberately NOT refused, each with its own test. A slot the rule writes
+  inline is the rule's own text, renamed with the rest of it, and shares correctly. A slot
+  whose variable is still unbound is the rule's own variable, which its own matching binds —
+  the ordinary spelling of a `collectAllIn` template. A pattern that is GROUND, including one
+  ground only through an alias chain, is matched as stored exactly as before. A quoted
+  formula's own `@forAll` binder is not a free variable, because it is bound inside its
+  formula and no substitution reaches it. And the SCOPE of `log:collectAllIn` / `log:forAllIn`
+  is not required to be ground at all: it is the data a clause is searched against, not a
+  pattern that has to match. Forward rules are unaffected, since their atoms are never
+  standardized apart. Because the test is groundness and not whose a variable is, two callers
+  that differ only in what they name their variables now reach the same verdict.
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to

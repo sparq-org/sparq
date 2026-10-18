@@ -50,9 +50,9 @@ fn err(body: &str) -> String {
     }
 }
 
-/// The refusal a bound aggregation subject that would need to share the applying backward
-/// rule's variables fails with.
-const SHARES: &str = "cannot share variables with the backward rule";
+/// The refusal an executable pattern that arrived through a variable and is not ground
+/// inside a backward proof fails with.
+const NOT_GROUND: &str = "bound through a variable inside a backward rule must be ground";
 
 fn one(s: &str) -> Vec<String> {
     vec![s.to_string()]
@@ -122,10 +122,18 @@ fn a_formula_local_universal_survives_the_projection() {
     let got = out(":seed :value :c.\n\
                    { :cfg :cl { @forAll :u. :u :q ?x } } <= { :seed :value ?x }.\n\
                    { :cfg :cl ?f } => { :out :got ?f }.");
-    assert_eq!(got.len(), 1, "{got:?}");
-    let row = &got[0];
-    assert!(row.contains("Iri(\"http://ex/c\")"), "?x instantiated: {row}");
-    assert!(row.contains("Var(\"__uf."), "the formula's own universal is kept: {row}");
+    // An exact match, not a `contains`: asserting only that SOME `__uf.` name is present
+    // cannot fail, because nothing in the engine ever substitutes one. What has to hold is
+    // that the universal is kept WHILE `?x` beside it is instantiated, and that the
+    // universal is the one its own formula declared.
+    assert_eq!(
+        got,
+        one(
+            "Iri(\"http://ex/got\") \
+             Formula([[Var(\"__uf.0.http://ex/u\"), Iri(\"http://ex/q\"), Iri(\"http://ex/c\")]])"
+        ),
+        "the universal kept, ?x instantiated beside it"
+    );
 }
 
 // ------------------------------------------------- a caller's value is never touched
@@ -171,6 +179,37 @@ fn the_answer_does_not_depend_on_the_callers_spelling() {
     }
 }
 
+/// The same symmetry for the UNBOUND-ALIAS case, where the caller's variable is in the
+/// binding only because head unification aliased it to a callee variable nothing has bound.
+/// Both spellings must reach the same verdict; the first revision of this PR refused the `?q`
+/// spelling and let the `?y` spelling FIRE, which made a caller's arbitrary choice of name
+/// decide a callee's soundness.
+#[test]
+fn the_verdict_does_not_depend_on_the_callers_spelling_through_an_alias() {
+    for (op, caller) in [("forAllIn", "ok"), ("collectAllIn", "coll")] {
+        let callee = match op {
+            "forAllIn" => format!(
+                ":cfg :cl {{ :a :p ?y }}.\n\
+                 {{ ?w :{caller} :yes }} <= {{ :cfg :cl ?cl . ( ?cl {{ :a :q ?y }} ) \
+                 log:forAllIn {{ :a :p :b. :a :p :c. :a :q :b }} }}.\n"
+            ),
+            _ => format!(
+                ":cfg :cl {{ :a :p ?y }}.\n\
+                 {{ ?w :{caller} ?l }} <= {{ :cfg :cl ?cl . ( ?y ?cl ?l ) \
+                 log:collectAllIn {{ :a :p :b. :a :p :c }} }}.\n"
+            ),
+        };
+        let head = |v: &str| match op {
+            "forAllIn" => format!("{{ {v} :{caller} :yes }} => {{ :out :fired :yes }}."),
+            _ => format!("{{ {v} :{caller} ?l }} => {{ :out :list ?l }}."),
+        };
+        let y = err(&format!("{callee}{}", head("?y")));
+        let q = err(&format!("{callee}{}", head("?q")));
+        assert!(y.contains(NOT_GROUND), "{op} ?y: {y}");
+        assert_eq!(y, q, "{op}: the two spellings must agree");
+    }
+}
+
 // ------------------------------------------- a written clause keeps its own seed
 
 /// A variable inside a clause the rule WROTE is the rule's own, and what it is bound to is
@@ -205,17 +244,19 @@ fn a_data_binding_inside_a_written_collect_clause_is_not_rewritten() {
 /// must extend to `:a :q ?y`, and over this scope `:a :p :c` has no `:a :q :c`, so
 /// `log:forAllIn` must NOT hold and `:mark :m :yes` must not be derived.
 ///
-/// Behind a `<=` the rule's own `{ :a :q ?y }` was renamed and the stored clause's `?y` was
-/// not, so the first clause constrains nothing the second reads: every solution extends
-/// trivially, `forAllIn` holds VACUOUSLY and the rule fires. That is an unsound firing, so
-/// the shape is refused instead of answered.
+/// Behind a `<=` the rule's own `{ :a :q ?y }` was renamed and the arriving clause's `?y`
+/// was not, so `?y` is left FREE in the arriving clause: nothing the proof holds can bind
+/// it, and the clause's own matching will not either. The first clause then constrains
+/// nothing the second reads, every solution extends trivially, `forAllIn` holds VACUOUSLY
+/// and the rule FIRES — which `origin/main` does. There is no sound reading, so the shape
+/// is refused.
 #[test]
-fn a_bound_forall_clause_that_would_share_a_rule_variable_is_refused() {
+fn a_bound_forall_clause_that_is_not_ground_is_refused() {
     let e = err(":cfg :cl { :a :p ?y }.\n\
                  { :mark :m :yes } <= { :cfg :cl ?cl. \
                  ( ?cl { :a :q ?y } ) log:forAllIn { :a :p :b. :a :p :c. :a :q :b } }.\n\
                  { :mark :m :yes } => { :out :fired :yes }.");
-    assert!(e.contains(SHARES), "{e}");
+    assert!(e.contains(NOT_GROUND), "{e}");
     // The same document with the clause written INLINE is the rule's own text, renamed with
     // the rest of it, so it shares correctly and is answered: it does not fire.
     let inline = out(":cfg :cl { :a :p ?y }.\n\
@@ -225,21 +266,136 @@ fn a_bound_forall_clause_that_would_share_a_rule_variable_is_refused() {
     assert_eq!(inline, none(), "inline: one variable, shared, so the premise fails");
 }
 
-/// The `log:collectAllIn` twin: the stored clause's `?y` and the rule's template `?y` were
-/// written to share. Unrefused, the template is never bound by the clause's solutions and
-/// the aggregation collects nothing — silently, with no sign the question was not answered.
+/// The `log:collectAllIn` twin: the arriving clause leaves `?y` free, so the template it is
+/// meant to bind is never bound and the aggregation collects nothing — silently, with no
+/// sign the question was not answered (`origin/main` answers `( )` here).
 #[test]
-fn a_bound_collect_clause_that_would_share_a_rule_variable_is_refused() {
+fn a_bound_collect_clause_that_is_not_ground_is_refused() {
     let e = err(":cfg :cl { :a :p ?y }.\n\
                  { :mark :m ?l } <= { :cfg :cl ?cl. \
                  ( ?y ?cl ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
                  { :mark :m ?l } => { :out :list ?l }.");
-    assert!(e.contains(SHARES), "{e}");
+    assert!(e.contains(NOT_GROUND), "{e}");
     // Inline, the same shape is the rule's own text and collects both.
     let inline = out("{ :mark :m ?l } <= { \
                       ( ?y { :a :p ?y } ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
                       { :mark :m ?l } => { :out :list ?l }.");
     assert_eq!(inline, list(&["b", "c"]), "inline: the template is bound by the clause");
+}
+
+/// Case (1): the projection follows an ALIAS CHAIN to the value the proof found. Head
+/// unification aliases the goal's one `?t` to both of the head's variables, and the premise
+/// then binds the far end to `:c`, so `?x` inside the returned formula reaches `:c` only
+/// through `?y`. Read one hop deep it comes back as the alias — `origin/main` derives
+/// `{ :a :q ?__bw<n>_x }` here — and the derived fact names a variable instead of a term.
+#[test]
+fn an_alias_chain_is_followed_to_the_value_the_proof_found() {
+    let got = out(":seed :value :c.\n\
+                   { ( ?x ?y ) :cl { :a :q ?x } } <= { :seed :value ?y }.\n\
+                   { ( ?t ?t ) :cl ?cl } => { :out :got ?cl }.");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].contains("Iri(\"http://ex/c\")"), "the value, not the alias: {}", got[0]);
+    assert!(!got[0].contains("Var("), "no variable survives: {}", got[0]);
+}
+
+// ------------------------------- answer safety: the shape that must fail closed
+
+/// Case (2), and the reviewer's own repro. The caller's `?y` IS in the binding, but only
+/// because head unification aliased it to the callee's renamed `?w`, which nothing has
+/// bound. A "is this name in the binding?" test reads that as constrained and lets the
+/// unsound firing through; following the chain to a non-variable shows it is still free.
+///
+/// `origin/main` FIRES here, and so did the first revision of this PR when the caller spelled
+/// its variable `?y`.
+#[test]
+fn an_unbound_alias_does_not_bypass_the_refusal() {
+    let e = err(":cfg :cl { :a :p ?y }.\n\
+                 { ?w :ok :yes } <= { :cfg :cl ?cl . ( ?cl { :a :q ?y } ) \
+                 log:forAllIn { :a :p :b. :a :p :c. :a :q :b } }.\n\
+                 { ?y :ok :yes } => { :out :fired :yes }.");
+    assert!(e.contains(NOT_GROUND), "{e}");
+}
+
+/// Case (5): a CONTAINMENT pattern that arrived through a variable and is not ground. Inside
+/// a backward proof it used to fall back to the EMPTY pattern, which makes `log:includes`
+/// hold of everything and `log:notIncludes` of nothing — on `origin/main` the `includes` rule
+/// FIRES and the `notIncludes` rule does not, both wrong, and both over a pattern
+/// (`{ :a :p ?z }`) the scope `{ :a :p :b }` was never tested against. Refused now.
+///
+/// The same premise in a FORWARD rule keeps main's behaviour, which
+/// `tests/n3_bound_containment.rs` pins; nothing here touches it.
+#[test]
+fn a_bound_containment_pattern_that_is_not_ground_is_refused() {
+    for op in ["includes", "notIncludes"] {
+        let e = err(&format!(
+            ":cfg :pat {{ :a :p ?z }}.\n\
+             {{ :mark :m :yes }} <= {{ :cfg :pat ?p . {{ :a :p :b }} log:{op} ?p }}.\n\
+             {{ :mark :m :yes }} => {{ :out :fired :yes }}."
+        ));
+        assert!(e.contains(NOT_GROUND), "{op}: {e}");
+    }
+}
+
+/// Case (6): a formula's OWN binder is not a free variable. `__uf.` names are bound inside
+/// their formula, no substitution reaches them, and matching treats them as constants — so a
+/// value carrying one is ground for this purpose and must NOT be refused. The answer is
+/// `origin/main`'s.
+#[test]
+fn a_formula_local_binder_is_not_a_free_variable() {
+    let got = out(":cfg :t { @forAll :u. :u :p :b }.\n\
+                   { :mark :m ?l } <= { :cfg :t ?tm . ( ?tm { :a :p :b } ?l ) \
+                   log:collectAllIn { :a :p :b } }.\n\
+                   { :mark :m ?l } => { :out :list ?l }.");
+    assert_eq!(got, none(), "accepted, and answered as on main");
+}
+
+/// Groundness is decided after following each variable to the END of its chain. Here the
+/// arriving clause's `?y` is ground only through an alias: head unification binds it to the
+/// callee's `?w`, and the premise then binds that to `:b`. A one-hop test reads the alias as
+/// a free variable and REFUSES a clause the proof did in fact ground, so the walk is
+/// transitive. The answer is `origin/main`'s.
+#[test]
+fn a_clause_ground_only_through_an_alias_is_accepted() {
+    let got = out(":cfg :cl { :a :p ?y }. :pick :one :b.\n\
+                   { ?w :coll ?l } <= { :pick :one ?w . :cfg :cl ?cl . \
+                   ( :hit ?cl ?l ) log:collectAllIn { :a :p :b } }.\n\
+                   { ?y :coll ?l } => { :out :list ?l }.");
+    assert_eq!(got, list(&[]), "accepted, and answered as on main");
+}
+
+/// A GROUND clause that arrived through a variable has no free variable to leave unbound, so
+/// it is matched as stored exactly as before — the refusal is about groundness, not about
+/// having arrived.
+#[test]
+fn a_ground_bound_clause_is_still_matched_as_stored() {
+    let got = out(":cfg :cl { :a :p :b }.\n\
+                   { :mark :m ?l } <= { :cfg :cl ?c . ( :hit ?c ?l ) \
+                   log:collectAllIn { :a :p :b } }.\n\
+                   { :mark :m ?l } => { :out :list ?l }.");
+    assert_eq!(got, list(&["hit"]));
+}
+
+// --------------------------------------- a SCOPE is searched data, not a pattern
+
+/// A stored SCOPE holding a variable is searched, not refused: the scope is the data a clause
+/// is matched against, not a pattern that has to match, and a free variable in it is simply a
+/// statement nothing matches. All three of these are `origin/main`'s answers, and the first
+/// two agree with the forward twin — requiring the scope to be ground refused them instead.
+#[test]
+fn a_stored_scope_holding_a_variable_is_searched_not_refused() {
+    let prem = ":k :v ?x . :cfg :sc ?s . ( ?t { ?t :type :T } ?l ) log:collectAllIn ?s";
+    let data = ":cfg :sc { :a :type :T . :b :type :T . ?x :knows :a }. :k :v :w.\n";
+    let bwd = out(&format!(
+        "{data}{{ :mark :m ?l }} <= {{ {prem} }}.\n{{ :mark :m ?l }} => {{ :out :list ?l }}."
+    ));
+    assert_eq!(bwd, list(&["a", "b"]), "backward");
+    let fwd = out(&format!("{data}{{ {prem} }} => {{ :out :list ?l }}."));
+    assert_eq!(fwd, list(&["a", "b"]), "forward: the same answer");
+    let fa = out(":cfg :sc { :a :type :T . ?x :knows :a }. :k :v :w.\n\
+                  { :mark :m :yes } <= { :k :v ?x . :cfg :sc ?s . \
+                  ( { ?t :type :T } { :missing :q :yes } ) log:forAllIn ?s }.\n\
+                  { :mark :m :yes } => { :out :fired :yes }.");
+    assert_eq!(fa, none(), "forAllIn over a stored scope: main's answer");
 }
 
 // ------------------------------------------------------- no spelling is special
@@ -262,28 +418,27 @@ fn a_document_that_spells_a_generated_name_is_answered_the_same() {
              {{ :mark :m :yes }} => {{ :out :fired :yes }}."
         )
     };
-    assert!(err(&doc("?y")).contains(SHARES), "{}", err(&doc("?y")));
+    assert!(err(&doc("?y")).contains(NOT_GROUND), "{}", err(&doc("?y")));
     assert_eq!(err(&doc("?y")), err(&doc("?__bw1_y")));
     assert_eq!(err(&doc("?y")), err(&doc("?__bw99999999999999999999999_y")));
 }
 
-/// A stored formula reaching the callee through the GOAL, whose `?y` the caller never bound,
-/// meets a callee whose template is its own `?y`. The two were written to share and cannot,
-/// so the aggregation would collect nothing — and collecting nothing is a wrong ANSWER, not
-/// a safe one. It is refused.
+/// A stored formula reaching the callee through the GOAL, still holding a free `?y` once the
+/// binding is followed out. The aggregation would collect nothing, and collecting nothing is
+/// a wrong ANSWER, not a safe one, so it is refused.
 #[test]
-fn a_stored_formula_whose_name_the_callee_also_writes_is_refused() {
+fn a_stored_non_ground_clause_reaching_the_callee_is_refused() {
     let e = err(":cfg :cl { :a :p ?y }.\n\
                  { ?cl :coll ?l } <= { ( ?y ?cl ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
                  { :cfg :cl ?cl. ?cl :coll ?l } => { :out :list ?l }.");
-    assert!(e.contains(SHARES), "{e}");
+    assert!(e.contains(NOT_GROUND), "{e}");
 }
 
 /// The SAME premise, forward and backward: the divergence that is now fail-closed. A
-/// forward rule's atoms are never standardized apart, so the document's `?y` is one
-/// variable there and the stored clause shares it — two items. Behind a `<=` the rule's
-/// atoms are renamed, the two `?y`s are different variables, and the aggregation would
-/// silently collect nothing; that half is refused rather than answered.
+/// forward rule's atoms are never standardized apart, so the document's `?y` is one variable
+/// there, the arriving clause's `?y` is ground by the time it matters, and the answer is
+/// `( :b :c )` — unchanged. Behind a `<=` the atoms are renamed, `?y` stays free, and the
+/// aggregation would silently collect nothing; that half is refused rather than answered.
 #[test]
 fn the_forward_answer_stands_and_the_backward_one_is_refused() {
     let data = ":cfg :cl { :a :p ?y }.\n";
@@ -291,7 +446,7 @@ fn the_forward_answer_stands_and_the_backward_one_is_refused() {
     let e = err(&format!(
         "{data}{{ :mark :m ?l }} <= {{ {prem} }}.\n{{ :mark :m ?l }} => {{ :out :list ?l }}."
     ));
-    assert!(e.contains(SHARES), "{e}");
+    assert!(e.contains(NOT_GROUND), "{e}");
     let fwd = out(&format!("{data}{{ {prem} }} => {{ :out :list ?l }}."));
     assert_eq!(fwd, list(&["b", "c"]), "forward: one document variable, shared");
 }
