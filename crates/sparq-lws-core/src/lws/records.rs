@@ -186,13 +186,22 @@ where
             Ok(false) | Err(_) => {
                 // Settled by a task the state owns, holding the record's own lock (a
                 // revocation of it waits), the quota place (`register` holds it), the lock of
-                // its own listing, shared (so the subscriber's conditional creates wait for it,
-                // and nobody else's, while its other changes go on), and this change's place
-                // among those being settled; the container's lock is taken again only to
-                // register it. An unsettled write is fenced first, so the listing it then reads
-                // is final.
-                drop(container_lock);
-                let own_listing = own_listing.map(ListingGuard::shared);
+                // the narrowest listing that shows it, shared, and this change's place among
+                // those being settled. A subscription listed to its subscriber keeps that
+                // listing's lock (so the subscriber's conditional creates wait for it, and
+                // nobody else's, while its other changes go on), and the container's lock is
+                // taken again only to register it. A record listed in the container alone keeps
+                // the container's: a conditional create evaluated on the whole listing (the
+                // owner's) waits for the outcome, as a subscriber's waits on its own, so two
+                // with one entity tag cannot both register. An unsettled write is fenced first,
+                // so the listing it then reads is final.
+                let (own_listing, container_lock) = match own_listing {
+                    Some(own) => {
+                        drop(container_lock);
+                        (Some(own.shared()), None)
+                    }
+                    None => (None, container_lock.map(ListingGuard::shared)),
+                };
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {
@@ -204,11 +213,15 @@ where
                         return;
                     }
                     // Registered under the container's lock, shared (taken after the record's,
-                    // as a revocation takes them), so no conditional create sees the listing
-                    // change between its check and its own registration. This task holds no
-                    // admission, so it may wait for it.
-                    let _listing =
-                        until_done(|| async { locks.read(&container).await.ok_or(()) }).await;
+                    // as a revocation takes them, unless still held), so no conditional create
+                    // sees the listing change between its check and its own registration. This
+                    // task holds no admission, so it may wait for it.
+                    let _listing = match container_lock {
+                        Some(held) => held,
+                        None => ListingGuard::Shared(
+                            until_done(|| async { locks.read(&container).await.ok_or(()) }).await,
+                        ),
+                    };
                     if let Some(state) = weak.upgrade() {
                         register(&state);
                     }

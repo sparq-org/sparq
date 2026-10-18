@@ -563,7 +563,7 @@ fn stats_counts_only_the_documents_the_session_may_read() {
     // The pod holds strictly more than either session can read.
     let whole_pod: u64 = alice
         .store()
-        .graph
+        .graph()
         .named
         .iter()
         .filter(|(name, _)| !name.to_string().starts_with("<urn:sparq:"))
@@ -1881,10 +1881,11 @@ fn acp_trusted_context_survives_a_write_through_the_server() {
     );
 }
 
-/// Resources created through the server record no creator for ACP `CreatorAgent` matchers,
-/// as on main: the writer gains nothing from `CreatorAgent` rules on what it creates.
+/// A document the server creates records its session agent as the creator, so a
+/// `CreatorAgent` rule above it answers for that agent on what it created — and for nobody
+/// else on what it did not.
 #[test]
-fn acp_resources_created_through_the_server_record_no_creator() {
+fn acp_a_document_created_through_the_server_records_the_session_agent() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
     const ACL: &str = "http://www.w3.org/ns/auth/acl#";
     const BOB: &str = "https://bob.ex/card#me";
@@ -1926,12 +1927,16 @@ fn acp_resources_created_through_the_server_record_no_creator() {
     );
     assert!(!is_err, "bob writes in /docs/: {text}");
     let (text, is_err) = tool(&mut s, "resource_get", json!({"url": d1}));
-    assert!(is_err, "bob is not d1's creator: {text}");
-    assert_eq!(s.store().acp_provenance().creator(d1), None);
+    assert!(!is_err, "bob created d1, so the creator rule reads it: {text}");
+    assert_eq!(s.store().acp_provenance().creator(d1), Some(BOB));
+    let (_, is_err) = tool(&mut s, "resource_get", json!({"url": d0}));
+    assert!(is_err, "d0 is still not his");
 }
 
 /// A container with a graph stored below it cannot be deleted through the server, whatever
-/// its containment listing says, and containers it creates record no creator.
+/// its containment listing says. A container the server was ASKED to create records its
+/// session agent; one that comes into being only because a document was stored below it
+/// records none.
 #[test]
 fn acp_a_container_with_a_graph_below_it_is_not_deleted() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
@@ -1974,8 +1979,8 @@ fn acp_a_container_with_a_graph_below_it_is_not_deleted() {
     assert!(!is_err, "bob creates /docs/c/: {text}");
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/docs/c/"),
-        None,
-        "no creator recorded for /docs/c/"
+        Some(BOB),
+        "bob was asked to create /docs/c/"
     );
     let (text, is_err) = tool(
         &mut s,
@@ -1985,7 +1990,13 @@ fn acp_a_container_with_a_graph_below_it_is_not_deleted() {
     assert!(!is_err, "bob writes /docs/a/b: {text}");
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/docs/a/"),
-        None
+        None,
+        "/docs/a/ came into being only by holding /docs/a/b"
+    );
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/docs/a/b"),
+        Some(BOB),
+        "the document he wrote"
     );
 
     // A graph stored under /docs/c/ keeps it from being deleted, whatever its containment
@@ -2013,7 +2024,7 @@ fn acp_a_container_with_a_graph_below_it_is_not_deleted() {
     );
     let listed = s
         .store()
-        .graph
+        .graph()
         .named
         .iter()
         .any(|(n, _)| n.to_string() == "<https://pod.ex/docs/c/>");
@@ -2075,8 +2086,8 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     let prov = s.store().acp_provenance();
     assert_eq!(
         prov.creator("https://pod.ex/e/mine"),
-        None,
-        "no creator recorded"
+        Some(BOB),
+        "the document he wrote"
     );
     assert_eq!(
         prov.creator("https://pod.ex/e/"),
@@ -2091,8 +2102,8 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     assert!(!is_err, "bob creates /f/: {text}");
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/f/"),
-        None,
-        "a new container, no creator recorded"
+        Some(BOB),
+        "he was asked to create /f/"
     );
     let (text, is_err) = tool(
         &mut s,
@@ -2101,15 +2112,16 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     );
     assert!(!is_err, "bob writes /n//odd: {text}");
     let prov = s.store().acp_provenance();
-    for r in [
-        "https://pod.ex/n//odd",
-        "https://pod.ex/n//",
-        "https://pod.ex/n/",
-    ] {
+    assert_eq!(
+        prov.creator("https://pod.ex/n//odd"),
+        Some(BOB),
+        "the document he wrote"
+    );
+    for r in ["https://pod.ex/n//", "https://pod.ex/n/"] {
         assert_eq!(
             prov.creator(r),
             None,
-            "no creator recorded for {r}"
+            "a container that came along with the write: {r}"
         );
     }
     assert_eq!(
@@ -2121,7 +2133,8 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
 
 /// A writer who empties a container whose access-control resource outlives it, and then
 /// writes into it again, is not the container's creator: its creator is kept with that
-/// resource, and keeps the Control its rules give the creator.
+/// resource, and keeps the Control its rules give the creator. A DOCUMENT the writer removed
+/// and wrote again is a resource it created, so the same rules answer for it there.
 #[test]
 fn acp_a_container_brought_back_under_its_surviving_rules_keeps_its_creator() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
@@ -2187,11 +2200,15 @@ fn acp_a_container_brought_back_under_its_surviving_rules_keeps_its_creator() {
     );
     assert!(!is_err, "bob writes /a/x again: {text}");
     for r in ["https://pod.ex/a/x", "https://pod.ex/a/y"] {
-        assert!(
-            !s.store().decide(&bob, r, sparq_solid::Mode::Control).allow,
-            "bob gains nothing on {r} from the creator rule"
+        assert_eq!(
+            s.store().acp_provenance().creator(r),
+            Some(BOB),
+            "bob wrote {r}"
         );
-        assert_eq!(s.store().acp_provenance().creator(r), None, "{r}");
+        assert!(
+            s.store().decide(&bob, r, sparq_solid::Mode::Control).allow,
+            "the creator rule of /a/.acr answers for him on {r}"
+        );
     }
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/a/"),
@@ -2277,12 +2294,12 @@ fn acp_an_emptied_container_under_inherited_rules_gives_its_writer_nothing() {
     assert_eq!(
         prov.creator("https://pod.ex/a/b/"),
         None,
-        "/a/b/ ended when emptied"
+        "/a/b/ ended when emptied, and filling it again records no creator for it"
     );
     assert_eq!(
         prov.creator("https://pod.ex/a/b/new"),
-        None,
-        "a new document, no creator recorded"
+        Some(BOB),
+        "the document he wrote"
     );
     assert!(
         !s.store()
@@ -2290,4 +2307,240 @@ fn acp_an_emptied_container_under_inherited_rules_gives_its_writer_nothing() {
             .allow,
         "bob gains no Control on /a/b/"
     );
+}
+
+// ───────────── Class P (provenance, context and anchor) ─────────────
+
+const ACP_NS: &str = "http://www.w3.org/ns/solid/acp#";
+const ACL_NS: &str = "http://www.w3.org/ns/auth/acl#";
+
+/// An ACP pod: `/a/x` under `/a/.acr`, whose member policies give everyone Read and Write
+/// and give a member's CREATOR Control.
+fn acp_creator_pod() -> String {
+    let acr = "https://pod.ex/a/.acr";
+    format!(
+        "<https://pod.ex/a/x#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/a/x> .
+<{acr}> <{ACP_NS}memberAccessControl> <{acr}#c> <{acr}> .
+<{acr}> <{ACP_NS}accessControl> <{acr}#c> <{acr}> .
+<{acr}#c> <{ACP_NS}apply> <{acr}#pub> <{acr}> .
+<{acr}#c> <{ACP_NS}apply> <{acr}#creator> <{acr}> .
+<{acr}#pub> <{ACP_NS}allow> <{ACL_NS}Read> <{acr}> .
+<{acr}#pub> <{ACP_NS}allow> <{ACL_NS}Write> <{acr}> .
+<{acr}#pub> <{ACP_NS}anyOf> <{acr}#mp> <{acr}> .
+<{acr}#mp> <{ACP_NS}agent> <{ACP_NS}PublicAgent> <{acr}> .
+<{acr}#creator> <{ACP_NS}allow> <{ACL_NS}Control> <{acr}> .
+<{acr}#creator> <{ACP_NS}anyOf> <{acr}#mc> <{acr}> .
+<{acr}#mc> <{ACP_NS}agent> <{ACP_NS}CreatorAgent> <{acr}> .
+"
+    )
+}
+
+fn acp_server(nq: &str, agent: &str) -> SolidMcpServer {
+    let mut store = PodStore::new(Graph::load_dataset(nq, "nquads").expect("fixture parses"));
+    store.materialize_acp().expect("acp materializes");
+    let config = SolidServerConfig {
+        agent: Some(agent.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    SolidMcpServer::with_config(store, config).expect("materializes")
+}
+
+/// A document the server creates for a session is recorded as created BY that session's
+/// agent, so a `.acr` above it that gives creators `acl:Control` answers for them: the agent
+/// can write the new document's own access-control document, which nobody else can.
+#[test]
+fn a_document_the_server_creates_is_recorded_as_created_by_the_session_agent() {
+    let new = "https://pod.ex/a/new";
+    let mut s = acp_server(&acp_creator_pod(), ALICE);
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({
+            "url": new,
+            "content": format!("<{new}#it> <https://ex.dev/ns#k> \"v\" .\n"),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(!is_err, "everyone may write a member of /a/: {text}");
+    assert_eq!(
+        s.store().acp_provenance().creator(new),
+        Some(ALICE),
+        "the session agent created it"
+    );
+
+    // The creator policy now answers for alice on the new document: she holds Control, so
+    // she may write its own access-control document.
+    let acr = format!("{new}.acr");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({
+            "url": acr,
+            "content": format!(
+                "<{acr}> <{ACP_NS}accessControl> <{acr}#c> .\n\
+                 <{acr}#c> <{ACP_NS}apply> <{acr}#p> .\n\
+                 <{acr}#p> <{ACP_NS}allow> <{ACL_NS}Read> .\n\
+                 <{acr}#p> <{ACP_NS}anyOf> <{acr}#m> .\n\
+                 <{acr}#m> <{ACP_NS}agent> <{ALICE}> .\n"
+            ),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(!is_err, "the creator holds Control of what it created: {text}");
+
+    // Bob, who created nothing, does not.
+    let mut bob = acp_server(&acp_creator_pod(), BOB);
+    let (_, is_err) = tool(
+        &mut bob,
+        "resource_put",
+        json!({
+            "url": "https://pod.ex/a/x.acr",
+            "content": format!("<https://pod.ex/a/x.acr> <{ACP_NS}accessControl> \
+                 <https://pod.ex/a/x.acr#c> .\n"),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(is_err, "bob created nothing, so he holds no Control");
+}
+
+/// The trusted ACP context is the embedder's to assert, and the server can supply it again —
+/// the only way an ACP pod recovers the grants that context decides after the store has
+/// refused to rebuild from facts that may no longer describe it.
+#[test]
+fn the_server_can_supply_the_trusted_acp_context_again() {
+    let acr = "https://pod.ex/a/.acr";
+    let nq = format!(
+        "<https://pod.ex/a/x#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/a/x> .
+<{acr}> <{ACP_NS}memberAccessControl> <{acr}#c> <{acr}> .
+<{acr}#c> <{ACP_NS}apply> <{acr}#creator> <{acr}> .
+<{acr}#creator> <{ACP_NS}allow> <{ACL_NS}Read> <{acr}> .
+<{acr}#creator> <{ACP_NS}anyOf> <{acr}#mc> <{acr}> .
+<{acr}#mc> <{ACP_NS}agent> <{ACP_NS}CreatorAgent> <{acr}> .
+"
+    );
+    let mut s = acp_server(&nq, ALICE);
+    let (_, is_err) = tool(
+        &mut s,
+        "resource_get",
+        json!({"url": "https://pod.ex/a/x"}),
+    );
+    assert!(is_err, "with no creator asserted the policy grants nobody");
+
+    let mut prov = sparq_solid::AccessProvenance::new();
+    prov.set_creator("https://pod.ex/a/x", ALICE);
+    s.supply_acp_context(&prov, &sparq_solid::VerifiedCredentials::new())
+        .expect("the context installs");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_get",
+        json!({"url": "https://pod.ex/a/x"}),
+    );
+    assert!(!is_err, "the supplied context decides the grant: {text}");
+
+    // A WAC server holds no such context and says so rather than rebuilding under ACP.
+    let mut wac = server_for(ALICE, true);
+    assert!(wac
+        .supply_acp_context(
+            &sparq_solid::AccessProvenance::new(),
+            &sparq_solid::VerifiedCredentials::new()
+        )
+        .is_err());
+}
+
+/// A write to a not-yet-existing resource is authorized at the nearest EXISTING container —
+/// the one the authorization view holds as a resource, or whose own access-control document is
+/// stored. A container that holds nothing but the access-control document of a resource that
+/// does not exist is neither, so the write is judged where the view can decide it: the same
+/// answer as for a write directly under that container's nearest existing ancestor. A textual
+/// prefix scan of the stored graph names instead stops at that container, about which the
+/// view holds nothing, and refuses.
+#[test]
+fn the_write_anchor_is_the_nearest_container_the_view_can_decide() {
+    let nq = format!(
+        "<https://pod.ex/root#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/root> .
+<https://pod.ex/ok/m#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/ok/m> .
+<https://pod.ex/.acl#d> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL_NS}Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#d> <{ACL_NS}accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#d> <{ACL_NS}default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#d> <{ACL_NS}agent> <{ALICE}> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#d> <{ACL_NS}mode> <{ACL_NS}Read> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#d> <{ACL_NS}mode> <{ACL_NS}Write> <https://pod.ex/.acl> .
+<https://pod.ex/c/d.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL_NS}Authorization> <https://pod.ex/c/d.acl> .
+<https://pod.ex/c/d.acl#a> <{ACL_NS}accessTo> <https://pod.ex/c/d> <https://pod.ex/c/d.acl> .
+<https://pod.ex/c/d.acl#a> <{ACL_NS}agent> <{BOB}> <https://pod.ex/c/d.acl> .
+<https://pod.ex/c/d.acl#a> <{ACL_NS}mode> <{ACL_NS}Read> <https://pod.ex/c/d.acl> .
+<https://pod.ex/b/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL_NS}Authorization> <https://pod.ex/b/.acl> .
+<https://pod.ex/b/.acl#a> <{ACL_NS}accessTo> <https://pod.ex/b/> <https://pod.ex/b/.acl> .
+<https://pod.ex/b/.acl#a> <{ACL_NS}default> <https://pod.ex/b/> <https://pod.ex/b/.acl> .
+<https://pod.ex/b/.acl#a> <{ACL_NS}agent> <{BOB}> <https://pod.ex/b/.acl> .
+<https://pod.ex/b/.acl#a> <{ACL_NS}mode> <{ACL_NS}Read> <https://pod.ex/b/.acl> .
+<https://pod.ex/b/.acl#a> <{ACL_NS}mode> <{ACL_NS}Write> <https://pod.ex/b/.acl> .
+"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    store.materialize_wac().expect("wac materializes");
+    let config = SolidServerConfig {
+        agent: Some(ALICE.to_string()),
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+
+    // /ok/ holds a member, so it is a resource and alice's default grant answers there.
+    let ok = "https://pod.ex/ok/fresh";
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({
+            "url": ok,
+            "content": format!("<{ok}#it> <https://ex.dev/ns#k> \"v\" .\n"),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(!is_err, "/ok/ is a resource of the view: {text}");
+
+    // /c/ holds only the access-control document of /c/d, which does not exist, so /c/ is
+    // neither a resource nor a name with its own access-control document: the write is judged
+    // at the root, which is alice's, exactly as a write directly under the root is.
+    let under_c = "https://pod.ex/c/fresh";
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({
+            "url": under_c,
+            "content": format!("<{under_c}#it> <https://ex.dev/ns#k> \"v\" .\n"),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(
+        !is_err,
+        "judged at the nearest existing container, the root alice holds: {text}"
+    );
+    let direct = "https://pod.ex/fresh";
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({
+            "url": direct,
+            "content": format!("<{direct}#it> <https://ex.dev/ns#k> \"v\" .\n"),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(!is_err, "the same answer directly under the root: {text}");
+
+    // A container whose OWN access-control document is stored still governs what is written
+    // below it: bob's grant there is not alice's.
+    let bobs = "https://pod.ex/b/fresh";
+    let (_, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({
+            "url": bobs,
+            "content": format!("<{bobs}#it> <https://ex.dev/ns#k> \"v\" .\n"),
+            "content_type": "application/n-triples",
+        }),
+    );
+    assert!(is_err, "/b/ has its own access-control document, and it is bob's");
 }

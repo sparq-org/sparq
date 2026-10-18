@@ -44,16 +44,17 @@
 //! producing a signature over a message the issuer never signed is exactly the
 //! forgery the signature scheme is assumed to resist.
 //!
-//! # Back-compatibility is the load-bearing requirement
-//! Every credential issued so far signs a method-UNBOUND message (`ZKSIG_C3`
-//! or `ZKSIG_C4`). Those are candidates too, and a signature that verifies
-//! only over one of them authenticates as [`AuthenticatedMethod::Unbound`] —
-//! "this issuer attested the commitment, the salt and the status reference, but
-//! attested NO method". Under the default [`MethodPolicy::current`] that is
-//! accepted, so an existing manifest verifies exactly as before. `Unbound` is
-//! never read as a method: it is the explicit absence of one, and a relying
-//! party that needs a method present opts into
-//! [`MethodPolicy::require_method_bound`].
+//! # Back-compatibility is an explicit opt-in, not the default
+//! Every credential issued before the method-bound message shapes existed signs
+//! a method-UNBOUND message (`ZKSIG_C3` or `ZKSIG_C4`). Those are candidates
+//! too, and a signature that verifies only over one of them authenticates as
+//! [`AuthenticatedMethod::Unbound`] — "this issuer attested the commitment, the
+//! salt and the status reference, but attested NO method". Under the default
+//! [`MethodPolicy::current`] that is now REFUSED: a commitment whose method is
+//! not issuer-attested has no authenticated leaf shape. `Unbound` is never read
+//! as a method — it is the explicit absence of one — and a relying party that
+//! must keep accepting already-issued method-unbound material opts into
+//! [`MethodPolicy::admit_unbound`].
 //!
 //! # Honest scope
 //! Authenticating the method does NOT open any value-lane gate. The stage-0
@@ -120,18 +121,27 @@ pub struct MethodPolicy {
 }
 
 impl MethodPolicy {
-    /// Today's default: accept a method-UNBOUND attestation (every credential
-    /// issued so far is one), and refuse an attested `DualLeafV1`, which is
-    /// recognised and verifiable but superseded for new issuance.
+    /// Today's default: REFUSE a method-UNBOUND attestation, and refuse an
+    /// attested `DualLeafV1`, which is recognised and verifiable but superseded
+    /// for new issuance.
     ///
-    /// The `accept_unbound` default is what makes this change back-compatible,
-    /// and it is deliberately the WEAKER of the two settings: it is a
-    /// transitional default, not a judgement that an unattested method is as
-    /// good as an attested one.
+    /// # The unbound default is fail-closed
+    /// It used to accept an unbound attestation, so that every credential issued
+    /// before the method-bound message shapes existed kept verifying. That was
+    /// the transitional setting, and it is the one no value-lane gate can be
+    /// opened over: a commitment whose method is not issuer-attested has no
+    /// authenticated leaf shape, so there is nothing to pin a lane constant or a
+    /// pattern-slot encoding against. Refusing it by default is a PREREQUISITE
+    /// (sq-j506), not the gate itself — the Stage-0 value-lane refusals stay
+    /// closed regardless.
+    ///
+    /// A relying party that must keep accepting already-issued method-unbound
+    /// material states so with [`Self::admit_unbound`]. That is a deliberate,
+    /// written-down downgrade rather than a silent default.
     pub fn current() -> Self {
         MethodPolicy {
             admit_legacy_dual_leaf_v1: false,
-            accept_unbound: true,
+            accept_unbound: false,
         }
     }
 
@@ -146,14 +156,30 @@ impl MethodPolicy {
         self
     }
 
-    /// Require an attested method: a method-UNBOUND attestation is then REFUSED.
+    /// Require an attested method: a method-UNBOUND attestation is REFUSED.
     ///
-    /// This is the strict posture. It rejects every credential issued before the
-    /// method-bound message shapes existed, so a relying party opts in only once
-    /// its issuers re-issue over `ZKSIG_M5` / `ZKSIG_M4`.
+    /// This is now the DEFAULT ([`Self::current`]), so calling it on a fresh
+    /// policy changes nothing. It is kept because it states the requirement
+    /// explicitly at a call site, and because it is how the requirement is taken
+    /// back after [`Self::admit_unbound`].
     #[must_use]
     pub fn require_method_bound(mut self) -> Self {
         self.accept_unbound = false;
+        self
+    }
+
+    /// Also accept a method-UNBOUND attestation (`ZKSIG_C3` / `ZKSIG_C4`) — the
+    /// written-down opt-in for a relying party that must keep verifying
+    /// credentials issued before the method-bound message shapes existed.
+    ///
+    /// It is a DOWNGRADE, and the weaker of the two settings: an unbound
+    /// attestation covers the commitment, the salt and the status reference but
+    /// attests NO commitment method, so nothing authenticates which leaf shape
+    /// the graph was committed under. `Unbound` is still never read AS a method;
+    /// this only decides whether its explicit absence is tolerated.
+    #[must_use]
+    pub fn admit_unbound(mut self) -> Self {
+        self.accept_unbound = true;
         self
     }
 
@@ -522,13 +548,13 @@ mod tests {
     }
 
     #[test]
-    fn default_policy_accepts_unbound_and_refuses_legacy_v1() {
+    fn default_policy_refuses_unbound_and_refuses_legacy_v1() {
         let p = MethodPolicy::current();
         assert_eq!(p, MethodPolicy::default());
-        assert!(p.accepts_unbound());
+        assert!(!p.accepts_unbound());
         assert_eq!(
             p.admit(AuthenticatedMethod::Unbound),
-            Ok(AuthenticatedMethod::Unbound)
+            Err(MethodAuthError::MethodNotAuthenticated)
         );
         for m in [CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV2] {
             assert_eq!(
@@ -549,8 +575,13 @@ mod tests {
             p.admit(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV1)),
             Ok(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV1))
         );
-        // The opt-in does not widen anything else.
-        assert!(p.accepts_unbound());
+        // The opt-in does not widen anything else — in particular it does not
+        // also admit a method-UNBOUND attestation.
+        assert!(!p.accepts_unbound());
+        assert_eq!(
+            p.admit(AuthenticatedMethod::Unbound),
+            Err(MethodAuthError::MethodNotAuthenticated)
+        );
     }
 
     #[test]
@@ -641,8 +672,8 @@ mod tests {
                 Ok(AuthenticatedMethod::Bound(method))
             );
         }
-        // A method-UNBOUND signature authenticates as Unbound, and is refused
-        // once the policy requires a method.
+        // A method-UNBOUND signature is refused under the default policy, and
+        // authenticates as Unbound only under the explicit downgrade.
         let sig_hex = sk.sign_commitment_with_status(&c, &s, &r);
         let pk = public_key_from_hex(&pk_hex).unwrap();
         let sig = signature_from_hex(&sig_hex).unwrap();
@@ -650,6 +681,14 @@ mod tests {
             authenticate(&inputs(None, &c, &s, &r), &MethodPolicy::current(), |m| {
                 verify(&pk, m, &sig)
             }),
+            Err(MethodAuthError::MethodNotAuthenticated)
+        );
+        assert_eq!(
+            authenticate(
+                &inputs(None, &c, &s, &r),
+                &MethodPolicy::current().admit_unbound(),
+                |m| verify(&pk, m, &sig)
+            ),
             Ok(AuthenticatedMethod::Unbound)
         );
         assert_eq!(

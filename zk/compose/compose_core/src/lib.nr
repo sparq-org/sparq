@@ -13,6 +13,14 @@
 //! the same fixture vectors from the Noir side.
 
 pub mod hashes;
+// The IN-CIRCUIT recompute of a DualLeafV2 term encoding from its components,
+// with the S3.3 reserved-sentinel band check and the S14.1 reserved
+// language-tag check at the witnessed component sites
+// (research/zk-field-native-encoding.md S11 bead 3 / S14). Consumed by the
+// `scan_v2dl_*` / `join_eq_v2dl_*` members; the shipped scan/join members are
+// byte-unchanged. Carries the documented INV-VL downgrade; NOT externally
+// audited (sq-qhy4).
+pub mod dual_leaf_v2_leaf;
 pub mod scan;
 pub mod filter_int;
 // Variable-length BLAKE3 opening of integer literals for the result profiles.
@@ -37,6 +45,10 @@ pub mod issuer;
 pub mod holder;
 // [OPUS-4.8] sq-bwwl (hidden-join sq-8mwz): in-circuit hidden cross-credential JOIN.
 pub mod join;
+// sq-j506 (#7103): the DualLeafV2 component-witnessed variants of the scan and
+// hidden-join relations -- the shipped bodies, fed encodings recomputed from
+// witnessed leaf components under the S3.3 band and S14.1 reserved-tag checks.
+pub mod v2_dual_leaf_relations;
 // [FABLE-5] sq-3kd2g.2 (#1591): bounded-depth path reachability -- property
 // paths `p+`/`p*` under the bounded existence-only statement of
 // research/zksparql-fragment-extension.md sec 4 (depth D a compile-time constant
@@ -74,6 +86,10 @@ mod tests;
 
 // [GPT-6] Additive selected-result relation; not externally audited.
 pub mod result;
+// sq-j506 (#7103): the METHOD-BOUND (ZKSIG_M5) successful-result relation. A NEW
+// relation beside `result`, which 30 shipped members compile and which must stay
+// byte-identical -- see result_m5.nr for why.
+pub mod result_m5;
 
 // [GPT-6] Additive private full-u64 result literal relation.
 pub mod result_integer;

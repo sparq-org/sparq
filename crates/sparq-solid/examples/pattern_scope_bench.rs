@@ -54,7 +54,7 @@ fn main() {
             None,
         )]);
         let scopes: FxHashMap<Term, GraphScope> = store
-            .graph
+            .graph()
             .named
             .iter()
             .map(|(name, _)| (name.clone(), deny.clone()))

@@ -74,6 +74,8 @@ env:
 
 jobs:
   native-composition:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: native credential and circuit composition
     runs-on: ubuntu-latest
     timeout-minutes: 60
