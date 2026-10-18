@@ -431,6 +431,8 @@ struct Branch {
     /// the node being matched then (in full): backtracking empties the queue but keeps
     /// the facts from before the branch, so their matches are queued again.
     queued: Vec<(Node, Option<Vec<Gain>>)>,
+    /// The nominal merges queued when the branch opened, queued again the same way.
+    nominals: Vec<Node>,
 }
 
 /// One tableau run over a fixed clause set.
@@ -1714,13 +1716,14 @@ impl<'c> Tableau<'c> {
             .map(|&n| (n, self.only[n as usize].clone()))
             .collect();
         queued.extend(self.centre.map(|x| (x, None)));
-        self.charge(queued.len());
+        self.charge(queued.len() + self.nominal_todo.len());
         self.branches.push(Branch {
             mark: self.trail.len(),
             choice: choice.clone(),
             alt: 0,
             acc: Dep::default(),
             queued,
+            nominals: self.nominal_todo.clone(),
         });
         self.choose(&choice, 0, &d);
     }
@@ -1780,6 +1783,7 @@ impl<'c> Tableau<'c> {
             let choice = b.choice.clone();
             let alt = b.alt;
             let queued = b.queued.clone();
+            self.nominal_todo.extend_from_slice(&b.nominals);
             for (n, only) in queued {
                 match only {
                     None => self.mark(n),
@@ -1862,8 +1866,7 @@ impl<'c> Tableau<'c> {
             }
         }
         self.touched.clear();
-        // Nominal merges are done before any branch point is created, so a queued one is
-        // about a fact the undo just removed.
+        // A queued nominal merge from before the branch is queued again by `backtrack`.
         self.nominal_todo.clear();
         self.recheck_all = true;
     }
@@ -2964,5 +2967,53 @@ mod tests {
         t.set_clash(Dep::single(level));
         assert_eq!(t.run(), Ok(true));
         assert!(t.nodes[x as usize].label.contains_key(&f), "E ⊑ F at x");
+    }
+
+    /// A nominal merge queued when a branch opens is queued again on backtracking: here
+    /// `y` gains `{a}` just before the branch, so it is still `a`'s node afterwards.
+    #[test]
+    fn a_nominal_merge_queued_when_a_branch_opens_survives_backtracking() {
+        let (d, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            :X a owl:Class . :G a owl:Class . :H a owl:Class . :N a owl:Class .
+            :a a owl:NamedIndividual , :X .
+            :X rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :G :H ) ] .
+            :N owl:equivalentClass [ a owl:Class ; owl:oneOf ( :a ) ] .
+        "#,
+        );
+        let x_ = class(&d, &c, "X");
+        let nom = c
+            .atoms
+            .iter()
+            .position(|k| matches!(k, AtomKind::Nominal(_)))
+            .unwrap() as Atom;
+        let disj = c
+            .clauses
+            .iter()
+            .position(|cl| cl.head.len() == 2 && cl.body_x == vec![x_])
+            .unwrap() as u32;
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        for _ in &c.abox.individuals {
+            t.add_root();
+        }
+        for &(a, n, _) in &c.abox.concepts {
+            t.assert_concept(n, a);
+        }
+        assert_eq!(t.run(), Ok(true));
+        let a = 0;
+        let y = t.new_node(Some(a));
+        t.add_concept(y, nom, &Dep::default());
+        let level = t.branches.len() as u32;
+        t.open(Choice::Clause(Instance {
+            clause: disj,
+            nodes: vec![a],
+            deps: Dep::default(),
+        }));
+        t.set_clash(Dep::single(level));
+        assert_eq!(t.run(), Ok(true));
+        assert!(!t.nodes[y as usize].active, "y is merged into a");
     }
 }
