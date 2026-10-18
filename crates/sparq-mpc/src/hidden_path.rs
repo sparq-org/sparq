@@ -11,18 +11,23 @@
 //! step 2) — the **cryptographic core** the disclosed-key module
 //! ([`crate::bounded_path`]) explicitly deferred. There the join keys are disclosed
 //! global IRIs and the whole chain is a crypto-free fold of equi-joins. HERE the
-//! intermediate node *values* are PRIVATE (secret-shared `F_p` keys): a chain
-//! `a → z_1 → … → z_{k−1} → b` exists iff there is a sequence of `k` edges whose
-//! join points line up, and each "lines up" test is decided as a **secret-shared
-//! match bit that is never opened** — so no intermediate node `z_i`, and no per-hop
-//! / per-pair match pattern, is ever reconstructed.
+//! intermediate comparisons run on secret-shared `F_p` key sharings whose values are
+//! not explicitly opened: a chain `a → z_1 → … → z_{k−1} → b` exists iff there is a
+//! sequence of `k` edges whose join points line up, and each "lines up" test is
+//! decided as a **secret-shared match bit the protocol never opens** — so no
+//! intermediate node `z_i`, and no per-hop / per-pair match pattern, is ever
+//! reconstructed by the arithmetic. That is not a confidentiality claim against the
+//! simulator host or an observer given the clear edge relation; see the disclosure
+//! list below for what the construction does make readable.
 //!
 //! ## The construction (design §2.1 / §2.6, realised against landed primitives)
 //!
 //! The federated edge set `E` is the union of every holder's `(subject, object)`
 //! edges for the path predicate, each endpoint carried as `(private F_p key,
 //! disclosed endpoint term)`. (The endpoint *terms* are the disclosed RESULT of the
-//! path — convention #4: only the *intermediate join values* are hidden. The
+//! path — convention #4: the *intermediate join values* are the part the
+//! arithmetic keeps secret-shared. What the construction as a whole makes
+//! readable is wider; the disclosure list below is the contract. The
 //! candidate edge-tuple COUNT `|E|^k` is public, the standard MPC assumption.)
 //!
 //! An exactly-`k` chain is a `k`-tuple of edges `(e_1, …, e_k)` that is "connected":
@@ -33,8 +38,11 @@
 //!
 //! Each internal equality is computed with [`crate::compare::secure_equal_to_bit`]
 //! — a bit-decomposition equality whose 0/1 verdict is a fresh degree-`t`
-//! **secret-shared** sharing that is NEVER opened (so the L2 per-pair / per-hop
-//! match-graph leak is closed *at the decision*, not merely at the output). The
+//! **secret-shared** sharing the protocol never opens — so the per-pair and
+//! per-hop match pattern is kept out of the arithmetic *at the decision*, not
+//! merely at the output. That is a property of the protocol, not a
+//! confidentiality claim: see the disclosure list below for what the
+//! construction does make readable. The
 //! `k − 1` internal-hop bits are AND-ed into a single per-tuple **chain bit** by
 //! one [`crate::shamir::mul_shares_raw`] + one
 //! [`crate::shamir::degree_reduce_through`] per AND — the BGW reshare-and-
@@ -52,8 +60,10 @@
 //! `degree_reduce_through`). Grouping is over the DISCLOSED endpoint terms — never
 //! over any secret intermediate key. It is not free of disclosure, though: the
 //! grouping key is the endpoint pair of EVERY enumerated tuple, matched or not, so
-//! every evaluating party knows the ordered candidate pair sequence and where each
-//! tuple folds — see the disclosure list below.
+//! anything supplied with those ordered plaintext terms — the simulator host here,
+//! and every evaluating party in a distributed implementation that hands them out —
+//! can determine the ordered candidate pair sequence and where each tuple folds.
+//! See the disclosure list below.
 //!
 //! The one connected-bit per distinct endpoint pair becomes a
 //! [`crate::oblivious_join::Candidate`] with a
@@ -68,11 +78,16 @@
 //!
 //! ## What stays hidden / what is disclosed (state it precisely)
 //!
-//! - **Hidden:** every intermediate node key `z_i` (never reconstructed); every
-//!   per-hop and per-pair match bit (secret-shared, never opened); WHICH tuples
-//!   connected a pair and the realized chain length (the OR-fold collapses
-//!   multiplicity). The NUMBER of distinct endpoint pairs is NOT in this list —
-//!   see the schedule bullet below.
+//! - **Not explicitly opened:** every intermediate node key `z_i` (never
+//!   reconstructed); every per-hop and per-pair match bit (secret-shared); which
+//!   tuples connected a pair and the realized chain length (the OR-fold collapses
+//!   multiplicity). "Not opened" is a statement about the arithmetic protocol, not
+//!   a confidentiality claim: it does not hide node identities or connectivity from
+//!   the simulator host, or from an observer supplied the clear edge terms and their
+//!   associations — under the documented consistent encoding
+//!   ([`crate::term_encode::encode_term`]) those terms determine hop equality and
+//!   chain connectivity. The NUMBER of distinct endpoint pairs is NOT in this list
+//!   either — see the schedule bullet below.
 //! - **Disclosed by the SCHEDULE (every successful run):** the OR-fold POSITIONS —
 //!   which tuple positions repeat an endpoint pair — and therefore the distinct
 //!   endpoint-pair count `D`. Who learns them:
@@ -80,23 +95,25 @@
 //!     evaluator that groups does so on plaintext `Term`s, so it sees the ORDERED
 //!     candidate pair sequence, unmatched pairs included — strictly more than the
 //!     result, which names the MATCHED pairs only.
-//!   - **In a real multi-party run**, every party evaluates the same circuit
-//!     wiring, including which accumulator each tuple's bit folds into. Every
-//!     evaluating party therefore knows the fold positions. This is not an
-//!     artefact of the simulation.
+//!   - **In a distributed implementation** that supplies every evaluating party
+//!     with the ordered plaintext endpoint terms, or with this construction's
+//!     data-dependent accumulator wiring, every such party can determine the fold
+//!     positions. This crate implements a single-process simulation and does not
+//!     establish a per-party input or wiring-distribution boundary.
 //!   - **Over a transport**, the ORs are not batched — each is one
 //!     `mul_shares_raw` followed by one `degree_reduce_through`, inline in the
-//!     enumeration — so a sequential transport would expose the positions through
-//!     the gate boundaries themselves. The hidden paths have no live transport
-//!     yet, so that is a property of the construction, not a measured
-//!     observation.
+//!     enumeration. A sequential transport that exposes identifiable tuple and
+//!     OR-gate boundaries would expose the fold positions; there is no
+//!     hidden-path transport establishing which boundaries a network observer
+//!     receives.
 //!   - Independently of any of that, each repeat costs one extra multiplication,
 //!     so the multiplication COUNT carries `D`, the public tuple total `T` being
 //!     known: `T − D` ORs over the `T` tuples, or `T + N₀ − D` when a bounded form
-//!     has `min == 0` and folds in one entry per node of the `N₀`-node disclosed
-//!     domain, plus the output stage's padding from `D` up to `B`. `T` is `|E|^k`
-//!     for the exactly-`k` chain and `Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths
-//!     `ℓ >= 1` for a bounded form, `a` being the alternation width.
+//!     has `min == 0` and folds in one entry per node of the `N₀`-node DECLARED
+//!     public node domain, plus the output stage's padding from `D` up to `B`. `T`
+//!     is `|E|^k` for the exactly-`k` chain, and for a bounded form
+//!     `T = Σ_{ℓ=max(min,1)}^{max} a^ℓ·|E|^ℓ` (empty sum = 0) with `a` the
+//!     alternation width; length-zero entries are counted separately by `N₀`.
 //!
 //!   These are the views this module can account for; it does NOT claim a complete
 //!   enumeration of what an arbitrary party or an arbitrary transport learns.
@@ -120,8 +137,9 @@
 //!   [`public_bounded_candidate_pair_bound`] — functions of `|E|` and the public
 //!   hop counts — whenever `B` reaches them, and the exact-count projection is not
 //!   run on that branch, so `D` stays out of the DECISION (the run itself still
-//!   materialises `D` candidates, as the schedule above says). A caller that chooses a `B` BELOW the public
-//!   bound puts `D` in the RESULT of the call as well: that branch accepts exactly
+//!   materialises `D` candidates, as the schedule above says). A caller that
+//!   chooses a `B` BELOW the public bound puts `D` in the RESULT of the call as
+//!   well: that branch accepts exactly
 //!   when `D <= B`, and a refusal draws nothing, so repeated calls with different
 //!   `B` recover `D` exactly by binary search. Given the schedule above that is no
 //!   new disclosure, but the public-only error text must not be read as hiding it.
@@ -304,9 +322,13 @@ pub struct HiddenEdge {
 /// the distinct endpoint-pair count `D`: the grouping key is the disclosed endpoint
 /// pair of every enumerated tuple, and each repeat costs one extra secure OR.
 /// **Unmatched endpoint terms are visible to the grouping evaluator**, which reads
-/// every tuple's endpoint pair in the clear, although they appear in no answer. NOT
-/// disclosed: any intermediate key, any per-hop or per-pair match bit, which tuples
-/// connected a pair, or the realized chain length. A `B` at or above
+/// every tuple's endpoint pair in the clear, although they appear in no answer. The
+/// arithmetic protocol does not explicitly open intermediate keys, hop bits, tuple
+/// bits or connected bits. This does not hide node identities or connectivity from
+/// the simulator host, or from an observer supplied the clear edge terms and their
+/// associations; under the documented consistent encoding
+/// ([`crate::term_encode::encode_term`]), those terms determine hop equality and
+/// chain connectivity. A `B` at or above
 /// [`public_candidate_pair_bound`] is decided without computing `D`, which keeps
 /// `D` out of the DECISION and out of the error text — not out of the schedule.
 #[derive(Debug, Clone)]
@@ -396,9 +418,12 @@ fn tuple_chain_bit(
     // k = 1: trivially connected (no internal hop) → constant shared 1.
     let mut bit = const_sharing(n, Fp::one());
     for w in tuple.windows(2) {
-        // The internal hop join: e_i.object must equal e_{i+1}.subject. Both keys
-        // are PRIVATE intermediate node values — the equality verdict stays a
-        // secret-shared bit, never opened (closes the per-hop L2 leak at source).
+        // The internal hop join: e_i.object must equal e_{i+1}.subject. Both are
+        // intermediate node key sharings the protocol never opens, and the equality
+        // verdict stays a secret-shared bit — the arithmetic reconstructs neither.
+        // The clear edge terms the caller supplies still determine this verdict
+        // under the consistent encoding (`crate::term_encode::encode_term`); see the
+        // module's disclosure list.
         let hop = secure_equal_to_bit_through(source, w[0].object.key, w[1].subject.key)?;
         bit = secret_and(source, &bit, &hop)?;
     }
@@ -413,7 +438,8 @@ fn endpoint_key(a: &Term, b: &Term) -> String {
 
 /// Build one [`Candidate`] per DISTINCT disclosed endpoint pair, OR-folding the
 /// chain bits of every edge-tuple that reaches that pair into one secret-shared
-/// connected-bit (design §2.5 — set semantics, realized length never revealed).
+/// connected-bit (design §2.5 — set semantics; the realized length is not
+/// separately opened or encoded in the result).
 ///
 /// Iterates the `|E|^k` edge-tuples lexicographically, computes each tuple's chain
 /// bit ([`tuple_chain_bit`]), and accumulates it into the connected-bit for the
@@ -527,10 +553,16 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 ///
 /// Same contract as [`public_candidate_pair_bound`], for the bounded union. The
 /// builder keys every enumerated tuple's endpoint pair plus, when `min == 0`, the
-/// reflexive diagonal over the node domain, so the arms are bounded publicly by
+/// reflexive diagonal over the DECLARED public node domain, so the arms are
+/// bounded publicly by
 ///
-/// - `min == 0` — at most `2*|E|` nodes in the domain, so at most `2*|E|` diagonal
-///   pairs;
+/// - `min == 0` — one diagonal pair per declared node, so exactly
+///   `node_domain_len` pairs (the declared domain's SIZE is a public plan input).
+///   Pass `0` for an edge relation whose declared domain is EMPTY, and also for
+///   one that declares no domain at all — the two are indistinguishable here. The
+///   second cannot serve a `min == 0` form: the evaluation refuses when it reaches
+///   the diagonal, whatever this bound says. The first serves it with an empty
+///   diagonal, which is the right answer for an empty active graph;
 /// - length `1` in range — at most `|E|` pairs;
 /// - any length `>= 2` in range — at most `|E|^2` pairs.
 ///
@@ -538,8 +570,10 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 /// deliberate: the bound must not depend on the edge data, and over-counting only
 /// raises the `B` at which the decision becomes data-independent. For inputs
 /// `check_bounded_params` accepts, that sum can exceed
-/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`, or
-/// `{0,2}` with `|E| = 511` — and then no admissible `B` reaches it, so the caller
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — a `{0,2}` form only needs an
+/// `|E|` whose square passes `MAX_CHAIN_TUPLES` but whose `|E|^2` term alone
+/// passes `MAX_OUTPUT_BOUND`, and the diagonal arm adds the declared domain on
+/// top — and then no admissible `B` reaches it, so the caller
 /// has only the data-dependent branch. Neither branch hides the distinct
 /// endpoint-pair count: the grouping reads every tuple's endpoint pair in the clear
 /// and each repeat costs one extra multiplication, whichever branch decided `B`.
@@ -547,11 +581,9 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 /// Returns `MpcError::Protocol` if the sum overflows `usize`.
 pub fn public_bounded_candidate_pair_bound(
     edge_count: usize,
+    node_domain_len: usize,
     form: &HiddenBoundedPath,
 ) -> Result<usize, MpcError> {
-    if edge_count == 0 {
-        return Ok(0);
-    }
     let overflow = || {
         MpcError::Protocol(format!(
             "hidden bounded path: the public endpoint-pair bound overflows usize for |E|={}",
@@ -559,10 +591,16 @@ pub fn public_bounded_candidate_pair_bound(
         ))
     };
     let mut total = 0usize;
+    // The diagonal arm is sized by the DECLARED domain, which is independent of
+    // `|E|`: a graph whose other predicates name many nodes has a domain larger
+    // than `2*|E|`, and one with no declared domain never reaches here with
+    // `min == 0`. So it is added even when `|E| == 0` — the builder emits the
+    // diagonal for every declared node whether or not any edge exists.
     if form.min == 0 {
-        total = total
-            .checked_add(edge_count.checked_mul(2).ok_or_else(overflow)?)
-            .ok_or_else(overflow)?;
+        total = total.checked_add(node_domain_len).ok_or_else(overflow)?;
+    }
+    if edge_count == 0 {
+        return Ok(total);
     }
     if form.min <= 1 && form.max >= 1 {
         total = total.checked_add(edge_count).ok_or_else(overflow)?;
@@ -636,7 +674,7 @@ fn projected_candidate_count(edges: &HiddenEdges, k: usize) -> Result<usize, Mpc
 /// constant `0` bit, but the PAIR is still keyed), so the key set does not depend
 /// on the alternation at all. It is the UNION of:
 ///
-/// - the reflexive diagonal `(x, x)` over the disclosed node domain, when
+/// - the reflexive diagonal `(x, x)` over the DECLARED node domain, when
 ///   `min == 0`;
 /// - the distinct `(subject, object)` edge pairs, when length `1` is in range;
 /// - the full product of distinct subjects with distinct objects, when any length
@@ -656,8 +694,8 @@ fn projected_bounded_candidate_count(
 ) -> Result<usize, MpcError> {
     let mut keys: BTreeSet<String> = BTreeSet::new();
     if form.min == 0 {
-        for node in edges.node_domain() {
-            keys.insert(endpoint_key(&node, &node));
+        for node in edges.node_domain()? {
+            keys.insert(endpoint_key(node, node));
         }
     }
     if !edges.is_empty() {
@@ -760,9 +798,12 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 /// branch hides `D` from a successful run. The grouping keys every enumerated tuple
 /// by its endpoint pair, read in the clear: in the model as built one process
 /// simulates every party, so the grouping evaluator sees the ordered candidate pair
-/// sequence; in a real multi-party run every party evaluates the same wiring,
-/// including which accumulator each tuple folds into, so every evaluating party
-/// knows the fold positions. The `T = |E|^k` tuples cost `T − D` ORs, and the output
+/// sequence. In a distributed implementation that supplies every evaluating party
+/// with the ordered plaintext endpoint terms, or with this construction's
+/// data-dependent accumulator wiring, every such party can determine the fold
+/// positions. This crate implements a single-process simulation and does not
+/// establish a per-party input or wiring-distribution boundary.
+/// The `T = |E|^k` tuples cost `T − D` ORs, and the output
 /// pads from `D` to `B`, so the multiplication count carries `D` regardless. Hiding
 /// `D` would need oblivious grouping with a uniform schedule, which is not built;
 /// see the module docs for the transport note and the limits of this account. A
@@ -881,7 +922,8 @@ pub(crate) fn exact_k_chain_candidates_and_opened_rows(
 // =====================================================================
 // sq-py8h.3 — bounded repetition `{1,k}` / `{0,k}` / `p?` + alternation
 // over the SAME hidden edge set, as a union-of-fixed-chains with an
-// OR-fold cross-length dedup (the realized length is never revealed).
+// OR-fold cross-length dedup (the realized length is not separately opened
+// or encoded in the result).
 // =====================================================================
 
 /// One labelled directed edge of the secret graph: `(subject, object)` nodes plus a
@@ -901,19 +943,182 @@ pub struct PredicatedEdge {
 
 /// The federated secret edge relation for a bounded path whose hops may range over an
 /// ALTERNATION of predicates `p_1 | … | p_a`. It is the union of every holder's
-/// `(predicate, subject, object)` edges; only the candidate-tuple COUNT and the
-/// matched endpoint TERMS are ever disclosed. Mirrors [`HiddenEdges`] but tags each
+/// `(predicate, subject, object)` edges. Mirrors [`HiddenEdges`] but tags each
 /// edge with its (public) predicate so a hop can be restricted to one alternation
 /// branch.
-#[derive(Debug, Clone)]
+///
+/// **What this operator discloses is the module's disclosure contract** — see the
+/// [module docs][crate::hidden_path] and [`HiddenEdges`]. It is wider than the
+/// candidate-tuple count and the matched endpoint terms: the grouping reads EVERY
+/// enumerated tuple's endpoint pair in the clear (unmatched ones included), the
+/// schedule carries the distinct endpoint-pair count, the uniform payload width is
+/// disclosed, and for `min == 0` the declared node domain's terms and size are
+/// public plan inputs.
+#[derive(Clone)]
 pub struct PredicatedEdges {
     edges: Vec<PredicatedEdge>,
+    /// The caller-declared PUBLIC node domain of the active graph, if any.
+    /// Deduped and canonically ordered; any `Term`, literals included. `None` =
+    /// not declared, and a form with `min == 0` is then refused — see
+    /// [`PredicatedEdges::with_node_domain`].
+    node_domain: Option<Vec<Term>>,
+}
+
+/// `Debug` is hand-written, like [`HiddenNode`]'s, and for the same reason: a
+/// derived one would print every term this relation owns from every container
+/// above it. [`PredicatedEdge`] already redacts its own nodes, but
+/// `node_domain` holds endpoint terms directly — including the terms of
+/// intermediate nodes, which `HiddenNode`'s `Debug` redacts — so a derived
+/// `Debug` on this type would have printed exactly what that redaction withholds.
+///
+/// What prints instead: the edge COUNT and the declared domain's SIZE (or that
+/// none is declared). Both are already public — `|E|` is a public input size and
+/// the domain's size enters [`public_bounded_candidate_pair_bound`] — so neither
+/// adds anything a `Debug` rendering should not carry. The edges themselves are
+/// not printed at all, only counted — [`PredicatedEdge`]'s own redacting `Debug`
+/// still covers them wherever one is printed on its own.
+impl std::fmt::Debug for PredicatedEdges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PredicatedEdges")
+            .field("edges", &self.edges.len())
+            .field(
+                "declared_node_domain",
+                &match &self.node_domain {
+                    Some(d) => format!("<redacted; {} term(s)>", d.len()),
+                    None => "<none declared>".to_string(),
+                },
+            )
+            .finish()
+    }
 }
 
 impl PredicatedEdges {
     /// Build the relation from the federated union of labelled edges.
+    ///
+    /// No node domain is declared, so a form with `min == 0` (a zero-length arm)
+    /// is refused; see [`PredicatedEdges::with_node_domain`].
     pub fn new(edges: Vec<PredicatedEdge>) -> Self {
-        PredicatedEdges { edges }
+        PredicatedEdges {
+            edges,
+            node_domain: None,
+        }
+    }
+
+    /// Declare the active graph's PUBLIC node domain — every term occurring as a
+    /// subject or object of any triple the federation holds — so a zero-length arm
+    /// (`{0,k}` / `p?`) can be evaluated.
+    ///
+    /// ## Why this has to come from the caller
+    ///
+    /// SPARQL 1.1 §18.4 `ZeroLengthPath` binds the zero-length match to **every
+    /// distinct subject or object term of the active graph** — object-only nodes
+    /// and **literals** included, predicate-only terms excluded, exactly as the
+    /// clear-text engine's `graph_nodes` computes it. The domain is accordingly a
+    /// set of [`Term`]s, independent of the regime applied to the edges
+    /// themselves: the diagonal is built from the DISCLOSED term, with a constant
+    /// shared `1` chain bit and no secure equality, so a non-IRI term is never a
+    /// key anything is compared on. A [`crate::partial::PartialResult`] row is
+    /// `Vec<Option<Term>>`, so a literal endpoint needs nothing special to carry.
+    /// The edges in this relation are only those the
+    /// holders contributed for the path's own alternation predicates, so their
+    /// endpoint terms are a SUBSET of that domain: a node occurring only in a
+    /// triple of another predicate is absent. Drawing the reflexive diagonal from
+    /// the edge endpoints alone therefore dropped those `(x, x)` pairs and
+    /// answered a `{0,k}` / `p?` form with fewer pairs than the clear-text
+    /// engine — a wrong answer, silently.
+    ///
+    /// Having the operator reach for the wider term set instead is not available
+    /// to it and would not be its call: the holders decide which triples they
+    /// contribute. So the domain is a declared, PUBLIC plan input, and without it
+    /// [`eval_bounded_path_hidden`] refuses a `min == 0` form fail-closed, BEFORE
+    /// any sharing is drawn. A form with `min >= 1` never reads the domain.
+    ///
+    /// Note what declaring it makes public: the diagonal's terms appear in the
+    /// opened output exactly as the matched endpoint terms already do, and the
+    /// domain's SIZE enters the public candidate bound
+    /// ([`public_bounded_candidate_pair_bound`]). Both are properties of the
+    /// public plan input the caller chose to declare, not of the secret node keys.
+    ///
+    /// ## The precondition — what the caller is trusted for
+    ///
+    /// The caller is trusted to supply **exactly** the selected active graph's
+    /// subject/object domain. The only thing this method checks is that the
+    /// declaration COVERS every endpoint term of every edge in this relation
+    /// (those are terms of the active graph by construction, so a declaration
+    /// missing one is inconsistent with the edges it accompanies, and is refused
+    /// with [`MpcError::Protocol`]). **Neither completeness nor the absence of
+    /// extra nodes is verified:** an omission loses `(x, x)` answers the engine
+    /// returns, and an extra node invents an `(x, x)` answer the engine does not.
+    /// Both are wrong answers this method cannot detect.
+    ///
+    /// ### Reproducing the engine's self-match for an ABSENT bound endpoint
+    ///
+    /// The engine matches a **bound** endpoint against itself even when that
+    /// constant occurs in no triple (`sparq-engine`'s `exec/bgp.rs` skips the
+    /// node-membership check for a concrete term). A caller can reproduce that by
+    /// including the constant in the declared domain — no API change is needed.
+    ///
+    /// It is a deliberate per-query WIDENING of the domain, not an exception to
+    /// the "exactly the domain" precondition above: the widened set is no longer
+    /// the active graph's domain, so it is declared for THAT query and the
+    /// consequence is accepted knowingly. The scope in which it is correct is a
+    /// SINGLE repetition whose bound endpoint is that constant — which is the
+    /// whole of THIS regime, since [`HiddenBoundedPath`] is one repetition and
+    /// this module has no sequence form at all.
+    ///
+    /// The caveat therefore belongs to the disclosed-key module, whose
+    /// [`crate::bounded_path::PathForm::Sequence`] can chain two or more nullable
+    /// arms: the Sequence's midpoint then ranges over the declared domain and the
+    /// widened constant over-answers. See
+    /// [`crate::bounded_path::DisclosedEdges::with_node_domain`].
+    ///
+    /// Duplicates are collapsed and the stored order is canonical, so the
+    /// diagonal does not depend on the order the caller listed its nodes in.
+    pub fn with_node_domain(
+        mut self,
+        nodes: impl IntoIterator<Item = Term>,
+    ) -> Result<Self, MpcError> {
+        let mut declared: BTreeMap<String, Term> = BTreeMap::new();
+        for n in nodes {
+            declared.entry(format!("{:?}", n)).or_insert(n);
+        }
+        // Count the uncovered endpoint terms; the message names the count only.
+        let mut missing: BTreeSet<String> = BTreeSet::new();
+        for e in &self.edges {
+            for term in [&e.subject.term, &e.object.term] {
+                let key = format!("{:?}", term);
+                if !declared.contains_key(&key) {
+                    missing.insert(key);
+                }
+            }
+        }
+        if !missing.is_empty() {
+            // VALUE- AND COUNT-FREE. An earlier version named how many endpoints
+            // were uncovered and how many terms were declared; both are statistics
+            // over the edge relation, and a caller could probe one candidate term
+            // at a time and read the count as a membership answer. The text now
+            // carries neither.
+            return Err(MpcError::Protocol(
+                "the declared node domain does not cover the edge endpoints — every edge \
+                 endpoint is a term of the active graph, so a zero-length arm over this \
+                 domain would under-answer; declare the full subject/object domain of the \
+                 active graph"
+                    .into(),
+            ));
+        }
+        self.node_domain = Some(declared.into_values().collect());
+        Ok(self)
+    }
+
+    /// Size of the declared PUBLIC node domain, or `0` when none was declared.
+    /// This is the public input size the `min == 0` arm of
+    /// [`public_bounded_candidate_pair_bound`] is computed from. `0` is returned
+    /// both for an explicitly EMPTY declared domain, whose diagonal is genuinely
+    /// empty, and for an undeclared one, which cannot serve a `min == 0` form at
+    /// all — that case is refused when the diagonal is reached, so the bound it
+    /// would produce cannot let a run through; see `zero_length_domain_err`.
+    fn declared_domain_len(&self) -> usize {
+        self.node_domain.as_ref().map_or(0, Vec::len)
     }
 
     /// Number of edges (`|E|` — public).
@@ -926,21 +1131,42 @@ impl PredicatedEdges {
         self.edges.is_empty()
     }
 
-    /// The set of all distinct node TERMS occurring as a subject or object — the
-    /// domain over which the reflexive (length-0) identity pairs `(x, x)` are added
-    /// for `{0,k}` / `p?` (design §2.3, the secret-graph analogue of the clear-text
-    /// `graph_nodes`). Disclosed terms only; no key is touched. Each distinct node
-    /// appears once, in canonical (debug-string) order so the output is deterministic.
-    fn node_domain(&self) -> Vec<Term> {
-        let mut seen: BTreeMap<String, Term> = BTreeMap::new();
-        for e in &self.edges {
-            seen.entry(format!("{:?}", e.subject.term))
-                .or_insert_with(|| e.subject.term.clone());
-            seen.entry(format!("{:?}", e.object.term))
-                .or_insert_with(|| e.object.term.clone());
-        }
-        seen.into_values().collect()
+    /// The DECLARED public node domain over which the reflexive (length-0)
+    /// identity pairs `(x, x)` are added for `{0,k}` / `p?` (design §2.3; the
+    /// analogue of the clear-text engine's `graph_nodes`, which ranges over the
+    /// WHOLE active graph). Disclosed terms only; no key is touched. Each distinct
+    /// node appears once, in canonical (debug-string) order so the output is
+    /// deterministic.
+    ///
+    /// Fail-closed when no domain was declared: the edge relation's own endpoint
+    /// terms are only a subset of the domain, so there is nothing sound to fall
+    /// back on. See `PredicatedEdges::with_node_domain`.
+    fn node_domain(&self) -> Result<&[Term], MpcError> {
+        self.node_domain
+            .as_deref()
+            .ok_or_else(zero_length_domain_err)
     }
+}
+
+/// The fail-closed refusal of a zero-length arm (`min == 0`) on an edge relation
+/// that carries no declared public node domain. The single source of that
+/// refusal: every consumer of the diagonal — `build_bounded_candidates` and the
+/// `projected_bounded_candidate_count` projection — reaches it through
+/// `PredicatedEdges::node_domain`, and the diagonal is the first thing the build
+/// does, so the refusal lands before any sharing is drawn. Value-free: it names
+/// no term and no count.
+fn zero_length_domain_err() -> MpcError {
+    MpcError::Protocol(
+        "hidden bounded path with min == 0 (the zero-length arm of {0,k} / p?) needs the \
+         active graph's PUBLIC node domain, which the edge relation does not carry: SPARQL \
+         1.1 §18.4 binds the zero-length match to every distinct SUBJECT or OBJECT term of \
+         the active graph, including terms occurring only in triples of predicates this path \
+         does not traverse. Refusing \
+         rather than drawing the reflexive diagonal from the edge endpoints alone, which \
+         would silently under-answer. Declare the domain with \
+         PredicatedEdges::with_node_domain, or use a form with min >= 1."
+            .into(),
+    )
 }
 
 /// A bounded property-path form the HIDDEN-regime operator understands: a repetition
@@ -1033,8 +1259,9 @@ fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> 
 /// [`tuple_chain_bit`]) and (b) a PUBLIC predicate-match gate per hop
 /// (`e_i.predicate == chain[i]`). The predicate gate is a fully public decision: a
 /// tuple whose predicates do not match the alternation branch contributes a
-/// constant shared `0` (no secure multiplication at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
-/// equality but never reconstructed.
+/// constant shared `0` (no secure multiplication at all) and is OR-folded away.
+/// The intermediate node KEYS are fed to the secure equality but never
+/// reconstructed by the arithmetic.
 fn predicated_tuple_chain_bit(
     backend: &ShamirBackend,
     source: &mut dyn DistributedRandomness,
@@ -1158,7 +1385,8 @@ fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Re
 /// one secret-shared connected-bit. This is the design §2.2–§2.5 union with the
 /// cross-length OR-fold dedup: a pair reached by a 2-hop AND a 4-hop chain (or by two
 /// alternation branches) yields ONE candidate with connected-bit `1`, and **which
-/// length connected it is never revealed** (§1.2 length-revealing prohibition).
+/// length connected it is not separately opened or encoded in the result** (§1.2
+/// length-revealing prohibition).
 ///
 /// When `form.min == 0` the reflexive length-0 diagonal `(x, x)` is added for every
 /// node in the domain with the constant shared `1` chain bit (design §2.3 — every node
@@ -1195,14 +1423,15 @@ fn build_bounded_candidates(
         Ok(())
     }
 
-    // Length-0 reflexive diagonal (design §2.3) for {0,k} / p?.
+    // Length-0 reflexive diagonal (design §2.3) over the DECLARED public node
+    // domain (SPARQL 1.1 §18.4), not the edge relation's own endpoints.
     if form.min == 0 {
-        for node in edges.node_domain() {
+        for node in edges.node_domain()? {
             fold(
                 source,
                 &mut by_pair,
                 node.clone(),
-                node,
+                node.clone(),
                 const_sharing(n, Fp::one()),
             )?;
         }
@@ -1258,7 +1487,8 @@ fn build_bounded_candidates(
 /// `vars == [?__pp_a, ?__pp_b]`. Covers `{1,k}`, `{0,k}` (reflexive), `p?` (`{0,1}`),
 /// and per-hop alternation `(p_1 | … | p_a)`, built as a union of fixed-length
 /// predicate chains over the SAME secret edge set, OR-folded to one connected-bit per
-/// distinct endpoint pair (set semantics; realized length never revealed, design
+/// distinct endpoint pair (set semantics; the realized length is not separately
+/// opened or encoded in the result, design
 /// §1.2/§2.2–§2.5). Reuses the exactly-`k` chain's secret-shared equality + AND/OR
 /// chaining and the landed oblivious output path verbatim.
 ///
@@ -1279,12 +1509,16 @@ fn build_bounded_candidates(
 /// branch hides `D` from a successful run. The grouping keys every enumerated tuple
 /// by its endpoint pair, read in the clear: in the model as built one process
 /// simulates every party, so the grouping evaluator sees the ordered candidate pair
-/// sequence; in a real multi-party run every party evaluates the same wiring,
-/// including which accumulator each tuple folds into, so every evaluating party
-/// knows the fold positions. For a bounded form the tuple total is
-/// `T = Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths `ℓ >= 1`, with `a` the
-/// alternation width; the OR count is `T + N₀ − D` when `min == 0`, the reflexive
-/// diagonal folding in one entry per node of the `N₀`-node disclosed domain, and
+/// sequence. In a distributed implementation that supplies every evaluating party
+/// with the ordered plaintext endpoint terms, or with this construction's
+/// data-dependent accumulator wiring, every such party can determine the fold
+/// positions. This crate implements a single-process simulation and does not
+/// establish a per-party input or wiring-distribution boundary.
+/// For a bounded form the tuple total is
+/// `T = Σ_{ℓ=max(min,1)}^{max} a^ℓ·|E|^ℓ` (empty sum = 0), with `a` the alternation
+/// width; length-zero entries are counted separately by `N₀`. The OR count is
+/// `T + N₀ − D` when `min == 0`, the reflexive diagonal folding in one entry per
+/// node of the `N₀`-node DECLARED public node domain, and
 /// `T − D` otherwise. The output then pads from `D` to `B`, so the multiplication
 /// count carries `D` regardless. Hiding `D` would need oblivious grouping with a
 /// uniform schedule, which is not built; see the module docs for the transport note
@@ -1295,8 +1529,9 @@ fn build_bounded_candidates(
 /// **The public bound can be out of reach here.**
 /// [`public_bounded_candidate_pair_bound`] sums the arms the form admits, and for
 /// inputs `check_bounded_params` accepts that sum can exceed
-/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`
-/// (`3·|E|`), or `{0,2}` with `|E| = 511` (`3·|E| + |E|^2`), for instance. No `B` is
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — a large enough `|E|` on the
+/// `|E|` arm of `{0,1}`/`{1,1}`, or on the `|E|^2` arm of any form reaching
+/// length 2, with the declared domain's size added on top when `min == 0`. No `B` is
 /// then both at or above the public bound and within `MAX_OUTPUT_BOUND`, so such a
 /// call can only run on the data-dependent branch, with the comparison that branch
 /// discloses.
@@ -1355,7 +1590,7 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     crate::oblivious_join::check_bound_public_first(
         "hidden bounded path",
         bound,
-        public_bounded_candidate_pair_bound(edges.len(), form)?,
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), form)?,
         || projected_bounded_candidate_count(edges, form),
     )?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
