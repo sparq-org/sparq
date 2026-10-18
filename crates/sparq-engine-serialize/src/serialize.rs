@@ -862,16 +862,16 @@ fn triple_from_ids(
     p: sparq_core::dict::Id,
     o: sparq_core::dict::Id,
 ) -> Triple {
-    let subject: NamedOrBlankNode = match graph.dict.term(s) {
+    let subject: NamedOrBlankNode = match graph.dict().term(s) {
         Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
         Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
         other => unreachable!("non-IRI/blank subject in store: {other}"),
     };
-    let predicate = match graph.dict.term(p) {
+    let predicate = match graph.dict().term(p) {
         Term::NamedNode(n) => n,
         other => unreachable!("non-IRI predicate in store: {other}"),
     };
-    let object = graph.dict.term(o);
+    let object = graph.dict().term(o);
     Triple {
         subject,
         predicate,
@@ -959,7 +959,7 @@ impl<'g> IdTurtleWriter<'g> {
             return None;
         }
         let start = self.arena.len();
-        let is_type = match self.graph.dict.term_parts(id) {
+        let is_type = match self.graph.dict().term_parts(id) {
             TermParts::Iri { prefix, suffix } => {
                 self.iri.clear();
                 self.iri.push_str(prefix);
@@ -1015,7 +1015,7 @@ impl<'g> IdTurtleWriter<'g> {
             return;
         }
         let graph = self.graph;
-        match graph.dict.term_parts(id) {
+        match graph.dict().term_parts(id) {
             TermParts::Lit { value, datatype, lang: None } => {
                 out.push('"');
                 escape_string(value, out);
@@ -1036,7 +1036,7 @@ impl<'g> IdTurtleWriter<'g> {
             }
             _ => {
                 // Triple terms / directional language tags: the generic renderer + header walk.
-                let term = graph.dict.term(id);
+                let term = graph.dict().term(id);
                 write_term(&term, self.prefixes, out);
                 let (table, used) = (&self.table, &mut self.used);
                 collect_iris(&term, &mut |iri: &str| table.note(iri, used));

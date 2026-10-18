@@ -533,6 +533,21 @@ def test_open_read_only_shares_with_readers(tmp_path):
         a.update("INSERT DATA { <http://ex/x> <http://ex/p> <http://ex/o> }")
 
 
+def test_reason_keeps_the_directory_locked(tmp_path):
+    d = tmp_path / "db"
+    sparq.Graph.load(RDFS_DATA).save(d)
+    a = sparq.Graph.open(d)
+    a.reason("rdfs")
+    # The reasoned graph still maps the store's dictionary, so it keeps the lock.
+    with pytest.raises(OSError):
+        sparq.Graph.open(d)
+    del a
+    import gc
+
+    gc.collect()
+    sparq.Graph.open(d)
+
+
 def test_open_missing_dir(tmp_path):
     with pytest.raises(IOError):
         sparq.Graph.open(tmp_path / "nope")

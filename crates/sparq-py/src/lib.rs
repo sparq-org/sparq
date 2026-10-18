@@ -248,7 +248,7 @@ fn resolve_source(source: &Bound<'_, PyAny>, format: Option<&str>) -> PyResult<(
 
 /// All triples of the (default) graph as canonical `[s, p, o]` id rows.
 fn all_triples(g: &CoreGraph) -> Vec<[Id; 3]> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     scan.rows.iter().map(|r| scan.to_spo(r)).collect()
 }
 
@@ -501,15 +501,19 @@ impl Graph {
         let prof = sparq_reason::Profile::parse(profile).ok_or_else(|| {
             PyValueError::new_err(format!("unknown reasoning profile {profile:?} (known: \"rdfs\", \"owl\")"))
         })?;
-        // Take the graph apart through its public fields (no Clone on Dict/Graph):
-        // move `dict` and `store` out, re-derive the canonical triples, materialize,
-        // rebuild (re-attaching the named graphs, which reasoning does not touch).
-        // A placeholder empty graph holds the slot during the closure.
-        let g = std::mem::replace(&mut self.inner, CoreGraph::from_parts(Dict::new(), Vec::new()));
+        // Take the graph apart (no Clone on Dict/Graph): re-derive the canonical triples,
+        // take the named graphs and the dictionary out (a mapped dictionary keeps its
+        // store's lock), materialize, rebuild (re-attaching the named graphs, which
+        // reasoning does not touch). A placeholder empty graph holds the slot during the
+        // closure.
+        let mut g = std::mem::replace(
+            &mut self.inner,
+            CoreGraph::from_parts(Dict::new(), Vec::new()),
+        );
         let (inner, added) = py.detach(move || {
             let mut triples = all_triples(&g);
-            let named = g.named;
-            let mut dict = g.dict;
+            let named = std::mem::take(&mut g.named);
+            let mut dict = g.into_dict();
             let added = sparq_reason::materialize(prof, &mut dict, &mut triples);
             let mut rebuilt = CoreGraph::from_parts(dict, triples);
             rebuilt.named = named;
@@ -547,7 +551,7 @@ impl Graph {
                 src.push('\n');
                 for [s, p, o] in rows {
                     for id in [s, p, o] {
-                        let term = inner.dict.term(id);
+                        let term = inner.dict().term(id);
                         match term {
                             oxrdf::Term::Triple(_) => {
                                 return Err("RDF 1.2 triple terms cannot participate in N3 reasoning".into());
@@ -615,7 +619,12 @@ impl Graph {
             hits.truncate(n);
         }
         hits.iter()
-            .map(|h| (Term::from_oxrdf(&inner.dict.term(h.id)), f64::from(h.score)))
+            .map(|h| {
+                (
+                    Term::from_oxrdf(&inner.dict().term(h.id)),
+                    f64::from(h.score),
+                )
+            })
             .collect()
     }
 
@@ -673,7 +682,7 @@ impl Graph {
     /// clashes that only follow by entailment.
     fn inconsistencies(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         let inner = &self.inner;
-        Ok(py.detach(|| sparq_reason::inconsistencies(&inner.dict, &all_triples(inner))))
+        Ok(py.detach(|| sparq_reason::inconsistencies(inner.dict(), &all_triples(inner))))
     }
 
     /// A cheap, logically-INDEPENDENT copy of this graph that can then be

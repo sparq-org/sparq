@@ -4115,7 +4115,7 @@ fn completion_json(
         .complete(prefix, limit, None)
         .into_iter()
         .map(|candidate| {
-            let term = graph.dict.term(candidate.id);
+            let term = graph.dict().term(candidate.id);
             let iri = match &term {
                 oxrdf::Term::NamedNode(node) => node.as_str().to_string(),
                 _ => term.to_string(),

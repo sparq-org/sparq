@@ -34,7 +34,7 @@ compact-index = []
 # reads sort and allocate; forks copy retained projections. See the crate README.
 overlay-deleted-projections = []
 # Out-of-core querying: persist the indexes and memory-map them (native only).
-mmap = ["dep:memmap2", "dep:fs4", "dep:same-file"]
+mmap = ["dep:memmap2", "dep:fs4", "dep:same-file", "dep:winapi-util"]
 # sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
 # (subject/object) leading column of a BLOCK-COMPRESSED permutation. The directory's
 # first-triple already gives an implicit min/max zone map that prunes RANGE scans, but for
@@ -154,6 +154,11 @@ memmap2 = { workspace = true, optional = true }
 fs4 = { workspace = true, optional = true }
 same-file = { workspace = true, optional = true }
 libc = { workspace = true, optional = true }
+
+# The hard-link count of a store's files on Windows (`GetFileInformationByHandle`), for the
+# `mmap` feature's store-internals check. Already in the lockfile (via `same-file`).
+[target.'cfg(windows)'.dependencies]
+winapi-util = { version = "0.1.11", optional = true }
 
 # sq-3dyje.2: property-based testing harness — DEV/TEST ONLY (does NOT appear
 # in [dependencies] or in any feature, so it is never pulled into the shipped crate or wasm

@@ -715,13 +715,13 @@ fn nquads_line(subject: &str, predicate: &str, object: &str, graph: Option<&str>
 /// Duplicate lines are NOT collapsed — see the raw-count check in [`compare`].
 fn sparq_nquads(g: &Graph) -> Vec<String> {
     fn triples_of(g: &Graph, graph: Option<&str>, out: &mut Vec<String>) {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {
             let t = scan.to_spo(r);
             out.push(nquads_line(
-                &g.dict.term(t[0]).to_string(),
-                &g.dict.term(t[1]).to_string(),
-                &g.dict.term(t[2]).to_string(),
+                &g.dict().term(t[0]).to_string(),
+                &g.dict().term(t[1]).to_string(),
+                &g.dict().term(t[2]).to_string(),
                 graph,
             ));
         }

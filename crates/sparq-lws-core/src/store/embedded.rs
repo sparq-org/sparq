@@ -616,7 +616,7 @@ impl SparqClient for EmbeddedSparqClient {
             };
             let id = |iri: &str| {
                 let id = g
-                    .dict
+                    .dict()
                     .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
                         iri,
                     )));
@@ -626,16 +626,16 @@ impl SparqClient for EmbeddedSparqClient {
                 return Ok(Some(Vec::new()));
             };
             let pattern = [Some(s), Some(p), None];
-            if g.store.estimate(&pattern) > rows {
+            if g.store().estimate(&pattern) > rows {
                 return Ok(None);
             }
-            let scan = g.store.scan(&pattern);
+            let scan = g.store().scan(&pattern);
             let mut children = Vec::with_capacity(scan.rows.len());
             let mut bytes = 0usize;
             for row in scan.rows.iter() {
                 let [_, _, o] = scan.to_spo(row);
                 // A member is an IRI; anything else is a malformed index (see `children`).
-                let oxrdf::Term::NamedNode(child) = g.dict.term(o) else {
+                let oxrdf::Term::NamedNode(child) = g.dict().term(o) else {
                     return Err(SparqError::Backend(
                         "fatal: a containment member is not an IRI".into(),
                     ));

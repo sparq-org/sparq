@@ -63,7 +63,7 @@ pub(crate) fn spill_run(
     #[cfg(not(feature = "parallel"))]
     buf.sort_unstable();
     let path = tmp.join(format!("run{}.bin", runs.len()));
-    std::fs::write(&path, as_bytes(buf))?;
+    crate::create_scratch(&path)?.write_all(as_bytes(buf))?;
     runs.push(path);
     buf.clear();
     Ok(())
@@ -149,14 +149,14 @@ fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink
 /// (deduplicating consecutive equal triples). See `kway_merge_to` for the shared merge
 /// machinery.
 pub(crate) fn kway_merge(runs: &[PathBuf], out: &Path) -> io::Result<()> {
-    let mut w = BufWriter::new(std::fs::File::create(out)?);
+    let mut w = BufWriter::new(crate::FreshFile::create(out)?);
     kway_merge_to(runs, |t| {
         for &id in &t {
             w.write_all(&id.to_le_bytes())?;
         }
         Ok(())
     })?;
-    w.flush()
+    crate::commit_fresh(w)
 }
 
 /// sq-vkz7 — k-way merges sorted run files into a BLOCK-COMPRESSED `SPQCPRM1`
@@ -226,8 +226,9 @@ pub(crate) fn external_sort_compressed(
 }
 
 /// Memory-maps a permutation file as a `[[Id;3]]` slice (for re-sorting into other
-/// orders during the build).
-pub fn map_perm(path: &Path) -> io::Result<(memmap2::Mmap, usize)> {
+/// orders during the build). Crate-internal: only a build, under the lock of the directory it
+/// writes, maps a permutation this way, for the duration of the build.
+pub(crate) fn map_perm(path: &Path) -> io::Result<(memmap2::Mmap, usize)> {
     let f = std::fs::File::open(path)?;
     // SAFETY: read-only mapping of a file we own for the call's duration.
     let m = unsafe { memmap2::Mmap::map(&f)? };

@@ -1707,6 +1707,7 @@ enum OutSink {
 
 impl OutSink {
     fn create(path: &str) -> std::io::Result<OutSink> {
+        crate::check_output_path(path)?;
         let w = std::io::BufWriter::new(std::fs::File::create(path)?);
         Ok(if path.ends_with(".gz") {
             OutSink::Gz(flate2::write::GzEncoder::new(w, flate2::Compression::default()))

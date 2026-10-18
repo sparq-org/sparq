@@ -83,14 +83,14 @@ fn session(agent: &str) -> Session<'_> {
 /// refused update must leave both exactly as they were.
 fn snapshot(graph: &Graph) -> (Vec<String>, usize) {
     fn dump(g: &Graph, name: &str, out: &mut Vec<String>) {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {
             let [s, p, o] = scan.to_spo(r);
             out.push(format!(
                 "{name} {} {} {}",
-                g.dict.term(s),
-                g.dict.term(p),
-                g.dict.term(o)
+                g.dict().term(s),
+                g.dict().term(p),
+                g.dict().term(o)
             ));
         }
     }

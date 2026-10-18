@@ -16,15 +16,15 @@ use tempfile::TempDir;
 /// Canonical comparable triple set (N-Triples term rendering) — same helper as
 /// `tests/roundtrip.rs`.
 fn triple_set(g: &Graph) -> BTreeSet<[String; 3]> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     scan.rows
         .iter()
         .map(|r| {
             let [s, p, o] = scan.to_spo(r);
             [
-                g.dict.term(s).to_string(),
-                g.dict.term(p).to_string(),
-                g.dict.term(o).to_string(),
+                g.dict().term(s).to_string(),
+                g.dict().term(p).to_string(),
+                g.dict().term(o).to_string(),
             ]
         })
         .collect()
@@ -75,14 +75,14 @@ fn save_then_load_round_trips_the_term_zoo() {
         "save -> load must preserve the term set exactly",
     );
     assert_eq!(
-        reloaded.store.len(),
-        original.store.len(),
+        reloaded.store().len(),
+        original.store().len(),
         "same stored triple count"
     );
-    assert_eq!(reloaded.store.len(), 11);
+    assert_eq!(reloaded.store().len(), 11);
     assert_eq!(
-        reloaded.dict.len(),
-        original.dict.len(),
+        reloaded.dict().len(),
+        original.dict().len(),
         "same number of distinct terms"
     );
 }
@@ -172,7 +172,7 @@ fn save_round_trips_multiblock_graph() {
     let reloaded = sparq_hdt::load(&path).unwrap();
     let from_nt = Graph::load_str(&nt, "ntriples").unwrap();
     assert_eq!(triple_set(&reloaded), triple_set(&from_nt));
-    assert_eq!(reloaded.store.len(), from_nt.store.len());
+    assert_eq!(reloaded.store().len(), from_nt.store().len());
 }
 
 /// Saving the empty graph produces a valid (empty) archive that reloads to nothing.
@@ -183,7 +183,7 @@ fn save_empty_graph() {
     let path = dir.path().join("empty.hdt");
     sparq_hdt::save(&empty, &path).unwrap();
     let reloaded = sparq_hdt::load(&path).unwrap();
-    assert_eq!(reloaded.store.len(), 0);
+    assert_eq!(reloaded.store().len(), 0);
     assert!(reloaded.is_empty());
 }
 
@@ -233,7 +233,7 @@ fn save_rejects_rdf12_triple_term_graph() {
     // Guard: the fixture really does carry a triple term (so the rejection below is the
     // triple-term arm firing, not an empty / malformed graph failing for another reason).
     assert_eq!(
-        g.store.len(),
+        g.store().len(),
         1,
         "the triple-term graph holds exactly one triple"
     );
@@ -388,15 +388,15 @@ fn direct_encode_matches_upstream_builder() {
     {
         use std::io::Write as _;
         let mut f = std::io::BufWriter::new(std::fs::File::create(&nt_path).unwrap());
-        let scan = original.store.scan(&[None, None, None]);
+        let scan = original.store().scan(&[None, None, None]);
         for row in scan.rows.iter() {
             let [s, p, o] = scan.to_spo(row);
             writeln!(
                 f,
                 "{} {} {} .",
-                original.dict.term(s),
-                original.dict.term(p),
-                original.dict.term(o)
+                original.dict().term(s),
+                original.dict().term(p),
+                original.dict().term(o)
             )
             .unwrap();
         }

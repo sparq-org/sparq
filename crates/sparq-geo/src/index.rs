@@ -164,7 +164,7 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
     for pred in [vocab::HAS_GEOMETRY, vocab::HAS_DEFAULT_GEOMETRY] {
         let pred = NamedNode::new_unchecked(pred);
         if let Some(pattern) = graph.pattern(None, Some(&pred), None) {
-            let scan = graph.store.scan(&pattern);
+            let scan = graph.store().scan(&pattern);
             for row in scan.rows.iter() {
                 let [s, _, o] = scan.to_spo(row);
                 let features = owners.entry(o).or_default();
@@ -184,12 +184,12 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
         let Some(pattern) = graph.pattern(None, Some(&pred), None) else {
             continue;
         };
-        let scan = graph.store.scan(&pattern);
+        let scan = graph.store().scan(&pattern);
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
             // Only geometry-typed literals (geo:wktLiteral / geo:gmlLiteral);
             // everything else is skipped.
-            let lit = match graph.dict.term(o) {
+            let lit = match graph.dict().term(o) {
                 Term::Literal(l) if crate::is_geometry_datatype(l.datatype().as_str()) => l,
                 _ => {
                     skipped += 1;
@@ -208,7 +208,7 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
                     continue;
                 }
             };
-            let node = graph.dict.term(s);
+            let node = graph.dict().term(s);
             let literal = Term::Literal(lit.clone());
             // `o` is the geo:asWKT OBJECT id in THIS graph's dict — the id the
             // engine's scanned geometry column binds for a row on this literal.
@@ -218,7 +218,7 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
                 Some(features) => {
                     for &f in features {
                         entries.push(Entry {
-                            entity: graph.dict.term(f),
+                            entity: graph.dict().term(f),
                             node: node.clone(),
                             literal: literal.clone(),
                             literal_id,
@@ -280,7 +280,7 @@ impl GeoIndex {
             tree: RTree::bulk_load(items),
             skipped,
             // The freshness token: the source dict's address (opaque; no live borrow).
-            dict_ptr: Some(std::ptr::from_ref(&graph.dict) as usize),
+            dict_ptr: Some(std::ptr::from_ref(graph.dict()) as usize),
             literal_ids,
             literal_id_refs,
         }
@@ -311,7 +311,7 @@ impl GeoIndex {
     /// The id-level indexed universe — the set of live `geo:asWKT` literal
     /// dictionary `Id`s this index holds an opinion on — returned ONLY when
     /// `dict_ptr` is the address of the SAME `Graph::dict` this index was built
-    /// over (`std::ptr::from_ref(&graph.dict) as usize`), else `None`.
+    /// over (`std::ptr::from_ref(graph.dict()) as usize`), else `None`.
     ///
     /// This is the id-level equivalent of the per-`Term` `is_indexed` check: the
     /// spatial pushdown consults it so a row can be judged "the index has no
@@ -344,7 +344,7 @@ impl GeoIndex {
         // engine's id-level fast path remains sound; a MISMATCH (a different dict
         // was passed) invalidates freshness so the engine falls back to the per-row
         // check — never a stale id-set.
-        let now_ptr = std::ptr::from_ref(&graph.dict) as usize;
+        let now_ptr = std::ptr::from_ref(graph.dict()) as usize;
         if self.dict_ptr != Some(now_ptr) {
             self.dict_ptr = None;
         }
@@ -409,10 +409,10 @@ impl GeoIndex {
             for pred in [vocab::HAS_GEOMETRY, vocab::HAS_DEFAULT_GEOMETRY] {
                 let pred = NamedNode::new_unchecked(pred);
                 if let Some(pattern) = graph.pattern(None, Some(&pred), Some(node)) {
-                    let scan = graph.store.scan(&pattern);
+                    let scan = graph.store().scan(&pattern);
                     for row in scan.rows.iter() {
                         let [s, _, _] = scan.to_spo(row);
-                        let feature = graph.dict.term(s);
+                        let feature = graph.dict().term(s);
                         if !owners.contains(&feature) {
                             owners.push(feature);
                         }
@@ -426,10 +426,10 @@ impl GeoIndex {
                 let Some(pattern) = graph.pattern(Some(node), Some(&pred), None) else {
                     continue;
                 };
-                let scan = graph.store.scan(&pattern);
+                let scan = graph.store().scan(&pattern);
                 for row in scan.rows.iter() {
                     let [_, _, o] = scan.to_spo(row);
-                    let lit = match graph.dict.term(o) {
+                    let lit = match graph.dict().term(o) {
                         Term::Literal(l) if crate::is_geometry_datatype(l.datatype().as_str()) => l,
                         _ => {
                             self.skipped += 1;
@@ -800,7 +800,7 @@ mod indexed_ids_tests {
     fn indexed_ids_for_returns_the_live_literal_ids_on_a_fresh_dict_match() {
         let g = graph();
         let idx = GeoIndex::build(&g);
-        let dict_ptr = std::ptr::from_ref(&g.dict) as usize;
+        let dict_ptr = std::ptr::from_ref(g.dict()) as usize;
         let ids = idx.indexed_ids_for(dict_ptr).expect("fresh dict must match");
         // Exactly the two geo:asWKT literal ids, and each is the id `id_of` resolves
         // for the corresponding literal Term the index reports as indexed.
@@ -820,7 +820,7 @@ mod indexed_ids_tests {
         let g = graph();
         let idx = GeoIndex::build(&g);
         let other = Graph::load_str("", "ntriples").unwrap();
-        let other_ptr = std::ptr::from_ref(&other.dict) as usize;
+        let other_ptr = std::ptr::from_ref(other.dict()) as usize;
         assert!(
             idx.indexed_ids_for(other_ptr).is_none(),
             "a mismatched dict address must decline the id-level universe"
@@ -845,7 +845,7 @@ mod indexed_ids_tests {
         let mut idx = GeoIndex::build(&g);
         // Two entries (a, b) but ONE distinct literal id.
         assert_eq!(idx.entries().count(), 2);
-        let dict_ptr = std::ptr::from_ref(&g.dict) as usize;
+        let dict_ptr = std::ptr::from_ref(g.dict()) as usize;
         assert_eq!(idx.indexed_ids_for(dict_ptr).unwrap().len(), 1);
 
         // Remove ONE ownership edge; the geometry (and its literal id) survives.
@@ -853,7 +853,7 @@ mod indexed_ids_tests {
         let del = [[iri("http://ex/a"), iri(vocab::HAS_GEOMETRY), iri("http://ex/g")]];
         g.apply_delta(&[], &del).unwrap();
         idx.apply_delta(&g, &[], &del);
-        let dict_ptr = std::ptr::from_ref(&g.dict) as usize;
+        let dict_ptr = std::ptr::from_ref(g.dict()) as usize;
         // One entry (b) remains; the literal id is still present exactly once.
         assert_eq!(idx.entries().count(), 1);
         assert_eq!(idx.indexed_ids_for(dict_ptr).unwrap().len(), 1);

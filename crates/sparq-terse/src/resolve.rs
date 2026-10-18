@@ -290,7 +290,7 @@ mod ctx {
             let hits = sparq_vectors::ann::nearest_exact(store, query_vec, 8);
             let mut candidates: Vec<(NamedNode, f32)> = Vec::new();
             for (id, score) in hits {
-                if let Term::NamedNode(n) = self.graph.dict.term(id) {
+                if let Term::NamedNode(n) = self.graph.dict().term(id) {
                     candidates.push((n, score));
                     if candidates.len() == 2 {
                         break;

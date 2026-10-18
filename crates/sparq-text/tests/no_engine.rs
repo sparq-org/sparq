@@ -50,7 +50,7 @@ fn graph_of(literals: &[&str]) -> Graph {
 /// queries) — mirrors `tests/index.rs::values`.
 fn values(graph: &Graph, hits: &[Hit]) -> Vec<String> {
     hits.iter()
-        .map(|h| match graph.dict.term(h.id) {
+        .map(|h| match graph.dict().term(h.id) {
             Term::Literal(l) => l.value().to_string(),
             other => panic!("hit {} is not a literal: {}", h.id, other),
         })
@@ -164,7 +164,7 @@ fn pure_index_positions_phrase_and_near() {
     let phrase_hits: Vec<String> = pidx
         .phrase("quick brown fox")
         .iter()
-        .map(|id| match g.dict.term(*id) {
+        .map(|id| match g.dict().term(*id) {
             Term::Literal(l) => l.value().to_string(),
             other => panic!("phrase hit is not a literal: {}", other),
         })

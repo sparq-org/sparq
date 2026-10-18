@@ -393,12 +393,16 @@ pub(crate) enum System {
 /// The triples of one named graph as ground term triples.
 pub(crate) fn graph_triples(g: &Graph) -> Vec<[Term; 3]> {
     let pat: sparq_core::store::Pattern = [None, None, None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     scan.rows
         .iter()
         .map(|r| {
             let t = scan.to_spo(r);
-            [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])]
+            [
+                g.dict().term(t[0]),
+                g.dict().term(t[1]),
+                g.dict().term(t[2]),
+            ]
         })
         .collect()
 }

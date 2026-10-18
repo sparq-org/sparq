@@ -77,7 +77,7 @@ fn is_control_graph(iri: &str) -> bool {
 /// The number of triples a sub-graph currently holds.
 fn graph_len(g: &Graph) -> usize {
     let pat: sparq_core::store::Pattern = [None, None, None];
-    g.store.scan(&pat).rows.len()
+    g.store().scan(&pat).rows.len()
 }
 
 impl PodStore {

@@ -88,15 +88,15 @@ fn spilled_dict_build_is_byte_identical_to_sharded() {
     let mem = Graph::load_str(&nt, "ntriples").unwrap();
     let ext = Graph::open(&spill_dir).unwrap();
     assert_eq!(mem.len(), ext.len(), "triple count differs");
-    assert_eq!(mem.dict.len(), ext.dict.len(), "dict size differs");
+    assert_eq!(mem.dict().len(), ext.dict().len(), "dict size differs");
     let dump = |g: &Graph| -> Vec<String> {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         let mut v: Vec<String> = scan
             .rows
             .iter()
             .map(|r| {
                 let spo = scan.to_spo(r);
-                format!("{} {} {}", g.dict.term(spo[0]), g.dict.term(spo[1]), g.dict.term(spo[2]))
+                format!("{} {} {}", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2]))
             })
             .collect();
         v.sort();
@@ -158,6 +158,6 @@ fn spilled_dict_build_empty_input() {
     Graph::build_external_spill("".as_bytes(), "ntriples", &base, 16, &cfg).unwrap();
     let g = Graph::open(&base).unwrap();
     assert_eq!(g.len(), 0);
-    assert_eq!(g.dict.len(), 0);
+    assert_eq!(g.dict().len(), 0);
     std::fs::remove_dir_all(&base).ok();
 }

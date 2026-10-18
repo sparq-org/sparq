@@ -47,13 +47,13 @@ fn dir_files(dir: &std::path::Path) -> Vec<String> {
 }
 
 fn dump(g: &Graph) -> Vec<String> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     let mut v: Vec<String> = scan
         .rows
         .iter()
         .map(|r| {
             let spo = scan.to_spo(r);
-            format!("{} {} {}", g.dict.term(spo[0]), g.dict.term(spo[1]), g.dict.term(spo[2]))
+            format!("{} {} {}", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2]))
         })
         .collect();
     v.sort();

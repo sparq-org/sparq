@@ -18,6 +18,30 @@ mod tabular;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// `Err` when the output file `out` would land in a graph store directory (or inside one): a
+/// store's files belong to the graph that holds its lock, and writing over one (a live store's
+/// `perm0.bin`, say) would corrupt it.
+fn check_output_path(out: &str) -> std::io::Result<()> {
+    #[cfg(feature = "mmap")]
+    if sparq_core::dir_lock::is_inside_store(std::path::Path::new(out))? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{out} is inside a graph store: write the output somewhere else"),
+        ));
+    }
+    #[cfg(not(feature = "mmap"))]
+    let _ = out;
+    Ok(())
+}
+
+/// [`check_output_path`], exiting 2 (a usage error) when it refuses.
+fn refuse_output_in_store(out: &str) {
+    if let Err(e) = check_output_path(out) {
+        eprintln!("error: {e}");
+        std::process::exit(2);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -584,9 +608,9 @@ fn diff_triples(graph: &sparq_core::Graph) -> std::collections::BTreeSet<String>
         for [s, p, o] in graph.iter_ids() {
             triples.insert(format!(
                 "{} {} {} .",
-                graph.dict.term(s),
-                graph.dict.term(p),
-                graph.dict.term(o)
+                graph.dict().term(s),
+                graph.dict().term(p),
+                graph.dict().term(o)
             ));
         }
         for (_, named) in &graph.named {
@@ -827,13 +851,13 @@ fn cmd_compare_compress(args: &[String]) {
 
     let raw = load(path, format);
     let raw_heap = raw.heap_bytes();
-    let raw_store = raw.store.heap_bytes();
+    let raw_store = raw.store().heap_bytes();
     // Re-encode the same store compressed (keeps the dict + numeric cache).
     let t = Instant::now();
     let cmp = raw.into_compressed();
     let enc_s = t.elapsed().as_secs_f64();
     let cmp_heap = cmp.heap_bytes();
-    let cmp_store = cmp.store.heap_bytes();
+    let cmp_store = cmp.store().heap_bytes();
 
     println!("=== index footprint (in-RAM) ===");
     println!("  triples            : {}", cmp.len());
@@ -1185,6 +1209,9 @@ fn cmd_classify(args: &[String]) {
             std::process::exit(2);
         }
     };
+    if let Some(out) = args.get(4) {
+        refuse_output_in_store(out);
+    }
     let (dict, triples, report) = el_classify_parts(path, format);
     println!("triples\t{}", triples.len());
     println!("named_classes\t{}", report.named_classes);
@@ -1245,6 +1272,9 @@ fn cmd_reason(args: &[String]) {
     }
     let g = load_with_reasoning(path, format, profile);
     let out = args.get(5);
+    if let Some(out) = out {
+        refuse_output_in_store(out);
+    }
     // With an output path the closure is the data product (and may itself be stdout, e.g.
     // `/dev/stdout`), so the summary is a diagnostic on stderr; without one the count is
     // the command's only result and stays on stdout (#6466).
@@ -1259,10 +1289,10 @@ fn cmd_reason(args: &[String]) {
             eprintln!("create {out}: {e}");
             std::process::exit(1);
         }));
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {
             let spo = scan.to_spo(r);
-            writeln!(w, "{} {} {} .", g.dict.term(spo[0]), g.dict.term(spo[1]), g.dict.term(spo[2])).unwrap();
+            writeln!(w, "{} {} {} .", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2])).unwrap();
         }
         w.flush().unwrap();
         eprintln!("wrote closure to {out}");
@@ -1304,7 +1334,7 @@ fn cmd_query_mmap(args: &[String]) {
         g.len(),
         t.elapsed().as_secs_f64(),
         g.heap_bytes() as f64 / 1e9,
-        g.dict.heap_bytes() as f64 / 1e9,
+        g.dict().heap_bytes() as f64 / 1e9,
     );
     // The mmap-backed Graph borrows its on-disk permutations for the whole of `g`'s scope;
     // `emit_query_results` takes `&g` and finishes before `g` drops, so the borrow is sound.
@@ -1524,7 +1554,7 @@ fn load(path: &str, format: &str) -> sparq_core::Graph {
     let g = load_quiet(path, format);
     let secs = t.elapsed().as_secs_f64();
     let heap = g.heap_bytes();
-    let dict = g.dict.heap_bytes();
+    let dict = g.dict().heap_bytes();
     eprintln!(
         "loaded {} triples in {:.3}s ({:.2} M/s) | store ~{:.2} GB ({:.0} B/triple), dict ~{:.2} GB ({} terms, {:.0} B/term)",
         g.len(),
@@ -1533,8 +1563,8 @@ fn load(path: &str, format: &str) -> sparq_core::Graph {
         heap as f64 / 1e9,
         heap as f64 / g.len().max(1) as f64,
         dict as f64 / 1e9,
-        g.dict.len(),
-        dict as f64 / g.dict.len().max(1) as f64,
+        g.dict().len(),
+        dict as f64 / g.dict().len().max(1) as f64,
     );
     g
 }
@@ -1578,10 +1608,10 @@ fn cmd_memstat(args: &[String]) {
     let load_s = t.elapsed().as_secs_f64();
 
     let triples = g.len().max(1);
-    let terms = g.dict.len().max(1);
+    let terms = g.dict().len().max(1);
     let heap_total = g.heap_bytes();
-    let heap_dict = g.dict.heap_bytes();
-    let heap_store = g.store.heap_bytes();
+    let heap_dict = g.dict().heap_bytes();
+    let heap_store = g.store().heap_bytes();
     // The remainder is the numerics + temporals literal-value caches (their accessors are
     // crate-private; the subtraction is exact because Graph::heap_bytes is the plain sum).
     let heap_caches = heap_total.saturating_sub(heap_dict + heap_store);
@@ -1590,7 +1620,7 @@ fn cmd_memstat(args: &[String]) {
     println!("memstat_version\t1");
     println!("mode\t{}", if compressed { "compressed" } else { "raw" });
     println!("triples\t{}", g.len());
-    println!("dict_terms\t{}", g.dict.len());
+    println!("dict_terms\t{}", g.dict().len());
     println!("load_s\t{:.3}", load_s);
     println!("heap_total_bytes\t{}", heap_total);
     println!("heap_dict_bytes\t{}", heap_dict);
@@ -1726,7 +1756,7 @@ fn cmd_dump(args: &[String]) {
             let triples: Vec<oxrdf::Triple> = g
                 .iter_ids()
                 .map(|[s, p, o]| {
-                    let subject = match g.dict.term(s) {
+                    let subject = match g.dict().term(s) {
                         oxrdf::Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n),
                         oxrdf::Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b),
                         other => {
@@ -1734,14 +1764,14 @@ fn cmd_dump(args: &[String]) {
                             std::process::exit(1);
                         }
                     };
-                    let predicate = match g.dict.term(p) {
+                    let predicate = match g.dict().term(p) {
                         oxrdf::Term::NamedNode(n) => n,
                         other => {
                             eprintln!("corrupt store: non-IRI predicate {other}");
                             std::process::exit(1);
                         }
                     };
-                    oxrdf::Triple { subject, predicate, object: g.dict.term(o) }
+                    oxrdf::Triple { subject, predicate, object: g.dict().term(o) }
                 })
                 .collect();
             sparq_engine::triples_to_ntriples(&triples)
@@ -2181,6 +2211,7 @@ fn take_json_flag(args: &[String]) -> (Vec<String>, Option<String>) {
         if args[i] == "--json" {
             match args.get(i + 1) {
                 Some(p) => {
+                    refuse_output_in_store(p);
                     json_path = Some(p.clone());
                     i += 2;
                     continue;

@@ -82,13 +82,13 @@ const TEMPORAL_CACHE_FILE: &str = "temporals-v4.bin";
 
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
-    /// Term dictionary. Direct writes bypass numeric/temporal cache
-    /// and memo maintenance; use [`Self::from_parts`] to rebuild a graph from an
-    /// edited dictionary and its matching ID triples.
-    pub dict: Dict,
-    /// Indexes using [`Self::dict`]'s IDs. Direct replacement does not rebuild
-    /// private caches; use [`Self::from_parts`] for a coherent replacement graph.
-    pub store: TripleStore,
+    /// Term dictionary ([`dict`](Self::dict) reads it). Private: a directory-backed graph's
+    /// dictionary maps the store's files, which are reachable only through the graph. Use
+    /// [`Self::from_parts`] to build a graph from a dictionary and its matching ID triples.
+    dict: Dict,
+    /// Indexes using the dictionary's IDs ([`store`](Self::store) reads them). Private, like
+    /// the dictionary.
+    store: TripleStore,
     /// Parallel to the dictionary: the f64 value of each numeric literal (NaN for
     /// non-numeric terms). Lets the engine evaluate numeric filters / comparisons
     /// / ORDER BY without materialising the term and parsing its string each time
@@ -694,12 +694,12 @@ fn temporals_of(dict: &Dict) -> Vec<TempCell> {
 #[cfg(feature = "mmap")]
 fn write_temporals(path: &std::path::Path, flags: &[u8], instants: &[f64]) -> std::io::Result<()> {
     use std::io::Write;
-    let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut f = std::io::BufWriter::new(FreshFile::create(path)?);
     // SAFETY: reinterpret the contiguous f64 column as bytes for writing.
     let ibytes = unsafe { std::slice::from_raw_parts(instants.as_ptr().cast::<u8>(), std::mem::size_of_val(instants)) };
     f.write_all(ibytes)?;
     f.write_all(flags)?;
-    f.flush()
+    commit_fresh(f)
 }
 
 /// Parses an XSD floating-point lexical without normalizing whitespace.
@@ -1497,6 +1497,26 @@ impl Graph {
         Self::build(dict, triples)
     }
 
+    /// The term dictionary: id <-> term, for reading. A memory-mapped dictionary keeps its
+    /// store's lock for as long as it (or any clone of it) lives.
+    #[inline]
+    pub fn dict(&self) -> &Dict {
+        &self.dict
+    }
+
+    /// The triple indexes (in the dictionary's ids), for reading.
+    #[inline]
+    pub fn store(&self) -> &TripleStore {
+        &self.store
+    }
+
+    /// Consumes this graph for its term dictionary, so a rebuilt graph
+    /// ([`from_parts`](Self::from_parts)) can reuse it. A memory-mapped dictionary carries its
+    /// store's lock with it. Take the [`named`](Self::named) graphs out first to keep them.
+    pub fn into_dict(self) -> Dict {
+        self.dict
+    }
+
     /// (gh-1118) An empty, in-memory graph — the trivial, INFALLIBLE constructor.
     ///
     /// Equivalent to [`from_parts`](Self::from_parts)`(Dict::new(), Vec::new())` but spelled the
@@ -2031,7 +2051,7 @@ impl Graph {
             let (name, next) = decode_graph_name(&bytes, pos).map_err(|m| bad(&m))?;
             pos = next;
             let sub_dir = named_dir.join(i.to_string());
-            if read_store_marker(&sub_dir) == Some(Role::Root) {
+            if read_store_marker(&sub_dir)? == Some(Role::Root) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!(
@@ -2073,12 +2093,7 @@ impl Graph {
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
         let owned = claim_store(dir, Claim::Open, |_, _| Ok(()))?;
-        Self::open_dir(
-            &owned.dir,
-            Some(std::sync::Arc::new(owned.lock)),
-            true,
-            Role::Root,
-        )
+        Self::open_dir(&owned.dir, Some(owned.lock), true, Role::Root)
     }
 
     /// [`open`](Self::open) the store in `dir`, first saving `seed` there when `dir` holds none
@@ -2089,7 +2104,7 @@ impl Graph {
     pub fn open_or_create(dir: &std::path::Path, seed: &Graph) -> std::io::Result<Graph> {
         let owned = claim_store(dir, Claim::Open, |_, _| Ok(()))?;
         let dir = owned.dir;
-        let lock = std::sync::Arc::new(owned.lock);
+        let lock = owned.lock;
         recover_compaction(&dir)?;
         recover_named_drop(&dir)?;
         if !(dir.join("dict-meta.bin").exists() || dir.join("dict.bin").exists()) {
@@ -2121,7 +2136,7 @@ impl Graph {
     pub fn open_read_only(dir: &std::path::Path) -> std::io::Result<Graph> {
         let owned = claim_store(dir, Claim::ReadOnly, |_, _| Ok(()))?;
         let resolved = owned.dir;
-        let lock = std::sync::Arc::new(owned.lock);
+        let lock = owned.lock;
         // Under the shared lock no writer runs, so what is checked now stays true.
         if let Some(why) = needs_writable_open(&resolved)? {
             return Err(std::io::Error::new(
@@ -2158,17 +2173,17 @@ impl Graph {
             recover_named_drop(dir)?;
         }
         check_store_internals(dir)?;
-        if writable && read_store_marker(dir).is_none() && holds_store_files(dir) {
+        if writable && read_store_marker(dir)?.is_none() && holds_store_files(dir) {
             write_store_marker(dir, role)?;
         }
-        let store = TripleStore::open(dir)?;
+        let store = TripleStore::open(dir, lock.clone())?;
         // (review 1325, sub-finding 2) Prefer the mmap dictionary format
         // (`dict-meta.bin`, written by `save_mmap`); fall back to the LEGACY single-file
         // `dict.bin` (written by the older `Dict::save`) so graph directories saved before
         // the mmap dictionary format still open. The legacy dict loads fully into RAM (no
         // mmap), which is the only difference — every term still round-trips.
         let dict = if dir.join("dict-meta.bin").exists() {
-            Dict::open_mmap(dir)?
+            Dict::open_mmap(dir, lock.clone())?
         } else {
             let legacy = dir.join("dict.bin");
             if legacy.exists() {
@@ -2176,7 +2191,7 @@ impl Graph {
             } else {
                 // Neither format present — surface the original mmap error (NotFound on
                 // dict-meta.bin), matching the previous behaviour for a corrupt directory.
-                Dict::open_mmap(dir)?
+                Dict::open_mmap(dir, lock.clone())?
             }
         };
         let np = dir.join(NUMERIC_CACHE_FILE);
@@ -2602,12 +2617,12 @@ impl Graph {
         for i in 0..6 {
             let p = dir.join(format!("perm{i}.bin"));
             if !p.exists() {
-                std::fs::File::create(&p).map_err(|e| e.to_string())?;
+                write_fresh(&p, &[]).map_err(|e| e.to_string())?;
             }
         }
         // Compute per-predicate stats once (a one-time POS/PSO scan) and persist them so
         // query-open never re-scans those indexes — keeping out-of-core open fast + small.
-        let store = TripleStore::open(dir).map_err(|e| e.to_string())?;
+        let store = TripleStore::open(dir, None).map_err(|e| e.to_string())?;
         store.save_pred_stats(dir).map_err(|e| e.to_string())?;
         std::fs::remove_dir_all(&tmp).ok();
         Ok(())
@@ -2778,8 +2793,8 @@ impl Graph {
                 }
                 let path = self.slot_path(slot);
                 let f = if self.seen.insert(slot) {
-                    // First time we touch this slot: truncate/create.
-                    std::fs::File::create(&path).map_err(|e| e.to_string())?
+                    // First time we touch this slot: a new file (never written through).
+                    create_scratch(&path).map_err(|e| e.to_string())?
                 } else {
                     // Reopen a previously-evicted slot: append so prior lines survive.
                     std::fs::OpenOptions::new()
@@ -2866,7 +2881,7 @@ impl Graph {
         if !have_default {
             // No default-graph quad was seen, so the file was never created — make an empty
             // one so the default store is a valid (empty) store.
-            std::fs::File::create(&default_path).map_err(|e| e.to_string())?;
+            create_scratch(&default_path).map_err(|e| e.to_string())?;
         }
         let default_file = std::fs::File::open(&default_path).map_err(|e| e.to_string())?;
         Self::build_external_in(default_file, "ntriples", dir, chunk)?;
@@ -3014,10 +3029,10 @@ impl Graph {
         for i in 0..6 {
             let p = dir.join(format!("perm{i}.bin"));
             if !p.exists() {
-                std::fs::File::create(&p).map_err(|e| e.to_string())?;
+                write_fresh(&p, &[]).map_err(|e| e.to_string())?;
             }
         }
-        let store = TripleStore::open(dir).map_err(|e| e.to_string())?;
+        let store = TripleStore::open(dir, None).map_err(|e| e.to_string())?;
         store.save_pred_stats(dir).map_err(|e| e.to_string())?;
         std::fs::remove_dir_all(&tmp).ok();
         Ok(())
@@ -3992,12 +4007,10 @@ impl Graph {
     /// graph that is open, use [`restore_in_place`](Self::restore_in_place).
     #[cfg(feature = "mmap")]
     pub fn restore_into_durable(dir: &std::path::Path, fresh: Graph) -> std::io::Result<Graph> {
-        let owned = claim_store(dir, Claim::Open, |_, _| Ok(()))?;
-        swap_dir_to_new_base(
-            &owned.dir,
-            Some(std::sync::Arc::new(owned.lock)),
-            |new_dir, role| fresh.save_unlocked(new_dir, role),
-        )
+        let owned = claim_store(dir, Claim::Write, |_, _| Ok(()))?;
+        swap_dir_to_new_base(&owned.dir, Some(owned.lock), |new_dir, role| {
+            fresh.save_unlocked(new_dir, role)
+        })
         .map_err(std::io::Error::from)
     }
 
@@ -4207,19 +4220,122 @@ impl Default for Graph {
     }
 }
 
-/// A new file at `path` for a save to write: any file already there is unlinked first, never
-/// truncated in place, so a graph that still maps the old file keeps reading the old bytes.
+/// A file a save or build writes into a store: the bytes go to a fresh sibling (`<name>.tmp`,
+/// any old one unlinked first, so nothing is ever written through an existing file or link),
+/// and [`commit`](Self::commit) fsyncs it, renames it over `path` and fsyncs the directory. Until
+/// then `path` keeps its old file whole, and a graph that maps the old file keeps reading it;
+/// dropped without a commit, the sibling is removed and `path` is untouched.
 #[cfg(feature = "mmap")]
-pub(crate) fn create_fresh(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+#[must_use = "a fresh file replaces its target only when committed"]
+pub(crate) struct FreshFile {
+    file: Option<std::fs::File>,
+    tmp: std::path::PathBuf,
+    path: std::path::PathBuf,
+}
+
+#[cfg(feature = "mmap")]
+impl FreshFile {
+    pub(crate) fn create(path: &std::path::Path) -> std::io::Result<FreshFile> {
+        let mut name = path
+            .file_name()
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("{} names no file", path.display()),
+                )
+            })?
+            .to_os_string();
+        name.push(".tmp");
+        let tmp = path.with_file_name(name);
+        match std::fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        Ok(FreshFile {
+            file: Some(file),
+            tmp,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// Makes the written bytes durable and puts them at the target path: fsync the file, rename
+    /// it over the target, fsync the directory.
+    pub(crate) fn commit(mut self) -> std::io::Result<()> {
+        let file = self.file.take().expect("a fresh file is committed once");
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&self.tmp, &self.path)?;
+        fsync_dir(
+            self.path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+        )
+    }
+}
+
+#[cfg(feature = "mmap")]
+impl std::io::Write for FreshFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file
+            .as_mut()
+            .expect("written before commit")
+            .write(buf)
+    }
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.file
+            .as_mut()
+            .expect("written before commit")
+            .write_all(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.as_mut().expect("written before commit").flush()
+    }
+}
+
+#[cfg(feature = "mmap")]
+impl Drop for FreshFile {
+    fn drop(&mut self) {
+        if self.file.take().is_some() {
+            std::fs::remove_file(&self.tmp).ok();
+        }
+    }
+}
+
+/// A new scratch file at `path` (a build's side file, read back and removed by the build): any
+/// file or link already there is unlinked first, never written through.
+#[cfg(feature = "mmap")]
+pub(crate) fn create_scratch(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     match std::fs::remove_file(path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
     std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .open(path)
+}
+
+/// Writes `bytes` to `path` as a [`FreshFile`] and commits it.
+#[cfg(feature = "mmap")]
+pub(crate) fn write_fresh(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = FreshFile::create(path)?;
+    std::io::Write::write_all(&mut f, bytes)?;
+    f.commit()
+}
+
+/// Flushes a buffered [`FreshFile`] and commits it.
+#[cfg(feature = "mmap")]
+pub(crate) fn commit_fresh(w: std::io::BufWriter<FreshFile>) -> std::io::Result<()> {
+    w.into_inner()
+        .map_err(std::io::IntoInnerError::into_error)?
+        .commit()
 }
 
 /// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. On
@@ -4251,7 +4367,7 @@ fn lock_to_build(dir: &std::path::Path) -> Result<Owned, String> {
 #[cfg(feature = "mmap")]
 struct Owned {
     dir: std::path::PathBuf,
-    lock: dir_lock::DirLock,
+    lock: std::sync::Arc<dir_lock::DirLock>,
 }
 
 /// What a [`claim_store`] is for.
@@ -4288,15 +4404,31 @@ fn write_store_marker(dir: &std::path::Path, role: Role) -> std::io::Result<()> 
         Role::Root => b"root\n",
         Role::Child => b"child\n",
     };
-    std::io::Write::write_all(&mut create_fresh(&dir.join(STORE_MARKER))?, text)
+    write_fresh(&dir.join(STORE_MARKER), text)
 }
 
+/// The [`Role`] the marker in `dir` records: `None` when there is no marker, an error (never a
+/// guess) when the marker cannot be read or says neither `root` nor `child`.
 #[cfg(feature = "mmap")]
-fn read_store_marker(dir: &std::path::Path) -> Option<Role> {
-    match std::fs::read(dir.join(STORE_MARKER)).ok()?.as_slice() {
-        b"root\n" => Some(Role::Root),
-        b"child\n" => Some(Role::Child),
-        _ => None,
+fn read_store_marker(dir: &std::path::Path) -> std::io::Result<Option<Role>> {
+    let path = dir.join(STORE_MARKER);
+    match std::fs::read(&path) {
+        Ok(bytes) => match bytes.as_slice() {
+            b"root\n" => Ok(Some(Role::Root)),
+            b"child\n" => Ok(Some(Role::Child)),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{} is not a graph store marker", path.display()),
+            )),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(std::io::Error::new(
+            e.kind(),
+            format!(
+                "the graph store marker {} cannot be read: {e}",
+                path.display()
+            ),
+        )),
     }
 }
 
@@ -4311,7 +4443,7 @@ fn holds_store_files(dir: &std::path::Path) -> bool {
 
 /// Whether `dir` is a graph store: it has a marker, or a legacy store's files.
 #[cfg(feature = "mmap")]
-fn is_store(dir: &std::path::Path) -> bool {
+pub(crate) fn is_store(dir: &std::path::Path) -> bool {
     dir.join(STORE_MARKER).exists() || holds_store_files(dir)
 }
 
@@ -4329,8 +4461,15 @@ fn is_store(dir: &std::path::Path) -> bool {
 /// 4. Only then are missing parent directories created (not for a read-only claim) and the lock
 ///    taken: exclusively, or shared for [`Claim::ReadOnly`]. The ancestor check is repeated
 ///    under the lock.
-/// 5. For [`Claim::Write`], the directory may hold nothing of anyone else's
-///    ([`refuse_foreign_descendants`]), and the root marker is written before anything else.
+/// 5. For [`Claim::Write`]: an interrupted swap of the directory is recovered first (so it is
+///    never mistaken for an empty one), its internals are checked ([`check_store_internals`]),
+///    it may hold nothing of anyone else's ([`refuse_foreign_descendants`]), and the root marker
+///    is written before anything else.
+///
+/// Ownership is per root and decided here, at claim time, by what is on disk: the ancestor and
+/// descendant checks are a best effort against mistakes, not a reservation. Two processes
+/// creating nested stores at the same moment (one inside the other's directory) are not
+/// excluded; that layout is unsupported.
 #[cfg(feature = "mmap")]
 fn claim_store(
     dir: &std::path::Path,
@@ -4353,13 +4492,16 @@ fn claim_store(
     };
     refuse_inside_store(&resolved)?;
     if claim == Claim::Write {
+        recover_compaction(&resolved)?;
+        recover_named_drop(&resolved)?;
+        check_store_internals(&resolved)?;
         refuse_foreign_descendants(&resolved)?;
         std::fs::create_dir_all(&resolved)?;
         write_store_marker(&resolved, Role::Root)?;
     }
     Ok(Owned {
         dir: resolved,
-        lock,
+        lock: std::sync::Arc::new(lock),
     })
 }
 
@@ -4381,10 +4523,11 @@ fn refuse_inside_store(dir: &std::path::Path) -> std::io::Result<()> {
 }
 
 /// `Err` when the resolved `dir`, about to be written as a whole store, holds something of
-/// someone else's: another root store anywhere inside it, or a lock file inside it that is held
-/// (a store under it is in use). Its own named graphs (child markers) are its to replace; an
-/// unmarked legacy store inside it is taken for one of its named graphs. Symbolic links inside
-/// are not followed.
+/// someone else's, or something it cannot tell is its own: another root store anywhere inside
+/// it, a store without a marker (a legacy store, which may be another root), a marker that
+/// cannot be read or parsed, or a lock file inside it that is held (a store under it is in use).
+/// Its own named graphs (child markers) are its to replace. Symbolic links inside are not
+/// followed.
 #[cfg(feature = "mmap")]
 fn refuse_foreign_descendants(dir: &std::path::Path) -> std::io::Result<()> {
     let entries = match std::fs::read_dir(dir) {
@@ -4398,12 +4541,27 @@ fn refuse_foreign_descendants(dir: &std::path::Path) -> std::io::Result<()> {
         let kind = entry.file_type()?;
         let path = entry.path();
         if kind.is_dir() {
-            if read_store_marker(&path) == Some(Role::Root) {
-                return refused(format!(
-                    "{} holds another graph store, {}",
-                    dir.display(),
-                    path.display()
-                ));
+            match read_store_marker(&path) {
+                Ok(Some(Role::Root)) => {
+                    return refused(format!(
+                        "{} holds another graph store, {}",
+                        dir.display(),
+                        path.display()
+                    ));
+                }
+                Ok(Some(Role::Child)) => {}
+                Ok(None) if holds_store_files(&path) => {
+                    return refused(format!(
+                        "{} holds a graph store without a marker (saved by an older version), \
+                         {}: open it writable once (which marks it), or move it out",
+                        dir.display(),
+                        path.display()
+                    ));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return refused(format!("{} holds {}: {e}", dir.display(), path.display()));
+                }
             }
             refuse_foreign_descendants(&path)?;
         } else if kind.is_file()
@@ -4421,7 +4579,7 @@ fn refuse_foreign_descendants(dir: &std::path::Path) -> std::io::Result<()> {
 }
 
 /// `Err` when the internals of the store in `dir` (its files, its `named/` directory and the
-/// entries in it) include a symbolic link, or (on Unix) a file with another hard link: either
+/// entries in it) include a symbolic link, or a file with another hard link: either
 /// would let this store's lock guard files that another store, under another lock, also uses.
 #[cfg(feature = "mmap")]
 fn check_store_internals(dir: &std::path::Path) -> std::io::Result<()> {
@@ -4443,8 +4601,7 @@ fn check_store_internals(dir: &std::path::Path) -> std::io::Result<()> {
             if meta.file_type().is_symlink() {
                 return refused(&path, "is a symbolic link");
             }
-            #[cfg(unix)]
-            if meta.is_file() && std::os::unix::fs::MetadataExt::nlink(&meta) > 1 {
+            if meta.is_file() && hard_links(&path, &meta)? > 1 {
                 return refused(&path, "has another hard link");
             }
         }
@@ -4454,10 +4611,33 @@ fn check_store_internals(dir: &std::path::Path) -> std::io::Result<()> {
     check(&dir.join(NAMED_SUBDIR))
 }
 
+/// How many directory entries (hard links) name the file at `path`, whose metadata is `meta`.
+#[cfg(all(feature = "mmap", unix))]
+fn hard_links(_path: &std::path::Path, meta: &std::fs::Metadata) -> std::io::Result<u64> {
+    Ok(std::os::unix::fs::MetadataExt::nlink(meta))
+}
+
+/// How many directory entries (hard links) name the file at `path` (`nNumberOfLinks` from
+/// `GetFileInformationByHandle`).
+#[cfg(all(feature = "mmap", windows))]
+fn hard_links(path: &std::path::Path, _meta: &std::fs::Metadata) -> std::io::Result<u64> {
+    let file = std::fs::File::open(path)?;
+    Ok(winapi_util::file::information(&file)?.number_of_links())
+}
+
+/// Elsewhere the link count is not known: taken as one.
+#[cfg(all(feature = "mmap", not(any(unix, windows))))]
+fn hard_links(_path: &std::path::Path, _meta: &std::fs::Metadata) -> std::io::Result<u64> {
+    Ok(1)
+}
+
 /// What in the resolved graph directory `dir` (or a named graph in it) only a writable open
 /// may touch, if anything: a log to replay, or the residue of an interrupted swap.
 #[cfg(feature = "mmap")]
 fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>> {
+    // Links first: past this, nothing in `dir` or its `named/` is a symbolic link, so the walk
+    // below never follows one (and cannot loop).
+    check_store_internals(dir)?;
     for staging in ["compact-new", "compact-old"] {
         let sibling = dir.with_extension(staging);
         if sibling.exists() {
@@ -4490,15 +4670,6 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
     if named.is_dir() {
         for entry in std::fs::read_dir(&named)? {
             let entry = entry?;
-            if entry.file_type()?.is_symlink() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "{} is a symbolic link inside a graph store: refused",
-                        entry.path().display()
-                    ),
-                ));
-            }
             if entry.file_type()?.is_dir() {
                 if let Some(why) = needs_writable_open(&entry.path())? {
                     return Ok(Some(why));
@@ -4537,12 +4708,14 @@ fn swap_dir_to_new_base<F>(
 where
     F: FnOnce(&std::path::Path, Role) -> std::io::Result<()>,
 {
-    // A named graph's directory is swapped as a named graph's: its marker says so.
-    let role = read_store_marker(dir).unwrap_or(Role::Root);
     let unchanged = |error| SwapFailure {
         error,
         dir_unchanged: true,
     };
+    // A named graph's directory is swapped as a named graph's: its marker says so.
+    let role = read_store_marker(dir)
+        .map_err(unchanged)?
+        .unwrap_or(Role::Root);
     let changed = |error| SwapFailure {
         error,
         dir_unchanged: false,
@@ -4669,11 +4842,6 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<()> {
 const NAMED_SUBDIR: &str = "named";
 #[cfg(feature = "mmap")]
 const NAMED_MANIFEST: &str = "named.bin";
-/// (Copilot review #69, finding 1) Temp filename for the ATOMIC manifest write: the
-/// full image is written here, fsync'd, then renamed over [`NAMED_MANIFEST`] so a crash
-/// mid-write never leaves a partial/corrupt `named.bin`. See [`write_named_manifest`].
-#[cfg(feature = "mmap")]
-const NAMED_MANIFEST_TMP: &str = "named.bin.tmp";
 /// Manifest magic ("NMG1" little-endian) — identifies a named-graph manifest and lets a
 /// stray/legacy file be rejected rather than misread.
 #[cfg(feature = "mmap")]
@@ -4713,20 +4881,13 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
     for name in names {
         encode_graph_name(&mut buf, name);
     }
-    let final_path = dir.join(NAMED_MANIFEST);
-    let tmp_path = dir.join(NAMED_MANIFEST_TMP);
-    // Write the full image to a sibling temp file and fsync its CONTENTS before the rename, so
-    // the bytes the rename publishes are already durable (a crash can't surface a
-    // zero-length/partial file under the canonical name).
-    {
-        let mut f = std::fs::File::create(&tmp_path)?;
-        f.write_all(&buf)?;
-        f.sync_all()?;
-    }
-    // Atomically publish: rename can't tear, so `named.bin` is always a COMPLETE manifest.
-    std::fs::rename(&tmp_path, &final_path)?;
-    // fsync the dir holding `named.bin` so the rename (the commit) is itself durable.
-    fsync_dir(dir)
+    // Write the full image to the sibling `named.bin.tmp` (afresh, never through an existing
+    // file or link) and fsync its CONTENTS before the rename, so the bytes the rename publishes
+    // are already durable (a crash can't surface a zero-length/partial file under the canonical
+    // name); then fsync `dir`, so the rename (the commit) is itself durable.
+    let mut f = FreshFile::create(&dir.join(NAMED_MANIFEST))?;
+    f.write_all(&buf)?;
+    f.commit()
 }
 
 /// (sq-glw2) Durably REMOVES the named-graph manifest `dir/named.bin` (the commit
@@ -5262,10 +5423,10 @@ fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
     use std::io::Write;
     // SAFETY: reinterpret the contiguous f64 cache as bytes for writing.
     let bytes = unsafe { std::slice::from_raw_parts(nums.as_ptr().cast::<u8>(), std::mem::size_of_val(nums)) };
-    let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut w = std::io::BufWriter::new(FreshFile::create(path)?);
     w.write_all(&NUMERICS_MAGIC)?;
     w.write_all(bytes)?;
-    w.flush()
+    commit_fresh(w)
 }
 
 /// (sq-7ph8) STREAM-writes the dense `numerics-v3.bin` (the header, `n` f64, the
@@ -5281,11 +5442,13 @@ fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
 #[cfg(feature = "mmap")]
 fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std::io::Result<()> {
     use std::io::Write;
-    let mut w = std::io::BufWriter::new(create_fresh(path)?);
+    let mut w = std::io::BufWriter::new(FreshFile::create(path)?);
     w.write_all(&NUMERICS_MAGIC)?;
     const BLOCK: usize = 1 << 16; // ids per flush (512 KiB of f64)
     let mut buf: Vec<f64> = Vec::with_capacity(BLOCK.min(n));
-    let flush = |w: &mut std::io::BufWriter<std::fs::File>, buf: &mut Vec<f64>| -> std::io::Result<()> {
+    let flush = |w: &mut std::io::BufWriter<FreshFile>,
+                 buf: &mut Vec<f64>|
+     -> std::io::Result<()> {
         // SAFETY: reinterpret the contiguous f64 block as bytes for writing. (sq-7ph8)
         // - `buf` is a live `Vec<f64>` of `buf.len()` initialised elements; `size_of_val(&buf[..])`
         //   = `len * 8` covers exactly that contiguous, fully-initialised region (no over-read).
@@ -5312,7 +5475,7 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
     if !buf.is_empty() {
         flush(&mut w, &mut buf)?;
     }
-    w.flush()
+    commit_fresh(w)
 }
 
 /// (sq-7ph8) STREAM-writes the dense `temporals-v4.bin` (`n` little-endian f64
@@ -5329,12 +5492,14 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
 #[cfg(feature = "mmap")]
 fn stream_write_temporals(path: &std::path::Path, n: usize, temp: &TempData) -> std::io::Result<()> {
     use std::io::Write;
-    let mut w = std::io::BufWriter::new(create_fresh(path)?);
+    let mut w = std::io::BufWriter::new(FreshFile::create(path)?);
     const BLOCK: usize = 1 << 16;
     // Pass 1: the f64 instant column (NaN for non-temporal ids — temp_flag 0 carries the
     // "not temporal" decode, so the instant value of a flag-0 cell is irrelevant on read).
     let mut fbuf: Vec<f64> = Vec::with_capacity(BLOCK.min(n));
-    let flush_f = |w: &mut std::io::BufWriter<std::fs::File>, buf: &mut Vec<f64>| -> std::io::Result<()> {
+    let flush_f = |w: &mut std::io::BufWriter<FreshFile>,
+                   buf: &mut Vec<f64>|
+     -> std::io::Result<()> {
         // SAFETY: reinterpret the contiguous f64 instant block as bytes for writing. (sq-7ph8)
         // Same invariants as `stream_write_numerics::flush`: `size_of_val(&buf[..]) = len*8` views
         // exactly the live, initialised `Vec<f64>` region; `u8` has align 1 so no misalignment;
@@ -5368,7 +5533,7 @@ fn stream_write_temporals(path: &std::path::Path, n: usize, temp: &TempData) -> 
     if !gbuf.is_empty() {
         w.write_all(&gbuf)?;
     }
-    w.flush()
+    commit_fresh(w)
 }
 
 fn subject_term(s: &oxrdf::NamedOrBlankNode) -> Term {
@@ -12475,6 +12640,70 @@ mod tests {
         assert!(g.compact().is_err() && g.vacuum().is_err());
         assert!(g.restore_in_place(Graph::new()).is_err());
         drop(g);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// Every mapped part of a graph carries the directory's lock: a fork of its triple indexes
+    /// or a clone of its dictionary keeps the directory locked after the graph is gone.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn mapped_parts_carry_the_lock() {
+        let base = std::env::temp_dir().join(format!("sparq_mapped_pin_{}", std::process::id()));
+        std::fs::remove_dir_all(&base).ok();
+        let dir = base.join("g");
+        Graph::load_str("<http://ex/a> <http://ex/p> <http://ex/o> .", "ntriples")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let blocked =
+            || matches!(Graph::open(&dir), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock);
+        let g = Graph::open(&dir).unwrap();
+        let store = g.store.fork();
+        drop(g);
+        assert!(blocked(), "the forked indexes lost the lock");
+        assert_eq!(store.len(), 1);
+        drop(store);
+        let g = Graph::open(&dir).unwrap();
+        let dict = g.dict.clone();
+        drop(g);
+        assert!(blocked(), "the cloned dictionary lost the lock");
+        assert_eq!(dict.len(), 3);
+        drop(dict);
+        drop(Graph::open(&dir).expect("released with the last mapped part"));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// A fresh file replaces its target only when committed: dropped before, the target keeps
+    /// its old bytes and no temporary is left; a stale temporary that links elsewhere is
+    /// replaced, never written through.
+    #[cfg(all(feature = "mmap", unix))]
+    #[test]
+    fn a_fresh_file_replaces_its_target_only_on_commit() {
+        use std::io::Write;
+        let base = std::env::temp_dir().join(format!("sparq_fresh_file_{}", std::process::id()));
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::create_dir_all(&base).unwrap();
+        let target = base.join("f.bin");
+        let tmp = base.join("f.bin.tmp");
+        std::fs::write(&target, b"old").unwrap();
+        let mut f = FreshFile::create(&target).unwrap();
+        f.write_all(b"new").unwrap();
+        drop(f);
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert!(!tmp.exists(), "an uncommitted temporary was left behind");
+        let outside = base.join("outside");
+        std::fs::write(&outside, b"keep").unwrap();
+        std::fs::hard_link(&outside, &tmp).unwrap();
+        let mut f = FreshFile::create(&target).unwrap();
+        f.write_all(b"new").unwrap();
+        f.commit().unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read(&outside).unwrap(),
+            b"keep",
+            "written through a stale link"
+        );
+        assert!(!tmp.exists());
         std::fs::remove_dir_all(&base).ok();
     }
 

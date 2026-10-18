@@ -2074,7 +2074,7 @@ fn update_clear_all_empties_all_graphs() {
     )
     .unwrap();
     sparq_engine::update_in_place(&mut g, "CLEAR ALL").unwrap();
-    assert_eq!(g.store.len(), 0, "CLEAR ALL must empty the default graph");
+    assert_eq!(g.store().len(), 0, "CLEAR ALL must empty the default graph");
     for (_, store) in &g.named {
         assert_eq!(store.len(), 0, "CLEAR ALL must empty every named graph");
     }
@@ -2085,9 +2085,9 @@ fn update_clear_all_empties_all_graphs() {
 fn update_drop_default_clears_default_graph() {
     let ttl = "<http://ex/s> <http://ex/p> <http://ex/o> .";
     let mut g = Graph::load_str(ttl, "turtle").unwrap();
-    assert!(!g.store.is_empty(), "setup: default graph must have triples");
+    assert!(!g.store().is_empty(), "setup: default graph must have triples");
     sparq_engine::update_in_place(&mut g, "DROP DEFAULT").unwrap();
-    assert_eq!(g.store.len(), 0, "DROP DEFAULT must clear the default graph");
+    assert_eq!(g.store().len(), 0, "DROP DEFAULT must clear the default graph");
 }
 
 /// DROP NAMED removes all named-graph entries (update.rs line 460).

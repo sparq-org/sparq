@@ -320,7 +320,7 @@ pub(super) fn try_topk_orderby_indexed(
     if seed_unsat {
         return Ok(Some(Bindings::unsorted(out_vars, vec![])));
     }
-    let scan = graph.store.scan_sorted(&seed_id_pat, 2);
+    let scan = graph.store().scan_sorted(&seed_id_pat, 2);
     let actual_sort = scan.perm.order().into_iter().find(|&c| seed_id_pat[c].is_none());
     if actual_sort != Some(2) {
         return Ok(None); // this store build can't give us an object-sorted scan
@@ -384,7 +384,7 @@ pub(super) fn try_topk_orderby_indexed(
         if op.prepared.is_some() {
             return true;
         }
-        let sub_scan = graph.store.scan_sorted(&op.id_pat, 0);
+        let sub_scan = graph.store().scan_sorted(&op.id_pat, 0);
         let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| op.id_pat[c].is_none());
         if sub_actual_sort != Some(0) {
             return false;
@@ -740,7 +740,7 @@ pub(super) fn perm_for_order(order: [usize; 3]) -> Option<sparq_core::store::Per
 pub(super) fn collect_var_ids_sorted(graph: &Graph, id_pat: &IdPattern, target_pos: usize) -> Option<Vec<Id>> {
     // A permutation sorted by `target_pos` as its first UNBOUND column yields the join
     // values already grouped and ascending — enumerate the distinct run heads directly.
-    let scan = graph.store.scan_sorted(id_pat, target_pos);
+    let scan = graph.store().scan_sorted(id_pat, target_pos);
     let order = scan.perm.order();
     let k = order.iter().position(|&c| c == target_pos)?;
     let rows = scan.rows.as_ref();
@@ -831,7 +831,7 @@ pub(super) fn block_intersects_anchor(block: &[[Id; 3]], jk: usize, anchor: &Anc
 /// `None` when no built permutation sorts the matching range by `target_pos` (conservative
 /// decline).
 pub(super) fn skipscan_distinct(graph: &Graph, id_pat: &IdPattern, target_pos: usize) -> Option<(Vec<Id>, usize)> {
-    let scan = graph.store.scan_sorted(id_pat, target_pos);
+    let scan = graph.store().scan_sorted(id_pat, target_pos);
     let order = scan.perm.order();
     // The range's rows are sorted by `target_pos` only when it is the FIRST unbound
     // column of the chosen permutation's order.
@@ -1093,7 +1093,7 @@ pub(super) fn anchor_probe_incidence(
     // (an inserted triple could add a predicate; a deleted one could remove the last member
     // relation). We do not maintain the set incrementally, so decline and let the exact scan
     // (which reads the overlay-merged rows) answer every candidate.
-    if graph.store.has_overlay() {
+    if graph.store().has_overlay() {
         return None;
     }
     if probe_jpos == 1 || anchor.sorted.is_empty() {
@@ -1105,7 +1105,7 @@ pub(super) fn anchor_probe_incidence(
     // join column. `scan_sorted` picks such a perm when built; if the chosen perm is not
     // actually led by `probe_jpos`, we cannot range-restrict soundly — decline.
     let all_unbound: IdPattern = [None, None, None];
-    let scan = graph.store.scan_sorted(&all_unbound, probe_jpos);
+    let scan = graph.store().scan_sorted(&all_unbound, probe_jpos);
     let order = scan.perm.order();
     if order[0] != probe_jpos {
         return None;
@@ -1311,7 +1311,7 @@ pub(super) fn probe_anchor_distinct(
     // pins the FIRST unbound column, so choose the exact permutation ourselves.
     let third = 3 - ppos - jpos;
     let want = perm_for_order([ppos, jpos, third]).ok_or("no such permutation")?;
-    let scan = match graph.store.scan_perm(probe_ip, want) {
+    let scan = match graph.store().scan_perm(probe_ip, want) {
         Some(s) => s,
         // Permutation not built (e.g. the compact wasm index) or the pattern's bound
         // positions are not a prefix in it → decline (fall back to the full path).
@@ -1899,7 +1899,7 @@ pub(super) struct GroupStream<'a> {
 
 impl<'a> GroupStream<'a> {
     pub(super) fn new(graph: &'a Graph, id_pat: &IdPattern, v_pos: usize) -> Self {
-        let scan = graph.store.scan_sorted(id_pat, v_pos);
+        let scan = graph.store().scan_sorted(id_pat, v_pos);
         let order = scan.perm.order();
         // Canonical column `v_pos` is stored at this position in the permutation's rows.
         let col = order.iter().position(|&c| c == v_pos).unwrap();
@@ -1967,7 +1967,7 @@ pub(super) fn count_single_filtered(
     // permutation set may not deliver that order, in which case we fall through to the
     // count-scan below).
     if let [(fpos, cmp)] = cmps[..] {
-        let scan = graph.store.scan_sorted(id_pat, fpos);
+        let scan = graph.store().scan_sorted(id_pat, fpos);
         let sorted_by_f = scan.perm.order().into_iter().find(|&c| id_pat[c].is_none()) == Some(fpos);
         if sorted_by_f && scan.rows.first().is_some_and(|r| dict::is_inline(scan.to_spo(r)[fpos])) {
             return Some(match inline_pass_values(cmp) {
@@ -1986,7 +1986,7 @@ pub(super) fn count_single_filtered(
     // No solution row is built. The single-comparison shapes are specialised so the
     // per-row test is a direct cache probe with no predicate-kind dispatch (this loop
     // is the COUNT-mode hot path for cached-numeric FILTERs).
-    let scan = graph.store.scan(id_pat);
+    let scan = graph.store().scan(id_pat);
     let total = match cmps[..] {
         [(pos, ScanCmp::Num(cmp))] => scan
             .rows
@@ -2035,7 +2035,7 @@ pub(super) fn count_pushdown(graph: &Graph, inner: &GraphPattern) -> Option<usiz
             return None;
         }
         if filters.is_empty() {
-            return Some(graph.store.estimate(&id_pat));
+            return Some(graph.store().estimate(&id_pat));
         }
         // Single pattern + sargable numeric FILTER(s): count the passing rows without
         // materialising — a binary-searched range size on an all-inline column, else a

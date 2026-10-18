@@ -74,7 +74,7 @@ fn wonly_len(s: &PodStore) -> usize {
         .named
         .iter()
         .find(|(n, _)| *n == term)
-        .map(|(_, g)| g.store.scan(&[None, None, None]).rows.len())
+        .map(|(_, g)| g.store().scan(&[None, None, None]).rows.len())
         .unwrap_or(0)
 }
 
@@ -233,7 +233,7 @@ fn snapshot(s: &PodStore) -> std::collections::BTreeMap<String, String> {
         .filter(|(n, _)| !n.to_string().contains("urn:sparq:"))
         .map(|(n, g)| {
             let mut rows: Vec<String> = g
-                .store
+                .store()
                 .scan(&[None, None, None])
                 .rows
                 .iter()

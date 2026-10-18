@@ -663,9 +663,9 @@ pub fn read_registry(graph: &Graph) -> Vec<RegistryEntry> {
     let mut by_subject: std::collections::HashMap<String, Vec<(String, Term)>> =
         std::collections::HashMap::new();
     for t in reg.iter_ids() {
-        let s = reg.dict.term(t[0]);
-        let p = reg.dict.term(t[1]);
-        let o = reg.dict.term(t[2]);
+        let s = reg.dict().term(t[0]);
+        let p = reg.dict().term(t[1]);
+        let o = reg.dict().term(t[2]);
         let (Term::NamedNode(s), Term::NamedNode(p)) = (s, p) else { continue };
         if !by_subject.contains_key(s.as_str()) {
             order.push(s.clone());

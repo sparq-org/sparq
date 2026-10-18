@@ -889,6 +889,35 @@ fn recompress_same_dir_by_another_spelling_exits_2() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An output file inside a graph store (here over a store's own `perm0.bin`) is refused
+/// before anything is computed or written: a store's files belong to the graph holding it.
+#[test]
+fn reason_output_inside_a_store_exits_2() {
+    let dir = scratch("err-reason-into-store");
+    let store = dir.join("store");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let perm = store.join("perm0.bin");
+    let before = std::fs::read(&perm).unwrap();
+    for out in [perm.clone(), store.join("named").join("new.nt")] {
+        let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&out)]);
+        assert_eq!(code, 2, "{}: stderr: {stderr}", out.display());
+        assert!(stderr.contains("inside a graph store"), "stderr: {stderr}");
+    }
+    assert_eq!(
+        std::fs::read(&perm).unwrap(),
+        before,
+        "the store's file was written"
+    );
+    assert!(
+        !store.join("named").exists(),
+        "a directory was created inside the store"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---------------------------------------------------------------------------
 // Algebra-rewrite pass is LIT in this binary (sq-7d3dj.30.13)
 // ---------------------------------------------------------------------------

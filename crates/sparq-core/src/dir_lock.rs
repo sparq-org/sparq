@@ -22,6 +22,17 @@
 //! opened from it keeps that one resolved path for its log, its recovery and its swaps too. Two
 //! bind mounts of one directory have different parents, and so different sibling locks: that
 //! alias is not excluded on the flat layout.
+//!
+//! The lock guards a store's files only because they are reachable through nothing but the
+//! `Graph` that holds it: the openers of a store's dictionary and indexes are crate-internal, and
+//! every memory-mapped part of a graph (its indexes, its dictionary, and every fork, snapshot or
+//! clone of them) keeps the lock while it lives.
+//!
+//! Ownership is per root store and checked when a directory is claimed (opened, saved into,
+//! built or restored): a path inside a store is refused, and a whole-store write refuses a
+//! directory holding another store, or one it cannot tell is its own. These checks see the disk
+//! as it is when they run and reserve nothing; separate processes creating nested stores (one
+//! inside the other's directory) at the same time are not supported.
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -75,6 +86,27 @@ pub(crate) fn resolve_dir(dir: &Path) -> io::Result<PathBuf> {
 /// and file index on Windows), however they are spelled. `false` when either is missing.
 pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
     same_file::is_same_file(a, b).unwrap_or(false)
+}
+
+/// What a memory-mapped store backing holds while it lives: the lock of the store directory
+/// its files are in (`None` for a backing that maps nothing from a store). Every copy of a
+/// backing (a fork, a snapshot, a graph rebuilt around a dictionary) carries it, so a mapping
+/// never outlives its lock.
+pub(crate) type Pin = Option<std::sync::Arc<DirLock>>;
+
+/// Whether `path` (a file or a directory, existing or not) is a graph store directory or inside
+/// one: its resolved path, or an ancestor of it, holds a store marker or a legacy store's
+/// files. A tool writing an output file refuses such a path, since a store's files belong to the
+/// graph that holds its lock. Checked when called: nothing stops a store being created there
+/// afterwards.
+pub fn is_inside_store(path: &Path) -> io::Result<bool> {
+    // A path that does not resolve (`/dev/stdout` on a pipe, say) is checked as spelled.
+    let resolved = match resolve_dir(path) {
+        Ok(resolved) => resolved,
+        Err(_) if path.is_absolute() => path.to_path_buf(),
+        Err(_) => std::env::current_dir()?.join(path),
+    };
+    Ok(resolved.ancestors().any(crate::is_store))
 }
 
 /// Where a directory's lock file is.

@@ -110,12 +110,12 @@ impl GraphScope {
 /// fresh [`Graph`] (own dictionary + indexes). Triples failing [`GraphScope::visible`]
 /// are **physically absent** from the result.
 pub fn masked_graph(base: &Graph, scope: &GraphScope) -> Graph {
-    let scan = base.store.scan(&[None, None, None]);
+    let scan = base.store().scan(&[None, None, None]);
     let mut dict = Dict::new();
     let mut ids = Vec::new();
     for row in scan.rows.iter() {
         let spo = scan.to_spo(row);
-        let terms = [base.dict.term(spo[0]), base.dict.term(spo[1]), base.dict.term(spo[2])];
+        let terms = [base.dict().term(spo[0]), base.dict().term(spo[1]), base.dict().term(spo[2])];
         if scope.visible(&terms) {
             ids.push([dict.intern(&terms[0]), dict.intern(&terms[1]), dict.intern(&terms[2])]);
         }

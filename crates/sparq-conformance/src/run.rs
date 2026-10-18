@@ -689,13 +689,13 @@ pub fn run_update_test(entry: &TestEntry) -> Status {
             // Dump the resulting dataset: default graph + every named graph.
             let mut rows: Vec<Row> = Vec::new();
             let mut dump = |g: &sparq_core::Graph, name: Option<&Term>| {
-                let scan = g.store.scan(&[None, None, None]);
+                let scan = g.store().scan(&[None, None, None]);
                 for r in scan.rows.iter() {
                     let [s, p, o] = scan.to_spo(r);
                     rows.push(vec![
-                        Some(g.dict.term(s)),
-                        Some(g.dict.term(p)),
-                        Some(g.dict.term(o)),
+                        Some(g.dict().term(s)),
+                        Some(g.dict().term(p)),
+                        Some(g.dict().term(o)),
                         name.cloned(),
                     ]);
                 }

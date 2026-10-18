@@ -1343,7 +1343,7 @@ mod tests {
 
     fn count(g: &Graph) -> usize {
         let pat: IdPattern = [None, None, None];
-        g.store.scan(&pat).rows.len()
+        g.store().scan(&pat).rows.len()
     }
 
     // --- (sq-aalh) intra-body CLEAR/DROP durable-journal resolution ------------------
@@ -1503,7 +1503,7 @@ mod tests {
         // and depends on `Term` string formatting).
         let x_name = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/x"));
         let x = g.named.iter().find(|(n, _)| *n == x_name);
-        let x_rows = x.map(|(_, sub)| sub.store.scan(&[None, None, None]).rows.len()).unwrap_or(0);
+        let x_rows = x.map(|(_, sub)| sub.store().scan(&[None, None, None]).rows.len()).unwrap_or(0);
         assert_eq!(
             x_rows, 0,
             "after crash-recovery redo, X must be empty (pre-body AND intra-body quads retracted)"
@@ -1559,13 +1559,13 @@ mod tests {
             .named
             .iter()
             .find(|(n, _)| *n == x_name)
-            .map(|(_, s)| s.store.scan(&[None, None, None]).rows.len())
+            .map(|(_, s)| s.store().scan(&[None, None, None]).rows.len())
             .unwrap_or(0);
         let y_rows = g
             .named
             .iter()
             .find(|(n, _)| *n == y_name)
-            .map(|(_, s)| s.store.scan(&[None, None, None]).rows.len())
+            .map(|(_, s)| s.store().scan(&[None, None, None]).rows.len())
             .unwrap_or(0);
         assert_eq!((x_rows, y_rows), (0, 1), "after reload: X empty, Y intact");
 
@@ -1745,13 +1745,13 @@ mod tests {
         let dump = |g: &Graph| -> Vec<(String, String, String, String)> {
             let mut v: Vec<_> = Vec::new();
             let mut one = |g: &Graph, name: &str| {
-                let scan = g.store.scan(&[None, None, None]);
+                let scan = g.store().scan(&[None, None, None]);
                 for r in scan.rows.iter() {
                     let t = scan.to_spo(r);
                     v.push((
-                        g.dict.term(t[0]).to_string(),
-                        g.dict.term(t[1]).to_string(),
-                        g.dict.term(t[2]).to_string(),
+                        g.dict().term(t[0]).to_string(),
+                        g.dict().term(t[1]).to_string(),
+                        g.dict().term(t[2]).to_string(),
                         name.to_string(),
                     ));
                 }
@@ -1777,7 +1777,7 @@ mod tests {
                 assert_eq!(crate::count(&inplace, q).unwrap(), crate::count(&rebuilt, q).unwrap(), "query {q} diverged after op {i}");
             }
         }
-        assert!(inplace.store.has_overlay(), "the in-place path must have gone through the overlay");
+        assert!(inplace.store().has_overlay(), "the in-place path must have gone through the overlay");
         // CLEAR still empties via replacement.
         update_in_place(&mut inplace, "CLEAR ALL").unwrap();
         assert_eq!(dump(&inplace).len(), 0);
@@ -1786,7 +1786,7 @@ mod tests {
         update_in_place(&mut g, ops[0]).unwrap();
         let before = dump(&g);
         g.compact().unwrap();
-        assert!(!g.store.has_overlay());
+        assert!(!g.store().has_overlay());
         assert_eq!(dump(&g), before);
     }
 
@@ -2023,7 +2023,7 @@ mod update_contract {
     /// "did anything change" probe used by the atomicity assertions.
     fn dataset_count(g: &Graph) -> usize {
         let pat: IdPattern = [None, None, None];
-        g.store.scan(&pat).rows.len() + g.named.iter().map(|(_, sub)| sub.store.scan(&pat).rows.len()).sum::<usize>()
+        g.store().scan(&pat).rows.len() + g.named.iter().map(|(_, sub)| sub.store().scan(&pat).rows.len()).sum::<usize>()
     }
 
     /// A canonical dataset dump (sorted (s,p,o,graph) strings) for exact PRE/POST-request
@@ -2032,13 +2032,13 @@ mod update_contract {
     fn dump(g: &Graph) -> Vec<(String, String, String, String)> {
         let mut v: Vec<(String, String, String, String)> = Vec::new();
         let mut one = |g: &Graph, name: &str| {
-            let scan = g.store.scan(&[None, None, None]);
+            let scan = g.store().scan(&[None, None, None]);
             for r in scan.rows.iter() {
                 let t = scan.to_spo(r);
                 v.push((
-                    g.dict.term(t[0]).to_string(),
-                    g.dict.term(t[1]).to_string(),
-                    g.dict.term(t[2]).to_string(),
+                    g.dict().term(t[0]).to_string(),
+                    g.dict().term(t[1]).to_string(),
+                    g.dict().term(t[2]).to_string(),
                     name.to_string(),
                 ));
             }
@@ -2073,7 +2073,7 @@ mod update_contract {
         // Anchor (valid): CLEAR of the existing :g1 succeeds and empties it.
         let g = update(&store(), "CLEAR GRAPH <http://ex/g1>").unwrap();
         let g1 = g.named.iter().find(|(n, _)| n.to_string().contains("g1")).expect("entry kept");
-        assert_eq!(g1.1.store.scan(&[None, None, None]).rows.len(), 0, "CLEAR empties the existing graph");
+        assert_eq!(g1.1.store().scan(&[None, None, None]).rows.len(), 0, "CLEAR empties the existing graph");
     }
 
     /// DROP (§3.1.4). Same SHOULD-conditioned-on-empty-graph-recording story as CLEAR: DROP of an
@@ -2127,7 +2127,7 @@ mod update_contract {
             let g = update(&store(), &req).unwrap_or_else(|e| panic!("{verb} self must be a no-op success, got: {e}"));
             // The source/destination graph is untouched (its one triple survives).
             let g1 = g.named.iter().find(|(n, _)| n.to_string().contains("g1")).expect("g1 preserved");
-            assert_eq!(g1.1.store.scan(&[None, None, None]).rows.len(), 1, "{verb} self leaves the graph unchanged");
+            assert_eq!(g1.1.store().scan(&[None, None, None]).rows.len(), 1, "{verb} self leaves the graph unchanged");
             // SILENT identity is also a success no-op.
             let req_s = format!("{verb} SILENT GRAPH <http://ex/g1> TO GRAPH <http://ex/g1>");
             assert!(update(&store(), &req_s).is_ok(), "{verb} SILENT self is a no-op success");
@@ -2136,7 +2136,7 @@ mod update_contract {
         let g = update(&store(), "MOVE GRAPH <http://ex/g1> TO GRAPH <http://ex/g2>").unwrap();
         assert!(!g.named.iter().any(|(n, _)| n.to_string().contains("g1")), "MOVE drops the source");
         let g2 = g.named.iter().find(|(n, _)| n.to_string().contains("g2")).expect("destination created");
-        assert_eq!(g2.1.store.scan(&[None, None, None]).rows.len(), 1, "MOVE delivered the triple");
+        assert_eq!(g2.1.store().scan(&[None, None, None]).rows.len(), 1, "MOVE delivered the triple");
     }
 
     // ------------------------------------------------------------------------------------------
@@ -2278,7 +2278,7 @@ mod capture_replay {
 
     /// Triple count of a single graph (default-graph store only) — the per-graph size probe.
     fn count(g: &Graph) -> usize {
-        g.store.scan(&[None, None, None]).rows.len()
+        g.store().scan(&[None, None, None]).rows.len()
     }
 
     /// A canonical, sorted (s, p, o, graph) dump of the WHOLE dataset — the exact-equality probe
@@ -2287,13 +2287,13 @@ mod capture_replay {
     fn dump(g: &Graph) -> Vec<(String, String, String, String)> {
         let mut v: Vec<(String, String, String, String)> = Vec::new();
         let mut one = |g: &Graph, name: &str| {
-            let scan = g.store.scan(&[None, None, None]);
+            let scan = g.store().scan(&[None, None, None]);
             for r in scan.rows.iter() {
                 let t = scan.to_spo(r);
                 v.push((
-                    g.dict.term(t[0]).to_string(),
-                    g.dict.term(t[1]).to_string(),
-                    g.dict.term(t[2]).to_string(),
+                    g.dict().term(t[0]).to_string(),
+                    g.dict().term(t[1]).to_string(),
+                    g.dict().term(t[2]).to_string(),
                     name.to_string(),
                 ));
             }

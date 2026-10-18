@@ -649,11 +649,13 @@ cargo build -p sparq-cli --features serialize-rdf
 **One holder per directory:** `Graph::open`, `open_or_create`, `save`, `save_compressed`,
 `restore_into_durable`, `restore_in_place` and the `build_external*` builders take an
 exclusive advisory lock (`dir_lock`: `flock` on Unix, `LockFileEx` on Windows) before touching
-a directory, all through one ownership check. An open keeps it while the graph lives, and so
-does every named graph of it (a named graph taken out of `g.named` keeps its root locked), every
-`fork()`/`snapshot()` of it (they share its memory-mapped files), and the graphs `compact`,
-`vacuum` and `restore_in_place` swap in. A second holder, in another process or this one,
-gets `WouldBlock` at once. Rules that follow:
+a directory, all through one ownership check. A store's files are reachable only through its
+`Graph` (`g.dict()` and `g.store()` read them; the store, dictionary and permutation openers
+are crate-internal), and every memory-mapped part of a graph carries the lock: it is held while
+the graph, any named graph taken out of `g.named`, any `fork()`/`snapshot()`, or a graph rebuilt
+around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the graphs `compact`,
+`vacuum` and `restore_in_place` swap in. A second holder, in another process or this one, gets
+`WouldBlock` at once. Rules that follow:
 
 - **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
   from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused
@@ -662,17 +664,25 @@ gets `WouldBlock` at once. Rules that follow:
   image (the supported in-place rewrite), `g.compact()` folds the log into its base, and
   `g.is_backed_by(dir)` tells the case apart. A fork of `g` cannot save over `g`'s directory
   either.
-- **A store owns everything under it.** Every store directory carries a marker file,
-  `sparq-store` (`root` or `child`), written before anything else. Opening, saving or building
-  at a path is refused (`InvalidInput`) when any ancestor of it is a store, so a named graph's
-  directory (`<root>/named/<i>`) belongs to its root; saving or building into a directory is
-  refused when another root store inside it, or a held lock file inside it, would be replaced.
-  Parent directories are created only after these checks. A store saved before markers counts
-  as a root by its dictionary or manifest file and is marked on its next writable open (a
-  legacy store found inside a directory being saved is taken for one of its named graphs).
-- **A store's internals are not links.** An open is refused when a file or named graph inside
-  the store is a symbolic link, or (on Unix) a file has another hard link. A save writes each
-  file fresh (unlink, then create) rather than truncating it in place.
+- **Ownership is per root, checked when a directory is claimed.** Every store directory
+  carries a marker file, `sparq-store` (`root` or `child`), written before anything else.
+  Opening, saving or building at a path is refused (`InvalidInput`) when any ancestor of it is a
+  store, so a named graph's directory (`<root>/named/<i>`) belongs to its root. Saving,
+  building or `restore_into_durable` into a directory recovers an interrupted swap of it first,
+  then is refused when it holds another root store, a store without a marker, a marker that
+  cannot be read, or a held lock file. Parent directories are created only after these checks.
+  A store saved before markers counts as a root by its dictionary or manifest file and is marked
+  on its next writable open. These checks see what is on disk when they run; they reserve
+  nothing. Separate processes creating nested stores (one inside the other's directory) at the
+  same time are not supported.
+- **A store's internals are not links.** An open, and a save or build into an existing
+  directory, is refused when a file or named graph inside the store is a symbolic link, or a
+  file has another hard link. Every file is written to a fresh `<name>.tmp` sibling, fsynced and
+  renamed over its target, then the directory is fsynced: a crash leaves the old file or the new
+  one, never a missing or truncated one.
+- **Tool outputs stay out of stores.** `sparq_core::dir_lock::is_inside_store(path)` says
+  whether a path is a store directory or inside one; `sparq-cli` refuses such a path for
+  `reason`, `classify`, tabular and benchmark `--json` outputs (exit 2).
 - **One path per directory.** The directory is resolved once (symbolic links and `.`/`..`;
   a dangling symbolic link is an error) and that path is used for the lock, the log, crash
   recovery and compaction swaps, so compacting through a link rewrites the real directory and

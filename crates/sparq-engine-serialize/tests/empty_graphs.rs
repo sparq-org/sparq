@@ -24,9 +24,9 @@ fn dataset_rows(graph: &Graph, blank_map: &HashMap<String, String>) -> BTreeSet<
     let mut collect = |name: Option<Term>, part: &Graph| {
         for [subject, predicate, object] in part.iter_ids() {
             rows.insert([
-                term_key(part.dict.term(subject), blank_map),
-                term_key(part.dict.term(predicate), blank_map),
-                term_key(part.dict.term(object), blank_map),
+                term_key(part.dict().term(subject), blank_map),
+                term_key(part.dict().term(predicate), blank_map),
+                term_key(part.dict().term(object), blank_map),
                 name.clone()
                     .map(|term| term_key(term, blank_map))
                     .unwrap_or_default(),

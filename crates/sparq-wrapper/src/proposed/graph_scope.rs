@@ -420,9 +420,9 @@ fn append_traversal(
         Direction::Out => ([Some(focus), Some(predicate), None], 2),
         Direction::In => ([None, Some(predicate), Some(focus)], 0),
     };
-    let scan = graph.store.scan(&pattern);
+    let scan = graph.store().scan(&pattern);
     for row in scan.rows.iter() {
-        let term = graph.dict.term(scan.to_spo(row)[position]);
+        let term = graph.dict().term(scan.to_spo(row)[position]);
         if seen.insert(term.clone()) {
             terms.push(term);
         }

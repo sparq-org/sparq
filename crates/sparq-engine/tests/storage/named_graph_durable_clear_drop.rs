@@ -21,7 +21,7 @@ use sparq_engine::update_in_place;
 
 /// Triple count in a (sub-)graph via a full overlay-merged scan.
 fn rows(g: &Graph) -> usize {
-    g.store.scan(&[None, None, None]).rows.len()
+    g.store().scan(&[None, None, None]).rows.len()
 }
 
 /// The sub-graph whose name contains `frag`, if present.

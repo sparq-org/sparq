@@ -116,9 +116,9 @@ fn dataset_rows(graph: &Graph, blank_map: &HashMap<String, String>) -> BTreeSet<
     let mut collect = |name: Option<Term>, part: &Graph| {
         for [s, p, o] in part.iter_ids() {
             rows.insert([
-                term_key(part.dict.term(s), blank_map),
-                term_key(part.dict.term(p), blank_map),
-                term_key(part.dict.term(o), blank_map),
+                term_key(part.dict().term(s), blank_map),
+                term_key(part.dict().term(p), blank_map),
+                term_key(part.dict().term(o), blank_map),
                 name.clone()
                     .map(|term| term_key(term, blank_map))
                     .unwrap_or_default(),
@@ -181,16 +181,16 @@ fn graph_triples(graph: &Graph) -> Vec<Triple> {
     graph
         .iter_ids()
         .map(|[s, p, o]| Triple {
-            subject: match graph.dict.term(s) {
+            subject: match graph.dict().term(s) {
                 Term::NamedNode(node) => NamedOrBlankNode::NamedNode(node),
                 Term::BlankNode(node) => NamedOrBlankNode::BlankNode(node),
                 other => panic!("invalid RDF subject: {other}"),
             },
-            predicate: match graph.dict.term(p) {
+            predicate: match graph.dict().term(p) {
                 Term::NamedNode(node) => node,
                 other => panic!("invalid RDF predicate: {other}"),
             },
-            object: graph.dict.term(o),
+            object: graph.dict().term(o),
         })
         .collect()
 }

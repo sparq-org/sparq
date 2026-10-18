@@ -22,7 +22,7 @@ fn dump(g: &Graph) -> Vec<[String; 3]> {
     let mut v: Vec<[String; 3]> = g
         .iter_ids()
         .map(|t| {
-            [g.dict.term(t[0]).to_string(), g.dict.term(t[1]).to_string(), g.dict.term(t[2]).to_string()]
+            [g.dict().term(t[0]).to_string(), g.dict().term(t[1]).to_string(), g.dict().term(t[2]).to_string()]
         })
         .collect();
     v.sort();
@@ -63,7 +63,7 @@ fn snapshot_sees_point_in_time_triples() {
 
     // A pattern scan through the deref answers identically to the source.
     let pat = snap.pattern(None, Some(&NamedNode::new_unchecked("http://ex/p")), None).unwrap();
-    assert_eq!(snap.store.scan(&pat).rows.len(), 2);
+    assert_eq!(snap.store().scan(&pat).rows.len(), 2);
 }
 
 /// (2a) After the snapshot is taken, mutating the BASE must NOT be visible to the
@@ -87,7 +87,7 @@ fn base_mutation_after_snapshot_invisible_to_snapshot() {
     assert_eq!(snap.len(), 1, "snapshot len drifted after base mutation");
     assert_eq!(dump(&snap), snap_dump, "snapshot content drifted after base mutation");
     assert!(snap.id_of(&iri("http://ex/x")).is_none(), "base-inserted term leaked into snapshot");
-    assert!(snap.store.contains([
+    assert!(snap.store().contains([
         snap.id_of(&iri("http://ex/a")).unwrap(),
         snap.id_of(&iri("http://ex/p")).unwrap(),
         snap.id_of(&iri("http://ex/b")).unwrap(),
@@ -133,37 +133,37 @@ fn snapshot_shares_base_indexes_no_duplication() {
         .collect();
     let g = Graph::from_parts(dict, ids);
 
-    let base_index_bytes = g.store.heap_bytes();
-    let count_before = g.store.base_strong_count();
+    let base_index_bytes = g.store().heap_bytes();
+    let count_before = g.store().base_strong_count();
     assert_eq!(count_before, 1, "an unforked base owns its perms alone");
 
     // Take several snapshots; each must bump the shared-base strong count by exactly one
     // and must NOT duplicate the (large) index memory.
     let s1 = g.snapshot();
-    assert_eq!(g.store.base_strong_count(), 2, "snapshot must Arc-share the base, not copy it");
-    assert_eq!(s1.store.base_strong_count(), 2, "the snapshot points at the SAME shared base");
+    assert_eq!(g.store().base_strong_count(), 2, "snapshot must Arc-share the base, not copy it");
+    assert_eq!(s1.store().base_strong_count(), 2, "the snapshot points at the SAME shared base");
     assert!(
-        s1.store.heap_bytes() <= base_index_bytes,
+        s1.store().heap_bytes() <= base_index_bytes,
         "snapshot index memory ({}) exceeds the shared base ({}) — it duplicated the indexes",
-        s1.store.heap_bytes(),
+        s1.store().heap_bytes(),
         base_index_bytes
     );
 
     let s2 = g.snapshot();
     let s3 = g.snapshot();
-    assert_eq!(g.store.base_strong_count(), 4, "three live snapshots => base refcount 4");
+    assert_eq!(g.store().base_strong_count(), 4, "three live snapshots => base refcount 4");
 
     // Dropping snapshots releases the shared reference (no leak, no copy lingering).
     drop(s2);
     drop(s3);
-    assert_eq!(g.store.base_strong_count(), 2, "dropping snapshots releases the shared base");
+    assert_eq!(g.store().base_strong_count(), 2, "dropping snapshots releases the shared base");
     drop(s1);
-    assert_eq!(g.store.base_strong_count(), 1, "base is sole owner again after all snapshots drop");
+    assert_eq!(g.store().base_strong_count(), 1, "base is sole owner again after all snapshots drop");
 
     // The taking of N snapshots cost no index duplication: total resident index bytes for
     // a fresh snapshot equals the base (the Arc is shared) — sanity re-check after drops.
     let s = g.snapshot();
-    assert_eq!(s.store.heap_bytes(), base_index_bytes, "shared base reports its own (single) index memory");
+    assert_eq!(s.store().heap_bytes(), base_index_bytes, "shared base reports its own (single) index memory");
 }
 
 /// A snapshot taken AFTER the base already carries an overlay sees the merged
@@ -173,7 +173,7 @@ fn snapshot_shares_base_indexes_no_duplication() {
 fn snapshot_includes_pending_overlay_and_survives_base_compaction() {
     let mut g = graph_of(&[["http://ex/a", "http://ex/p", "http://ex/b"]]);
     g.apply_delta(&[[iri("http://ex/c"), iri("http://ex/p"), iri("http://ex/d")]], &[]).unwrap();
-    assert!(g.store.has_overlay());
+    assert!(g.store().has_overlay());
 
     let snap = g.snapshot(); // captures the 2-triple merged state
     assert_eq!(snap.len(), 2);
@@ -181,7 +181,7 @@ fn snapshot_includes_pending_overlay_and_survives_base_compaction() {
 
     // Base compacts (folds the overlay) and then diverges further.
     g.compact().unwrap();
-    assert!(!g.store.has_overlay());
+    assert!(!g.store().has_overlay());
     g.apply_delta(&[], &[[iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")]]).unwrap();
     assert_eq!(g.len(), 1);
 

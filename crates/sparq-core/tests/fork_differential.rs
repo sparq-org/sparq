@@ -22,9 +22,9 @@ fn dump(g: &Graph) -> Vec<[String; 3]> {
         .iter_ids()
         .map(|t| {
             [
-                g.dict.term(t[0]).to_string(),
-                g.dict.term(t[1]).to_string(),
-                g.dict.term(t[2]).to_string(),
+                g.dict().term(t[0]).to_string(),
+                g.dict().term(t[1]).to_string(),
+                g.dict().term(t[2]).to_string(),
             ]
         })
         .collect();
@@ -89,9 +89,9 @@ fn assert_reads_match(forked: &Graph, reference: &[[Term; 3]], ctx: &str) {
                 let gpat: Pattern = [gs, gpp, go];
                 for sort_col in [None, Some(0), Some(1), Some(2)] {
                     let (a, b) = match sort_col {
-                        None => (forked.store.scan(&fpat), flat.store.scan(&gpat)),
+                        None => (forked.store().scan(&fpat), flat.store().scan(&gpat)),
                         Some(c) => {
-                            (forked.store.scan_sorted(&fpat, c), flat.store.scan_sorted(&gpat, c))
+                            (forked.store().scan_sorted(&fpat, c), flat.store().scan_sorted(&gpat, c))
                         }
                     };
                     // Sorted in the chosen permutation's order (merge-join guarantee).
@@ -109,9 +109,9 @@ fn assert_reads_match(forked: &Graph, reference: &[[Term; 3]], ctx: &str) {
                             .map(|r| {
                                 let t = sc.to_spo(r);
                                 [
-                                    g.dict.term(t[0]).to_string(),
-                                    g.dict.term(t[1]).to_string(),
-                                    g.dict.term(t[2]).to_string(),
+                                    g.dict().term(t[0]).to_string(),
+                                    g.dict().term(t[1]).to_string(),
+                                    g.dict().term(t[2]).to_string(),
                                 ]
                             })
                             .collect();
@@ -126,8 +126,8 @@ fn assert_reads_match(forked: &Graph, reference: &[[Term; 3]], ctx: &str) {
                     );
                 }
                 assert_eq!(
-                    forked.store.estimate(&fpat),
-                    flat.store.estimate(&gpat),
+                    forked.store().estimate(&fpat),
+                    flat.store().estimate(&gpat),
                     "{ctx}: estimate diverges for {fpat:?}"
                 );
             }
@@ -172,7 +172,7 @@ fn fork_chain_matches_flat_rebuild() {
         .collect();
     let base = Graph::from_parts(dict, ids);
     let base_dump = dump(&base);
-    let base_dict_len = base.dict.len();
+    let base_dict_len = base.dict().len();
 
     // Chain of generations: gen[k+1] = fork(gen[k]) + a random batch. Holds every
     // generation alive (the ring shape) and re-checks old ones for isolation.
@@ -244,7 +244,7 @@ fn fork_chain_matches_flat_rebuild() {
         if gen % 3 == 2 {
             let before = dump(&g);
             g.compact().unwrap();
-            assert!(!g.store.has_overlay(), "compaction must fold the overlay");
+            assert!(!g.store().has_overlay(), "compaction must fold the overlay");
             assert_eq!(g.pending_delta_len(), 0, "compaction must clear the pending delta");
             assert_eq!(dump(&g), before, "compaction changed visible state");
             assert_reads_match(&g, &reference, &format!("gen {gen} post-compact"));

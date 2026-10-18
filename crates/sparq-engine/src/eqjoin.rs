@@ -430,7 +430,7 @@ fn key_of(graph: &Graph, id: Id) -> JKey {
         // tier (`"0.1"^^xsd:float = 0.1`), whose cached f64 differs from the float's, so no
         // f64-bits key covers it: pair it through the exact evaluator.
         if !dict::is_inline(id)
-            && matches!(graph.dict.term_parts(id), dict::TermParts::Lit { datatype, .. } if datatype == xsd::FLOAT.as_str())
+            && matches!(graph.dict().term_parts(id), dict::TermParts::Lit { datatype, .. } if datatype == xsd::FLOAT.as_str())
         {
             return JKey::Hard;
         }
@@ -441,7 +441,7 @@ fn key_of(graph: &Graph, id: Id) -> JKey {
         return JKey::Hard;
     }
     // Inline-integer ids never reach here (`numeric_value` is total for them).
-    match graph.dict.term_parts(id) {
+    match graph.dict().term_parts(id) {
         dict::TermParts::Iri { .. } | dict::TermParts::Blank(_) => JKey::Term(id),
         dict::TermParts::Triple(_) => JKey::Hard,
         dict::TermParts::Lit { value, datatype, lang } => {
@@ -934,8 +934,8 @@ mod tests {
             "<http://ex/s> <http://ex/p> \"u\"^^<http://ex/unknownDt> .\n",
         ));
         let id_of = |needle: &str| -> Id {
-            (1..=g.dict.len() as Id)
-                .find(|&i| format!("{}", g.dict.term(i)).contains(needle))
+            (1..=g.dict().len() as Id)
+                .find(|&i| format!("{}", g.dict().term(i)).contains(needle))
                 .unwrap_or_else(|| panic!("term containing {} not interned", needle))
         };
         // Same numeric VALUE, three datatypes/lexicals -> one key (the "01"/"1.0" pair).

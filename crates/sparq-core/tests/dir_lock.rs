@@ -471,3 +471,183 @@ fn a_read_only_graph_refuses_every_mutator() {
     );
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// A graph rebuilt around another's dictionary (`into_dict` + `from_parts`, as a reasoner does)
+/// keeps the directory locked while the mapped dictionary lives, writable or read-only.
+#[test]
+fn a_rebuilt_graph_keeps_its_dictionarys_lock() {
+    let root = scratch("rebuilt");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    for read_only in [false, true] {
+        let mut g = if read_only {
+            Graph::open_read_only(&dir).unwrap()
+        } else {
+            Graph::open(&dir).unwrap()
+        };
+        let triples: Vec<_> = g.iter_ids().collect();
+        g.named.clear();
+        let rebuilt = Graph::from_parts(g.into_dict(), triples);
+        assert!(
+            would_block(Graph::open(&dir)),
+            "the lock went with the graph the dictionary came from"
+        );
+        assert!(has(&rebuilt, "a"));
+        drop(rebuilt);
+        drop(Graph::open(&dir).expect("released with the dictionary"));
+    }
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A whole-store write (`restore_into_durable`, `save`) never replaces a directory holding
+/// another store it cannot tell is its own: an independently held root, a closed legacy store
+/// without a marker, or a marker that cannot be parsed. Everything inside is left as it was.
+#[test]
+fn a_whole_store_write_refuses_what_it_cannot_tell_is_its_own() {
+    let root = scratch("foreign");
+    let fresh =
+        || Graph::load_str("<http://ex/n> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
+
+    // An independently locked root inside the target of a restore.
+    let target = root.join("t");
+    let nested = target.join("sub");
+    save_dataset(&nested);
+    let held = Graph::open(&nested).unwrap();
+    let err = Graph::restore_into_durable(&target, fresh())
+        .err()
+        .expect("restored over a held store");
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(has(&held, "a"));
+    drop(held);
+    assert!(
+        Graph::open(&nested).is_ok(),
+        "the held store was left alone"
+    );
+
+    // A closed legacy store (no markers) where the future root's first named graph would go.
+    let later = root.join("later");
+    let legacy = later.join("named").join("0");
+    save_dataset(&legacy);
+    for d in [
+        legacy.clone(),
+        legacy.join("named/0"),
+        legacy.join("named/1"),
+    ] {
+        std::fs::remove_file(d.join("sparq-store")).unwrap();
+    }
+    let err = fresh().save(&later).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    let err = Graph::restore_into_durable(&later, fresh())
+        .err()
+        .expect("restored over a legacy store");
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(
+        has(&Graph::open_read_only(&legacy).unwrap(), "a"),
+        "the legacy store was left alone"
+    );
+
+    // A marker that is neither `root` nor `child`: refused, never guessed.
+    let odd = root.join("odd");
+    std::fs::create_dir_all(odd.join("x")).unwrap();
+    std::fs::write(odd.join("x").join("sparq-store"), b"garbage").unwrap();
+    let err = fresh().save(&odd).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(odd.join("x").join("sparq-store").exists());
+    // ... and a store whose own marker is garbage does not open writable.
+    let own = root.join("own");
+    save_dataset(&own);
+    std::fs::write(own.join("sparq-store"), b"garbage").unwrap();
+    let err = Graph::open(&own)
+        .err()
+        .expect("opened under a garbage marker");
+    assert_eq!(err.kind(), ErrorKind::InvalidData, "{err}");
+
+    // A restore over a directory a crash left mid-swap recovers it first.
+    let swapped = root.join("swapped");
+    save_dataset(&swapped);
+    std::fs::rename(&swapped, swapped.with_extension("compact-old")).unwrap();
+    let g = Graph::restore_into_durable(&swapped, fresh()).unwrap();
+    assert!(has(&g, "n") && !has(&g, "a"));
+    assert!(!swapped.with_extension("compact-old").exists());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A save writes every file to a fresh sibling and renames it into place: a file already there
+/// is replaced, never written through (a handle on the old file still reads the old bytes), no
+/// temporary file is left behind, and a directory whose files are hard-linked elsewhere is
+/// refused for saves and builds alike.
+#[cfg(unix)]
+#[test]
+fn a_save_replaces_files_and_never_writes_through_them() {
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
+    let root = scratch("fresh");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let perm = dir.join("perm0.bin");
+    let before = std::fs::read(&perm).unwrap();
+    let inode = std::fs::metadata(&perm).unwrap().ino();
+    let mut old = std::fs::File::open(&perm).unwrap();
+    Graph::load_str("<http://ex/n> <http://ex/p> <http://ex/o> .", "ntriples")
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+    assert_ne!(
+        std::fs::metadata(&perm).unwrap().ino(),
+        inode,
+        "rewritten in place"
+    );
+    let mut still = Vec::new();
+    old.read_to_end(&mut still).unwrap();
+    assert_eq!(still, before, "the old file was written through");
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let name = entry.unwrap().file_name();
+        assert!(
+            !name.to_string_lossy().ends_with(".tmp"),
+            "left {name:?} behind"
+        );
+    }
+    let g = Graph::open(&dir).unwrap();
+    assert!(has(&g, "n") && !has(&g, "a"));
+    drop(g);
+
+    // A file of the store hard-linked to one outside it: saves and builds are refused.
+    let outside = root.join("outside.bin");
+    std::fs::write(&outside, b"not a store file").unwrap();
+    std::fs::remove_file(&perm).unwrap();
+    std::fs::hard_link(&outside, &perm).unwrap();
+    let err = Graph::new().save(&dir).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(Graph::build_external("".as_bytes(), "ntriples", &dir, 1024).is_err());
+    assert_eq!(std::fs::read(&outside).unwrap(), b"not a store file");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A read-only open checks for links before it walks the store for residue, so a `named/` that
+/// links back into itself is refused at once rather than walked forever.
+#[cfg(unix)]
+#[test]
+fn a_read_only_open_does_not_walk_a_link_loop() {
+    let root = scratch("loop");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    // Each of x's entries links back to x: a walk that follows links fans out without end.
+    let x = root.join("x");
+    for i in 0..3 {
+        std::fs::create_dir_all(x.join(i.to_string())).unwrap();
+        std::os::unix::fs::symlink(&x, x.join(i.to_string()).join("named")).unwrap();
+    }
+    std::fs::remove_dir_all(dir.join("named")).unwrap();
+    std::os::unix::fs::symlink(&x, dir.join("named")).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let d = dir.clone();
+    std::thread::spawn(move || {
+        tx.send(Graph::open_read_only(&d).err().map(|e| e.kind()))
+            .ok();
+    });
+    let kind = rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the read-only open did not return");
+    assert_eq!(kind, Some(ErrorKind::InvalidInput));
+    std::fs::remove_dir_all(&root).ok();
+}

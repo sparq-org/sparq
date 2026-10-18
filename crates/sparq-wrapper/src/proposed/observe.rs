@@ -285,10 +285,10 @@ impl LiveValues<'_> {
         let Some(pattern) = graph.pattern(Some(&self.subject), Some(&self.predicate), None) else {
             return Vec::new();
         };
-        let scan = graph.store.scan(&pattern);
+        let scan = graph.store().scan(&pattern);
         scan.rows
             .iter()
-            .map(|row| graph.dict.term(scan.to_spo(row)[2]))
+            .map(|row| graph.dict().term(scan.to_spo(row)[2]))
             .collect()
     }
 
@@ -351,7 +351,7 @@ pub(crate) fn contains(
 ) -> bool {
     graph
         .pattern(Some(subject), Some(predicate), Some(object))
-        .is_some_and(|pattern| !graph.store.scan(&pattern).rows.is_empty())
+        .is_some_and(|pattern| !graph.store().scan(&pattern).rows.is_empty())
 }
 
 /// Applies one mutation to `graph`, which the caller has already found effective.

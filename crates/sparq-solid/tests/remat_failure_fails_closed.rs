@@ -269,14 +269,14 @@ fn snapshot(g: &Graph) -> Vec<String> {
         if name.to_string().starts_with("<urn:sparq:") {
             continue;
         }
-        let scan = sub.store.scan(&[None, None, None]);
+        let scan = sub.store().scan(&[None, None, None]);
         for row in scan.rows.iter() {
             let t = scan.to_spo(row);
             quads.push(format!(
                 "{} {} {} {name}",
-                sub.dict.term(t[0]),
-                sub.dict.term(t[1]),
-                sub.dict.term(t[2])
+                sub.dict().term(t[0]),
+                sub.dict().term(t[1]),
+                sub.dict().term(t[2])
             ));
         }
     }
