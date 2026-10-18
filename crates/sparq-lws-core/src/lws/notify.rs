@@ -298,7 +298,7 @@ pub struct Subscription {
     /// when the subscription goes, and a delivery that finishes later finds nothing to count.
     #[serde(skip)]
     pub failures: u32,
-    /// Whether it has been seen expired, in memory only (see [`Subscription::expired`]).
+    /// Whether it has been seen expired, in memory only (see `Subscription::expired`).
     #[serde(skip)]
     pub lapsed: Lapsed,
 }
@@ -1779,6 +1779,9 @@ struct Sweeper {
     /// The subscriptions whose removal did not go through: when each may be tried again, and how
     /// many times it has not.
     backoff: HashMap<String, (tokio::time::Instant, u32)>,
+    /// Holds whose release failed, being released again (one task at a time; see
+    /// [`LwsState::release_unreleased`]), owned here so it goes with the sweeper.
+    releases: tokio::task::JoinSet<()>,
 }
 
 impl Sweeper {
@@ -1793,6 +1796,12 @@ impl Sweeper {
         let clock = tokio::time::Instant::now();
         while let Some(ended) = self.removals.try_join_next_with_id() {
             self.ended(ended, clock);
+        }
+        while self.releases.try_join_next().is_some() {}
+        if self.releases.is_empty() && state.has_unreleased() {
+            let state = state.clone();
+            self.releases
+                .spawn(async move { state.release_unreleased().await });
         }
         // Counted from the removals it owns, not from the places free now: a removal spawned
         // but not yet run has not taken its place, and one more started for it would find
@@ -4875,6 +4884,113 @@ mod tests {
         drop(gate);
     }
 
+    /// Review finding: the owner's conditional create, evaluated on the whole listing, dropped
+    /// the container's lock once the store left its outcome unknown, so a second one with the
+    /// same entity tag passed and both could register. The settlement keeps that lock shared:
+    /// the owner's plain creates go on, and another conditional create waits for the outcome.
+    #[tokio::test(start_paused = true)]
+    async fn an_unsettled_owner_create_keeps_the_whole_listing_shared() {
+        use test_store::{agent, closed_state, OWNER};
+        let (state, store) = closed_state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let owner = agent(OWNER);
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |headers: Vec<(&'static str, String)>| {
+            let (state, body, owner) = (state.clone(), body.clone(), owner.clone());
+            async move {
+                let mut h = vec![("content-type", LWS_JSON.to_string())];
+                h.extend(headers);
+                let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                let req = test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body);
+                handle(&state, &req, &owner).await.status()
+            }
+        };
+        assert_eq!(post(vec![]).await, StatusCode::CREATED);
+        let req = test_store::request(Method::GET, SUBSCRIPTIONS_PATH, &[], "");
+        let etag = test_store::route_as(&state, req, &owner).await.headers()["etag"]
+            .to_str()
+            .unwrap()
+            .to_string();
+        // Its write never settles: the fence that would settle it never answers.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store.hang_fence.store(true, Ordering::SeqCst);
+        let status = post(vec![("if-match", etag.clone())]).await;
+        assert!(status.is_server_error(), "{status}");
+        assert_ne!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            post(vec![]).await,
+            StatusCode::CREATED,
+            "a plain create waited"
+        );
+        // Another conditional create on the same listing waits for the outcome.
+        assert_eq!(
+            post(vec![("if-match", etag)]).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        drop(gate);
+    }
+
+    /// Once the owner's unsettled conditional create is settled, stored or not, the listing's
+    /// lock is released: a later conditional create is decided on the listing as it then is,
+    /// no longer told to wait.
+    #[tokio::test(start_paused = true)]
+    async fn a_settled_owner_create_releases_the_whole_listing() {
+        use test_store::{agent, closed_state, OWNER};
+        for stored in [false, true] {
+            let (state, store) = closed_state(100).await;
+            state.notify.sweeper_off.store(true, Ordering::SeqCst);
+            let owner = agent(OWNER);
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [state.cfg.storage()],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let post = |headers: Vec<(&'static str, String)>| {
+                let (state, body, owner) = (state.clone(), body.clone(), owner.clone());
+                async move {
+                    let mut h = vec![("content-type", LWS_JSON.to_string())];
+                    h.extend(headers);
+                    let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                    let req = test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body);
+                    handle(&state, &req, &owner).await.status()
+                }
+            };
+            let req = test_store::request(Method::GET, SUBSCRIPTIONS_PATH, &[], "");
+            let etag = test_store::route_as(&state, req, &owner).await.headers()["etag"]
+                .to_str()
+                .unwrap()
+                .to_string();
+            // Its write is left unsettled, and the fence that would settle it fails for now.
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+            store.fail_fence.store(true, Ordering::SeqCst);
+            let status = post(vec![("if-match", etag.clone())]).await;
+            assert!(status.is_server_error(), "{status}");
+            assert_eq!(
+                post(vec![("if-match", etag.clone())]).await,
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+            if stored {
+                gate.add_permits(1);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            store.fail_fence.store(false, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let expected = match stored {
+                true => StatusCode::PRECONDITION_FAILED,
+                false => StatusCode::CREATED,
+            };
+            assert_eq!(post(vec![("if-match", etag)]).await, expected, "stored: {stored}");
+        }
+    }
+
     /// `n` expired subscriptions, of `n` subscribers, put in force directly; their ids, in order.
     fn expired_subscriptions<S: Store>(state: &LwsState<S>, n: usize) -> Vec<String> {
         let mut subs = state.notify.subs.write().unwrap();
@@ -5002,6 +5118,32 @@ mod tests {
             state.notify.subs.read().unwrap().len(),
             2 * MAINTENANCE_PLACES
         );
+    }
+
+    /// A hold whose release failed stays only until the sweeper releases it again.
+    #[tokio::test]
+    async fn a_hold_whose_release_failed_is_released_by_the_sweeper() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let d = format!("{}doc", state.cfg.storage());
+        store
+            .write(&d, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        store.fail_release.store(true, Ordering::SeqCst);
+        let mut journal = state.journal();
+        journal.stage(&d).await.unwrap();
+        assert!(journal.commit(None).await.is_ok());
+        assert_eq!(state.store.holds().await.unwrap().len(), 1);
+        let mut sweeper = Sweeper::default();
+        // Failing still: kept for the next sweep.
+        sweeper.sweep(&state);
+        while sweeper.releases.join_next().await.is_some() {}
+        assert_eq!(state.store.holds().await.unwrap().len(), 1);
+        store.fail_release.store(false, Ordering::SeqCst);
+        sweeper.sweep(&state);
+        while sweeper.releases.join_next().await.is_some() {}
+        assert!(state.store.holds().await.unwrap().is_empty());
     }
 
     /// A removal that fails is tried again only once its wait is over, and waits twice as long

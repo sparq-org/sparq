@@ -167,6 +167,24 @@ impl MpcError {
     }
 }
 
+/// Name the KIND of a result-row slot — never its value.
+///
+/// Refusal messages on paths that handle private inputs, join keys or opened
+/// intermediate values must stay free of the values themselves, because an error
+/// string travels further than the value it describes (logs, a federation peer's
+/// response body, a user-visible message). The kind is enough to diagnose a
+/// malformed partial; the value adds nothing a caller cannot get from its own
+/// input, which it already holds.
+pub(crate) fn term_slot_kind(slot: Option<&Term>) -> &'static str {
+    match slot {
+        None => "an unbound binding",
+        Some(Term::NamedNode(_)) => "an IRI",
+        Some(Term::BlankNode(_)) => "a blank node",
+        Some(Term::Literal(_)) => "a literal",
+        Some(_) => "a term of an unsupported kind",
+    }
+}
+
 impl std::fmt::Display for MpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

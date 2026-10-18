@@ -334,7 +334,12 @@ fn canonicalize_rows(rows: &mut [Vec<Option<Term>>]) {
 /// false-match collision before any key is shared. The in-circuit proof that the
 /// opened key equals `encode_term(term)` for the holder's real term stays the M4
 /// collaborative-proof job (the encoder is its on-ramp).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written: `rows` pairs each PRIVATE join key with that row's
+/// payload terms, so a derived `Debug` would route the keys to `Fp`'s rendering and
+/// print the payload beside them. What is kept is the public shape — the holder,
+/// the disclosed payload column names, and the row count, which this join already
+/// treats as public (input cardinality, L3).
+#[derive(Clone)]
 pub struct HiddenKeyedRows {
     /// The holder that owns these rows.
     pub holder: HolderId,
@@ -342,6 +347,17 @@ pub struct HiddenKeyedRows {
     pub payload_vars: Vec<Variable>,
     /// One entry per row: `(private_key_fp, disclosed_payload_terms)`.
     pub rows: Vec<(Fp, Vec<Option<Term>>)>,
+}
+
+impl std::fmt::Debug for HiddenKeyedRows {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HiddenKeyedRows")
+            .field("holder", &self.holder)
+            .field("payload_vars", &self.payload_vars)
+            .field("rows", &"<redacted>")
+            .field("row_count", &self.rows.len())
+            .finish()
+    }
 }
 
 /// The hidden-value cross-holder join over PRIVATE join keys (M3).
@@ -648,7 +664,10 @@ impl HiddenValueJoin {
 /// and are NEVER reconstructed from shares — exactly as the four-flatmates aggregate
 /// uses its salary column. The DISCLOSED payload columns ride alongside in the clear
 /// (disclosure-minimisation, convention #4 — only the *key* is hidden).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written for the same reason as [`HiddenKeyedRows`]: `rows`
+/// carries the private key of each row next to its payload. The binding IS printed
+/// — a [`RowBinding::Keyed`] holds the DISCLOSED public row keys (convention #4).
+#[derive(Clone)]
 pub struct BatchedHiddenInput {
     /// The holder that owns this column.
     pub holder: HolderId,
@@ -659,6 +678,18 @@ pub struct BatchedHiddenInput {
     pub rows: Vec<(Fp, Vec<Option<Term>>)>,
     /// How row `i` correlates across holders (see [`RowBinding`]).
     pub binding: RowBinding,
+}
+
+impl std::fmt::Debug for BatchedHiddenInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchedHiddenInput")
+            .field("holder", &self.holder)
+            .field("payload_vars", &self.payload_vars)
+            .field("rows", &"<redacted>")
+            .field("row_count", &self.rows.len())
+            .field("binding", &self.binding)
+            .finish()
+    }
 }
 
 impl BatchedHiddenInput {

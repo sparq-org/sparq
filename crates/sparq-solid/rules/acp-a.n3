@@ -60,6 +60,12 @@
 # the resource-scoped grant in acp-c.n3 joins it back to the specific (resource, creator).
 { ?m solidx:isMatcher true . ?m acp:agent acp:CreatorAgent . } => { ?m solidx:provMatcher solidx:creator . } .
 { ?m solidx:isMatcher true . ?m acp:agent acp:OwnerAgent . }   => { ?m solidx:provMatcher solidx:owner . } .
+# A matcher may name SEVERAL agent alternatives — both provenance kinds, and concrete
+# WebIDs alongside them — and ACP values within one attribute are DISJUNCTIVE. So the
+# agent dimension is decided once per matcher, jointly over all its alternatives; only
+# the rules that need the kind itself (to join `?r ?kind ?w`) range over provMatcher,
+# and every other rule uses this kind-free flag so it fires ONCE per matcher.
+{ ?m solidx:provMatcher ?kind . } => { ?m solidx:isProvMatcher true . } .
 { ?m solidx:isMatcher true . ?m acp:client ?c . ?c log:notEqualTo acp:PublicClient . }
 => { ?m solidx:clientValP ?c . } .
 { ?m acp:client acp:PublicClient . }      => { ?m solidx:clientValP auth:AnyClient . } .
@@ -85,11 +91,9 @@
 => { ?m solidx:rawAgentP auth:Authenticated . } .
 { ?m solidx:rawAgentP auth:Authenticated . ?a solidx:isCandAgent true . }
 => { ?m solidx:rawAgentP ?a . } .
-# [OPUS-4.8] sq-3jtd.5: a provenance matcher accepts its provenance agent (the creator/owner)
-# in the agent dimension, so the resource-scoped provenance candidate is not allOf-rejected
-# by its own matcher in stratum B. Resource-scoping is enforced separately by the grant's
-# provForResource join — this accept-set fact is agent-only and carries no resource binding.
-{ ?m solidx:provMatcher ?kind . ?m solidx:provAgent ?w . } => { ?m solidx:rawAgentP ?w . } .
+# A provenance matcher's own accept-set holds only its non-provenance values: whether it
+# accepts a creator or owner depends on the resource, so that lives on the matcher's
+# per-resource instance (below), never on the matcher itself.
 
 # ── [SONNET-4.6] sq-ysv3u: acp:vc — the CREDENTIAL constraint on the agent dimension ────
 # `?m acp:vc ?c` requires the context agent to HOLD a verified credential satisfying the
@@ -153,39 +157,83 @@
 
 # ── [OPUS-4.8] sq-3jtd.5: provenance (CreatorAgent/OwnerAgent) candidate generation ─────
 # A provenance matcher M (kind K) in policy P, applied to resource R whose trusted K-fact
-# is W, yields a RESOURCE-SCOPED candidate: the agent is the creator/owner W, the client /
-# issuer dimensions come from M's OWN constraints (its clientValP/issuerValP, or the dim
-# tops when M is unconstrained there). We tag the candidate with its resource R so the
+# is W, yields RESOURCE-SCOPED candidates: the agent is the creator/owner W, crossed with
+# every client and issuer value P's allOf/anyOf matchers name (so a sibling client/issuer
+# matcher of the same policy combines with M). We tag each candidate with its resource R so the
 # acp-c.n3 grant fires ONLY on R — W (creator of R1) never reaches R2. The candidate IRI
 # embeds the resource alongside the usual (pol, agent, client, issuer), all percent-encoded,
 # so distinct (pol, W, client, issuer, R) tuples stay injective.
 # ?kind is the creator/owner predicate IRI itself (solidx:creator / solidx:owner), so the
-# loader fact `?r ?kind ?w` matches directly with ?kind in predicate position. The (w, r)
-# pair stays COUPLED here so a creator of R1 never picks up R2; ?w becomes a candidate
-# agent (the matcher accepts it — see acceptsAgentP rule above) and feeds isCandAgent.
-{ ?pol solidx:hasMatcher ?m . ?m solidx:provMatcher ?kind .
-  ?pol solidx:appliesToResource ?r . ?r ?kind ?w . ?w solidx:isWebId true . }
-=> { ?m solidx:provAgent ?w . ?w solidx:isCandAgent true . } .
-# the provenance matcher's client/issuer values: M's own, defaulting to the dim tops.
-{ ?m solidx:provMatcher ?kind . ?m solidx:clientValP ?c . } => { ?m solidx:provClient ?c . } .
-{ ?m solidx:provMatcher ?kind . ?UNSCOPED log:notIncludes { ?m acp:client ?x . } . }
-=> { ?m solidx:provClient auth:AnyClient . } .
-{ ?m solidx:provMatcher ?kind . ?m solidx:issuerValP ?i . } => { ?m solidx:provIssuer ?i . } .
-{ ?m solidx:provMatcher ?kind . ?UNSCOPED log:notIncludes { ?m acp:issuer ?x . } . }
-=> { ?m solidx:provIssuer auth:AnyIssuer . } .
+# loader fact `?r ?kind ?w` matches directly with ?kind in predicate position.
+#
+# A policy using a provenance matcher in any role (allOf, anyOf, noneOf) is RESOURCE-SCOPED:
+# whether it applies depends on the resource, so every candidate it has is minted per
+# resource (below) and every provenance matcher it uses is evaluated through its instance
+# for that resource. The instance (matcher M, resource R) accepts what M accepts on its own
+# plus R's creator/owner W (holding one of M's acp:vc requirements, when M has any), so a
+# creator of R1 never satisfies M on R2, in any role.
+{ ?pol acp:allOf ?m . }  => { ?pol solidx:usesMatcher ?m . } .
+{ ?pol acp:anyOf ?m . }  => { ?pol solidx:usesMatcher ?m . } .
+{ ?pol acp:noneOf ?m . } => { ?pol solidx:usesMatcher ?m . } .
+{ ?pol solidx:usesMatcher ?m . ?m solidx:isProvMatcher true . }
+=> { ?pol solidx:resourceScoped true . } .
+{ ?pol solidx:usesMatcher ?m . ?m solidx:isProvMatcher true . ?pol solidx:appliesToResource ?r .
+  ?m log:uri ?ms . ?r log:uri ?rs . ?ms string:encodeForUri ?me . ?rs string:encodeForUri ?re .
+  ("urn:sparq:matcher?m=" ?me "&res=" ?re) string:concatenation ?is .
+  ?mi log:uri ?is . }
+=> { ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . } .
+{ ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?m solidx:provMatcher ?kind .
+  ?r ?kind ?w . ?w solidx:isWebId true . }
+=> { ?mi solidx:provAgent ?w . ?w solidx:isCandAgent true . } .
+{ ?mi solidx:provAgent ?w . ?mi solidx:instanceOf ?m .
+  ?UNSCOPED log:notIncludes { ?m acp:vc ?v . } . }
+=> { ?mi solidx:acceptsAgentP ?w . } .
+{ ?mi solidx:provAgent ?w . ?mi solidx:instanceOf ?m . ?m acp:vc ?c . ?w solidx:holdsVc ?c . }
+=> { ?mi solidx:acceptsAgentP ?w . } .
+{ ?mi solidx:instanceOf ?m . ?m solidx:acceptsAgentP ?a . }  => { ?mi solidx:acceptsAgentP ?a . } .
+{ ?mi solidx:instanceOf ?m . ?m solidx:acceptsClientP ?c . } => { ?mi solidx:acceptsClientP ?c . } .
+{ ?mi solidx:instanceOf ?m . ?m solidx:acceptsIssuerP ?i . } => { ?mi solidx:acceptsIssuerP ?i . } .
 
-# mint the provenance candidate triple, resource-tagged. The creator/owner (?w, ?r) pair is
-# re-derived COUPLED here (?r ?kind ?w), and ?r is in the key + carried as provForResource,
-# so two resources sharing a creator get distinct candidates and distinct resource-scoped
-# grants. Components percent-encoded -> injective minting.
-{ ?pol solidx:hasMatcher ?m . ?m solidx:provMatcher ?kind .
-  ?pol solidx:appliesToResource ?r . ?r ?kind ?pa . ?pa solidx:isWebId true .
-  ?m solidx:provClient ?pc . ?m solidx:provIssuer ?pi .
-  ?pol log:uri ?pols . ?m log:uri ?ms . ?pa log:uri ?pas . ?pc log:uri ?pcs .
-  ?pi log:uri ?pis . ?r log:uri ?rs .
-  ?pols string:encodeForUri ?pole . ?ms string:encodeForUri ?me . ?pas string:encodeForUri ?pae .
+# ── a resource with NO recorded creator/owner leaves the matcher UNDECIDED ──────────────
+# The loader emits `?r solidx:creator|owner ?w` from the trusted AccessProvenance map and
+# from NOWHERE else (both predicates sit in the solidx: namespace the loader forbids pod
+# content from stating), so the ABSENCE of that fact is exactly "the trusted caller
+# supplied no creator (resp. owner) for this resource" — a resource that has an `.acr` but
+# is not in the view included. The instance for such a resource neither accepts nor
+# rejects an agent, so it is marked provUndecided and every role reads that mark as a
+# third truth value: an allow whose condition is undecided does not apply, a deny whose
+# condition is undecided does. Strata B/C do that for allOf/anyOf; the session layer does
+# it for a noneOf exception, which is why the mark travels into the auth view alongside
+# the accept-sets (src/materialize.rs MATCHER_FACTS -> src/authindex.rs).
+# Input-only negation: the creator/owner facts are loader input to this stratum.
+{ ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?m solidx:provMatcher solidx:creator .
+  ?UNSCOPED log:notIncludes { ?r solidx:creator ?w . } . }
+=> { ?mi solidx:provUndecided solidx:creator . } .
+{ ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r . ?m solidx:provMatcher solidx:owner .
+  ?UNSCOPED log:notIncludes { ?r solidx:owner ?w . } . }
+=> { ?mi solidx:provUndecided solidx:owner . } .
+
+# mint the per-resource provenance candidate triples. On resource ?r, a resource-scoped
+# policy's candidate AGENTS are its policy-wide candAgent set (minted by the
+# resource-scoped rule below) PLUS ?r's own creator/owner — the only further agents a
+# provenance matcher of the policy can accept there. This rule adds the latter and crosses
+# them with EVERY client and issuer value the policy's allOf/anyOf matchers name
+# (candClient / candIssuer), so a SIBLING client or issuer matcher of the same policy
+# combines with the provenance one instead of naming a (client, issuer) pair that no
+# candidate ever carries.
+# The creator/owner (?pa, ?r) pair is re-derived COUPLED here (?r ?kind ?pa), and ?r is in
+# the key + carried as provForResource, so two resources sharing a creator get distinct
+# candidates and distinct resource-scoped grants. The key has the same shape as the
+# resource-scoped one below, so the two rules feed ONE candidate set. Components
+# percent-encoded -> injective minting.
+{ ?pol solidx:resourceScoped true . ?pol solidx:appliesToResource ?r .
+  ?pol solidx:usesMatcher ?m . ?m solidx:provMatcher ?kind .
+  ?r ?kind ?pa . ?pa solidx:isWebId true .
+  ?pol solidx:candClient ?pc . ?pol solidx:candIssuer ?pi .
+  ?pol log:uri ?pols . ?pa log:uri ?pas . ?pc log:uri ?pcs . ?pi log:uri ?pis . ?r log:uri ?rs .
+  ?pols string:encodeForUri ?pole . ?pas string:encodeForUri ?pae .
   ?pcs string:encodeForUri ?pce . ?pis string:encodeForUri ?pie . ?rs string:encodeForUri ?re .
-  ("urn:sparq:provcand?pol=" ?pole "&m=" ?me "&agent=" ?pae "&client=" ?pce "&issuer=" ?pie "&res=" ?re)
+  ("urn:sparq:scand?pol=" ?pole "&agent=" ?pae "&client=" ?pce "&issuer=" ?pie "&res=" ?re)
       string:concatenation ?ks .
   ?k log:uri ?ks . }
 => { ?pol solidx:candTriple ?k . ?pol solidx:provTriple ?k .
@@ -195,7 +243,21 @@
 # ── candidate (agent, client, issuer) triples, minted deterministically ────────────────
 # (components percent-encoded — string:encodeForUri — so distinct (pol, agent, client,
 #  issuer) tuples can never concatenate to the same candidate key)
+# A resource-scoped policy's candidates are minted per resource, tagged like the provenance
+# candidates above, and never as policy-wide candidates.
+{ ?pol solidx:resourceScoped true . ?pol solidx:appliesToResource ?r .
+  ?pol solidx:candAgent ?pa . ?pol solidx:candClient ?pc . ?pol solidx:candIssuer ?pi .
+  ?pol log:uri ?pols . ?pa log:uri ?pas . ?pc log:uri ?pcs . ?pi log:uri ?pis . ?r log:uri ?rs .
+  ?pols string:encodeForUri ?pole . ?pas string:encodeForUri ?pae .
+  ?pcs string:encodeForUri ?pce . ?pis string:encodeForUri ?pie . ?rs string:encodeForUri ?re .
+  ("urn:sparq:scand?pol=" ?pole "&agent=" ?pae "&client=" ?pce "&issuer=" ?pie "&res=" ?re)
+      string:concatenation ?ks .
+  ?k log:uri ?ks . }
+=> { ?pol solidx:candTriple ?k . ?pol solidx:provTriple ?k .
+     ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
+     ?k solidx:provForResource ?r . } .
 { ?pol solidx:candAgent ?pa . ?pol solidx:candClient ?pc . ?pol solidx:candIssuer ?pi .
+  ?UNSCOPED log:notIncludes { ?pol solidx:resourceScoped true . } .
   ?pol log:uri ?pols . ?pa log:uri ?pas . ?pc log:uri ?pcs . ?pi log:uri ?pis .
   ?pols string:encodeForUri ?pole . ?pas string:encodeForUri ?pae .
   ?pcs string:encodeForUri ?pce . ?pis string:encodeForUri ?pie .

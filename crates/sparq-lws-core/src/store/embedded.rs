@@ -437,12 +437,53 @@ impl SparqClient for EmbeddedSparqClient {
         .await
     }
 
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        // Asked and named in ONE actor job: nothing commits in between.
+        let referenced = sparql::ask_blob_referenced(blob_key);
+        let u = sparql::update_begin_reclaim(blob_key);
+        self.dispatch(move |graph| {
+            if sparq_engine::ask(graph, &referenced).map_err(|e| engine_err("referenced", e))? {
+                return Ok(false);
+            }
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("begin_reclaim", e))?;
+            Ok(true)
+        })
+        .await
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        let u = sparql::update_end_reclaim(blob_key);
+        self.dispatch(move |graph| {
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("end_reclaim", e))
+        })
+        .await
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        let q = sparql::select_reclaiming();
+        self.dispatch(move |graph| {
+            let result = sparq_engine::query(graph, &q).map_err(|e| engine_err("reclaiming", e))?;
+            let col = var_col(&result, "k").ok_or_else(|| {
+                SparqError::Backend("fatal: reclaiming result missing ?k column".into())
+            })?;
+            Ok(result
+                .rows
+                .iter()
+                .filter_map(|row| term_value(row.get(col).and_then(|c| c.as_ref())))
+                .collect())
+        })
+        .await
+    }
+
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         // DROP SILENT the resource's whole named graph (idempotent on an absent graph) — the SAME
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
         self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("delete_meta", e))
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("delete_meta", e))
         })
         .await
     }
@@ -598,8 +639,8 @@ impl SparqClient for EmbeddedSparqClient {
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
         let q = sparql::select_referenced_blob_keys();
         self.dispatch(move |graph| {
-            let result =
-                sparq_engine::query(graph, &q).map_err(|e| engine_err("referenced_blob_keys", e))?;
+            let result = sparq_engine::query(graph, &q)
+                .map_err(|e| engine_err("referenced_blob_keys", e))?;
             let bk_col = var_col(&result, "bk").ok_or_else(|| {
                 SparqError::Backend("fatal: referenced-blob-keys result missing ?bk column".into())
             })?;
@@ -1154,6 +1195,23 @@ mod tests {
             let keys = c.referenced_blob_keys().await.unwrap();
             assert!(keys.contains("k1") && keys.contains("k2"), "got {keys:?}");
             assert_eq!(keys.len(), 2);
+        });
+    }
+
+    /// The embedded client names a reclaim only on bytes no record names, a hold's included,
+    /// lists what it names, and withdraws it.
+    #[test]
+    fn a_reclaim_is_named_only_on_unnamed_bytes() {
+        block_on(async {
+            let c = client();
+            c.put_meta("urn:x-sparq-lws:held/a/b", meta("x", "k1", "\"h\""))
+                .await
+                .unwrap();
+            assert!(!c.begin_reclaim("k1").await.unwrap());
+            assert!(c.begin_reclaim("k2").await.unwrap());
+            assert_eq!(c.reclaiming().await.unwrap(), ["k2"]);
+            c.end_reclaim("k2").await.unwrap();
+            assert!(c.reclaiming().await.unwrap().is_empty());
         });
     }
 

@@ -1565,6 +1565,19 @@ pub enum CheckError {
     /// real edge check.
     #[cfg(feature = "dual-leaf")]
     ValueLaneSubProofNotAccepted { proof: usize },
+
+    /// sq-j506: a scan sub-proof binds `K` graph commitments whose authenticated
+    /// commitment methods select DIFFERENT pattern-constant encoders. One
+    /// `pattern_const_enc` vector cannot answer two encodings, so the scan is
+    /// refused rather than resolved to either method. See `scan_pattern_method`.
+    ScanPatternMethodsMixed { proof: usize, first: String, second: String },
+
+    /// sq-j506: a scan sub-proof's authenticated commitment method has no
+    /// pattern-constant encoding in this build -- the `commitment-value-only`
+    /// method, which drops term identity entirely, or a dual-leaf method without
+    /// the `dual-leaf` feature. Refused rather than compared under the
+    /// string-canonical encoder it was never derived under.
+    ScanPatternMethodNotEncodable { proof: usize, method: String },
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
     /// the field representative (plan S2.5): two adjacent commitments
     /// are equal or out of order. `scan_check` step 1b enforces
@@ -2198,6 +2211,16 @@ impl std::fmt::Display for CheckError {
                  (the value-lane query binding is sq-j506) — refused",
                 proof
             ),
+            CheckError::ScanPatternMethodsMixed { proof, first, second } => write!(
+                f,
+                "scan sub-proof {}: its graph commitments carry different authenticated commitment methods ({} and {}), and one pattern constant cannot match two encodings (sq-j506)",
+                proof, first, second
+            ),
+            CheckError::ScanPatternMethodNotEncodable { proof, method } => write!(
+                f,
+                "scan sub-proof {}: the authenticated commitment method {} has no pattern-constant encoding in this build, so its bound pattern cannot be re-checked (sq-j506)",
+                proof, method
+            ),
             CheckError::ScanCommitmentsNotStrictlyIncreasing { proof, at } => write!(
                 f,
                 "scan sub-proof {proof}: per-graph commitments are not strictly increasing at index {at} (commitments[{at}] <= commitments[{at_prev}]) (plan S2.5 / sq-vxq8: distinct-graph strict ordering — a duplicate or out-of-order commitment is the duplicate-inclusion / COUNT forgery, e.g. the same credential included twice to claim 'I hold >=2 tickets')",
@@ -2774,6 +2797,46 @@ fn prefilter_manifest_structure_impl(
         }
     }
 
+    // --- Stage 2d: issuer-signature / key-set binding (audit #3 / codex #1). ---
+    // sq-j506: runs HERE, ahead of the stage-1 query-binding gates, because the
+    // authenticated-method map it returns is what selects the pattern-constant
+    // encoder those gates compare under. It reads only the manifest and the
+    // EXTERNAL key set, so it depends on nothing the gates below establish. The
+    // gate SET is unchanged and every gate below still runs, so no manifest that
+    // was refused becomes acceptable; what changes is which refusal is reported
+    // first when a manifest fails both an attestation check and a pattern check.
+    // Every scan sub-proof's commitments[g] must carry a valid issuer signature
+    // whose key ∈ the EXTERNAL trusted K (the verifier's argument, NOT
+    // manifest.key_set). commitments[g] is byte-bound into the bb public inputs
+    // by the audit #1 reconstruction, so this verifier-side check ties the
+    // attested commitment to the proved statement. The issuer signature ALSO
+    // binds the credential's status-list reference (audit #12), so a scan-covering
+    // attestation that omits/forges the reference is rejected here.
+    //
+    // sq-xxg: a scan commitment may be covered EITHER by a clear
+    // attestation OR by a hidden-issuer proof (when the relying party enabled the
+    // hidden path). Compute the STRUCTURALLY hidden-covered commitments so the
+    // clear attestation is treated as NOT-REQUIRED for them; the fail-closed
+    // either-clear-or-hidden / never-neither rule is enforced inside
+    // `bind_issuer_attestations`. The hidden proof itself is cryptographically
+    // verified by `bind_hidden_issuer_attestations` in the bb stage of
+    // `verify_manifest` (which binds its public `key_set_root` to the relying
+    // party's authoritative KeySet and its `m` to the issuer-signed message), so a
+    // hidden-only commitment is no less attested than a clear one — only WHICH
+    // issuer signed is hidden.
+    // Stage 2d also AUTHENTICATES each commitment's commitment method from the
+    // issuer signature and applies the relying party's `MethodPolicy`; the map it
+    // returns is carried out of the pre-filter for the gates that must recompute
+    // an issuer-signed message later.
+    let methods = authenticated_methods_for(manifest, trusted_key_set)?;
+
+    // --- Stage 2d' (sq-j506): every scan's pattern constants must be encodable
+    // under ONE authenticated commitment method. Runs immediately after stage 2d,
+    // so a scan whose commitments mix encoders, or whose method has no encoder in
+    // this build, is refused BY NAME before any comparison site reads the map.
+    // ADDS two named refusals and opens nothing. ---
+    bind_scan_pattern_methods(manifest, &methods)?;
+
     // --- Stage 1a: query-fragment gate + (flat stage-1 only) cross-graph
     // obligations. ---
     let required = if skip_query_binding {
@@ -2798,7 +2861,7 @@ fn prefilter_manifest_structure_impl(
         // obligation is correctly required, while two scans over the SAME graph
         // still collapse (a same-graph bnode join is legitimate). See
         // `global_attributions` for the fail-closed edge cases.
-        let attributions = global_attributions(manifest);
+        let attributions = global_attributions(manifest, &methods);
         let declared: Vec<JoinEdge> = manifest
             .join_obligations
             .iter()
@@ -2936,10 +2999,14 @@ fn prefilter_manifest_structure_impl(
     // `join_obligations` on the disclosed path, `bind_joins` on the hidden path)
     // works across pattern PAIRS and so cannot see a within-pattern repeat. Placed
     // AFTER the gates above so their (already-pinned) error precedence is unchanged.
+    // sq-j506: these gates compare every pattern constant under the encoder of
+    // the commitment's AUTHENTICATED method, established by stage 2d above. A
+    // method with no pattern-constant encoding in this build was already refused
+    // by name in stage 2d'.
     if !skip_query_binding {
-        check_pattern_scans(manifest)?;
-        bind_query_correctness(manifest)?;
-        bind_repeated_pattern_slots(manifest)?;
+        check_pattern_scans(manifest, &methods)?;
+        bind_query_correctness(manifest, &methods)?;
+        bind_repeated_pattern_slots(manifest, &methods)?;
     }
 
     // --- Stage 2e: cross-graph attribution binding (audit #8). ---
@@ -2955,35 +3022,9 @@ fn prefilter_manifest_structure_impl(
     // patterns->scans, so the extended-fragment regime (`skip_query_binding`)
     // defers it to the per-branch routing (`dispatch_fragment`) + sq-1zf94.
     if !skip_query_binding {
-        bind_attributions(manifest)?;
+        bind_attributions(manifest, &methods)?;
     }
 
-    // --- Stage 2d: issuer-signature / key-set binding (audit #3 / codex #1). ---
-    // Every scan sub-proof's commitments[g] must carry a valid issuer signature
-    // whose key ∈ the EXTERNAL trusted K (the verifier's argument, NOT
-    // manifest.key_set). commitments[g] is byte-bound into the bb public inputs
-    // by the audit #1 reconstruction, so this verifier-side check ties the
-    // attested commitment to the proved statement. The issuer signature ALSO
-    // binds the credential's status-list reference (audit #12), so a scan-covering
-    // attestation that omits/forges the reference is rejected here.
-    //
-    // sq-xxg: a scan commitment may be covered EITHER by a clear
-    // attestation OR by a hidden-issuer proof (when the relying party enabled the
-    // hidden path). Compute the STRUCTURALLY hidden-covered commitments so the
-    // clear attestation is treated as NOT-REQUIRED for them; the fail-closed
-    // either-clear-or-hidden / never-neither rule is enforced inside
-    // `bind_issuer_attestations`. The hidden proof itself is cryptographically
-    // verified by `bind_hidden_issuer_attestations` in the bb stage of
-    // `verify_manifest` (which binds its public `key_set_root` to the relying
-    // party's authoritative KeySet and its `m` to the issuer-signed message), so a
-    // hidden-only commitment is no less attested than a clear one — only WHICH
-    // issuer signed is hidden.
-    let hidden_covered = hidden_issuer_covered_commitments(manifest, trusted_key_set);
-    // Stage 2d also AUTHENTICATES each commitment's commitment method from the
-    // issuer signature and applies the relying party's `MethodPolicy`; the map it
-    // returns is carried out of the pre-filter for the gates that must recompute
-    // an issuer-signed message later.
-    let methods = bind_issuer_attestations(manifest, trusted_key_set, &hidden_covered)?;
 
     // --- Stage 2f: revocation / freshness (audit #12). ---
     // The status reference is now issuer-bound (stage 2d); check the credential's
@@ -3014,7 +3055,7 @@ fn prefilter_manifest_structure_impl(
     // (`skip_query_binding`) defers it — the hidden-join slot binding over a
     // multi-branch query is part of the per-branch term binding (sq-1zf94).
     if !skip_query_binding {
-        bind_joins(manifest)?;
+        bind_joins(manifest, &methods)?;
     }
 
     Ok(Prefiltered { required, methods })
@@ -3249,20 +3290,23 @@ enum HiddenOnlyMethod {
 ///
 /// # ⚠️ NOT A VERIFIER
 /// It runs ONE stage. It does not check the query binding, the circuit ids, the
-/// binding edges, the revocation state or any proof. Its only caller is the
-/// value-lane pin REPORT ([`crate::value_pin::value_lane_pin_report`]), which
-/// needs the authenticated methods of a manifest the full pre-filter would
-/// refuse outright at stage 0 (a value-lane sub-proof is unconditionally
-/// refused there, and that refusal is unchanged).
+/// binding edges, the revocation state or any proof. A caller that is not itself
+/// a verifier must not treat its answer as acceptance of anything.
+///
+/// sq-j506: it is how the structural gates that compare pattern constants obtain
+/// the authenticated map — `prefilter_manifest_structure` calls it as its stage
+/// 2d, ahead of the stage-1 query-binding gates, and the `extended-fragment`
+/// routing calls it ahead of `bind_fragment_scans`. The value-lane pin REPORT
+/// ([`crate::value_pin::value_lane_pin_report`]) also uses it, because it needs
+/// the authenticated methods of a manifest the full pre-filter would refuse
+/// outright at stage 0 (a value-lane sub-proof is unconditionally refused there,
+/// and that refusal is unchanged).
 ///
 /// In particular, because no proof is verified here, a HIDDEN-ONLY commitment's
 /// entry is the method its declared hidden-issuer message SELECTS — the method a
 /// hidden-issuer proof would then have to bind — and not a method any issuer is
 /// yet shown to have signed. Only the bb hidden-issuer stage establishes that, so
 /// nothing may treat this map as issuer-attested for a hidden-only commitment.
-// Its only caller is the `dual-leaf` pin REPORT, which is itself test-only, so
-// no shipped build carries this.
-#[cfg(all(test, feature = "dual-leaf"))]
 pub(crate) fn authenticated_methods_for(
     manifest: &ProofManifest,
     trusted_key_set: &KeySet,
@@ -5202,14 +5246,181 @@ pub(crate) fn normalize_hex(h: &str) -> String {
 }
 
 /// Encode a query pattern's constant term to its `pattern_const_enc` field-hex
+/// UNDER THE COMMITMENT METHOD the scan's issuer signature attests
 /// (salt-independent for IRIs/literals — only bnodes use the salt, and query
 /// constants are never bnodes; matches `build::encode_slot` / the in-circuit
 /// `pattern_const_enc`). Variable slots encode as `0x0`.
-fn encode_pattern_slot(c: &Option<oxrdf::Term>) -> Option<FieldHex> {
-    match c {
-        Some(t) => encode_term(t, &Fr::from(0u64)).map(|f| FieldHex(field_to_hex(&f))),
-        None => Some(FieldHex("0x0".to_string())),
+///
+/// # Why the method decides the encoder (sq-j506)
+/// A pattern constant is compared against the scan's bb-bound
+/// `pattern_const_enc`, which the prover computed with the SAME encoder that
+/// built the committed graph. `StringCanonicalV1` folds a term to its lexical
+/// hash; the dual-leaf methods fold it to a `(value, identity, type)` leaf. One
+/// pattern constant therefore has a DIFFERENT encoding under each method, and
+/// encoding it under the wrong one can only mismatch.
+///
+/// # `None` is a REFUSAL, never a fallback
+/// `None` means this method has no pattern-constant encoding available here — the
+/// `commitment-value-only` method, which drops term identity entirely, or a
+/// dual-leaf method in a build without the `dual-leaf` feature. The caller
+/// refuses; nothing falls back to the string-canonical encoder, because a
+/// fallback would compare a constant against an encoding it was never derived
+/// under.
+fn encode_pattern_slot(
+    c: &Option<oxrdf::Term>,
+    method: AuthenticatedMethod,
+) -> Option<FieldHex> {
+    let Some(t) = c else {
+        return Some(FieldHex("0x0".to_string()));
+    };
+    let salt = Fr::from(0u64);
+    let f = match method.method() {
+        // A commitment with no authenticated method takes the string-canonical
+        // encoder — the behaviour that predates method authentication.
+        None | Some(sparq_zk::commit::CommitmentMethod::StringCanonicalV1) => {
+            encode_term(t, &salt)
+        }
+        #[cfg(feature = "dual-leaf")]
+        Some(sparq_zk::commit::CommitmentMethod::DualLeafV1) => {
+            sparq_zk::dual_leaf::encode_term_dual(t, &salt).ok().flatten()
+        }
+        #[cfg(feature = "dual-leaf")]
+        Some(sparq_zk::commit::CommitmentMethod::DualLeafV2) => {
+            sparq_zk::dual_leaf_v2::encode_term(t, &salt).ok().flatten()
+        }
+        #[cfg(not(feature = "dual-leaf"))]
+        Some(sparq_zk::commit::CommitmentMethod::DualLeafV1)
+        | Some(sparq_zk::commit::CommitmentMethod::DualLeafV2) => None,
+        #[cfg(feature = "commitment-value-only")]
+        Some(sparq_zk::commit::CommitmentMethod::ValueOnlyV1) => None,
+    }?;
+    Some(FieldHex(field_to_hex(&f)))
+}
+
+/// The authenticated commitment method a scan sub-proof's pattern constants must
+/// be encoded under, or a named refusal (sq-j506).
+///
+/// A scan binds `K` graph commitments and ONE `pattern_const_enc` vector. A
+/// pattern constant has a different encoding under each commitment method, so a
+/// single constant cannot answer two methods at once. A `K > 1` scan whose
+/// commitments carry DIFFERENT authenticated methods is therefore REFUSED
+/// ([`CheckError::ScanPatternMethodsMixed`]) rather than resolved to either
+/// method: resolving to one would compare the other graph's bound encoding
+/// against a constant it was never derived under, and resolving to "whichever
+/// matches" would let a prover pick the convenient one.
+///
+/// A commitment ABSENT from the map had no method authenticated and reads as
+/// [`AuthenticatedMethod::Unbound`] — the pre-method-authentication behaviour.
+/// `Unbound` and `Bound(StringCanonicalV1)` are DISTINCT map entries but share
+/// one encoder, so a scan mixing those two is not a mixed-ENCODER scan and is
+/// accepted; the comparison below is over the encoder, not the entry.
+fn scan_pattern_method(
+    proof: usize,
+    inputs: &ProofInputs,
+    methods: &AuthenticatedMethods,
+) -> Result<AuthenticatedMethod, CheckError> {
+    scan_pattern_method_inner(inputs, methods).map_err(|(first, second)| {
+        CheckError::ScanPatternMethodsMixed { proof, first, second }
+    })
+}
+
+/// The body of [`scan_pattern_method`], returning the two CONFLICTING method
+/// names on a mixed scan so both the fallible and the infallible wrapper can be
+/// built from one resolution.
+fn scan_pattern_method_inner(
+    inputs: &ProofInputs,
+    methods: &AuthenticatedMethods,
+) -> Result<AuthenticatedMethod, (String, String)> {
+    let ProofInputs::Scan { commitments, .. } = inputs else {
+        return Ok(AuthenticatedMethod::Unbound);
+    };
+    let mut resolved: Option<AuthenticatedMethod> = None;
+    for c in commitments {
+        let authenticated = c
+            .to_field()
+            .and_then(|f| methods.get(&field_to_hex(&f)).copied())
+            .unwrap_or(AuthenticatedMethod::Unbound);
+        match resolved {
+            // Two entries share an encoder exactly when they agree on the method
+            // they bind, with `Unbound` reading as the string-canonical default.
+            Some(prev) if pattern_encoder_of(prev) != pattern_encoder_of(authenticated) => {
+                return Err((format!("{:?}", prev), format!("{:?}", authenticated)));
+            }
+            // Prefer a BOUND entry as the resolved method, so the scan is held to
+            // an attested method rather than to the unbound default.
+            Some(AuthenticatedMethod::Unbound) | None => resolved = Some(authenticated),
+            Some(_) => {}
+        }
     }
+    Ok(resolved.unwrap_or(AuthenticatedMethod::Unbound))
+}
+
+/// [`scan_pattern_method`] without the error: `None` where the scan's
+/// commitments mix pattern-constant encoders.
+///
+/// The 8 pattern-comparison sites sit inside iterator closures that cannot
+/// propagate a `Result`, so the refusal is raised once, up front, by
+/// [`bind_scan_pattern_methods`], and a mixed scan reaching a comparison here
+/// simply matches nothing (fail-closed, never resolved to one of the two).
+fn resolved_method(
+    inputs: &ProofInputs,
+    methods: &AuthenticatedMethods,
+) -> Option<AuthenticatedMethod> {
+    scan_pattern_method_inner(inputs, methods).ok()
+}
+
+/// The commitment method whose ENCODER an authenticated entry selects, with
+/// `Unbound` reading as the string-canonical default. Two entries that agree
+/// here encode every pattern constant identically.
+fn pattern_encoder_of(authenticated: AuthenticatedMethod) -> sparq_zk::commit::CommitmentMethod {
+    authenticated
+        .method()
+        .unwrap_or(sparq_zk::commit::CommitmentMethod::StringCanonicalV1)
+}
+
+/// Stage 2d′ (sq-j506): every scan sub-proof's pattern constants must be
+/// encodable under ONE authenticated commitment method.
+///
+/// Two named refusals, both fail-closed:
+/// - [`CheckError::ScanPatternMethodsMixed`] — a `K > 1` scan whose commitments
+///   carry different methods (see [`scan_pattern_method`]).
+/// - [`CheckError::ScanPatternMethodNotEncodable`] — the resolved method has no
+///   pattern-constant encoding in this build (the `commitment-value-only`
+///   method, which drops term identity, or a dual-leaf method without the
+///   `dual-leaf` feature).
+///
+/// This gate ADDS refusals and opens nothing. It runs AFTER the attestation gate,
+/// so it reads an authenticated map; the stage-1 pattern gates run BEFORE that
+/// map exists and are still held to the string-canonical encoder, which is why
+/// no previously accepted manifest changes verdict here. Making those stage-1
+/// gates method-aware for real needs the attestation gate to move ahead of
+/// stage-1 query binding — a gate-ORDER change, deliberately not taken here.
+fn bind_scan_pattern_methods(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Result<(), CheckError> {
+    for (i, sp) in manifest.sub_proofs.iter().enumerate() {
+        let ProofInputs::Scan { .. } = &sp.inputs else {
+            continue;
+        };
+        let resolved = scan_pattern_method(i, &sp.inputs, methods)?;
+        // The refusal is unconditional for a non-encodable method: a scan is
+        // refused even when its pattern happens to carry no constant, because
+        // every later pattern comparison on this scan would have no encoder to
+        // compare under. The probe is a representative IRI constant -- the
+        // encoder's AVAILABILITY does not depend on which term it is handed.
+        let probe = Some(oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("urn:sparq:pattern-encoder-probe")
+                .expect("a valid probe IRI"),
+        ));
+        if encode_pattern_slot(&probe, resolved).is_none() {
+            return Err(CheckError::ScanPatternMethodNotEncodable {
+                proof: i,
+                method: format!("{:?}", resolved),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Whether a scan sub-proof's bound pattern constancy/encoding matches a query
@@ -5217,7 +5428,22 @@ fn encode_pattern_slot(c: &Option<oxrdf::Term>) -> Option<FieldHex> {
 /// bb-bound `pattern_is_const`/`pattern_const_enc` (audit #10): a scan over
 /// `<hasAge>` cannot answer a query pattern over `<hasSalary>` (constant-swap),
 /// and a variable slot must be a variable on both sides.
-fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3]) -> bool {
+/// `method` is the scan's authenticated commitment method, which selects the
+/// encoder the query constants are folded with (sq-j506, see
+/// [`encode_pattern_slot`]). A method with no encoder makes every constant slot
+/// mismatch, so this returns `false` -- fail-closed, and already refused up
+/// front by [`bind_scan_pattern_methods`] on the sound path.
+fn scan_matches_pattern(
+    inputs: &ProofInputs,
+    consts: &[Option<oxrdf::Term>; 3],
+    method: Option<AuthenticatedMethod>,
+) -> bool {
+    // `None` is a scan whose commitments mix pattern-constant encoders: there is
+    // no single encoder to compare under, so it matches NO pattern. Fail-closed,
+    // and already refused up front by `bind_scan_pattern_methods`.
+    let Some(method) = method else {
+        return false;
+    };
     let (is_const, const_enc) = match inputs {
         ProofInputs::Scan { pattern_is_const, pattern_const_enc, .. } => {
             (pattern_is_const, pattern_const_enc)
@@ -5232,7 +5458,7 @@ fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3])
         // For a constant slot, the bound encoding must equal the query
         // constant's encoding; for a variable slot both carry the `0x0` filler
         // (still checked, so a non-`0x0` variable slot mismatches).
-        match encode_pattern_slot(&consts[slot]) {
+        match encode_pattern_slot(&consts[slot], method) {
             Some(enc) if enc == const_enc[slot] => {}
             _ => return false,
         }
@@ -5286,7 +5512,10 @@ fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3])
 /// is recorded metadata, nothing more.
 // sq-q9r5e follow-up: explicit pattern→scan mapping, validated but
 // deliberately NOT load-bearing. Research-grade, NOT externally audited (sq-qhy4).
-fn check_pattern_scans(manifest: &ProofManifest) -> Result<(), CheckError> {
+fn check_pattern_scans(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Result<(), CheckError> {
     if manifest.pattern_scans.is_empty() {
         return Ok(());
     }
@@ -5313,7 +5542,13 @@ fn check_pattern_scans(manifest: &ProofManifest) -> Result<(), CheckError> {
             let answers = manifest
                 .sub_proofs
                 .get(spi)
-                .is_some_and(|sp| scan_matches_pattern(&sp.inputs, &consts[pi]));
+                .is_some_and(|sp| {
+                    scan_matches_pattern(
+                        &sp.inputs,
+                        &consts[pi],
+                        resolved_method(&sp.inputs, methods),
+                    )
+                });
             if !answers {
                 return Err(CheckError::PatternScanMismatch { pattern: pi, proof: spi });
             }
@@ -5370,7 +5605,10 @@ fn check_pattern_scans(manifest: &ProofManifest) -> Result<(), CheckError> {
 /// over the wrong operand). Stage 2 already enforced the edge's scanned-slot
 /// encoding equals the filter `operand_enc` (so #7 operand substitution is
 /// closed by that equality over the now-bb-bound values + this slot check).
-fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
+fn bind_query_correctness(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Result<(), CheckError> {
     let patterns = fragment_patterns(&manifest.query)?;
     let consts = fragment_pattern_consts(&patterns);
     let filters = fragment_filters(&manifest.query)?;
@@ -5381,7 +5619,7 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
         let bound = manifest
             .sub_proofs
             .iter()
-            .any(|sp| scan_matches_pattern(&sp.inputs, c));
+            .any(|sp| scan_matches_pattern(&sp.inputs, c, resolved_method(&sp.inputs, methods)));
         if !bound {
             return Err(CheckError::UnboundPattern { pattern: pi });
         }
@@ -5446,7 +5684,15 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
             let slots: BTreeSet<usize> = positions
                 .iter()
                 .filter(|(pi, _)| {
-                    consts.get(*pi).is_some_and(|c| scan_matches_pattern(&sp.inputs, c))
+                    consts
+                        .get(*pi)
+                        .is_some_and(|c| {
+                            scan_matches_pattern(
+                                &sp.inputs,
+                                c,
+                                resolved_method(&sp.inputs, methods),
+                            )
+                        })
                 })
                 .map(|(_, si)| *si)
                 .collect();
@@ -5534,7 +5780,10 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
 /// there by construction.
 // #5240: within-pattern slot equality. Research-grade, NOT externally
 // audited (sq-qhy4).
-fn bind_repeated_pattern_slots(manifest: &ProofManifest) -> Result<(), CheckError> {
+fn bind_repeated_pattern_slots(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Result<(), CheckError> {
     let patterns = fragment_patterns(&manifest.query)?;
     let consts = fragment_pattern_consts(&patterns);
     let var_slots = variable_slots(&patterns);
@@ -5564,7 +5813,7 @@ fn bind_repeated_pattern_slots(manifest: &ProofManifest) -> Result<(), CheckErro
                 ProofInputs::Scan { rows, row_count, .. } => (rows, *row_count as usize),
                 _ => continue,
             };
-            if !scan_matches_pattern(&sp.inputs, c) {
+            if !scan_matches_pattern(&sp.inputs, c, resolved_method(&sp.inputs, methods)) {
                 continue;
             }
             let active = row_count.min(rows.len());
@@ -5691,7 +5940,10 @@ fn bind_repeated_pattern_slots(manifest: &ProofManifest) -> Result<(), CheckErro
 /// on [`ProofManifest::revocation`].
 // sq-sfsi: bind_joins gate (commitment-matching + query slot binding).
 // sq-cuvmj: + the scalar-revocation cross-credential scope constraint.
-fn bind_joins(manifest: &ProofManifest) -> Result<(), CheckError> {
+fn bind_joins(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Result<(), CheckError> {
     if manifest.join_edges.is_empty() {
         // No hidden joins declared: nothing for this gate to validate. A query
         // cross-scan shared variable WITHOUT a hidden JoinEdge is discharged by the
@@ -5722,7 +5974,9 @@ fn bind_joins(manifest: &ProofManifest) -> Result<(), CheckError> {
         consts
             .get(pi)
             .zip(manifest.sub_proofs.get(scan_idx))
-            .is_some_and(|(c, sp)| scan_matches_pattern(&sp.inputs, c))
+            .is_some_and(|(c, sp)| {
+                scan_matches_pattern(&sp.inputs, c, resolved_method(&sp.inputs, methods))
+            })
     };
 
     // For the N-way chain check (design §2.4): record, per edge that passes the
@@ -5892,7 +6146,10 @@ fn field_hex_eq(a: &FieldHex, b: &FieldHex) -> bool {
 /// stage. A pattern legitimately answered by MORE THAN ONE scan (multi-scan) unions
 /// every matching scan's identity (widening = safe), mirroring the
 /// `scan_matches_pattern` membership test `bind_attributions`/`bind_joins` use.
-fn global_attributions(manifest: &ProofManifest) -> Vec<BTreeSet<usize>> {
+fn global_attributions(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Vec<BTreeSet<usize>> {
     // The query's per-pattern constant slots identify which scan answers each
     // pattern (the same mapping `bind_attributions` uses). A parse failure leaves
     // `consts` empty; every local index then falls through to a fresh unique id and
@@ -5939,7 +6196,7 @@ fn global_attributions(manifest: &ProofManifest) -> Vec<BTreeSet<usize>> {
                 .enumerate()
                 .filter(|(_, sp)| {
                     matches!(sp.inputs, ProofInputs::Scan { .. })
-                        && scan_matches_pattern(&sp.inputs, c)
+                        && scan_matches_pattern(&sp.inputs, c, resolved_method(&sp.inputs, methods))
                 })
                 .map(|(idx, _)| idx)
                 .collect()
@@ -6012,7 +6269,10 @@ fn global_attributions(manifest: &ProofManifest) -> Vec<BTreeSet<usize>> {
 /// structure-only verify already rejects the forge and the full verify rejects it
 /// twice (structurally + cryptographically).
 // audit #8.
-fn bind_attributions(manifest: &ProofManifest) -> Result<(), CheckError> {
+fn bind_attributions(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+) -> Result<(), CheckError> {
     let patterns = fragment_patterns(&manifest.query)?;
     let consts = fragment_pattern_consts(&patterns);
 
@@ -6030,7 +6290,7 @@ fn bind_attributions(manifest: &ProofManifest) -> Result<(), CheckError> {
             let ProofInputs::Scan { attribution, .. } = &sp.inputs else {
                 continue;
             };
-            if !scan_matches_pattern(&sp.inputs, c) {
+            if !scan_matches_pattern(&sp.inputs, c, resolved_method(&sp.inputs, methods)) {
                 continue;
             }
             matched_a_scan = true;
@@ -7766,6 +8026,7 @@ fn pattern_slot_consts(slots: &[SlotPattern; 3]) -> [Option<oxrdf::Term>; 3] {
 #[cfg(feature = "extended-fragment")]
 pub fn bind_fragment_scans(
     fm: &crate::manifest::FragmentManifest,
+    methods: &AuthenticatedMethods,
 ) -> Result<(), FragmentScanError> {
     let manifest = &fm.manifest;
     // Re-derive the fragment from the query TEXT alone (never the manifest). An
@@ -7826,7 +8087,7 @@ pub fn bind_fragment_scans(
             // pattern constants; the scan circuit binds each disclosed row's
             // constant slots to those, so we only bind the VARIABLE slots below.
             let consts = pattern_slot_consts(&pattern.slots);
-            if !scan_matches_pattern(&sp.inputs, &consts) {
+            if !scan_matches_pattern(&sp.inputs, &consts, resolved_method(&sp.inputs, methods)) {
                 return Err(FragmentScanError::ScanPatternMismatch { witness: wi, obligation: oi });
             }
 
@@ -8379,7 +8640,16 @@ pub fn verify_fragment_manifest(
     // value (re-derived from the query text + disclosed solution), and check join
     // coherence across scan atoms sharing a variable. Also before the nonce is burnt
     // or any bb runs.
-    bind_fragment_scans(fm).map_err(CheckError::FragmentScan)?;
+    // sq-j506: the authenticated-method map comes from stage 2d run alone over the
+    // EMBEDDED manifest, so this gate compares each pattern constant under the
+    // encoder of the commitment's attested method rather than string-canonically.
+    // Stage 2d reads only the manifest and the external key set, and the crypto
+    // stage below runs it again as part of the full pre-filter, so nothing is
+    // skipped: a refusal here is a refusal that stage would also raise, reported
+    // before the nonce is burnt.
+    let fragment_methods = authenticated_methods_for(&fm.manifest, trusted_key_set)?;
+    bind_scan_pattern_methods(&fm.manifest, &fragment_methods)?;
+    bind_fragment_scans(fm, &fragment_methods).map_err(CheckError::FragmentScan)?;
 
     // (2c) FAIL-CLOSED PER-BRANCH JOIN COHERENCE + cross-graph Q6 non-bnode
     // (sq-ygk6x): re-derive each branch's Q6 obligations from the proof-bound
@@ -8851,7 +9121,19 @@ fn test_attestation_at_index(
     crate::manifest::CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: sparq_zk::sig::public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        // The fixtures attest the STRING-CANONICAL method (the METHOD-BOUND
+        // `ZKSIG_M5` message), because `MethodPolicy::current` now refuses an
+        // attestation that attests no method. A test whose subject IS legacy
+        // unbound material builds an unbound message directly and states
+        // `MethodPolicy::admit_unbound`.
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &sparq_zk::sig::scheme_iri_to_field(
+                sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+            ),
+        ),
         cryptosuite: sparq_zk::sig::SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -9844,19 +10126,19 @@ mod tests {
 
         let unbound =
             with(&sparq_zk::sig::commitment_message_with_status(&c, &salt, &status_ref));
-        assert!(
-            bind_issuer_attestations(&unbound, &keys(), &covered).is_ok(),
-            "the default policy accepts an unbound hidden `m`"
-        );
-        let err = bind_issuer_attestations(
-            &unbound,
-            &keys().with_method_policy(MethodPolicy::current().require_method_bound()),
-            &covered,
-        )
-        .unwrap_err();
+        let err = bind_issuer_attestations(&unbound, &keys(), &covered).unwrap_err();
         assert!(
             matches!(err, CheckError::MethodNotAuthenticated { .. }),
-            "require_method_bound refuses an unbound hidden `m`, got {err:?}"
+            "the default policy refuses an unbound hidden `m`, got {err:?}"
+        );
+        assert!(
+            bind_issuer_attestations(
+                &unbound,
+                &keys().with_method_policy(MethodPolicy::current().admit_unbound()),
+                &covered,
+            )
+            .is_ok(),
+            "the admit_unbound downgrade accepts an unbound hidden `m`"
         );
 
         assert!(
@@ -10467,6 +10749,354 @@ mod tests {
             "2 curated entries fit a 2^1 tree"
         );
     }
+
+    // --- sq-j506: the method-aware pattern-constant encoder + the two named
+    // refusals over a scan's authenticated commitment methods. ---
+
+    /// The two-commitment scan the mixed-method tests resolve over.
+    fn scan_over(commitments: &[Fr]) -> ProofInputs {
+        ProofInputs::Scan {
+            id: CircuitId::Scan { k: commitments.len() as u32, n: 16, r: 4 },
+            commitments: commitments.iter().map(FieldHex::from_field).collect(),
+            pattern_is_const: [false, true, false],
+            pattern_const_enc: [fh("0x0"), fh("0x2"), fh("0x0")],
+            rows: vec![],
+            row_count: 0,
+            attribution: vec![false; commitments.len()],
+        }
+    }
+
+    /// THE REASON THE GATE EXISTS: the SAME pattern constant encodes to DIFFERENT
+    /// fields under the string-canonical and the V2 dual-leaf methods, so one
+    /// `pattern_const_enc` vector cannot answer both.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn a_pattern_constant_encodes_differently_under_each_method() {
+        let c = Some(oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("http://ex/p").expect("a valid IRI"),
+        ));
+        let canonical = encode_pattern_slot(
+            &c,
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::StringCanonicalV1),
+        )
+        .expect("the string-canonical encoder is always available");
+        let v2 = encode_pattern_slot(
+            &c,
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::DualLeafV2),
+        )
+        .expect("the V2 encoder is available under the dual-leaf feature");
+        assert_ne!(
+            canonical, v2,
+            "if these agreed, encoding a pattern constant under the wrong method would be harmless and this gate would be pointless"
+        );
+        // And the method-UNBOUND default is the string-canonical encoder, so the
+        // empty-map stage-1 behaviour is byte-identical to the old behaviour.
+        assert_eq!(
+            encode_pattern_slot(&c, AuthenticatedMethod::Unbound),
+            Some(canonical),
+            "an unbound commitment must keep the string-canonical encoding"
+        );
+    }
+
+    /// A variable slot encodes to the `0x0` filler under EVERY method: the filler
+    /// is not method-dependent, so a variable slot cannot be made to differ.
+    #[test]
+    fn a_variable_slot_is_the_filler_under_every_method() {
+        for method in [
+            AuthenticatedMethod::Unbound,
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::StringCanonicalV1),
+        ] {
+            assert_eq!(encode_pattern_slot(&None, method), Some(fh("0x0")));
+        }
+    }
+
+    /// THE HEADLINE REFUSAL: a `K > 1` scan whose two commitments carry different
+    /// authenticated methods is refused by name, not resolved to either.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn a_scan_mixing_commitment_methods_is_refused_by_name() {
+        let (a, b) = (Fr::from(100u64), Fr::from(200u64));
+        let mut methods = AuthenticatedMethods::new();
+        methods.insert(
+            field_to_hex(&a),
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::StringCanonicalV1),
+        );
+        methods.insert(
+            field_to_hex(&b),
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::DualLeafV2),
+        );
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: scan_over(&[a, b]),
+            proof_hex: String::new(),
+        }];
+        match bind_scan_pattern_methods(&m, &methods) {
+            Err(CheckError::ScanPatternMethodsMixed { proof, .. }) => assert_eq!(proof, 0),
+            other => panic!("a mixed-method scan must be refused by name, got {:?}", other),
+        }
+        // And the infallible resolver used inside the comparison closures reports
+        // no method, so every pattern comparison on this scan matches nothing.
+        assert_eq!(
+            resolved_method(&m.sub_proofs[0].inputs, &methods),
+            None,
+            "a mixed-method scan must resolve to no encoder (fail-closed)"
+        );
+        let consts = [None, None, None];
+        assert!(
+            !scan_matches_pattern(&m.sub_proofs[0].inputs, &consts, None),
+            "a scan with no resolved encoder must match no pattern"
+        );
+    }
+
+    /// The CONTROL for the refusal above: `Unbound` and `Bound(StringCanonicalV1)`
+    /// are distinct map entries that share ONE encoder, so a scan mixing those two
+    /// is NOT a mixed-encoder scan and is accepted -- and it resolves to the BOUND
+    /// entry, so the scan is held to the attested method rather than the default.
+    #[test]
+    fn a_scan_mixing_unbound_with_string_canonical_is_accepted() {
+        let (a, b) = (Fr::from(100u64), Fr::from(200u64));
+        let mut methods = AuthenticatedMethods::new();
+        methods.insert(
+            field_to_hex(&b),
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::StringCanonicalV1),
+        );
+        // `a` is deliberately absent => Unbound.
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: scan_over(&[a, b]),
+            proof_hex: String::new(),
+        }];
+        assert!(bind_scan_pattern_methods(&m, &methods).is_ok());
+        assert_eq!(
+            resolved_method(&m.sub_proofs[0].inputs, &methods),
+            Some(AuthenticatedMethod::Bound(
+                sparq_zk::commit::CommitmentMethod::StringCanonicalV1
+            )),
+            "a bound entry must win over the unbound default"
+        );
+    }
+
+    /// An EMPTY map -- what the stage-1 pattern gates are fed -- resolves every
+    /// scan to the unbound default, so those gates keep their old behaviour.
+    #[test]
+    fn an_empty_method_map_resolves_every_scan_to_the_unbound_default() {
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: scan_over(&[Fr::from(100u64), Fr::from(200u64)]),
+            proof_hex: String::new(),
+        }];
+        let empty = AuthenticatedMethods::new();
+        assert!(bind_scan_pattern_methods(&m, &empty).is_ok());
+        assert_eq!(
+            resolved_method(&m.sub_proofs[0].inputs, &empty),
+            Some(AuthenticatedMethod::Unbound)
+        );
+    }
+
+    /// THE SITE-LEVEL RULE (sq-j506): the query-binding gates compare each pattern
+    /// constant under the encoder of the scan's AUTHENTICATED method.
+    ///
+    /// A dual-leaf-attested scan whose constants are STRING-CANONICAL-encoded
+    /// therefore answers no pattern and is refused, and the same scan with
+    /// V2-encoded constants is accepted — while a string-canonical-attested scan
+    /// with string-canonical constants is still accepted, so the refusal is about
+    /// the method and not about the encoding. Under the empty map these gates
+    /// compared string-canonically whatever the attested method was, so the first
+    /// case was accepted and the second refused: exactly backwards.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn the_pattern_gates_compare_constants_under_the_authenticated_method() {
+        use sparq_zk::commit::CommitmentMethod;
+        const Q: &str = "SELECT * WHERE { ?s <http://ex/p> ?o }";
+        let commitment = Fr::from(100u64);
+        let predicate = Some(oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("http://ex/p").expect("a valid IRI"),
+        ));
+        let encoded = |m: CommitmentMethod| {
+            encode_pattern_slot(&predicate, AuthenticatedMethod::Bound(m))
+                .expect("every method here encodes an IRI")
+        };
+        let scan_with = |enc: FieldHex| ProofInputs::Scan {
+            id: CircuitId::Scan { k: 1, n: 16, r: 4 },
+            commitments: vec![FieldHex::from_field(&commitment)],
+            pattern_is_const: [false, true, false],
+            pattern_const_enc: [fh("0x0"), enc, fh("0x0")],
+            rows: vec![],
+            row_count: 0,
+            attribution: vec![false],
+        };
+        let under = |m: CommitmentMethod| {
+            let mut methods = AuthenticatedMethods::new();
+            methods.insert(field_to_hex(&commitment), AuthenticatedMethod::Bound(m));
+            methods
+        };
+        let manifest_with = |enc: FieldHex| {
+            let mut m = minimal_manifest(Q);
+            m.sub_proofs = vec![crate::manifest::SubProof {
+                inputs: scan_with(enc),
+                proof_hex: String::new(),
+            }];
+            m
+        };
+
+        // A correctly encoded scan passes for EVERY method with an encoder here.
+        for method in [
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ] {
+            let m = manifest_with(encoded(method));
+            assert!(
+                bind_query_correctness(&m, &under(method)).is_ok(),
+                "a correctly encoded scan must pass under {:?}",
+                method
+            );
+        }
+
+        // The SAME scan, string-canonical-encoded, under a dual-leaf-attested
+        // commitment: refused, because it answers no pattern.
+        let canonical = encoded(CommitmentMethod::StringCanonicalV1);
+        let v2 = encoded(CommitmentMethod::DualLeafV2);
+        assert_ne!(canonical, v2, "the two encodings must differ, or this is vacuous");
+        let m = manifest_with(canonical);
+        let v2_methods = under(CommitmentMethod::DualLeafV2);
+        assert!(
+            bind_query_correctness(&m, &v2_methods).is_err(),
+            "a dual-leaf-attested scan with string-canonical constants must be refused"
+        );
+
+        // The DECLARATION gate reads the same map: declaring this scan as the one
+        // answering pattern 0 is consistent only under the attested encoder, so the
+        // string-canonical scan is refused there too, and the V2 one is accepted.
+        let mut declared = m.clone();
+        declared.pattern_scans = vec![vec![0]];
+        assert!(
+            check_pattern_scans(&declared, &v2_methods).is_err(),
+            "a declaration naming a scan whose constants are encoded under another \
+method must be refused"
+        );
+        let mut declared_ok = manifest_with(v2);
+        declared_ok.pattern_scans = vec![vec![0]];
+        assert!(
+            check_pattern_scans(&declared_ok, &v2_methods).is_ok(),
+            "the same declaration under the attested encoder must be accepted"
+        );
+    }
+
+    /// THE WIRING (sq-j506): the same rule through `prefilter_manifest_structure`,
+    /// where the map the gates read is the one stage 2d authenticated.
+    ///
+    /// The scan's commitment is attested under the V2 DUAL-LEAF scheme, so the
+    /// pre-filter must compare its pattern constants under the V2 encoder: the
+    /// string-canonical-encoded scan is refused and the V2-encoded one passes the
+    /// pattern gates. Replacing the map at any comparison site with an empty one
+    /// swaps both verdicts, so this test covers the wiring and not only the gate.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn the_prefilter_feeds_the_pattern_gates_the_authenticated_map() {
+        use sparq_zk::commit::CommitmentMethod;
+        const Q: &str = "SELECT * WHERE { ?s <http://ex/p> ?o }";
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let key_set =
+            KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())]);
+        let commitment = Fr::from(100u64);
+        let salt = Fr::from(7u64);
+        let predicate = Some(oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("http://ex/p").expect("a valid IRI"),
+        ));
+        // An attestation over the V2 DUAL-LEAF scheme, so stage 2d authenticates
+        // that method rather than the string-canonical one the other fixtures use.
+        let list_id = sparq_zk::sig::status_list_id_to_field(TEST_STATUS_LIST);
+        let status_ref =
+            sparq_zk::sig::status_ref_digest(&list_id, TEST_STATUS_INDEX, TEST_STATUS_VERSION);
+        let attestation = crate::manifest::CommitmentAttestation {
+            commitment: FieldHex::from_field(&commitment),
+            issuer_public_key: sparq_zk::sig::public_key_to_hex(&sk.public_key()),
+            signature: sk.sign_presentation_with_status_and_scheme(
+                &commitment,
+                &salt,
+                &status_ref,
+                &sparq_zk::sig::scheme_iri_to_field(
+                    CommitmentMethod::DualLeafV2.scheme_iri(),
+                ),
+            ),
+            cryptosuite: sparq_zk::sig::SignatureScheme::Poseidon2SchnorrV1
+                .cryptosuite_iri()
+                .to_string(),
+            salt: Some(FieldHex::from_field(&salt)),
+            status: Some(crate::manifest::AttestedStatusRef {
+                index: Some(TEST_STATUS_INDEX),
+                version: Some(TEST_STATUS_VERSION),
+                index_commitment: None,
+                ref_commitment: None,
+            }),
+            holder: None,
+        };
+        let manifest_with = |method: CommitmentMethod| {
+            let enc = encode_pattern_slot(&predicate, AuthenticatedMethod::Bound(method))
+                .expect("every method here encodes an IRI");
+            let mut m = minimal_manifest(Q);
+            m.revocation = Some(test_revocation());
+            m.commitment_attestations = vec![attestation.clone()];
+            m.attributions = vec![vec![0]];
+            m.sub_proofs = vec![crate::manifest::SubProof {
+                inputs: ProofInputs::Scan {
+                    id: CircuitId::Scan { k: 1, n: 16, r: 4 },
+                    commitments: vec![FieldHex::from_field(&commitment)],
+                    pattern_is_const: [false, true, false],
+                    pattern_const_enc: [fh("0x0"), enc, fh("0x0")],
+                    rows: vec![],
+                    row_count: 0,
+                    attribution: vec![false],
+                },
+                proof_hex: String::new(),
+            }];
+            m
+        };
+        let policy = RevocationPolicy::accept_version(TEST_STATUS_VERSION).with_snapshot(
+            status_snapshot(TEST_STATUS_LIST, TEST_STATUS_VERSION, vec![0u8, 0]),
+        );
+        // Correctly encoded for the ATTESTED method: the pattern gates pass.
+        let good = manifest_with(CommitmentMethod::DualLeafV2);
+        assert!(
+            prefilter_manifest_structure(&good, &key_set, &policy).is_ok(),
+            "a V2-attested scan with V2-encoded constants must pass the pre-filter"
+        );
+        // String-canonical constants under the SAME V2 attestation: refused.
+        let bad = manifest_with(CommitmentMethod::StringCanonicalV1);
+        assert!(
+            prefilter_manifest_structure(&bad, &key_set, &policy).is_err(),
+            "a V2-attested scan with string-canonical constants must be refused"
+        );
+    }
+
+    /// THE SECOND NAMED REFUSAL: a method with no pattern-constant encoding is
+    /// refused rather than compared under an encoder it was never derived under.
+    #[cfg(feature = "commitment-value-only")]
+    #[test]
+    fn a_scan_under_a_non_encodable_method_is_refused_by_name() {
+        let a = Fr::from(100u64);
+        let mut methods = AuthenticatedMethods::new();
+        methods.insert(
+            field_to_hex(&a),
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::ValueOnlyV1),
+        );
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: scan_over(&[a]),
+            proof_hex: String::new(),
+        }];
+        match bind_scan_pattern_methods(&m, &methods) {
+            Err(CheckError::ScanPatternMethodNotEncodable { proof, .. }) => {
+                assert_eq!(proof, 0)
+            }
+            other => panic!(
+                "a value-only scan has no pattern-constant encoding and must be refused by name, got {:?}",
+                other
+            ),
+        }
+    }
+
 }
 
 // sq-3kd2g.6: FAIL-CLOSED wave-1 fragment DISPATCH tests — the
@@ -10896,6 +11526,45 @@ mod fragment_dispatch_tests {
     const OUTSIDE: &str =
         "SELECT * WHERE { ?s <http://ex/p> ?o OPTIONAL { ?o <http://ex/q> ?r } }";
 
+    /// sq-j506: honestly attest every committed graph a routing fixture
+    /// references, with a distinct salt each, and return the key set that trusts
+    /// the issuer.
+    ///
+    /// Stage 2d — the issuer-attestation and method-authentication gate — now runs
+    /// ahead of the structural routing gates, because the authenticated method is
+    /// what selects the encoder a pattern constant is compared under. An
+    /// unattested fixture is therefore refused at stage 2d and never reaches the
+    /// gate under test, so these fixtures are attested and the routing forge is
+    /// the only thing wrong with them.
+    fn attest_routing_fixture(m: &mut ProofManifest) -> KeySet {
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        m.revocation = Some(test_revocation());
+        let referenced: Vec<FieldHex> = m
+            .sub_proofs
+            .iter()
+            .flat_map(|sp| match &sp.inputs {
+                ProofInputs::Scan { commitments, .. } => commitments.clone(),
+                ProofInputs::PathReach { commitments, .. } => commitments.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let mut salt = 1_000u64;
+        let mut seen = std::collections::BTreeSet::new();
+        for c in referenced {
+            let Some(f) = c.to_field() else { continue };
+            if seen.insert(field_to_hex(&f)) {
+                m.commitment_attestations.push(test_attestation(f, Fr::from(salt), &sk));
+                salt += 1;
+            }
+        }
+        KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())])
+    }
+
+    /// [`attest_routing_fixture`] over the embedded manifest of a fragment fixture.
+    fn attest_fragment_fixture(m: &mut crate::manifest::FragmentManifest) -> KeySet {
+        attest_routing_fixture(&mut m.manifest)
+    }
+
     fn dummy_prover() -> CircuitProver {
         // Never invoked in these tests — every case rejects before the sub-proof
         // bb loop, so no nargo/bb toolchain is needed.
@@ -10979,10 +11648,15 @@ mod fragment_dispatch_tests {
             "fragment path must route past stage-1 into the attestation gate, got {frag_err:?}"
         );
         // NON-REGRESSION: the FLAT entry point still rejects the same query at
-        // stage-1 with the same structured error as before this bead.
-        let (p2, w2, ks2, rp2, hr2, hbp2, ep2, n2, seen2) = empty_verify_env();
+        // stage-1 with the same structured error as before this bead. sq-j506: the
+        // attestation gate now runs ahead of stage-1a, so this half is asserted on
+        // an ATTESTED copy — otherwise it would stop at the attestation gate and
+        // say nothing about the UNION refusal.
+        let mut attested = m.clone();
+        let ks_attested = attest_fragment_fixture(&mut attested);
+        let (p2, w2, _ks2, rp2, hr2, hbp2, ep2, n2, seen2) = empty_verify_env();
         let flat_err = verify_manifest(
-            &m.manifest, &p2, &w2, &ks2, &rp2, &hr2, &hbp2, &ep2, &n2, &seen2,
+            &attested.manifest, &p2, &w2, &ks_attested, &rp2, &hr2, &hbp2, &ep2, &n2, &seen2,
         )
         .unwrap_err();
         assert!(
@@ -11036,10 +11710,13 @@ mod fragment_dispatch_tests {
             depth_bound: 4,
             attribution: vec![true],
         };
-        let m = base_manifest(PLUS, vec![sub(bad)]);
+        let mut m = base_manifest(PLUS, vec![sub(bad)]);
+        // sq-j506: the attestation gate runs ahead of stage-1b now, so the fixture
+        // is attested and the id forge is the only thing wrong with it.
+        let k = attest_routing_fixture(&mut m);
         let err = prefilter_manifest_structure_impl(
             &m,
-            &KeySet::empty(),
+            &k,
             &RevocationPolicy::accept_version(1),
             true,
         )
@@ -11467,7 +12144,7 @@ mod fragment_dispatch_tests {
             vec![sub(scan_sp_o("http://ex/o1"))],
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        assert_eq!(bind_fragment_scans(&m), Ok(()));
+        assert_eq!(bind_fragment_scans(&m, &AuthenticatedMethods::new()), Ok(()));
     }
 
     #[test]
@@ -11479,7 +12156,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::ScanSlotMismatch { witness: 0, obligation: 0, slot: 2, var: "o".to_string() })
         );
     }
@@ -11501,7 +12178,7 @@ mod fragment_dispatch_tests {
         );
         // Row 1 slot 0 (?s = <s2>) disagrees with the disclosed ?s = <s1>.
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::ScanSlotMismatch { witness: 0, obligation: 0, slot: 0, var: "s".to_string() })
         );
     }
@@ -11514,7 +12191,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![3], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::RowOutOfRange { witness: 0, obligation: 0, row: 3, active: 1 })
         );
     }
@@ -11528,7 +12205,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::MissingRowSelection { witness: 0, obligation: 0 })
         );
     }
@@ -11542,7 +12219,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::UnboundProjectedScanVar { witness: 0, obligation: 0, slot: 0, var: "s".to_string() })
         );
     }
@@ -11560,7 +12237,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::ScanPatternMismatch { witness: 0, obligation: 0 })
         );
     }
@@ -11574,7 +12251,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::NotAScanProof { witness: 0, obligation: 0, proof: 0 })
         );
     }
@@ -11587,7 +12264,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "not an iri"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::MalformedSolutionTerm { witness: 0, var: "s".to_string() })
         );
     }
@@ -11608,7 +12285,7 @@ mod fragment_dispatch_tests {
             vec![sub(sc0), sub(sc1)],
             vec![bw_scan(0, vec![0, 1], vec![0, 0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        assert_eq!(bind_fragment_scans(&m), Ok(()));
+        assert_eq!(bind_fragment_scans(&m, &AuthenticatedMethods::new()), Ok(()));
     }
 
     #[test]
@@ -11628,7 +12305,7 @@ mod fragment_dispatch_tests {
             vec![bw_scan(0, vec![0, 1], vec![0, 0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_scans(&m),
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
             Err(FragmentScanError::JoinIncoherent { witness: 0, obligation: 1, slot: 0, var: "x".to_string() })
         );
     }
@@ -11642,7 +12319,7 @@ mod fragment_dispatch_tests {
             vec![[iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")]],
         );
         let m = fm(GROUND, vec![sub(sc)], vec![bw_scan(0, vec![0], vec![], vec![], vec![])]);
-        assert_eq!(bind_fragment_scans(&m), Ok(()));
+        assert_eq!(bind_fragment_scans(&m, &AuthenticatedMethods::new()), Ok(()));
     }
 
     #[test]
@@ -11650,12 +12327,15 @@ mod fragment_dispatch_tests {
         // End-to-end: a scan row inconsistent with the disclosed solution is refused
         // as a structured CheckError::FragmentScan BEFORE the nonce is burnt or any
         // bb subprocess runs.
-        let m = fm(
+        let mut m = fm(
             SCANQ,
             vec![sub(scan_sp_o("http://ex/other"))],
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        // sq-j506: attested, because the attestation gate now runs ahead of the
+        // structural routing gates; the routing forge is the only thing wrong.
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
         let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
             .unwrap_err();
         assert!(
@@ -11870,12 +12550,15 @@ mod fragment_dispatch_tests {
             vec![[iri("http://ex/s1"), iri("http://ex/p"), iri("http://ex/x1")]],
         );
         let pa = path_real(4, 1, 16, false, "http://ex/q", "http://ex/zzz", "http://ex/o1");
-        let m = fm(
+        let mut m = fm(
             SCANPATH_SRC,
             vec![sub(sc), sub(pa)],
             vec![bw_full(0, vec![0], vec![1], vec![], vec![0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        // sq-j506: attested, because the attestation gate now runs ahead of the
+        // structural routing gates; the routing forge is the only thing wrong.
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
         let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
             .unwrap_err();
         assert!(

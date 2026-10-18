@@ -3634,3 +3634,264 @@ fn an_at_most_restriction_in_a_union_or_under_a_condition_counts_its_neighbours(
         assert_eq!(verdict(&format!("{decl} {chain} {extra}")), want, "{extra}");
     }
 }
+
+/// An at-most restriction at an individual whose neighbours are blockable nodes from all over
+/// the tree: merging them keeps joining parts of the tree, so they become the individual's
+/// named neighbours instead (the NI-rule on merges). Consistent, as HermiT agrees; decided
+/// under the default budget.
+#[test]
+fn merges_at_an_individual_of_nodes_across_the_tree_are_decided() {
+    let body = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual . :i1 a owl:NamedIndividual . :i2 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C2 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:allValuesFrom :C2 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:allValuesFrom :C1 ] .
+        :C2 owl:disjointWith :C1 .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:hasValue :i2 ] .
+        :i2 a [ a owl:Class ; owl:unionOf ( [ a owl:Restriction ; owl:onProperty :r1 ; owl:maxQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] :C2 ) ] .
+        :r1 rdfs:subPropertyOf :r1 .
+        :i2 a [ a owl:Restriction ; owl:onProperty :r1 ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C0 ] :C2 ) ] ] .
+        :r2 a owl:SymmetricProperty .
+        :i1 owl:differentFrom :i0 .
+        :i2 :r1 :i2 .
+        :a a owl:NamedIndividual , :C0 ."#;
+    assert_eq!(verdict(body), Consistency::Consistent);
+}
+
+/// A fuzz ontology whose at-most fillers are complements: choosing `C2 ⊔ ¬C2` (and
+/// `C0 ⊔ ¬C0`) at every node of the `r0`-chain buried the merges at `i0` under branch points.
+/// Making that choice only at the nodes the restrictions count classifies it. Consistent, as
+/// HermiT agrees (`C0 = {a, i0}`, `r0 = r2 = {(a, i0), (i0, i0)}`, `C1 = C2 = ∅`, `i1 ≠ i0`),
+/// and with no unsatisfiable class, as HermiT also finds.
+#[test]
+fn complement_fillers_are_chosen_only_where_counted() {
+    let body = r#"<http://ex/o3767> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual . :i1 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C2 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C1 [ owl:complementOf :C1 ] ) ] .
+        :C1 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C2 ] :C0 ) ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :r0 rdfs:subPropertyOf :r2 .
+        :i0 a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r2 ] ; owl:maxQualifiedCardinality "3"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C2 ] ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "3"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C0 ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C1 :C0 ) ] .
+        :i0 a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] .
+        :i1 a [ a owl:Class ; owl:unionOf ( [ a owl:Class ; owl:oneOf ( :i0 ) ] [ owl:complementOf :C0 ] ) ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r2 ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (_, r) = run(body);
+    assert_eq!(r.consistency, Consistency::Consistent);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+}
+
+/// `B ⊑ ≥2 r.¬D ⊓ ≤1 r.¬D` makes `B`, and so `A`, empty. On small budgets the plain attempt
+/// runs out and the eager attempt decides with the scoped choice of `¬D`'s superset, which
+/// must still reach every counted neighbour: no budget answers `Consistent`.
+#[test]
+fn the_scoped_choice_reaches_every_counted_neighbour() {
+    let body = format!(
+        r#"{PRE}:A a owl:Class . :B a owl:Class . :D a owl:Class . :r a owl:ObjectProperty . :s a owl:ObjectProperty . :a a owl:NamedIndividual .
+        :a a :A .
+        :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :s ; owl:someValuesFrom :B ] .
+        :B rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :D ] ] .
+        :B rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :D ] ] ."#
+    );
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").expect("parse");
+    let o = extract(&d, &t).expect("extract");
+    for max_steps in (100..=400).step_by(10) {
+        let budget = Budget {
+            max_steps,
+            max_nodes: 100_000,
+        };
+        let r = check(&d, &o, budget);
+        assert_ne!(r.consistency, Consistency::Consistent, "{max_steps}");
+        if max_steps == 200 {
+            assert_eq!(r.consistency, Consistency::Inconsistent);
+        }
+    }
+}
+
+/// The complement of the filler `≥2 s.D` is an at-most restriction, so each attempt's
+/// definition of the filler's superset carries an NI-shaped clause of its own. Only the
+/// attempt's own clauses may name `o`'s neighbours: no budget answers `Consistent`.
+#[test]
+fn an_at_most_inside_a_filler_complement_stays_sound_at_every_budget() {
+    let body = format!(
+        r#"{PRE}:D a owl:Class . :r a owl:ObjectProperty . :s a owl:ObjectProperty . :o a owl:NamedIndividual . :a a owl:NamedIndividual . :b a owl:NamedIndividual .
+        :o a [ a owl:Restriction ; owl:onProperty :r ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Restriction ; owl:onProperty :s ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] ] .
+        :o :r :a , :b .
+        :a owl:differentFrom :b .
+        :a a [ a owl:Restriction ; owl:onProperty :s ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] .
+        :b a [ a owl:Restriction ; owl:onProperty :s ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] ."#
+    );
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").expect("parse");
+    let o = extract(&d, &t).expect("extract");
+    assert_eq!(
+        check(&d, &o, Budget::default()).consistency,
+        Consistency::Inconsistent
+    );
+    for max_steps in (20..=2_000).step_by(20) {
+        let budget = Budget {
+            max_steps,
+            max_nodes: 100_000,
+        };
+        assert_ne!(
+            check(&d, &o, budget).consistency,
+            Consistency::Consistent,
+            "{max_steps}"
+        );
+    }
+}
+
+/// A fuzz ontology whose tests of `C0` against each other class ran out of the shared
+/// budget. The model the consistency check found has elements in `C0` that are outside
+/// every other class but `C1`, so only `C0 ⊑ C1` is tested. HermiT agrees.
+#[test]
+fn the_consistency_model_shows_non_subsumptions() {
+    let body = r#"<http://ex/o6854> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :C4 a owl:Class . :C5 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r2 ] ; owl:someValuesFrom :C0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C0 ] .
+        :C4 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C0 :C3 ) ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:allValuesFrom :C1 ] .
+        :C5 owl:disjointWith :C1 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:hasValue :i0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:hasValue :i0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:maxQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C4 ] ] .
+        :i0 a :C5 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C5 ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C0 [ owl:complementOf :C3 ] ) ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r2 ; owl:minCardinality "2"^^xsd:nonNegativeInteger ] .
+        :i0 :r0 :i0 .
+        :r1 a owl:FunctionalProperty .
+        :C5 owl:hasKey ( :r1 ) .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (d, r) = run(body);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+    assert!(c.subsumptions.contains(&(ex(&d, "C0"), ex(&d, "C1"))));
+}
+
+/// A fuzz ontology that runs out of the shared budget unless the models of earlier tests
+/// also count as witnesses: each class's test model rules out candidates for the classes
+/// tested after it. No class is unsatisfiable and none has an inferred subsumer, as HermiT
+/// agrees.
+#[test]
+fn every_test_model_shows_non_subsumptions() {
+    let body = r#"<http://ex/o5658> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :C4 a owl:Class . :C5 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :i0 a owl:NamedIndividual . :i1 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C3 ] .
+        :C4 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C5 ] [ owl:complementOf :C2 ] ) ] .
+        :C5 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C0 :C2 ) ] .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:allValuesFrom :C4 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:allValuesFrom :C5 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:hasValue :i0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C5 ] ] .
+        :i0 a :C5 .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:maxQualifiedCardinality "3"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C3 ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C3 :C3 ) ] .
+        :r1 a owl:IrreflexiveProperty .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (_, r) = run(body);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+    assert!(c.inferred.is_empty());
+}
+
+/// A fuzz ontology whose consistency check needs the tableau's eager attempt. Its class
+/// tests ran out of the shared budget while each first spent a third of its share on the
+/// plain attempt; started in the eager one they decide `C0 ⊑ C4`, the only inferred
+/// subsumption, as HermiT agrees.
+#[test]
+fn the_tests_start_in_the_attempt_the_model_needed() {
+    let body = r#"<http://ex/o5940> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :C4 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :i0 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C1 ] .
+        :C2 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C0 ] :C4 ) ] .
+        :C4 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C3 ] :C2 ) ] .
+        :C4 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:allValuesFrom :C2 ] .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:allValuesFrom :C4 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "3"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:intersectionOf ( [ owl:complementOf :C3 ] :C0 ) ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C2 [ owl:complementOf :C1 ] ) ] .
+        :i0 a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] .
+        :r0 rdfs:subPropertyOf :r1 .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:intersectionOf ( [ owl:complementOf :C0 ] [ owl:complementOf :C2 ] ) ] ] .
+        :i0 a :C3 .
+        :i0 :r0 :i0 .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:minCardinality "2"^^xsd:nonNegativeInteger ] .
+        :i0 :r0 :i0 .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (d, r) = run(body);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+    assert_eq!(c.inferred.len(), 1);
+    assert!(c.subsumptions.contains(&(ex(&d, "C0"), ex(&d, "C4"))));
+}
+
+/// The scoped choice for `o : ≤1 T.∃S.¬C0` is the clause `T⁻(x, y₀) ∧ S(x, y₁) → C0(y₁) ∨
+/// Q(x)`, with two neighbour variables. The plain attempt does not apply it, so it must not
+/// count copies of a blocked node there either, or the plain attempt's model goes
+/// unconfirmed. Consistent: `C0 = {a}`, `C1 = C2 = {o}`, `Q = {(a, a)}`, `T = {(a, o)}`,
+/// `S = {(o, a)}`.
+#[test]
+fn a_clause_of_the_other_attempt_counts_no_copies() {
+    let body = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :R a owl:ObjectProperty . :S a owl:ObjectProperty . :T a owl:ObjectProperty . :Q a owl:ObjectProperty . :o a owl:NamedIndividual . :p a owl:NamedIndividual . :a a owl:NamedIndividual .
+        :a a :C0 . :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :Q ] ; owl:someValuesFrom :C0 ] , [ a owl:Restriction ; owl:onProperty :T ; owl:someValuesFrom [ owl:intersectionOf ( [ owl:oneOf ( :o ) ] :C2 ) ] ] .
+        :o a [ a owl:Restriction ; owl:onProperty :T ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Restriction ; owl:onProperty :S ; owl:someValuesFrom [ owl:complementOf :C0 ] ] ] .
+        :T rdfs:subPropertyOf [ owl:inverseOf :S ] .
+        :o a [ owl:unionOf ( [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :Q ] ; owl:hasValue :o ] [ owl:intersectionOf ( :C1 [ owl:complementOf :C0 ] ) ] ) ] .
+        :C3 rdfs:subClassOf [ owl:unionOf ( [ owl:intersectionOf ( :C1 :C2 ) ] [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :Q ] ; owl:minCardinality "2"^^xsd:nonNegativeInteger ] ) ] ."#;
+    assert_eq!(verdict(body), Consistency::Consistent);
+}
+
+/// A fuzz ontology where HermiT reports `C2` unsatisfiable, wrongly: `C2` has the model below
+/// (domain `{a, x, i0}`), which satisfies every axiom, and HermiT itself answers consistent
+/// once the model is added as assertions with `x : C2`.
+///
+/// `C0 = {a, x}`, `C1 = {a}`, `C2 = {x}`, `r0 = {(a,x), (a,i0), (x,x), (x,i0), (i0,x),
+/// (i0,a)}`, `r1 = {(i0,x)}`, `r2 = ∅`. For instance `i0 : ≤1 r0⁻.(C1 ⊔ ¬C2)` holds since
+/// of its `r0`-predecessors `a` and `x` only `a` counts, and `C2 ⊑ ≥3 r0⁻` holds at `x`
+/// with predecessors `a`, `x` and `i0`.
+#[test]
+fn a_class_hermit_misreports_unsatisfiable_has_a_model() {
+    let axioms = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:someValuesFrom :C1 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C1 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C0 [ owl:complementOf :C2 ] ) ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:allValuesFrom [ owl:complementOf :C1 ] ] .
+        :C2 owl:disjointWith :C1 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C2 ] :C2 ) ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C1 [ owl:complementOf :C0 ] ) ] .
+        :i0 a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:unionOf ( :C1 [ owl:complementOf :C2 ] ) ] ] .
+        :r2 a owl:SymmetricProperty .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :r2 a owl:FunctionalProperty .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:hasValue :i0 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:hasValue :i0 ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let model = ":x a owl:NamedIndividual , :C0 , :C2 , [ owl:complementOf :C1 ] . :a a :C1 , [ owl:complementOf :C2 ] . :i0 a [ owl:complementOf :C0 ] , [ owl:complementOf :C1 ] , [ owl:complementOf :C2 ] . :a :r0 :x , :i0 . :x :r0 :x , :i0 . :i0 :r0 :x , :a . :i0 :r1 :x . :a owl:differentFrom :x , :i0 . :x owl:differentFrom :i0 .";
+    let (d, r) = run(axioms);
+    assert_eq!(r.consistency, Consistency::Consistent);
+    let c = r.classification.expect("classified");
+    assert!(!c.unsatisfiable.contains(&ex(&d, "C2")));
+    assert_eq!(
+        verdict(&format!("{axioms} {model}")),
+        Consistency::Consistent
+    );
+}

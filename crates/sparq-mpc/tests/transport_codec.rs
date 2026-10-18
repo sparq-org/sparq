@@ -267,6 +267,83 @@ fn share_count_exceeding_payload_is_rejected() {
     );
 }
 
+/// The exact crafted frame from the review, plus a variant per tag, driven through
+/// the REAL `Channel::recv` path.
+///
+/// `00 00 00 05 01 ff ff ff ff` is a five-byte body: a share-vec tag and a declared
+/// count of `0xffffffff`, with no item bytes behind it. At `8 + FIELD_BYTES` bytes
+/// an item that count asks for roughly 64 GiB. Reading item by item would have
+/// failed as well, but only after the reserve — and an aborted process is not an
+/// `Err`. So what this test is really asserting is that the process is still here
+/// to return one.
+#[test]
+fn a_declared_count_the_frame_cannot_hold_is_rejected() {
+    // The frame verbatim, bytes and all.
+    let crafted = [0x00, 0x00, 0x00, 0x05, 0x01, 0xff, 0xff, 0xff, 0xff];
+    let mut pipe = MemPipe::default();
+    pipe.push_raw(&crafted);
+    let mut chan = Channel::new(pipe);
+    assert!(
+        chan.recv().is_err(),
+        "a count the frame cannot hold must be rejected"
+    );
+
+    // Both length-prefixed tags, with a huge count and with a count just past the
+    // payload, and with a legal count for contrast.
+    for tag in [1u8, 2] {
+        for count in [u32::MAX, u32::MAX / 2, 1000, 2] {
+            let mut body = vec![tag];
+            body.extend_from_slice(&count.to_be_bytes());
+            // One item's worth of bytes, whatever was declared.
+            body.extend_from_slice(&7u64.to_be_bytes());
+            body.extend_from_slice(&[0u8; FIELD_BYTES]);
+            let mut pipe = MemPipe::default();
+            pipe.push_raw(&frame(&body));
+            let mut chan = Channel::new(pipe);
+            let got = chan.recv();
+            if count == 1 {
+                assert!(got.is_ok(), "tag={tag}: a legal count must decode");
+            } else {
+                assert!(
+                    got.is_err(),
+                    "tag={tag}, count={count}: must be rejected, not reserved"
+                );
+            }
+        }
+    }
+
+    // A legal one-item frame of each tag still round-trips, so the check above is
+    // refusing impossible counts and not every count.
+    for tag in [1u8, 2] {
+        let mut body = vec![tag];
+        body.extend_from_slice(&1u32.to_be_bytes());
+        body.extend_from_slice(&7u64.to_be_bytes());
+        body.extend_from_slice(&[0u8; FIELD_BYTES]);
+        let mut pipe = MemPipe::default();
+        pipe.push_raw(&frame(&body));
+        let mut chan = Channel::new(pipe);
+        chan.recv().expect("a one-item frame decodes");
+    }
+
+    // Truncated bodies for every tag: each an Err, none a panic.
+    for body in [
+        vec![1u8],
+        vec![2u8, 0, 0],
+        vec![3u8],
+        vec![5u8, 0, 0, 0, 1],
+        vec![0xFEu8],
+        vec![],
+    ] {
+        let mut pipe = MemPipe::default();
+        pipe.push_raw(&frame(&body));
+        let mut chan = Channel::new(pipe);
+        assert!(
+            chan.recv().is_err(),
+            "a truncated or unknown frame must be an Err: {body:?}"
+        );
+    }
+}
+
 #[test]
 fn step_frame_missing_opcode_is_rejected() {
     // TAG_STEP (3) with no following opcode byte.

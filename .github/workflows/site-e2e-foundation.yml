@@ -56,6 +56,8 @@ jobs:
   # `.github/advisory-registry.json`, so it is a hard (non-advisory) check, as
   # `.github/E2E-GATING-POLICY.md` §1.1 describes.
   determinism-gate:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: site e2e determinism gate (no waitForTimeout calls)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -71,6 +73,8 @@ jobs:
   # now that the determinism gate + a11y ratchet are their own HARD jobs — the old name
   # advertised a gate this job no longer contains.
   foundation-smoke:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: foundation smoke (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -132,6 +136,8 @@ jobs:
   # states (home:idle, /download release+no-release) run — the same set as before.
   # Design of record: research/web-gui-test-program.md §3.1.
   a11y-ratchet:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: site a11y ratchet — axe WCAG 2.1 AA (headless Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 20

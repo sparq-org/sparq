@@ -16,14 +16,17 @@
 //! circuit would constrain against — not merely the host function — is the one
 //! shown to be out of band.
 //!
-//! The pin changes no proving path: no shipped Noir member imports that library,
-//! so nothing here changes which proofs verify. Research-grade, NOT externally
-//! audited (sq-qhy4); the value lanes carry the documented INV-VL downgrade
-//! (#769 accepted, CR-G8).
+//! The pin changes no proving path. `compose_core` now depends on that library
+//! for the V2 term recompute (`dual_leaf_v2_leaf.nr`, pinned at the end of this
+//! file), but only the NEW `scan_v2dl_*` / `join_eq_v2dl_*` members reach it, so
+//! nothing here changes which previously issued proofs verify. Research-grade,
+//! NOT externally audited (sq-qhy4); the value lanes carry the documented INV-VL
+//! downgrade (#769 accepted, CR-G8).
 #![cfg(feature = "dual-leaf")]
 
 use sparq_zk::dual_leaf::LANG_NONE;
 use sparq_zk::dual_leaf_v2;
+use sparq_zk::poseidon2;
 use sparq_zk::field::{field_from_hex_str, field_to_hex};
 use sparq_zk::Fr;
 
@@ -168,6 +171,127 @@ fn the_noir_lane_constants_equal_their_host_derivations() {
             field_to_hex(&host),
             "the Noir {} literal drifted from its host derivation",
             name
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The in-circuit V2 term RECOMPUTE (sq-j506 / #7103)
+//
+// `zk/compose/compose_core/src/dual_leaf_v2_leaf.nr::recompute_term` rebuilds a
+// V2 leaf from witnessed components, so the circuit now carries its own copy of
+// the §3.2 leaf SHAPE. Nothing in Rust can evaluate Noir, so the pin below is in
+// two honest halves:
+//
+//  1. A Rust mirror of the recompute's arithmetic, fed the constants parsed OUT
+//     OF the Noir sources, asserted equal to the host encoder's leaf. This pins
+//     the VALUES: a changed lane constant, language tag or type code breaks it.
+//  2. A source-text assertion that the two folds in the Noir file are still the
+//     expressions the mirror models. This pins the SHAPE: it is a text check,
+//     not an evaluation, and it is what catches a reordered or re-nested fold.
+//
+// Neither half changes which proofs verify.
+// ---------------------------------------------------------------------------
+
+/// The circuit's leaf module, compiled in. A path change breaks the build.
+const NOIR_LEAF: &str = include_str!("../../../zk/compose/compose_core/src/dual_leaf_v2_leaf.nr");
+
+/// The circuit's hash/type-code module, compiled in.
+const NOIR_HASHES: &str = include_str!("../../../zk/compose/compose_core/src/hashes.nr");
+
+/// A `pub global NAME: Field = <decimal>;` in `hashes.nr`.
+fn noir_hashes_global(name: &str) -> Fr {
+    let needle = format!("pub global {}: Field = ", name);
+    let rest = NOIR_HASHES
+        .split_once(&needle)
+        .unwrap_or_else(|| panic!("hashes.nr declares no global {}", name))
+        .1;
+    let literal = rest.split_once(';').expect("a global declaration terminates").0.trim();
+    Fr::from(literal.parse::<u64>().unwrap_or_else(|_| {
+        panic!("global {} is not a decimal literal: {}", name, literal)
+    }))
+}
+
+/// The Rust mirror of `recompute_term`'s arithmetic for a LITERAL on the value
+/// lane, driven entirely by constants parsed out of the Noir sources. Parameter
+/// order follows the Noir function's component order.
+fn circuit_literal_recompute(value_hook: Fr, datatype_const: Fr, identity: Fr) -> Fr {
+    let value_component =
+        poseidon2::hash(&[value_hook, datatype_const, noir_global("LANG_NONE")]);
+    poseidon2::hash(&[value_component, identity, noir_hashes_global("TYPE_CODE_LITERAL")])
+}
+
+/// THE VALUE PIN. For a real `xsd:integer` literal, the circuit's recompute --
+/// run in Rust over the Noir files' own constants -- reproduces the host V2 leaf
+/// exactly. A drifted lane constant, language tag or literal type code breaks
+/// this.
+#[test]
+fn the_circuit_value_lane_recompute_equals_the_host_leaf() {
+    let literal = oxrdf::Literal::new_typed_literal("42", oxrdf::NamedNode::new(sparq_zk::dual_leaf::XSD_INTEGER).expect("a valid datatype IRI"));
+    let components = dual_leaf_v2::encode_integer(&literal).expect("42 is on the integer lane");
+    let host = dual_leaf_v2::encode_literal(&literal).expect("42 is on the integer lane");
+    // The datatype constant comes from the NOIR global, not from the host
+    // components, so a drifted lane constant breaks this assertion too.
+    let circuit = circuit_literal_recompute(
+        components.value_hook,
+        noir_global("INTEGER_LANE_CONST"),
+        components.lexical_component,
+    );
+    assert_eq!(
+        field_to_hex(&circuit),
+        field_to_hex(&host),
+        "the in-circuit V2 recompute drifted from the host leaf"
+    );
+
+    // The control: the same mirror over a DIFFERENT datatype constant must not
+    // reproduce the leaf, so the equality above is not an artefact of the fold
+    // ignoring its inputs.
+    let wrong = circuit_literal_recompute(
+        components.value_hook,
+        noir_global("DOUBLE_LANE_CONST"),
+        components.lexical_component,
+    );
+    assert_ne!(
+        field_to_hex(&wrong),
+        field_to_hex(&host),
+        "the recompute must depend on the datatype constant"
+    );
+}
+
+/// The circuit's term type codes are the host's. An IRI or blank-node leaf is
+/// `h3(VALUE_NONE_V2, identity, TYPE_CODE)`, so once the sentinel is pinned
+/// (above) those two shapes agree with the host for every identity exactly when
+/// the type codes agree.
+#[test]
+fn the_circuit_type_codes_equal_the_host_type_codes() {
+    for (name, host) in [
+        ("TYPE_CODE_IRI", sparq_zk::encode::TYPE_CODE_IRI),
+        ("TYPE_CODE_LITERAL", sparq_zk::encode::TYPE_CODE_LITERAL),
+        ("TYPE_CODE_BLANK_NODE", sparq_zk::encode::TYPE_CODE_BLANK_NODE),
+    ] {
+        assert_eq!(
+            field_to_hex(&noir_hashes_global(name)),
+            field_to_hex(&Fr::from(host)),
+            "the Noir {} literal drifted from the host type code",
+            name
+        );
+    }
+}
+
+/// THE SHAPE PIN. The two folds the mirror above models are still the
+/// expressions in the Noir file. A text check, deliberately: re-nesting or
+/// reordering a fold would keep every constant pinned above intact while
+/// changing the leaf, and this is what catches that.
+#[test]
+fn the_circuit_leaf_module_keeps_the_pinned_recompute_shape() {
+    for fold in [
+        "h3(c.value_slot0, c.datatype_const, c.lang_const)",
+        "h3(value_component, c.identity, c.type_code)",
+    ] {
+        assert!(
+            NOIR_LEAF.contains(fold),
+            "the in-circuit V2 recompute no longer folds `{}`; re-derive the mirror in this file",
+            fold
         );
     }
 }

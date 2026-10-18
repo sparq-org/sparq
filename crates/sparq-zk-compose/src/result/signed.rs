@@ -375,6 +375,141 @@ mod tests {
         );
     }
 
+    /// The default-policy refusal reaches the PUBLIC entry point, not only
+    /// `NumericContract::package`: [`verify_signed_result`] itself refuses a
+    /// version-three presentation by name, before any proof work, so the refusal
+    /// needs no toolchain. Under `ResultPolicy::admit_unbound_legacy` the same
+    /// call gets past member selection and fails only later, on the absent
+    /// proof, which is what makes the refusal attributable to the policy.
+    #[test]
+    fn verify_signed_result_refuses_a_legacy_member_under_the_default_policy() {
+        let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);
+        let q = query("?v >= 18");
+        let p = prepare_signed_result(&q, &[c], &rows, &policy, &nonce).unwrap();
+        let member = p.inner.package;
+        let wire = presentation(&p);
+        let driver = CircuitProver::from_crate_root();
+        let dir =
+            std::env::temp_dir().join(format!("sparq_signed_legacy_entry_{}", std::process::id()));
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let Err(ResultError::Rejected(refusal)) = verify_signed_result(
+            &q,
+            &wire,
+            &bound,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("refused"),
+        ) else {
+            panic!("the default policy must refuse a legacy member at verify_signed_result");
+        };
+        assert!(
+            refusal.contains("folds the method-unbound message") && refusal.contains(member),
+            "the refusal must name the selected member, got: {}",
+            refusal
+        );
+        let Err(ResultError::Rejected(later)) = verify_signed_result(
+            &q,
+            &wire,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("admitted"),
+        ) else {
+            panic!("the downgrade must carry an unproved presentation past member selection");
+        };
+        assert_eq!(
+            later, "missing proof",
+            "the downgrade must fail only on the absent proof, not on member selection"
+        );
+    }
+
+    /// The admitted direction end to end at the public entry point: a GENUINE
+    /// version-three proof verifies under the written-down downgrade and is
+    /// refused by name without it. Same presentation, same proof, same nonce —
+    /// only the policy differs.
+    #[test]
+    #[ignore = "requires pinned nargo and bb; proves a version-three member and verifies it through verify_signed_result"]
+    fn signed_real_legacy_member_verifies_only_under_the_written_down_downgrade() {
+        crate::result::pinned_toolchain().unwrap();
+        let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);
+        let q = query("?v >= 18");
+        let prepared = prepare_signed_result(&q, &[c], &rows, &policy, &nonce).unwrap();
+        let member = prepared.inner.package;
+        let dir =
+            std::env::temp_dir().join(format!("sparq_signed_legacy_live_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let p = prepared
+            .prove(&driver, &dir.join("proof"), "signed_legacy_downgrade")
+            .unwrap();
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let Err(ResultError::Rejected(refusal)) = verify_signed_result(
+            &q,
+            &p,
+            &bound,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("refused"),
+        ) else {
+            panic!("a proved version-three member must still be refused by the default policy");
+        };
+        assert!(
+            refusal.contains("folds the method-unbound message") && refusal.contains(member),
+            "the refusal must name the selected member, got: {}",
+            refusal
+        );
+        let checked = verify_signed_result(
+            &q,
+            &p,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("admitted"),
+        )
+        .expect("the written-down downgrade verifies already-issued version-three material");
+        assert_eq!(checked.rows, rows);
+    }
+
+    /// VERIFICATION side, version-three family: a `result_v3_*` member folds the
+    /// method-unbound message, so the verifier's own statement derivation refuses
+    /// it under the default policy and names the member it selected; only the
+    /// written-down downgrade admits it. sq-j506: the boundness check runs on the
+    /// SELECTED member, so this family cannot inherit the legacy behaviour by
+    /// omission.
+    #[test]
+    fn signed_verification_requires_the_written_down_downgrade() {
+        let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);
+        let q = query("?v >= 18");
+        let p = prepare_signed_result(&q, &[c], &rows, &policy, &nonce).unwrap();
+        let wire = presentation(&p);
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let err = public_statement_for(wire.view(), NumericContract::Signed, &bound, &nonce)
+            .expect_err("a method-unbound member needs the written-down opt-in");
+        let text = err.to_string();
+        assert!(
+            text.contains("folds the method-unbound message")
+                && text.contains("result_v3_k1_n16_p3_r4_f2_s64_d10"),
+            "the refusal must name the selected member: {}",
+            text
+        );
+        let statement = public_statement_for(wire.view(), NumericContract::Signed, &policy, &nonce)
+            .expect("the downgrade admits already-issued version-three material");
+        assert_eq!(statement.package, "result_v3_k1_n16_p3_r4_f2_s64_d10");
+    }
+
     #[test]
     fn signed_type_and_version_do_not_extend_unsigned_wire_acceptance() {
         let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);

@@ -860,6 +860,89 @@ mod tests {
         handle(state, &get, &Agent::anonymous()).await
     }
 
+    /// A storage holding `a` and one more child of the root, named `child`.
+    async fn storage_with(child: &str) -> LwsState<super::super::test_store::FlakyStore> {
+        use super::super::test_store;
+        let (state, _store) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        for name in ["a", child] {
+            state
+                .store
+                .create_in_container(&root, &format!("{root}{name}"), "x".into(), "text/plain")
+                .await
+                .unwrap();
+        }
+        state
+    }
+
+    /// The IRIs the search of everything answers with, in the order it gives them.
+    async fn found<S: Store + 'static>(state: &LwsState<S>) -> Vec<String> {
+        let r = search_all(state).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let doc = super::super::test_store::body_json(r).await;
+        doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|i| i["id"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// The smallest budget the search of everything is answered within.
+    async fn least_budget<S: Store + 'static>(state: &LwsState<S>) -> usize {
+        let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
+        let get = super::super::test_store::request(Method::GET, &path, &[], "");
+        let answered = |budget: usize| {
+            let get = super::super::test_store::request(Method::GET, &path, &[], "");
+            async move {
+                handle_within(state, &get, &Agent::anonymous(), budget)
+                    .await
+                    .status()
+                    == StatusCode::OK
+            }
+        };
+        let (mut low, mut high) = (0usize, 8192usize);
+        assert_eq!(
+            handle_within(state, &get, &Agent::anonymous(), high)
+                .await
+                .status(),
+            StatusCode::OK,
+            "the search fits the budget this search begins from"
+        );
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if answered(mid).await {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        low
+    }
+
+    /// Regression guard for the record-name filter the walk already applies: a container whose
+    /// listing names a linkset record (what a legacy edge leaves) does not have that record
+    /// followed, charged to the budget or answered with among a search's results, since no
+    /// listing shows it and no request reads it. A child of the same length that is not a record
+    /// still is.
+    #[tokio::test]
+    async fn a_record_a_listing_names_is_not_walked() {
+        let record = storage_with("doc.meta").await;
+        let ordinary = storage_with("doc-meta").await;
+        let root = record.cfg.storage();
+        assert_eq!(found(&record).await, vec![root.clone(), format!("{root}a")]);
+        assert_eq!(
+            found(&ordinary).await,
+            vec![root.clone(), format!("{root}a"), format!("{root}doc-meta")]
+        );
+        // Both listings are the same length, so what the walk keeps differs only by the child
+        // it did not follow.
+        assert!(
+            least_budget(&record).await < least_budget(&ordinary).await,
+            "a record a listing names is not charged for"
+        );
+    }
+
     /// Review findings: the walk waited on the lock of a resource whose change was set aside
     /// (its locks held until it is put back), holding the request; then it skipped it, giving a
     /// `200` that left out what the walk could not see. The walk fails with `503` as soon as

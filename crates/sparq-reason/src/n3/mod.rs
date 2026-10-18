@@ -2804,13 +2804,11 @@ fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
 /// hasher is NOT changed — the saving is in what a COPY costs, not in what a lookup costs,
 /// and the count of key hashes a workload performs is the same either way.
 ///
-/// **Iteration order is unchanged too**, which matters because [`canonical_new_firings`]
-/// encodes a whole binding on its proof-mode tie-break path. A table's bucket count follows
-/// from how many entries it holds, not from how wide one is, so the same inserts give the
-/// same buckets; the hashes are the same; and a copy-then-mutate still copies before it
-/// mutates. (That encoding also sorts what it collects, and the one other place that reads a
-/// whole binding — [`independent_firing`] — asks a question of every entry, so neither
-/// output would depend on the order even if it had moved.)
+/// **No output depends on iteration order.** Each table is seeded by its own `RandomState`, so
+/// its order was never fixed, before or after this representation. Every reader of a whole
+/// binding is order-free: [`canonical_new_firings`]'s proof-mode tie-break sorts the encoding
+/// it collects, and [`independent_firing`] and the depth check (`bounded::generated`) ask a
+/// question of every entry.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub(crate) struct Binding {
     map: HashMap<Rc<str>, Term>,
@@ -2859,7 +2857,7 @@ impl Binding {
         self.map.retain(|k, _| keep(k));
     }
 
-    /// Every binding, as the name and the term. The order is the table's, as it was.
+    /// Every binding, as the name and the term, in the table's (unspecified) order.
     fn iter(&self) -> impl Iterator<Item = (&str, &Term)> {
         self.map.iter().map(|(k, v)| (&**k, v))
     }

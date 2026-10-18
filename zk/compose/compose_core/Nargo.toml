@@ -16,3 +16,7 @@ poseidon = { git = "https://github.com/noir-lang/poseidon", tag = "v0.3.0" }
 # nargo 1.0.0-beta.21 pin). nargo fetches this git dep the same way it already
 # fetches the poseidon dep above (precedent: poseidon v0.3.0).
 sparq_ieee754 = { git = "https://github.com/sparq-org/noir_IEEE754", tag = "v0.11.0" }
+# The V2 reserved-sentinel / lane-constant mirror (zk/dual-leaf-v2), shared with
+# the host pin in crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs. A PATH dep on
+# the sibling library keeps ONE copy of those constants.
+sparq_dual_leaf_v2 = { path = "../../dual-leaf-v2" }

@@ -152,7 +152,11 @@ pub const MAX_DISTINCT_ROWS: usize = 1 << 12; // 4096
 /// output payload (convention #4 — the path result is the disclosed binding). Both
 /// keys must be `< 2^`[`crate::compare::COMPARE_BITS`] (fail-closed, so the secure
 /// comparator's bit-decomposition is injective).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written: both keys are private, and both terms are disclosed
+/// only if the pair survives the DISTINCT — a `Debug` rendering is not that
+/// condition. All four fields are redacted; they stay public for the callers that
+/// legitimately read them.
+#[derive(Clone)]
 pub struct SecretEndpointPair {
     /// The subject endpoint's private join key (compared, never reconstructed).
     pub a_key: Fp,
@@ -162,6 +166,17 @@ pub struct SecretEndpointPair {
     pub a_term: Term,
     /// The object endpoint's disclosed term (emitted iff this pair survives).
     pub b_term: Term,
+}
+
+impl std::fmt::Debug for SecretEndpointPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretEndpointPair")
+            .field("a_key", &"<redacted>")
+            .field("b_key", &"<redacted>")
+            .field("a_term", &"<redacted>")
+            .field("b_term", &"<redacted>")
+            .finish()
+    }
 }
 
 /// MODELLED cost of one hidden-key DISTINCT (counted, never measured — the crate is

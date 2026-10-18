@@ -477,10 +477,25 @@ loader hard-rejects any control-graph triple whose predicate is in `solidx:` spa
 so a writer cannot self-grant via a forged `solidx:creator` triple smuggled into the `.acr`
 (tests `acp_forged_{creator,owner,applies_to_resource}_in_acr_document_does_not_grant`).
 The grant is RESOURCE-SCOPED — a resource-tagged
-`urn:sparq:provcand?…&res=R` candidate mints per (policy, creator/owner, resource), so the
-creator of `R1` is never granted `R2`; the creator/owner agent composes with the matcher's
-own `acp:client`/`acp:issuer` constraints (minting the same pair/triple principal). With no
-provenance supplied, no `CreatorAgent`/`OwnerAgent` matcher grants (fail-closed). A provenance
+`urn:sparq:scand?…&res=R` candidate mints per (policy, agent, client, issuer, resource), so
+the creator of `R1` is never granted `R2`. On resource `R`, a resource-scoped policy's
+candidate agents are its policy-wide candidate agents PLUS `R`'s own creator/owner, each
+crossed with every client and issuer value the policy's matchers name (`candClient` /
+`candIssuer`), so the creator/owner agent composes with a client/issuer constraint on the
+provenance matcher itself AND with one on a SIBLING matcher of the same policy.
+
+Provenance is THREE-VALUED. A provenance matcher on a resource the trusted caller supplied
+no creator (resp. owner) for is UNDECIDED in every role — `allOf`, `anyOf` and `noneOf`: it
+neither accepts nor rejects, because no agent can be ruled out as that resource's creator.
+An ALLOW with an undecided condition does not apply; a DENY with one does. The marker is
+the absence of the loader's `<r> solidx:creator|owner <w>` fact, which pod content cannot
+forge, and it is carried on the matcher's per-resource instance as
+`solidx:provUndecided <kind>` (acp-a.n3); stratum B turns it into
+`solidx:allOfUndecided`/`anyOfUndecided`, stratum C splits satisfaction into
+`solidx:satisfied` (allow-valued) and `solidx:satisfiedForDeny`, and the session layer
+reads the same marker for a `noneOf` exception (`AuthIndex::cond_applies`). So with no
+provenance supplied, no `CreatorAgent`/`OwnerAgent` matcher grants and every deny gated on
+one applies (fail-closed in both directions). A provenance
 matcher composes with client/issuer constraints on itself and with `anyOf`/`noneOf`/the
 policy's other allOf matchers' client/issuer dimensions. It ALSO composes with a SECOND,
 independent concrete-WebID `acp:agent` matcher under the same `allOf` ([OPUS-4.8] sq-az1b)
