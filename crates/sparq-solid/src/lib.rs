@@ -77,8 +77,9 @@ pub use decide::{is_control_document_name, AclScope, AclStatus, EffectiveAcl, Wa
 pub use wac_conformance::{AclBuilder, AuthBuilder, WacScenario};
 pub use fixture::{acp_fixture, wac_fixture};
 pub use materialize::{
-    default_auth_limits, is_auth_allowance_refusal, materialize_acp, materialize_acp_with,
-    materialize_acp_with_credentials, materialize_wac, MaterializeStats, AUTH_ALLOWANCE_REFUSAL,
+    auth_allowance_refusal, default_auth_limits, is_auth_allowance_refusal, materialize_acp,
+    materialize_acp_with, materialize_acp_with_credentials, materialize_wac, AuthAllowance,
+    MaterializeStats, AUTH_ALLOWANCE_REFUSAL,
 };
 /// The reasoning allowance of an authorization materialization
 /// ([`PodStore::set_auth_limits`], [`default_auth_limits`]) — the reasoner's own limits

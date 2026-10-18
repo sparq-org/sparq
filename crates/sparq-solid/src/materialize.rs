@@ -38,21 +38,109 @@ const ACP_A: &str = include_str!("../rules/acp-a.n3");
 const ACP_B: &str = include_str!("../rules/acp-b.n3");
 const ACP_C: &str = include_str!("../rules/acp-c.n3");
 
-/// The leading text of the error a materialization refused by its reasoning allowance
-/// returns — the one refusal an operator must read as "this pod's policies are too big for
-/// the allowance in force", not as "these policies deny access".
+/// Which reasoning allowance an authorization materialization reached.
+///
+/// Carried by the refusal ([`auth_allowance_refusal`]) so a caller can act on the kind
+/// rather than on wording. `RoundsOrFacts` is one variant because the reasoner reports a
+/// closure that ran out of rounds and one that ran out of facts with the same cut, naming
+/// both; the message that accompanies the kind gives the values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AuthAllowance {
+    /// `max_total_join_rows`: the binding rows and firings of one stratum, over all its
+    /// rounds.
+    TotalJoinRows,
+    /// `max_join_rows`: the binding rows and firings of one round.
+    JoinRows,
+    /// `max_rounds` or `max_facts`: the stratum did not reach a fixpoint inside them.
+    RoundsOrFacts,
+    /// `max_term_bytes`: a term the rules would derive.
+    TermBytes,
+    /// An allowance this crate does not name individually (a newer reasoner cut).
+    Unspecified,
+}
+
+impl AuthAllowance {
+    /// The [`ClosureLimits`] field(s) this kind stands for, for a message.
+    pub fn limit_name(self) -> &'static str {
+        match self {
+            AuthAllowance::TotalJoinRows => "max_total_join_rows",
+            AuthAllowance::JoinRows => "max_join_rows",
+            AuthAllowance::RoundsOrFacts => "max_rounds/max_facts",
+            AuthAllowance::TermBytes => "max_term_bytes",
+            AuthAllowance::Unspecified => "an unnamed limit",
+        }
+    }
+
+    /// The tag this kind is carried as.
+    fn tag(self) -> &'static str {
+        match self {
+            AuthAllowance::TotalJoinRows => "total-join-rows",
+            AuthAllowance::JoinRows => "join-rows",
+            AuthAllowance::RoundsOrFacts => "rounds-or-facts",
+            AuthAllowance::TermBytes => "term-bytes",
+            AuthAllowance::Unspecified => "unspecified",
+        }
+    }
+
+    /// The kind a tag stands for; [`AuthAllowance::Unspecified`] for one this build does
+    /// not know.
+    fn from_tag(tag: &str) -> AuthAllowance {
+        for kind in [
+            AuthAllowance::TotalJoinRows,
+            AuthAllowance::JoinRows,
+            AuthAllowance::RoundsOrFacts,
+            AuthAllowance::TermBytes,
+        ] {
+            if kind.tag() == tag {
+                return kind;
+            }
+        }
+        AuthAllowance::Unspecified
+    }
+}
+
+/// The text a materialization refused by its reasoning allowance puts in its error — the
+/// one refusal an operator must read as "this pod's policies are too big for the allowance
+/// in force", not as "these policies deny access".
 ///
 /// A refusal of either kind leaves no grant behind (the view in force is kept or dropped,
 /// never widened), so the distinction is operational rather than one of access: a deny is
 /// the policies' decision, while this says the policies were never decided at all and the
 /// allowance has to be raised ([`crate::PodStore::set_auth_limits`]) before they will be.
-/// The rest of the message is the reasoner's own, which names the limit that was reached
-/// and its value.
+///
+/// Read it with [`auth_allowance_refusal`] rather than by matching this text: every refusal
+/// also carries a machine-readable kind tag, which that function finds ANYWHERE in the
+/// message. This crate's materialization errors are `String`s with no error chain to walk,
+/// and the write paths wrap a failed rebuild's error in their own sentence, so a refusal
+/// must be recognizable from the middle of a longer message — not only as a prefix.
 pub const AUTH_ALLOWANCE_REFUSAL: &str = "authorization reasoning allowance exceeded";
 
-/// Whether `err` — an error from any `materialize_*` entry point, free function or
-/// [`crate::PodStore`] method — is a refusal by the reasoning allowance
-/// ([`AUTH_ALLOWANCE_REFUSAL`]) rather than any other materialization error.
+/// The opening of the kind tag every refusal carries; the kind's own tag and a `]` follow.
+const AUTH_ALLOWANCE_TAG: &str = "[allowance=";
+
+/// Which allowance `err` was refused by, or `None` when `err` is not a refusal by the
+/// reasoning allowance.
+///
+/// `err` is an error from any `materialize_*` entry point, free function or
+/// [`crate::PodStore`] method, INCLUDING one a write path wrapped in its own sentence (an
+/// update whose rebuild was refused, a rollback that could not rebuild): the kind tag is
+/// read wherever it appears, so wrapping does not hide it.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(sparq_solid::auth_allowance_refusal("some other error"), None);
+/// ```
+pub fn auth_allowance_refusal(err: &str) -> Option<AuthAllowance> {
+    let at = err.find(AUTH_ALLOWANCE_TAG)? + AUTH_ALLOWANCE_TAG.len();
+    let rest = &err[at..];
+    let end = rest.find(']')?;
+    Some(AuthAllowance::from_tag(&rest[..end]))
+}
+
+/// Whether `err` is a refusal by the reasoning allowance rather than any other
+/// materialization error — [`auth_allowance_refusal`] without the kind.
 ///
 /// # Examples
 ///
@@ -60,7 +148,7 @@ pub const AUTH_ALLOWANCE_REFUSAL: &str = "authorization reasoning allowance exce
 /// assert!(!sparq_solid::is_auth_allowance_refusal("some other materialization error"));
 /// ```
 pub fn is_auth_allowance_refusal(err: &str) -> bool {
-    err.starts_with(AUTH_ALLOWANCE_REFUSAL)
+    auth_allowance_refusal(err).is_some()
 }
 
 /// The reasoning allowance every authorization closure runs under unless the store is given
@@ -79,43 +167,55 @@ pub fn is_auth_allowance_refusal(err: &str) -> bool {
 /// (~1.1k named graphs, the one `examples/bench.rs` materializes), the same fixture with
 /// filler content (`fixture::wac_fixture_sized(50)`, which reasons over the same control
 /// documents) and `fixture::acp_fixture` across all three strata — the SMALLEST allowance
-/// each field could take while the view still materialized was found by bisection:
+/// each field could take while the view still materialized was found by bisection, and
+/// each value here is about ten times the largest of those, rounded:
 ///
-/// | field            | largest minimum over those fixtures | the value here | margin |
-/// |------------------|------------------------------------:|---------------:|-------:|
-/// | `max_join_rows`  |                             ~82,400 |     20,000,000 |  ~240× |
-/// | `max_facts`      |                             ~15,900 |     20,000,000 | ~1200× |
-/// | `max_rounds`     |                                  11 |        100,000 | ~9000× |
+/// | field                 | largest minimum over those fixtures | the value here | margin |
+/// |-----------------------|------------------------------------:|---------------:|-------:|
+/// | `max_total_join_rows` |                             357,200 |      4,000,000 |  ~11×  |
+/// | `max_join_rows`       |                              82,435 |      1,000,000 |  ~12×  |
+/// | `max_facts`           |                              15,847 |        256,000 |  ~16×  |
+/// | `max_rounds`          |                                  11 |            128 |  ~12×  |
+/// | `max_term_bytes`      |                               1,197 |         64 KiB |  ~55×  |
 ///
 /// (A fixture-and-box-specific measurement, so it is recorded here rather than in any
-/// markdown.) `max_join_rows` is the one that matters: it is what the reasoner's own
-/// default leaves unbounded. Every margin is deliberately far wider than any pod this
-/// crate is asked about — the allowance exists to stop unbounded join work, not to size a
-/// pod — and a pod that still needs more raises it
-/// ([`crate::PodStore::set_auth_limits`]).
+/// markdown.) The two that matter are the join-row allowances, which the reasoner's own
+/// default leaves unbounded; `max_total_join_rows` is the one that caps the work a single
+/// materialization can be made to do, because the per-round allowance is refilled every
+/// round and so bounds a closure only as its own value times `max_rounds`. `max_facts`
+/// bounds one closure's held facts, so under ACP each of the three strata is bounded by
+/// it separately, as each is its own closure.
+///
+/// The margins are deliberate but no longer open-ended: an untrusted writer of a control
+/// document chooses how far its policies multiply, so the ceiling is what they can spend.
+/// A pod that genuinely needs more raises it ([`crate::PodStore::set_auth_limits`]).
 pub fn default_auth_limits() -> ClosureLimits {
     let mut limits = ClosureLimits::default();
     limits.max_rounds = AUTH_MAX_ROUNDS;
     limits.max_facts = AUTH_MAX_FACTS;
     limits.max_term_bytes = AUTH_MAX_TERM_BYTES;
     limits.max_join_rows = AUTH_MAX_JOIN_ROWS;
+    limits.max_total_join_rows = AUTH_MAX_TOTAL_JOIN_ROWS;
     limits
 }
 
 /// Rounds one authorization stratum may run. The rules are not recursive over a growing
 /// term, so a stratum reaches its fixpoint in a handful of rounds on any pod; this is a
 /// runaway guard, not a working bound.
-const AUTH_MAX_ROUNDS: usize = 100_000;
+const AUTH_MAX_ROUNDS: usize = 128;
 /// Facts one authorization stratum may hold, asserted and derived together.
-const AUTH_MAX_FACTS: usize = 20_000_000;
+const AUTH_MAX_FACTS: usize = 256_000;
 /// Bytes of one term the rules may derive. The rules derive compound terms only as minted
 /// candidate/matcher-instance IRIs (a few hundred bytes of percent-encoded components), so
 /// 1 MiB is already far above anything they build.
-const AUTH_MAX_TERM_BYTES: usize = 1 << 20;
-/// Binding rows and rule firings one round of one authorization stratum may produce — the
-/// limit the reasoner's defaults leave unbounded. See [`default_auth_limits`] for how it
-/// was measured.
-const AUTH_MAX_JOIN_ROWS: usize = 20_000_000;
+const AUTH_MAX_TERM_BYTES: usize = 64 << 10;
+/// Binding rows and rule firings one round of one authorization stratum may produce.
+const AUTH_MAX_JOIN_ROWS: usize = 1_000_000;
+/// Binding rows and rule firings one authorization stratum may produce over ALL its rounds
+/// — the bound that actually caps the work a materialization can be made to do, since the
+/// per-round allowance is refilled every round. Both of these are unbounded in the
+/// reasoner's defaults. See [`default_auth_limits`] for how they were measured.
+const AUTH_MAX_TOTAL_JOIN_ROWS: usize = 4_000_000;
 
 /// One authorization stratum, under `limits`: [`eval_with_limits`] with the allowance
 /// refusal tagged ([`AUTH_ALLOWANCE_REFUSAL`]) so the caller can tell a pod too big for the
@@ -133,14 +233,33 @@ pub(crate) fn auth_eval(
     eval_with_limits(dict, facts, rules, limits).map_err(tag_allowance_refusal)
 }
 
-/// `e` prefixed with [`AUTH_ALLOWANCE_REFUSAL`] when it is the reasoner's forward-closure
-/// cut, unchanged otherwise.
+/// `e` tagged as an allowance refusal ([`AUTH_ALLOWANCE_REFUSAL`] plus the kind
+/// [`auth_allowance_refusal`] reads) when it is the reasoner's forward-closure cut,
+/// unchanged otherwise.
 pub(crate) fn tag_allowance_refusal(e: String) -> String {
-    if e.contains(CLOSURE_CUT) {
-        format!("{}: {}", AUTH_ALLOWANCE_REFUSAL, e)
-    } else {
-        e
+    if !e.contains(CLOSURE_CUT) {
+        return e;
     }
+    // Which limit the cut names. `max_total_join_rows` contains `max_join_rows`, so it is
+    // tested first.
+    let kind = if e.contains("max_total_join_rows") {
+        AuthAllowance::TotalJoinRows
+    } else if e.contains("max_join_rows") {
+        AuthAllowance::JoinRows
+    } else if e.contains("max_term_bytes") || e.contains("would be a term of about") {
+        AuthAllowance::TermBytes
+    } else if e.contains("before reaching a fixpoint") {
+        AuthAllowance::RoundsOrFacts
+    } else {
+        AuthAllowance::Unspecified
+    };
+    format!(
+        "{} {}{}]: {}",
+        AUTH_ALLOWANCE_REFUSAL,
+        AUTH_ALLOWANCE_TAG,
+        kind.tag(),
+        e
+    )
 }
 
 /// The reasoner's own text for a forward closure stopped by its [`ClosureLimits`] (every
