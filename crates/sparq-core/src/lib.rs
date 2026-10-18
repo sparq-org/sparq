@@ -3216,8 +3216,16 @@ impl Graph {
         #[cfg(feature = "mmap")]
         self.begin_durable_write()?;
         #[cfg(feature = "mmap")]
-        if let Some(w) = &mut self.wal {
-            w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
+        {
+            // A failed append may have left a PARTIAL frame at the end of the log. Replay
+            // truncates at the first torn frame, so every record appended after it — committed
+            // and acknowledged — would be discarded with it. The tree therefore stops taking
+            // durable writes until the reopen, which trims the unacked tail and keeps the rest.
+            let appended = match &mut self.wal {
+                Some(w) => w.append_batch(inserts, deletes).map_err(|e| e.to_string()),
+                None => Ok(()),
+            };
+            self.freeze_on_err(appended, "a WAL append")?;
         }
         self.apply_delta_mem(inserts, deletes);
         Ok(())
@@ -3390,11 +3398,16 @@ impl Graph {
             self.begin_durable_write()?;
         }
         #[cfg(feature = "mmap")]
-        if let Some(j) = &mut self.txn {
-            return j
-                .truncate()
-                .map_err(|e| format!("txn journal clear failed: {}", e));
+        {
+            let cleared = match &mut self.txn {
+                Some(j) => j.truncate().map_err(|e| e.to_string()),
+                None => return Ok(()),
+            };
+            // A clear that failed leaves the journal in a state this handle cannot describe: its
+            // frame may be gone, kept, or shortened. The reopen decides, from the bytes.
+            return self.freeze_on_err(cleared, "a txn journal clear");
         }
+        #[cfg(not(feature = "mmap"))]
         Ok(())
     }
 
@@ -3438,6 +3451,29 @@ impl Graph {
             );
         }
         Ok(())
+    }
+
+    /// (sq-ycle) Freeze the tree when a durable path FAILED part-way, and say so.
+    ///
+    /// Every durable mutator here writes several files (a directory, a manifest, a staged
+    /// sub-tree, a log), so an error can leave the store half-changed and the in-memory image
+    /// disagreeing with it — a named-graph drop has already removed the entry in memory by the
+    /// time it persists, and a create has already published the manifest entry by the time it
+    /// opens the new sub-graph. Carrying on from there acknowledges later writes against a state
+    /// no reopen will reproduce, so the tree stops taking durable writes until it is reopened,
+    /// which replays what is actually on disk.
+    #[cfg(feature = "mmap")]
+    fn freeze_on_err<T>(&self, result: Result<T, String>, what: &str) -> Result<T, String> {
+        match result {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.tree.poison();
+                Err(format!(
+                    "{} failed; the store is frozen until it is reopened: {}",
+                    what, e
+                ))
+            }
+        }
     }
 
     /// (sq-ycle) Hand this graph's shared tree state to every named graph beneath it
@@ -3572,8 +3608,10 @@ impl Graph {
         let removed = self.named.remove(idx);
         drop(removed);
         // Re-persist the renumbered survivor set in ONE staging swap (or tear the whole sub-tree
-        // down when none survive). Shared with the batch drop-all path.
-        self.persist_named_after_drop(dir)?;
+        // down when none survive). Shared with the batch drop-all path. The entry is already
+        // gone from memory, so a failure here leaves the two images disagreeing: freeze.
+        let persisted = self.persist_named_after_drop(dir);
+        self.freeze_on_err(persisted, "dropping a named graph")?;
         Ok(true)
     }
 
@@ -3605,7 +3643,8 @@ impl Graph {
         self.named.clear();
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
-            return self.persist_named_after_drop(&dir);
+            let persisted = self.persist_named_after_drop(&dir);
+            return self.freeze_on_err(persisted, "dropping every named graph");
         }
         Ok(())
     }
@@ -3809,7 +3848,8 @@ impl Graph {
         if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
             // Creating a named graph writes a directory, a manifest and a WAL: the gate first.
             self.begin_durable_write()?;
-            let mut g = self.create_durable_named(&dir, name)?;
+            let created = self.create_durable_named(&dir, name);
+            let mut g = self.freeze_on_err(created, "creating a named graph")?;
             // The new sub-graph joins this tree, so it reads this tree's poison flag.
             g.tree = std::sync::Arc::clone(&self.tree);
             g.share_tree();
@@ -4395,7 +4435,7 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
     buf.extend_from_slice(&NAMED_FORMAT_VERSION.to_le_bytes());
     buf.extend_from_slice(&(names.len() as u32).to_le_bytes());
     for name in names {
-        encode_graph_name(&mut buf, name);
+        encode_graph_name(&mut buf, name)?;
     }
     let final_path = dir.join(NAMED_MANIFEST);
     let tmp_path = dir.join(NAMED_MANIFEST_TMP);
@@ -4435,19 +4475,39 @@ fn remove_named_manifest(dir: &std::path::Path) -> std::io::Result<()> {
 /// are only ever NamedNode or BlankNode (never a literal/triple — see
 /// [`load_dataset`](Graph::load_dataset) / [`apply_delta_nquads`](Graph::apply_delta_nquads)).
 #[cfg(feature = "mmap")]
-fn encode_graph_name(buf: &mut Vec<u8>, name: &Term) {
-    // Graph names are constrained to NamedNode | BlankNode by every public loader; encode
-    // each with its raw value. A literal/triple graph name cannot occur, so map it to its
-    // lexical form as a NamedNode rather than panicking (keeps the encoding total).
-    let (kind, val): (u8, String) = match name {
-        Term::NamedNode(n) => (0, n.as_str().to_string()),
-        Term::BlankNode(b) => (1, b.as_str().to_string()),
-        other => (0, other.to_string()),
+fn encode_graph_name(buf: &mut Vec<u8>, name: &Term) -> std::io::Result<()> {
+    // (sq-ycle) A graph name is a NamedNode or a BlankNode. A literal or a triple term
+    // used to be COERCED to kind 0 with its N-Triples lexical form as the "IRI": the manifest
+    // then held a value `decode_graph_name` rejects as an invalid IRI, so the store it named
+    // would not open — a write that cannot be read back. Such a name is rejected here instead,
+    // before anything is written.
+    let (kind, val): (u8, &str) = match name {
+        Term::NamedNode(n) => (0, n.as_str()),
+        Term::BlankNode(b) => (1, b.as_str()),
+        other => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "graph name refused: {} is neither an IRI nor a blank node, so it cannot name a graph",
+                    other
+                ),
+            ))
+        }
     };
-    buf.push(kind);
     let bytes = val.as_bytes();
-    buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    let len = u32::try_from(bytes.len()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "graph name refused: its {} bytes do not fit the on-disk u32 length field",
+                bytes.len()
+            ),
+        )
+    })?;
+    buf.push(kind);
+    buf.extend_from_slice(&len.to_le_bytes());
     buf.extend_from_slice(bytes);
+    Ok(())
 }
 
 /// (sq-3ui0) Inverse of [`encode_graph_name`]: decode the term starting at
@@ -4733,11 +4793,14 @@ pub enum TxnOp {
 /// the DEFAULT graph (`None`) gets a distinct marker byte (kind 2, no payload) so [`decode_slot`]
 /// can tell "default graph" apart from "named graph" unambiguously on replay.
 #[cfg(feature = "mmap")]
-fn encode_slot(buf: &mut Vec<u8>, slot: &Option<Term>) {
+fn encode_slot(buf: &mut Vec<u8>, slot: &Option<Term>) -> std::io::Result<()> {
     match slot {
         Some(name) => encode_graph_name(buf, name),
         // Default-graph marker: kind 2, no length/value (kinds 0/1 are NamedNode/BlankNode).
-        None => buf.push(2),
+        None => {
+            buf.push(2);
+            Ok(())
+        }
     }
 }
 
@@ -4803,10 +4866,16 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    /// The store directory this journal belongs to — needed to announce the journal's format to
+    /// older binaries (see [`TxnJournal::mark_store_format`]).
+    dir: std::path::PathBuf,
     /// Set when an append, or the materialisation after one, failed: the journal may then
     /// hold a frame reported as failed, so it takes no further frame, and keeps what it holds,
     /// until reopened.
     poisoned: bool,
+    /// Whether this handle has already confirmed the store's format marker covers `WTX2`
+    /// frames, so the check costs one read per handle rather than one per commit.
+    format_marked: bool,
 }
 
 #[cfg(feature = "mmap")]
@@ -4829,6 +4898,11 @@ impl TxnJournal {
     /// is rejected as a torn tail. An older build meeting a `WTX2` frame sees unknown magic and
     /// discards the tail — hence the clean version bump rather than a silent record-format change.
     const TXN_MAGIC_V1: u32 = 0x31_58_54_57;
+    /// (sq-ycle) The low three bytes shared by every journal frame magic (`b"WTX"`), so a
+    /// frame of a FUTURE journal version is told apart from a torn tail: the first is an error,
+    /// the second is truncated. Without the distinction a newer build's frame was discarded by
+    /// an older one as corruption.
+    const TXN_MAGIC_FAMILY: u32 = 0x00_58_54_57;
 
     fn path(dir: &std::path::Path) -> std::path::PathBuf {
         dir.join("txn.log")
@@ -4841,8 +4915,60 @@ impl TxnJournal {
             .open(Self::path(dir))?;
         Ok(TxnJournal {
             file,
+            dir: dir.to_path_buf(),
             poisoned: false,
+            format_marked: false,
         })
+    }
+
+    /// (sq-ycle) Announce to OLDER binaries, before the first `WTX2` frame of this handle
+    /// reaches the log, that this store's journal may hold frames they cannot read.
+    ///
+    /// An older build meeting a `WTX2` frame sees an unknown frame magic, treats it as a torn
+    /// tail and TRUNCATES it — destroying a commit that was already acknowledged, silently. The
+    /// only field such a build hard-errors on instead of truncating is `dict-meta.bin`'s format
+    /// version, so a store whose journal may hold `WTX2` frames carries
+    /// `DICT_META_VERSION` = 2 and an older binary refuses to open it at all.
+    ///
+    /// A store this build SAVED already carries 2 (`Dict::save_mmap` writes the current
+    /// version), so this only has work to do for a store written by an older build and then
+    /// written to by this one. The marker is rewritten whole, through a temp file and a rename,
+    /// so a crash cannot leave a partial header; the rest of the file is copied byte for byte.
+    /// Costs one small read per handle, nothing per commit.
+    fn mark_store_format(&mut self) -> std::io::Result<()> {
+        if self.format_marked {
+            return Ok(());
+        }
+        let meta = self.dir.join("dict-meta.bin");
+        let Ok(mut bytes) = std::fs::read(&meta) else {
+            // No mmap dictionary header (a legacy single-file or in-memory-built store): there is
+            // nothing an older build would consult, and nothing this build can mark.
+            self.format_marked = true;
+            return Ok(());
+        };
+        if bytes.len() < 8
+            || u32::from_le_bytes(bytes[0..4].try_into().expect("4 bytes")) != dict::DICT_META_MAGIC
+        {
+            self.format_marked = true;
+            return Ok(());
+        }
+        let version = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
+        if version == dict::DICT_META_VERSION {
+            self.format_marked = true;
+            return Ok(());
+        }
+        bytes[4..8].copy_from_slice(&dict::DICT_META_VERSION.to_le_bytes());
+        let tmp = self.dir.join("dict-meta.bin.tmp");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, &meta)?;
+        fsync_dir(&self.dir)?;
+        self.format_marked = true;
+        Ok(())
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
@@ -4862,6 +4988,24 @@ impl TxnJournal {
         if records.is_empty() {
             return Ok(());
         }
+        // (sq-ycle) The frame header counts records and body bytes in `u32`, so a frame
+        // that does not FIT must be refused before a byte is written — truncating the count or
+        // the length with `as u32` produced a frame whose header disagreed with its body, which
+        // replay then discards as corrupt: an acknowledged commit silently lost. Refused
+        // UNWRITTEN, so the journal is not poisoned by it.
+        let too_big = |what: &str, n: usize| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "txn journal frame refused: {} is {}, which does not fit the on-disk u32 field",
+                    what, n
+                ),
+            )
+        };
+        let n_records =
+            u32::try_from(records.len()).map_err(|_| too_big("the record count", records.len()))?;
+        // The store's format marker must say `WTX2` before the first such frame is on disk.
+        self.mark_store_format()?;
         let mut body = Vec::new();
         for record in records {
             // A graph-existence record is `[op][slot]` and stops there; a data record adds the
@@ -4875,17 +5019,19 @@ impl TxnJournal {
                 TxnOp::Drop(name) => (Self::DROP, Some(name.clone()), None),
             };
             body.push(op);
-            encode_slot(&mut body, &slot);
+            encode_slot(&mut body, &slot)?;
             if let Some(t) = triple {
                 let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
-                body.extend_from_slice(&(line.len() as u32).to_le_bytes());
+                let len = u32::try_from(line.len()).map_err(|_| too_big("a triple record", line.len()))?;
+                body.extend_from_slice(&len.to_le_bytes());
                 body.extend_from_slice(line.as_bytes());
             }
         }
+        let body_len = u32::try_from(body.len()).map_err(|_| too_big("the frame body", body.len()))?;
         let mut buf = Vec::with_capacity(body.len() + 24);
         buf.extend_from_slice(&Self::TXN_MAGIC.to_le_bytes());
-        buf.extend_from_slice(&(records.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&n_records.to_le_bytes());
+        buf.extend_from_slice(&body_len.to_le_bytes());
         buf.extend_from_slice(&body);
         // Checksum covers header + body; the commit marker is appended AFTER it so a torn write
         // can't produce a valid-looking trailer (identical discipline to `Wal::append_batch`).
@@ -4948,6 +5094,20 @@ impl TxnJournal {
             // Accept the magic this build writes AND the previous one (an older build's journal).
             let magic = rd(bstart);
             if magic != Self::TXN_MAGIC && magic != Self::TXN_MAGIC_V1 {
+                // (sq-ycle) A frame of the journal's OWN family (`WTX` + a version byte)
+                // whose version this build does not know is a FUTURE format, not a torn tail: the
+                // bytes are a commit some other build acknowledged. Truncating them would destroy
+                // it, so this is an error that rewrites nothing and names the version.
+                if magic & 0x00FF_FFFF == Self::TXN_MAGIC_FAMILY {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: redo-journal frame format {:?} was written by a newer build and cannot be replayed; nothing was changed",
+                            path.display(),
+                            String::from_utf8_lossy(&magic.to_le_bytes())
+                        ),
+                    ));
+                }
                 break; // not a txn frame (corruption / torn tail)
             }
             let existence_ops_allowed = magic == Self::TXN_MAGIC;
@@ -4969,7 +5129,12 @@ impl TxnJournal {
             // The frame is committed: parse its records. A parse failure here means a
             // committed-but-corrupt body — treat it as a torn tail and stop, conservatively.
             let mut pos = body_start;
-            let mut frame_ops = Vec::with_capacity(n_records);
+            // (sq-ycle) `n_records` is a header field of a file that may be corrupt or
+            // hostile: a huge count behind a small body would reserve gigabytes before a single
+            // bounds check ran. Every record costs at least two bytes of body (an op byte and a
+            // slot kind byte), so the body length bounds how many can possibly follow — the same
+            // defensive clamp `read_named_manifest` applies to its entry count.
+            let mut frame_ops = Vec::with_capacity(n_records.min(body_len / 2));
             for _ in 0..n_records {
                 if pos >= body_end {
                     break 'frames;
@@ -5018,6 +5183,12 @@ impl TxnJournal {
             if frame_ops.len() != n_records {
                 break; // body record count disagreed with the header — corrupt
             }
+            // The declared records must account for the WHOLE body. Trailing bytes inside a
+            // frame that checksums correctly mean the writer and this reader disagree about the
+            // record format, so the frame is not safe to apply.
+            if pos != body_end {
+                break;
+            }
             ops.extend(frame_ops);
             good = trailer_end;
         }
@@ -5035,6 +5206,13 @@ impl TxnJournal {
 fn parse_nt_record(bytes: &[u8]) -> Option<[Term; 3]> {
     let mut it = NTriplesParser::new().for_slice(bytes);
     let t = it.next()?.ok()?;
+    // (sq-ycle) The record's declared length must cover EXACTLY one statement. A record
+    // holding a second statement (or trailing junk after the first) meant the writer framed it
+    // differently from this reader, so taking the first statement and ignoring the rest would
+    // apply a fraction of a committed record. Anything left over rejects the record.
+    if it.next().is_some() {
+        return None;
+    }
     Some([subject_term(&t.subject), Term::NamedNode(t.predicate), t.object])
 }
 
@@ -11052,6 +11230,264 @@ mod tests {
     #[cfg(feature = "mmap")]
     fn base_named() -> Vec<(String, String, String)> {
         vec![("<http://ex/n0>".into(), "<http://ex/p>".into(), "<http://ex/o0>".into())]
+    }
+
+    /// (sq-ycle) Build one well-formed journal frame: `magic`, a record count, a body,
+    /// and the checksum + commit marker trailer the reader requires. Used by the format and
+    /// malformed-frame tests, which need bytes a correct reader would otherwise accept.
+    #[cfg(feature = "mmap")]
+    fn txn_frame(magic: u32, n_records: u32, body: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&magic.to_le_bytes());
+        buf.extend_from_slice(&n_records.to_le_bytes());
+        buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        buf.extend_from_slice(body);
+        let crc = Wal::checksum(&buf);
+        buf.extend_from_slice(&crc.to_le_bytes());
+        buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
+        buf
+    }
+
+    /// One journal record body: `[op][slot]` plus, for a data op, the triple as a
+    /// length-prefixed N-Triples line.
+    #[cfg(feature = "mmap")]
+    fn txn_record(op: u8, line: Option<&str>) -> Vec<u8> {
+        let mut body = vec![op, 2u8]; // slot kind 2 = the default graph
+        if let Some(l) = line {
+            body.extend_from_slice(&(l.len() as u32).to_le_bytes());
+            body.extend_from_slice(l.as_bytes());
+        }
+        body
+    }
+
+    /// (sq-ycle) A journal frame written by a NEWER build must be an ERROR that changes
+    /// nothing — not a torn tail that gets truncated. Truncating it destroys a commit that the
+    /// build which wrote it already acknowledged, and the bytes are the only copy.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_future_journal_format_is_an_error_and_is_never_truncated() {
+        let dir = txn_tmp_dir("future-fmt");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // "WTX9": this journal's own family, a version this build does not know.
+        let future = u32::from_le_bytes([b'W', b'T', b'X', b'9']);
+        let frame = txn_frame(
+            future,
+            1,
+            &txn_record(0, Some("<http://ex/s1> <http://ex/p> <http://ex/o1> .\n")),
+        );
+        let journal = TxnJournal::path(&dir);
+        std::fs::write(&journal, &frame).unwrap();
+        match Graph::open(&dir) {
+            Ok(_) => panic!("a future journal format must not open"),
+            Err(e) => assert!(
+                e.to_string().contains("newer build"),
+                "unexpected error: {}",
+                e
+            ),
+        }
+        assert_eq!(
+            std::fs::read(&journal).unwrap(),
+            frame,
+            "the frame must still be on disk, byte for byte"
+        );
+        // A magic from NO known family stays a torn tail: it is corruption, not a commit.
+        std::fs::write(&journal, txn_frame(0x4A_4E_55_4A, 1, &txn_record(0, Some("<http://ex/s2> <http://ex/p> <http://ex/o2> .\n")))).unwrap();
+        let g = Graph::open(&dir).expect("foreign bytes are a torn tail, as before");
+        assert!(!dump_terms(&g).iter().any(|(s, _, _)| s.contains("s2")));
+        assert!(std::fs::read(&journal).unwrap().is_empty(), "and are truncated");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) Before the first `WTX2` frame of a handle reaches the log, the store's
+    /// format marker must say so, because an older binary that met such a frame would treat it as
+    /// a torn tail and truncate an acknowledged commit. The marker is `dict-meta.bin`'s format
+    /// version — the one field an older build hard-errors on instead of truncating.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_frame_marks_the_store_format_for_older_builds() {
+        let dir = txn_tmp_dir("fmt-marker");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // Rewind the marker to the version an older build wrote, so this store looks like one.
+        let meta = dir.join("dict-meta.bin");
+        let mut bytes = std::fs::read(&meta).unwrap();
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        std::fs::write(&meta, &bytes).unwrap();
+        let version_on_disk = |path: &std::path::Path| {
+            let b = std::fs::read(path).unwrap();
+            u32::from_le_bytes(b[4..8].try_into().unwrap())
+        };
+        assert_eq!(version_on_disk(&meta), 1, "the store starts on the older marker");
+        {
+            let mut g = Graph::open(&dir).expect("a store on the older marker still opens");
+            g.commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            }])
+            .unwrap();
+        }
+        assert_eq!(
+            version_on_disk(&meta),
+            dict::DICT_META_VERSION,
+            "a committed frame must leave the marker an older build refuses"
+        );
+        // And the store this build wrote is still readable by this build, frame included.
+        let g = Graph::open(&dir).unwrap();
+        assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("s1")), "the frame replayed");
+        drop(g);
+        // The protection the marker buys is the REFUSAL: a build that does not know the version
+        // must not open the store (and so cannot truncate the journal it cannot read). This is
+        // that refusal, seen from the other side — an unknown version in place of ours.
+        let mut unknown = std::fs::read(&meta).unwrap();
+        unknown[4..8].copy_from_slice(&7u32.to_le_bytes());
+        std::fs::write(&meta, &unknown).unwrap();
+        match Graph::open(&dir) {
+            Ok(_) => panic!("a store whose format version this build does not know must not open"),
+            Err(e) => assert!(
+                e.to_string().contains("not supported"),
+                "unexpected error: {}",
+                e
+            ),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) Malformed-but-checksummed frames: a reader that trusts a header field
+    /// over the body it can see will either apply a fraction of a record or reserve memory a
+    /// corrupt count asked for. None of these may apply anything, and none may panic.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn malformed_journal_frames_apply_nothing_and_never_over_reserve() {
+        let line = "<http://ex/s1> <http://ex/p> <http://ex/o1> .\n";
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            // A record count far beyond anything the body can hold (an OOM reservation before
+            // this clamp): the frame is corrupt and applies nothing.
+            ("huge record count", txn_frame(TxnJournal::TXN_MAGIC, u32::MAX, &txn_record(0, Some(line)))),
+            // Trailing bytes after the declared records, inside a frame that checksums.
+            ("trailing body bytes", {
+                let mut body = txn_record(0, Some(line));
+                body.extend_from_slice(b"junk");
+                txn_frame(TxnJournal::TXN_MAGIC, 1, &body)
+            }),
+            // One record whose declared length holds TWO statements: the reader must not take
+            // the first and ignore the rest.
+            ("two statements in one record", {
+                let both = format!("{}{}", line, "<http://ex/s2> <http://ex/p> <http://ex/o2> .\n");
+                txn_frame(TxnJournal::TXN_MAGIC, 1, &txn_record(0, Some(&both)))
+            }),
+            // An existence record (CREATE) whose slot says "default graph": the default graph
+            // can be cleared but neither created nor dropped.
+            ("CREATE of the default graph", txn_frame(TxnJournal::TXN_MAGIC, 1, &txn_record(2, None))),
+            // A record count the body cannot reach (one record declared, none present).
+            ("count exceeds the body", txn_frame(TxnJournal::TXN_MAGIC, 1, &[])),
+        ];
+        for (what, frame) in cases {
+            let dir = txn_tmp_dir("malformed");
+            std::fs::remove_dir_all(&dir).ok();
+            Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+                .unwrap()
+                .save(&dir)
+                .unwrap();
+            std::fs::write(TxnJournal::path(&dir), &frame).unwrap();
+            let g = Graph::open(&dir).unwrap_or_else(|e| panic!("{}: open failed: {}", what, e));
+            let got = dump_terms(&g);
+            assert_eq!(got.len(), 1, "{}: only the base triple may be present: {:?}", what, got);
+            assert!(
+                !got.iter().any(|(s, _, _)| s.contains("s1") || s.contains("s2")),
+                "{}: a malformed frame applied a record: {:?}",
+                what,
+                got
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    /// (sq-ycle) A graph name that is neither an IRI nor a blank node cannot be written:
+    /// the manifest would hold a value its own decoder rejects, so the store would not open. It is
+    /// refused before anything is written, rather than coerced to a lexical form.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_graph_name_that_cannot_be_decoded_is_refused_before_it_is_written() {
+        let dir = txn_tmp_dir("bad-name");
+        std::fs::remove_dir_all(&dir).ok();
+        let mut g = Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads").unwrap();
+        g.named.push((
+            Term::Literal(oxrdf::Literal::new_simple_literal("not a graph name")),
+            Graph::load_str("<http://ex/a> <http://ex/b> <http://ex/c> .", "ntriples").unwrap(),
+        ));
+        let e = g.save(&dir).expect_err("a literal graph name must be refused");
+        assert!(e.to_string().contains("neither an IRI nor a blank node"), "unexpected error: {}", e);
+        assert!(
+            !dir.join(NAMED_MANIFEST).exists(),
+            "and no manifest may be published naming it"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) A durable path that fails PART-WAY freezes the tree: a create has
+    /// already published its manifest entry by the time it opens the sub-graph, and a drop has
+    /// already removed its entry in memory by the time it persists. Carrying on from either
+    /// acknowledges writes against a state no reopen reproduces.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_durable_path_that_fails_part_way_freezes_the_tree() {
+        // (a) A create that cannot build its sub-tree.
+        let dir = txn_tmp_dir("freeze-create");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            std::fs::write(dir.join(NAMED_SUBDIR), b"not a directory").unwrap();
+            let e = g.ensure_named(&named("fresh")).expect_err("the create cannot succeed");
+            assert!(e.contains("frozen until it is reopened"), "unexpected error: {}", e);
+            let t = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+            assert!(
+                g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+                "a write after a half-done create must be refused"
+            );
+        }
+        std::fs::remove_file(dir.join(NAMED_SUBDIR)).ok();
+        std::fs::remove_dir_all(&dir).ok();
+
+        // (b) A drop that cannot stage its survivor sub-tree — with the entry already gone
+        //     from the in-memory set.
+        let dir = txn_tmp_dir("freeze-drop");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            let staging = dir.join(NAMED_SUBDIR).with_extension("drop-new");
+            std::fs::write(&staging, b"not a directory").unwrap();
+            let e = g
+                .drop_named_durable(&named("g0"))
+                .expect_err("the drop cannot stage its survivors");
+            assert!(e.contains("frozen until it is reopened"), "unexpected error: {}", e);
+            let t = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+            assert!(
+                g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+                "a write after a half-done drop must be refused"
+            );
+            std::fs::remove_file(&staging).ok();
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A journal whose frame failed to materialise keeps it for the reopen to redo, and
