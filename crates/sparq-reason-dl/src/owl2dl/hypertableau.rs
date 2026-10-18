@@ -416,6 +416,9 @@ pub(crate) struct Tableau<'c> {
     /// Whether the NI-rule also applies when an at-most restriction merges (see
     /// [`Tableau::run`]).
     eager_ni: bool,
+    /// Whether an at-most filler's superset atom is chosen only where the restriction counts
+    /// ([`Clause::scoped`]).
+    scoped: bool,
 }
 
 /// What the key rule did.
@@ -493,6 +496,7 @@ impl<'c> Tableau<'c> {
             named: Vec::new(),
             ni_nodes: FxHashMap::default(),
             eager_ni: false,
+            scoped: false,
         }
     }
 
@@ -567,6 +571,27 @@ impl<'c> Tableau<'c> {
         }
     }
 
+    /// After a satisfiable run, the distinct labels of the model's elements: the active
+    /// abstract nodes not blocked (a directly blocked node has its blocker's label), each
+    /// sorted.
+    pub(crate) fn element_labels(&self) -> Vec<Vec<Atom>> {
+        let blocked = self.blocked();
+        let mut out: Vec<Vec<Atom>> = (0..self.nodes.len())
+            .filter(|&n| {
+                let node = &self.nodes[n];
+                node.active && !node.concrete && !blocked[n]
+            })
+            .map(|n| {
+                let mut l: Vec<Atom> = self.nodes[n].label.keys().copied().collect();
+                l.sort_unstable();
+                l
+            })
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
@@ -608,7 +633,8 @@ impl<'c> Tableau<'c> {
     /// model, the run starts over with the NI-rule applied to those merges too (`eager_ni`,
     /// as HermiT does), on the rest of the budget. The eager rule settles graphs whose
     /// merges at a root would otherwise keep joining parts of the tree, but slows some that
-    /// the plain attempt decides.
+    /// the plain attempt decides. The eager attempt also chooses an at-most filler's
+    /// superset atom only where the restriction counts ([`Clause::scoped`]).
     pub(crate) fn run(&mut self) -> Result<bool, Stop> {
         let (full, done) = (self.budget.max_steps, self.work());
         // A budget already spent (by loading the ABox, say) is left to the run to report;
@@ -626,6 +652,7 @@ impl<'c> Tableau<'c> {
         let spent = self.work() - start.work();
         *self = start;
         self.eager_ni = true;
+        self.scoped = true;
         self.probes.set(self.probes.get() + spent);
         self.run_inner()
     }
@@ -1353,6 +1380,9 @@ impl<'c> Tableau<'c> {
 
     fn match_clause(&self, ci: u32, x: Node, found: &mut Vec<Instance>) {
         let cl = &self.c.clauses[ci as usize];
+        if cl.scoped.is_some_and(|scoped| scoped != self.scoped) {
+            return;
+        }
         let node = &self.nodes[x as usize];
         let mut deps = Dep::default();
         for a in &cl.body_x {
@@ -1978,9 +2008,10 @@ impl<'c> Tableau<'c> {
         for &ci in &self.index.multi_y {
             self.probe();
             let cl = &self.c.clauses[ci as usize];
-            // A clause whose body fails at `s`, or whose head already holds there, counts
-            // nothing.
-            if !cl.body_x.iter().all(|a| sn.label.contains_key(a))
+            // A clause inactive in this attempt counts nothing, nor does one whose body fails
+            // at `s` or whose head already holds there.
+            if cl.scoped.is_some_and(|scoped| scoped != self.scoped)
+                || !cl.body_x.iter().all(|a| sn.label.contains_key(a))
                 || cl.head.iter().any(|h| match *h {
                     Head::Concept(a, Var::X) => sn.label.contains_key(&a),
                     Head::SelfLoop(r) => self.has_role(r, s, s),
