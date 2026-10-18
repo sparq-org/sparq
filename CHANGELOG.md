@@ -166,7 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `commit_a`/`commit_b`, and a `Filter*` member inherits the method of the source scan of every
   validated binding edge that binds it; all of them must agree. The declared id is resolved through the
   `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
-  `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
+  `dual-leaf`) and only the resolved member is used. Five new fail-closed refusals:
   `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
   `CheckError::SubProofMethodUnresolved` (no single method could be derived — differing methods
   across bound commitments, a mixture of attested and unattested ones, an unparseable bound
@@ -199,7 +199,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
   decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
   `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
-  state. Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
+  state. Of the five refusals above, the first four compile only with `dual-leaf`;
+  `CheckError::MemberNotForFixedRole` is UNCONDITIONAL, as are `FixedMemberRole` and the
+  per-role `fixed_member` selection path that raises it, which run in every feature state.
+  Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
   achieved.
 
 - **sparq-zk-compose:** the hidden-join gate's ENDPOINT half now runs in BOTH stage-1 regimes.
@@ -214,11 +217,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names commitments other than its endpoint scans' is now refused
   (`CheckError::JoinCommitmentMismatch`) instead of standing as a prover-declared linkage, and a
   hidden join one of whose endpoints is a bounded-path (`PathReach`) sub-proof rather than a
-  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's verdicts
-  are unchanged — it already ran the whole gate. In BOTH regimes and in EVERY feature state, a
+  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's ENDPOINT
+  verdicts are unchanged — it already ran that half of the gate — but see the coverage rule
+  below, which is new in both regimes. In BOTH regimes and in EVERY feature state, a
   `JoinEq` sub-proof that no `JoinEdge` names is now refused
   (`CheckError::JoinProofNotBoundToAnEdge`): its `commit_a`/`commit_b` were free of the manifest's
   declared linkage, and no later gate read them. Adds refusals and no acceptance.
+
+- **sparq-zk-compose (opt-in `extended-fragment`):** the extended-fragment verifier now REFUSES
+  four query/presentation shapes it does not discharge, instead of accepting them.
+  (1) A query one of whose re-derived branches carries a `FILTER` is refused by the routing gate
+  (`FragmentDispatchError::FilterNotDischarged { branch, filters }`): the flat FILTER obligation
+  lives in `bind_query_correctness`, which this regime skips, and nothing on this path reads
+  `FragmentBranch::filters`, so an accepted presentation would have answered the query as though
+  the FILTER were absent. Checked over EVERY branch, attributed or not; the branch-local typed
+  FILTER obligation that would lift it does not exist yet.
+  (2) A `VALUES` cell now constrains its variable whether or not that variable is PROJECTED:
+  `bind_fragment_join_coherence` merges every selected non-`UNDEF` cell — re-encoded by the
+  verifier from the query text, never a prover encoding — into the branch coherence map before
+  the atoms are read, so the scan slot or `PathReach` endpoint carrying the variable must equal
+  it. `bind_fragment_solution` still binds only the PROJECTED cells, having no disclosed term for
+  the rest; before the merge an unprojected `VALUES` variable entered no map at all. Two blocks
+  pinning one variable to disagreeing cells is `FragmentJoinError::ValuesCellIncoherent`, a cell
+  the verifier cannot re-encode is `ValuesCellUnencodable`, and an atom disagreeing with a seeded
+  cell is `Incoherent` against that atom.
+  (3) The branch coherence maps refuse a DISAGREEING duplicate rather than overwriting it, so a
+  variable occurring twice in ONE atom is compared: a path whose subject and object are the same
+  variable (`ASK { ?x <p>+ ?x }`) must carry `src_enc` equal to `dst_enc`, and the two slots of a
+  self-joining BGP atom must agree in the selected row.
+  (4) `verify_fragment_manifest` refuses a presentation carrying NO `BranchWitness`
+  (`CheckError::FragmentNoBranchWitness`): every branch-local layer iterates the witnesses, so an
+  empty vector left all four of them with nothing to check and the accept would have rested on the
+  crypto stage alone. `dispatch_fragment` called on its own stays a deliberate no-op over such a
+  manifest, since it is also used over stage-1-style presentations.
+  All four ADD refusals and open nothing; default builds are byte-identical (the feature is OFF by
+  default) and no new dependency is added. Research grade, NOT externally audited (`sq-qhy4`). No
+  soundness or privacy claim.
+  <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
+
+- **sparq-zk-compose:** stage 2g′ (`bind_join_endpoints`) collects the covered join-proof indices
+  in the SAME pass that validates the declared edges, so the coverage rule is a set lookup per
+  sub-proof rather than a re-walk of `join_edges` for each one, and the `JoinEq` arm of the
+  per-sub-proof member resolution reads a per-manifest index of validated endpoints
+  (`JoinEndpointIndex`, built once) rather than re-validating the matching edges for every
+  sub-proof it is asked about. Both vectors are prover-controlled, so neither product is a cost a
+  presentation can choose any more. No verdict changes: the same edges are validated and the same
+  endpoints are read.
 
 - **sparq-lws-core (notifications):** subscription expiry is decided against a durable
   high-water time stored in the index, so a restart with the clock stepped back does not revive

@@ -506,15 +506,39 @@ jobs:
       # `#[cfg(feature = "dual-leaf")]` compiles to nothing there, and the
       # feature-matrix `dual-leaf` leg has no toolchain and does not run ignored
       # cases — so such a case would execute in NO lane. This step is the executor
-      # for that intersection: the ignored dual-leaf cases of `tests/e2e.rs` (the
-      # DEFERRED member resolution over a hidden-only commitment, which needs a
-      # real `scan_k2` proof AND a real hidden-issuer proof). Named explicitly so a
-      # silently-skipped body cannot report PASS.
+      # for that intersection: the ignored dual-leaf cases of `tests/e2e.rs`.
+      #
+      # The cases, by name:
+      #   * the DEFERRED member resolution over a hidden-only commitment (a real
+      #     `scan_k2` proof AND a real hidden-issuer proof) — the NEGATIVE case;
+      #   * `hidden_issuer_in_set_*` / `hidden_issuer_only_*` — the POSITIVE
+      #     controls for the deferred post-pass: an honest hidden-issuer
+      #     presentation must still VERIFY with `dual-leaf` on, so the post-pass is
+      #     not refusing everything it defers. Without `--features dual-leaf` these
+      #     two run in the step above with the whole resolution compiled out, which
+      #     says nothing about it.
+      #
+      # `--exact` with one invocation per name, and the per-test result line is
+      # CHECKED: a libtest name filter that matches nothing exits 0, so a renamed
+      # or `cfg`-ed-out case would otherwise report PASS having run nothing.
       - name: Run the ignored dual-leaf e2e cases (real bb, default-off feature)
         if: steps.changes.outputs.zk == 'true'
         run: |
-          cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
-            -- --ignored --test-threads=1 a_deferred_member_resolution
+          set -euo pipefail
+          for t in \
+            a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate \
+            hidden_issuer_in_set_verifies_and_key_is_private \
+            hidden_issuer_only_verifies_with_clear_key_absent \
+            hidden_issuer_only_message_is_held_to_the_method_policy; do
+            echo "::group::$t"
+            cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
+              -- --ignored --exact --test-threads=1 "$t" 2>&1 | tee "/tmp/dl-e2e-$t.log"
+            echo "::endgroup::"
+            if ! grep -qE '^test result: ok\. 1 passed' "/tmp/dl-e2e-$t.log"; then
+              echo "FAIL: $t did not run as exactly one passing test under --features dual-leaf" >&2
+              exit 1
+            fi
+          done
 
       # The live tests that are NOT `#[ignore]`d (e2e forge-reject cases, the signed
       # filter bindings, the family members, the differential fuzz, the car-hire capture)
