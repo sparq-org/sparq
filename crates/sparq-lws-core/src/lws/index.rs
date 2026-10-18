@@ -270,8 +270,11 @@ impl Kept {
 
 /// Visit every resource the agent may read now, with its types (full IRIs) and its metadata;
 /// an error when a listing, or whether a resource the agent may read is there, or its metadata,
-/// cannot be read, or when `visit` refuses. Read is decided first for each resource: one whose
-/// access cannot be decided is one the agent may not read, passed over as one not there is. Each resource's shared lock is held from its permission check through the
+/// cannot be read, or when `visit` refuses. Read is decided for each resource before anything but
+/// its lock is asked of it: one whose access cannot be decided is one the agent may not read
+/// (unless a grant names the agent for it, [`super::access::granted`]: then the walk fails),
+/// passed over as one not there is; a container it may not read is still listed, and its
+/// listing charged. Each resource's shared lock is held from its permission check through the
 /// read of its metadata and its visit, so the types and relations seen are those of the state
 /// the check allowed (a delete and a re-create by someone else cannot slip in between); the lock
 /// is released, and the metadata dropped, before the next resource.
@@ -307,11 +310,14 @@ async fn readable<S: Store + 'static>(
             return Err(Failed::SetAside);
         }
         let is_container = uri.ends_with('/');
-        // Whether the agent may read it is decided first, before anything else is asked of it:
-        // one it may not read (or whose access cannot be decided, which fails closed) is passed
-        // over as one that is not there, with nothing more asked of it but, for a container,
-        // its listing (what is under it may be readable). So no answer turns on whether a
-        // resource the agent may not read is there, or on its state.
+        // Whether the agent may read it is decided before anything else is asked of it but its
+        // lock (above: a resource set aside fails the walk with `503` before its access is
+        // decided, whoever asks). One it may not read (or whose access cannot be decided, which
+        // fails closed, unless a grant names the agent) is passed over as one that is not there,
+        // with nothing more asked of it but, for a container, its listing (what is under it may
+        // be readable), which is read and charged to the budget as any listing is. So whether a
+        // document the agent may not read is there is never asked; a container it may not read
+        // is listed (a missing one listing nothing), and its listing's size counts.
         let may_read = match state.check(Action::Read, &uri, agent).await {
             Ok(may) => may,
             Err(crate::error::ServerError::NotFound) => false,
@@ -1049,6 +1055,17 @@ mod tests {
         let unreadable = searched_as(&with, &with_store, &stranger).await;
         let absent = searched_as(&without, &without_store, &stranger).await;
         assert_eq!((unreadable.0, &unreadable.1), (absent.0, &absent.1));
+        // A grant to everyone names no one: the stranger is still told what it is told of a
+        // resource that is not there, for that resource and for the whole storage.
+        let everyone = super::super::FOAF_AGENT;
+        for state in [&with, &without] {
+            super::super::test_store::grant_read(state, everyone, &[&x]).await;
+            super::super::test_store::grant_read(state, everyone, &[&state.cfg.storage()]).await;
+        }
+        let public = searched_as(&with, &with_store, &stranger).await;
+        let absent = searched_as(&without, &without_store, &stranger).await;
+        assert_eq!(public.0, StatusCode::OK);
+        assert_eq!((public.0, &public.1), (absent.0, &absent.1));
         // One a grant names for it may be a reader: for it, the walk fails whole.
         super::super::test_store::grant_read(&with, "https://reader.example/#me", &[&x]).await;
         let reader = agent("https://reader.example/#me");

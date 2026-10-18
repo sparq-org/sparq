@@ -822,20 +822,25 @@ pub async fn allowed_as<S: Store + 'static>(
     .unwrap_or(false)
 }
 
-/// Whether some grant in force names `agent` (or everyone) for `action` on `uri`: whether a
-/// grant could let it, whatever the resource's metadata says. Read from the grants alone.
+/// Whether some grant in force names `agent` itself (its subject, not everyone) for `action`
+/// on `uri`: whether a grant could let it in particular, whatever the resource's metadata says.
+/// Read from the grants alone. A grant to everyone (`foaf:Agent`) does not count: it names no
+/// one, so what turns on this (the type index failing whole for a resource whose access cannot
+/// be decided) never turns on a grant that is not the agent's own.
 pub(crate) fn granted<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
 ) -> bool {
-    let subject = agent.subject.as_deref();
+    let Some(subject) = agent.subject.as_deref() else {
+        return false;
+    };
     state
         .access
         .policies_covering(action, uri)
         .iter()
-        .any(|p| p.assignee == FOAF_AGENT || Some(p.assignee.as_str()) == subject)
+        .any(|p| p.assignee != FOAF_AGENT && p.assignee == subject)
 }
 
 pub(crate) fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
