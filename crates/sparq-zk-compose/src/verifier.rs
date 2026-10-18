@@ -203,7 +203,7 @@ pub struct KeySet {
     /// unchanged, the same way `hidden_issuer_depth` does.
     ///
     /// `None` means the caller expressed no preference and
-    /// [`MethodPolicy::current`] applies, which accepts a method-UNBOUND
+    /// [`MethodPolicy::current`] applies, which REFUSES a method-UNBOUND
     /// attestation; it is stored as an `Option` only so a `Default`/`empty()`
     /// key set carries no opinion of its own.
     method_policy: Option<MethodPolicy>,
@@ -261,9 +261,10 @@ impl KeySet {
     /// an attested superseded method is admitted
     /// ([`MethodPolicy::admit_legacy_dual_leaf_v1`]).
     ///
-    /// Unset, [`MethodPolicy::current`] applies, which accepts a method-UNBOUND
-    /// attestation — so an existing manifest verifies exactly as it did before
-    /// method authentication existed.
+    /// Unset, [`MethodPolicy::current`] applies, which REFUSES a method-UNBOUND
+    /// attestation. A relying party that must keep verifying credentials issued
+    /// before the method-bound message shapes existed states that with
+    /// [`MethodPolicy::admit_unbound`].
     #[must_use]
     pub fn with_method_policy(mut self, policy: MethodPolicy) -> Self {
         self.method_policy = Some(policy);
@@ -1582,10 +1583,13 @@ pub enum CheckError {
     /// The circuit member a verification key would be selected for is NOT legal,
     /// under the `crate::dispatch` `(method × circuit)` matrix, for the
     /// AUTHENTICATED commitment method of a commitment that sub-proof is bound
-    /// to. Raised by `resolve_member_against_methods`, which every verification-key
-    /// selection site whose sub-proof is bound to a commitment now routes its id
-    /// through, so the key is selected from the resolved member rather than from
-    /// the id alone.
+    /// to. Raised by `resolve_member_for_sub_proof`, which the per-sub-proof
+    /// verification-key selection site routes its declared id through, so the key
+    /// is selected from the resolved member rather than from the id alone. That is
+    /// the ONE selection site whose id comes from the manifest; the five auxiliary
+    /// gates' members come from the relying party's own policy or registry (see
+    /// `fixed_member`), and `crate::result`'s selected-answer verifier is a
+    /// separate surface outside this PR's scope.
     ///
     /// This variant only ADDS a refusal: `crate::dispatch::resolve_circuit` echoes
     /// the id it is given on success, so a legal pair selects exactly the member it
@@ -1604,16 +1608,58 @@ pub enum CheckError {
     /// which raises them: an unparseable bound commitment, two bound commitments
     /// authenticating DIFFERENT methods, or a bound commitment authenticating a
     /// method beside one authenticating none. `resolve_member_for_sub_proof` also
-    /// raises it for an ORPHAN sub-proof — one bound to no committed graph — whose
-    /// member is not legal under every admissible method, so no
-    /// method-independent member exists to select.
+    /// raises it for a sub-proof whose bound commitments authenticated NO method,
+    /// and for an ORPHAN one — bound to no committed graph — when the member is
+    /// not legal under every ADMISSIBLE method, so no method-independent member
+    /// exists to select.
     ///
-    /// BEHAVIOUR CHANGE: a manifest whose sub-proof binds commitments that
-    /// authenticated DIFFERENT methods, or a mixture of attested and unattested
-    /// ones, used to be accepted and is now refused. An edge-less FILTER over a
-    /// member legal under every recognised method still verifies.
+    /// BEHAVIOUR CHANGE (opt-in, `dual-leaf` only — see the variant's `cfg`): a
+    /// manifest whose sub-proof binds commitments that authenticated DIFFERENT
+    /// methods, or a mixture of attested and unattested ones, used to be accepted
+    /// and is now refused. An edge-less FILTER over a member legal under every
+    /// admissible method still verifies.
     #[cfg(feature = "dual-leaf")]
     SubProofMethodUnresolved { proof: String, reason: String },
+
+    /// A commitment a sub-proof is bound to has NO entry in the
+    /// authenticated-method map, so no attestation gate established anything
+    /// about it — not even that it authenticated no method.
+    ///
+    /// This is NOT the same fact as an explicit [`AuthenticatedMethod::Unbound`]
+    /// entry. An `Unbound` entry means an attestation over that commitment
+    /// verified and attested no method; an ABSENT entry means the attestation
+    /// gate never saw the commitment at all, because nothing in the manifest ties
+    /// it to a credential (stage 2d walks the SCAN- and PATH-referenced
+    /// commitments). Reading absence as `Unbound` let a sub-proof be verified
+    /// against commitments no issuer attested, so absence is refused by name.
+    /// `commitment` is the canonical commitment hex.
+    #[cfg(feature = "dual-leaf")]
+    SubProofCommitmentNotAuthenticated { proof: String, commitment: String },
+
+    /// A `JoinEq` sub-proof that NO declared [`crate::manifest::JoinEdge`] names.
+    ///
+    /// A join proof's public `commit_a`/`commit_b` are prover-chosen; the only
+    /// thing that ties them to attested credentials is an edge naming the two
+    /// endpoint scans (`bind_join_endpoints`). A join proof no edge names
+    /// therefore proves an equality between two commitments of the prover's
+    /// choosing, discharges nothing, and is refused fail-closed rather than
+    /// verified beside the manifest's real sub-proofs. `proof` is the sub-proof
+    /// index.
+    JoinProofNotBoundToAnEdge { proof: usize },
+
+    /// A manifest sub-proof whose declared circuit id names a member of one of the
+    /// five AUXILIARY bb gates' families (`RevokeUnset`, `RevokeHiddenRef`,
+    /// `HiddenIssuer`, `HolderPok`, `HolderSet`).
+    ///
+    /// Those members are selected by the relying party's own policy or registry
+    /// and are declared nowhere in the manifest, so a sub-proof carrying one is
+    /// refused rather than having a key selected for it. `derive_id` already
+    /// refuses the pairing (every variant re-derives its OWN family, so a carried
+    /// auxiliary id yields `CircuitIdMismatch`); this is the second, explicit
+    /// barrier at the selection site, so the refusal does not depend on that
+    /// derivation staying exhaustive. `circuit` is the offending member's package
+    /// name.
+    AuxiliaryMemberIdInSubProof { proof: usize, circuit: String },
 
     /// An AUXILIARY bb gate's verification key would have been selected for a
     /// member outside that gate's own role. Each of the five auxiliary roles has
@@ -1621,6 +1667,14 @@ pub enum CheckError {
     /// never declared by the manifest; `fixed_member` refuses anything else rather
     /// than selecting a key for another role's member. `role` is the gate
     /// (e.g. `"holder_set"`), `circuit` the offending member's package name.
+    ///
+    /// HONEST REACH: every one of the five call sites builds its id from the
+    /// relying party's own input, so no manifest can make this fire today. It is a
+    /// standing barrier against a future site that took an id from elsewhere, not
+    /// a refusal a presentation can reach. What DOES keep an auxiliary member out
+    /// of a manifest sub-proof is `derive_id` (each variant re-derives its OWN
+    /// family, so a carried auxiliary id is a `CircuitIdMismatch`) and, at the
+    /// selection site, [`CheckError::AuxiliaryMemberIdInSubProof`].
     MemberNotForFixedRole { role: String, circuit: String },
 
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
@@ -2282,6 +2336,29 @@ impl std::fmt::Display for CheckError {
                  this sub-proof, so its circuit member could not be selected against \
                  one — {} (refused fail-closed)",
                 proof, reason
+            ),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::SubProofCommitmentNotAuthenticated { proof, commitment } => write!(
+                f,
+                "{}: the commitment {} it is bound to has no entry in the \
+                 authenticated-method map, so no attestation gate established \
+                 anything about it — refused fail-closed (an ABSENT entry is not \
+                 an attestation that attested no method)",
+                proof, commitment
+            ),
+            CheckError::JoinProofNotBoundToAnEdge { proof } => write!(
+                f,
+                "sub_proofs[{}]: a join_eq sub-proof that no declared join edge \
+                 names — its commit_a/commit_b are prover-chosen and nothing ties \
+                 them to an attested credential, so it is refused fail-closed",
+                proof
+            ),
+            CheckError::AuxiliaryMemberIdInSubProof { proof, circuit } => write!(
+                f,
+                "sub_proofs[{}]: the declared circuit id {} names a member of an \
+                 AUXILIARY gate's family, which the relying party selects from its \
+                 own policy or registry and the manifest never declares — refused",
+                proof, circuit
             ),
             CheckError::MemberNotForFixedRole { role, circuit } => write!(
                 f,
@@ -3706,8 +3783,9 @@ fn bind_issuer_attestations(
             // signature and never read from a prover field.
             //
             // Back-compat: an existing attestation signs the method-unbound
-            // message, so it authenticates as `Unbound` and — under the default
-            // policy, which accepts that — is accepted exactly as before, with
+            // message, so it authenticates as `Unbound`. The DEFAULT policy
+            // refuses that; under the written-down `admit_unbound()` downgrade it
+            // is accepted exactly as before, with
             // the same `InvalidIssuerSignature` refusal when nothing verifies.
             //
             // Trial-verifying the candidate set is the expensive part of this
@@ -5564,6 +5642,27 @@ impl FixedMemberRole {
             FixedMemberRole::HolderSet => matches!(id, CircuitId::HolderSet { .. }),
         }
     }
+
+    /// Every role, so a caller can quantify over them.
+    ///
+    /// Only the `dual-leaf` per-sub-proof resolution reads it, so it is compiled
+    /// with that feature.
+    #[cfg(feature = "dual-leaf")]
+    const ALL: [FixedMemberRole; 5] = [
+        FixedMemberRole::HiddenRevocation,
+        FixedMemberRole::FullyHiddenRevocation,
+        FixedMemberRole::HiddenIssuer,
+        FixedMemberRole::HolderPok,
+        FixedMemberRole::HolderSet,
+    ];
+
+    /// The role whose family `id` belongs to, if any — the test a sub-proof's
+    /// declared id is held to, since no auxiliary member may ever be selected for
+    /// one.
+    #[cfg(feature = "dual-leaf")]
+    fn owning(id: &CircuitId) -> Option<FixedMemberRole> {
+        FixedMemberRole::ALL.into_iter().find(|r| r.owns(id))
+    }
 }
 
 /// Select an AUXILIARY role's fixed verification-key member.
@@ -5580,10 +5679,16 @@ impl FixedMemberRole {
 /// `id` outside the role's family is [`CheckError::MemberNotForFixedRole`] rather
 /// than a key selected for another role's member. On the sound path the callers
 /// construct the role's own family inline, so this never fires; it is the
-/// compiled statement of that invariant, and the companion test
-/// `no_manifest_declared_id_can_select_an_auxiliary_role_member` shows that no
-/// manifest sub-proof can derive an id any role owns, so the two member-selection
-/// populations are disjoint.
+/// compiled statement of that invariant.
+///
+/// What keeps the auxiliary families out of the manifest is NOT this function:
+/// `derive_id` re-derives every sub-proof's id from its public inputs and
+/// refuses any disagreement, so an auxiliary id declared by a sub-proof is a
+/// `CheckError::CircuitIdMismatch` at stage 1b — pinned over the whole
+/// (auxiliary id × `ProofInputs` variant) cross product by
+/// `no_sub_proof_variant_can_declare_an_auxiliary_member_id`. The per-sub-proof
+/// selection site refuses it a second time, by name
+/// (`CheckError::AuxiliaryMemberIdInSubProof`).
 fn fixed_member(role: FixedMemberRole, id: CircuitId) -> Result<CircuitId, CheckError> {
     if role.owns(&id) {
         Ok(id)
@@ -5626,7 +5731,10 @@ enum SubProofMethod {
     Deferred,
     /// The sub-proof is bound to NO committed graph at all, so no method can be
     /// derived for it. [`resolve_member_for_sub_proof`] admits it only if its
-    /// member is legal under EVERY recognised method.
+    /// member is legal under every ADMISSIBLE method — the methods
+    /// `MethodPolicy::widest_admissible` admits, which is narrower than every
+    /// RECOGNISED method (the `value-only` research dial is recognised and
+    /// admissible under no policy).
     NoCommitment,
 }
 
@@ -5695,8 +5803,18 @@ fn bound_commitments(manifest: &ProofManifest, proof: usize) -> Vec<FieldHex> {
             out
         }
         // Every remaining variant is a FILTER member, which binds to committed
-        // data only through a binding edge.
-        _ => {
+        // data only through a binding edge. Listed exhaustively rather than with a
+        // wildcard, so a NEW `ProofInputs` variant has to state its own relation
+        // to a commitment here instead of silently inheriting the FILTER rule.
+        ProofInputs::FilterInt { .. }
+        | ProofInputs::FilterF64 { .. }
+        | ProofInputs::FilterSignedInt { .. }
+        | ProofInputs::FilterDecimal { .. }
+        | ProofInputs::FilterValueDl { .. }
+        | ProofInputs::FilterValueDlF64 { .. }
+        | ProofInputs::FilterValueDlDecimal { .. }
+        | ProofInputs::FilterValueDlDateTime { .. }
+        | ProofInputs::FilterValueDlBool { .. } => {
             let mut out: Vec<FieldHex> = Vec::new();
             for edge in &manifest.binding_edges {
                 if edge.to_proof != proof {
@@ -5722,16 +5840,17 @@ fn hidden_only_commitments(
     manifest: &ProofManifest,
     trusted_key_set: &KeySet,
 ) -> BTreeSet<String> {
-    let covered = hidden_issuer_covered_commitments(manifest, trusted_key_set);
-    covered
+    // The clear-attested commitment hexes, interned ONCE: the filter below used to
+    // re-walk and re-parse every attestation for each covered commitment, which is
+    // quadratic in a prover-controlled pair of vectors.
+    let clear: BTreeSet<String> = manifest
+        .commitment_attestations
+        .iter()
+        .filter_map(|a| a.commitment.to_field().map(|f| field_to_hex(&f)))
+        .collect();
+    hidden_issuer_covered_commitments(manifest, trusted_key_set)
         .into_iter()
-        .filter(|hex| {
-            !manifest.commitment_attestations.iter().any(|a| {
-                a.commitment
-                    .to_field()
-                    .is_some_and(|f| &field_to_hex(&f) == hex)
-            })
-        })
+        .filter(|hex| !clear.contains(hex))
         .collect()
 }
 
@@ -5741,7 +5860,7 @@ fn hidden_only_commitments(
 /// An ORPHAN sub-proof — bound to no committed graph — yields
 /// [`SubProofMethod::NoCommitment`]; [`resolve_member_for_sub_proof`] decides it.
 ///
-/// Three refusals, all [`CheckError::SubProofMethodUnresolved`]:
+/// Three refusals raised as [`CheckError::SubProofMethodUnresolved`]:
 /// - a bound commitment that is not a parseable field element;
 /// - two bound commitments that authenticated DIFFERENT methods;
 /// - a bound commitment that authenticated a method beside one that authenticated
@@ -5752,6 +5871,11 @@ fn hidden_only_commitments(
 ///   therefore lets `Unbound` pass beside `Bound(StringCanonicalV1)`: that is
 ///   sound for choosing an encoder (the two encode identically) and is not sound
 ///   for choosing a member, because `Unbound` attests no leaf shape at all.
+///
+/// And one as [`CheckError::SubProofCommitmentNotAuthenticated`]: a bound
+/// commitment with NO entry in the map. That is not the same fact as an explicit
+/// `Unbound` entry — it means the attestation gate never saw the commitment —
+/// and it is refused rather than read as "attested no method".
 ///
 /// Returns [`SubProofMethod::Deferred`] at [`MethodStage::BeforeHiddenIssuer`]
 /// when any bound commitment is hidden-only, so no candidate method is read as
@@ -5782,12 +5906,18 @@ fn fold_bound_methods(
         if stage == MethodStage::BeforeHiddenIssuer && hidden_only.contains(&key) {
             return Ok(SubProofMethod::Deferred);
         }
-        // A commitment ABSENT from the map authenticated no method, which is the
-        // same fact as an explicit `Unbound` entry and is read identically.
-        let authenticated = methods
-            .get(&key)
-            .copied()
-            .unwrap_or(AuthenticatedMethod::Unbound);
+        // Hardening: a commitment ABSENT from the map is NOT the same fact as an
+        // explicit `Unbound` entry, and reading absence as `Unbound` let a
+        // sub-proof be verified against a commitment no attestation gate ever
+        // saw. Stage 2d walks the SCAN- and PATH-referenced commitments, so a
+        // commitment reachable only from a join proof's public inputs gets no
+        // entry at all. Refused by name.
+        let Some(&authenticated) = methods.get(&key) else {
+            return Err(CheckError::SubProofCommitmentNotAuthenticated {
+                proof: label.to_string(),
+                commitment: key,
+            });
+        };
         match seen {
             None => seen = Some(authenticated),
             Some(prev) if prev != authenticated => {
@@ -5806,45 +5936,91 @@ fn fold_bound_methods(
     }
 }
 
+/// The member to select when the dispatch matrix has NO method input — a
+/// sub-proof bound to no committed graph, or one whose bound commitments all
+/// authenticated no method.
+///
+/// `id` is admitted only where the matrix's answer does not DEPEND on the method:
+/// it must be legal under every method some [`MethodPolicy`] admits
+/// ([`MethodPolicy::widest_admissible`]), so exactly one method-independent member
+/// exists to select. Stage 2d refuses every other method, so no commitment can
+/// authenticate one and none can change the answer. A member whose legality varies
+/// across the admissible methods has no derivable answer here and is refused.
+///
+/// `what` names the case for the refusal's `reason`. Restates no part of the
+/// dispatch table: the quantification is evaluated THROUGH
+/// `crate::dispatch::resolve_circuit`.
+#[cfg(feature = "dual-leaf")]
+fn method_independent_member(
+    label: &str,
+    id: &CircuitId,
+    what: &str,
+) -> Result<CircuitId, CheckError> {
+    for &method in sparq_zk::commit::CommitmentMethod::recognised() {
+        if !MethodPolicy::widest_admissible().admits_method(method) {
+            continue;
+        }
+        if crate::dispatch::resolve_circuit(method, id).as_ref() != Ok(id) {
+            return Err(CheckError::SubProofMethodUnresolved {
+                proof: label.to_string(),
+                reason: format!(
+                    "{}, so no commitment method can be derived for it, and its \
+                     member is not legal under every admissible method (not under \
+                     {})",
+                    what,
+                    method.scheme_iri()
+                ),
+            });
+        }
+    }
+    Ok(id.clone())
+}
+
 /// Resolve the member a sub-proof's verification key will be selected for THROUGH
 /// the `(commitment-method × circuit)` dispatch matrix, against the ONE
 /// authenticated commitment method of the commitments that sub-proof is bound to.
 ///
 /// `Ok(Some(member))` is the member to select the key for — the caller uses THAT
-/// and never the declared id, so a resolver that one day rewrites rather than
-/// echoes is honoured without revisiting the call site. `Ok(None)` is a deferral
-/// (see [`MethodStage`]): the caller must re-run this at
-/// [`MethodStage::AfterHiddenIssuer`] and refuse on the answer.
+/// and never the declared id. `Ok(None)` is a deferral (see [`MethodStage`]): the
+/// caller must re-run this at [`MethodStage::AfterHiddenIssuer`] and refuse on the
+/// answer.
 ///
 /// `crate::dispatch::resolve_circuit` echoes its id on success, so for every legal
 /// pair the returned member equals the declared one and no key selection changes:
-/// this adds refusals and no acceptance.
+/// this adds refusals and no acceptance. The caller takes the returned member
+/// rather than re-using the declared id because that is where the member comes
+/// from in this design; it is NOT a claim that a REWRITING resolver would be
+/// honoured end to end — the deferred pass asserts the resolved member EQUALS the
+/// declared one, so a resolver that rewrote an id would be refused there, and
+/// making rewriting work would mean revisiting both sites.
 ///
 /// # The rule when no method was attested
-/// [`SubProofMethod::NoneAttested`] — every bound commitment authenticated
-/// `Unbound` — performs NO resolution and returns the declared member. The matrix
-/// takes a [`sparq_zk::commit::CommitmentMethod`] and `Unbound` is the explicit
-/// ABSENCE of one, so there is nothing for it to decide; in particular the member
-/// is NOT resolved against `StringCanonicalV1`, which would be substituting a
-/// method no issuer attested.
+/// [`SubProofMethod::NoneAttested`] — every bound commitment carried an explicit
+/// `AuthenticatedMethod::Unbound` entry — has no method to resolve against: the
+/// matrix takes a [`sparq_zk::commit::CommitmentMethod`] and `Unbound` is the
+/// explicit ABSENCE of one. In particular the member is NOT resolved against
+/// `StringCanonicalV1`, which would be substituting a method no issuer attested.
 ///
-/// That is not a hole under the default [`MethodPolicy`], which REFUSES an
-/// unbound attestation at stage 2d before any key is selected. It is reachable
-/// only under the written-down [`MethodPolicy::admit_unbound`] downgrade, and
-/// there it is exactly what that downgrade opts into: for commitments whose
-/// method its issuer did not attest, a relying party that has stated it will act
-/// on them anyway gets the member selection that predates method authentication.
+/// It does not echo the declared member either. Hardening: it is held to the SAME
+/// method-independence rule as an orphan (below), so the only member admitted is
+/// one whose legality no admissible method could have changed. Echoing let a
+/// sub-proof over method-unattested commitments pick any member the id named.
 /// A MIXED set — some bound, some not — is refused by [`fold_bound_methods`]
-/// rather than resolved either way.
+/// rather than resolved either way, and a commitment with NO map entry is refused
+/// outright as [`CheckError::SubProofCommitmentNotAuthenticated`].
+///
+/// Under the default [`MethodPolicy`] an unbound attestation is already refused at
+/// stage 2d, so this arm is reachable only under the written-down
+/// [`MethodPolicy::admit_unbound`] downgrade.
 ///
 /// # The rule for an ORPHAN sub-proof
 /// A sub-proof bound to NO committed graph has no method to resolve against. It
 /// is admitted ONLY where the matrix's answer does not depend on the method: the
 /// member must be legal under every ADMISSIBLE method — those some
-/// [`MethodPolicy`] admits, since stage 2d refuses the rest, so no commitment can
-/// authenticate them — leaving exactly one method-independent member to select. A
-/// member whose legality varies across those methods has no derivable answer for
-/// an orphan and is refused.
+/// [`MethodPolicy`] admits ([`MethodPolicy::widest_admissible`]), since stage 2d
+/// refuses the rest, so no commitment can authenticate them — leaving exactly one
+/// method-independent member to select. A member whose legality varies across
+/// those methods has no derivable answer for an orphan and is refused.
 ///
 /// This is why an edge-less FILTER over a string-lane member still verifies: that
 /// member is legal under every admissible method, so no method could have changed
@@ -5853,6 +6029,11 @@ fn fold_bound_methods(
 /// acceptances nothing about the commitment method justifies removing — an
 /// edge-less FILTER discharges no query FILTER obligation, and the gates that
 /// care about that are unchanged.
+///
+/// Method-independence is about the MATRIX only, so it does not by itself keep an
+/// AUXILIARY gate's member out of a sub-proof: `CircuitId::HolderPok` is legal
+/// under every admissible method too. That is refused separately, up front, as
+/// [`CheckError::AuxiliaryMemberIdInSubProof`].
 #[cfg(feature = "dual-leaf")]
 fn resolve_member_for_sub_proof(
     manifest: &ProofManifest,
@@ -5863,43 +6044,34 @@ fn resolve_member_for_sub_proof(
     stage: MethodStage,
 ) -> Result<Option<CircuitId>, CheckError> {
     let label = format!("sub_proofs[{}]", proof);
+    // An AUXILIARY gate's member can never be selected for a manifest sub-proof,
+    // whatever its commitments authenticated. `derive_id` already refuses the
+    // pairing, so this is a second barrier rather than the only one; it is here
+    // because the method-independence rule below would otherwise admit such an id
+    // for an orphan sub-proof (an auxiliary member is legal under every
+    // admissible method).
+    if let Some(role) = FixedMemberRole::owning(id) {
+        let _ = role;
+        return Err(CheckError::AuxiliaryMemberIdInSubProof {
+            proof,
+            circuit: id.package(),
+        });
+    }
     let bound = bound_commitments(manifest, proof);
     match fold_bound_methods(&label, &bound, methods, hidden_only, stage)? {
         SubProofMethod::Deferred => Ok(None),
-        SubProofMethod::NoneAttested => Ok(Some(id.clone())),
+        // No method was attested, and no commitment was bound: NEITHER gives the
+        // matrix an input, so both are held to the same method-independence rule.
         SubProofMethod::NoCommitment => {
-            // An ORPHAN sub-proof: no commitment, so no method to resolve
-            // against. It is admitted only where the matrix's answer does not
-            // DEPEND on the method — i.e. where the member is legal under every
-            // method a relying party could ever have authenticated, so there is a
-            // single method-independent member to select. Otherwise there is no
-            // derivable answer and it is refused.
-            //
-            // The quantification is over the ADMISSIBLE methods, not every
-            // recognised one: a method no `MethodPolicy` admits can never be a
-            // commitment's authenticated method (stage 2d refuses it), so it
-            // cannot change the answer. `admit_legacy_dual_leaf_v1` is the most
-            // permissive policy over attested methods, so it defines the set.
-            // Stating the rule this way restates no part of the dispatch table.
-            let widest = MethodPolicy::current().admit_legacy_dual_leaf_v1();
-            for &method in sparq_zk::commit::CommitmentMethod::recognised() {
-                if !widest.admits_method(method) {
-                    continue;
-                }
-                if crate::dispatch::resolve_circuit(method, id).as_ref() != Ok(id) {
-                    return Err(CheckError::SubProofMethodUnresolved {
-                        proof: label,
-                        reason: format!(
-                            "it is bound to no committed graph, so no commitment \
-                             method can be derived for it, and its member is not \
-                             legal under every admissible method (not under {})",
-                            method.scheme_iri()
-                        ),
-                    });
-                }
-            }
-            Ok(Some(id.clone()))
+            method_independent_member(&label, id, "it is bound to no committed graph")
+                .map(Some)
         }
+        SubProofMethod::NoneAttested => method_independent_member(
+            &label,
+            id,
+            "every commitment it is bound to authenticated no commitment method",
+        )
+        .map(Some),
         SubProofMethod::One(method) => {
             let resolved = crate::dispatch::resolve_circuit(method, id).map_err(|_| {
                 CheckError::MemberNotLegalForMethod {
@@ -6436,6 +6608,14 @@ fn validate_join_edge(
 /// endpoints: that arm returns the endpoint scans' commitments, which this gate
 /// has already required the join's public inputs to byte-equal.
 ///
+/// It also requires every `JoinEq` sub-proof to be NAMED by one of those edges
+/// ([`CheckError::JoinProofNotBoundToAnEdge`]). Without that, a join proof outside
+/// the edge set kept prover-chosen `commit_a`/`commit_b` that no gate ever looked
+/// at — the gate returned early on an empty `join_edges` vector — so it could
+/// prove an equality between two commitments of the prover's own making and ride
+/// along in an otherwise honest presentation. It discharges no query obligation,
+/// so refusing it removes no acceptance anything else justified.
+///
 /// In the extended regime this additionally refuses — fail-closed, by the
 /// pre-existing [`CheckError::JoinEdgeKindMismatch`] — a hidden join whose
 /// endpoint is a bounded-path (`PathReach`) sub-proof rather than a `Scan`. A
@@ -6444,6 +6624,22 @@ fn validate_join_edge(
 fn bind_join_endpoints(manifest: &ProofManifest) -> Result<(), CheckError> {
     for (e, edge) in manifest.join_edges.iter().enumerate() {
         validate_join_edge(manifest, e, edge)?;
+    }
+    // And every `JoinEq` sub-proof must be NAMED by one of those edges. An edge is
+    // the only thing that ties a join proof's prover-chosen `commit_a`/`commit_b`
+    // to commitments an issuer attested; a join proof no edge names proves an
+    // equality between two commitments of the prover's choosing, discharges no
+    // query obligation, and used to ride along in the manifest unexamined — the
+    // gate above returned early on an empty `join_edges` vector and inspected
+    // nothing else. Refused fail-closed, in BOTH stage-1 regimes and in every
+    // feature state.
+    for (i, sp) in manifest.sub_proofs.iter().enumerate() {
+        if !matches!(sp.inputs, ProofInputs::JoinEq { .. }) {
+            continue;
+        }
+        if !manifest.join_edges.iter().any(|e| e.join_proof == i) {
+            return Err(CheckError::JoinProofNotBoundToAnEdge { proof: i });
+        }
     }
     Ok(())
 }
@@ -9836,6 +10032,187 @@ mod tests {
 
     fn fh(s: &str) -> FieldHex {
         FieldHex(s.to_string())
+    }
+
+    /// The five AUXILIARY bb members (hidden revocation, fully-hidden
+    /// revocation, hidden issuer, holder PoK, holder set) are derived by the
+    /// relying party and are declarable by NO manifest sub-proof.
+    ///
+    /// `fixed_member` is NOT what enforces that — every call site passes an id
+    /// the relying party built itself, so it cannot fire on manifest input. The
+    /// barrier that does is `derive_id`: stage 1b re-derives each sub-proof's id
+    /// from its public inputs and refuses any disagreement
+    /// (`CheckError::CircuitIdMismatch`). This pins that barrier for the cross
+    /// product of every auxiliary id and every `ProofInputs` variant, which is
+    /// the construction the per-sub-proof `AuxiliaryMemberIdInSubProof` refusal
+    /// is the second line of defence against.
+    #[test]
+    fn no_sub_proof_variant_can_declare_an_auxiliary_member_id() {
+        let aux = [
+            CircuitId::RevokeUnset { depth: 10 },
+            CircuitId::RevokeHiddenRef { depth: 10, set_depth: 4 },
+            CircuitId::HiddenIssuer { depth: 8 },
+            CircuitId::HolderPok,
+            CircuitId::HolderSet { depth: 8 },
+        ];
+        for id in aux {
+            // The pushes below are feature-gated; in a build with neither the
+            // vec is complete as written.
+            #[cfg_attr(
+                not(any(feature = "dual-leaf", feature = "extended-fragment")),
+                allow(unused_mut)
+            )]
+            let mut variants: Vec<(&str, ProofInputs)> = vec![
+                (
+                    "scan",
+                    ProofInputs::Scan {
+                        id: id.clone(),
+                        commitments: vec![fh("0x1")],
+                        pattern_is_const: [false, false, false],
+                        pattern_const_enc: [fh("0x0"), fh("0x0"), fh("0x0")],
+                        rows: vec![],
+                        row_count: 0,
+                        attribution: vec![false],
+                    },
+                ),
+                (
+                    "filter_int",
+                    ProofInputs::FilterInt {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound: 1,
+                        expected: true,
+                    },
+                ),
+                (
+                    "filter_f64",
+                    ProofInputs::FilterF64 {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        b_bits: 1,
+                        expected: true,
+                    },
+                ),
+                (
+                    "filter_signed_int",
+                    ProofInputs::FilterSignedInt {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound_neg: false,
+                        bound: 1,
+                        expected: true,
+                    },
+                ),
+                (
+                    "filter_decimal",
+                    ProofInputs::FilterDecimal {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound_neg: false,
+                        bound_scaled: 1,
+                        expected: true,
+                    },
+                ),
+                (
+                    "join_eq",
+                    ProofInputs::JoinEq {
+                        id: id.clone(),
+                        commit_a: fh("0x1"),
+                        commit_b: fh("0x2"),
+                        join_commitment: fh("0x3"),
+                        slot_a: 0,
+                        slot_b: 1,
+                    },
+                ),
+            ];
+            #[cfg(feature = "dual-leaf")]
+            {
+                variants.push((
+                    "filter_value_dl",
+                    ProofInputs::FilterValueDl {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound: 1,
+                        datatype_const: fh("0x0"),
+                        expected: true,
+                    },
+                ));
+                variants.push((
+                    "filter_value_dl_f64",
+                    ProofInputs::FilterValueDlF64 {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        b_bits: 1,
+                        datatype_const: fh("0x0"),
+                        expected: true,
+                    },
+                ));
+                variants.push((
+                    "filter_value_dl_decimal",
+                    ProofInputs::FilterValueDlDecimal {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound_neg: false,
+                        bound_scaled: 1,
+                        datatype_const: fh("0x0"),
+                        expected: true,
+                    },
+                ));
+                variants.push((
+                    "filter_value_dl_datetime",
+                    ProofInputs::FilterValueDlDateTime {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound_neg: false,
+                        bound_scaled_epoch: 1,
+                        datatype_const: fh("0x0"),
+                        expected: true,
+                    },
+                ));
+                variants.push((
+                    "filter_value_dl_bool",
+                    ProofInputs::FilterValueDlBool {
+                        id: id.clone(),
+                        operand_enc: fh("0x0"),
+                        op: FilterOp::Gt,
+                        bound: 1,
+                        datatype_const: fh("0x0"),
+                        expected: true,
+                    },
+                ));
+            }
+            #[cfg(feature = "extended-fragment")]
+            variants.push((
+                "path_reach",
+                ProofInputs::PathReach {
+                    id: id.clone(),
+                    commitments: vec![fh("0x1")],
+                    pred_enc: fh("0x11"),
+                    src_enc: fh("0x22"),
+                    dst_enc: fh("0x33"),
+                    allow_zero: false,
+                    depth_bound: 4,
+                    attribution: vec![true],
+                },
+            ));
+            for (what, inputs) in variants {
+                assert_ne!(
+                    derive_id(&inputs).as_ref(),
+                    Some(&id),
+                    "{} must not re-derive the auxiliary member {}",
+                    what,
+                    id.package()
+                );
+            }
+        }
     }
 
     // sq-r6dq: the hidden-issuer trust-anchor derivation
@@ -13806,15 +14183,21 @@ mod fixed_member_role_tests {
         }
     }
 
-    /// No manifest-declared circuit id can select an auxiliary role's member.
+    /// No `ProofInputs` variant's OWN member id is an auxiliary role's member:
+    /// the two member families are disjoint.
     ///
-    /// `ProofInputs::circuit_id` is the ONLY route from a manifest to a member
-    /// selection, so this enumerates one instance of EVERY `ProofInputs` variant in
-    /// this build and asserts no auxiliary role owns the id it carries. A new
-    /// variant has to be added here, because the constructor list is exhaustive by
-    /// a `match` in `every_proof_inputs_variant`.
+    /// This enumerates one instance of EVERY `ProofInputs` variant in this build
+    /// and asserts no auxiliary role owns the id it carries. A new variant has to
+    /// be added here, because the constructor list is exhaustive by a `match` in
+    /// `every_proof_inputs_variant`.
+    ///
+    /// It does NOT show that a manifest cannot CARRY an auxiliary id — a prover
+    /// writes the `id` field itself. That is `derive_id`'s job (stage 1b refuses
+    /// a declared id its public inputs do not re-derive), pinned by
+    /// `no_sub_proof_variant_can_declare_an_auxiliary_member_id`, with the
+    /// per-sub-proof `AuxiliaryMemberIdInSubProof` refusal behind it.
     #[test]
-    fn no_manifest_declared_id_can_select_an_auxiliary_role_member() {
+    fn no_proof_inputs_variants_own_member_is_an_auxiliary_role_member() {
         // The enumeration below is only a proof of the claim if it is exhaustive.
         assert_proof_inputs_variants_are_covered();
         let variants = every_proof_inputs_variant();
@@ -13857,7 +14240,9 @@ mod member_from_authenticated_method_tests {
     }
 
     /// An authenticated map built from `(commitment, entry)` pairs. A commitment
-    /// given `None` is left ABSENT, which a consumer must read as `Unbound`.
+    /// given `None` is left ABSENT from the map, which is NOT the same as an
+    /// explicit `Unbound` entry: absence means stage 2d authenticated nothing at
+    /// all for that commitment, and the fold refuses it by name.
     fn map_of(entries: &[(&FieldHex, Option<AuthenticatedMethod>)]) -> AuthenticatedMethods {
         let mut m = AuthenticatedMethods::new();
         for (c, e) in entries {
@@ -14152,9 +14537,13 @@ mod member_from_authenticated_method_tests {
         );
     }
 
-    /// A BOUND neighbour must not mask an UNBOUND one, and the reverse. Both
-    /// mixtures are refused, and both ABSENT and explicitly-`Unbound` entries count
-    /// as unbound, because a consumer must read the two identically.
+    /// A BOUND neighbour must not mask an UNBOUND one, and the reverse: either
+    /// mixture is refused as unresolved.
+    ///
+    /// An ABSENT entry is refused EARLIER and by a DIFFERENT name: absence means
+    /// stage 2d authenticated nothing for that commitment, so there is nothing to
+    /// fold, and the mixture question never arises. Both orders are pinned so the
+    /// two refusals are not conflated.
     ///
     /// This is where the resolution is deliberately STRICTER than
     /// `scan_pattern_method_inner`, which compares the pattern-constant ENCODER and
@@ -14167,8 +14556,6 @@ mod member_from_authenticated_method_tests {
         for (what, entries) in [
             ("bound then explicit unbound", [(&c1, Some(CANON)), (&c2, Some(UNBOUND))]),
             ("explicit unbound then bound", [(&c1, Some(UNBOUND)), (&c2, Some(CANON))]),
-            ("bound then ABSENT", [(&c1, Some(CANON)), (&c2, None)]),
-            ("ABSENT then bound", [(&c1, None), (&c2, Some(CANON))]),
         ] {
             assert!(
                 matches!(
@@ -14176,6 +14563,20 @@ mod member_from_authenticated_method_tests {
                     Err(CheckError::SubProofMethodUnresolved { .. })
                 ),
                 "{}: a mixture of attested and unattested methods must be refused",
+                what
+            );
+        }
+        for (what, entries) in [
+            ("bound then ABSENT", [(&c1, Some(CANON)), (&c2, None)]),
+            ("ABSENT then bound", [(&c1, None), (&c2, Some(CANON))]),
+            ("explicit unbound then ABSENT", [(&c1, Some(UNBOUND)), (&c2, None)]),
+        ] {
+            assert!(
+                matches!(
+                    resolve(&m, 0, &map_of(&entries)),
+                    Err(CheckError::SubProofCommitmentNotAuthenticated { .. })
+                ),
+                "{}: a commitment absent from the map must be refused by name",
                 what
             );
         }
@@ -14192,39 +14593,120 @@ mod member_from_authenticated_method_tests {
         );
     }
 
-    /// Every bound commitment unattested: NO resolution is performed, and in
-    /// particular the member is NOT resolved against the string-canonical member.
+    /// Every bound commitment explicitly `Unbound`: the declared member is NOT
+    /// echoed back. It is held to the METHOD-INDEPENDENCE rule, exactly as an
+    /// edge-less sub-proof is — a member legal under every admissible method is
+    /// the only one a relying party can select without knowing the method.
     ///
-    /// The probe is a VALUE-LANE member, the case that tells the two readings
-    /// apart: substituting `StringCanonicalV1` for the absent method would REFUSE
-    /// it, while the rule returns it unchanged.
+    /// Both arms are pinned on the same manifest shape. The VALUE-LANE member is
+    /// the probe that tells the readings apart: echoing it back would admit it,
+    /// and the rule refuses it. The STRING-LANE member shows the rule is not a
+    /// blanket refusal.
+    ///
+    /// A commitment ABSENT from the map is a different case again: nothing was
+    /// authenticated for it, so it is refused by name before any fold.
     #[test]
-    fn an_unattested_sub_proof_is_not_resolved_against_the_string_canonical_member() {
+    fn an_unattested_sub_proof_is_held_to_the_method_independence_rule() {
         let c = fhx("0x64");
-        let mut m = manifest_of(vec![scan_over(vec![c.clone()]), filter_value_dl()]);
-        m.binding_edges = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+        let edge = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+        let mut value = manifest_of(vec![scan_over(vec![c.clone()]), filter_value_dl()]);
+        value.binding_edges = edge.clone();
+        let mut string_lane = manifest_of(vec![scan_over(vec![c.clone()]), filter_int()]);
+        string_lane.binding_edges = edge;
 
-        // Sanity: string-canonical REFUSES this member, so the assertions are not
-        // vacuous.
+        // Sanity: string-canonical REFUSES the value-lane member, so the refusal
+        // below is about a real legality difference and not a vacuous assertion.
         assert!(
-            resolve(&m, 1, &map_of(&[(&c, Some(CANON))])).is_err(),
+            resolve(&value, 1, &map_of(&[(&c, Some(CANON))])).is_err(),
             "string-canonical must refuse the value-lane member, or this test is \
              vacuous"
         );
-        for (what, entries) in [
-            ("an explicit Unbound entry", vec![(&c, Some(UNBOUND))]),
-            ("an absent entry", vec![(&c, None)]),
-        ] {
-            let resolved = resolve(&m, 1, &map_of(&entries)).unwrap_or_else(|e| {
-                panic!("{} must perform no resolution: {}", what, e)
-            });
+
+        assert!(
+            matches!(
+                resolve(&value, 1, &map_of(&[(&c, Some(UNBOUND))])),
+                Err(CheckError::SubProofMethodUnresolved { .. })
+            ),
+            "an all-Unbound value-lane member is not method-independent, so it \
+             must be refused rather than echoed back"
+        );
+        assert_eq!(
+            resolve(&string_lane, 1, &map_of(&[(&c, Some(UNBOUND))]))
+                .expect("a method-independent member resolves"),
+            Some(CircuitId::FilterInt { d: 1 }),
+            "an all-Unbound member legal under every admissible method resolves"
+        );
+        assert!(
+            matches!(
+                resolve(&value, 1, &map_of(&[(&c, None)])),
+                Err(CheckError::SubProofCommitmentNotAuthenticated { .. })
+            ),
+            "a commitment absent from the map is refused before any fold"
+        );
+    }
+
+    /// A manifest sub-proof that declares one of the five AUXILIARY members is
+    /// refused at the per-sub-proof site, before any method is folded.
+    ///
+    /// The construction this closes is an EDGE-LESS `FilterInt` carrying an
+    /// auxiliary id: it is bound to no commitment, so the method-independence
+    /// rule is what would otherwise decide it — and the first assertion shows
+    /// that rule ADMITS every auxiliary member, because the dispatch matrix
+    /// echoes it back under every admissible method. The refusal is therefore
+    /// load-bearing and not a restatement of the rule below it.
+    #[test]
+    fn a_manifest_declared_auxiliary_member_id_is_refused_at_the_sub_proof_site() {
+        let aux = CircuitId::HolderPok;
+        for method in CommitmentMethod::recognised() {
+            if !MethodPolicy::widest_admissible().admits_method(*method) {
+                continue;
+            }
             assert_eq!(
-                resolved,
-                Some(CircuitId::FilterValueDl),
-                "{}: the member must be returned unchanged",
-                what
+                crate::dispatch::resolve_circuit(*method, &aux).as_ref(),
+                Ok(&aux),
+                "the matrix echoes the auxiliary member under {}, so the \
+                 method-independence rule alone would admit it",
+                method.scheme_iri()
             );
         }
+        let m = manifest_of(vec![ProofInputs::FilterInt {
+            id: aux.clone(),
+            operand_enc: fhx("0x0"),
+            op: crate::manifest::FilterOp::Gt,
+            bound: 1,
+            expected: true,
+        }]);
+        assert!(
+            matches!(
+                resolve(&m, 0, &AuthenticatedMethods::new()),
+                Err(CheckError::AuxiliaryMemberIdInSubProof { .. })
+            ),
+            "an auxiliary member id declared by a manifest sub-proof must be \
+             refused by name"
+        );
+    }
+
+    /// A `JoinEq` sub-proof no `JoinEdge` names is refused.
+    ///
+    /// Its `commit_a`/`commit_b` are then bound by nothing: the endpoint gate
+    /// only validates DECLARED edges, and the member resolution reads the
+    /// validated endpoints, so an uncovered join proof would carry two
+    /// prover-chosen commitments no gate ever looks at.
+    #[test]
+    fn a_join_proof_no_edge_names_is_refused_by_the_endpoint_gate() {
+        let c1 = fhx("0x64");
+        let c2 = fhx("0xc8");
+        let mut m = join_manifest_of(&c1, &c2, (&c1, &c2));
+        // The covered manifest passes, so the refusal below is about coverage.
+        bind_join_endpoints(&m).expect("a covered join proof passes the gate");
+        m.join_edges.clear();
+        assert!(
+            matches!(
+                bind_join_endpoints(&m),
+                Err(CheckError::JoinProofNotBoundToAnEdge { .. })
+            ),
+            "a join proof no edge names must be refused"
+        );
     }
 
     /// An ORPHAN sub-proof — one bound to no committed graph — is admitted ONLY
@@ -14266,7 +14748,7 @@ mod member_from_authenticated_method_tests {
             Err(CheckError::MemberNotLegalForMethod { .. })
         ));
 
-        // An edge-less STRING-LANE filter: legal under every recognised method, so
+        // An edge-less STRING-LANE filter: legal under every ADMISSIBLE method, so
         // the member is selected unchanged and the acceptance is preserved.
         let s = manifest_of(vec![scan_over(vec![c.clone()]), filter_int()]);
         assert_eq!(
@@ -14324,6 +14806,67 @@ mod member_from_authenticated_method_tests {
                 Err(CheckError::MemberNotLegalForMethod { .. })
             ),
             "at the later stage the entry is authenticated and the member is refused"
+        );
+    }
+
+    /// The same two stages for a JOIN: one hidden-only endpoint beside one clear
+    /// endpoint of a DIFFERENT method defers first and is refused after.
+    ///
+    /// This is the case the deferred post-pass exists for. Before the
+    /// hidden-issuer gate the hidden-only endpoint's entry is only a CANDIDATE,
+    /// so no verdict may be read from it; after that gate the two endpoints
+    /// disagree and there is no single method to select a member against.
+    #[test]
+    fn a_joins_hidden_only_endpoint_defers_and_is_then_refused_against_a_clear_one() {
+        let hidden = fhx("0x64");
+        let clear = fhx("0xc8");
+        let m = join_manifest_of(&hidden, &clear, (&hidden, &clear));
+        let methods = map_of(&[(&hidden, Some(CANON)), (&clear, Some(UNBOUND))]);
+        let mut hidden_only = BTreeSet::new();
+        hidden_only.insert(key_of(&hidden));
+        let id = CircuitId::JoinEq { n_a: 16, n_b: 16 };
+
+        assert_eq!(
+            resolve_member_for_sub_proof(
+                &m,
+                2,
+                &id,
+                &methods,
+                &hidden_only,
+                MethodStage::BeforeHiddenIssuer
+            )
+            .expect("a candidate method must not be read as authenticated"),
+            None,
+            "the join's resolution must DEFER while an endpoint is hidden-only"
+        );
+        assert!(
+            matches!(
+                resolve_member_for_sub_proof(
+                    &m,
+                    2,
+                    &id,
+                    &methods,
+                    &hidden_only,
+                    MethodStage::AfterHiddenIssuer
+                ),
+                Err(CheckError::SubProofMethodUnresolved { .. })
+            ),
+            "after the gate the two endpoints' methods disagree and the join is \
+             refused"
+        );
+        // Not vacuous: with the clear endpoint attesting the SAME method the
+        // later stage resolves.
+        assert_eq!(
+            resolve_member_for_sub_proof(
+                &m,
+                2,
+                &id,
+                &map_of(&[(&hidden, Some(CANON)), (&clear, Some(CANON))]),
+                &hidden_only,
+                MethodStage::AfterHiddenIssuer
+            )
+            .expect("agreeing endpoints resolve"),
+            Some(id.clone())
         );
     }
 
@@ -14385,12 +14928,23 @@ mod member_from_authenticated_method_tests {
     /// selection site refuses no pair that reaches it in this build, and becomes
     /// load-bearing when either is relaxed (sq-j506 opens the value lane).
     ///
-    /// The `SubProofMethodUnresolved` refusals are NOT in that position: the orphan
-    /// and mixed-method cases are reachable today, which is why they are a stated
-    /// behaviour change.
+    /// The `SubProofMethodUnresolved` family splits:
+    /// - the MIXED-method case is reachable today (two bound commitments
+    ///   authenticating different methods, or one attested beside one unattested
+    ///   under the written-down `admit_unbound()` downgrade), which is why it is a
+    ///   stated behaviour change, and
+    ///   `tests/join_gates.rs::a_joins_member_is_resolved_in_the_verify_loop_from_its_endpoints_methods`
+    ///   drives it through `verify_manifest`;
+    /// - the METHOD-INDEPENDENCE case (no derivable method, so the member must be
+    ///   legal under every admissible method) sits in the SAME position as the
+    ///   matrix refusal: only a value-lane member fails it, and a value-lane
+    ///   sub-proof is refused at stage 0. It too becomes load-bearing when that is
+    ///   relaxed.
     ///
-    /// This test asserts the `value-only` half and the admissible-method half; it
-    /// claims nothing about any pair being unreachable for another reason.
+    /// This test asserts the `value-only` half and the admissible-method half, over
+    /// the two string-lane shapes the resolver treats differently (a scan, which
+    /// reads its own commitments, and an edge-bound FILTER, which inherits them).
+    /// It claims nothing about any pair being unreachable for another reason.
     #[test]
     fn an_illegal_pair_needs_an_upstream_refusal_relaxed_first() {
         #[cfg(feature = "commitment-value-only")]
@@ -14407,22 +14961,29 @@ mod member_from_authenticated_method_tests {
             );
         }
 
-        // Every method a policy CAN admit is one every string-lane query member is
-        // legal for — checked through the resolver, not asserted.
-        let default_policy = MethodPolicy::current();
-        let legacy_ok = MethodPolicy::current().admit_legacy_dual_leaf_v1();
+        // Every method a policy CAN admit is one these string-lane query members
+        // are legal for — checked through the resolver, not asserted.
         let c = fhx("0x64");
-        let m = manifest_of(vec![scan_over(vec![c.clone()])]);
+        let scan_only = manifest_of(vec![scan_over(vec![c.clone()])]);
+        let mut with_filter = manifest_of(vec![scan_over(vec![c.clone()]), filter_int()]);
+        with_filter.binding_edges =
+            vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         for &method in CommitmentMethod::recognised() {
-            if !default_policy.admits_method(method) && !legacy_ok.admits_method(method) {
+            if !MethodPolicy::widest_admissible().admits_method(method) {
                 continue;
             }
             let methods = map_of(&[(&c, Some(AuthenticatedMethod::Bound(method)))]);
-            assert!(
-                resolve(&m, 0, &methods).is_ok(),
-                "a scan under the admissible method {:?} must resolve",
-                method
-            );
+            for (what, m, i) in [
+                ("a scan", &scan_only, 0),
+                ("an edge-bound FILTER", &with_filter, 1),
+            ] {
+                assert!(
+                    resolve(m, i, &methods).is_ok(),
+                    "{} under the admissible method {:?} must resolve",
+                    what,
+                    method
+                );
+            }
         }
     }
 }

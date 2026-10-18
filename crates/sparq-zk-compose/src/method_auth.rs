@@ -183,6 +183,23 @@ impl MethodPolicy {
         self
     }
 
+    /// The WIDEST policy over attested methods — the one that admits every method
+    /// some policy admits.
+    ///
+    /// The orphan / no-method-attested member rule in `crate::verifier` has to
+    /// quantify over the methods a commitment could ever have authenticated.
+    /// Stage 2d refuses any method the relying party's policy does not admit, so
+    /// that set is exactly the union over all policies, and this names it in one
+    /// place instead of each caller rebuilding it from the settings.
+    ///
+    /// `accept_unbound` is deliberately NOT part of it: it decides whether the
+    /// ABSENCE of a method is tolerated, not which method is admitted, and
+    /// [`Self::admits_method`] does not read it.
+    #[must_use]
+    pub fn widest_admissible() -> Self {
+        MethodPolicy::current().admit_legacy_dual_leaf_v1()
+    }
+
     /// Whether a method-UNBOUND attestation is accepted.
     pub fn accepts_unbound(&self) -> bool {
         self.accept_unbound
@@ -596,6 +613,45 @@ mod tests {
             p.admit(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV2)),
             Ok(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV2))
         );
+    }
+
+    /// `widest_admissible` really is the union over every policy this build can
+    /// construct: no setting admits a method it does not.
+    ///
+    /// The verifier's method-independence rule quantifies over this set, so a
+    /// policy that admitted a method outside it would make that rule unsound —
+    /// a member could be legal under every method the rule checks and illegal
+    /// under the one actually authenticated.
+    #[test]
+    fn widest_admissible_is_a_superset_of_every_constructible_policy() {
+        let widest = MethodPolicy::widest_admissible();
+        for p in [
+            MethodPolicy::default(),
+            MethodPolicy::current(),
+            MethodPolicy::current().admit_unbound(),
+            MethodPolicy::current().admit_legacy_dual_leaf_v1(),
+            MethodPolicy::current().require_method_bound(),
+            MethodPolicy::current()
+                .admit_legacy_dual_leaf_v1()
+                .admit_unbound(),
+            MethodPolicy::current()
+                .admit_legacy_dual_leaf_v1()
+                .require_method_bound(),
+        ] {
+            for m in CommitmentMethod::recognised() {
+                assert!(
+                    !p.admits_method(*m) || widest.admits_method(*m),
+                    "{} is admitted by a policy but not by widest_admissible",
+                    m.scheme_iri()
+                );
+            }
+        }
+        // Not vacuous: the widest policy admits a method the DEFAULT one refuses.
+        assert!(widest.admits_method(CommitmentMethod::DualLeafV1));
+        assert!(!MethodPolicy::current().admits_method(CommitmentMethod::DualLeafV1));
+        // And it is a policy over METHODS only: it does not tolerate the absence
+        // of one.
+        assert!(!widest.accepts_unbound());
     }
 
     /// The research dial is never admitted, under any policy setting.

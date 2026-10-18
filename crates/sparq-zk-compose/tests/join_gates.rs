@@ -576,17 +576,31 @@ fn forge_join_wrong_slot_b_rejected() {
 /// join is not a soundness hole, it reverts to the disclosed mechanism (whose
 /// obligation is declared and verified separately). Contrast `finding_a_*`, which
 /// drops BOTH the hidden edge AND the obligation and is rejected by Q6.
+///
+/// Dropping the edge while KEEPING the join_eq sub-proof is a different thing and
+/// is now refused (`JoinProofNotBoundToAnEdge`): that sub-proof's declared
+/// `commit_a`/`commit_b` would be bound by nothing. The fallback this test pins is
+/// therefore the manifest with the hidden join REMOVED, and both halves are
+/// asserted here so the boundary is explicit.
 #[test]
 fn drop_edge_falls_back_to_disclosed_path() {
     let mut m = join_manifest();
     m.join_edges.clear();
     // The disclosed obligation `join_manifest` declares (`[("p", 0, 1)]`) discharges
     // the cross-graph Q6 requirement; `bind_joins` is now a no-op (no hidden edge).
-    // The manifest passes every structural gate (it would reach MissingProof in the
-    // full bb verify).
     assert_eq!(m.join_obligations, vec![("p".to_string(), 0, 1)]);
+    // Dropping the edge ALONE leaves the join_eq sub-proof behind with nothing
+    // binding its declared commitments, which the endpoint gate now refuses.
+    match prefilter(&m) {
+        Err(CheckError::JoinProofNotBoundToAnEdge { proof: 2 }) => {}
+        other => panic!("an orphaned join_eq sub-proof must be refused, got {other:?}"),
+    }
+    // The disclosed fallback is the manifest WITHOUT the hidden join at all: it
+    // passes every structural gate (it would reach MissingProof in the full bb
+    // verify).
+    m.sub_proofs.truncate(2);
     prefilter(&m).expect(
-        "dropping the hidden JoinEdge but keeping the declared obligation falls back to the disclosed-row path and passes the structural gate",
+        "dropping the hidden join and keeping the declared obligation falls back to the disclosed-row path and passes the structural gate",
     );
 }
 
@@ -1198,5 +1212,238 @@ fn a_joins_member_is_resolved_in_the_verify_loop_from_its_endpoints_methods() {
             "with both endpoints attested to one method the resolution must \
              succeed and the loop must proceed to the canonical vk, got {other:?}"
         ),
+    }
+}
+
+/// The FILTER query for the two-edge inheritance case: ONE pattern, answered by
+/// TWO credentials, whose shared object `<ex/p>` the FILTER is discharged at.
+#[cfg(feature = "dual-leaf")]
+const FILTER_QUERY: &str = "SELECT ?a ?p WHERE { ?a <http://ex/knows> ?p FILTER(?p > 1) }";
+
+/// A `filter_int` sub-proof's public inputs: `[challenge, operand_enc, op, bound,
+/// expected]` as 32-byte big-endian words (`reconstruct_public_inputs`' FilterInt
+/// arm).
+#[cfg(feature = "dual-leaf")]
+fn filter_int_public_inputs(inputs: &ProofInputs, challenge: &FieldHex) -> Vec<u8> {
+    let ProofInputs::FilterInt { operand_enc, op, bound, expected, .. } = inputs else {
+        unreachable!("filter_int inputs");
+    };
+    let mut out = Vec::new();
+    for f in [challenge, operand_enc] {
+        let v = f.to_field().expect("parseable field");
+        out.extend_from_slice(&sparq_zk::field::field_to_be_bytes_32(&v));
+    }
+    for n in [u64::from(op.code()), *bound, u64::from(*expected)] {
+        let mut word = [0u8; 32];
+        word[24..].copy_from_slice(&n.to_be_bytes());
+        out.extend_from_slice(&word);
+    }
+    out
+}
+
+/// `[filter_int, scan_a, scan_a2]` for `FILTER_QUERY`: the FILTER is at index 0,
+/// so the loop resolves its member first, and it is discharged by TWO binding
+/// edges — one from each scan answering the single pattern. `graph_a2_unbound`
+/// makes the SECOND edge's source scan the method-unattested one.
+#[cfg(feature = "dual-leaf")]
+fn filter_two_edge_manifest(graph_a2_unbound: bool) -> ProofManifest {
+    let ga = graph_a();
+    let ga2 = graph_a2();
+    let scan_a = scan_a_inputs(&ga);
+    let scan_a2 = scan_a_inputs(&ga2);
+    // `<ex/p>` is a NAMED node, so its encoding is salt-INDEPENDENT: the two
+    // scans disclose the SAME object encoding, which is what lets one FILTER
+    // sub-proof be discharged against both of them.
+    let operand = match (&scan_a, &scan_a2) {
+        (ProofInputs::Scan { rows: r1, .. }, ProofInputs::Scan { rows: r2, .. }) => {
+            assert_eq!(r1[0][2], r2[0][2], "both scans disclose the same object");
+            r1[0][2].clone()
+        }
+        _ => unreachable!("scan inputs"),
+    };
+    let filter = ProofInputs::FilterInt {
+        id: CircuitId::FilterInt { d: 1 },
+        operand_enc: operand,
+        op: sparq_zk_compose::manifest::FilterOp::Gt,
+        bound: 1,
+        expected: true,
+    };
+    let challenge = FieldHex(CHALLENGE_HEX.to_string());
+    let art = sparq_zk_compose::driver::ProofArtifacts {
+        proof: vec![0u8; 8],
+        public_inputs: filter_int_public_inputs(&filter, &challenge),
+        vk: vec![0u8; 8],
+    };
+    let sk = test_issuer_sk(1);
+    let att_a2 = if graph_a2_unbound {
+        attest_method_unbound(ga2.commitment, ga2.salt, &sk)
+    } else {
+        attest_full(ga2.commitment, ga2.salt, &sk)
+    };
+    ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: FILTER_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![public_key_to_hex(&sk.public_key())],
+        commitment_attestations: vec![attest_full(ga.commitment, ga.salt, &sk), att_a2],
+        attributions: vec![vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot()],
+        sub_proofs: vec![
+            SubProof { inputs: filter, proof_hex: encode_artifacts(&art) },
+            SubProof { inputs: scan_a, proof_hex: String::new() },
+            SubProof { inputs: scan_a2, proof_hex: String::new() },
+        ],
+        binding_edges: vec![
+            sparq_zk_compose::manifest::BindingEdge {
+                from_proof: 1,
+                from_row: 0,
+                from_slot: 2,
+                to_proof: 0,
+            },
+            sparq_zk_compose::manifest::BindingEdge {
+                from_proof: 2,
+                from_row: 0,
+                from_slot: 2,
+                to_proof: 0,
+            },
+        ],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    }
+}
+
+/// INTEGRATION: through the public `verify_manifest`, a FILTER discharged by TWO
+/// binding edges inherits the method of EVERY edge's source scan, not just the
+/// first one's.
+///
+/// One pattern, two credentials answering it, one FILTER sub-proof discharged
+/// against both. The SECOND edge's scan attests no method, the first's attests
+/// string-canonical, so there is no single method to select a member against and
+/// the manifest is REFUSED. Inheriting from the first edge alone would resolve to
+/// string-canonical and proceed, which is what the control below shows happening
+/// when the two genuinely agree.
+#[cfg(feature = "dual-leaf")]
+#[test]
+fn a_filter_inherits_the_method_of_every_edges_source_scan() {
+    use sparq_zk_compose::MethodPolicy;
+    let sk = test_issuer_sk(1);
+    let k = trusted_k(&sk).with_method_policy(MethodPolicy::current().admit_unbound());
+
+    match run_verify(&filter_two_edge_manifest(true), &k) {
+        Err(CheckError::SubProofMethodUnresolved { proof, .. }) => {
+            assert_eq!(proof, "sub_proofs[0]", "the FILTER sub-proof the loop was on");
+        }
+        other => panic!(
+            "a FILTER whose two edges' scans disagree on the method must be \
+             refused, got {other:?}"
+        ),
+    }
+
+    // CONTROL: both edges' scans attested to the SAME method — the resolution
+    // succeeds and the loop proceeds to the canonical-vk recomputation, which
+    // this toolchain-free prover cannot do.
+    match run_verify(&filter_two_edge_manifest(false), &k) {
+        Err(CheckError::Driver(_)) => {}
+        other => panic!(
+            "with both edges' scans attesting one method the resolution must \
+             succeed, got {other:?}"
+        ),
+    }
+}
+
+// === The DEFERRAL of a hidden-only commitment's resolution ===================
+
+/// The hidden-issuer key-set depth this fixture's relying party enables.
+#[cfg(feature = "dual-leaf")]
+const HI_DEPTH: u32 = 4;
+
+/// The METHOD-BOUND presentation message over `(commitment, salt)` and this
+/// fixture's status reference — the candidate a hidden-only commitment's declared
+/// hidden-issuer `message` selects.
+#[cfg(feature = "dual-leaf")]
+fn hi_message(commitment: &Fr, salt: &Fr) -> Fr {
+    let list_id = sparq_zk::sig::status_list_id_to_field(STATUS_LIST);
+    let status_ref = sparq_zk::sig::status_ref_digest(&list_id, STATUS_INDEX, STATUS_VERSION);
+    sparq_zk::sig::presentation_message_with_status_and_scheme(
+        commitment,
+        salt,
+        &status_ref,
+        &string_canonical_scheme(),
+    )
+}
+
+/// `join_first_manifest`'s shape with graph A covered ONLY by a hidden-issuer
+/// attestation (no clear attestation), whose declared `message` selects the
+/// STRING-CANONICAL method, while graph B's clear attestation attests NO method.
+///
+/// The hidden-issuer PROOF is junk: the hidden-issuer gate runs AFTER the
+/// per-sub-proof loop, which is exactly what makes this fixture able to observe
+/// the loop's behaviour on a hidden-only candidate without a toolchain.
+#[cfg(feature = "dual-leaf")]
+fn hidden_only_endpoint_manifest() -> (ProofManifest, KeySet) {
+    use sparq_zk_compose::MethodPolicy;
+    let sk = test_issuer_sk(1);
+    let key_set = trusted_k(&sk)
+        .with_hidden_issuer_depth(HI_DEPTH)
+        .with_method_policy(MethodPolicy::current().admit_unbound());
+    let ga = graph_a();
+    let gb = graph_b();
+    let mut m = join_first_manifest(false);
+    // Graph A loses its clear attestation and gains a hidden-issuer one.
+    m.commitment_attestations = vec![attest_method_unbound(gb.commitment, gb.salt, &sk)];
+    let junk = sparq_zk_compose::driver::ProofArtifacts {
+        proof: vec![0u8; 8],
+        public_inputs: vec![0u8; 32],
+        vk: vec![0u8; 8],
+    };
+    m.hidden_issuer_attestations = vec![sparq_zk_compose::manifest::HiddenIssuerAttestation {
+        commitment: FieldHex::from_field(&ga.commitment),
+        depth: HI_DEPTH,
+        key_set_root: FieldHex::from_field(
+            &key_set.hidden_issuer_root(HI_DEPTH).expect("authoritative root"),
+        ),
+        message: FieldHex::from_field(&hi_message(&ga.commitment, &ga.salt)),
+        salt: Some(FieldHex::from_field(&ga.salt)),
+        proof_hex: encode_artifacts(&junk),
+    }];
+    (m, key_set)
+}
+
+/// INTEGRATION: the loop DEFERS a sub-proof bound to a hidden-only commitment
+/// rather than reading that commitment's candidate method as authenticated.
+///
+/// Graph A is hidden-only and its declared message selects the string-canonical
+/// method; graph B's clear attestation attests none. Read as authenticated, that
+/// is a mixture, and the loop would refuse it on the spot
+/// (`SubProofMethodUnresolved` on `sub_proofs[0]`) — reporting a method refusal
+/// BEFORE the hidden-issuer gate has byte-bound any proof to that candidate. With
+/// the deferral in place the loop reports no method verdict at all and the
+/// manifest proceeds, failing instead on the toolchain this fixture does not
+/// have.
+///
+/// That the deferred verdict DOES arrive, after the hidden-issuer gate, needs a
+/// real `scan_k2` proof and a real hidden-issuer proof, so it is pinned by the
+/// toolchain-gated `e2e::a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate`.
+#[cfg(feature = "dual-leaf")]
+#[test]
+fn a_hidden_only_commitments_candidate_method_is_not_read_in_the_loop() {
+    let (m, k) = hidden_only_endpoint_manifest();
+    match run_verify(&m, &k) {
+        Err(CheckError::Driver(_)) => {}
+        Err(CheckError::SubProofMethodUnresolved { proof, .. }) => panic!(
+            "the loop must DEFER a hidden-only commitment's candidate method, not \
+             refuse {proof} on it before the hidden-issuer gate has run"
+        ),
+        other => panic!("expected the loop to defer and proceed, got {other:?}"),
     }
 }
