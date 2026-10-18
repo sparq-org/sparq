@@ -3152,7 +3152,7 @@ fn match_premise_admitted(
                 let resolved: Option<Binding> = arrival.as_ref().and_then(|(prefix, vars)| {
                     let mut over: Option<Binding> = None;
                     for v in vars {
-                        match b.get(*v) {
+                        match b.get(v) {
                             Some(val) if holds_document_var(val) => {
                                 let into = into_application(val, prefix);
                                 over.get_or_insert_with(|| b.clone()).insert(*v, into);
