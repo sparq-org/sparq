@@ -154,6 +154,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
+  its canonical verification key — from the AUTHENTICATED commitment method of the commitments
+  that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
+  method is derived per sub-proof: a `Scan` (and an `extended-fragment` `PathReach`) resolves
+  every commitment in its own `commitments` vector, a `JoinEq` resolves both `commit_a` and
+  `commit_b`, and a `Filter*` member inherits the method of the source scan of every validated
+  binding edge that binds it; all of them must agree. The declared id is resolved through the
+  `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
+  `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
+  `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
+  `CheckError::SubProofMethodUnresolved` (no single method could be derived — differing methods
+  across bound commitments, a mixture of attested and unattested ones, an unparseable bound
+  commitment, or an orphan sub-proof whose member is not legal under every admissible method),
+  and `CheckError::MemberNotForFixedRole`. A commitment that authenticated no method is NOT
+  resolved and is never resolved against the string-canonical member; under the default
+  `MethodPolicy` that case is refused upstream, and it is reachable only under the written-down
+  `admit_unbound()` downgrade. A sub-proof bound to a commitment covered only by a hidden-issuer
+  proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
+  method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
+  revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
+  their member is fixed by the relying party's own policy or registry and declared nowhere in the
+  manifest — and each now selects it through a named per-role fixed-member path that refuses any
+  id outside its own role. This adds refusals and no acceptance. **Behaviour change:** a manifest
+  whose sub-proof binds commitments that authenticated different methods, or a mixture of
+  attested and unattested ones, used to be accepted and is now refused; an edge-less FILTER over
+  a member legal under every admissible method still verifies. Not externally audited (sq-qhy4);
+  no soundness or privacy property is claimed as achieved.
+
 - **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
   members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
