@@ -296,6 +296,7 @@ mod tests {
         let dir = root.join("g");
         std::fs::create_dir_all(&dir).unwrap();
         let held = DirLock::acquire(LockLocation::sibling_of(&dir).unwrap()).unwrap();
+        #[cfg_attr(not(unix), allow(unused_mut))] // a symbolic link is added on Unix only
         let mut aliases = vec![
             PathBuf::from(format!("{}/", dir.display())),
             root.join("g").join("..").join("g"),

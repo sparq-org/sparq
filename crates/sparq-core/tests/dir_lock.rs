@@ -121,6 +121,7 @@ fn a_graph_does_not_save_into_its_own_directory() {
     save_dataset(&dir);
     let mut g = Graph::open(&dir).unwrap();
     g.apply_delta(&[triple("logged")], &[]).unwrap();
+    #[cfg_attr(not(unix), allow(unused_mut))] // a symbolic link is added on Unix only
     let mut spellings = vec![
         dir.clone(),
         PathBuf::from(format!("{}/", dir.display())),
