@@ -806,7 +806,11 @@ pub(crate) fn substitute<B: Subst + ?Sized>(
 /// instantiation): a variable left inside a formula after substitution is the formula's
 /// own.
 #[inline]
-pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
+pub(crate) fn substitute_deep<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    run: &Truncation,
+) -> Option<Term> {
     match t {
         Term::List(_) | Term::Triple(_) | Term::Formula(_) if compound_refused(t, b, run, true) => {
             None
@@ -1052,9 +1056,9 @@ fn apply<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
 
 /// [`apply`] through quoted formulae too. Private: callers go through
 /// [`substitute_deep`].
-fn apply_deep(t: &Term, b: &super::Binding) -> Term {
+fn apply_deep<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
     match t {
-        Term::Var(v) => match b.get(v) {
+        Term::Var(v) => match b.bound(v) {
             Some(val) => val.clone(),
             None => t.clone(),
         },

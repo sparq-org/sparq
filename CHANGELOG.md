@@ -576,21 +576,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-reason (N3):** a `log:collectAllIn` / `log:forAllIn` subject, subject member
-  (template, clause, result pattern) or scope given through a VARIABLE inside a backward
-  (`<=`) rule is resolved into that rule application's variable namespace, so it shares the
-  rule's bindings exactly as the same formula written in the rule does — and exactly as
-  either form does in a forward rule, whose atoms are never standardized apart. It used to
-  arrive with the names the document wrote, which share nothing with the renamed atoms
-  around it: a `collectAllIn` template was never bound by its clause's solutions so the
-  aggregation collected nothing, and a `forAllIn` first clause was independent of the
-  second so the premise held vacuously and fired a rule that must not fire. A variable the
-  document wrote is renamed into the application; a quoted formula's own `@forAll`
-  universal keeps its scope, and a name the chainer itself minted keeps its bindings, so a
-  clause the proof built from the rule's own terms still shares them. A bound clause
-  carrying a formula-level `@forAll` is still refused, as the inline one is. Forward rules,
-  containment patterns (`log:includes` / `log:notIncludes` / `log:supports`) and every name
-  the chainer mints are all unchanged.
+- **sparq-reason (N3):** a quoted formula a backward (`<=`) rule RETURNS now carries the
+  bindings its proof made for it. A formula is opaque to substitution, so a variable the
+  proof produced survived the projection onto the goal — and the substitution that bound it
+  was dropped the moment the projection ended, so the value named a variable nothing would
+  ever bind, and that name — not the term the proof found — became part of the derived
+  fact's term identity, its `why()` string and its `sparq-prov` IRI:
+  `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }` proved for `:c` returned
+  `{ ?__bw<n>_x :p :b }` where the proof had bound that variable to `:c`, and now returns
+  `{ :c :p :b }`. Only what the PROOF produced is instantiated: a name the caller already
+  binds, and a name the goal itself writes, are the caller's to resolve and are left exactly
+  as they are, so a formula a caller supplies and a formula read from the store come back as
+  they went in. A variable no premise binds keeps its name, which is still the one
+  `__bw<fold>_` fingerprint of the derivation that makes the value its own. A quoted
+  formula's own `@forAll` binder is never bound by a proof, so it is untouched. Three pinned
+  expectations in the backward-naming tests move with this, all of the same shape and all
+  from a leaked name to the term the proof bound; forward rules, the aggregation and
+  containment operators, and every name the chainer mints are unchanged.
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to

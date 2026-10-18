@@ -118,20 +118,6 @@ fn universal_base(v: &str) -> Option<&str> {
     }
 }
 
-/// Is `v` a name the backward chainer MINTED — does it carry a `__bw<n>_` chunk, the same
-/// chunk [`universal_base`] strips? Such a name belongs to a rule application's
-/// standardize-apart space, so it is already in the engine's own namespace and a term
-/// arriving from a document must not be renamed over it (`into_application`).
-///
-/// It is a test on the NAME, so it cannot tell a minted name from a variable a document
-/// itself spells `__bw<digits>_…`: that namespace is not reserved (see `BwPath`), and this
-/// inherits exactly that limit — it neither widens nor narrows it.
-pub(super) fn backward_renamed(v: &str) -> bool {
-    let Some(r) = v.strip_prefix("__bw") else { return false };
-    let digits = r.bytes().take_while(u8::is_ascii_digit).count();
-    digits > 0 && r[digits..].starts_with('_')
-}
-
 /// An `@forAll` universal variable name taken apart: its declared IRI and its base name
 /// (backward-chaining copy prefixes stripped). `None` for any other variable.
 ///

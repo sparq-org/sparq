@@ -116,16 +116,22 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // holds, notIncludes fails), as before; full matching is
 // https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
 // containment matches its blanks afresh (no witness carries over to the next one).
-// A log:collectAllIn / log:forAllIn SUBJECT, subject member (template, clause, result
-// pattern) or SCOPE given through a variable is resolved into the backward (<=) rule
-// application that reads it, so it shares that rule's bindings exactly as the same formula
-// written in the rule does, and exactly as either form does in a forward rule (GH #6943):
-// a variable the document wrote is renamed into the application, while a quoted formula's
-// own universal keeps its scope and a name the chainer itself minted keeps its bindings, so
-// a clause the proof built from the rule's own terms still shares them. Before this a bound
-// clause behind a <= shared nothing: a collectAllIn template was never bound (it collected
-// nothing) and a forAllIn first clause was independent of the second (it held vacuously).
-// A bound clause carrying a formula-level @forAll is still refused, as the inline one is.
+// A quoted formula a BACKWARD (<=) rule RETURNS carries the bindings its proof made for
+// it (GH #6943): a formula is opaque to substitution, so a variable the proof produced
+// used to survive the projection onto the goal with nothing left to bind it —
+// `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }` proved for `:c` returned
+// `{ ?__bw<n>_x :p :b }` and now returns `{ :c :p :b }`. Only what the proof produced is
+// instantiated: a name the CALLER binds and a name the GOAL writes are the caller's to
+// resolve and are left as they are, so a formula a caller supplies or one read from the
+// store comes back as it went in. A variable no premise binds keeps its name (still the
+// one __bw<fold>_ fingerprint of the derivation), and a quoted formula's own @forAll
+// binder is never bound by a proof, so it is untouched. A log:collectAllIn / log:forAllIn
+// clause or a containment pattern given through a variable is NOT resolved into the
+// reading rule's variables: behind a <= the rule's own atoms are standardized apart, so a
+// ?y arriving from elsewhere is a different variable from the rule's own ?y and binds
+// nothing of it, whatever either spells. A formula a FORWARD rule passes to such a clause
+// is read through that rule's own substitution and does share its bindings. Whether a
+// backward rule should share the same way is open.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
