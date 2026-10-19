@@ -37,7 +37,7 @@
     "@solid/access-token-verifier": "^2.1.2"
   },
   "peerDependencies": {
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.7"
   },
   "peerDependenciesMeta": {
     "fastify": {
@@ -45,7 +45,7 @@
     }
   },
   "devDependencies": {
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.7",
     "jose": "^6.2.12"
   },
   "repository": {
