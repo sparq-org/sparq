@@ -2234,37 +2234,30 @@ impl ApplyUpdates for ServerApplier {
     /// snapshot the ring should publish so reads serve the restored data. Runs on the WRITER THREAD
     /// (the only thread that mutates the durable store), so the on-disk swap never races a commit.
     ///
-    /// Sequence: release the OLD durable graph's WAL handle (close its log), then
-    /// [`Graph::restore_into_durable`] writes `fresh`'s image to a sibling, two-rename-swaps it over
-    /// `dir` (parent fsync'd between the renames), re-opens the new base memory-mapped with a fresh
-    /// WAL, and drops the old base — the EXACT crash-safe protocol the in-process compaction uses,
-    /// healed by `recover_compaction` on the next open if a crash interrupts it. We adopt the
-    /// re-opened directory-backed graph as the new durable store (so subsequent updates WAL-append
-    /// to it), and return an independent in-memory snapshot of it for the ring to publish.
+    /// Sequence: the durable graph itself performs the swap (`Graph::restore_in_place`) — it
+    /// writes `fresh`'s image to a sibling, two-rename-swaps it over its own directory (parent
+    /// fsync'd between the renames), re-opens the new base memory-mapped with a fresh WAL, and
+    /// drops the old base — the EXACT crash-safe protocol the in-process compaction uses, healed
+    /// by `recover_compaction` on the next open if a crash interrupts it. The graph becomes the
+    /// restored store (so subsequent updates WAL-append to it), and we return an independent
+    /// in-memory snapshot of it for the ring to publish.
     ///
-    /// FAIL-CLOSED: `fresh` is fully built before this runs; if the swap fails before the first
-    /// rename the OLD durable store is untouched, and a crash mid-swap heals to old-or-new. An
-    /// in-memory applier (no durable store) is a clean `Err` — there is no durable dir to write
-    /// through, so the in-memory restore path (the ring/writer swap) is used instead.
+    /// FAIL-CLOSED: `fresh` is fully built before this runs. The graph gives up its log only
+    /// once the new base is staged, so a staging failure leaves the OLD durable store untouched
+    /// AND still writable; a failure past that point freezes it until the reopen. This is why
+    /// the swap is the graph's own and not performed around it. An in-memory applier (no durable
+    /// store) is a clean `Err` — there is no durable dir to write through, so the in-memory
+    /// restore path (the ring/writer swap) is used instead.
     fn restore_durable(&mut self, fresh: Graph) -> Result<Graph, String> {
         let durable = self.durable.as_mut().ok_or_else(|| {
             "restore-into-durable requested on an applier with no --persist store".to_string()
         })?;
-        // The directory the OLD durable graph is backed by; the swap targets it.
-        let dir = durable
+        durable
             .graph
-            .persist_dir()
-            .ok_or_else(|| "durable graph is not directory-backed".to_string())?;
-        // Release the OLD durable graph's WAL handle before the directory swap (its `wal.log` is
-        // about to be renamed away with `dir`); the crash-safe swap re-opens a fresh handle.
-        durable.graph.close_wal();
-        let restored = Graph::restore_into_durable(&dir, fresh)
-            .map_err(|e| format!("restore-into-durable swap failed: {e}"))?;
-        // Adopt the re-opened, directory-backed restored store; subsequent updates WAL-append to it.
+            .restore_in_place(fresh)
+            .map_err(|e| format!("restore-into-durable swap failed: {}", e))?;
         // The published snapshot is an independent in-memory image of the restored content.
-        let published = restored.snapshot().into_graph();
-        durable.graph = restored;
-        Ok(published)
+        Ok(durable.graph.snapshot().into_graph())
     }
 }
 
@@ -6193,8 +6186,13 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
             "compaction complete\n".to_string(),
             false,
         ),
-        // A compaction failure (e.g. durable-write I/O error) is retryable: the writer thread
-        // stays alive and reads keep flowing from the last published snapshot.
+        // A compaction failure leaves the writer thread alive and reads flowing from the last
+        // published snapshot. It is NOT always retryable, so the response does not promise that:
+        // (sq-ycle) a durable swap that fails after it has staged its new base FREEZES
+        // the store — core refuses every later durable write until the store is reopened — so a
+        // retry returns the same 503 and the operator has to restart this server against the
+        // same `--persist` dir (which replays what is on disk; nothing acknowledged is lost).
+        // A failure before that point leaves the store writable and a retry can succeed.
         // (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
         // the server's `--persist` filesystem path (an I/O error embeds the absolute path).
         // Although this route is write/admin-gated, withhold the path from the response body —
@@ -6202,7 +6200,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
         Ok(Err(e)) => sanitized_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "compaction",
-            "compaction failed (retryable)",
+            "compaction failed; reads are unaffected, and if the durable swap had already staged its new base the store stays frozen until this server is restarted against the same --persist dir",
             &e,
         ),
         Err(_) => json_error(

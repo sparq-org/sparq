@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core / sparq-engine (`sq-ycle`):** the durable redo journal records GRAPH-EXISTENCE
+  changes, not only triples. New public `sparq_core::TxnOp` (`Insert` / `Delete` / `Create` /
+  `Drop`) plus `Graph::commit_txn_ops` and `Graph::commit_txn_ops_checked` commit a whole UPDATE
+  body as one frame over that vocabulary; `commit_txn`/`commit_txn_checked` keep their tuple
+  signatures and now delegate to them. `CREATE GRAPH <g>` of a new empty graph and `DROP GRAPH
+  <g>` of an empty one resolve to no triple record at all, so a data-only frame carried no trace
+  of them and a crash between the commit and the materialisation could recover a dataset whose
+  graph SET differed from the one the commit had acknowledged; the engine's effect resolver now
+  emits a `Create` for each CREATE and, after its retractions, a `Drop` for each dropped named
+  graph, and `Graph::open` redoes a frame's records in commit order. The frame magic moves to
+  `WTX2`; a `WTX1` frame left by an older build is still replayed (data records only). A CLEAR
+  emits no existence record, and the default graph never gets one.
+
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
   `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
@@ -371,6 +384,247 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but the cut it is refused with may change from `backward proof-node limit exceeded` to a
   forward-closure limit. Wherever both the old and the new behaviour answer, the answers are
   identical; no run that previously answered is now refused.
+
+- **sparq-core (`sq-ycle`):** a kept journal frame now freezes the WHOLE graph tree. State shared
+  by a root and its named sub-graphs carries the "a committed frame is kept for the reopen" flag,
+  and every durable mutation passes one central gate before writing a byte: a delta on the root or
+  on any named graph, a graph create or drop, a compaction, a vacuum, and `clear_txn` itself are
+  all refused until the store is reopened — previously only compaction and vacuum were, so a
+  direct write could be acknowledged and then undone or reordered by the recovery redo. The
+  refusal propagates in both directions: a frame retained by a named graph refuses the root's
+  writes too. `clear_txn` is gated like an append because truncating the journal destroys
+  committed records. A durable path that fails PART-WAY — a WAL append, a graph create, a graph
+  drop, a journal clear, or a base swap after its new base is staged — freezes the tree the same
+  way, because each has already changed part of the store or the in-memory image by the time it
+  can fail; the store is writable again after it is reopened, which replays what is on disk.
+
+- **sparq-core (`sq-ycle`): a durable store written by this version cannot be opened by an
+  earlier one.** The dictionary's on-disk format version (`dict-meta.bin`) moves to 2, and an
+  older build refuses a version it does not know with a rebuild-required error. This is
+  deliberate: an older build meeting a `WTX2` journal frame treats the unknown frame magic as a
+  torn tail and TRUNCATES it, destroying a commit it had already acknowledged, and the format
+  version is the only field such a build hard-errors on instead of truncating. A store written by
+  an older build is marked the first time this version appends a journal frame to it, so opening
+  a store read-only does not mark it, and a store this version has committed to is a one-way
+  upgrade. A store still on the pre-`dict-meta.bin` layout (the legacy single-file `dict.bin`)
+  has no such field, so there is nothing to mark: an atomic UPDATE on such a store is now
+  REFUSED rather than written unmarked, with an error saying to re-save it with this version
+  (`Graph::open(old)?.save(new)?`) first. Reads and ordinary updates of such a store are
+  unaffected. In the other direction, a journal frame whose format version is NEWER than this
+  build knows is an error that changes nothing, instead of a torn tail that gets truncated.
+
+- **sparq-core (`sq-ycle`): a named graph's directory is a MONOTONIC slot id, not its
+  position.** `named.bin` is format version 2: it records the `named/<slot>` id of every named
+  graph and, in its header, the next id to hand out. A version-1 manifest is still read (its ids
+  are its positions). Three behaviours follow. A drop no longer renumbers the survivors into a
+  fresh sub-tree and swaps it in — it rewrites the manifest, which is the commit point, and
+  removes the dropped graph's own directory, so survivors keep their slots and their handles. A
+  drop of every named graph rewrites the manifest naming NOTHING instead of removing it, because
+  the header carries the counter: removing it reset the counter, and the next created graph then
+  landed in slot 0 on top of whatever the removal of the old slot 0 had left behind — base, WAL
+  and journal — whose replay brought the dropped graph's triples back under the new graph's
+  name. And the removals themselves are REPORTED rather than discarded: a drop whose directories
+  are still on disk afterwards is an error that freezes the store, which for a DROP performed to
+  erase data is the only honest answer. A whole-store write — `save`, or the base swap a
+  compaction publishes — writes a FRESH image whose slots are numbered from zero again and whose
+  counter starts past them, which is sound precisely because nothing of the old image survives
+  there for an id to collide with. Format 2 is a ONE-WAY upgrade, like the dictionary's: an
+  earlier build refuses any `named.bin` version but 1, and this version writes format 2 from
+  every save, create and drop that touches a named set — including the manifest naming nothing
+  that a drop of every named graph leaves, where an earlier build left no manifest at all.
+
+- **sparq-core (`sq-ycle`): a republish of the named manifest records EVERY slot it stops
+  naming.** The named set is public and detaching a child graph to write through it is a
+  supported pattern, but every republish rebuilds the manifest from the ATTACHED children — so a
+  create, or a drop of a sibling, performed while a child is detached published a set that no
+  longer named that child. Only the dropped slot was recorded as replaced, so the detached
+  handle's next write was ACKNOWLEDGED into a directory the store no longer named and was gone on
+  the next open; when the drop had emptied the set, `named/` itself was removed and the write was
+  acknowledged into an unlinked log. The invalidated set is now derived from the manifest diff
+  (declared before, not declared after), so such a write is refused with the reason instead.
+
+- **sparq-core (`sq-ycle`): a drop removes the store's OWN slot directory, and a slot id is
+  the store's own.** The directory a drop removed used to be the dropped handle's own `wal.dir()`
+  — whatever directory that handle was opened from. Since the named set is public, a graph opened
+  from ANOTHER store could be pushed onto it and dropped, and the removal then deleted that other
+  store's directory. Every removal on these paths is now built from this store's `named/` plus a
+  slot id, and refuses a name under it that is not a real directory, so no drop or recovery sweep
+  can follow a link out of the store. For the same reason a child's slot id is accepted only when
+  its directory is exactly `named/<slot>` of THIS store: a foreign child's basename used to be
+  recorded as a local slot, which left the manifest naming a directory that was not there or —
+  when the id collided with a local child's — opened two graph names onto one directory, sharing
+  one base and one WAL. A manifest may not name one slot twice, where it is written or where it
+  is read, and a slot name is its plain decimal spelling only, so a stray `named/05` is not a
+  second name for slot 5. The residue and slot probes on these paths are fallible: an unreadable
+  path is an error, not an "absent".
+
+- **sparq-core (`sq-ycle`): the layout record is a per-directory map, not a scanned log.**
+  Staleness is a question about a handle's directory and its ancestors, so it is asked of those —
+  a bounded number of lookups — instead of scanning every directory the tree has ever replaced,
+  and recording a directory now drops the entries beneath it, which a replacement of that
+  directory already answers for. Because slot ids are monotonic, each create/drop cycle added a
+  distinct entry that nothing ever removed, and every durable write to every handle in the tree
+  then paid for each drop since the last whole-tree swap.
+
+- **sparq-core (`sq-ycle`): an undeclared named-graph slot is swept on the next open.** The
+  manifest is the commit point for the whole named set, so a `named/<slot>` directory it does not
+  name is garbage by construction: a create whose manifest write never landed, or a drop
+  interrupted between its manifest rewrite and the removal. Nothing opened such a directory, but
+  nothing removed it either until the next whole-store rewrite, and a retried drop reported
+  success with the dropped graph's bytes still on disk — which for a DROP performed to erase them
+  is the answer that may not be given. The open removes them before anything is opened, when no
+  handle can point at them, and reports a failure to do so.
+
+- **sparq-core (`sq-ycle`): one bottom-up durability barrier for every named-graph
+  manifest publish.** Each level is made durable before the level that names it — the sub-trees'
+  files and their own directories, then the `named/` container, then the store root that holds
+  `named/` and the manifest — and every publish site goes through it, the external quad builder
+  included (it wrote the manifest directly, so it synced nothing at all). The root rung was the
+  one previously missing: when a create was what made `named/` exist, the root's directory entry
+  for it reached disk only in the fsync that followed the manifest rename. The external-sort
+  merge and the compressed-permutation writer now fsync the index they produce instead of
+  flushing it.
+
+- **sparq-core (`sq-ycle`): layout generations are PER SUB-TREE, and a root compaction
+  stages the whole tree once.** A handle is stale when the directory its log lives in — or one
+  containing it — was replaced, not when anything anywhere in the tree was. One tree-wide
+  counter made a child's base swap mark the root and every sibling stale, so a root compaction
+  that folded its children one at a time refused at the second child, and with a single child
+  the root's own next write refused. A directory-backed compaction now stages the whole tree's
+  new base once and publishes it once (the image `save` writes already contains every named
+  graph, folded), so a sequential writer can compact a root with named graphs and carry on
+  writing.
+
+- **sparq-core (`sq-ycle`): a tree-wide WRITER PERMIT.** One writer at a time across a
+  durable tree, held across a write's staleness check, log append and in-memory application, and
+  by maintenance from staging through publish; reentrant, because a write at the top of a tree
+  materialises through writes further down it. The check-then-append sequence was not atomic
+  against maintenance elsewhere: a handle on a named graph taken out of its parent's public
+  `named` vector could pass the check, and the parent could then stage a new base, record the
+  replacement and unlink the old directory, before the detached child appended to — and
+  acknowledged — the log inside it. Exclusion BETWEEN PROCESSES is a different problem and is
+  still not solved here.
+
+- **sparq-core (`sq-ycle`): an interrupted named-graph drop reconciles EVERY candidate
+  before removing any of them.** The manifest names a definite set of slots, and a candidate
+  sub-tree agrees only if it holds exactly that set; the first candidate that agrees is
+  published, the losers are removed only afterwards, and when NONE agrees the open is refused
+  with all of them left on disk. A present `named/` that disagreed used to be deleted so that
+  `named.drop-old` could be promoted, without checking that `drop-old` agreed either. Slot
+  inspection is also fallible now: it walked directory entries with `is_dir()`, which an I/O
+  error answers the same way a missing directory does, so an unreadable sub-tree read as a
+  shorter one.
+
+- **sparq-core (`sq-ycle`): one committed-frame decoder for the WAL and the redo
+  journal.** Both files are the same frame format and had two copies of the scan, which had
+  drifted: the journal treated a COMMITTED, checksum-valid body it could not decode as a torn
+  tail and truncated it — an acknowledged commit discarded on the strength of a byte the build
+  could not interpret — and sized its record vector with an infallible reservation from the
+  untrusted header count. Through the shared decoder the journal now reports such a body as an
+  error that rewrites nothing, bounds the declared count by the body length before reserving
+  fallibly, refuses an unknown opcode, and refuses bytes left after the last record.
+
+- **sparq-core (`sq-ycle`): a graph store directory now says what it is.** Every store
+  carries a `sparq-store` marker file naming its role — a root (opened, saved or built on its
+  own) or a named graph of one — written before anything else in the directory, and a store
+  written before markers existed gets one on its next writable open. What a directory is was
+  previously inferred from its name and its contents. Every open, create, save, external build
+  and restore now goes through one constructor, which resolves the path once, refuses it when any
+  ancestor is a store (so a named graph's directory, or anything else inside a store, belongs to
+  that store), refuses a name a staging directory would collide with, and for a whole-store write
+  additionally refuses a destination that holds another store. A directory in a `named/` slot
+  that is marked as a store ROOT is refused rather than adopted as a named graph.
+
+- **sparq-core (`sq-ycle`): a store image is written to a FRESH destination only.**
+  `Graph::save`, `Graph::save_compressed` and every `build_external*` builder now refuse a
+  destination directory that exists and is not empty, through one shared check. Writing over a
+  store in place was the common root of several losses: the writers remove the `named/` sub-tree
+  they are about to walk, rewrite the base a live graph has mapped, leave the old root `wal.log`
+  and `txn.log` in place for the next open to replay into the replacement, and discard any
+  committed journal frame the destination was keeping. To replace a store's contents, build the
+  image elsewhere and swap it in: `Graph::restore_in_place` for a graph that is open, or
+  `Graph::restore_into_durable` for one that is not — both stage a complete base and rename it
+  into place. `restore_into_durable` still refuses a store whose `txn.log` keeps an unreplayed
+  committed frame. A graph name that is neither an IRI nor a blank node is also refused rather
+  than coerced into the manifest as a lexical form the manifest's own decoder rejects.
+
+- **sparq-core (`sq-ycle`): a graph is never writable without a write-ahead log.** The
+  log field is an explicit three-state value — durable (it holds a log), poisoned (it had one and
+  a durable path failed part-way), or deliberately in-memory — instead of an `Option` whose
+  `None` meant both of the last two. Every write path matches on it, so the paths that used to
+  reach the no-log branch and act in memory are refused instead: a named-graph create no longer
+  builds an unpersisted in-memory child on a frozen store, a batch `DROP` no longer clears the
+  set in memory while writing nothing, and a delta is refused rather than applied.
+  `Graph::close_wal` is gone from the public API: a restore is now the graph's own operation
+  (`Graph::restore_in_place`), which gives the log up only once the new base is staged, so a
+  failed restore leaves the store writable rather than logless-but-accepting. Callers that used
+  `persist_dir` + `close_wal` + `restore_into_durable` on an OPEN graph should call
+  `restore_in_place` instead.
+
+- **sparq-core (`sq-ycle`):** a handle whose directory was replaced by maintenance performed
+  elsewhere in the tree now refuses durable writes instead of appending to an unlinked file. Each
+  graph records the tree's layout generation, which a base swap (compaction, vacuum, restore) and
+  a named-graph drop bump; a mismatch is refused with an error naming both generations. This
+  covers the case a parent cannot reach: a named graph taken out of its parent's public `named`
+  vector keeps a log inside the parent's directory, which the parent's next swap unlinks.
+
+- **sparq-core (`sq-ycle`):** a compaction whose staging step fails is retry-safe. The
+  overlay is now folded by adopting the re-opened store, never before the swap publishes;
+  previously the fold happened first, so a retry saw nothing pending, truncated the log that
+  still carried the acknowledged batch, and reported success.
+
+- **sparq-core (`sq-ycle`):** a base swap HEALS an interrupted earlier swap before it
+  clears the staging siblings. The clear ran first, so a restore attempted after a crash between
+  the two renames removed the only surviving copy of the store.
+
+- **sparq-core (`sq-ycle`):** a committed, checksum-valid WAL batch this build cannot read
+  back is now an ERROR rather than a torn tail that gets truncated — the bytes are what the
+  writer wrote, so discarding them discards an acknowledged write. Replay bounds the declared
+  record count by the body that holds it and reserves fallibly (a 32-bit count used to reserve
+  that many records before a byte of the body was examined), requires the records to fill the
+  body exactly, and reads opcodes explicitly (any byte that was not `insert` applied as a
+  DELETE). Both encoders refuse, UNWRITTEN, a record that does not fit its `u32` on-disk field
+  and a triple whose positions are not valid RDF — a literal predicate used to be fsynced,
+  acknowledged, applied in memory, and then dropped by the replay meant to recover it.
+
+- **sparq-core (`sq-ycle`):** `fsync` of a directory no longer reports success when the
+  filesystem rejected it. Every caller is making a rename durable before treating it as
+  committed, and the `InvalidInput` case that was swallowed cannot be told from a real failure.
+  One helper now publishes a named-graph set: it fsyncs the child or survivor trees' FILES, then
+  their container, and only then writes the manifest that names them — a create used to publish
+  the manifest before the child's own bytes were on disk, and a drop synced the staging container
+  without the survivor trees inside it.
+
+- **sparq-core:** a staged base is now fsynced file by file and then directory by directory before
+  the rename that publishes it, and a WAL or journal file this process creates gets its directory
+  entry synced once. Flushing a buffered writer moves bytes into the page cache only, so a crash
+  just after the swap could leave the canonical directory naming an index, dictionary or manifest
+  whose bytes were never written.
+
+- **sparq-core:** the staging directories a compaction, a vacuum and a named-graph drop use are
+  now derived by appending the suffix to the store's WHOLE name (`data.a.compact-new`), not by
+  replacing its file extension (`data.compact-new`). Two stores in one directory whose names
+  differ only after a dot shared staging paths, so opening or swapping one could remove or
+  overwrite the other's — including the retained staging directory that is a store's only copy
+  after a crash mid-swap. A store whose own name ends in `.compact-new`, `.compact-old`,
+  `.drop-new` or `.drop-old` is refused on open, as a save destination and as an external-build
+  destination: such a store derives its own path as its staging sibling, so a swap removed the
+  store it was swapping. The check reads the name's native bytes (`as_bytes` on unix,
+  `encode_wide` on Windows), so a name that is not valid UTF-8 no longer slips past it. A store
+  whose canonical directory is missing while a sibling named the OLD way (`data.compact-new` for
+  a store `data.a`) survives is not recovered automatically: that stem is shared with every other
+  store of the same stem, so the open is refused with an error naming the sibling, and
+  `Graph::adopt_legacy_staging` finishes the swap once the owner has been confirmed.
+
+- **sparq-core:** a crash between a named-graph DROP's sub-tree swap and the manifest rewrite that
+  commits it left a manifest naming a slot the swapped-in sub-tree no longer had, and the store
+  did not open at all. Recovery now reconciles the two by count in EVERY branch: whichever
+  sub-tree the manifest's count agrees with is the one published, whether that is the sub-tree in
+  place or one of the two staging siblings. Promoting whichever sibling happened to survive could
+  publish the post-drop set under a pre-drop manifest and delete the roll-back candidate on the
+  way out. When neither surviving sibling agrees with the manifest the open is refused and both
+  are left on disk for a deliberate recovery, and a manifest that is present but unreadable is an
+  error rather than a licence to guess.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that

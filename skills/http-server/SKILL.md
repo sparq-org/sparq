@@ -736,7 +736,8 @@ curl http://127.0.0.1:3030/metrics                              # Prometheus tex
 # Admin WAL compaction / vacuum for ERASURE-COMPLETENESS (sq-x32t). POST-only; gated by the
 # WRITE token. Physically purges data removed by DELETE / DROP (incl. orphaned literal VALUES) from the
 # on-disk store so a logical erasure is followed by real erasure. 200 ok; 409 if in-memory
-# (no --persist, nothing to purge); 503 on a transient durable-write error (retryable):
+# (no --persist, nothing to purge); 503 on a durable-write error (retryable only if the swap had
+# not yet staged its new base — past that the store is frozen until a restart, sq-ycle):
 curl -X POST -H 'Authorization: Bearer <TOKEN>' http://127.0.0.1:3030/admin/compact
 
 # Online consistent-snapshot backup + restore (feature `backup`, default OFF). POST-only, WRITE-gated.
@@ -779,7 +780,11 @@ batches** (no race with a concurrent write), preserves the live triple set **exa
 generation published; reads keep flowing throughout). **POST-only**, gated by the **write** token
 (`--auth-token`), like an UPDATE. Responses: `200` ok; `409` if the server is in-memory (no
 `--persist` — there is no on-disk history to purge, so a no-op success would mislead); `503` on a
-transient durable-write error (retryable, writer stays alive). **Offline equivalent:** stop the
+durable-write error (the writer stays alive and reads keep flowing either way). That `503` is
+retryable only when the failure came BEFORE the swap staged its new base: past that point core
+freezes the store — every later durable write is refused — until the server is restarted against
+the same `--persist` dir, which replays what is on disk, so nothing acknowledged is lost
+(`sq-ycle`). **Offline equivalent:** stop the
 server and run `sparq-cli compact <persist-dir>` (see the `cli` skill). **Honest scope:** this
 scrubs the engine's own on-disk segments + dictionary; it cannot reach bytes already copied off-box
 (filesystem snapshots, COW history, external backups) — those are the operator's responsibility
@@ -1921,6 +1926,93 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **One UPDATE body = one durable commit, graph SET included (`sq-ycle`).** A multi-operation
+  UPDATE body is resolved into ONE redo-journal frame (`DIR/txn.log`) that is fsync'd before any
+  per-graph WAL is touched, so a crash part-way through materialising it recovers the whole body
+  or none of it. The frame now records graph-EXISTENCE changes as well as triples: `CREATE GRAPH
+  <g>` of a new empty graph and `DROP GRAPH <g>` of an empty one carry no triples at all, so
+  without those records a crash between the commit and the materialisation could come back with a
+  different graph SET from the one the `204` acknowledged. Records replay in commit order, so a
+  create and a drop of the same graph in one body recover with the last one winning. A journal
+  written by an older build (before the existence records) is still replayed, not discarded.
+- **A failed materialisation freezes the WHOLE store until a restart.** If a body's commit
+  succeeds but materialising it fails, the frame is KEPT for the next open to replay and every
+  durable write in that store — the default graph, every named graph, a graph create or drop, a
+  compaction, a vacuum, and the journal clear itself — is refused until the store is reopened
+  (`503` over HTTP). Accepting a write in that window would let the recovery redo silently undo
+  or reorder something already acknowledged. The refusal is tree-wide in both directions: a frame
+  retained by a named graph freezes the root too.
+- **A durable path that fails part-way freezes the store the same way.** Not only a failed
+  materialisation: a WAL append, a graph create, a graph drop, a journal clear, or a compaction
+  or vacuum whose swap fails after its new base is staged all freeze the store until it is
+  reopened, because each has already changed part of it or part of the in-memory image by the
+  time it can fail. Over HTTP that is a `503` until the process is restarted against the same
+  `DIR`; the restart replays what is on disk, so nothing acknowledged is lost and nothing refused
+  appears.
+- **`--persist DIR` written by this version cannot be opened by an earlier one.** The store's
+  on-disk format version moves with the journal format, and an older build refuses a version it
+  does not know rather than silently truncating a journal frame it cannot read (which would
+  destroy an acknowledged commit). A `DIR` written by an older build is marked the first time
+  this version commits a body to it, so this is a one-way upgrade per store: keep a backup before
+  rolling a server forward if a rollback matters. A `DIR` still on the pre-`dict-meta.bin`
+  dictionary layout carries no such field: an atomic UPDATE on it is REFUSED — like any other
+  refused durable write, so a `503` over HTTP — with an error saying to re-save the store with
+  this build first (`Graph::open(old)?.save(new)?`).
+  Queries and single-operation updates of such a store are unaffected.
+- **A `--persist DIR` is a claimed store directory.** Every store carries a `sparq-store` marker
+  naming its role (a root, or a named graph of one), and every open, create, save, external build
+  and restore goes through one constructor: the path is resolved once, refused when any ancestor
+  is a store (so `DIR/named/<i>` is not a store you can point `--persist` at), and refused when
+  its name ends in a suffix a compaction or a named-graph drop derives for its own staging
+  directories. A store written before markers existed gets one on its next writable open.
+- **A whole-store write goes to a FRESH directory.** `Graph::save`, `save_compressed` and the
+  `build_external*` builders refuse a destination that exists and is not empty. The online
+  restore (`POST /admin/restore` with the durable store) is unaffected: it goes through
+  `Graph::restore_in_place`, which the graph itself performs — it stages the complete new base
+  beside the store and renames it in, giving its log up only once that base is on disk, so a
+  staging failure leaves the store exactly as writable as it was.
+- **A handle whose directory was replaced refuses writes.** Each graph records the layout
+  generation of the DIRECTORY its log lives in, and every base swap (compaction, vacuum, restore)
+  and every named-graph drop records which directory it replaced. A handle inside a replaced
+  directory — a named graph taken out of its parent's `named` vector before the parent swapped
+  its base, for instance — is refused rather than left appending to an unlinked log. A swap
+  elsewhere in the tree (a sibling graph, or a child beneath a root that is still there) does not
+  make a handle stale, so a sequential writer can compact a store with named graphs and carry on
+  writing. A compaction of a store that HAS named graphs stages the whole tree once and publishes
+  it once. Every republish of the manifest is built from the ATTACHED named graphs, so a create
+  or a drop performed while a handle is detached records that handle's directory as replaced
+  too: its next write is refused rather than acknowledged into a directory the store no longer
+  names.
+- **A named graph's directory is handed out once.** `named.bin` (format 2; format 1 is still
+  read, and a store this build has written is NOT readable by a build before it) records each
+  named graph's `named/<slot>` id and the next id to hand out, so the id is monotonic rather than
+  the graph's position — between whole-store rewrites: a `save`, a compaction or a vacuum writes
+  a fresh image and numbers it from zero, which is safe because that image contains no residue. A
+  `DROP GRAPH` rewrites the manifest — the commit point — and then removes that graph's own
+  directory, leaving every other graph's slot and handle alone; a drop of every named graph
+  leaves a manifest naming none, which is what keeps the counter. A graph created after a drop
+  therefore cannot land in a dropped graph's directory, even if the removal of that directory
+  failed or a crash interrupted it. A slot id is its plain decimal spelling and nothing else, the
+  manifest may not name one twice, and the only directories a drop or a recovery ever removes are
+  the store's own `named/` container, its interrupted-drop siblings and its `named/<slot>` paths —
+  a graph opened from somewhere else and pushed onto the public named set is refused, not
+  dropped, and a name under any of those that is not a real directory is refused too.
+- **An undeclared slot directory is swept on the next open.** The manifest is the commit point
+  for the whole named set, so a `named/<slot>` it does not name is garbage: the directory of a
+  create whose manifest write never landed, or of a drop interrupted between its manifest rewrite
+  and the removal. The open removes it before anything is opened, so a `DROP` that reported
+  success does not leave the dropped graph's bytes on disk until the next whole-store rewrite.
+- **A drop that cannot remove its directories is an error.** The removals are reported, not
+  discarded, and the failure freezes the store until it is reopened: for a `DROP` performed to
+  ERASE data (the retention/erasure runbook), reporting success while the data is still on disk
+  is the one answer that must not be given. Over HTTP this is a refused update, not a 2xx.
+- **One writer per `--persist DIR`.** Within this process the store tree holds a writer permit,
+  so two handles on one tree — a root and a named graph detached from it, say — cannot write
+  concurrently, and a handle's staleness check cannot be overtaken by maintenance between the
+  check and the append it guards. Two writing PROCESSES on one directory still corrupt it and
+  nothing detects that; cross-process exclusion is designed in
+  [`research/core-versioned-store-design.md`](../../research/core-versioned-store-design.md) and
+  is not implemented yet.
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with
   `--features backup` to mount the WRITE-gated, POST-only `/admin/backup` (stream a
   self-describing snapshot artifact of the live store WITHOUT stopping the world) and

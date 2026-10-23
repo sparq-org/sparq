@@ -51,9 +51,25 @@ const INLINE_MAX: u32 = (1 << 30) - 1;
 // persistence paths, which are cfg'd out of the default feature set.
 #[allow(dead_code)]
 pub(crate) const DICT_META_MAGIC: u32 = 0x31_56_4D_44; // b"DMV1" little-endian
-/// Bump when the on-disk meta layout changes incompatibly.
+/// Bump when the on-disk meta layout changes incompatibly. A build that does not know a
+/// version REFUSES the store with a rebuild-required error rather than reading it, which makes
+/// this field the one place a format change can be announced to an OLDER binary: every other
+/// on-disk marker this crate writes is treated by an older build as a torn tail and silently
+/// TRUNCATED.
+///
+/// (sq-ycle) Version 2 says "the redo journal in this store may hold `WTX2` frames"
+/// (graph-existence records — see `TxnJournal`). An older build meeting such a frame sees an
+/// unknown frame magic, treats it as a torn tail and truncates it, destroying a commit it had
+/// already acknowledged; refusing to open the store at all is the only honest alternative, and
+/// this version is what makes it refuse. Opening a store is therefore a ONE-WAY upgrade.
 #[allow(dead_code)]
-pub(crate) const DICT_META_VERSION: u32 = 1;
+pub(crate) const DICT_META_VERSION: u32 = 2;
+
+/// (sq-ycle) The versions this build can READ. Version 1 is a store written before the
+/// `WTX2` journal format existed; its layout is otherwise identical, so it is read as it is (and
+/// upgraded in place the first time this build appends a journal frame to it).
+#[allow(dead_code)]
+pub(crate) const DICT_META_VERSIONS_READ: [u32; 2] = [1, DICT_META_VERSION];
 
 /// If a literal `value`/`datatype` is a canonical non-negative `xsd:integer` in
 /// range, its inline id. Only the canonical lexical form (no leading zeros / sign)
@@ -2142,6 +2158,9 @@ impl Dict {
         }
         meta.write_all(&(n as u64).to_le_bytes())?;
         meta.flush()?;
+        // (sq-ycle) Flushed is not durable: a staged dictionary is published by a
+        // rename, so its bytes must be on disk first.
+        meta.into_inner().map_err(std::io::Error::other)?.sync_all()?;
 
         // term blob + per-term byte offsets; collect (hash, id) for the lookup index.
         let mut blob = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin"))?);
@@ -2155,6 +2174,7 @@ impl Dict {
             pairs.push((hash_stored_ref(&r, &self.prefixes, &self.datatypes), id));
         }
         blob.flush()?;
+        blob.into_inner().map_err(std::io::Error::other)?.sync_all()?;
         write_pod_slice(&dir.join("dict-offs.bin"), &offsets)?;
 
         // hash-sorted parallel arrays (binary-searchable lookup). Sorted by (hash, id) —
@@ -2198,11 +2218,11 @@ impl Dict {
             ));
         }
         let version = read_u32(&mut r)?;
-        if version != DICT_META_VERSION {
+        if !DICT_META_VERSIONS_READ.contains(&version) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "dict-meta.bin format version {version} is not supported (this build expects {DICT_META_VERSION}); rebuild the store"
+                    "dict-meta.bin format version {version} is not supported (this build reads {DICT_META_VERSIONS_READ:?}); rebuild the store"
                 ),
             ));
         }
@@ -2545,7 +2565,12 @@ fn write_pod_slice<T: Copy>(path: &std::path::Path, data: &[T]) -> std::io::Resu
     let () = DICT_ON_DISK_LE_GUARD;
     // SAFETY: T is u32/u64 (POD); we only read its bytes.
     let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data)) };
-    std::fs::write(path, bytes)
+    // (sq-ycle) Written AND synced: these blobs are part of a base that a rename
+    // publishes, so `std::fs::write`'s page-cache-only guarantee is not enough.
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
 }
 
 fn read_u32(r: &mut impl std::io::Read) -> std::io::Result<u32> {

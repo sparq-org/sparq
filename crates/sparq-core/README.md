@@ -34,8 +34,8 @@ subtype facets on the raw RDF lexical form, independently of finite arithmetic
 capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
 representation and the existing NaN sentinel; larger literals can remain valid.
 
-`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
-keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional keys with
+checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
 Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
@@ -43,10 +43,8 @@ Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed i
 preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bin`; missing or
 wrong-sized current files also trigger rebuilds.
 
-Legacy opens cost a dictionary scan and cache allocation until migrated with
-`Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
-Versions mark semantic compatibility, not integrity; the trusted-storage contract
-still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md).
+Legacy opens cost a dictionary scan until migrated with `Graph::open(old)?.save(new)?`; a store written before the `sparq-store` marker existed gets one
+on its next writable open. Versions mark semantic compatibility, not integrity. A pre-`dict-meta.bin` store is refused an atomic UPDATE until migrated, and `save`/`save_compressed`/`build_external*` write to a FRESH destination only — replace a store by swapping a staged image in. A named graph lives in the `named/<slot>` directory its manifest (`named.bin`, format 2; format 1 is still read, and format 2 is a ONE-WAY upgrade — an earlier build refuses it) records; a slot id is handed out once between whole-store rewrites (a `save`, compaction or vacuum writes a fresh, residue-free image and renumbers it), so a graph dropped and a graph created afterwards can never share a directory. A drop or a recovery removes only the store's own `named/<slot>` paths, and an open sweeps the slots the manifest does not name. One writer at a time per open store tree, in this process; a drop that cannot remove its directories is an error, not a silent success. Details: [data-formats](../../skills/data-formats/SKILL.md), [durability](../../skills/http-server/SKILL.md).
 
 ## ✨ Features
 
