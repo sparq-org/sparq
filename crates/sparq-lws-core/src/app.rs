@@ -159,7 +159,26 @@ where
     // relying on axum's implicit default (which a dependency bump could silently change). The binary's
     // [`build_router_with_overload`] applies the CONFIGURABLE value instead. Health routes are merged
     // OUTSIDE the layer (they carry no body).
-    build_app_routes(state)
+    build_app_routes(state, crate::describe::ServiceCatalog::default())
+        .layer(crate::body_limit::layer(
+            crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+        ))
+        .merge(health_routes())
+}
+
+/// Build the Solid router with entries for additional routes mounted by the caller.
+///
+/// The caller must mount every endpoint registered in `catalog` on the returned router.
+pub fn build_router_with_catalog<J, R, S>(
+    state: AppState<J, R, S>,
+    catalog: crate::describe::ServiceCatalog,
+) -> Router
+where
+    J: JwksProvider + Send + Sync + 'static,
+    R: ReplayStore + Send + Sync + 'static,
+    S: Store + 'static,
+{
+    build_app_routes(state, catalog)
         .layer(crate::body_limit::layer(
             crate::body_limit::DEFAULT_MAX_BODY_BYTES,
         ))
@@ -180,7 +199,10 @@ where
     R: ReplayStore + Send + Sync + 'static,
     S: Store + 'static,
 {
-    with_overload_layers(build_app_routes(state), overload)
+    with_overload_layers(
+        build_app_routes(state, crate::describe::ServiceCatalog::default()),
+        overload,
+    )
 }
 
 /// Wrap application routes in the overload stack — body ceiling, request timeout, admission
@@ -245,7 +267,10 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
 
 /// The application routes (LDP + notifications), WITHOUT the overload layers or the health routes —
 /// the shared core of [`build_router`] and [`build_router_with_overload`].
-fn build_app_routes<J, R, S>(state: AppState<J, R, S>) -> Router
+fn build_app_routes<J, R, S>(
+    state: AppState<J, R, S>,
+    mut catalog: crate::describe::ServiceCatalog,
+) -> Router
 where
     J: JwksProvider + Send + Sync + 'static,
     R: ReplayStore + Send + Sync + 'static,
@@ -265,7 +290,24 @@ where
     // registered via `…/receive` is on the same registry the LDP emit path fans to), the base URL,
     // AND the store + parsed-ACL cache — the last of which is what lets the subscribe/receive seams
     // run the SAME per-resource WAC check as a GET of the topic.
-    let notify_state = Arc::new(NotifyState::new(ldp.clone()));
+    use crate::describe::{capability, entry, SSD};
+    let base = ldp.base_url().trim_end_matches('/');
+    let storage = format!("{base}/");
+    catalog.service(entry("storage-root", "StorageRoot", storage));
+    catalog.service(entry(
+        "storage-description",
+        "StorageDescription",
+        format!("{base}{WELL_KNOWN_SOLID_PATH}"),
+    ));
+    catalog.capability(capability(
+        &format!("{SSD}AccessControl"),
+        serde_json::json!({
+            "model": {"@id": format!("{SSD}WAC")}
+        }),
+    ));
+    catalog.capability(capability(&format!("{SSD}PatchSupport"), serde_json::json!({
+        "format": [{"source": "text/turtle", "patchType": crate::ldp::handler::ACCEPT_PATCH_TYPES.split(',').map(str::trim).collect::<Vec<_>>()}]
+    })));
 
     // The full LDP method set, shared by the wildcard `/{*path}` route AND the explicit `/` (root)
     // route. The `/{*path}` wildcard does NOT match the empty path, so the storage root needs its own
@@ -316,10 +358,72 @@ where
         ))
         // OUTERMOST: CORS (preflight short-circuit + the Access-Control-* headers on every response).
         .layer(axum::middleware::from_fn(cors_middleware));
-    #[cfg(feature = "sparql-endpoint")]
     let protected = protected.with_state(ldp.clone());
-    #[cfg(not(feature = "sparql-endpoint"))]
-    let protected = protected.with_state(ldp);
+
+    let mut router = Router::new();
+
+    // sq-r1ei8: the query surface is a distinct protected route so
+    // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.
+    // It still uses the identical authentication and CORS layers, and its
+    // handler performs WAC independently for every assembled resource.
+    #[cfg(feature = "sparql-endpoint")]
+    {
+        let mut query = entry(
+            "sparql",
+            &format!("{SSD}SparqlQueryService"),
+            format!("{base}/sparql"),
+        );
+        query.extras.insert(
+            "conformsTo".into(),
+            serde_json::json!([
+                "https://jeswr.github.io/solid-specs/specs/access-controlled-query/"
+            ]),
+        );
+        catalog.service(query);
+        let sparql = Router::new()
+            .route(
+                "/sparql",
+                get(crate::sparql_endpoint::get_handler::<S>)
+                    .post(crate::sparql_endpoint::post_handler::<S>),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                auth.clone(),
+                auth_middleware::<J, R>,
+            ))
+            .layer(axum::middleware::from_fn(cors_middleware))
+            .with_state(ldp.clone());
+        router = router.merge(sparql);
+    }
+
+    let mut notification = entry(
+        "notifications",
+        &format!("{SSD}SolidNotificationService"),
+        format!("{base}{SUBSCRIPTION_PATH}"),
+    );
+    notification.extras.insert(
+        "http://www.w3.org/ns/solid/notifications#channelType".into(),
+        serde_json::json!({"@id": crate::notifications::ws::WEBSOCKET_CHANNEL_2023_TYPE}),
+    );
+    catalog.service(notification);
+    let endpoint = catalog
+        .services()
+        .iter()
+        .find(|service| service.type_term == format!("{SSD}SparqlQueryService"))
+        .map(|service| {
+            axum::http::HeaderValue::from_str(&format!(
+                "<{}>; rel=\"{}\"",
+                service.endpoint,
+                crate::describe::SPARQL_ENDPOINT
+            ))
+            .expect("valid mounted endpoint")
+        });
+    let protected = protected.layer(axum::middleware::from_fn_with_state(
+        endpoint,
+        crate::describe::root_discovery,
+    ));
+    let mut notify_state = NotifyState::new(ldp.clone());
+    notify_state.catalog = catalog;
+    let notify_state = Arc::new(notify_state);
 
     // The AUTH-GATED subscribe route: behind the SAME DPoP middleware so the handler sees a
     // VerifiedToken (fail-closed on anonymous).
@@ -338,28 +442,7 @@ where
         .route(WELL_KNOWN_SOLID_PATH, get(storage_description_handler::<S>))
         .with_state(notify_state);
 
-    let mut router = Router::new().merge(subscribe).merge(public_notify);
-
-    // sq-r1ei8: the query surface is a distinct protected route so
-    // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.
-    // It still uses the identical authentication and CORS layers, and its
-    // handler performs WAC independently for every assembled resource.
-    #[cfg(feature = "sparql-endpoint")]
-    {
-        let sparql = Router::new()
-            .route(
-                "/sparql",
-                get(crate::sparql_endpoint::get_handler::<S>)
-                    .post(crate::sparql_endpoint::post_handler::<S>),
-            )
-            .layer(axum::middleware::from_fn_with_state(
-                auth.clone(),
-                auth_middleware::<J, R>,
-            ))
-            .layer(axum::middleware::from_fn(cors_middleware))
-            .with_state(ldp.clone());
-        router = router.merge(sparql);
-    }
+    router = router.merge(subscribe).merge(public_notify);
 
     // PoP Tier 2 (DPoP-SK, `SOLID_SERVER_DPOP_SK`) — the session establishment/termination
     // endpoint, mounted ONLY when the tier is enabled so a flag-off build's route table (and the

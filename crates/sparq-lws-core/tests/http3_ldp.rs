@@ -302,7 +302,7 @@ async fn h3_response_matrix_matches_h1_and_websocket_falls_back() -> TestResult 
             path: "/.well-known/solid",
             accept: Some("text/turtle"),
             expected_status: StatusCode::OK,
-            body_witness: b"notificationChannel",
+            body_witness: b"SolidNotificationService",
         },
         RequestCase {
             name: "liveness",

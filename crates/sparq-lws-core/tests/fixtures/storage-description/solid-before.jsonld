@@ -1,0 +1,13 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/solid/notifications-context/v1",
+    "https://www.w3.org/ns/activitystreams"
+  ],
+  "notificationChannel": [
+    {
+      "id": "https://pod.example/.notifications/WebSocketChannel2023/",
+      "channelType": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023",
+      "subscriptionService": "https://pod.example/.notifications/WebSocketChannel2023/"
+    }
+  ]
+}

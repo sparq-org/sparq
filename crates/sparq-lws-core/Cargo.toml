@@ -305,6 +305,8 @@ js-sys = "0.3"
 sha2 = "0.10"
 
 [dev-dependencies]
+sparq-shacl = { path = "../sparq-shacl" }
+sparq-core = { path = "../sparq-core" }
 # Mint test JWS access tokens + DPoP proofs for the auth-middleware unit tests (mirrors the
 # verifier crate's own test helpers — ES256 keys + RFC 7638 thumbprint).
 p256 = { version = "0.13", features = ["ecdsa", "jwk", "pem", "std"] }

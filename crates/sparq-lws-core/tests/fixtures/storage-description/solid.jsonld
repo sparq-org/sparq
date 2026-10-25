@@ -1,0 +1,128 @@
+[
+  {
+    "@id": "https://pod.example/",
+    "@type": [
+      "http://www.w3.org/ns/pim/space#Storage",
+      "https://www.w3.org/ns/lws#Storage"
+    ],
+    "https://www.w3.org/ns/did#service": [
+      {
+        "@id": "https://pod.example/#storage-root"
+      },
+      {
+        "@id": "https://pod.example/#storage-description"
+      },
+      {
+        "@id": "https://pod.example/#notifications"
+      },
+      {
+        "@id": "https://pod.example/#sparql"
+      }
+    ],
+    "https://www.w3.org/ns/lws#capability": [
+      {
+        "@id": "_:access"
+      },
+      {
+        "@id": "_:patch"
+      }
+    ],
+    "http://www.w3.org/ns/solid/sparql#endpoint": [
+      {
+        "@id": "https://pod.example/sparql"
+      }
+    ]
+  },
+  {
+    "@id": "https://pod.example/#storage-root",
+    "@type": [
+      "https://www.w3.org/ns/lws#StorageRoot"
+    ],
+    "https://www.w3.org/ns/did#serviceEndpoint": [
+      {
+        "@id": "https://pod.example/"
+      }
+    ]
+  },
+  {
+    "@id": "https://pod.example/#storage-description",
+    "@type": [
+      "https://www.w3.org/ns/lws#StorageDescription"
+    ],
+    "https://www.w3.org/ns/did#serviceEndpoint": [
+      {
+        "@id": "https://pod.example/.well-known/solid"
+      }
+    ]
+  },
+  {
+    "@id": "https://pod.example/#notifications",
+    "@type": [
+      "https://jeswr.org/ns/solid-sd#SolidNotificationService"
+    ],
+    "https://www.w3.org/ns/did#serviceEndpoint": [
+      {
+        "@id": "https://pod.example/.notifications/WebSocketChannel2023/"
+      }
+    ],
+    "http://www.w3.org/ns/solid/notifications#channelType": [
+      {
+        "@id": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023"
+      }
+    ]
+  },
+  {
+    "@id": "https://pod.example/#sparql",
+    "@type": [
+      "https://jeswr.org/ns/solid-sd#SparqlQueryService"
+    ],
+    "https://www.w3.org/ns/did#serviceEndpoint": [
+      {
+        "@id": "https://pod.example/sparql"
+      }
+    ],
+    "http://purl.org/dc/terms/conformsTo": [
+      {
+        "@id": "https://jeswr.github.io/solid-specs/specs/access-controlled-query/"
+      }
+    ]
+  },
+  {
+    "@id": "_:access",
+    "@type": [
+      "https://jeswr.org/ns/solid-sd#AccessControl"
+    ],
+    "https://jeswr.org/ns/solid-sd#model": [
+      {
+        "@id": "https://jeswr.org/ns/solid-sd#WAC"
+      }
+    ]
+  },
+  {
+    "@id": "_:patch",
+    "@type": [
+      "https://jeswr.org/ns/solid-sd#PatchSupport"
+    ],
+    "https://jeswr.org/ns/solid-sd#format": [
+      {
+        "@id": "_:format"
+      }
+    ]
+  },
+  {
+    "@id": "_:format",
+    "https://jeswr.org/ns/solid-sd#source": [
+      {
+        "@value": "text/turtle"
+      }
+    ],
+    "https://jeswr.org/ns/solid-sd#patchType": [
+      {
+        "@value": "text/n3"
+      },
+      {
+        "@value": "application/sparql-update"
+      }
+    ]
+  }
+]

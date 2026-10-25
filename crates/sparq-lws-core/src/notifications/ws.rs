@@ -19,7 +19,7 @@
 //!
 //! ## Discovery (per the Solid Notifications Protocol)
 //! A client finds the channel two ways, both implemented here:
-//! 1. the `/.well-known/solid` storage description lists the `notificationChannel` subscription
+//! 1. the `/.well-known/solid` storage description lists the notification subscription
 //!    service + its supported `channelType`, and
 //! 2. [`link_headers`] returns the `Link` rels (`describedby` + `solid:storageDescription`) the LDP
 //!    GET/HEAD handler can attach so a client can `HEAD` a resource and discover the same service.
@@ -125,6 +125,8 @@ fn authorization_unavailable() -> Response {
 pub struct NotifyState<S: Store> {
     pub hub: NotificationHub,
     pub base_url: String,
+    /// The services mounted by this host.
+    pub catalog: crate::describe::ServiceCatalog,
     /// The LDP state — the store + ACL cache the [`WacAuthorizer`] reads `.acl` resources through.
     ldp: Arc<LdpState<S>>,
     /// How often an open socket's subscriber is checked for read access apart from any event
@@ -151,6 +153,7 @@ impl<S: Store> NotifyState<S> {
     /// emit path fans to and the advertised URLs match the LDP layer's own base.
     pub fn new(ldp: Arc<LdpState<S>>) -> Self {
         Self {
+            catalog: crate::describe::ServiceCatalog::default(),
             hub: ldp.notifications.clone(),
             base_url: ldp.base_url().to_string(),
             ldp,
@@ -788,24 +791,56 @@ async fn stream_notifications<S: Store + 'static, W>(
 /// storage description).
 pub async fn storage_description_handler<S: Store>(
     State(state): State<Arc<NotifyState<S>>>,
+    headers: HeaderMap,
 ) -> Response {
-    let body = json!({
-        "@context": [NOTIFICATIONS_CONTEXT, AS2_CONTEXT],
-        "notificationChannel": [
-            {
-                "id": state.subscription_service_url(),
-                "channelType": WEBSOCKET_CHANNEL_2023_TYPE,
-                // The subscription service: POST a channel request here to obtain a `receiveFrom` URL.
-                "subscriptionService": state.subscription_service_url(),
-            }
-        ],
-    });
-    (
-        StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/ld+json")],
-        body.to_string(),
-    )
-        .into_response()
+    use crate::ldp::content::RdfFormat;
+    use crate::lws::resources::negotiate;
+    let Some(media) = negotiate(
+        headers
+            .get(axum::http::header::ACCEPT)
+            .and_then(|v| v.to_str().ok()),
+        &["application/ld+json", "text/turtle"],
+    ) else {
+        return (
+            StatusCode::NOT_ACCEPTABLE,
+            [(axum::http::header::VARY, "Accept")],
+        )
+            .into_response();
+    };
+    let format = if media == "text/turtle" {
+        RdfFormat::Turtle
+    } else {
+        RdfFormat::JsonLd
+    };
+    let storage = format!("{}/", state.base_url.trim_end_matches('/'));
+    let body = match state.catalog.solid(&storage, format) {
+        Ok(body) => body,
+        Err(error) => return error.into_response(),
+    };
+    use sha2::{Digest, Sha256};
+    let etag = format!(
+        "\"sd-{}\"",
+        crate::lws::jose::b64url(&Sha256::digest(&body))
+    );
+    let status = match crate::ldp::conditional::evaluate(&headers, Some(&etag), None, true) {
+        crate::ldp::conditional::Precondition::Proceed => StatusCode::OK,
+        crate::ldp::conditional::Precondition::NotModified => StatusCode::NOT_MODIFIED,
+        crate::ldp::conditional::Precondition::Failed => StatusCode::PRECONDITION_FAILED,
+    };
+    let mut response = (status, body).into_response();
+    if status != StatusCode::OK {
+        *response.body_mut() = axum::body::Body::empty();
+    }
+    for (name, value) in [
+        (axum::http::header::CONTENT_TYPE, media),
+        (axum::http::header::ETAG, etag),
+        (axum::http::header::VARY, "Accept".into()),
+    ] {
+        response
+            .headers_mut()
+            .insert(name, value.parse().expect("valid description header"));
+    }
+    response
 }
 
 /// The discovery `Link` header VALUES the LDP GET/HEAD handler can attach to a resource response so a
@@ -1414,19 +1449,6 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn storage_description_advertises_subscription_service() {
-        let resp = storage_description_handler(State(state())).await;
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = body_to_string(resp).await;
-        assert!(body.contains("notificationChannel"), "{body}");
-        assert!(body.contains(WEBSOCKET_CHANNEL_2023_TYPE), "{body}");
-        assert!(
-            body.contains("https://pod.example/.notifications/WebSocketChannel2023/"),
-            "{body}"
-        );
     }
 
     /// A root ACL granting `owner` every mode and `reader` Read alone, over the whole pod.

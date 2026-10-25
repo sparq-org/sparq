@@ -628,6 +628,8 @@ pub struct Inner<S: Store> {
     /// Every change to the store moves the listing snapshots it concerns (see [`tracked`]).
     pub store: tracked::Tracked<S>,
     pub cfg: LwsConfig,
+    /// Services mounted by the LWS dispatcher.
+    pub catalog: crate::describe::ServiceCatalog,
     pub access: access::AccessStore,
     pub notify: notify::Notifier,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
@@ -704,6 +706,14 @@ impl<S: Store + 'static> LwsState<S> {
     /// change a process stop cut short (see the `intents` module), and load the stored access
     /// grants, requests and subscriptions.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
+        Self::with_catalog(store, cfg, crate::describe::ServiceCatalog::default()).await
+    }
+
+    pub(crate) async fn with_catalog(
+        store: S,
+        cfg: LwsConfig,
+        additional: crate::describe::ServiceCatalog,
+    ) -> Result<Self, String> {
         // Refused before anything is read or written: notifications keep a time the store must
         // raise atomically.
         notify::refuse_without_atomic_markers(&store)?;
@@ -736,10 +746,13 @@ impl<S: Store + 'static> LwsState<S> {
         let notify = notify::Notifier::new(&cfg)?;
         notify.hold(lease);
         let (owner, closed) = tokio::sync::watch::channel(());
+        let mut catalog = resources::service_catalog(&cfg);
+        catalog.extend(additional);
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
                 store,
+                catalog,
                 cfg,
                 access,
                 notify,
@@ -2389,7 +2402,21 @@ pub(crate) fn encode_meta(meta: &ResourceMeta) -> Result<Vec<u8>, crate::error::
 
 /// Build the LWS router over `store`.
 pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Router, String> {
-    let state = LwsState::new(store, cfg).await?;
+    router_with_catalog(store, cfg, crate::describe::ServiceCatalog::default()).await
+}
+
+/// Build the LWS router with entries for additional mounted routes.
+///
+/// The caller must mount every endpoint registered in `catalog` on the returned router.
+///
+/// # Errors
+/// Returns an error when storage initialization or recovery fails.
+pub async fn router_with_catalog<S: Store + 'static>(
+    store: S,
+    cfg: LwsConfig,
+    catalog: crate::describe::ServiceCatalog,
+) -> Result<Router, String> {
+    let state = LwsState::with_catalog(store, cfg, catalog).await?;
     Ok(Router::new()
         .fallback(dispatch::<S>)
         .with_state(state)
