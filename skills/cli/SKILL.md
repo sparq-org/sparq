@@ -189,6 +189,13 @@ cargo run --release -p sparq-cli --features hdt-write -- \
 - **Format ↔ ingest path:** N-Triples streams block-by-block (parallel parse, no full decompressed copy in RAM); Turtle/N-Quads/TriG are buffered whole for the parallel statement-splitter. zstd decompresses much faster than bzip2 (see the `fused-decompress-parse` skill for measured numbers) — recompress `.bz2` sources once with `zstd -9 -T0` for big ingests.
 - **Compressed-perm dirs** written by `save ... compressed` / `recompress` are auto-detected by `query-mmap`/`bench-mmap`; `bench-mmap ... decompress` decodes them to RAM first.
 
+## Test harness
+
+The `reserved_output_refusal_leaves_the_store_untouched` unit test uses
+`SPARQ_TEST_RESERVED_OUTPUT` (unset by default) to pass its output path to a child
+test process. This variable exists only in the test harness; setting it makes that
+child exercise the output refusal guard.
+
 ## See also
 
 - `core` — the `sparq_core::Graph` library API (load/save/open, the store, the Dict) used under the hood.
