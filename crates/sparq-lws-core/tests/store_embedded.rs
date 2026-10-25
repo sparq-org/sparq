@@ -205,11 +205,9 @@ async fn durable_commit_failure_requires_reopen_and_keeps_the_frame_for_recovery
         .put_meta(refused, durable_meta("refused"))
         .await
         .unwrap_err();
-    assert!(
-        error.to_string().contains("txn journal commit failed"),
-        "{error}"
-    );
-    assert!(!client.exists(refused).await.unwrap());
+    assert!(error.to_string().contains("index must be reopened"), "{error}");
+    let read_error = client.exists(refused).await.unwrap_err();
+    assert_eq!(read_error.to_string(), error.to_string());
     assert_eq!(std::fs::read(dir.0.join("txn.log")).unwrap(), frame);
 
     // Repair the external obstruction only after dropping the poisoned client. Recovery is

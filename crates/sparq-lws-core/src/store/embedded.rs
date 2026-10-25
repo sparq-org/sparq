@@ -71,6 +71,8 @@
 //! empty directory. Mutators evaluate on a private fork, then commit the resolved effects to the
 //! original graph. Directory-backed writes use one fsync'd `txn.log` frame before materializing
 //! the per-graph WALs; acknowledged writes survive reopening without a snapshot or compaction.
+//! A possibly applied commit failure stops all subsequent actor jobs (reads and writes) with the
+//! original cause until the client is reopened to replay the journal.
 //! [`EmbeddedSparqClient::save`] is a snapshot helper for tests, not the production durability path.
 
 use std::panic::AssertUnwindSafe;
@@ -98,7 +100,9 @@ const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped (a prior engine
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
 /// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
 /// internally), so the channel stays monomorphic across every differently-typed engine call.
-type Job = Box<dyn FnOnce(&mut Graph) + Send + 'static>;
+/// The second argument holds the sticky reopen cause; only `commit_update` sets it, and the
+/// call wrapper refuses every later job before it can access the graph.
+type Job = Box<dyn FnOnce(&mut Graph, &mut Option<String>) + Send + 'static>;
 
 /// The dedicated OS thread that OWNS the [`Graph`] and serves engine ops over an mpsc channel.
 ///
@@ -140,15 +144,19 @@ impl GraphActor {
     /// caller can never mistake a dead actor for a successful op.
     async fn call<T, F>(&self, f: F) -> Result<T, SparqError>
     where
-        F: FnOnce(&mut Graph) -> Result<T, SparqError> + Send + 'static,
+        F: FnOnce(&mut Graph, &mut Option<String>) -> Result<T, SparqError> + Send + 'static,
         T: Send + 'static,
     {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let job: Job = Box::new(move |graph| {
+        let job: Job = Box::new(move |graph, needs_reopen| {
             // A dropped receiver means the caller's future was cancelled. The op still ran to
-            // completion on the actor thread (same as a dropped `spawn_blocking` handle), so the
-            // graph state is well-defined; only the unobserved result is discarded.
-            let _ = reply_tx.send(f(graph));
+            // completion on the actor thread (same as a dropped `spawn_blocking` handle),
+            // including recording any sticky reopen cause; only the result is discarded.
+            let result = match needs_reopen {
+                Some(cause) => Err(SparqError::Backend(cause.clone())),
+                None => f(graph, needs_reopen),
+            };
+            let _ = reply_tx.send(result);
         });
         self.tx
             .send(job)
@@ -168,12 +176,14 @@ impl GraphActor {
 /// left the `Graph` half-mutated, so the fail-closed posture is to serve nothing further rather than
 /// hand out reads of a torn index.
 fn actor_loop(mut graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
+    // A possibly applied commit keeps its original cause for every subsequent job.
+    let mut needs_reopen = None;
     // `blocking_recv` is correct here precisely because this thread is NOT a tokio worker — it has
     // no runtime context, so parking it blocks nothing but itself.
     while let Some(job) = rx.blocking_recv() {
         // `AssertUnwindSafe`: on a caught panic we never touch `graph` again (the loop breaks), so a
         // logically-torn index can never be observed — which is exactly the unwind-safety obligation.
-        if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut graph))).is_err() {
+        if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut graph, &mut needs_reopen))).is_err() {
             break;
         }
     }
@@ -304,7 +314,7 @@ impl EmbeddedSparqClient {
         q: String,
         max_bytes: usize,
     ) -> Result<Option<Vec<String>>, SparqError> {
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             let result =
                 sparq_engine::query(graph, &q).map_err(|e| engine_err("list_children", e))?;
             let child_col = var_col(&result, "child").ok_or_else(|| {
@@ -337,7 +347,7 @@ impl EmbeddedSparqClient {
 
     async fn dispatch<T, F>(&self, f: F) -> Result<T, SparqError>
     where
-        F: FnOnce(&mut Graph) -> Result<T, SparqError> + Send + 'static,
+        F: FnOnce(&mut Graph, &mut Option<String>) -> Result<T, SparqError> + Send + 'static,
         T: Send + 'static,
     {
         self.round_trips.fetch_add(1, Ordering::Relaxed);
@@ -355,7 +365,7 @@ impl EmbeddedSparqClient {
     /// Returns [`SparqError::Backend`] if compaction fails or the actor stops.
     pub async fn compact(&self) -> Result<(), SparqError> {
         self.actor
-            .call(|graph| {
+            .call(|graph, _| {
                 let wal = graph.persist_dir().map(|dir| dir.join("wal.log"));
                 let wal_bytes = || {
                     wal.as_ref().and_then(|path| std::fs::metadata(path).ok().map(|m| m.len()))
@@ -380,7 +390,7 @@ impl EmbeddedSparqClient {
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
-            .call(move |graph| {
+            .call(move |graph, _| {
                 graph.save(&dir).map_err(|e| {
                     SparqError::Backend(format!("fatal: graph save({}) failed: {e}", dir.display()))
                 })
@@ -402,8 +412,14 @@ fn engine_err(context: &str, e: String) -> SparqError {
 /// commit point is `apply_effects_checked`'s fsync of one `txn.log` frame, followed by per-graph
 /// WAL materialization. In-memory graphs apply the same effects without journal I/O. A failure
 /// after the commit point leaves the journal poisoned for recovery on reopen; never repair it
-/// in-process or replace the original graph with its WAL-less fork.
-fn commit_update(graph: &mut Graph, update: &str, context: &str) -> Result<(), SparqError> {
+/// in-process or replace the original graph with its WAL-less fork. Record that failure's
+/// cause in the actor state before replying, so later jobs cannot observe partial effects.
+fn commit_update(
+    graph: &mut Graph,
+    needs_reopen: &mut Option<String>,
+    update: &str,
+    context: &str,
+) -> Result<(), SparqError> {
     let mut working = graph.fork();
     let effects = sparq_engine::update_in_place_capturing(
         &mut working,
@@ -413,13 +429,12 @@ fn commit_update(graph: &mut Graph, update: &str, context: &str) -> Result<(), S
     .map_err(|e| engine_err(context, e))?;
     sparq_engine::apply_effects_checked(graph, &effects).map_err(|e| {
         if e.applied {
-            engine_err(
-                context,
-                format!(
-                    "{}; the index must be reopened to recover the poisoned journal",
-                    e.message
-                ),
-            )
+            let cause = format!(
+                "fatal: embedded engine {context}: {}; the index must be reopened to recover the poisoned journal",
+                e.message
+            );
+            *needs_reopen = Some(cause.clone());
+            SparqError::Backend(cause)
         } else {
             engine_err(context, e.message)
         }
@@ -481,7 +496,7 @@ impl SparqClient for EmbeddedSparqClient {
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         // SAME query as the HTTP/in-mem paths — the injection-safe `select_meta` builder VERBATIM.
         let q = sparql::select_meta(iri)?;
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             let result =
                 sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
             meta_from_result(&result)
@@ -501,8 +516,10 @@ impl SparqClient for EmbeddedSparqClient {
             &meta.etag,
             modified.as_deref(),
         )?;
-        self.dispatch(move |graph| commit_update(graph, &u, "put_meta"))
-            .await
+        self.dispatch(move |graph, needs_reopen| {
+            commit_update(graph, needs_reopen, &u, "put_meta")
+        })
+        .await
     }
 
     async fn replace_meta(
@@ -521,7 +538,7 @@ impl SparqClient for EmbeddedSparqClient {
             &meta.etag,
             modified.as_deref(),
         )?;
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, needs_reopen| {
             let result =
                 sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
             let previous = match meta_from_result(&result) {
@@ -529,7 +546,7 @@ impl SparqClient for EmbeddedSparqClient {
                 Err(SparqError::NotFound) => None,
                 Err(e) => return Err(e),
             };
-            commit_update(graph, &u, "put_meta")?;
+            commit_update(graph, needs_reopen, &u, "put_meta")?;
             Ok(previous)
         })
         .await
@@ -543,7 +560,7 @@ impl SparqClient for EmbeddedSparqClient {
         // Read and written in ONE actor job, so no other index operation lands in between.
         let q = sparql::select_meta(iri)?;
         let iri = iri.to_string();
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, needs_reopen| {
             let result =
                 sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
             let stored = match meta_from_result(&result) {
@@ -561,7 +578,7 @@ impl SparqClient for EmbeddedSparqClient {
                     &meta.etag,
                     None,
                 )?;
-                commit_update(graph, &u, "raise_marker")?;
+                commit_update(graph, needs_reopen, &u, "raise_marker")?;
             }
             Ok(raised)
         })
@@ -570,7 +587,7 @@ impl SparqClient for EmbeddedSparqClient {
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         let q = sparql::ask_exists(iri)?;
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             sparq_engine::ask(graph, &q).map_err(|e| engine_err("ask_exists", e))
         })
         .await
@@ -580,11 +597,11 @@ impl SparqClient for EmbeddedSparqClient {
         // Asked and named in ONE actor job: nothing commits in between.
         let referenced = sparql::ask_blob_referenced(blob_key);
         let u = sparql::update_begin_reclaim(blob_key);
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, needs_reopen| {
             if sparq_engine::ask(graph, &referenced).map_err(|e| engine_err("referenced", e))? {
                 return Ok(false);
             }
-            commit_update(graph, &u, "begin_reclaim")?;
+            commit_update(graph, needs_reopen, &u, "begin_reclaim")?;
             Ok(true)
         })
         .await
@@ -592,13 +609,15 @@ impl SparqClient for EmbeddedSparqClient {
 
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let u = sparql::update_end_reclaim(blob_key);
-        self.dispatch(move |graph| commit_update(graph, &u, "end_reclaim"))
-            .await
+        self.dispatch(move |graph, needs_reopen| {
+            commit_update(graph, needs_reopen, &u, "end_reclaim")
+        })
+        .await
     }
 
     async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
         let q = sparql::select_reclaiming();
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             let result = sparq_engine::query(graph, &q).map_err(|e| engine_err("reclaiming", e))?;
             let col = var_col(&result, "k").ok_or_else(|| {
                 SparqError::Backend("fatal: reclaiming result missing ?k column".into())
@@ -616,8 +635,10 @@ impl SparqClient for EmbeddedSparqClient {
         // DROP SILENT the resource's whole named graph (idempotent on an absent graph) — the SAME
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
-        self.dispatch(move |graph| commit_update(graph, &u, "delete_meta"))
-            .await
+        self.dispatch(move |graph, needs_reopen| {
+            commit_update(graph, needs_reopen, &u, "delete_meta")
+        })
+        .await
     }
 
     async fn delete_meta_if_empty(
@@ -640,7 +661,7 @@ impl SparqClient for EmbeddedSparqClient {
         // lock decide the returned `DeleteOutcome` directly.
         let nonce = next_nonce();
         let delete_u = sparql::update_delete_container_if_empty(iri, parent, &nonce)?;
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, needs_reopen| {
             // 1. Exists? (absent ⇒ NotFound, nothing deleted.)
             if !sparq_engine::ask(graph, &exists_q)
                 .map_err(|e| engine_err("delete_if_empty/exists", e))?
@@ -657,7 +678,7 @@ impl SparqClient for EmbeddedSparqClient {
             //    marker). The builder's own WHERE guard re-confirms exists+empty against the same
             //    graph (belt-and-braces; it can only AGREE with our check, since nothing else can run
             //    between the two inside one actor job), then deletes atomically.
-            commit_update(graph, &delete_u, "delete_if_empty/delete")?;
+            commit_update(graph, needs_reopen, &delete_u, "delete_if_empty/delete")?;
             Ok(DeleteOutcome::Deleted)
         })
         .await
@@ -686,7 +707,7 @@ impl SparqClient for EmbeddedSparqClient {
             modified.as_deref(),
             &nonce,
         )?;
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, needs_reopen| {
             // Container must exist (else 404). Checked inside the same job as the insert, so no
             // concurrent delete can race between this check and the insert.
             if !sparq_engine::ask(graph, &exists_q)
@@ -694,15 +715,17 @@ impl SparqClient for EmbeddedSparqClient {
             {
                 return Err(SparqError::NotFound);
             }
-            commit_update(graph, &create_u, "create_child/insert")
+            commit_update(graph, needs_reopen, &create_u, "create_child/insert")
         })
         .await
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         let u = sparql::update_remove_child(container, child)?;
-        self.dispatch(move |graph| commit_update(graph, &u, "remove_child"))
-            .await
+        self.dispatch(move |graph, needs_reopen| {
+            commit_update(graph, needs_reopen, &u, "remove_child")
+        })
+        .await
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
@@ -722,7 +745,7 @@ impl SparqClient for EmbeddedSparqClient {
         let rows = super::sparq::max_rows(container, max_bytes);
         let name = oxrdf::NamedNode::new(container)
             .map_err(|e| SparqError::Backend(format!("container IRI: {e}")))?;
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             let Some(g) = graph.named_graph(&oxrdf::Term::NamedNode(name)) else {
                 return Ok(Some(Vec::new()));
             };
@@ -765,7 +788,7 @@ impl SparqClient for EmbeddedSparqClient {
 
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
         let q = sparql::select_referenced_blob_keys();
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             let result = sparq_engine::query(graph, &q)
                 .map_err(|e| engine_err("referenced_blob_keys", e))?;
             let bk_col = var_col(&result, "bk").ok_or_else(|| {
@@ -811,7 +834,7 @@ impl SparqClient for EmbeddedSparqClient {
         let q = sparql::select_read_plan(target, acl_candidates)?;
         let target = target.to_string();
         let candidates: Vec<String> = acl_candidates.to_vec();
-        self.dispatch(move |graph| {
+        self.dispatch(move |graph, _| {
             let result =
                 sparq_engine::query(graph, &q).map_err(|e| engine_err("select_read_plan", e))?;
             // Resolve the result columns once (a row missing a REQUIRED binding is a malformed
@@ -946,15 +969,15 @@ mod tests {
             let c = client();
             let caller = std::thread::current().id();
 
-            let first = c.dispatch(|_g| Ok(thread_ident())).await.unwrap();
+            let first = c.dispatch(|_g, _| Ok(thread_ident())).await.unwrap();
             // Interleave a REAL data-path op, so the identity claim covers actual engine work and
             // not just back-to-back probes.
             c.put_meta("http://pod/alice/doc", meta("text/turtle", "b", "\"e\""))
                 .await
                 .unwrap();
-            let second = c.dispatch(|_g| Ok(thread_ident())).await.unwrap();
+            let second = c.dispatch(|_g, _| Ok(thread_ident())).await.unwrap();
             // A CLONE is the same logical backend, so it must reach the SAME actor.
-            let via_clone = c.clone().dispatch(|_g| Ok(thread_ident())).await.unwrap();
+            let via_clone = c.clone().dispatch(|_g, _| Ok(thread_ident())).await.unwrap();
 
             assert_eq!(
                 first.1.as_deref(),
@@ -975,7 +998,7 @@ mod tests {
             // A SECOND client owns a SEPARATE graph, so it must get its own actor thread (the actor
             // is per-graph, not a process-wide singleton).
             let other = client();
-            let other_ident = other.dispatch(|_g| Ok(thread_ident())).await.unwrap();
+            let other_ident = other.dispatch(|_g, _| Ok(thread_ident())).await.unwrap();
             assert_ne!(
                 first.0, other_ident.0,
                 "distinct clients own distinct graphs on distinct actor threads"
@@ -1135,7 +1158,7 @@ mod tests {
             assert!(c.exists(iri).await.unwrap(), "healthy before the panic");
 
             let err = c
-                .dispatch(|_g| -> Result<(), SparqError> { panic!("deliberate engine-op panic") })
+                .dispatch(|_g, _| -> Result<(), SparqError> { panic!("deliberate engine-op panic") })
                 .await
                 .unwrap_err();
             assert!(
@@ -1269,7 +1292,9 @@ mod tests {
             // default policy, without accessing the network. No prefix may reach the live WAL.
             let update = format!("{update}; LOAD <file:///sparq-lws-rollback-denied>");
             let error = c
-                .dispatch(move |graph| commit_update(graph, &update, "rollback test"))
+                .dispatch(move |graph, needs_reopen| {
+                    commit_update(graph, needs_reopen, &update, "rollback test")
+                })
                 .await
                 .unwrap_err();
             assert!(matches!(error, SparqError::Backend(_)));
@@ -1278,6 +1303,82 @@ mod tests {
             drop(c);
             let reopened = EmbeddedSparqClient::open(&dir.0).unwrap();
             assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+        });
+    }
+
+    #[test]
+    fn partially_materialized_commit_refuses_every_job_until_reopen() {
+        block_on(async {
+            let dir = TestDir::new();
+            let c = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            let first = "http://pod/alice/first";
+            let second = "http://pod/alice/second";
+            let expected = meta("text/plain", "committed", "\"committed\"");
+            let update = [first, second]
+                .map(|iri| {
+                    sparql::update_put_meta(
+                        iri,
+                        &expected.content_type,
+                        &expected.blob_key,
+                        &expected.etag,
+                        None,
+                    )
+                    .unwrap()
+                })
+                .join("; ");
+            // The first graph can materialize, but the second hits a real filesystem
+            // obstruction AFTER the whole transaction frame has been fsync'd.
+            std::fs::create_dir(dir.0.join("named")).unwrap();
+            let obstruction = dir.0.join("named/1");
+            std::fs::write(&obstruction, b"not a directory").unwrap();
+            let error = c
+                .dispatch(move |graph, needs_reopen| {
+                    commit_update(graph, needs_reopen, &update, "multi-graph test")
+                })
+                .await
+                .unwrap_err();
+            let cause = error.to_string();
+            assert!(cause.contains("multi-graph test"), "{cause}");
+            assert!(cause.contains("index must be reopened"), "{cause}");
+            let materialized = Graph::open(&dir.0.join("named/0")).unwrap();
+            assert_eq!(materialized.store.len(), 3, "the first record reached its WAL");
+            drop(materialized);
+            let frame = std::fs::read(dir.0.join("txn.log")).unwrap();
+            assert!(!frame.is_empty(), "keep the complete transaction for recovery");
+
+            // Even after the filesystem is repaired, the sticky failure covers clones,
+            // reads, writes, snapshots and compaction, and keeps the original cause.
+            std::fs::remove_file(obstruction).unwrap();
+            let clone = c.clone();
+            let refused = "http://pod/alice/refused";
+            let snapshot = dir.0.join("refused-snapshot");
+            for _ in 0..2 {
+                assert_eq!(c.get_meta(first).await.unwrap_err().to_string(), cause);
+                assert_eq!(clone.exists(second).await.unwrap_err().to_string(), cause);
+                assert_eq!(c.list_children(first).await.unwrap_err().to_string(), cause);
+                assert_eq!(
+                    clone
+                        .put_meta(refused, expected.clone())
+                        .await
+                        .unwrap_err()
+                        .to_string(),
+                    cause
+                );
+                assert_eq!(c.compact().await.unwrap_err().to_string(), cause);
+                assert_eq!(c.save(&snapshot).await.unwrap_err().to_string(), cause);
+                assert_eq!(std::fs::read(dir.0.join("txn.log")).unwrap(), frame);
+            }
+            assert!(!snapshot.exists(), "a refused job must not run");
+            drop(clone);
+            drop(c);
+            let reopened = EmbeddedSparqClient::open(&dir.0).unwrap();
+            for iri in [first, second] {
+                assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+            }
+            assert!(!reopened.exists(refused).await.unwrap());
+            assert_eq!(std::fs::metadata(dir.0.join("txn.log")).unwrap().len(), 0);
+            reopened.put_meta(refused, expected.clone()).await.unwrap();
+            assert_eq!(reopened.get_meta(refused).await.unwrap(), expected);
         });
     }
 
