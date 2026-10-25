@@ -1542,8 +1542,7 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         )));
-        // Seed through the public durable Graph API; the existing client's atomic
-        // mutators discard WAL backing. Exercise named-only and parent-overlay paths.
+        // Exercise client writes with both named-only and parent-overlay paths.
         for write_default in [false, true] {
             let dir = root.0.join(if write_default {
                 "default-and-named"
@@ -1566,26 +1565,20 @@ mod tests {
                 }
                 assert!(dir.join("wal.log").metadata().unwrap().len() > 0);
             }
-            let expected = ResourceMeta {
+            let mut expected = ResourceMeta {
                 content_type: "text/plain".into(),
                 blob_key: "test-blob".into(),
                 etag: "\"durable\"".into(),
                 last_modified: None,
             };
-            let mut graph = sparq_core::Graph::open(&dir).unwrap();
-            for _ in 0..4 {
-                let update = sparq_lws_core::store::sparql::update_put_meta(
-                    "http://pod/alice/doc",
-                    &expected.content_type,
-                    &expected.blob_key,
-                    &expected.etag,
-                    None,
-                )
-                .unwrap();
-                sparq_engine::update_in_place(&mut graph, &update).unwrap();
-            }
-            drop(graph);
             let client = EmbeddedSparqClient::open_or_create(&dir).unwrap();
+            for i in 0..4 {
+                expected.blob_key = format!("test-blob-{i}");
+                client
+                    .put_meta("http://pod/alice/doc", expected.clone())
+                    .await
+                    .unwrap();
+            }
             let named_wals: Vec<_> = std::fs::read_dir(dir.join("named"))
                 .unwrap()
                 .map(|entry| entry.unwrap().path().join("wal.log"))

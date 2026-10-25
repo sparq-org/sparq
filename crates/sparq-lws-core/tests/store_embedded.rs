@@ -36,6 +36,233 @@ fn store() -> impl Store {
     )
 }
 
+struct TestDir(std::path::PathBuf);
+
+impl TestDir {
+    fn new() -> Self {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        Self(std::env::temp_dir().join(format!("sparq-lws-restart-{}-{nonce}", std::process::id())))
+    }
+
+    fn reopen(&self, client: EmbeddedSparqClient) -> EmbeddedSparqClient {
+        // Deliberately no save or graceful compaction: only acknowledged commits can survive.
+        drop(client);
+        EmbeddedSparqClient::open(&self.0).unwrap()
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn durable_meta(key: &str) -> ResourceMeta {
+    ResourceMeta {
+        content_type: "text/turtle".into(),
+        blob_key: key.into(),
+        etag: format!("\"{key}\""),
+        last_modified: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_783_254_896)),
+    }
+}
+
+#[tokio::test]
+async fn durable_create_child_keeps_metadata_and_parent_containment_together() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    let parent = "https://pod.example/alice/";
+    let child = "https://pod.example/alice/note";
+    let parent_meta = durable_meta("parent");
+    client.put_meta(parent, parent_meta.clone()).await.unwrap();
+    let mut client = dir.reopen(client);
+    for key in ["first", "replacement"] {
+        let expected = durable_meta(key);
+        client
+            .create_child(parent, child, expected.clone())
+            .await
+            .unwrap();
+        // Both the initial create and the replacement must retain directory backing.
+        client = dir.reopen(client);
+        assert_eq!(client.get_meta(parent).await.unwrap(), parent_meta);
+        assert_eq!(client.get_meta(child).await.unwrap(), expected);
+        assert_eq!(client.list_children(parent).await.unwrap(), vec![child]);
+    }
+}
+
+#[tokio::test]
+async fn durable_delete_paths_do_not_resurrect_records_or_containment() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    let parent = "https://pod.example/alice/";
+    let detached = "https://pod.example/alice/detached";
+    let deleted = "https://pod.example/alice/deleted";
+    let empty = "https://pod.example/alice/empty/";
+    client
+        .put_meta(parent, durable_meta("parent"))
+        .await
+        .unwrap();
+    for iri in [detached, deleted, empty] {
+        client
+            .create_child(parent, iri, durable_meta(iri))
+            .await
+            .unwrap();
+    }
+    let client = dir.reopen(client);
+    assert_eq!(
+        client.delete_meta_if_empty(parent, None).await.unwrap(),
+        DeleteOutcome::NotEmpty
+    );
+    client.remove_child(parent, detached).await.unwrap();
+    let client = dir.reopen(client);
+    assert_eq!(
+        client.get_meta(detached).await.unwrap(),
+        durable_meta(detached)
+    );
+    let mut listed = client.list_children(parent).await.unwrap();
+    listed.sort();
+    assert_eq!(listed, vec![deleted, empty]);
+
+    client.delete_meta(deleted).await.unwrap();
+    let client = dir.reopen(client);
+    assert!(!client.exists(deleted).await.unwrap());
+    assert_eq!(
+        client
+            .delete_meta_if_empty(empty, Some(parent))
+            .await
+            .unwrap(),
+        DeleteOutcome::Deleted
+    );
+    let client = dir.reopen(client);
+    assert!(!client.exists(empty).await.unwrap());
+    // delete_meta drops only the resource; the explicit detach and guarded delete remove edges.
+    assert_eq!(client.list_children(parent).await.unwrap(), vec![deleted]);
+    assert_eq!(
+        client.get_meta(parent).await.unwrap(),
+        durable_meta("parent")
+    );
+    assert_eq!(
+        client.get_meta(detached).await.unwrap(),
+        durable_meta(detached)
+    );
+    assert_eq!(
+        client
+            .delete_meta_if_empty(empty, Some(parent))
+            .await
+            .unwrap(),
+        DeleteOutcome::NotFound
+    );
+    client.delete_meta(deleted).await.unwrap();
+    let client = dir.reopen(client);
+    assert!(!client.exists(deleted).await.unwrap());
+}
+
+#[tokio::test]
+async fn durable_reclaim_records_and_marker_raises_survive_reopen() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    let marker = "https://pod.example/.lws/subscriptions/#high-water";
+    client.put_meta(IRI, durable_meta("live")).await.unwrap();
+    assert!(!client.begin_reclaim("live").await.unwrap());
+    assert!(client.begin_reclaim("orphan").await.unwrap());
+    assert_eq!(client.raise_marker(marker, 300).await.unwrap(), 300);
+    let client = dir.reopen(client);
+    assert_eq!(client.reclaiming().await.unwrap(), vec!["orphan"]);
+    assert_eq!(client.get_meta(marker).await.unwrap().etag, "300");
+    assert_eq!(client.raise_marker(marker, 200).await.unwrap(), 300);
+    client.end_reclaim("orphan").await.unwrap();
+    let client = dir.reopen(client);
+    assert!(client.reclaiming().await.unwrap().is_empty());
+    assert_eq!(client.get_meta(marker).await.unwrap().etag, "300");
+    assert_eq!(client.raise_marker(marker, 400).await.unwrap(), 400);
+    let client = dir.reopen(client);
+    assert_eq!(client.get_meta(marker).await.unwrap().etag, "400");
+    assert_eq!(client.get_meta(IRI).await.unwrap(), durable_meta("live"));
+}
+
+#[tokio::test]
+async fn durable_commit_failure_requires_reopen_and_keeps_the_frame_for_recovery() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    // A real filesystem obstruction: the first named graph cannot materialize after the
+    // transaction frame is fsync'd. No fault hook or disabled fsync stands in for the write.
+    std::fs::create_dir_all(dir.0.join("named")).unwrap();
+    let obstruction = dir.0.join("named/0");
+    std::fs::write(&obstruction, b"not a directory").unwrap();
+    let expected = durable_meta("committed");
+    let error = client.put_meta(IRI, expected.clone()).await.unwrap_err();
+    assert!(
+        error.to_string().contains("index must be reopened"),
+        "{error}"
+    );
+    let frame = std::fs::read(dir.0.join("txn.log")).unwrap();
+    assert!(!frame.is_empty(), "keep the committed frame for reopen");
+
+    let refused = "https://pod.example/refused";
+    let error = client
+        .put_meta(refused, durable_meta("refused"))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("txn journal commit failed"),
+        "{error}"
+    );
+    assert!(!client.exists(refused).await.unwrap());
+    assert_eq!(std::fs::read(dir.0.join("txn.log")).unwrap(), frame);
+
+    // Repair the external obstruction only after dropping the poisoned client. Recovery is
+    // Graph::open's job; the client must never try to repair a poisoned journal in-process.
+    drop(client);
+    std::fs::remove_file(obstruction).unwrap();
+    let client = EmbeddedSparqClient::open(&dir.0).unwrap();
+    assert_eq!(client.get_meta(IRI).await.unwrap(), expected);
+    assert!(!client.exists(refused).await.unwrap());
+    assert_eq!(std::fs::metadata(dir.0.join("txn.log")).unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn durable_store_create_in_container_keeps_lws_record_pointers_on_reopen() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    let store = CompositeStore::new(client.clone(), InMemoryBlobStore::new());
+    let mut records = Vec::new();
+    for kind in ["grants", "requests", "subscriptions"] {
+        let container = format!("https://pod.example/.lws/{kind}/");
+        let record = format!("{container}record");
+        store
+            .write(&container, Bytes::from_static(b"{}"), "application/json")
+            .await
+            .unwrap();
+        let expected = store
+            .create_in_container(
+                &container,
+                &record,
+                Bytes::from_static(b"{\"id\":\"record\"}"),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        records.push((container, record, expected));
+    }
+    // Only the index is under test; these blob bytes are intentionally ephemeral.
+    drop(store);
+    let client = dir.reopen(client);
+    for (container, record, expected) in records {
+        let actual = client.get_meta(&record).await.unwrap();
+        assert_eq!(actual.content_type, expected.content_type);
+        assert_eq!(actual.blob_key, expected.blob_key);
+        assert_eq!(actual.etag, expected.etag);
+        assert!(actual.last_modified.is_some());
+        assert_eq!(
+            client.list_children(&container).await.unwrap(),
+            vec![record]
+        );
+        assert!(client.exists(&container).await.unwrap());
+    }
+}
+
 #[tokio::test]
 async fn read_of_a_missing_resource_is_not_found() {
     let s = store();
