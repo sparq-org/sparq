@@ -278,6 +278,10 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.raises_markers()
     }
 
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
+    }
+
     /// A marker shows in no listing, so it moves no snapshot.
     async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
         self.inner.raise_marker(iri, value).await

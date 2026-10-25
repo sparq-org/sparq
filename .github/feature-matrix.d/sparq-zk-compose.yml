@@ -38,3 +38,20 @@
   crate: "sparq-zk-compose"
   features: "successful-results"
   test: true
+
+# sq-h732x / sq-ygk6x: the default-OFF `extended-fragment` wave-1 lane. ci.yml's
+# workspace lane passes no `--features`, so `verifier::dispatch_fragment`,
+# `verify_fragment_manifest` and the four branch-local binding layers — with the
+# whole `fragment_dispatch_tests` module of `src/verifier.rs` — compile EMPTY
+# there and run ZERO of those tests. The other two legs above do not cover them
+# either (neither turns this feature on), and the zk-toolchain workflow enables
+# only `dual-leaf`, so this leg is the only executor for the lane's regression
+# tests. `dual-leaf` rides along because the lane's encoding-policy and
+# method-aware cases are themselves `dual-leaf`-gated, and the two features are
+# independent (neither implies the other).
+# The lane is research-grade and NOT externally audited (sq-qhy4); this leg gates
+# its BUILD/TEST/CLIPPY health, not any soundness claim.
+- name: "sparq-zk-compose (extended-fragment + dual-leaf — wave-1 routing, binding layers and encoding policy)"
+  crate: "sparq-zk-compose"
+  features: "extended-fragment,dual-leaf"
+  test: true

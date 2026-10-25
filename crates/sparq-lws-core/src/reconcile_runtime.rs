@@ -78,6 +78,14 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.delete_meta(iri).await
     }
 
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        self.0.delete_resource(iri, parent).await
+    }
+
     async fn delete_meta_if_empty(
         &self,
         iri: &str,
@@ -105,6 +113,10 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
 
     fn raises_markers(&self) -> bool {
         self.0.raises_markers()
+    }
+
+    fn call_timeout(&self) -> std::time::Duration {
+        self.0.call_timeout()
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {

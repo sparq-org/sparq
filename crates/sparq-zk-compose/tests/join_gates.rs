@@ -604,6 +604,37 @@ fn drop_edge_falls_back_to_disclosed_path() {
     );
 }
 
+/// Hardening: the coverage rule of stage 2g′ is not short-cut once an edge
+/// exists. An honest covered join BESIDE an uncovered `JoinEq` is refused in the
+/// FLAT regime, naming the uncovered sub-proof.
+///
+/// `drop_edge_falls_back_to_disclosed_path` above covers the case where NO edge is
+/// declared at all; this is the case where one is, so a gate that returned `Ok`
+/// as soon as any edge had validated would accept it and the extra join's
+/// prover-chosen `commit_a`/`commit_b` would be read by nothing. The extended-regime
+/// counterpart is `an_uncovered_join_is_refused_in_the_extended_regime` in
+/// `src/verifier.rs`.
+#[test]
+fn an_uncovered_join_beside_a_covered_one_is_refused_in_the_flat_regime() {
+    let mut m = join_manifest();
+    // The honest join at index 2 is covered by the declared edge. Add a SECOND
+    // `join_eq` at index 3, declaring the SAME (honest) commitments and slots, that
+    // no edge names — so only the coverage rule separates it from index 2.
+    let commit_a = commitment_hex(&m.sub_proofs[0].inputs);
+    let commit_b = commitment_hex(&m.sub_proofs[1].inputs);
+    m.sub_proofs.push(SubProof {
+        inputs: join_eq_inputs(commit_a, commit_b, SLOT_A, SLOT_B),
+        proof_hex: String::new(),
+    });
+    match prefilter(&m) {
+        Err(CheckError::JoinProofNotBoundToAnEdge { proof: 3 }) => {}
+        other => panic!("an uncovered join beside a covered one must be refused, got {other:?}"),
+    }
+    // Not vacuous: covering it with its own edge makes the same manifest pass.
+    m.join_edges.push(JoinEdge { scan_a: 0, graph_a: 0, scan_b: 1, graph_b: 0, join_proof: 3 });
+    prefilter(&m).expect("a second join covered by its own edge passes the structural gate");
+}
+
 /// sq-en5dx NEGATIVE regression (Finding A of the sq-1s2.6 composition review,
 /// `research/zk-bind-composition-review.md`): construct the exact cross-scan
 /// attribution-alias forge and assert the Q6 obligation ITSELF rejects it.
