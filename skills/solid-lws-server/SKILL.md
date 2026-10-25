@@ -768,7 +768,8 @@ What the server exposes, all discoverable from the storage description
   host's persistent store does not say) the start fails before anything is read or written.
   The lock is `<dir>.lock` beside the index directory, when it exists or can be created, and
   `sparq.lock` inside it; an index directory whose parent is not writable is held by the inside
-  lock alone and serves, but cannot be compacted. A graph a failed compaction froze is reported
+  lock alone and serves; compaction that must swap the index's root directory is refused.
+  A graph a failed compaction froze is reported
   as a failed store call (`5xx`), never served: restart to re-open the directory. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their

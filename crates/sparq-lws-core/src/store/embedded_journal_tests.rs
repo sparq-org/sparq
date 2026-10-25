@@ -77,6 +77,8 @@ async fn save_compacts_the_open_directory_and_aliases_without_losing_later_write
         let c = dir.open();
         c.put_meta(PARENT, meta("parent")).await.unwrap();
         c.create_child(PARENT, CHILD, meta("before")).await.unwrap();
+        #[cfg(unix)]
+        let alias = Directory(dir.0.with_extension("alias"));
         let destination = match spelling {
             "direct" => dir.0.clone(),
             "dot" => dir.0.join("."),
@@ -86,9 +88,8 @@ async fn save_compacts_the_open_directory_and_aliases_without_losing_later_write
             }
             #[cfg(unix)]
             "symlink" => {
-                let alias = dir.0.join("alias");
-                std::os::unix::fs::symlink(&dir.0, &alias).unwrap();
-                alias
+                std::os::unix::fs::symlink(&dir.0, &alias.0).unwrap();
+                alias.0.clone()
             }
             _ => unreachable!(),
         };
@@ -149,6 +150,13 @@ async fn refused_inside_only_compaction_keeps_reads_and_writes_available() {
     std::fs::create_dir(&parent.0).unwrap();
     let dir = Directory(parent.0.join("store"));
     Graph::load_str("", "ntriples").unwrap().save(&dir.0).unwrap();
+    // A pending default-graph delta requires the root directory swap, which needs the
+    // outside lock. Named-only compaction can finish without renaming the root.
+    let mut seed = Graph::open(&dir.0).unwrap();
+    let triple = ["urn:m5:s", "urn:m5:p", "urn:m5:o"]
+        .map(|iri| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(iri)));
+    seed.apply_delta(&[triple], &[]).unwrap();
+    drop(seed);
     std::fs::remove_file(parent.0.join("store.lock")).unwrap();
     let permissions = RestorePermissions(
         parent.0.clone(),
