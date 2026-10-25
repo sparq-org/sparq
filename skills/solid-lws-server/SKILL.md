@@ -78,7 +78,10 @@ Set `PSS_SPARQ_BACKEND` to one of:
   against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
 
 Rust callers use `store::EmbeddedSparqClient::open_or_create(&dir)` for bootstrap,
-or `open(&dir)` to require an existing graph. Mutators evaluate on a private fork,
+or `open(&dir)` to require an existing graph. Bootstrap fsyncs the saved base files,
+the graph directory, then each newly created directory's parent through the first
+pre-existing ancestor before opening the store. Power-loss durability cannot be
+tested in-process. Mutators evaluate on a private fork,
 then commit resolved effects to the original graph through one fsync'd `txn.log`
 frame before materializing per-graph WALs. Successful writes survive reopening
 without compaction, including child metadata and parent containment from one create.

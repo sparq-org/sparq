@@ -265,6 +265,17 @@ impl EmbeddedSparqClient {
         {
             return Self::open(dir);
         }
+        // Remember the missing path components before create_dir_all hides which
+        // directory entries need to be made durable. An empty relative parent is `.`.
+        let mut created_dirs = Vec::new();
+        let mut ancestor = dir;
+        while !ancestor.try_exists().map_err(io_error)? {
+            created_dirs.push(ancestor.to_path_buf());
+            ancestor = ancestor
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+        }
         std::fs::create_dir_all(dir).map_err(io_error)?;
         for entry in std::fs::read_dir(dir).map_err(io_error)? {
             let entry = entry.map_err(io_error)?;
@@ -279,6 +290,7 @@ impl EmbeddedSparqClient {
             .map_err(|e| engine_err("empty graph init", e))?
             .save(dir)
             .map_err(io_error)?;
+        sync_bootstrap(dir, &created_dirs).map_err(io_error)?;
         Self::open(dir)
     }
 
@@ -397,6 +409,36 @@ impl EmbeddedSparqClient {
             })
             .await
     }
+}
+
+/// Make an empty graph's bootstrap durable after `Graph::save` has only flushed its files.
+/// Sync every regular file, then the graph directory, then the parent of each directory
+/// created by `create_dir_all`, deepest first through the first pre-existing ancestor.
+/// Bootstrap has no named-graph subtree; callers supply the missing directories recorded
+/// before creation. Propagate every open/fsync error instead of acknowledging durability.
+fn sync_bootstrap(dir: &Path, created_dirs: &[std::path::PathBuf]) -> std::io::Result<()> {
+    let sync = |path: &Path| -> std::io::Result<()> {
+        std::fs::File::open(path)?.sync_all()?;
+        // Observe successful sync calls in unit tests without replacing the real I/O.
+        #[cfg(test)]
+        tests::BOOTSTRAP_SYNCS.with_borrow_mut(|paths| paths.push(path.to_path_buf()));
+        Ok(())
+    };
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            sync(&entry.path())?;
+        }
+    }
+    sync(dir)?;
+    for created in created_dirs {
+        let parent = created
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        sync(parent)?;
+    }
+    Ok(())
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -926,6 +968,11 @@ fn next_nonce() -> String {
 mod tests {
     use super::*;
 
+    std::thread_local! {
+        pub(super) static BOOTSTRAP_SYNCS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
     /// A runtime so the async `SparqClient` API can be driven from a sync unit test without the
     /// `#[tokio::test]` macro for every case. The multi-thread builder is used so the concurrency
     /// tests below can drive genuinely-parallel callers at the actor; the engine work itself never
@@ -1201,6 +1248,12 @@ mod tests {
     #[test]
     fn open_or_create_bootstraps_empty_missing_and_lock_only_directories() {
         let root = TestDir::new();
+        let sample = root.0.join("sample");
+        Graph::load_str("", "ntriples").unwrap().save(&sample).unwrap();
+        let base_files: std::collections::HashSet<_> = std::fs::read_dir(&sample)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
         for dir in [
             root.0.join("empty"),
             root.0.join("missing/graph"),
@@ -1216,7 +1269,31 @@ mod tests {
                 std::fs::create_dir(&dir).unwrap();
                 std::fs::write(dir.join("LOCK"), b"1234\n").unwrap();
             }
+            BOOTSTRAP_SYNCS.with_borrow_mut(Vec::clear);
             let c = EmbeddedSparqClient::open_or_create(&dir).unwrap();
+            let synced = BOOTSTRAP_SYNCS.with_borrow_mut(std::mem::take);
+            let file_count = base_files.len() + usize::from(dir.ends_with("locked"));
+            let synced_files: std::collections::HashSet<_> = synced[..file_count]
+                .iter()
+                .map(|path| {
+                    assert_eq!(path.parent(), Some(dir.as_path()));
+                    assert!(path.is_file());
+                    path.file_name().unwrap().to_owned()
+                })
+                .collect();
+            let mut expected_files = base_files.clone();
+            if dir.ends_with("locked") {
+                expected_files.insert("LOCK".into());
+            }
+            assert_eq!(synced_files, expected_files, "sync every saved base file first");
+            let mut expected_dirs = vec![dir.clone()];
+            if dir.ends_with("graph") {
+                expected_dirs.extend([root.0.join("missing"), root.0.clone()]);
+            }
+            assert_eq!(
+                synced[file_count..], expected_dirs,
+                "sync the graph directory, then each new directory's parent up to the existing root"
+            );
             assert!(dir.join("dict-meta.bin").is_file());
             assert!(Graph::open(&dir).unwrap().is_directory_backed());
             if dir.ends_with("locked") {
