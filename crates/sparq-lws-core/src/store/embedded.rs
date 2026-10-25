@@ -91,8 +91,8 @@ use super::timestamp;
 /// run on the dedicated thread (not a tokio worker or blocking-pool thread).
 const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 
-/// The fail-closed error every call gets once the actor is gone — it either poisoned itself on a
-/// panicking job (the `Mutex`-poisoning analogue) or the thread could not be kept alive.
+/// The fail-closed error after a panic, indeterminate commit, or actor thread failure.
+/// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
 
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
@@ -188,7 +188,7 @@ impl GraphActor {
 /// every subsequent `send` fail, so all later calls get the fail-closed [`ACTOR_STOPPED`] error.
 /// This deliberately reproduces the previous slice's `Mutex` poisoning: a panic mid-update may have
 /// left the `Graph` half-mutated, so the fail-closed posture is to serve nothing further rather than
-/// hand out reads of a torn index.
+/// hand out reads of a torn index. An indeterminate commit stops the actor the same way.
 fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
     let mut graph = ActorGraph {
         graph,
