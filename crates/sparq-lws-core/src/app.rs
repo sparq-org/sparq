@@ -401,7 +401,7 @@ where
         format!("{base}{SUBSCRIPTION_PATH}"),
     );
     notification.extras.insert(
-        "channelType".into(),
+        format!("{}channelType", crate::describe::SSD),
         serde_json::json!({"@id": crate::notifications::ws::WEBSOCKET_CHANNEL_2023_TYPE}),
     );
     catalog.service(notification);

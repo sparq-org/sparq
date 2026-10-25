@@ -258,6 +258,7 @@ impl<S: Store> NotifyState<S> {
     }
 
     /// The absolute subscription-service URL (the POST target).
+    #[cfg(test)]
     fn subscription_service_url(&self) -> String {
         format!("{}{SUBSCRIPTION_PATH}", self.base_url.trim_end_matches('/'))
     }
@@ -822,10 +823,19 @@ pub async fn storage_description_handler<S: Store>(
         "\"sd-{}\"",
         crate::lws::jose::b64url(&Sha256::digest(&body))
     );
-    let status = match crate::ldp::conditional::evaluate(&headers, Some(&etag), None, true) {
-        crate::ldp::conditional::Precondition::Proceed => StatusCode::OK,
-        crate::ldp::conditional::Precondition::NotModified => StatusCode::NOT_MODIFIED,
-        crate::ldp::conditional::Precondition::Failed => StatusCode::PRECONDITION_FAILED,
+    use crate::ldp::conditional::{evaluate_read, evaluate_read_guard, Precondition, ReadPrecondition};
+    let if_match = crate::entity_tag::field(&headers, axum::http::header::IF_MATCH);
+    let if_none_match = crate::entity_tag::field(&headers, axum::http::header::IF_NONE_MATCH);
+    let status = if evaluate_read_guard(if_match.as_deref(), None, &etag, None)
+        == Precondition::Failed
+    {
+        StatusCode::PRECONDITION_FAILED
+    } else if evaluate_read(if_none_match.as_deref(), None, &etag, None)
+        == ReadPrecondition::NotModified
+    {
+        StatusCode::NOT_MODIFIED
+    } else {
+        StatusCode::OK
     };
     let mut response = (status, body).into_response();
     if status != StatusCode::OK {
@@ -1460,9 +1470,10 @@ mod tests {
             &format!("{}SolidNotificationService", crate::describe::SSD),
             state.subscription_service_url(),
         );
-        service
-            .extras
-            .insert("channelType".into(), json!({"@id": WEBSOCKET_CHANNEL_2023_TYPE}));
+        service.extras.insert(
+            format!("{}channelType", crate::describe::SSD),
+            json!({"@id": WEBSOCKET_CHANNEL_2023_TYPE}),
+        );
         Arc::get_mut(&mut state).unwrap().catalog.service(service);
         let app = axum::Router::new()
             .route(

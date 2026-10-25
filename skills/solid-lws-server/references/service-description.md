@@ -37,7 +37,11 @@ capability nodes. The extension namespace is `https://jeswr.org/ns/solid-sd#`.
 The deployed Solid entries are `lws:StorageRoot`, `lws:StorageDescription`,
 `ssd:SolidNotificationService`, and (when mounted) `ssd:SparqlQueryService`.
 The notification entry names the `notify:WebSocketChannel2023` channel type with
-`ssd:channelType`.
+`ssd:channelType`. The original `notificationChannel` array, `channelType`, and
+`subscriptionService` keys remain in compact JSON-LD, whose first context is the
+standard notifications context followed by inline discovery mappings. The graph
+also retains `notify:notificationChannel`, `notify:channelType`, and
+`notify:subscriptionService` discovery statements.
 The query entry carries the ACQ profile and is also linked directly with
 `http://www.w3.org/ns/solid/sparql#endpoint`. Root GET/HEAD responses carry that
 same link on allowed and denied reads. Discovery does not inspect resource ACLs.
@@ -52,9 +56,10 @@ index and type search entries, and adds `lws:StorageDescription` pointing at the
 storage URI. `conformsTo` names `https://www.w3.org/TR/lws10-core/`. Its first two
 contexts stay CID v1 then LWS v1; the third is an inline extension mapping, with
 no extension context URL to retrieve. `ssd:PatchSupport.mediaType` maps
-`application/json`, `application/ld+json`, `*/*+json` (all structured JSON suffix types), and
-`application/linkset+json` to `["application/json-patch+json"]`. This applies to data documents and
-linksets; containers remain server-managed.
+`application/json`, `application/ld+json`, and `application/linkset+json` to `["application/json-patch+json"]`. This applies to data documents and
+linksets; containers remain server-managed. The data-document PATCH handler also
+accepts other media types with a `+json` structured syntax suffix, without listing
+media-type patterns in the catalog.
 `ssd:RecursiveDelete` reflects `DELETE` with `Depth: infinity`.
 NotificationService's `subscriptionType` is currently `["WebhookSubscription"]`.
 Neither mode advertises move, CRDT sync, versions, trash, or unmounted channels.

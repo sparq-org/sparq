@@ -174,7 +174,7 @@ async fn well_known_solid_advertises_the_subscription_service() {
         .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = body_string(resp).await;
-    assert!(body.contains("SolidNotificationService"), "{body}");
+    assert!(body.contains("notificationChannel"), "{body}");
     assert!(body.contains(WS_TYPE), "{body}");
     assert!(
         body.contains("https://pod.example/.notifications/WebSocketChannel2023/"),

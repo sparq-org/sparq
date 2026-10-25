@@ -11,6 +11,8 @@ use serde_json::{json, Map, Value};
 pub const SSD: &str = "https://jeswr.org/ns/solid-sd#";
 /// Access-controlled query discovery relation.
 pub const SPARQL_ENDPOINT: &str = "http://www.w3.org/ns/solid/sparql#endpoint";
+const NOTIFICATIONS_CONTEXT: &str = "https://www.w3.org/ns/solid/notifications-context/v1";
+const NOTIFY: &str = "http://www.w3.org/ns/solid/notifications#";
 const LWS: &str = "https://www.w3.org/ns/lws#";
 
 /// A deployed service and its description properties.
@@ -102,12 +104,25 @@ impl ServiceCatalog {
     /// Returns an error for invalid JSON-LD properties or RDF serialization failures.
     pub fn solid(&self, storage: &str, format: RdfFormat) -> Result<Vec<u8>, ServerError> {
         let mut document = json!({
-            "@context": local_context(),
+            "@context": solid_context(),
             "id": storage,
             "type": ["http://www.w3.org/ns/pim/space#Storage", format!("{LWS}Storage")],
             "service": self.services_json(storage),
             "capability": self.capabilities_json(),
         });
+        let channels: Vec<_> = self
+            .services
+            .iter()
+            .filter(|service| service.type_term == format!("{SSD}SolidNotificationService"))
+            .map(|service| {
+                json!({
+                    "id": service.endpoint,
+                    "channelType": service.extras.get(&format!("{SSD}channelType")),
+                    "subscriptionService": service.endpoint,
+                })
+            })
+            .collect();
+        document["notificationChannel"] = json!(channels);
         for service in &self.services {
             if service.type_term == format!("{SSD}SparqlQueryService") {
                 document[SPARQL_ENDPOINT] = json!({"@id": service.endpoint});
@@ -119,7 +134,48 @@ impl ServiceCatalog {
             storage,
         )?;
         crate::ldp::content::label_blank_nodes_by_position(&mut triples);
-        serialize_triples(format, &triples)
+        let bytes = serialize_triples(format, &triples)?;
+        if format != RdfFormat::JsonLd {
+            return Ok(bytes);
+        }
+        // Frame the RDF writer's graph at the storage root, keeping legacy compact keys.
+        // All processing uses inline contexts and a loader that cannot access the network.
+        let input = sparq_jsonld::Json::parse(
+            std::str::from_utf8(&bytes).map_err(|e| ServerError::Storage(e.to_string()))?,
+        )
+        .map_err(|e| ServerError::Storage(e.to_string()))?;
+        let frame = sparq_jsonld::Json::parse(
+            &json!({
+                "@context": solid_context(), "@id": storage, "@embed": "@always"
+            })
+            .to_string(),
+        )
+        .map_err(|e| ServerError::Storage(e.to_string()))?;
+        let mut options = sparq_jsonld::JsonLdOptions::default();
+        options.compact_to_relative = false;
+        let framed = sparq_jsonld::frame::frame(
+            &input,
+            &frame,
+            &options,
+            &Default::default(),
+            &sparq_jsonld::NoopLoader,
+        )
+        .map_err(|e| ServerError::Storage(e.to_string()))?;
+        let mut output = String::new();
+        framed.write(&mut output);
+        let mut output: Value =
+            serde_json::from_str(&output).map_err(|e| ServerError::Storage(e.to_string()))?;
+        let mut context = solid_context();
+        // The first remote context already defines these protected terms. Keep its
+        // definitions intact, and avoid aliasing the extension's channelType to notify's.
+        for term in ["id", "type", "channelType", "feature"] {
+            context
+                .as_object_mut()
+                .expect("object context")
+                .remove(term);
+        }
+        output["@context"] = json!([NOTIFICATIONS_CONTEXT, context]);
+        serde_json::to_vec(&output).map_err(|e| ServerError::Storage(e.to_string()))
     }
 }
 
@@ -187,6 +243,31 @@ fn local_context() -> Value {
             },
         );
     }
+    context
+}
+
+// Resolve the notification terms locally; the wire document names the standard
+// notifications context first and supplies only additional mappings inline.
+fn solid_context() -> Value {
+    let mut context = local_context();
+    let c = context.as_object_mut().expect("object context");
+    c.insert(
+        "channelType".into(),
+        json!({"@id": format!("{NOTIFY}channelType"), "@type": "@vocab"}),
+    );
+    c.insert(
+        "feature".into(),
+        json!({"@id": format!("{NOTIFY}feature"), "@type": "@vocab"}),
+    );
+    c.insert("ssdChannelType".into(), json!(format!("{SSD}channelType")));
+    c.insert(
+        "notificationChannel".into(),
+        json!({"@id": format!("{NOTIFY}notificationChannel"), "@container": "@set"}),
+    );
+    c.insert(
+        "subscriptionService".into(),
+        json!({"@id": format!("{NOTIFY}subscriptionService"), "@type": "@id"}),
+    );
     context
 }
 

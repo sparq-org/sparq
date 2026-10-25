@@ -6,7 +6,8 @@ mod common;
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
-use oxrdf::{CanonicalizationAlgorithm, Graph, NamedNode, Triple};
+use oxrdf::graph::CanonicalizationAlgorithm;
+use oxrdf::{Graph, NamedNode, Triple};
 use serde_json::{json, Value};
 use solid_oidc_verifier::config::VerifierConfig;
 use solid_oidc_verifier::replay::InMemoryReplayStore;
@@ -220,10 +221,12 @@ async fn lws_public_catalog_and_shape() {
         patch["mediaType"]["application/linkset+json"],
         json!(["application/json-patch+json"])
     );
-    assert_eq!(
-        patch["mediaType"]["*/*+json"],
-        json!(["application/json-patch+json"])
-    );
+    assert_eq!(patch["mediaType"].as_object().unwrap().len(), 3);
+    assert!(patch["mediaType"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .all(|ty| !ty.contains('*')));
     assert!(caps
         .iter()
         .any(|c| c["type"] == format!("{SSD}RecursiveDelete")));
@@ -306,7 +309,23 @@ async fn solid_negotiation_graph_and_goldens() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(ttl_headers["content-type"], "text/turtle");
     assert_eq!(ttl_headers["vary"], "Accept");
-    let graph = triples(RdfFormat::JsonLd, &json_body);
+    let document: Value = serde_json::from_slice(&json_body).unwrap();
+    assert_eq!(
+        document["@context"][0],
+        "https://www.w3.org/ns/solid/notifications-context/v1"
+    );
+    assert_eq!(
+        document["notificationChannel"],
+        json!([{
+            "id": "https://pod.example/.notifications/WebSocketChannel2023/",
+            "channelType": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023",
+            "subscriptionService": "https://pod.example/.notifications/WebSocketChannel2023/"
+        }])
+    );
+    let graph = triples(
+        RdfFormat::JsonLd,
+        &serde_json::to_vec(&offline(document)).unwrap(),
+    );
     assert_eq!(
         canonical(&graph),
         canonical(&triples(RdfFormat::Turtle, &ttl_body))
@@ -320,7 +339,10 @@ async fn solid_negotiation_graph_and_goldens() {
         canonical(&graph),
         canonical(&triples(
             RdfFormat::JsonLd,
-            &fixture(&format!("solid{suffix}.jsonld"))
+            &serde_json::to_vec(&offline(
+                serde_json::from_slice(&fixture(&format!("solid{suffix}.jsonld"))).unwrap()
+            ))
+            .unwrap()
         ))
     );
     assert_eq!(
@@ -402,6 +424,17 @@ async fn solid_negotiation_graph_and_goldens() {
     .await;
     assert_eq!(status, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty());
+    let (status, _, body) = call(
+        &app,
+        "GET",
+        "/.well-known/solid",
+        &[("if-match", "\"different-catalog\""),
+          ("if-none-match", json_headers["etag"].to_str().unwrap())],
+        "",
+    ).await;
+    assert_eq!(status, StatusCode::PRECONDITION_FAILED);
+    assert!(body.is_empty());
+    assert_ne!(ttl_headers["etag"], json_headers["etag"]);
     // Public discovery ignores credentials and resource visibility.
     assert_eq!(
         call(
@@ -470,29 +503,46 @@ async fn legacy_notification_expansion_is_preserved() {
         RdfFormat::JsonLd,
         &serde_json::to_vec(&offline(before)).unwrap(),
     );
-    // Neither legacy property is defined in the normative contexts. Their values
-    // expand under AS2's blank-node vocabulary and produce no RDF statements.
-    assert!(
-        before.is_empty(),
-        "review the context snapshot if legacy expansion changes"
-    );
     let app = solid(ServiceCatalog::default(), false).await;
     for (accept, format) in [
         ("text/turtle", RdfFormat::Turtle),
         ("application/ld+json", RdfFormat::JsonLd),
     ] {
         let (_, _, body) = call(&app, "GET", "/.well-known/solid", &[("accept", accept)], "").await;
+        let body = if format == RdfFormat::JsonLd {
+            serde_json::to_vec(&offline(serde_json::from_slice(&body).unwrap())).unwrap()
+        } else {
+            body
+        };
         let graph = triples(format, &body);
-        let notification_triples = graph
-            .iter()
-            .filter(|t| {
-                t.predicate
-                    .as_str()
-                    .starts_with("http://www.w3.org/ns/solid/notifications#")
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(canonical(&before), canonical(&notification_triples));
+        for triple in &before {
+            assert!(
+                graph.contains(triple),
+                "lost legacy notification triple: {triple}"
+            );
+        }
+        // The old contexts omit notificationChannel and subscriptionService.
+        // Pin the intended notification graph explicitly as well as the legacy subgraph.
+        let notify = "http://www.w3.org/ns/solid/notifications#";
+        let endpoint = "https://pod.example/.notifications/WebSocketChannel2023/";
+        assert!(has(
+            &graph,
+            ROOT,
+            &format!("{notify}notificationChannel"),
+            endpoint
+        ));
+        assert!(has(
+            &graph,
+            endpoint,
+            &format!("{notify}channelType"),
+            &format!("{notify}WebSocketChannel2023")
+        ));
+        assert!(has(
+            &graph,
+            endpoint,
+            &format!("{notify}subscriptionService"),
+            endpoint
+        ));
         assert!(has(
             &graph,
             &format!("{ROOT}#notifications"),
@@ -542,9 +592,7 @@ async fn extra_registration_reaches_both_descriptions_and_changes_etags() {
         assert_eq!(status, StatusCode::OK);
         assert_ne!(old_headers["etag"], headers["etag"]);
         let mut doc: Value = serde_json::from_slice(&body).unwrap();
-        if is_lws {
-            doc = offline(doc);
-        }
+        doc = offline(doc);
         let graph = triples(RdfFormat::JsonLd, &serde_json::to_vec(&doc).unwrap());
         assert_service(
             &graph,
@@ -651,4 +699,24 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
         headers["accept-patch"],
         "text/n3, application/sparql-update"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn regenerate_catalog_fixtures() {
+    let app = lws(ServiceCatalog::default(), false).await;
+    let (status, _, body) = call(&app, "GET", "/", &[("accept", "application/lws+cid")], "").await;
+    assert_eq!(status, StatusCode::OK);
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    std::fs::write(format!("{FIXTURES}lws.jsonld"), serde_json::to_string_pretty(&value).unwrap()+"\n").unwrap();
+    let app = solid(ServiceCatalog::default(), false).await;
+    let suffix = if cfg!(feature = "sparql-endpoint") { "" } else { "-no-sparql" };
+    for (accept, ext) in [("application/ld+json", "jsonld"), ("text/turtle", "ttl")] {
+        let (status, _, body) = call(&app, "GET", "/.well-known/solid", &[("accept", accept)], "").await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let body = if ext == "jsonld" {
+            serde_json::to_string_pretty(&serde_json::from_slice::<Value>(&body).unwrap()).unwrap().into_bytes()
+        } else { body };
+        std::fs::write(format!("{FIXTURES}solid{suffix}.{ext}"), body).unwrap();
+    }
 }

@@ -301,6 +301,8 @@ support byte-range reads.
 Both modes expose a public catalog built with their mounted routes. Solid serves
 `/.well-known/solid` as JSON-LD by default (`Accept: */*` included) or Turtle with
 `Accept: text/turtle`; unsupported types, including `application/lws+cid`, get `406`.
+JSON-LD keeps the compact `notificationChannel` discovery array and names the
+notifications context first, followed by inline extension mappings.
 Both representations carry `Vary: Accept` and representation ETags with conditional
 GET/HEAD support. The SPARQL service and root GET/HEAD discovery link appear only
 with `sparql-endpoint`, independent of the requester's readable resources.

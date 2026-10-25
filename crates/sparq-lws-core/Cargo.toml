@@ -217,6 +217,8 @@ itoa = "1"
 # Declared for native targets below.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Existing default-member JSON-LD processor for compact storage-description output.
+sparq-jsonld = { path = "../sparq-jsonld" }
 # Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
 # tokens and RFC 9421 notification signatures. p256 and reqwest are already in the resolved graph
 # (p256 as a dev-dependency, reqwest via solid-oidc-verifier), so these entries add no new crate.

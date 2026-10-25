@@ -1418,12 +1418,12 @@ pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::Servic
         }
         catalog.service(service);
     }
-    // The PATCH parser accepts JSON Patch for every JSON structured-suffix document,
-    // including linksets. The wildcard records that rule without enumerating vendor types.
+    // Advertise concrete JSON types served here. The PATCH parser also accepts
+    // other structured JSON suffix types on data documents.
     catalog.capability(capability(
         &format!("{SSD}PatchSupport"),
         json!({"mediaType": {
-            JSON: [ACCEPT_PATCH], LD_JSON: [ACCEPT_PATCH], "*/*+json": [ACCEPT_PATCH], LINKSET_JSON: [ACCEPT_PATCH]
+            JSON: [ACCEPT_PATCH], LD_JSON: [ACCEPT_PATCH], LINKSET_JSON: [ACCEPT_PATCH]
         }}),
     ));
     catalog.capability(capability(&format!("{SSD}RecursiveDelete"), json!({})));
