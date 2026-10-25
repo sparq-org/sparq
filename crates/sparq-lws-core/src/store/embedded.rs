@@ -320,14 +320,41 @@ impl EmbeddedSparqClient {
         self.actor.call(f).await
     }
 
-    /// Snapshot the current graph to `dir` (the durable seam for the in-memory path). Runs on the
-    /// actor thread, so the snapshot cannot interleave with a write — but is deliberately NOT counted
+    /// Snapshot the current graph to a separate directory.
+    ///
+    /// Runs on the actor thread, so the snapshot cannot interleave with a write. It is not counted
     /// as an engine round-trip (it is an operator/persistence action, not a data-path query), keeping
     /// [`Self::engine_round_trips`] the same metric the counter tests pin.
+    ///
+    /// # Errors
+    /// Returns a backend error if `dir` resolves to the client's open backing directory, path
+    /// resolution or snapshot I/O fails, or the actor has stopped. Saving over live WALs would
+    /// replace their named-graph files and lose subsequent writes.
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
             .call(move |graph| {
+                if let Some(backing) = graph.persist_dir() {
+                    let backing = backing.canonicalize().map_err(|e| {
+                        SparqError::Backend(format!(
+                            "fatal: backing directory resolution failed: {e}"
+                        ))
+                    })?;
+                    match dir.canonicalize() {
+                        Ok(destination) if destination == backing => {
+                            return Err(SparqError::Backend(
+                                "refusing to save over the open backing directory".into(),
+                            ));
+                        }
+                        Ok(_) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => {
+                            return Err(SparqError::Backend(format!(
+                                "fatal: save directory resolution failed: {e}"
+                            )));
+                        }
+                    }
+                }
                 graph.save(&dir).map_err(|e| {
                     SparqError::Backend(format!("fatal: graph save({}) failed: {e}", dir.display()))
                 })
@@ -343,11 +370,15 @@ fn engine_err(context: &str, e: String) -> SparqError {
     SparqError::Backend(format!("fatal: embedded engine {context}: {e}"))
 }
 
-/// Resolve a whole update privately, then journal and materialize it on the live graph.
-/// Never publish the fork: it carries neither the WAL nor the transaction journal.
+/// Preserve atomic in-memory updates; journal captured effects for directory-backed graphs.
+/// Never publish a durable graph's fork: it carries neither WAL nor transaction journal.
 fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqError> {
     if graph.stopped {
         return Err(SparqError::Backend(ACTOR_STOPPED.into()));
+    }
+    if !graph.is_directory_backed() {
+        return sparq_engine::update_in_place_atomic(&mut graph.graph, sparql)
+            .map_err(|e| engine_err(op, e));
     }
     let budget = sparq_engine::QueryBudget::unlimited();
     let mut working = graph.graph.fork();

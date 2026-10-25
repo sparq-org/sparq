@@ -50,8 +50,56 @@ fn every_embedded_update_uses_the_commit_helper() {
         .lines()
         .filter(|line| line.contains("sparq_engine::update_in_place"))
         .collect();
-    assert_eq!(calls.len(), 1, "only the commit helper may capture updates");
-    assert!(calls[0].contains("sparq_engine::update_in_place_capturing("));
+    assert_eq!(calls.len(), 2, "only the commit helper may execute updates");
+    assert!(calls[0].contains("sparq_engine::update_in_place_atomic("));
+    assert!(calls[1].contains("sparq_engine::update_in_place_capturing("));
+    let helper = source
+        .split("fn commit(")
+        .nth(1)
+        .unwrap()
+        .split("#[path")
+        .next()
+        .unwrap();
+    assert!(calls.iter().all(|call| helper.contains(call.trim())));
+}
+
+#[tokio::test]
+async fn save_refuses_the_open_directory_and_aliases_without_losing_later_writes() {
+    let dir = Directory::empty();
+    let c = dir.open();
+    c.put_meta(PARENT, meta("parent")).await.unwrap();
+    c.create_child(PARENT, CHILD, meta("before")).await.unwrap();
+    let mut destinations = vec![dir.0.clone(), dir.0.join(".")];
+    #[cfg(unix)]
+    {
+        let alias = dir.0.join("alias");
+        std::os::unix::fs::symlink(&dir.0, &alias).unwrap();
+        destinations.push(alias);
+    }
+    for destination in destinations {
+        assert!(matches!(
+            c.save(&destination).await,
+            Err(SparqError::Backend(ref e)) if e.contains("open backing directory")
+        ));
+        assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("before"));
+        assert_eq!(c.list_children(PARENT).await.unwrap(), [CHILD]);
+    }
+    let snapshot = Directory::empty();
+    c.save(&snapshot.0).await.unwrap();
+    assert_eq!(
+        snapshot.open().get_meta(CHILD).await.unwrap(),
+        meta("before")
+    );
+    c.put_meta(CHILD, meta("after")).await.unwrap();
+    let later = "https://pod.example/c/later";
+    c.create_child(PARENT, later, meta("later")).await.unwrap();
+    drop(c);
+    let reopened = dir.open();
+    assert_eq!(reopened.get_meta(CHILD).await.unwrap(), meta("after"));
+    assert_eq!(reopened.get_meta(later).await.unwrap(), meta("later"));
+    let mut children = reopened.list_children(PARENT).await.unwrap();
+    children.sort();
+    assert_eq!(children, [CHILD, later]);
 }
 
 #[tokio::test]

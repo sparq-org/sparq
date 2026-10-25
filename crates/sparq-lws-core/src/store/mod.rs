@@ -1850,6 +1850,13 @@ mod tests {
         async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
             self.0.delete_meta(iri).await
         }
+        async fn delete_resource(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<Option<String>, SparqError> {
+            self.0.delete_resource(iri, parent).await
+        }
         async fn delete_meta_if_empty(
             &self,
             iri: &str,
