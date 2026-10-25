@@ -127,12 +127,9 @@ pub(crate) fn edit_events<'a>(
 /// access-control document was stored before them (see the module docs); `Ok(None)` when the
 /// events change no resource's life (most updates), so nothing is copied.
 ///
-/// The replay walks the container chain of every name the events touch and OWNS each
-/// container it finds, so it is charged against `budget` exactly as a materialization's own
-/// resource enumeration is ([`crate::loader::ResourceGraphs::add`]): a name past the per-name
-/// caps, or a replay past the aggregate byte budget, is `Err` and the caller refuses the
-/// change rather than walking it. The replay gets its own aggregate allowance, since it is a
-/// pass of its own rather than part of one materialization's input.
+/// The replay borrows graph names and their container subslices from `before` or the
+/// events. Only added names face per-name caps; removals and clears never refuse. No
+/// container strings are copied; materialization alone charges aggregate input bytes.
 pub(crate) fn provenance_after(
     before: &Graph,
     events: &[GraphEvent<'_>],
@@ -191,9 +188,9 @@ pub(crate) fn provenance_after_names(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn replay(
-    mut graphs: ResourceGraphs,
-    events: &[GraphEvent<'_>],
+fn replay<'a>(
+    mut graphs: ResourceGraphs<'a>,
+    events: &[GraphEvent<'a>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
     created: Option<&[&str]>,
@@ -204,7 +201,7 @@ fn replay(
     // Each resource the change touches, with whether it was one before the change (the first
     // time the change touches it says which). Only the net effect counts: a resource that
     // exists before and after keeps its creator and owner, whatever happens in between.
-    let mut touched: FxHashMap<String, bool> = FxHashMap::default();
+    let mut touched: FxHashMap<&str, bool> = FxHashMap::default();
     // The access control resources the change removes at any point, and whether it removes
     // every graph: one removed and stored again is not stored throughout.
     let mut acr_removed: FxHashSet<&str> = FxHashSet::default();
@@ -213,22 +210,22 @@ fn replay(
         match *event {
             GraphEvent::Added(name) => {
                 graphs.add(name, meter, |r| {
-                    touched.entry(r.to_owned()).or_insert(false);
+                    touched.entry(r).or_insert(false);
                 })?;
             }
             GraphEvent::Removed(name) => {
                 if name.ends_with(ACR_SUFFIX) {
                     acr_removed.insert(name);
                 }
-                graphs.remove(name, meter, |r| {
-                    touched.entry(r.to_owned()).or_insert(true);
-                })?;
+                graphs.remove(name, |r| {
+                    touched.entry(r).or_insert(true);
+                });
             }
             GraphEvent::RemovedAll => {
                 cleared = true;
-                graphs.clear(meter, |r| {
-                    touched.entry(r.to_owned()).or_insert(true);
-                })?;
+                graphs.clear(|r| {
+                    touched.entry(r).or_insert(true);
+                });
             }
         }
     }
@@ -272,7 +269,7 @@ fn replay(
             .filter(|(r, was)| {
                 !**was && graphs.holds(r) && !stored_before(&acr_of(r)) && named(r)
             })
-            .map(|(r, _)| r.as_str())
+            .map(|(r, _)| *r)
             .collect(),
         None => Vec::new(),
     };

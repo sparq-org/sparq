@@ -193,6 +193,7 @@ pub fn admit(
         return admitted;
     };
 
+    let mut data = None;
     for r in rules {
         // §3.2 scope: the rule must cover the target resource.
         if !scope_covers(&r.scope, target) {
@@ -217,7 +218,9 @@ pub fn admit(
         if cred.revoked {
             continue;
         }
-        // Pre-build the shape data once per rule.
+        let data =
+            data.get_or_insert_with(|| sparq_shacl::graph_from_triples(cred.graph.iter().cloned()));
+        let shape = ShapeAdmission::new(&r.shape, &cred.graph, data);
         for t in &cred.graph {
             // The reserved-derivation-predicate guard stays in force UNDER admission:
             // a source trusted for schema:age cannot launder a solidx:/urn:sparq:/acl
@@ -229,7 +232,7 @@ pub fn admit(
             // §2.3.2 statement-type scoping via the SHACL shape (forShape /
             // forPredicate-sugar). A triple whose subject the shape does not target,
             // or that violates the shape, is NOT of the trusted statement-type.
-            if !shape_admits(&r.shape, t, &cred.graph) {
+            if !shape.admits(t) {
                 continue;
             }
             // §3.4 holder binding: the credential subject must equal the authenticated
@@ -288,6 +291,7 @@ pub fn admit_static(
         return admitted;
     };
 
+    let mut data = None;
     for r in rules {
         // §3.2 scope (STATIC: policy + credential only).
         if !scope_covers(&r.scope, target) {
@@ -309,13 +313,16 @@ pub fn admit_static(
         // a per-request DYNAMIC condition (NOT checked here against any `now`).
         let not_after_unix_secs = cred.issued_at_unix_secs.saturating_add(r.fresh_within_secs);
 
+        let data =
+            data.get_or_insert_with(|| sparq_shacl::graph_from_triples(cred.graph.iter().cloned()));
+        let shape = ShapeAdmission::new(&r.shape, &cred.graph, data);
         for t in &cred.graph {
             // The reserved-predicate guard stays in force UNDER admission (STATIC).
             if is_reserved_triple(t) {
                 continue;
             }
             // §2.3.2 statement-type scoping via the SHACL shape (STATIC).
-            if !shape_admits(&r.shape, t, &cred.graph) {
+            if !shape.admits(t) {
                 continue;
             }
             // The bound holder is the credential subject — pinned into the grant's
@@ -424,17 +431,52 @@ fn is_reserved_triple(t: &oxrdf::Triple) -> bool {
             && matches!(&t.object, oxrdf::Term::NamedNode(o) if is_reserved_iri(o.as_str())))
 }
 
-/// `shape_admits(shape, t, G)` — does the SHACL shape admit triple `t` in the context
-/// of graph `G`? Runs the shipped, terminating `sparq-shacl` validator (the `forShape`
-/// primitive; `forPredicate` desugars to it). The triple is admitted iff its SUBJECT
-/// is a focus node the shape TARGETS (so an off-type triple's subject is not selected)
-/// AND that focus node CONFORMS to the shape.
-///
-/// For the single-predicate desugaring (`sh:targetSubjectsOf P` + `sh:path P ;
-/// sh:minCount 1`), this is exactly "`t`'s predicate is `P`" — so a source trusted for
-/// `schema:age` cannot admit an `acl:agent` / arbitrary triple: that triple's subject
-/// is not a `targetSubjectsOf schema:age` focus node, so the shape never selects it.
-fn shape_admits(shape: &ShapeRef, t: &Triple, graph: &[Triple]) -> bool {
+/// One SHACL validation per (rule, credential), indexed by focus node. Target selection
+/// retains the admission gate's subjects-of semantics, including graph-wide violations.
+struct ShapeAdmission {
+    targeted: std::collections::HashSet<Term>,
+    violations: std::collections::HashSet<Term>,
+}
+
+impl ShapeAdmission {
+    fn new(shape: &ShapeRef, graph: &[Triple], data: &sparq_core::Graph) -> Self {
+        let shapes = sparq_shacl::graph_from_triples(shape.triples.iter().cloned());
+        let report = sparq_shacl::validate(data, &shapes);
+        let predicates: std::collections::HashSet<&NamedNode> = shape
+            .triples
+            .iter()
+            .filter(|t| t.predicate.as_str() == vocab::SH_TARGET_SUBJECTS_OF)
+            .filter_map(|t| match &t.object {
+                Term::NamedNode(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        let targeted = graph
+            .iter()
+            .filter(|t| predicates.contains(&t.predicate))
+            .map(|t| subject_term(&t.subject))
+            .collect();
+        let violations = report
+            .results
+            .into_iter()
+            .filter(|r| r.severity.ends_with("#Violation"))
+            .map(|r| r.focus_node)
+            .collect();
+        Self {
+            targeted,
+            violations,
+        }
+    }
+
+    fn admits(&self, t: &Triple) -> bool {
+        let subject = subject_term(&t.subject);
+        self.targeted.contains(&subject) && !self.violations.contains(&subject)
+    }
+}
+
+/// Former per-triple validation retained as an independent differential oracle.
+#[cfg(test)]
+fn shape_admits_reference(shape: &ShapeRef, t: &Triple, graph: &[Triple]) -> bool {
     use sparq_shacl::{graph_from_triples, validate};
 
     // Only the triple's subject matters for whether the statement-type is trusted; but
@@ -462,6 +504,7 @@ fn shape_admits(shape: &ShapeRef, t: &Triple, graph: &[Triple]) -> bool {
 /// Whether the shape's `sh:targetSubjectsOf` predicates select `subject` over `graph`
 /// — i.e. `subject` asserts at least one of the shape's target predicates. This is the
 /// statement-type gate: an off-type triple's subject is not selected.
+#[cfg(test)]
 fn shape_targets_subject(shape: &ShapeRef, subject: &Term, graph: &[Triple]) -> bool {
     let target_preds: Vec<&str> = shape
         .triples
@@ -1388,6 +1431,212 @@ mod tests {
 
     fn iri(s: &str) -> NamedNode {
         NamedNode::new(s).unwrap()
+    }
+
+    // Preserve the former gate independently of the cached-report implementation.
+    fn admit_reference(
+        cred: &PresentedCredential,
+        rules: &[TrustRule],
+        session: &Session,
+        target: &NamedNode,
+    ) -> Vec<AdmittedFact> {
+        let mut admitted: Vec<AdmittedFact> = Vec::new();
+
+        let salt = salt_from_bytes(&cred.salt);
+        let Ok(commitment) = commit_triples(&cred.graph, salt) else {
+            return admitted; // fail closed
+        };
+        let commitment_fr: Fr = commitment.commitment;
+
+        let Some(signature) = signature_from_hex(&cred.issuer_signature_hex) else {
+            return admitted;
+        };
+
+        for r in rules {
+            if !scope_covers(&r.scope, target) {
+                continue;
+            }
+            let msg = commitment_message(&commitment_fr);
+            if !verify(&r.issuer_key, &msg, &signature) {
+                continue;
+            }
+            let age = session
+                .now_unix_secs
+                .saturating_sub(cred.issued_at_unix_secs);
+            if age < 0 || age > r.fresh_within_secs {
+                continue;
+            }
+            if cred.revoked {
+                continue;
+            }
+            for t in &cred.graph {
+                if is_reserved_triple(t) {
+                    continue;
+                }
+                if !shape_admits_reference(&r.shape, t, &cred.graph) {
+                    continue;
+                }
+                if !subject_is(t, &session.agent) {
+                    continue;
+                }
+                let fact = AdmittedFact {
+                    triple: t.clone(),
+                    issuer: r.source.clone(),
+                };
+                if !admitted.contains(&fact) {
+                    admitted.push(fact);
+                }
+            }
+        }
+        admitted
+    }
+
+    fn check_admission_differential(graph: Vec<Triple>, seed: u64) {
+        use sparq_zk::sig::SecretKey;
+        let key = SecretKey::from_seed(seed);
+        let salt = [7; 32];
+        let commitment = commit_triples(&graph, salt_from_bytes(&salt)).unwrap();
+        let mut credential = PresentedCredential {
+            issuer_signature_hex: key.sign_commitment(&commitment.commitment),
+            graph,
+            salt,
+            issued_at_unix_secs: 100,
+            revoked: false,
+        };
+        let predicates: std::collections::BTreeSet<_> = credential
+            .graph
+            .iter()
+            .map(|t| t.predicate.clone())
+            .collect();
+        let mut rules = Vec::new();
+        for predicate in predicates {
+            let root = iri("urn:shape");
+            let property = iri("urn:property");
+            let sh = "http://www.w3.org/ns/shacl#";
+            let shape = ShapeRef {
+                root: root.clone().into(),
+                triples: vec![
+                    Triple::new(
+                        root.clone(),
+                        iri(vocab::SH_TARGET_SUBJECTS_OF),
+                        predicate.clone(),
+                    ),
+                    Triple::new(root, iri(&format!("{sh}property")), property.clone()),
+                    Triple::new(property.clone(), iri(&format!("{sh}path")), predicate),
+                    Triple::new(
+                        property.clone(),
+                        iri(&format!("{sh}minCount")),
+                        oxrdf::Literal::from(1),
+                    ),
+                    Triple::new(
+                        property,
+                        iri(&format!("{sh}maxCount")),
+                        oxrdf::Literal::from(2),
+                    ),
+                ],
+            };
+            rules.push(TrustRule {
+                source: iri("urn:issuer"),
+                issuer_key: key.public_key(),
+                shape,
+                scope: iri("https://pod.ex/"),
+                fresh_within_secs: 50,
+            });
+        }
+        // Duplicate rules and triples exercise result deduplication and output ordering.
+        rules.extend(rules.clone());
+        let mut subjects: Vec<NamedNode> = credential
+            .graph
+            .iter()
+            .filter_map(|t| match &t.subject {
+                NamedOrBlankNode::NamedNode(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        subjects.push(iri("urn:wrong-holder"));
+        subjects.sort();
+        subjects.dedup();
+        for now in [99, 100, 150, 151] {
+            for agent in &subjects {
+                let session = Session {
+                    agent: agent.clone(),
+                    now_unix_secs: now,
+                };
+                let target = iri("https://pod.ex/doc");
+                assert_eq!(
+                    admit(&credential, &rules, &session, &target),
+                    admit_reference(&credential, &rules, &session, &target),
+                    "seed {seed}, now {now}"
+                );
+            }
+        }
+        credential.revoked = true;
+        let session = Session {
+            agent: subjects[0].clone(),
+            now_unix_secs: 100,
+        };
+        let target = iri("https://pod.ex/doc");
+        assert_eq!(
+            admit(&credential, &rules, &session, &target),
+            admit_reference(&credential, &rules, &session, &target)
+        );
+    }
+
+    #[test]
+    fn cached_shape_admission_matches_per_triple_validation_on_trust_fixtures() {
+        let suite = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/trust-expression");
+        let mut paths: Vec<_> = std::fs::read_dir(suite)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .collect();
+        paths.sort();
+        let mut count = 0;
+        for path in paths {
+            let fixture = path.join("holder.trig");
+            if !fixture.exists() {
+                continue;
+            }
+            let source = std::fs::read(fixture).unwrap();
+            let graph = oxttl::TriGParser::new()
+                .for_slice(&source)
+                .map(|q| {
+                    let q = q.unwrap();
+                    Triple::new(q.subject, q.predicate, q.object)
+                })
+                .collect();
+            check_admission_differential(graph, 31);
+            count += 1;
+        }
+        assert!(count >= 8, "the fixture suite was exercised");
+    }
+
+    #[test]
+    fn cached_shape_admission_matches_per_triple_validation_on_randomized_graphs() {
+        let mut state = 0x7184_u64;
+        for case in 0..32 {
+            let mut graph = Vec::new();
+            for _ in 0..20 {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let subject = if state & 7 == 0 {
+                    NamedOrBlankNode::BlankNode(oxrdf::BlankNode::new("b").unwrap())
+                } else {
+                    iri(&format!("urn:holder:{}", state % 4)).into()
+                };
+                let predicate = if state & 15 == 0 {
+                    iri("http://www.w3.org/ns/auth/acl#agent")
+                } else {
+                    iri(&format!("urn:p:{}", (state >> 8) % 3))
+                };
+                graph.push(Triple::new(
+                    subject,
+                    predicate,
+                    oxrdf::Literal::from(((state >> 16) % 5) as i64),
+                ));
+            }
+            graph.push(graph[0].clone());
+            check_admission_differential(graph, case + 1);
+        }
     }
 
     #[test]

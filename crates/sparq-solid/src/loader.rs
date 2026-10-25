@@ -1027,7 +1027,7 @@ fn insert_with_containers(
 /// so is every container on its chain (see [`enumerate`]). Every lifecycle decision about
 /// the stored provenance is made against this one rule.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct ResourceGraphs(std::collections::BTreeSet<String>);
+pub(crate) struct ResourceGraphs<'a>(std::collections::BTreeSet<&'a str>);
 
 /// Whether each of `resources` is a resource of `graph` (as [`ResourceGraphs::holds`]), in one
 /// pass over its graph names: for judging a few resources without enumerating them all.
@@ -1052,21 +1052,15 @@ pub(crate) fn held(graph: &Graph, resources: &[String]) -> Vec<bool> {
     held
 }
 
-impl ResourceGraphs {
+impl<'a> ResourceGraphs<'a> {
     /// The resource graphs among the names of `graph`'s named graphs.
-    pub(crate) fn of(graph: &Graph) -> Self {
+    pub(crate) fn of(graph: &'a Graph) -> Self {
         Self::from_names(graph.named.iter().filter_map(|(n, _)| graph_iri(n)))
     }
 
     /// The resource graphs among `names`.
-    pub(crate) fn from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
-        ResourceGraphs(
-            names
-                .into_iter()
-                .filter(|n| is_resource_graph(n))
-                .map(str::to_owned)
-                .collect(),
-        )
+    pub(crate) fn from_names(names: impl IntoIterator<Item = &'a str>) -> Self {
+        ResourceGraphs(names.into_iter().filter(|n| is_resource_graph(n)).collect())
     }
 
     /// Whether `iri` is a resource: a stored resource graph, or a container on the chain of
@@ -1092,6 +1086,7 @@ impl ResourceGraphs {
     /// [`crate::AuthBudget::max_resource_iri_bytes`] /
     /// [`crate::AuthBudget::max_resource_path_depth`], or an enumeration past the aggregate
     /// [`crate::AuthBudget::max_input_bytes`], refuses rather than being walked.
+    #[cfg(test)]
     pub(crate) fn all(&self, meter: &mut InputMeter) -> Result<FxHashSet<String>, String> {
         let mut out = FxHashSet::default();
         for name in &self.0 {
@@ -1100,84 +1095,67 @@ impl ResourceGraphs {
         Ok(out)
     }
 
-    /// Store a graph named `name`, calling `appears` for each resource it makes that was
-    /// not one just before (the graph itself and the containers it brings).
+    /// Add a graph, announcing borrowed names for resources newly brought into being.
     ///
-    /// `appears` is what OWNS the container chain downstream (the lifecycle replay keys its
-    /// touched map by it), so every fresh resource is charged against `meter` BEFORE it is
-    /// handed over, and the name's own length and depth before the chain is walked at all.
+    /// Only added names face the per-name length/depth caps, before their chain is walked.
+    /// The replay owns no strings, so it spends no aggregate input-byte allowance.
     /// A refusal leaves the set unchanged and nothing announced.
     pub(crate) fn add(
         &mut self,
-        name: &str,
+        name: &'a str,
         meter: &mut InputMeter,
-        mut appears: impl FnMut(&str),
+        mut appears: impl FnMut(&'a str),
     ) -> Result<(), String> {
         if !is_resource_graph(name) || self.0.contains(name) {
             return Ok(());
         }
         meter.resource(name)?;
-        let mut chain = vec![name];
-        let mut cur = name;
-        while let Some(parent) = parent_iri(cur) {
-            chain.push(parent);
-            cur = parent;
-        }
-        let fresh: Vec<&str> = chain.into_iter().filter(|r| !self.holds(r)).collect();
-        for r in &fresh {
-            meter.resource_bytes(r.len())?;
-        }
-        self.0.insert(name.to_owned());
-        fresh.into_iter().for_each(&mut appears);
-        Ok(())
-    }
-
-    /// Remove the graph named `name`, calling `gone` for each resource that is not one any
-    /// more (the graph itself, and each container left with no graph below it).
-    ///
-    /// Metered as [`ResourceGraphs::add`] is, and for the same reason: `gone` owns each
-    /// container it is given. A refusal leaves the set unchanged.
-    pub(crate) fn remove(
-        &mut self,
-        name: &str,
-        meter: &mut InputMeter,
-        mut gone: impl FnMut(&str),
-    ) -> Result<(), String> {
-        if !self.0.contains(name) {
-            return Ok(());
-        }
-        meter.resource(name)?;
-        self.0.remove(name);
-        let mut cur = name;
-        if !self.holds(cur) {
-            meter.resource_bytes(cur.len())?;
-            gone(cur);
-        }
-        while let Some(parent) = parent_iri(cur) {
-            if self.holds(parent) {
+        let mut cur = Some(name);
+        while let Some(r) = cur {
+            if self.holds(r) {
                 break;
             }
-            meter.resource_bytes(parent.len())?;
-            gone(parent);
-            cur = parent;
+            appears(r);
+            cur = parent_iri(r);
         }
+        self.0.insert(name);
         Ok(())
     }
 
-    /// Remove every graph, calling `gone` for every resource.
+    /// Remove a graph, announcing borrowed names for resources that cease to exist.
     ///
-    /// The enumeration [`ResourceGraphs::all`] charges is the one `gone` is then given, so
-    /// the charge is the set's bytes once rather than twice; the copies `gone` makes are
-    /// bounded by that same charged set.
-    pub(crate) fn clear(
-        &mut self,
-        meter: &mut InputMeter,
-        mut gone: impl FnMut(&str),
-    ) -> Result<(), String> {
-        let all = self.all(meter)?;
-        all.iter().for_each(|r| gone(r));
+    /// Removals never refuse, including names beyond the current per-name caps. Each
+    /// parent is a subslice of the removed name; no container strings are allocated.
+    pub(crate) fn remove(&mut self, name: &'a str, mut gone: impl FnMut(&'a str)) {
+        if !self.0.remove(name) {
+            return;
+        }
+        let mut cur = Some(name);
+        while let Some(r) = cur {
+            if self.holds(r) {
+                break;
+            }
+            gone(r);
+            cur = parent_iri(r);
+        }
+    }
+
+    /// Remove all graphs, announcing each resource once through borrowed names.
+    ///
+    /// Like individual removals, clears never refuse or charge an input allowance.
+    pub(crate) fn clear(&mut self, mut gone: impl FnMut(&'a str)) {
+        let mut announced = FxHashSet::default();
+        for &name in &self.0 {
+            let mut cur = Some(name);
+            while let Some(r) = cur {
+                if !announced.insert(r) {
+                    break;
+                }
+                gone(r);
+                cur = parent_iri(r);
+            }
+        }
         self.0.clear();
-        Ok(())
     }
 }
 
@@ -1319,19 +1297,17 @@ mod tests {
         );
     }
 
-    /// [`ResourceGraphs::remove`] is charged the same way, and a refusal leaves the set as
-    /// it was (so a refused walk cannot silently drop a resource).
+    /// Removal still works after the caller lowers its per-name caps.
     #[test]
-    fn resource_graphs_remove_refuses_a_name_past_the_caps_keeping_the_set() {
+    fn resource_graphs_remove_borrows_a_name_past_the_caps() {
         let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
         let mut graphs = super::ResourceGraphs::from_names([name.as_str()]);
-        let mut ended: Vec<String> = Vec::new();
-        let err = graphs
-            .remove(&name, &mut meter(), |r| ended.push(r.to_owned()))
-            .expect_err("a name past the caps is refused");
-        assert!(crate::is_auth_allowance_refusal(&err), "{}", err);
-        assert!(ended.is_empty(), "nothing is announced: {:?}", ended);
-        assert!(graphs.holds(&name), "the set is unchanged by a refusal");
+        let mut ended = Vec::new();
+        graphs.remove(&name, |r| ended.push(r));
+        assert!(!graphs.holds(&name));
+        assert_eq!(ended.first(), Some(&name.as_str()));
+        assert_eq!(ended.last(), Some(&"https://pod.ex/"));
+        assert!(ended.iter().all(|r| name.as_ptr() == r.as_ptr()));
     }
 
     #[test]

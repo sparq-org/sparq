@@ -923,20 +923,15 @@ pod costs at most the input budget, whatever shape its names have. Past any of t
 whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
 `InputBytes` for the aggregate), fail-closed, with nothing installed.
 
-The SAME three caps bound the store-side walks over those names — the store's own provenance
-pruning, and the lifecycle REPLAY a direct edit's rebuild runs
-(`PodStore::rematerialize_after_edit`, and the provenance an update stages). Those walks build
-container chains too, and the replay does it for a name the edit is ADDING rather than one the
-store already holds, so neither is bounded by what is already stored. Each is charged on the
-store's `AuthBudget` BEFORE anything is installed, with its own aggregate allowance (it is a
-pass of its own, not part of one materialization's input): a name past the caps makes the
-authorization view REFUSE — the same typed `AuthAllowance` refusal, with the view in force left
-in place and nothing granted — rather than the walk running to completion. A pod that has
-ALREADY stored such a name still opens and is still readable as plain RDF, and a view already
-in force stays in force; it is the REBUILD that refuses. Raising `max_resource_iri_bytes` /
-`max_resource_path_depth` with `set_auth_budget` is what makes it materialize again — and what
-lets a caller remove the offending name, since the removal's own replay is charged the same
-way.
+The store's provenance pruning owns container strings and uses the same three caps, with
+its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`
+and update provenance staging) instead borrows names from the before-store or edit events,
+and borrows container prefixes as subslices. Only **added** names face the per-name length
+and depth caps, before their chains are walked. Replay charges no aggregate input bytes;
+materialization charges the resulting store once. **Removals and clears are never refused**
+by replay, including stored names beyond the current caps. A pod can therefore remove an
+over-cap name after lowering its budget. A refused addition leaves the installed view in
+place and grants nothing to the refused resource.
 
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
 a bridged ODRL policy's five strata could each spend the full allowance. Each closure now

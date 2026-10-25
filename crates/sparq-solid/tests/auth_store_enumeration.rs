@@ -1,222 +1,206 @@
-//! The STORE-SIDE resource enumeration is metered on the same caps as a materialization's
-//! own, and refuses the authorization view rather than walking an unbounded name.
-//!
-//! A materialization charges the resources it assembles its input from
-//! (`AuthBudget::max_resource_iri_bytes` / `max_resource_path_depth`, and every string it
-//! owns against the aggregate `max_input_bytes`). Three enumerations of the SAME names run
-//! outside that input assembly and used to be unmetered: the store's own provenance pruning
-//! (`loader::resources`), the whole-set walk behind `ResourceGraphs::clear`, and the
-//! lifecycle REPLAY that `PodStore::rematerialize_after_edit` runs — which walks the
-//! container chain of every name the edit touches and OWNS each container it finds, for a
-//! name the edit is ADDING rather than one the store already holds.
-//!
-//! Each of them is now charged on the store's `AuthBudget`, before anything is installed,
-//! so a name past the caps makes the authorization view REFUSE (fail-closed, the view in
-//! force untouched) instead of the walk running to completion. Normal names are unaffected:
-//! the defaults admit a 2 KiB IRI under 64 containers, which is far past what a pod's own
-//! names are.
+//! Replay-specific guards: the final dataset fits, but an intermediate added name does
+//! not. Materialization cannot mask a missing replay guard in these tests.
 
 use sparq_core::Graph;
 use sparq_solid::{
     auth_allowance_refusal, default_auth_budget, AuthAllowance, Mode, PodStore, Session,
 };
 
-const ACL: &str = "http://www.w3.org/ns/auth/acl#";
-const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const ALICE: &str = "https://alice.ex/card#me";
 
-fn alice() -> Session<'static> {
+fn owner() -> Session<'static> {
     Session {
         agent: Some(ALICE),
         ..Session::default()
     }
 }
 
-/// A pod whose root `.acl` gives alice Read by default, plus one document under it.
 fn pod() -> PodStore {
+    let mut nq = "<https://pod.ex/n1> <https://ex.dev/p> \"v\" <https://pod.ex/n1> .\n".to_owned();
     let acl = "https://pod.ex/.acl";
-    let nq = format!(
-        "<{acl}#r> <{RDF_TYPE}> <{ACL}Authorization> <{acl}> .\n\
-         <{acl}#r> <{ACL}agent> <{ALICE}> <{acl}> .\n\
-         <{acl}#r> <{ACL}default> <https://pod.ex/> <{acl}> .\n\
-         <{acl}#r> <{ACL}mode> <{ACL}Read> <{acl}> .\n\
-         <https://pod.ex/n1#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/n1> .\n"
-    );
-    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
-    store.materialize_wac().expect("the fixture materializes");
-    assert!(
-        store
-            .decide(&alice(), "https://pod.ex/n1", Mode::Read)
-            .allow,
-        "the fixture grants alice Read"
-    );
+    let ns = "http://www.w3.org/ns/auth/acl#";
+    nq.push_str(&format!("\n<{acl}#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ns}Authorization> <{acl}> .\n"));
+    for (predicate, object) in [
+        ("agent", ALICE),
+        ("default", "https://pod.ex/"),
+        ("accessTo", "https://pod.ex/"),
+        ("mode", "http://www.w3.org/ns/auth/acl#Read"),
+        ("mode", "http://www.w3.org/ns/auth/acl#Write"),
+        ("mode", "http://www.w3.org/ns/auth/acl#Control"),
+    ] {
+        nq.push_str(&format!(
+            "<{acl}#r> <{ns}{predicate}> <{object}> <{acl}> .\n"
+        ));
+    }
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+    store.materialize_wac().unwrap();
     store
 }
 
-/// Store an empty named graph called `name` directly, the way an embedder's write path does.
-fn store_graph(store: &mut PodStore, name: &str) {
-    let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new(name).expect("an IRI"));
+fn add_graph(store: &mut PodStore, name: &str) {
+    let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new(name).unwrap());
+    store.graph_unchecked_mut().ensure_named(&term).unwrap();
+}
+
+/// Install a view and creator fact under a generous budget. Then remove only the data
+/// graph, retaining the authorization view as an embedder can between edit and rebuild.
+/// The final store fits the lowered budget; only replay sees the transient added name.
+fn refuses_transient_name(name: &str, operations: &str) {
+    let mut store = pod();
+    let before = store.stored_graphs();
+    add_graph(&mut store, name);
+    let mut generous = default_auth_budget();
+    generous.max_resource_iri_bytes = name.len().max(generous.max_resource_iri_bytes);
+    generous.max_resource_path_depth = 1000;
+    store.set_auth_budget(generous);
+    store
+        .rematerialize_after_edit(&before, Some(ALICE), &[name], false)
+        .unwrap();
+    assert_eq!(store.acp_provenance().creator(name), Some(ALICE));
+    assert!(store.decide(&owner(), name, Mode::Write).allow);
     store
         .graph_unchecked_mut()
         .named
-        .push((term, Graph::default()));
-}
-
-/// A resource IRI under `depth` containers, well inside `max_resource_iri_bytes` so the
-/// DEPTH cap is the one that refuses it.
-fn deep_name(depth: usize) -> String {
-    format!("https://pod.ex/{}doc", "a/".repeat(depth))
-}
-
-/// The replay a direct edit's rebuild runs is metered: a newly added name under more
-/// containers than `max_resource_path_depth` refuses the rebuild, with the view in force
-/// untouched and nothing installed.
-#[test]
-fn an_added_name_past_the_depth_cap_refuses_the_rebuild() {
-    let mut store = pod();
-    let before = store.stored_graphs();
-    let name = deep_name(default_auth_budget().max_resource_path_depth + 8);
-    assert!(
-        name.len() < default_auth_budget().max_resource_iri_bytes,
-        "the name is inside the LENGTH cap, so the depth cap is what refuses it"
-    );
-    store_graph(&mut store, &name);
-
-    let err = store
-        .rematerialize_after_edit(&before, Some(ALICE), &[name.as_str()], false)
-        .expect_err("a name past the depth cap must refuse the rebuild");
-    assert_eq!(
-        auth_allowance_refusal(&err),
-        Some(AuthAllowance::ResourceIri),
-        "the refusal is the typed resource-enumeration one: {}",
-        err
-    );
-    // Fail-closed: the view in force is untouched (it still describes the pod it was built
-    // for), and the refused name was granted nothing.
-    assert!(
-        store
-            .decide(&alice(), "https://pod.ex/n1", Mode::Read)
-            .allow,
-        "the view in force is left in place"
-    );
-    assert!(
-        !store.decide(&alice(), &name, Mode::Read).allow,
-        "the refused resource is granted nothing"
-    );
-}
-
-/// The same guard on the LENGTH dimension: a single very long name refuses the rebuild.
-#[test]
-fn an_added_name_past_the_length_cap_refuses_the_rebuild() {
-    let mut store = pod();
-    let before = store.stored_graphs();
-    let name = format!(
-        "https://pod.ex/{}",
-        "x".repeat(default_auth_budget().max_resource_iri_bytes + 1)
-    );
-    store_graph(&mut store, &name);
-
-    let err = store
-        .rematerialize_after_edit(&before, Some(ALICE), &[name.as_str()], false)
-        .expect_err("a name past the length cap must refuse the rebuild");
-    assert_eq!(
-        auth_allowance_refusal(&err),
-        Some(AuthAllowance::ResourceIri),
-        "the refusal is the typed resource-enumeration one: {}",
-        err
-    );
-    assert!(
-        store
-            .decide(&alice(), "https://pod.ex/n1", Mode::Read)
-            .allow,
-        "the view in force is left in place"
-    );
-}
-
-/// The replay's AGGREGATE charge: many names, each inside both per-name caps, together past
-/// `max_input_bytes` refuse the rebuild — so no shape of names can make the replay cost more
-/// than the input budget.
-#[test]
-fn an_edit_whose_names_exceed_the_aggregate_refuses_the_rebuild() {
-    let mut store = pod();
-    let mut budget = default_auth_budget();
-    budget.max_input_bytes = 2_000;
-    store.set_auth_budget(budget);
-    let before = store.stored_graphs();
-    let names: Vec<String> = (0..200)
-        .map(|i| format!("https://pod.ex/bulk/{}/doc-{}", i, i))
-        .collect();
-    for name in &names {
-        store_graph(&mut store, name);
-    }
-    let created: Vec<&str> = names.iter().map(String::as_str).collect();
-
-    let err = store
-        .rematerialize_after_edit(&before, Some(ALICE), &created, false)
-        .expect_err("names past the aggregate must refuse the rebuild");
-    assert_eq!(
-        auth_allowance_refusal(&err),
-        Some(AuthAllowance::InputBytes),
-        "the refusal is the aggregate input-bytes one: {}",
-        err
-    );
-    assert!(
-        store
-            .decide(&alice(), "https://pod.ex/n1", Mode::Read)
-            .allow,
-        "the view in force is left in place"
-    );
-}
-
-/// A name ALREADY stored past the caps refuses the authorization view rather than making the
-/// store unusable: the store opens, holds its graphs, and answers decisions from the view in
-/// force; it is the REBUILD that refuses.
-#[test]
-fn an_already_stored_name_past_the_caps_refuses_the_view_not_the_store() {
-    let name = deep_name(default_auth_budget().max_resource_path_depth + 8);
-    let nq = format!("<{name}#it> <https://ex.dev/ns#k> \"v\" <{name}> .\n");
-    // The store opens over the dataset and is readable as plain RDF.
-    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
-    assert_eq!(store.graph().named.len(), 1, "the store holds its graph");
-
-    let err = store
+        .retain(|(n, _)| !matches!(n, oxrdf::Term::NamedNode(n) if n.as_str() == name));
+    store.set_auth_budget(default_auth_budget());
+    let mut fresh = PodStore::new(store.graph().fork());
+    fresh
         .materialize_wac()
-        .expect_err("the view over a name past the caps is refused");
+        .expect("the final dataset fits from scratch");
+
+    let err = store
+        .update_as(&owner(), operations)
+        .expect_err("replay refuses the transient added name");
     assert_eq!(
         auth_allowance_refusal(&err),
         Some(AuthAllowance::ResourceIri),
-        "the refusal is the typed resource-enumeration one: {}",
-        err
-    );
-    // Fail-closed: no view, so nothing is granted.
-    assert!(!store.decide(&alice(), &name, Mode::Read).allow);
-}
-
-/// Normal behaviour is unchanged: an ordinary edit still rebuilds, records its creator, and
-/// keeps the grants the pod's documents state. The metering is a ceiling, not a filter.
-#[test]
-fn an_ordinary_edit_still_rebuilds_and_records_its_creator() {
-    let mut store = pod();
-    let before = store.stored_graphs();
-    store_graph(&mut store, "https://pod.ex/deep/er/n2");
-
-    store
-        .rematerialize_after_edit(&before, Some(ALICE), &["https://pod.ex/deep/er/n2"], false)
-        .expect("an ordinary edit rebuilds");
-    assert_eq!(
-        store.acp_provenance().creator("https://pod.ex/deep/er/n2"),
-        Some(ALICE),
-        "the creator of the resource the edit named is recorded"
-    );
-    assert_eq!(
-        store.acp_provenance().creator("https://pod.ex/deep/"),
-        None,
-        "a container the edit only brings into being keeps no creator"
+        "{err}"
     );
     assert!(
         store
-            .decide(&alice(), "https://pod.ex/deep/er/n2", Mode::Read)
-            .allow,
-        "the rebuilt view still grants what the root .acl states"
+            .decide(&owner(), "https://pod.ex/n1", Mode::Read)
+            .allow
     );
+    assert!(store
+        .graph()
+        .named_graph(&oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new(name).unwrap()
+        ))
+        .is_none());
+}
+
+#[test]
+fn create_then_drop_checks_the_added_names_depth() {
+    let name = format!("https://pod.ex/{}doc", "a/".repeat(72));
+    refuses_transient_name(
+        &name,
+        &format!("CREATE GRAPH <{name}>; DROP GRAPH <{name}>"),
+    );
+}
+
+#[test]
+fn insert_then_drop_checks_the_added_names_length() {
+    let name = format!("https://pod.ex/{}", "x".repeat(2100));
+    refuses_transient_name(
+        &name,
+        &format!(
+            "INSERT DATA {{ GRAPH <{name}> {{ <urn:s> <urn:p> <urn:o> }} }}; DROP GRAPH <{name}>"
+        ),
+    );
+}
+
+#[test]
+fn removal_before_create_does_not_bypass_the_added_name_cap() {
+    let name = format!("https://pod.ex/{}doc", "a/".repeat(72));
+    refuses_transient_name(
+        &name,
+        &format!("DROP SILENT GRAPH <{name}>; CREATE GRAPH <{name}>; DROP GRAPH <{name}>"),
+    );
+}
+
+#[test]
+fn clear_all_before_create_does_not_bypass_the_added_name_cap() {
+    let name = format!("https://pod.ex/{}doc", "a/".repeat(72));
+    refuses_transient_name(
+        &name,
+        &format!("DROP NAMED; CREATE GRAPH <{name}>; DROP GRAPH <{name}>"),
+    );
+}
+
+#[test]
+fn clear_all_after_create_does_not_mask_the_added_name_cap() {
+    let name = format!("https://pod.ex/{}", "x".repeat(2100));
+    refuses_transient_name(&name, &format!("CREATE GRAPH <{name}>; DROP ALL"));
+}
+
+#[test]
+fn lowering_the_depth_budget_never_prevents_dropping_a_stored_graph() {
+    let mut store = pod();
+    let name = format!("https://pod.ex/{}doc", "a/".repeat(100));
+    let before = store.stored_graphs();
+    add_graph(&mut store, &name);
+    let mut budget = default_auth_budget();
+    budget.max_resource_path_depth = 1000;
+    store.set_auth_budget(budget);
+    store
+        .rematerialize_after_edit(&before, Some(ALICE), &[&name], false)
+        .unwrap();
+    store.set_auth_budget(default_auth_budget());
+    store
+        .update_as(&owner(), &format!("DROP GRAPH <{name}>"))
+        .expect("removals never refuse");
+    let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new(&name).unwrap());
+    assert!(store.graph().named_graph(&term).is_none());
+    assert_eq!(store.acp_provenance().creator(&name), None);
+}
+
+#[test]
+fn moving_resources_fits_the_smallest_materialization_budget_of_either_store() {
+    fn graph(folder: &str) -> Graph {
+        let mut graph = Graph::default();
+        for i in 0..100 {
+            let name = oxrdf::Term::NamedNode(
+                oxrdf::NamedNode::new(format!("https://pod.ex/{folder}/folder/{i}")).unwrap(),
+            );
+            graph.ensure_named(&name).unwrap();
+        }
+        graph
+    }
+    fn fits(graph: &Graph, bytes: usize) -> bool {
+        let mut store = PodStore::new(graph.fork());
+        let mut budget = default_auth_budget();
+        budget.max_input_bytes = bytes;
+        store.set_auth_budget(budget);
+        store.materialize_wac().is_ok()
+    }
+    let before_graph = graph("old");
+    let after_graph = graph("new");
+    let mut low = 0;
+    let mut high = default_auth_budget().max_input_bytes;
+    assert!(fits(&before_graph, high) && fits(&after_graph, high));
+    while low + 1 < high {
+        let mid = low + (high - low) / 2;
+        if fits(&before_graph, mid) && fits(&after_graph, mid) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    assert!(!fits(&before_graph, high - 1) || !fits(&after_graph, high - 1));
+    let mut store = PodStore::new(before_graph);
+    let mut budget = default_auth_budget();
+    budget.max_input_bytes = high;
+    store.set_auth_budget(budget);
+    store.materialize_wac().unwrap();
+    let before = store.stored_graphs();
+    *store.graph_unchecked_mut() = after_graph;
+    store
+        .rematerialize_after_edit(&before, None, &[], false)
+        .expect("the move charges no aggregate replay bytes");
+    assert!(store
+        .graph()
+        .named_graph(&oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("https://pod.ex/new/folder/0").unwrap()
+        ))
+        .is_some());
 }

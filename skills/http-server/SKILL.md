@@ -1453,16 +1453,21 @@ feature **and** served only when `--solid-authz` / `SPARQ_SOLID_AUTHZ=1` is set 
 **Bounded authorization-build pool.** Materialising an authorization view is CPU-bound and its
 size is chosen by untrusted input — the request's own `"dataset"` on the stateless lane, the
 store's control documents on the stateful one. Every lane that builds a view therefore runs on
-ONE bounded blocking pool rather than on an async worker: the stateless per-request build, the
-stateful per-generation view, the `odrl-authz` extension's re-parse + policy evaluation + index
-rebuild (a second build over the same request, so it takes a slot of its own), and the
-`solid-authz-trust` lane's augmented build. `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` caps the
+ONE bounded blocking pool: the stateless per-request build, stateful per-generation **cache
+misses** (hits use an O(1) read-lock lookup and claim no slot), the `odrl-authz` lane's store
+build plus policy evaluation and index rebuild under **one claim**, and the
+`solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
+credential N-Quads parsing, admission, augmented store build and decision) under one claim.
+The permit remains in the blocking task until it finishes, even if the handler is cancelled.
+`SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` is clamped to `1..=tokio::sync::Semaphore::MAX_PERMITS`
+(0 becomes 1), and caps the
 builds in flight (default: the CPU count — the work is CPU-bound, so more concurrency than cores
 buys queueing, not throughput) and `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` caps the WAIT: a request
 that finds every slot taken waits at most that long and is then **shed** with the same retryable
 `503` a materialisation failure gives, never queued without limit. The existing mappings are
 unchanged — an unparseable dataset is still `400`, a materialisation refusal still `503` — and a
-shed request produces no decision (fail-closed).
+shed request produces no decision (fail-closed). Saturation warnings emit at most once per
+second, with the count shed since the preceding warning.
 
 **Which pod: `"source"` (`sq-snopa.8`).** Every endpoint takes an optional `"source"` field:
 

@@ -483,7 +483,7 @@ enum ReindexScope {
 /// The stored facts a failed commit judges (see [`PodStore::touched_with_facts`]).
 enum TouchedFacts {
     /// Every resource, judged against the resources before the commit.
-    All(loader::ResourceGraphs),
+    All(StoredGraphs),
     /// These resources, and whether each existed before the commit.
     Some { resources: Vec<String>, held: Vec<bool> },
 }
@@ -826,9 +826,8 @@ impl PodStore {
         // The staged rebuild below installs the model `acp` names: checked before it runs.
         let _checked = self.matching_model(acp)?;
         let events = lifecycle::edit_events(&before.0, &self.graph);
-        // The replay walks the container chain of every name the edit touches, so it is
-        // metered on the store's own budget: a stored name past the enumeration caps refuses
-        // the rebuild here, before anything is installed, rather than being walked.
+        // Replay borrows names and container prefixes. Only additions face per-name caps;
+        // removing a name remains possible after the budget has been lowered.
         let staged = lifecycle::provenance_after_names(
             &before.0,
             &events,
@@ -869,7 +868,7 @@ impl PodStore {
                 UpdateEffect::Clear(t) | UpdateEffect::Drop(t) => match t {
                     GraphTarget::NamedNode(n) => names.push(n.as_str()),
                     GraphTarget::DefaultGraph => {}
-                    _ => return Some(TouchedFacts::All(loader::ResourceGraphs::of(&self.graph))),
+                    _ => return Some(TouchedFacts::All(self.stored_graphs())),
                 },
                 _ => {}
             }
@@ -898,6 +897,8 @@ impl PodStore {
         match touched {
             None => {}
             Some(TouchedFacts::All(before)) => {
+                let before =
+                    loader::ResourceGraphs::from_names(before.0.iter().map(String::as_str));
                 let after = loader::ResourceGraphs::of(&self.graph);
                 self.acp_context.0.retain(|r| before.holds(r) && after.holds(r));
             }
@@ -1486,8 +1487,8 @@ impl PodStore {
         {
             return Ok(None);
         }
-        // Metered on the store's budget: an update naming a resource past the enumeration
-        // caps is refused before it commits, rather than replayed unbounded.
+        // Added names face the per-name caps before commit. Removals borrow their
+        // chains without refusing, even if the budget has since been lowered.
         lifecycle::provenance_after(
             &self.graph,
             &events,

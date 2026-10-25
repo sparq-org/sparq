@@ -139,8 +139,8 @@ fn a_deep_added_name_is_refused_without_replaying_its_chain() {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new(&name).expect("an IRI"));
     store
         .graph_unchecked_mut()
-        .named
-        .push((term, Graph::default()));
+        .ensure_named(&term)
+        .expect("store the graph");
 
     let start = LIVE.load(Ordering::Relaxed);
     PEAK.store(start, Ordering::Relaxed);

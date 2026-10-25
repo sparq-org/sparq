@@ -1339,7 +1339,7 @@ impl ServerConfig {
         #[cfg(feature = "solid-authz")]
         if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY") {
             if let Ok(n) = v.trim().parse::<usize>() {
-                cfg.solid_authz_build_concurrency = n.max(1);
+                cfg.solid_authz_build_concurrency = n.clamp(1, tokio::sync::Semaphore::MAX_PERMITS);
             }
         }
         // SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS is how long a request waits for a free build slot
