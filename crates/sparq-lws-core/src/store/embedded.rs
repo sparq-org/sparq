@@ -340,19 +340,18 @@ impl EmbeddedSparqClient {
                             "fatal: backing directory resolution failed: {e}"
                         ))
                     })?;
-                    match dir.canonicalize() {
-                        Ok(destination) if destination == backing => {
-                            return Err(SparqError::Backend(
-                                "refusing to save over the open backing directory".into(),
-                            ));
-                        }
-                        Ok(_) => {}
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(e) => {
-                            return Err(SparqError::Backend(format!(
-                                "fatal: save directory resolution failed: {e}"
-                            )));
-                        }
+                    // Resolve after creating the destination, as save itself would: a missing
+                    // component followed by `..` can otherwise hide an alias of the live directory.
+                    std::fs::create_dir_all(&dir).map_err(|e| {
+                        SparqError::Backend(format!("fatal: save directory creation failed: {e}"))
+                    })?;
+                    let destination = dir.canonicalize().map_err(|e| {
+                        SparqError::Backend(format!("fatal: save directory resolution failed: {e}"))
+                    })?;
+                    if destination == backing {
+                        return Err(SparqError::Backend(
+                            "refusing to save over the open backing directory".into(),
+                        ));
                     }
                 }
                 graph.save(&dir).map_err(|e| {

@@ -69,7 +69,7 @@ async fn save_refuses_the_open_directory_and_aliases_without_losing_later_writes
     let c = dir.open();
     c.put_meta(PARENT, meta("parent")).await.unwrap();
     c.create_child(PARENT, CHILD, meta("before")).await.unwrap();
-    let mut destinations = vec![dir.0.clone(), dir.0.join(".")];
+    let mut destinations = vec![dir.0.clone(), dir.0.join("."), dir.0.join("new/..")];
     #[cfg(unix)]
     {
         let alias = dir.0.join("alias");
@@ -84,7 +84,7 @@ async fn save_refuses_the_open_directory_and_aliases_without_losing_later_writes
         assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("before"));
         assert_eq!(c.list_children(PARENT).await.unwrap(), [CHILD]);
     }
-    let snapshot = Directory::empty();
+    let snapshot = Directory(dir.0.join("snapshot"));
     c.save(&snapshot.0).await.unwrap();
     assert_eq!(
         snapshot.open().get_meta(CHILD).await.unwrap(),
