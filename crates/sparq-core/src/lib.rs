@@ -2322,8 +2322,8 @@ impl Graph {
     /// unversioned caches are ignored because they used older validation rules.
     /// Saving to a new directory persists current cache files without changing RDF.
     ///
-    /// The directory is locked first ([`dir_lock`], at
-    /// [`LockLocation::sibling_of`](dir_lock::LockLocation::sibling_of) `dir`), before anything in it is recovered, read or
+    /// The directory is locked first ([`dir_lock`], with its inside lock and any available
+    /// outside lock), before anything in it is recovered, read or
     /// replayed, and stays locked while the graph lives: `WouldBlock` when another holder (another
     /// process, or another open in this one) has it. Every open is a writable one (it replays
     /// and truncates the logs), so there is no unlocked open. Its named graphs hold the same
@@ -5604,6 +5604,17 @@ fn claim_store(
 /// writable by this process.
 #[cfg(feature = "mmap")]
 fn needs_outside_lock(dir: &std::path::Path, lock: &dir_lock::DirLock, what: &str) -> std::io::Error {
+    if dir_lock::is_filesystem_root(dir) {
+        return std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "{} cannot be {what}: the filesystem root {} has no parent directory for an \
+                 outside lock. Its inside lock {} permits ordinary opens and updates; keep \
+                 the store in a subdirectory of {} for operations that rename it",
+                dir.display(), dir.display(), lock.location().path().display(), dir.display()
+            ),
+        );
+    }
     let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
     std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,

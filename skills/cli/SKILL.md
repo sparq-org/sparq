@@ -189,11 +189,15 @@ cargo run --release -p sparq-cli --features hdt-write -- \
 - **Format ↔ ingest path:** N-Triples streams block-by-block (parallel parse, no full decompressed copy in RAM); Turtle/N-Quads/TriG are buffered whole for the parallel statement-splitter. zstd decompresses much faster than bzip2 (see the `fused-decompress-parse` skill for measured numbers) — recompress `.bz2` sources once with `zstd -9 -T0` for big ingests.
 - **Compressed-perm dirs** written by `save ... compressed` / `recompress` are auto-detected by `query-mmap`/`bench-mmap`; `bench-mmap ... decompress` decodes them to RAM first.
 
-## Test harness
+- **Native filesystem roots:** stores use their inside lock and support ordinary
+opens and updates. Use a subdirectory for `compact`, `vacuum`, and restores that rename
+the store directory; those operations require an outside lock.
 
-Direct stream outputs preserve the inherited stream's position and append mode.
+- **Direct stream outputs:** preserve the inherited stream's position and append mode.
 On Unix, `/dev/stdout`, `/dev/stderr`, and their standard descriptor aliases also
 work when the process can use its inherited handles but cannot reopen `/dev`.
+
+## Test harness
 
 The `reserved_output_refusal_leaves_the_store_untouched` unit test uses
 `SPARQ_TEST_RESERVED_OUTPUT` (unset by default) to pass its output path to a child

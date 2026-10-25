@@ -792,8 +792,12 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   no `<dir>.lock` is held by its inside lock alone: it opens writable or read-only and keeps one
   writer, but `compact`, `vacuum` and the restores, which rename the directory, are refused
   with an error naming the parent (create `<dir>.lock` once, make the parent writable, or keep
-  the store in a subdirectory). A swap holds the old directory's inside lock until the old
-  directory is gone and locks the new one's before putting it in place (on Windows, which
+  the store in a subdirectory).
+  Filesystem and drive roots have no sibling lock location and also use their inside lock
+  alone. They support ordinary opens and updates; place the store in a subdirectory for
+  compaction, vacuum, or restore operations that rename it.
+  A swap holds the old directory's inside lock until the old directory is gone and locks the
+  new one's before putting it in place (on Windows, which
   cannot rename a directory with a file open in it, it lets go for the renames and refuses
   writes afterwards if someone took the lock in between). A swap also leaves the lock files of
   its staging paths (`<dir>.compact-new.lock`, `<dir>.compact-old.lock`). Anyone who can open a

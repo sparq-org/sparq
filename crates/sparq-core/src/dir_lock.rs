@@ -15,8 +15,10 @@
 //! when it exists or can be created, then `sparq.lock` inside it, always. A store whose parent
 //! directory is not writable (a mount root, say) is held by its inside lock alone: it opens,
 //! is written and read as any other, but a compaction or restore, which renames the directory,
-//! needs the outside lock and is refused, naming the parent. Both files are empty and harmless
-//! to keep: never delete either as "stale" while the directory may be in use, since a holder
+//! needs the outside lock and is refused, naming the parent. A filesystem or drive root has no
+//! sibling namespace and uses only its inside lock; keep a store in a subdirectory when it
+//! needs operations that rename its directory. Both files are empty and harmless to keep:
+//! never delete either as "stale" while the directory may be in use, since a holder
 //! keeps the lock on the file it opened, and a new file at that path would let a second holder
 //! in. Anyone who can open a lock file can take a shared lock on it and so keep a writer out.
 //!
@@ -117,6 +119,11 @@ pub(crate) fn resolve_store_dir(dir: &Path) -> io::Result<PathBuf> {
 /// and file index on Windows), however they are spelled. `false` when either is missing.
 pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
     same_file::is_same_file(a, b).unwrap_or(false)
+}
+
+/// Whether the resolved directory has no parent or sibling namespace (including drive roots).
+pub(crate) fn is_filesystem_root(dir: &Path) -> bool {
+    dir.is_absolute() && dir.parent().is_none()
 }
 
 /// What a memory-mapped store backing holds while it lives: the lock of the store directory
@@ -280,9 +287,12 @@ impl LockLocation {
         Ok(Self(path))
     }
 
-    /// The flat layout's lock for the already resolved directory `resolved`: `<resolved>.lock`
-    /// beside it. Touches nothing on disk.
+    /// The lock namespace for a resolved store: its sibling, or its inside lock at a
+    /// filesystem root, where no sibling exists. Touches nothing on disk.
     pub(crate) fn beside(resolved: &Path) -> io::Result<Self> {
+        if is_filesystem_root(resolved) {
+            return Ok(Self(resolved.join(INSIDE_LOCK)));
+        }
         let mut name = resolved
             .file_name()
             .ok_or_else(|| unnamed(resolved))?
@@ -551,12 +561,18 @@ impl DirLock {
         shared: bool,
         create: bool,
     ) -> io::Result<Self> {
-        let outside = match open_lock_file(location.path(), create)? {
-            Some(file) => {
-                try_lock(&file, location.path(), shared)?;
-                Some(file)
+        // A filesystem/drive root has no sibling. Its location identifies the inside
+        // lock, which is acquired once by lock_inside after the directory is checked.
+        let outside = if is_filesystem_root(dir) {
+            None
+        } else {
+            match open_lock_file(location.path(), create)? {
+                Some(file) => {
+                    try_lock(&file, location.path(), shared)?;
+                    Some(file)
+                }
+                None => None,
             }
-            None => None,
         };
         Ok(Self {
             outside,
@@ -646,7 +662,7 @@ impl DirLock {
         self.shared
     }
 
-    /// Where this lock's outside lock file is (held or not).
+    /// Its lock namespace: the outside file, or the inside file for a filesystem root.
     pub fn location(&self) -> &LockLocation {
         &self.location
     }
@@ -767,6 +783,22 @@ mod tests {
                 .unwrap()
                 .join(&name)
         );
+    }
+
+    /// Root paths select an inside-only namespace without opening files in the host root.
+    #[test]
+    fn filesystem_roots_use_an_inside_only_lock_namespace() {
+        let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let root = cwd.ancestors().last().unwrap();
+        let location = LockLocation::beside(root).expect("a root has an inside lock namespace");
+        assert_eq!(location.path(), root.join(INSIDE_LOCK));
+        let lock = DirLock::acquire_outside(location, root, false, true).unwrap();
+        assert!(!lock.holds_outside());
+        assert_eq!(lock.location().path(), root.join(INSIDE_LOCK));
+        let error = crate::refuse_swap_without_outside_lock(root, Some(&lock)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("has no parent directory"));
+        assert!(error.to_string().contains(&root.display().to_string()));
     }
     #[test]
     fn ensure_inside_locks_the_replacement_directory() {
