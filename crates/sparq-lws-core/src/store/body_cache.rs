@@ -402,11 +402,11 @@ mod tests {
         // does it in ONE pass (not a whole-map min-scan per victim). Fill the cache with many tiny
         // bodies, then insert ONE large body that needs most of them evicted; the budget invariant
         // must hold and the large body must be resident.
-        let per_tiny = 4 + 3 + ENTRY_OVERHEAD_BYTES; // key(4) + etag(3) + tiny body
+        let per_tiny = 35 + 3 + ENTRY_OVERHEAD_BYTES; // key(35) + etag(3) + tiny body
         let budget = 400 * per_tiny;
         let c = BodyCache::with_max_entry_bytes(budget, budget); // large entries allowed
         for i in 0..300 {
-            c.insert(&format!("t{i:03}"), "\"e\"", &body("x"));
+            c.insert(&format!("b1-{i:032x}"), "\"e\"", &body("x"));
         }
         assert!(c.total_charged() <= budget, "budget holds while filling");
         let filled = c.len();

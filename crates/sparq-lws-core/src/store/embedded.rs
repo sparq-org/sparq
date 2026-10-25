@@ -908,7 +908,7 @@ mod tests {
                 let c = c.clone();
                 tasks.push(tokio::spawn(async move {
                     let child = format!("http://pod/alice/c/n{}", i);
-                    let bk = format!("bk{}", i);
+                    let bk = format!("b1-{i:032x}");
                     c.create_child(container, &child, meta("text/turtle", &bk, "\"e\""))
                         .await
                 }));
@@ -954,7 +954,7 @@ mod tests {
                 c.create_child(
                     container,
                     &child,
-                    meta("text/turtle", &format!("bk{i}"), "\"e\""),
+                    meta("text/turtle", &format!("b1-{i:032x}"), "\"e\""),
                 )
                 .await
                 .unwrap();
@@ -998,9 +998,13 @@ mod tests {
                 .iter()
                 .enumerate()
             {
-                c.create_child(other, child, meta("text/plain", &format!("d{i}"), "\"e\""))
-                    .await
-                    .unwrap();
+                c.create_child(
+                    other,
+                    child,
+                    meta("text/plain", &format!("b1-{i:032x}"), "\"e\""),
+                )
+                .await
+                .unwrap();
             }
             let budget = 3 * (other.len() + 1);
             assert_eq!(super::super::sparq::max_rows(other, budget), 3);
@@ -1015,7 +1019,11 @@ mod tests {
                 .enumerate()
             {
                 memory
-                    .create_child(other, child, meta("text/plain", &format!("d{i}"), "\"e\""))
+                    .create_child(
+                        other,
+                        child,
+                        meta("text/plain", &format!("b1-{i:032x}"), "\"e\""),
+                    )
                     .await
                     .unwrap();
             }

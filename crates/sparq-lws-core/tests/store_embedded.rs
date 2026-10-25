@@ -639,8 +639,8 @@ async fn concurrent_same_child_creates_commit_exactly_one_untorn_record() {
     let got = sparq.get_meta(child).await.unwrap();
     let i: u32 = got
         .blob_key
-        .strip_prefix('k')
-        .and_then(|s| s.parse().ok())
+        .strip_prefix("b1-")
+        .and_then(|s| u32::from_str_radix(s, 16).ok())
         .expect("blob_key is one of the writers' keys");
     assert_eq!(
         got.etag,
