@@ -24,7 +24,9 @@
 //!
 //! Fragment honesty (stage 1): SELECT/ASK over BGP + FILTER, with the
 //! solution modifiers that do not change pattern input sets (DISTINCT /
-//! REDUCED / LIMIT-OFFSET / projection). Everything else — property paths,
+//! REDUCED / projection). A solution slice (`LIMIT` / `OFFSET`) is refused
+//! wherever it appears, since it can change which solutions exist.
+//! Everything else — property paths,
 //! OPTIONAL, MINUS, UNION, `GRAPH` (contradictory with graph-set privacy,
 //! plan §2.4), `FROM` / `FROM NAMED` dataset clauses (which would re-define
 //! the dataset the fixed statement is about, so ignoring one mis-scopes the

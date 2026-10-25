@@ -9146,6 +9146,12 @@ pub enum FragmentScanError {
     /// The selected supporting row index is outside the scan's ACTIVE disclosed
     /// rows (`min(row_count, rows.len())`).
     RowOutOfRange { witness: usize, obligation: usize, row: usize, active: usize },
+    /// A scan attributed to a branch witness discloses NO active row
+    /// (`min(row_count, rows.len()) == 0`). The scan circuit admits an empty
+    /// result, so an empty scan proves only that it ran — not that the pattern has
+    /// a match. A branch whose solution rests on that pattern (including a fully
+    /// ground one, which needs no variable binding) is refused fail-closed.
+    NoActiveRow { witness: usize, obligation: usize },
     /// A PROJECTED (disclosed) variable occupies a scan slot but is absent from the
     /// disclosed solution — omitting it to dodge the binding is refused fail-closed.
     UnboundProjectedScanVar { witness: usize, obligation: usize, slot: usize, var: String },
@@ -9205,6 +9211,11 @@ impl std::fmt::Display for FragmentScanError {
                 f,
                 "branch witness {} BGP obligation {}: selected row {} is outside the {} active disclosed rows (fail-closed)",
                 witness, obligation, row, active
+            ),
+            FragmentScanError::NoActiveRow { witness, obligation } => write!(
+                f,
+                "branch witness {} BGP obligation {}: the attributed scan discloses no active row, so the pattern is not shown to match (fail-closed)",
+                witness, obligation
             ),
             FragmentScanError::UnboundProjectedScanVar { witness, obligation, slot, var } => write!(
                 f,
@@ -9390,7 +9401,18 @@ pub fn bind_fragment_scans(
                 return Err(FragmentScanError::ScanPatternMismatch { witness: wi, obligation: oi });
             }
 
-            // A pattern with no variable slot is fully bound by (1); no row needed.
+            // Every pattern a branch's solution rests on must actually match: the
+            // attributed scan has to disclose at least one ACTIVE row. The circuit
+            // admits an empty result, so this is checked here, ahead of the
+            // ground-pattern shortcut below, which would otherwise accept a branch
+            // over a triple the graph lacks.
+            let active = (*row_count as usize).min(rows.len());
+            if active == 0 {
+                return Err(FragmentScanError::NoActiveRow { witness: wi, obligation: oi });
+            }
+
+            // A pattern with no variable slot is fully bound by (1) plus the
+            // non-empty check above; no particular row needs selecting.
             let has_var = pattern.slots.iter().any(|s| matches!(s, SlotPattern::Var(_)));
             if !has_var {
                 continue;
@@ -9401,7 +9423,6 @@ pub fn bind_fragment_scans(
             let Some(&row) = bw.scan_rows.get(oi) else {
                 return Err(FragmentScanError::MissingRowSelection { witness: wi, obligation: oi });
             };
-            let active = (*row_count as usize).min(rows.len());
             if row >= active {
                 return Err(FragmentScanError::RowOutOfRange {
                     witness: wi,
@@ -14324,6 +14345,57 @@ mod fragment_dispatch_tests {
     }
 
     #[test]
+    fn a_ground_pattern_over_an_empty_scan_is_refused() {
+        // The scan proves the ground triple's pattern constants but discloses no
+        // row: the graph lacks the triple, so the ASK answer is false and must not
+        // be accepted as true. Control: the same scan with the row disclosed.
+        const GROUND: &str = "ASK { <http://ex/a> <http://ex/p> <http://ex/b> }";
+        let consts = [Some("http://ex/a"), Some("http://ex/p"), Some("http://ex/b")];
+        let empty = scan_real(consts, vec![]);
+        let m = fm(GROUND, vec![sub(empty)], vec![bw_scan(0, vec![0], vec![], vec![], vec![])]);
+        assert_eq!(
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
+            Err(FragmentScanError::NoActiveRow { witness: 0, obligation: 0 })
+        );
+        let full = scan_real(consts, vec![[iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")]]);
+        let m = fm(GROUND, vec![sub(full)], vec![bw_scan(0, vec![0], vec![], vec![], vec![])]);
+        assert_eq!(bind_fragment_scans(&m, &AuthenticatedMethods::new()), Ok(()));
+    }
+
+    #[test]
+    fn a_values_answer_beside_an_empty_ground_scan_is_refused_end_to_end() {
+        // The VALUES cell supplies ?x without any scan row; the ground pattern
+        // beside it must still be shown to match. With an empty scan the true
+        // answer is empty, so the disclosed x=<urn:a> is refused before bb.
+        const Q: &str = "SELECT ?x WHERE { VALUES ?x { <urn:a> } <urn:s> <urn:p> <urn:o> . }";
+        let consts = [Some("urn:s"), Some("urn:p"), Some("urn:o")];
+        let empty = scan_real(consts, vec![]);
+        let mut m = fm(Q, vec![sub(empty)], vec![bw_scan(0, vec![0], vec![], vec![0], sol(&[("x", "urn:a")]))]);
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentScan(FragmentScanError::NoActiveRow { witness: 0, obligation: 0 })
+            ),
+            "an empty ground scan must be refused as NoActiveRow, got {err:?}"
+        );
+        // Control: the triple exists, so every structural gate passes; what is
+        // left is the cryptographic check, which this fixture cannot satisfy.
+        let full = scan_real(consts, vec![[iri("urn:s"), iri("urn:p"), iri("urn:o")]]);
+        let mut m = fm(Q, vec![sub(full)], vec![bw_scan(0, vec![0], vec![], vec![0], sol(&[("x", "urn:a")]))]);
+        let ks = attest_fragment_fixture(&mut m);
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            !matches!(err, CheckError::FragmentScan(_) | CheckError::FragmentDispatch(_) | CheckError::FragmentJoin(_)),
+            "the honest ground-plus-VALUES shape must clear every structural gate, got {err:?}"
+        );
+    }
+
+    #[test]
     fn verify_fragment_manifest_refuses_wrong_scan_row_before_bb() {
         // End-to-end: a scan row inconsistent with the disclosed solution is refused
         // as a structured CheckError::FragmentScan BEFORE the nonce is burnt or any
@@ -14354,6 +14426,7 @@ mod fragment_dispatch_tests {
             FragmentScanError::ScanPatternMismatch { witness: 0, obligation: 0 },
             FragmentScanError::MissingRowSelection { witness: 0, obligation: 0 },
             FragmentScanError::RowOutOfRange { witness: 0, obligation: 0, row: 3, active: 1 },
+            FragmentScanError::NoActiveRow { witness: 0, obligation: 0 },
             FragmentScanError::UnboundProjectedScanVar { witness: 0, obligation: 0, slot: 0, var: "s".into() },
             FragmentScanError::ScanSlotMismatch { witness: 0, obligation: 0, slot: 2, var: "o".into() },
             FragmentScanError::JoinIncoherent { witness: 0, obligation: 1, slot: 0, var: "x".into() },

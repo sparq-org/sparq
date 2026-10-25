@@ -290,6 +290,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`sq-qhy4`). No soundness or privacy claim.
   <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
 
+- **sparq-zk-compose (extended-fragment):** a scan attributed to a branch witness must disclose
+  at least one ACTIVE row (`FragmentScanError::NoActiveRow`). The scan circuit admits an empty
+  result, and a fully ground pattern binds no variable, so the ground-pattern shortcut in
+  `bind_fragment_scans` previously accepted a branch over a triple the graph lacks (for example
+  `ASK { <a> <p> <b> }`, or a `VALUES`-supplied answer beside a ground pattern). The check now runs
+  ahead of that shortcut for every attributed scan. A standalone empty scan proof is unaffected.
+  Adds a refusal and opens nothing.
+
 - **sparq-zk:** every query extractor refuses a solution SLICE (`LIMIT` and/or `OFFSET`) at any
   depth, under one shared reason, instead of descending through it: `verify::fragment_query`'s
   top-level modifier peel and its subquery arm, and the flat `verify::fragment_patterns`,
