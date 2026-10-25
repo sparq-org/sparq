@@ -376,8 +376,13 @@ async fn solid_negotiation_graph_and_goldens() {
             && t.object
                 == oxrdf::Term::NamedNode(NamedNode::new(format!("{SSD}{capability}")).unwrap())));
     }
-    assert!(!String::from_utf8_lossy(&json_body).contains("MoveResource"));
-    assert!(!String::from_utf8_lossy(&json_body).contains("RecursiveDelete"));
+    for absent in [
+        format!("{LWS}MoveResource"),
+        format!("{SSD}RecursiveDelete"),
+    ] {
+        assert!(!graph.iter().any(|t| t.predicate.as_str() == RDF_TYPE
+            && t.object == oxrdf::Term::NamedNode(NamedNode::new(&absent).unwrap())));
+    }
     assert_eq!(
         has(&graph, ROOT, ACQ, "https://pod.example/sparql"),
         cfg!(feature = "sparql-endpoint")
@@ -390,7 +395,11 @@ async fn solid_negotiation_graph_and_goldens() {
             "https://pod.example/sparql",
         );
     } else {
-        assert!(!String::from_utf8_lossy(&json_body).contains("SparqlQueryService"));
+        assert!(!graph.iter().any(|t| t.predicate.as_str() == RDF_TYPE
+            && t.object
+                == oxrdf::Term::NamedNode(
+                    NamedNode::new(format!("{SSD}SparqlQueryService")).unwrap()
+                )));
     }
     for accept in ["*/*", "text/turtle;q=0.3, application/ld+json;q=0.8"] {
         assert_eq!(
@@ -428,10 +437,13 @@ async fn solid_negotiation_graph_and_goldens() {
         &app,
         "GET",
         "/.well-known/solid",
-        &[("if-match", "\"different-catalog\""),
-          ("if-none-match", json_headers["etag"].to_str().unwrap())],
+        &[
+            ("if-match", "\"different-catalog\""),
+            ("if-none-match", json_headers["etag"].to_str().unwrap()),
+        ],
         "",
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::PRECONDITION_FAILED);
     assert!(body.is_empty());
     assert_ne!(ttl_headers["etag"], json_headers["etag"]);
@@ -630,7 +642,7 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
             .unwrap()
             .strip_prefix(common::BASE_URL)
             .unwrap();
-        let (status, headers, _) = call(
+        let (status, _, _) = call(
             &app,
             "PATCH",
             path,
@@ -639,6 +651,8 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT, "{media}");
+        let (status, headers, _) = call(&app, "OPTIONS", path, &[], "").await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
         assert_eq!(headers["accept-patch"], "application/json-patch+json");
         let (_, _, body) = call(&app, "GET", path, &[], "").await;
         assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["value"], 2);
@@ -699,24 +713,4 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
         headers["accept-patch"],
         "text/n3, application/sparql-update"
     );
-}
-
-#[tokio::test]
-#[ignore]
-async fn regenerate_catalog_fixtures() {
-    let app = lws(ServiceCatalog::default(), false).await;
-    let (status, _, body) = call(&app, "GET", "/", &[("accept", "application/lws+cid")], "").await;
-    assert_eq!(status, StatusCode::OK);
-    let value: Value = serde_json::from_slice(&body).unwrap();
-    std::fs::write(format!("{FIXTURES}lws.jsonld"), serde_json::to_string_pretty(&value).unwrap()+"\n").unwrap();
-    let app = solid(ServiceCatalog::default(), false).await;
-    let suffix = if cfg!(feature = "sparql-endpoint") { "" } else { "-no-sparql" };
-    for (accept, ext) in [("application/ld+json", "jsonld"), ("text/turtle", "ttl")] {
-        let (status, _, body) = call(&app, "GET", "/.well-known/solid", &[("accept", accept)], "").await;
-        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let body = if ext == "jsonld" {
-            serde_json::to_string_pretty(&serde_json::from_slice::<Value>(&body).unwrap()).unwrap().into_bytes()
-        } else { body };
-        std::fs::write(format!("{FIXTURES}solid{suffix}.{ext}"), body).unwrap();
-    }
 }

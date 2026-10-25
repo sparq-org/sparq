@@ -122,7 +122,7 @@ impl ServiceCatalog {
                 })
             })
             .collect();
-        document["notificationChannel"] = json!(channels);
+        document["notificationChannel"] = if channels.is_empty() { json!(channels) } else { json!([]) };
         for service in &self.services {
             if service.type_term == format!("{SSD}SparqlQueryService") {
                 document[SPARQL_ENDPOINT] = json!({"@id": service.endpoint});

@@ -1,104 +1,120 @@
-[
-  {
-    "@id": "https://pod.example/",
-    "@type": [
-      "http://www.w3.org/ns/pim/space#Storage",
-      "https://www.w3.org/ns/lws#Storage"
-    ],
-    "https://www.w3.org/ns/did#service": [
-      {
-        "@id": "https://pod.example/#storage-root"
+{
+  "@context": [
+    "https://www.w3.org/ns/solid/notifications-context/v1",
+    {
+      "@vocab": "https://www.w3.org/ns/lws#",
+      "ACP": "https://jeswr.org/ns/solid-sd#ACP",
+      "AccessControl": "https://jeswr.org/ns/solid-sd#AccessControl",
+      "CrdtSyncService": "https://jeswr.org/ns/solid-sd#CrdtSyncService",
+      "ODRLGrants": "https://jeswr.org/ns/solid-sd#ODRLGrants",
+      "PatchSupport": "https://jeswr.org/ns/solid-sd#PatchSupport",
+      "RecursiveDelete": "https://jeswr.org/ns/solid-sd#RecursiveDelete",
+      "SolidNotificationService": "https://jeswr.org/ns/solid-sd#SolidNotificationService",
+      "SparqlQueryService": "https://jeswr.org/ns/solid-sd#SparqlQueryService",
+      "SseSubscription": "https://jeswr.org/ns/solid-sd#SseSubscription",
+      "TrashService": "https://jeswr.org/ns/solid-sd#TrashService",
+      "VersioningService": "https://jeswr.org/ns/solid-sd#VersioningService",
+      "WAC": "https://jeswr.org/ns/solid-sd#WAC",
+      "WebSocketSubscription": "https://jeswr.org/ns/solid-sd#WebSocketSubscription",
+      "capability": "https://www.w3.org/ns/lws#capability",
+      "conformsTo": {
+        "@id": "http://purl.org/dc/terms/conformsTo",
+        "@type": "@id"
       },
-      {
-        "@id": "https://pod.example/#storage-description"
+      "format": "https://jeswr.org/ns/solid-sd#format",
+      "model": "https://jeswr.org/ns/solid-sd#model",
+      "notificationChannel": {
+        "@container": "@set",
+        "@id": "http://www.w3.org/ns/solid/notifications#notificationChannel"
       },
-      {
-        "@id": "https://pod.example/#notifications"
-      }
-    ],
-    "https://www.w3.org/ns/lws#capability": [
-      {
-        "@id": "_:access"
+      "patchType": "https://jeswr.org/ns/solid-sd#patchType",
+      "profile": {
+        "@id": "http://purl.org/dc/terms/conformsTo",
+        "@type": "@id"
       },
-      {
-        "@id": "_:patch"
-      }
-    ]
-  },
-  {
-    "@id": "https://pod.example/#storage-root",
-    "@type": [
-      "https://www.w3.org/ns/lws#StorageRoot"
-    ],
-    "https://www.w3.org/ns/did#serviceEndpoint": [
-      {
-        "@id": "https://pod.example/"
-      }
-    ]
-  },
-  {
-    "@id": "https://pod.example/#storage-description",
-    "@type": [
-      "https://www.w3.org/ns/lws#StorageDescription"
-    ],
-    "https://www.w3.org/ns/did#serviceEndpoint": [
-      {
-        "@id": "https://pod.example/.well-known/solid"
-      }
-    ]
-  },
-  {
-    "@id": "https://pod.example/#notifications",
-    "@type": [
-      "https://jeswr.org/ns/solid-sd#SolidNotificationService"
-    ],
-    "https://www.w3.org/ns/did#serviceEndpoint": [
-      {
-        "@id": "https://pod.example/.notifications/WebSocketChannel2023/"
-      }
-    ],
-    "https://jeswr.org/ns/solid-sd#channelType": [
-      {
-        "@id": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023"
-      }
-    ]
-  },
-  {
-    "@id": "_:access",
-    "@type": [
-      "https://jeswr.org/ns/solid-sd#AccessControl"
-    ],
-    "https://jeswr.org/ns/solid-sd#model": [
-      {
-        "@id": "https://jeswr.org/ns/solid-sd#WAC"
-      }
-    ]
-  },
-  {
-    "@id": "_:patch",
-    "@type": [
-      "https://jeswr.org/ns/solid-sd#PatchSupport"
-    ],
-    "https://jeswr.org/ns/solid-sd#format": [
-      {
-        "@id": "_:format"
-      }
-    ]
-  },
-  {
-    "@id": "_:format",
-    "https://jeswr.org/ns/solid-sd#source": [
-      {
-        "@value": "text/turtle"
-      }
-    ],
-    "https://jeswr.org/ns/solid-sd#patchType": [
-      {
-        "@value": "text/n3"
+      "protocol": "https://jeswr.org/ns/solid-sd#protocol",
+      "retention": "https://jeswr.org/ns/solid-sd#retention",
+      "roomTemplate": "https://jeswr.org/ns/solid-sd#roomTemplate",
+      "service": "https://www.w3.org/ns/did#service",
+      "serviceEndpoint": {
+        "@id": "https://www.w3.org/ns/did#serviceEndpoint",
+        "@type": "@id"
       },
-      {
-        "@value": "application/sparql-update"
+      "source": "https://jeswr.org/ns/solid-sd#source",
+      "ssdChannelType": "https://jeswr.org/ns/solid-sd#channelType",
+      "subscriptionService": {
+        "@id": "http://www.w3.org/ns/solid/notifications#subscriptionService",
+        "@type": "@id"
+      },
+      "target": "https://jeswr.org/ns/solid-sd#target"
+    }
+  ],
+  "capability": [
+    {
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": {
+        "id": "https://jeswr.org/ns/solid-sd#AccessControl"
+      },
+      "model": {
+        "id": "https://jeswr.org/ns/solid-sd#WAC"
       }
-    ]
-  }
-]
+    },
+    {
+      "format": {
+        "patchType": [
+          "text/n3",
+          "application/sparql-update"
+        ],
+        "source": "text/turtle"
+      },
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": {
+        "id": "https://jeswr.org/ns/solid-sd#PatchSupport"
+      }
+    }
+  ],
+  "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+    {
+      "id": "http://www.w3.org/ns/pim/space#Storage"
+    },
+    {
+      "id": "https://www.w3.org/ns/lws#Storage"
+    }
+  ],
+  "id": "https://pod.example/",
+  "notificationChannel": [
+    {
+      "channelType": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023",
+      "id": "https://pod.example/.notifications/WebSocketChannel2023/",
+      "subscriptionService": "https://pod.example/.notifications/WebSocketChannel2023/"
+    }
+  ],
+  "service": [
+    {
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": {
+        "id": "https://www.w3.org/ns/lws#StorageRoot"
+      },
+      "id": "https://pod.example/#storage-root",
+      "serviceEndpoint": "https://pod.example/"
+    },
+    {
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": {
+        "id": "https://www.w3.org/ns/lws#StorageDescription"
+      },
+      "id": "https://pod.example/#storage-description",
+      "serviceEndpoint": "https://pod.example/.well-known/solid"
+    },
+    {
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": {
+        "id": "https://jeswr.org/ns/solid-sd#SolidNotificationService"
+      },
+      "id": "https://pod.example/#notifications",
+      "serviceEndpoint": {
+        "channelType": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023",
+        "id": "https://pod.example/.notifications/WebSocketChannel2023/",
+        "subscriptionService": "https://pod.example/.notifications/WebSocketChannel2023/"
+      },
+      "ssdChannelType": {
+        "id": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023"
+      }
+    }
+  ]
+}

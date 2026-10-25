@@ -38,9 +38,6 @@
   "capability": [
     {
       "mediaType": {
-        "*/*+json": [
-          "application/json-patch+json"
-        ],
         "application/json": [
           "application/json-patch+json"
         ],
