@@ -5279,6 +5279,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-lws-blob-fs"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "getrandom 0.2.17",
+ "tokio",
+]
+
+[[package]]
 name = "sparq-lws-core"
 version = "0.1.0"
 dependencies = [
@@ -5326,6 +5335,7 @@ dependencies = [
  "sparq-lws-authn-openid",
  "sparq-lws-authn-saml",
  "sparq-lws-authn-ssi",
+ "sparq-lws-blob-fs",
  "sparq-policy",
  "sparq-solid",
  "sparq-spargebra",

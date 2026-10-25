@@ -1,0 +1,19 @@
+[package]
+name = "sparq-lws-blob-fs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Filesystem blob storage with immutable b1 keys and fsync-backed writes."
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+publish = false
+
+[dependencies]
+bytes = "1"
+getrandom = "0.2"
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

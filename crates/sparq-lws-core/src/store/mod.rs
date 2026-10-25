@@ -7,6 +7,8 @@
 //! whole stack is testable without a running SPARQ or S3.
 
 pub mod blob;
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+mod blob_fs;
 // The blob-body LRU cache (read-4 — backend-read-path.md §3.4): `(blob_key, etag)`-keyed,
 // byte-budgeted, sat in front of BlobStore::get inside CompositeStore so a hot unchanged
 // resource's repeat read pays zero blob round-trips. Immutable-by-construction (unique-per-write
@@ -99,6 +101,8 @@ pub use reconcile::{
 pub use sparq::{
     DeleteOutcome, Fence, InMemorySparqClient, ReadPlan, ResourceMeta, SparqClient, SparqError,
 };
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+pub use sparq_lws_blob_fs::FsBlobStore;
 pub use sparql::{BodyObject, BuildError};
 
 use crate::error::{ServerError, ServerResult};

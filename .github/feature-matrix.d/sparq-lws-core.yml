@@ -14,6 +14,12 @@
 # leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
 # mark a check as non-blocking.
 
+# Default-on native filesystem adapter and the shared CompositeStore contract suite.
+- name: "sparq-lws-core (blob-fs)"
+  crate: "sparq-lws-core"
+  features: "blob-fs"
+  test: true
+
 # The IN-PROCESS embedded SPARQ backend (src/store/embedded.rs) — in-workspace path
 # deps on sparq-core/sparq-engine. DEFAULT-ON since sq-gg0qq.3 (the first-class
 # in-workspace backend), so the default ci.yml lanes now also cover it; this leg keeps

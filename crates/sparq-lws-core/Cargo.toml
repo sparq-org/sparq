@@ -217,6 +217,7 @@ itoa = "1"
 # Declared for native targets below.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sparq-lws-blob-fs = { path = "../sparq-lws-blob-fs", optional = true }
 # Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
 # tokens and RFC 9421 notification signatures. p256 and reqwest are already in the resolved graph
 # (p256 as a dev-dependency, reqwest via solid-oidc-verifier), so these entries add no new crate.
@@ -374,7 +375,9 @@ authn-ssi = ["dep:sparq-lws-authn-ssi"]
 # in-workspace builds. Build with `--no-default-features` for the engine-free profile (the
 # in-memory double only — the former default), e.g. for an out-of-workspace consumer that wants
 # no engine dependency.
-default = ["embedded-sparq", "sparql-endpoint", "authn-openid", "authn-ssi"]
+default = ["embedded-sparq", "sparql-endpoint", "authn-openid", "authn-ssi", "blob-fs"]
+# Native filesystem BlobStore library adapter; runtime selection remains explicit.
+blob-fs = ["dep:sparq-lws-blob-fs"]
 # Opt-in: compile the distributed Redis-backed DPoP-`jti` replay store (`src/redis_replay.rs`) + its
 # `redis`/`r2d2` deps. OFF by default so the standard build, tests, and conformance are byte-identical
 # and carry no extra dependency. Enable for a horizontally-scaled deployment that shares one replay set

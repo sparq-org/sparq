@@ -3,8 +3,8 @@
 //!
 //! Per the architecture, `object_store`/S3 is **backup-only** for resource bytes: SPARQ is the
 //! authoritative index, and the blob store holds a durable copy of the bytes keyed by an opaque
-//! `s3Key`. This module defines the [`BlobStore`] trait and an in-memory test impl. The real
-//! `object_store`-backed impl (S3 / Local) is an M2 adapter behind the same trait.
+//! `s3Key`. This module defines the [`BlobStore`] trait and an in-memory test impl.
+//! The native `blob-fs` feature also supplies a filesystem adapter behind this trait.
 //!
 //! Composite-store keys use `b1-<32 lowercase hex>` with 128 bits of OS randomness per write.
 //! Service-pool keys retain the `$pool$` prefix; neither form includes the resource IRI.
@@ -69,6 +69,18 @@ pub struct BlobEntry {
 
 /// The byte store: a key/value store of resource bodies, keyed by an opaque storage key.
 ///
+/// # Key lifetime contract
+/// Callers MUST mint a fresh, unique key for every write, including rewrites of the same
+/// resource, and MUST NOT reuse a key after deletion. This is a trait-level requirement,
+/// not just a convention of `CompositeStore`. Backends may reject existing keys; callers
+/// cannot rely on replacement even if a versioned test backend supports it.
+///
+/// A versionless backend reports [`BlobEntry::generation`] as `None`. Because no later
+/// write may reuse an orphan's key, its unconditional [`delete`](Self::delete) is sound
+/// after the reconciler's age and reference checks. A timestamp is only an age witness,
+/// never a substitute for a generation. A versioned backend may additionally provide CAS
+/// protection via [`delete_if_unchanged`](Self::delete_if_unchanged).
+///
 /// M2: an `object_store`-backed impl (`object_store::aws::AmazonS3` / `LocalFileSystem`) plugs in
 /// here, using `PutMode::Create`/`Update` for the S3 If-None-Match/If-Match CAS (spike §6).
 #[async_trait]
@@ -76,7 +88,7 @@ pub trait BlobStore: Send + Sync {
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
 
-    /// Write (create-or-replace) the bytes for a storage key.
+    /// Write bytes under a fresh, unique-per-write storage key; existing keys may error.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
 
     /// Whether a key exists.
@@ -98,8 +110,7 @@ pub trait BlobStore: Send + Sync {
     /// M2-next (the `object_store` adapter): implement via `object_store::ObjectStore::list` — its
     /// `ObjectMeta` carries `location` (→ `key`) + `last_modified` (a `chrono::DateTime<Utc>` → map to
     /// [`SystemTime`]), so the real S3/Local backend reports a real timestamp and the grace window
-    /// works against true object age. Until that adapter lands the in-memory double below is the only
-    /// impl.
+    /// works against true object age. The native filesystem adapter uses file modification times.
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError>;
 
     /// Re-read ONE key's current state (its present `last_modified`), or `None` if the key no longer
@@ -167,9 +178,9 @@ pub trait BlobStore: Send + Sync {
     /// into [`BlobEntry::generation`] (`object_store` `PutMode`/delete with an `if_match`/version
     /// precondition on the backends that support it: S3 conditional writes / object versioning). On a
     /// backend WITHOUT a conditional delete (and no native version ⇒ [`BlobEntry::generation`] is `None`),
-    /// safety rests on the **unique-per-write blob keys** the composite store now mints
-    /// (`CompositeStore::mint_blob_key`): an overwrite never reuses a candidate's key, so the
-    /// reconciler can never target live bytes and the delete is safe to be unconditional.
+    /// no numeric witness can match: return `Ok(false)` without deleting (invalid keys and
+    /// backend errors may still propagate). The reconciler uses unconditional `delete` for
+    /// versionless entries, safe under the trait's key lifetime contract above.
     async fn delete_if_unchanged(
         &self,
         key: &str,

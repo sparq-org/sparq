@@ -31,6 +31,7 @@ base URL unless configured otherwise. The default Cargo features are:
 
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
+- `blob-fs`, which supplies the native filesystem blob-store library adapter.
 - `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
   authentication suites (§ *Run the LWS 1.0 protocol* below). `authn-saml` is off.
 
@@ -84,6 +85,25 @@ present the native image as a durable production data service.
 of OS randomness per write. Service-pool records retain the `$pool$` prefix:
 `$pool$b1-<32 lowercase hex>`. Keys contain no resource IRI; metadata remains
 the authoritative pointer to the bytes. RNG failure fails the write closed.
+
+The default-on, native-only `blob-fs` Cargo feature re-exports
+`sparq_lws_core::store::FsBlobStore`. Open it with
+`FsBlobStore::open(std::path::Path::new("blobs")).await?` in a Tokio runtime,
+then pass it to `CompositeStore::new(index, blobs)`. This library adapter does
+not select a backend in the binary. It accepts only the two b1 key forms above,
+rejects existing keys, syncs bytes before rename and syncs the destination
+directory. Opening creates the layout and removes all `tmp/` leftovers; open
+only with no writes in flight, over a root managed by trusted storage code.
+All filesystem I/O runs in `spawn_blocking`.
+
+The `BlobStore` contract requires fresh keys on every write, never reused even
+after deletion. Filesystem entries have file mtime as `Some(last_modified)`
+and `generation = None`, so orphan reconciliation safely uses unconditional
+delete. `delete` is idempotent; trait `stat` returns `Ok(None)` when missing,
+and `delete_if_unchanged` returns false because no numeric generation matches.
+Use the trait methods (or a `dyn BlobStore`) for trait-shaped errors and `stat`;
+the inherent filesystem API has its own errors and missing-key `stat` returns
+`Error::NotFound`. See the [crate README](../../crates/sparq-lws-blob-fs/README.md).
 
 The seed variables are test-only:
 
