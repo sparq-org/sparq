@@ -1209,8 +1209,11 @@ impl std::str::FromStr for CircuitId {
             }
         }
         // Fixed members use serde names except for the integer value member.
-        let kind = name.strip_prefix("filter_value_dl_int").filter(|s| s.is_empty())
-            .map_or(name, |_| "filter_value_dl");
+        let kind = match name {
+            "filter_value_dl_int" => "filter_value_dl",
+            "filter_value_dl_datetime" => "filter_value_dl_date_time",
+            _ => name,
+        };
         if let Ok(id) = serde_json::from_value::<Self>(serde_json::json!({"kind": kind})) {
             if id.package()? == name { return Ok(id); }
         }

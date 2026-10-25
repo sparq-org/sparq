@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-zk-compose (`dual-leaf`):** complete dispatch coverage for the V2 component-witnessed
+  scan `(1,16,4)` and join `(16,16)` members with dedicated `CircuitId` variants.
+  V2 ids are legal only under `DualLeafV2`; opaque scan/join ids are refused under V2.
+  Checked constructors, serde, package-name parsing and the fallible `CircuitId::package()`
+  refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
+  Extended-fragment and value-FILTER refusals remain closed. Experimental and unaudited.
+
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
   `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,

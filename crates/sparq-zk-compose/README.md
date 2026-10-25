@@ -1,6 +1,23 @@
 <!-- sq-puyy: trimmed to the concise internal-stub README template (sq-9jw5). -->
 # sparq-zk-compose
 
+With `dual-leaf`, dispatch coverage includes `CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }`
+and `CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 }`. These select the component-witnessed
+`scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16` packages only under `DualLeafV2`.
+Opaque `Scan`/`JoinEq` ids are refused under V2; they remain legal under
+`StringCanonicalV1` and legacy `DualLeafV1`. V2 ids are refused under every other method,
+including the `ValueOnlyV1` research dial. An edge-less V2 join cannot derive a method.
+The extended-fragment entry point still refuses non-string-canonical commitments,
+and stage 0 still refuses value-FILTER sub-proofs. No value gate opens.
+
+`CircuitId::package()` now returns `Result<String, CircuitIdError>`.
+The checked `scan_v2_dl`/`join_eq_v2_dl` constructors, package-name parsing (`FromStr`),
+serde and driver entry points refuse uncompiled V2 shapes with `UncompiledV2Member`.
+The opaque witness renderer returns `ProverTomlError::V2ComponentsRequired` for V2 ids;
+component witnesses must be supplied to the raw driver. This completes dispatch coverage
+without adding a general V2 witness builder. The estate remains experimental and unaudited.
+
+
 ZK proof **composition** for [sparq](../../README.md) — stage 2 of the query-proof
 design ([`research/zkp-query-proofs-plan.md`](../../research/zkp-query-proofs-plan.md)
 v3, §S4.E). Drives the per-property Noir circuit family at

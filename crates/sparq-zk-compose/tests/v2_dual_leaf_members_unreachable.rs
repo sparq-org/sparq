@@ -1,23 +1,5 @@
-//! The V2 component-witnessed members are NOT verifier-acceptable (sq-j506).
-//!
-//! `zk/compose/scan_v2dl_k1_n16_r4` and `zk/compose/join_eq_v2dl_na16_nb16`
-//! recompute their graphs' term encodings from witnessed `DualLeafV2` leaf
-//! components. They are shipped as circuit packages and nothing more: this PR
-//! wires no verifier acceptance for them, and the value-lane / V2-scan gates stay
-//! closed.
-//!
-//! The ONE thing that makes that true is [`CircuitId::package`] — the single
-//! function the verifier's member resolution, id derivation and canonical-vk
-//! lookup all name a member through. No `CircuitId` variant produces either
-//! package name, so no `ProofManifest` can name a V2 member and no sub-proof can
-//! be routed to one. This file asserts exactly that, over a sweep of the shipped
-//! id space, and compiles in each member's own `main.nr` so the claim is about
-//! real members rather than absent ones -- a moved or renamed member is a COMPILE
-//! error here, not a silently-passing test.
-//!
-//! When sq-j506 opens the V2 scan lane it will add a `CircuitId` variant for
-//! these members. This test is what turns red at that moment, so the gates are
-//! opened deliberately rather than by a member becoming nameable.
+//! Only the two dedicated ids may name the compiled V2 component members.
+//! The opaque families never alias their packages, regardless of parameters.
 
 use sparq_zk_compose::manifest::CircuitId;
 
@@ -31,9 +13,8 @@ const SCAN_V2DL_MAIN: &str =
 const JOIN_V2DL_MAIN: &str =
     include_str!("../../../zk/compose/join_eq_v2dl_na16_nb16/src/main.nr");
 
-/// Every `CircuitId` the shipped id space can form over a sweep that covers each
-/// variant's parameters well past the compiled members. A name no `CircuitId`
-/// produces cannot be reached by any manifest.
+/// Opaque scan/join and token FILTER names over parameters extending beyond
+/// the compiled buckets. Dedicated V2 ids are checked separately below.
 fn swept_package_names() -> Vec<String> {
     let mut out = Vec::new();
     for k in 0..6u32 {
@@ -55,18 +36,69 @@ fn swept_package_names() -> Vec<String> {
     out
 }
 
-/// The guard. Neither V2 member is nameable by any swept `CircuitId`, so neither
-/// is reachable through the verifier's member resolution.
+/// No opaque family parameterization aliases a V2 package.
 #[test]
-fn no_circuit_id_names_a_v2_dual_leaf_member() {
+fn no_opaque_circuit_id_names_a_v2_dual_leaf_member() {
     let swept = swept_package_names();
     for member in V2_MEMBERS {
-        assert!(
-            !swept.contains(&member.to_string()),
-            "{} is nameable by a CircuitId: the V2 component-witnessed member has become verifier-reachable, which sq-j506 must open deliberately",
-            member
-        );
+        assert!(!swept.contains(&member.to_string()), "opaque family aliases {member}");
     }
+}
+
+/// Exactly the two dedicated variants produce the two package names.
+#[cfg(feature = "dual-leaf")]
+#[test]
+fn exactly_the_two_v2_variants_name_the_v2_members() {
+    let ids = [
+        CircuitId::scan_v2_dl(1, 16, 4).unwrap(),
+        CircuitId::join_eq_v2_dl(16, 16).unwrap(),
+    ];
+    for (id, name) in ids.iter().zip(V2_MEMBERS) {
+        assert_eq!(id.package().unwrap(), name);
+        assert_eq!(name.parse::<CircuitId>().unwrap(), *id);
+        let json = serde_json::to_string(id).unwrap();
+        assert_eq!(serde_json::from_str::<CircuitId>(&json).unwrap(), *id);
+    }
+    let mut names = Vec::new();
+    for k in 0..6 {
+        for n in [0, 8, 16, 32, 64] {
+            for r in 0..9 {
+                if let Ok(name) = (CircuitId::ScanV2Dl { k, n, r }).package() { names.push(name); }
+            }
+        }
+    }
+    for n_a in [0, 8, 16, 32, 64] {
+        for n_b in [0, 8, 16, 32, 64] {
+            if let Ok(name) = (CircuitId::JoinEqV2Dl { n_a, n_b }).package() { names.push(name); }
+        }
+    }
+    names.sort();
+    assert_eq!(names, vec![V2_MEMBERS[1], V2_MEMBERS[0]]);
+}
+
+#[cfg(feature = "dual-leaf")]
+#[test]
+fn every_checked_construction_path_refuses_uncompiled_v2_shapes() {
+    use sparq_zk_compose::manifest::CircuitIdError;
+    assert!(matches!(CircuitId::scan_v2_dl(2, 16, 4), Err(CircuitIdError::UncompiledV2Member(_))));
+    assert!(matches!(CircuitId::join_eq_v2_dl(8, 16), Err(CircuitIdError::UncompiledV2Member(_))));
+    for (id, name, json) in [
+        (CircuitId::ScanV2Dl { k: 2, n: 16, r: 4 }, "scan_v2dl_k2_n16_r4",
+            r#"{"kind":"scan_v2_dl","k":2,"n":16,"r":4}"#),
+        (CircuitId::JoinEqV2Dl { n_a: 8, n_b: 16 }, "join_eq_v2dl_na8_nb16",
+            r#"{"kind":"join_eq_v2_dl","n_a":8,"n_b":16}"#),
+    ] {
+        assert!(matches!(id.package(), Err(CircuitIdError::UncompiledV2Member(_))));
+        assert!(matches!(name.parse::<CircuitId>(), Err(CircuitIdError::UncompiledV2Member(_))));
+        assert!(serde_json::from_str::<CircuitId>(json).unwrap_err().to_string().contains("UncompiledV2Member"));
+        assert!(serde_json::to_string(&id).unwrap_err().to_string().contains("UncompiledV2Member"));
+        for &method in sparq_zk::commit::CommitmentMethod::recognised() {
+            assert!(matches!(sparq_zk_compose::dispatch::resolve_circuit(method, &id),
+                Err(sparq_zk_compose::dispatch::DispatchError::UncompiledCircuit(_))));
+        }
+    }
+    assert!(CircuitId::scan_v2_dl(1, 16, 4).is_ok());
+    assert!(CircuitId::join_eq_v2_dl(16, 16).is_ok());
 }
 
 /// The CONTROL. The sweep genuinely produces the SHIPPED members' names, so the
@@ -78,15 +110,13 @@ fn the_sweep_names_the_shipped_scan_and_join_members() {
     for member in ["scan_k1_n16_r4", "join_eq_na16_nb16"] {
         assert!(
             swept.contains(&member.to_string()),
-            "the sweep must name the shipped member {}, or the unreachability assertion is vacuous",
+            "the sweep must name the shipped member {}, or the non-alias assertion is vacuous",
             member
         );
     }
 }
 
-/// And the two V2 members are REAL members whose relations go through the
-/// component recompute, so the unreachability above is a statement about members
-/// that exist and do the work the gates are being kept closed over.
+/// Both named packages execute their component-witnessed relations.
 #[test]
 fn both_v2_dual_leaf_members_call_the_component_recompute() {
     for (member, source, relation) in [

@@ -142,6 +142,8 @@ fn bench_scan(prover: &CircuitProver, k: u32, graph_triples: usize, matches: usi
         .collect();
     let scan = build_scan(&commits, &age_pattern()).expect("scan in family");
     let (id, n, r) = match scan.inputs.circuit_id() {
+        // This curve uses build_scan's opaque string-canonical witness only.
+        // V2 component witnesses belong to the dedicated V2 proof tests.
         CircuitId::Scan { n, r, .. } => (scan.inputs.circuit_id().clone(), *n, *r),
         _ => unreachable!(),
     };

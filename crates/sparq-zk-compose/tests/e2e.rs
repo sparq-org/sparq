@@ -7414,3 +7414,7 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
         ),
     }
 }
+
+#[cfg(feature = "dual-leaf")]
+#[path = "support/v2_members.rs"]
+mod v2_members;

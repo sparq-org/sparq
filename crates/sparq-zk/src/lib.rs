@@ -87,8 +87,8 @@ pub mod dual_leaf_datetime;
 // no-value sentinel asserted outside the reachable value-handle band (the
 // `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement, on the
 // HOST side; the in-circuit half is enforced by the component-witnessed
-// `scan_v2dl_*` / `join_eq_v2dl_*` members, which are not yet acceptable to the
-// verifier). Same
+// `scan_v2dl_*` / `join_eq_v2dl_*` members selected by dedicated V2 ids).
+// Same
 // OFF-by-default `dual-leaf` gate, same INV-VL downgrade + CR-G8 / sq-qhy4 audit
 // obligation as `dual_leaf`, whose V1 surface is unchanged.
 #[cfg(feature = "dual-leaf")]
