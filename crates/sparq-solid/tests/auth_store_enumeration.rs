@@ -58,10 +58,11 @@ fn refuses_transient_name(name: &str, operations: &str) {
         .unwrap();
     assert_eq!(store.acp_provenance().creator(name), Some(ALICE));
     assert!(store.decide(&owner(), name, Mode::Write).allow);
+    let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new(name).unwrap());
     store
         .graph_unchecked_mut()
-        .named
-        .retain(|(n, _)| !matches!(n, oxrdf::Term::NamedNode(n) if n.as_str() == name));
+        .drop_named_durable(&term)
+        .unwrap();
     store.set_auth_budget(default_auth_budget());
     let mut fresh = PodStore::new(store.graph().fork());
     fresh
