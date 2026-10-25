@@ -94,7 +94,9 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 ## Embedded index lifecycle
 
 `EmbeddedSparqClient::open_or_create` bootstraps or reopens `SOLID_SERVER_SPARQ_DIR`; strict `open` requires a store. Foreign non-empty directories are refused.
-Existing atomic mutators discard WAL backing; bootstrap does not fix that limitation.
+Mutators evaluate on a private fork, then commit resolved effects through one fsync'd
+`txn.log` frame and materialize the per-graph WALs. Successful writes survive reopening
+without compaction. A post-commit failure requires reopening the index for journal recovery.
 `save` remains a test snapshot helper. After SIGINT/SIGTERM drains listeners,
 directory-backed shutdown awaits actor compaction for up to 30 seconds, logging
 parent WAL bytes before/after and compacting named WALs. Timeout stops waiting, not the job.

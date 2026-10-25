@@ -78,10 +78,12 @@ Set `PSS_SPARQ_BACKEND` to one of:
   against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
 
 Rust callers use `store::EmbeddedSparqClient::open_or_create(&dir)` for bootstrap,
-or `open(&dir)` to require an existing graph. The engine supports durable WAL writes,
-but existing client atomic mutators replace the graph with an in-memory fork and
-lose directory backing. Bootstrap does not fix that limitation. `save` remains a
-test snapshot helper. Arrange
+or `open(&dir)` to require an existing graph. Mutators evaluate on a private fork,
+then commit resolved effects to the original graph through one fsync'd `txn.log`
+frame before materializing per-graph WALs. Successful writes survive reopening
+without compaction, including child metadata and parent containment from one create.
+Evaluation failures leave the original graph untouched; a post-commit failure says
+the index must be reopened for journal recovery. `save` remains a test snapshot helper. Arrange
 exclusive access with a lock outside the graph directory, which compaction swaps.
 For a configured index directory, the native server drains listeners on
 SIGINT/SIGTERM, then awaits an embedded compaction actor job for at most 30 seconds,

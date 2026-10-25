@@ -49,8 +49,8 @@
 //! - **No blocking-pool hop.** A job runs on the actor thread directly instead of being handed to a
 //!   tokio blocking-pool thread (a fresh thread per burst, and a different thread each call).
 //! - **One serialisation point.** Every mutation passes through a single thread in FIFO channel
-//!   order — the natural place to hang a future WAL / durable-on-every-write story off, since the
-//!   actor sees every write exactly once, in commit order.
+//!   order. Directory-backed writes commit their resolved effects through the graph's redo journal
+//!   before replying, so the actor sees every write exactly once, in commit order.
 //!
 //! These are STRUCTURAL properties of the design, not a measured speed-up: this change has not been
 //! benchmarked, and the degree of serialisation is unchanged (the `Mutex` already admitted exactly
@@ -68,9 +68,9 @@
 //! ## Persistence
 //! [`EmbeddedSparqClient::in_memory`] creates an ephemeral graph. [`EmbeddedSparqClient::open`]
 //! strictly opens an existing store; [`EmbeddedSparqClient::open_or_create`] also bootstraps an
-//! empty directory. The engine supports WAL-backed writes, but the client's existing atomic
-//! mutators replace the graph with an in-memory fork and lose that backing. Bootstrap and
-//! compaction do not fix that separate limitation.
+//! empty directory. Mutators evaluate on a private fork, then commit the resolved effects to the
+//! original graph. Directory-backed writes use one fsync'd `txn.log` frame before materializing
+//! the per-graph WALs; acknowledged writes survive reopening without a snapshot or compaction.
 //! [`EmbeddedSparqClient::save`] is a snapshot helper for tests, not the production durability path.
 
 use std::panic::AssertUnwindSafe;
@@ -227,8 +227,8 @@ impl EmbeddedSparqClient {
     /// its corruption errors. A directory containing only a regular `LOCK` file counts as
     /// empty; other non-empty directories are refused without overwriting their contents.
     /// Callers must arrange exclusive access, with a lock outside the graph directory:
-    /// compaction replaces that directory. The existing client mutators use in-memory
-    /// atomic forks, so opening a directory alone does not make those writes durable.
+    /// compaction replaces that directory. Mutations commit through the directory-backed
+    /// graph's redo journal before returning success.
     ///
     /// # Errors
     /// Returns [`SparqError::Backend`] for foreign contents, filesystem errors, an invalid
@@ -396,6 +396,36 @@ fn engine_err(context: &str, e: String) -> SparqError {
     SparqError::Backend(format!("fatal: embedded engine {context}: {e}"))
 }
 
+/// Evaluate an update atomically and commit its effects to the original graph.
+///
+/// Evaluation errors discard the private fork without changing `graph`. The single durable
+/// commit point is `apply_effects_checked`'s fsync of one `txn.log` frame, followed by per-graph
+/// WAL materialization. In-memory graphs apply the same effects without journal I/O. A failure
+/// after the commit point leaves the journal poisoned for recovery on reopen; never repair it
+/// in-process or replace the original graph with its WAL-less fork.
+fn commit_update(graph: &mut Graph, update: &str, context: &str) -> Result<(), SparqError> {
+    let mut working = graph.fork();
+    let effects = sparq_engine::update_in_place_capturing(
+        &mut working,
+        update,
+        &sparq_engine::QueryBudget::unlimited(),
+    )
+    .map_err(|e| engine_err(context, e))?;
+    sparq_engine::apply_effects_checked(graph, &effects).map_err(|e| {
+        if e.applied {
+            engine_err(
+                context,
+                format!(
+                    "{}; the index must be reopened to recover the poisoned journal",
+                    e.message
+                ),
+            )
+        } else {
+            engine_err(context, e.message)
+        }
+    })
+}
+
 /// Extract the lexical string of a SELECT cell ([`oxrdf::Term`]): a literal's value, or an IRI's
 /// string. The data-path SELECTs bind either plain literals (the metadata fields) or IRIs (a
 /// `?child`); both are returned as their value string, matching the HTTP impl's
@@ -461,9 +491,8 @@ impl SparqClient for EmbeddedSparqClient {
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
         // The SAME `update_put_meta` builder — a single `;`-joined update (3 targeted deletes + one
-        // insert). Run it request-ATOMICALLY (`update_in_place_atomic`): the whole request commits
-        // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
-        // for a direct library consumer, per the sparq-engine docs).
+        // insert). Evaluate the whole request on a fork before committing its effects through the
+        // original graph's durable commit path, so an evaluation error leaves no partial rewrite.
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
         let u = sparql::update_put_meta(
             iri,
@@ -472,10 +501,8 @@ impl SparqClient for EmbeddedSparqClient {
             &meta.etag,
             modified.as_deref(),
         )?;
-        self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("put_meta", e))
-        })
-        .await
+        self.dispatch(move |graph| commit_update(graph, &u, "put_meta"))
+            .await
     }
 
     async fn replace_meta(
@@ -502,8 +529,7 @@ impl SparqClient for EmbeddedSparqClient {
                 Err(SparqError::NotFound) => None,
                 Err(e) => return Err(e),
             };
-            sparq_engine::update_in_place_atomic(graph, &u)
-                .map_err(|e| engine_err("put_meta", e))?;
+            commit_update(graph, &u, "put_meta")?;
             Ok(previous)
         })
         .await
@@ -535,8 +561,7 @@ impl SparqClient for EmbeddedSparqClient {
                     &meta.etag,
                     None,
                 )?;
-                sparq_engine::update_in_place_atomic(graph, &u)
-                    .map_err(|e| engine_err("raise_marker", e))?;
+                commit_update(graph, &u, "raise_marker")?;
             }
             Ok(raised)
         })
@@ -559,8 +584,7 @@ impl SparqClient for EmbeddedSparqClient {
             if sparq_engine::ask(graph, &referenced).map_err(|e| engine_err("referenced", e))? {
                 return Ok(false);
             }
-            sparq_engine::update_in_place_atomic(graph, &u)
-                .map_err(|e| engine_err("begin_reclaim", e))?;
+            commit_update(graph, &u, "begin_reclaim")?;
             Ok(true)
         })
         .await
@@ -568,11 +592,8 @@ impl SparqClient for EmbeddedSparqClient {
 
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let u = sparql::update_end_reclaim(blob_key);
-        self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u)
-                .map_err(|e| engine_err("end_reclaim", e))
-        })
-        .await
+        self.dispatch(move |graph| commit_update(graph, &u, "end_reclaim"))
+            .await
     }
 
     async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
@@ -595,11 +616,8 @@ impl SparqClient for EmbeddedSparqClient {
         // DROP SILENT the resource's whole named graph (idempotent on an absent graph) — the SAME
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
-        self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u)
-                .map_err(|e| engine_err("delete_meta", e))
-        })
-        .await
+        self.dispatch(move |graph| commit_update(graph, &u, "delete_meta"))
+            .await
     }
 
     async fn delete_meta_if_empty(
@@ -639,8 +657,7 @@ impl SparqClient for EmbeddedSparqClient {
             //    marker). The builder's own WHERE guard re-confirms exists+empty against the same
             //    graph (belt-and-braces; it can only AGREE with our check, since nothing else can run
             //    between the two inside one actor job), then deletes atomically.
-            sparq_engine::update_in_place_atomic(graph, &delete_u)
-                .map_err(|e| engine_err("delete_if_empty/delete", e))?;
+            commit_update(graph, &delete_u, "delete_if_empty/delete")?;
             Ok(DeleteOutcome::Deleted)
         })
         .await
@@ -677,19 +694,15 @@ impl SparqClient for EmbeddedSparqClient {
             {
                 return Err(SparqError::NotFound);
             }
-            sparq_engine::update_in_place_atomic(graph, &create_u)
-                .map_err(|e| engine_err("create_child/insert", e))
+            commit_update(graph, &create_u, "create_child/insert")
         })
         .await
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         let u = sparql::update_remove_child(container, child)?;
-        self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u)
-                .map_err(|e| engine_err("remove_child", e))
-        })
-        .await
+        self.dispatch(move |graph| commit_update(graph, &u, "remove_child"))
+            .await
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
@@ -1190,21 +1203,6 @@ mod tests {
         }
     }
 
-    // Seed through the public WAL-backed Graph path: the existing client atomic
-    // mutators discard directory backing, independently of bootstrap (see module docs).
-    fn write_durable_meta(dir: &Path, iri: &str, expected: &ResourceMeta) {
-        let mut graph = Graph::open(dir).unwrap();
-        let update = sparql::update_put_meta(
-            iri,
-            &expected.content_type,
-            &expected.blob_key,
-            &expected.etag,
-            None,
-        )
-        .unwrap();
-        sparq_engine::update_in_place(&mut graph, &update).unwrap();
-    }
-
     #[test]
     fn open_or_create_preserves_existing_durable_writes() {
         block_on(async {
@@ -1212,9 +1210,9 @@ mod tests {
             let iri = "http://pod/alice/doc";
             let expected = meta("text/turtle", "blob-1", "\"e1\"");
             let c = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            c.put_meta(iri, expected.clone()).await.unwrap();
             drop(c);
-            write_durable_meta(&dir.0, iri, &expected);
-            let reopened = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            let reopened = EmbeddedSparqClient::open(&dir.0).unwrap();
             assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
         });
     }
@@ -1229,6 +1227,56 @@ mod tests {
             c.put_meta(iri, expected.clone()).await.unwrap();
             drop(c);
             let reopened = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+
+            let rewritten = meta("application/ld+json", "blob-2", "\"e2\"");
+            reopened.put_meta(iri, rewritten.clone()).await.unwrap();
+            drop(reopened);
+            let reopened = EmbeddedSparqClient::open(&dir.0).unwrap();
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), rewritten);
+
+            let replaced = meta("text/plain", "blob-3", "\"e3\"");
+            assert_eq!(
+                reopened.replace_meta(iri, replaced.clone()).await.unwrap(),
+                Some(rewritten)
+            );
+            let new_iri = "http://pod/alice/new";
+            assert_eq!(
+                reopened
+                    .replace_meta(new_iri, expected.clone())
+                    .await
+                    .unwrap(),
+                None
+            );
+            drop(reopened);
+            let reopened = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), replaced);
+            assert_eq!(reopened.get_meta(new_iri).await.unwrap(), expected);
+        });
+    }
+
+    #[test]
+    fn failed_update_discards_the_partial_fork_without_committing() {
+        block_on(async {
+            let dir = TestDir::new();
+            let c = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            let iri = "http://pod/alice/doc";
+            let expected = meta("text/plain", "original", "\"original\"");
+            c.put_meta(iri, expected.clone()).await.unwrap();
+            let update =
+                sparql::update_put_meta(iri, "text/turtle", "changed", "changed", None).unwrap();
+            // The first operations change the fork; the final file LOAD is refused by the
+            // default policy, without accessing the network. No prefix may reach the live WAL.
+            let update = format!("{update}; LOAD <file:///sparq-lws-rollback-denied>");
+            let error = c
+                .dispatch(move |graph| commit_update(graph, &update, "rollback test"))
+                .await
+                .unwrap_err();
+            assert!(matches!(error, SparqError::Backend(_)));
+            assert_eq!(c.get_meta(iri).await.unwrap(), expected);
+            assert_eq!(std::fs::metadata(dir.0.join("txn.log")).unwrap().len(), 0);
+            drop(c);
+            let reopened = EmbeddedSparqClient::open(&dir.0).unwrap();
             assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
         });
     }
@@ -1259,8 +1307,8 @@ mod tests {
             let c = EmbeddedSparqClient::open_or_create(&dir).unwrap();
             let iri = "http://pod/alice/doc";
             let expected = meta("text/plain", "blob-2", "\"e2\"");
+            c.put_meta(iri, expected.clone()).await.unwrap();
             drop(c);
-            write_durable_meta(&dir, iri, &expected);
             std::fs::rename(&dir, dir.with_extension("compact-old")).unwrap();
             let reopened = EmbeddedSparqClient::open_or_create(&dir).unwrap();
             assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);

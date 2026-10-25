@@ -115,8 +115,12 @@ of them a performance claim:
 
 **Durability — the honest posture.** `embedded` is durable only with a persistence
 directory. `SOLID_SERVER_SPARQ_DIR` set ⇒ a directory-backed graph (durable);
-unset ⇒ a fresh in-memory graph (ephemeral) (`src/main.rs:234-256`;
-`src/store/embedded.rs:67-74`). Separately, the native binary's **blob** backend is
+unset ⇒ a fresh in-memory graph (ephemeral). Each embedded mutator evaluates on a
+private fork, then applies its resolved effects to the original graph: one fsync'd
+`txn.log` frame is the commit point before per-graph WAL materialization. This keeps
+request-atomic rollback on evaluation errors and makes successful writes survive reopening
+without compaction, including multi-graph creates. A failure after the commit point
+requires reopening the index to recover its poisoned journal. Separately, the native binary's **blob** backend is
 in-memory, so a durable RDF index does not by itself make resource bodies durable — the
 crate README and `skills/solid-lws-server/SKILL.md` both say this, and it must stay said.
 
