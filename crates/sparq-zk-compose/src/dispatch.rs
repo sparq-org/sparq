@@ -344,7 +344,7 @@ pub fn resolve_circuit(
 ) -> Result<CircuitId, DispatchError> {
     // (3) reject-list (v): an identity op must never be a value-lane member.
     if is_value_lane_member(id) && is_identity_op_member(id) {
-        return Err(DispatchError::IdentityOpAtValueLane { circuit: id.package() });
+        return Err(DispatchError::IdentityOpAtValueLane { circuit: id.label() });
     }
 
     let legal = if is_value_lane_member(id) {
@@ -361,7 +361,7 @@ pub fn resolve_circuit(
     } else {
         Err(DispatchError::IllegalPair {
             method_iri: method.scheme_iri().to_string(),
-            circuit: id.package(),
+            circuit: id.label(),
         })
     }
 }
@@ -387,7 +387,7 @@ pub fn resolve_circuit_for_use(
 fn not_selectable(e: &MethodNotSelectable, id: &CircuitId) -> DispatchError {
     DispatchError::MethodNotSelectableForIssuance {
         method_iri: e.scheme_iri().to_string(),
-        circuit: id.package(),
+        circuit: id.label(),
     }
 }
 
@@ -617,7 +617,7 @@ pub fn check_lane_const_for_member(
     let row = lane_row(circuit, datatype_const)?;
     if row.legacy_v1 && use_ == MethodUse::NewIssuance {
         return Err(DispatchError::LegacyLaneConstForIssuance {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         });
     }
@@ -634,16 +634,16 @@ fn lane_row(
 ) -> Result<&'static LaneRow, DispatchError> {
     let decoded = canonical_field(datatype_const).ok_or_else(|| {
         DispatchError::NonCanonicalFieldHex {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             field: "datatype_const".to_string(),
         }
     })?;
     let Some(row) = lane_table().iter().find(|r| r.constant == decoded) else {
-        return Err(DispatchError::UnknownLaneConst { circuit: circuit.package() });
+        return Err(DispatchError::UnknownLaneConst { circuit: circuit.label() });
     };
     if &row.member != circuit {
         return Err(DispatchError::LaneMemberMismatch {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         });
     }
@@ -662,7 +662,7 @@ pub(crate) fn check_legacy_v1_lane_const(
     let row = lane_row(circuit, datatype_const)?;
     if !row.legacy_v1 {
         return Err(DispatchError::NotALegacyV1LaneConst {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         });
     }
@@ -695,7 +695,7 @@ pub(crate) fn check_method_lane_version(
     } else {
         Err(DispatchError::MethodLaneVersionMismatch {
             method_iri: method.scheme_iri().to_string(),
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         })
     }
@@ -724,7 +724,7 @@ pub(crate) fn require_canonical(
     for (name, h) in fields {
         if canonical_field(h).is_none() {
             return Err(DispatchError::NonCanonicalFieldHex {
-                circuit: circuit.package(),
+                circuit: circuit.label(),
                 field: (*name).to_string(),
             });
         }
@@ -790,7 +790,7 @@ pub fn check_lane_member_pairing_for_use(
         Some(lane) => {
             if crate::value_lane::derive_value_lane_member(inputs).is_none() {
                 return Err(DispatchError::ValueLaneVariantIdMismatch {
-                    circuit: declared.package(),
+                    circuit: declared.label(),
                     variant: lane.variant_name().to_string(),
                 });
             }
@@ -798,7 +798,7 @@ pub fn check_lane_member_pairing_for_use(
         None => {
             if is_value_lane_member(declared) {
                 return Err(DispatchError::ValueLaneVariantIdMismatch {
-                    circuit: declared.package(),
+                    circuit: declared.label(),
                     variant: non_value_lane_variant_name(inputs).to_string(),
                 });
             }
@@ -880,12 +880,12 @@ mod tests {
                 resolve_circuit(CommitmentMethod::DualLeafV2, &id),
                 Ok(id.clone()),
                 "{} must be legal against dual-leaf v2",
-                id.package()
+                id.label()
             );
             assert!(
                 resolve_circuit(CommitmentMethod::DualLeafV1, &id).is_ok(),
                 "{} must stay legal against dual-leaf v1 (already-issued graphs)",
-                id.package()
+                id.label()
             );
             // And neither version's value lane is legal against string-canonical.
             assert!(matches!(

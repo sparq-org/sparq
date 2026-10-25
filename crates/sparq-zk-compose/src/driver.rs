@@ -37,6 +37,8 @@ pub enum DriverError {
         stderr: String,
     },
     Io(std::io::Error),
+    /// A circuit id names an uncompiled V2 shape.
+    CircuitId(crate::manifest::CircuitIdError),
     /// The checked value-lane prove entry [`CircuitProver::prove_value_lane`]
     /// refused its inputs before any subprocess ran — e.g. a FRESH proof under a
     /// method that is not selectable for new issuance, a lane constant on the
@@ -54,6 +56,7 @@ impl std::fmt::Display for DriverError {
             DriverError::Tool { tool, stderr } => {
                 write!(f, "`{tool}` failed:\n{stderr}")
             }
+            DriverError::CircuitId(e) => write!(f, "{e}"),
             DriverError::Io(e) => write!(f, "io error: {e}"),
             #[cfg(feature = "dual-leaf")]
             DriverError::Dispatch(e) => write!(f, "dispatch refused the proof: {}", e),
@@ -62,6 +65,10 @@ impl std::fmt::Display for DriverError {
 }
 
 impl std::error::Error for DriverError {}
+
+impl From<crate::manifest::CircuitIdError> for DriverError {
+    fn from(e: crate::manifest::CircuitIdError) -> Self { Self::CircuitId(e) }
+}
 
 impl From<std::io::Error> for DriverError {
     fn from(e: std::io::Error) -> Self {
@@ -274,7 +281,7 @@ impl CircuitProver {
     /// are serialized across cooperating processes using this local workspace.
     /// Do not run external nargo writes or remove the cache during driver jobs.
     pub fn compile(&self, id: &CircuitId) -> Result<PathBuf, DriverError> {
-        self.compile_package(&id.package())
+        self.compile_package(&id.package()?)
     }
 
     // Crate-private package dispatch also serves the isolated result contract.
@@ -383,7 +390,7 @@ impl CircuitProver {
         prover_toml: &str,
         tag: &str,
     ) -> Result<PathBuf, DriverError> {
-        self.gen_package_witness(&id.package(), prover_toml, tag)
+        self.gen_package_witness(&id.package()?, prover_toml, tag)
     }
 
     // Callers supply a fixed, internally selected member name.
@@ -554,7 +561,7 @@ impl CircuitProver {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
-        self.prove_package(&id.package(), prover_toml, out_dir, tag)
+        self.prove_package(&id.package()?, prover_toml, out_dir, tag)
     }
 
     /// The CHECKED value-lane prove entry: prove a typed
@@ -650,7 +657,7 @@ impl CircuitProver {
     /// vk to `bb prove --write_vk`, so this is the authentic member vk.
     // new verifier-side canonical-vk path (audit #2).
     pub fn canonical_vk(&self, id: &CircuitId, work_dir: &Path) -> Result<Vec<u8>, DriverError> {
-        self.canonical_package_vk(&id.package(), work_dir)
+        self.canonical_package_vk(&id.package()?, work_dir)
     }
 
     // Rebuilds a member key locally; never consumes an untrusted bundled VK.
@@ -1105,7 +1112,7 @@ mod driver_glue_tests {
     fn tagged_witness_paths_do_not_collide() {
         let tmp = std::env::temp_dir().join(format!("sq-bif6-driver-{}", std::process::id()));
         let id = CircuitId::FilterInt { d: 1 };
-        let pkg = id.package();
+        let pkg = id.package().unwrap();
         // The package dir must exist for the toml write to land.
         std::fs::create_dir_all(tmp.join(&pkg)).expect("scratch package dir");
         std::fs::create_dir_all(tmp.join("target")).expect("scratch target dir");
@@ -1163,7 +1170,7 @@ mod driver_glue_tests {
     fn unsafe_witness_tags_reject_before_any_artifact_write() {
         let scratch = ScratchDir::new(&std::env::temp_dir(), "bad_tag").unwrap();
         let id = CircuitId::FilterInt { d: 1 };
-        let pkg = id.package();
+        let pkg = id.package().unwrap();
         std::fs::create_dir_all(scratch.0.join(&pkg).join("Prover_escape")).unwrap();
         let sentinel = scratch.0.join("sentinel.toml");
         std::fs::write(&sentinel, "unchanged").unwrap();
@@ -1220,7 +1227,7 @@ mod driver_glue_tests {
     fn tagged_input_symlink_cannot_overwrite_its_target() {
         let scratch = ScratchDir::new(&std::env::temp_dir(), "symlink_tag").unwrap();
         let id = CircuitId::FilterInt { d: 1 };
-        let pkg = scratch.0.join(id.package());
+        let pkg = scratch.0.join(id.package().unwrap());
         std::fs::create_dir_all(&pkg).unwrap();
         let sentinel = scratch.0.join("sentinel.toml");
         std::fs::write(&sentinel, "unchanged").unwrap();

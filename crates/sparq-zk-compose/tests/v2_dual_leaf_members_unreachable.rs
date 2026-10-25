@@ -39,17 +39,17 @@ fn swept_package_names() -> Vec<String> {
     for k in 0..6u32 {
         for n in [0u32, 1, 2, 4, 8, 16, 32, 64] {
             for r in 0..8u32 {
-                out.push(CircuitId::Scan { k, n, r }.package());
+                out.push(CircuitId::Scan { k, n, r }.package().unwrap());
             }
         }
     }
     for d in 0..24u32 {
-        out.push(CircuitId::FilterInt { d }.package());
-        out.push(CircuitId::FilterF64 { d }.package());
+        out.push(CircuitId::FilterInt { d }.package().unwrap());
+        out.push(CircuitId::FilterF64 { d }.package().unwrap());
     }
     for na in [0u32, 1, 2, 4, 8, 16, 32] {
         for nb in [0u32, 1, 2, 4, 8, 16, 32] {
-            out.push(CircuitId::JoinEq { n_a: na, n_b: nb }.package());
+            out.push(CircuitId::JoinEq { n_a: na, n_b: nb }.package().unwrap());
         }
     }
     out

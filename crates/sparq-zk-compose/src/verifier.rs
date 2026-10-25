@@ -5755,7 +5755,7 @@ fn fixed_member(role: FixedMemberRole, id: CircuitId) -> Result<CircuitId, Check
     } else {
         Err(CheckError::MemberNotForFixedRole {
             role: role.name().to_string(),
-            circuit: id.package(),
+            circuit: id.label(),
         })
     }
 }
@@ -6163,7 +6163,7 @@ fn resolve_member_for_sub_proof(
         let _ = role;
         return Err(CheckError::AuxiliaryMemberIdInSubProof {
             proof,
-            circuit: id.package(),
+            circuit: id.label(),
         });
     }
     let bound = bound_commitments(manifest, proof, joins);
@@ -6186,7 +6186,7 @@ fn resolve_member_for_sub_proof(
                 CheckError::MemberNotLegalForMethod {
                     proof: label.clone(),
                     method_iri: method.scheme_iri().to_string(),
-                    circuit: id.package(),
+                    circuit: id.label(),
                 }
             })?;
             Ok(Some(resolved))
@@ -10904,7 +10904,7 @@ mod tests {
                     Some(&id),
                     "{} must not re-derive the auxiliary member {}",
                     what,
-                    id.package()
+                    id.label()
                 );
             }
         }
@@ -16174,7 +16174,7 @@ mod fixed_member_role_tests {
                 match fixed_member(*role, other.clone()) {
                     Err(CheckError::MemberNotForFixedRole { role: named, circuit }) => {
                         assert_eq!(named, role.name());
-                        assert_eq!(circuit, other.package());
+                        assert_eq!(circuit, other.label());
                     }
                     other_result => panic!(
                         "{} must refuse {}'s member, got {:?}",
@@ -16201,7 +16201,7 @@ mod fixed_member_role_tests {
                     ),
                     "{} must refuse the query member {}",
                     role.name(),
-                    member.package()
+                    member.label()
                 );
             }
         }
@@ -16233,7 +16233,7 @@ mod fixed_member_role_tests {
                     !role.owns(id),
                     "a manifest sub-proof carrying {} would select the {} gate's \
                      member",
-                    id.package(),
+                    id.label(),
                     role.name()
                 );
             }
@@ -16401,7 +16401,7 @@ mod member_from_authenticated_method_tests {
             Err(CheckError::MemberNotLegalForMethod { proof, method_iri, circuit }) => {
                 assert_eq!(proof, "sub_proofs[3]");
                 assert_eq!(method_iri, CommitmentMethod::StringCanonicalV1.scheme_iri());
-                assert_eq!(circuit, CircuitId::FilterValueDl.package());
+                assert_eq!(circuit, CircuitId::FilterValueDl.label());
             }
             other => panic!("expected the member/method refusal, got {:?}", other),
         }
@@ -16704,7 +16704,7 @@ mod member_from_authenticated_method_tests {
                     Ok(&aux),
                     "the matrix echoes {} under {}, so the method-independence \
                      rule alone would admit it",
-                    aux.package(),
+                    aux.label(),
                     method.scheme_iri()
                 );
             }

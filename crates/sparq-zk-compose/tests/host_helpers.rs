@@ -446,20 +446,20 @@ fn filter_op_codes_are_the_circuit_globals() {
 
 #[test]
 fn circuit_id_package_names_every_member_family() {
-    assert_eq!(CircuitId::Scan { k: 2, n: 4, r: 1 }.package(), "scan_k2_n4_r1");
-    assert_eq!(CircuitId::FilterInt { d: 1 }.package(), "filter_int_d1");
-    assert_eq!(CircuitId::FilterF64 { d: 3 }.package(), "filter_f64_d3");
+    assert_eq!(CircuitId::Scan { k: 2, n: 4, r: 1 }.package().unwrap(), "scan_k2_n4_r1");
+    assert_eq!(CircuitId::FilterInt { d: 1 }.package().unwrap(), "filter_int_d1");
+    assert_eq!(CircuitId::FilterF64 { d: 3 }.package().unwrap(), "filter_f64_d3");
     // sq-7lrq: signed-int / decimal package names.
     assert_eq!(
-        CircuitId::FilterSignedInt { md: 2 }.package(),
+        CircuitId::FilterSignedInt { md: 2 }.package().unwrap(),
         "filter_signed_int_d2"
     );
     assert_eq!(
-        CircuitId::FilterDecimal { id: 3, fd: 2 }.package(),
+        CircuitId::FilterDecimal { id: 3, fd: 2 }.package().unwrap(),
         "filter_decimal_i3_f2"
     );
-    assert_eq!(CircuitId::RevokeUnset { depth: 10 }.package(), "revoke_unset_d10");
-    assert_eq!(CircuitId::HiddenIssuer { depth: 4 }.package(), "hidden_issuer_d4");
+    assert_eq!(CircuitId::RevokeUnset { depth: 10 }.package().unwrap(), "revoke_unset_d10");
+    assert_eq!(CircuitId::HiddenIssuer { depth: 4 }.package().unwrap(), "hidden_issuer_d4");
 }
 
 #[test]

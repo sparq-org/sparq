@@ -5912,7 +5912,7 @@ fn revoke_hidden_ref_member_family_is_exact_match() {
         Some(CircuitId::RevokeHiddenRef { depth: HIDDEN_DEPTH, set_depth: FH_SET_DEPTH })
     );
     assert_eq!(
-        CircuitId::RevokeHiddenRef { depth: 10, set_depth: 4 }.package(),
+        CircuitId::RevokeHiddenRef { depth: 10, set_depth: 4 }.package().unwrap(),
         "revoke_hidden_ref_d10_a4"
     );
     for (d, a) in [(10u32, 5u32), (9, 4), (17, 4), (0, 0)] {

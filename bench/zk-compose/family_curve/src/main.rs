@@ -158,7 +158,7 @@ fn bench_scan(prover: &CircuitProver, k: u32, graph_triples: usize, matches: usi
     assert_eq!(cid, id);
     let (prove_secs, verify_secs, proof_bytes, vk_bytes) = time_member(prover, &cid, &toml, tag);
     Row {
-        member: cid.package(),
+        member: cid.package().unwrap(),
         k,
         n,
         r,
@@ -182,7 +182,7 @@ fn bench_filter_int(prover: &CircuitProver, value: u64, tag: &str) -> Row {
         prover_toml_for(&filter, &FieldHex(CHALLENGE.into()), &[], &[], &digits, None, None)
             .expect("filter_int prover toml");
     let (prove_secs, verify_secs, proof_bytes, vk_bytes) = time_member(prover, &cid, &toml, tag);
-    Row { member: cid.package(), k: 0, n: 0, r: 0, d, prove_secs, verify_secs, proof_bytes, vk_bytes }
+    Row { member: cid.package().unwrap(), k: 0, n: 0, r: 0, d, prove_secs, verify_secs, proof_bytes, vk_bytes }
 }
 
 /// Build + time a MANIFEST-COMPOSABLE filter_f64 member for a `d`-digit
@@ -214,7 +214,7 @@ fn bench_filter_f64(prover: &CircuitProver, value: u64, tag: &str) -> Row {
         prover_toml_for(&filter, &FieldHex(CHALLENGE.into()), &[], &[], &digits, None, None)
             .expect("filter_f64 prover toml");
     let (prove_secs, verify_secs, proof_bytes, vk_bytes) = time_member(prover, &cid, &toml, tag);
-    Row { member: cid.package(), k: 0, n: 0, r: 0, d, prove_secs, verify_secs, proof_bytes, vk_bytes }
+    Row { member: cid.package().unwrap(), k: 0, n: 0, r: 0, d, prove_secs, verify_secs, proof_bytes, vk_bytes }
 }
 
 fn main() {
