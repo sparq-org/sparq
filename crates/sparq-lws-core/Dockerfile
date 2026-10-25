@@ -9,8 +9,8 @@
 # dependency manifest, and the final distroless image has no shell or package manager.
 
 # -------- builder --------
-# Tag: rust:1.88-slim-bookworm
-FROM rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 AS builder
+# Tag: rust:1.89-slim-bookworm
+FROM rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6 AS builder
 
 ARG CARGO_FLAGS=""
 WORKDIR /build

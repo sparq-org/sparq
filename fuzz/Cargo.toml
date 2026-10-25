@@ -15,7 +15,7 @@ edition = "2021"
 publish = false
 # Pin the same MSRV floor as the workspace for documentation parity; cargo-fuzz
 # itself still requires nightly to *run* (libFuzzer codegen), independent of this.
-rust-version = "1.88"
+rust-version = "1.89"
 
 [package.metadata]
 cargo-fuzz = true

@@ -2,7 +2,7 @@
 name = "sparq-lws-core"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "EXPERIMENTAL Solid/LDP server core (imported from jeswr/solid-server-rs). SPARQ-authoritative for RDF + access-control; bytes behind a BlobStore seam."
 license = "MIT OR Apache-2.0"
 repository.workspace = true
@@ -78,8 +78,8 @@ tower = "0.5"
 # acceptance window (which the CTH's future-skewed proof relies on) is unchanged. `contains()` is an
 # OPTIMIZATION-only seam for the (separately-held) opt-4 jti-precheck; it is NOT yet wired into this
 # server's auth path — implemented to satisfy the trait + carry the security fix.
-# NB: `hickory-resolver 0.26.1` declares MSRV `rust-version = 1.88`, so this crate's `rust-version`
-# is bumped to `1.88` to match (local toolchain is 1.89).
+# NB: `hickory-resolver 0.26.1` requires Rust 1.88; this crate requires 1.89
+# for std::fs::File::try_lock in the data-dir LOCK guard.
 # FOLLOW-UP: re-pin to a tagged release once the verifier cuts one.
 # Re-pinned `321db01 → 89c8962` (verifier `main`) for the PoP Tier-1 LIVE path: this rev completes
 # design §10 bead 1 — the verifier's `verify()` now ADMITS a cert-bound Bearer token under

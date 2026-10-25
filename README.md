@@ -6,7 +6,7 @@
   <a href="https://github.com/sparq-org/sparq/actions/workflows/ci.yml"><img src="https://github.com/sparq-org/sparq/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://sparq.jeswr.org/dev/bench"><img src="https://img.shields.io/badge/benchmarks-dashboard-f5a623.svg" alt="Benchmarks dashboard"></a>
-  <img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="MSRV 1.88">
+  <img src="https://img.shields.io/badge/rust-1.89%2B-orange.svg" alt="MSRV 1.89">
   <img src="https://img.shields.io/badge/status-experimental-yellow.svg" alt="Status: experimental">
 </p>
 

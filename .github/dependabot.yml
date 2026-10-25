@@ -32,12 +32,6 @@ updates:
           - patch
     # Security updates are NOT grouped (applies-to: security-updates omitted),
     # so each advisory remediation lands as its own PR.
-    ignore:
-      # uuid 1.27+ declares rust-version 1.89, above the workspace floor (root
-      # Cargo.toml rust-version = "1.88") that the MSRV job checks, so Cargo.lock
-      # holds uuid at 1.26.x (#6824). Drop this entry when the floor moves to 1.89.
-      - dependency-name: "uuid"
-        versions: [">= 1.27"]
 
   # ---- GitHub Actions ----
   - package-ecosystem: github-actions
@@ -60,9 +54,8 @@ updates:
     ignore:
       # sq-sski: do NOT let Dependabot version-bump dtolnay/rust-toolchain.
       # Its release tags are *Rust toolchain versions*, not action releases — the
-      # trailing `# 1.88` comment on the MSRV-check pin in .github/workflows/ci.yml is
-      # the declared workspace floor (root Cargo.toml `[workspace.package]
-      # rust-version = "1.88"`, driven by geo@0.33.1 + the released ox* parser stack).
+      # MSRV-check pin in .github/workflows/ci.yml is the declared workspace floor (root Cargo.toml `[workspace.package]
+      # rust-version = "1.89"`, required by std file locking in sparq-lws-core).
       # Bumping that pin to e.g. 1.100 would raise the *tested* floor above the
       # *declared* floor, so the MSRV job would stop verifying the declared floor —
       # defeating its purpose. This pin must move only in lockstep with the root
@@ -192,7 +185,7 @@ updates:
   # ---- Docker base images ----
   # sq-bqjv: the two Dockerfiles that build from THIRD-PARTY bases (this
   # root one and crates/sparq-lws-core) pin them by DIGEST
-  # (`rust:1.88-slim-bookworm@sha256:…`, `gcr.io/distroless/cc-debian12:nonroot@sha256:…`).
+  # (`rust:1.89-slim-bookworm@sha256:…`, `gcr.io/distroless/cc-debian12:nonroot@sha256:…`).
   # A digest pin is reproducible but FROZEN: a Debian/distroless security rebuild
   # publishes a new digest under the same tag and the pin never moves, so base-image
   # CVEs accumulate silently until someone bumps by hand. container-scan.yml only
@@ -204,7 +197,7 @@ updates:
   # no-op on a key the config parser skips.
   #
   # The `rust` image `ignore` mirrors the dtolnay/rust-toolchain rationale above:
-  # `1.88` is the DECLARED workspace MSRV floor (root Cargo.toml
+  # `1.89` is the DECLARED workspace MSRV floor (root Cargo.toml
   # `[workspace.package] rust-version`), not a "latest toolchain" pin. Letting
   # Dependabot walk the tag to 1.9x would build the image on a toolchain above the
   # declared floor and quietly stop exercising it. Only semver TAG walks are ignored;

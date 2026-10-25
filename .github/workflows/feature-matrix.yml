@@ -118,7 +118,7 @@
 #   • sq-8ju74: the `hdt`/`hdt-write` (sparq-cli) + `write` (sparq-hdt) legs
 #     USED to be excluded here because the wrapped `hdt` crate declares MSRV 1.87 and
 #     the workspace floor was 1.85 ("needs its own toolchain lane"). That reason is
-#     STALE — the floor is 1.88, at/above sparq-hdt's 1.87 — so the legs now exist in
+#     STALE — the floor is 1.89, at/above sparq-hdt's 1.87 — so the legs now exist in
 #     .github/feature-matrix.d/{sparq-cli,sparq-hdt}.yml and the former silent gaps
 #     (tests/hdt_cli.rs, tests/hdt_write_cli.rs, tests/write_roundtrip.rs) gate normally.
 #   • `live` (sparq-nlq) / `embeddings` (sparq-vectors): enable a REAL network client

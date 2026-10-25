@@ -710,7 +710,7 @@ cargo build -p sparq-cli --features serialize-rdf
   All store writers emit `predstats.bin` in ascending predicate-ID order, so equal
   statistics serialize identically after reload. Older unordered files remain readable.
 - **HDT is opt-in and native-only.** `sparq-hdt` declares MSRV **1.87** (the wrapped `hdt` crate;
-  the workspace floor is now 1.88) — in the CLI it is gated behind `--features hdt`. It carries
+  the workspace floor is now 1.89) — in the CLI it is gated behind `--features hdt`. It carries
   zero code into the wasm build. Compression containers are detected by **magic bytes, not
   file extension**, so a mislabeled `.hdt` still loads; all three (`gz`/`zst`/`bz2`) decode
   in a streaming fashion.

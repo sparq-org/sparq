@@ -892,55 +892,47 @@ jobs:
 
   msrv:
     # sq-ucwf: ENFORCE the declared MSRV. The workspace pins
-    # `rust-version = "1.88"` in the root Cargo.toml ([workspace.package]); without a
+    # `rust-version = "1.89"` in the root Cargo.toml ([workspace.package]); without a
     # job that actually compiles on that toolchain the floor is just documentation — a
     # new use of a >floor stdlib/lang feature would silently raise the real MSRV. This
     # builds the whole workspace on the pinned floor toolchain so the declared floor is a
     # checked invariant, GATING.
     #
-    # (sq-qmth) Floor BUMPED 1.85 -> 1.88. Upstream-driven, verified
-    # empirically (cargo +1.87/+1.88 check, this exact --exclude scope): on 1.87 the
-    # resolver rejects ONLY `geo@0.33.1 requires rustc 1.88` (a transitive dep of
-    # sparq-geo); the released oxigraph parser stack (oxrdf/oxttl/oxrdfio/spargebra/…)
-    # needs 1.87; on 1.88 the whole MSRV-scope workspace builds clean. So 1.88 is the
-    # true minimal floor — not an over-bump. Keep this pin == root rust-version.
+    # Floor 1.89 is required by sparq-lws-core's std::fs::File::try_lock data-dir
+    # guard. Keep this pin == root rust-version.
     #
     # Two crates are excluded, each for a concrete reason:
     #   - sparq-py: pyo3/maturin extension module (excluded from native jobs throughout
     #     this workflow; built by python.yml with the correct profile).
     #   - sparq-hdt: declares its own `rust-version = "1.87"` for the wrapped `hdt` crate
-    #     (see crates/sparq-hdt/Cargo.toml). Now AT/BELOW the 1.88 floor, so its
+    #     (see crates/sparq-hdt/Cargo.toml). Now AT/BELOW the 1.89 floor, so its
     #     exclusion is no longer load-bearing, but kept to decouple sparq-hdt from the
     #     workspace-floor pin.
-    # If the root MSRV is bumped, update the `@1.88` toolchain pin below to match.
-    name: MSRV check (Rust 1.88, declared floor)
+    # If the root MSRV is bumped, update the `@1.89` toolchain pin below to match.
+    name: MSRV check (Rust 1.89, declared floor)
     runs-on: ubuntu-latest
     env:
-      # Clear the workflow-level -fuse-ld=lld for THIS job only: the floor
-      # toolchain (1.88) does not supply rustc's ld.lld shim path the way the
-      # current preinstalled stable does, and the runner image ships no lld —
-      # so on 1.88 the flag dies deterministically ("collect2: cannot find
-      # 'ld'", 3/3 on this PR once the gate stopped being vacuous). Plain GNU
-      # ld is fine here: this lane is `cargo check` (only build scripts and
-      # proc-macros link) and its meaning is the VERSION floor, not link speed.
+      # Clear the workflow-level -fuse-ld=lld for the floor toolchain. The runner
+      # may not supply lld, and this lane checks the version floor, not link speed.
+      # Plain GNU ld suffices for build scripts and proc-macros under cargo check.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ""
       # KEEPS THIS GATE NON-VACUOUS UNDER THE ROOT `rust-toolchain.toml`
       # PIN. rustup resolves the toolchain file (precedence 4) ABOVE `rustup
-      # default` (precedence 5), so the `rustup default 1.88` below — which was
+      # default` (precedence 5), so the `rustup default 1.89` below — which was
       # the whole fix for the vacuity described in the step comment — would be
       # SILENTLY OVERRIDDEN by the root pin and this lane would go back to
       # compiling on pinned stable, i.e. vacuous again in exactly the way PR
       # #3511 finding 4 called out. `RUSTUP_TOOLCHAIN` is precedence 2, so it
-      # beats the file; setting it at JOB level (rather than `cargo +1.88` at
+      # beats the file; setting it at JOB level (rather than `cargo +1.89` at
       # one call site) makes every cargo/rustc in the job — including anything
       # nested — use the floor, and makes `rustup show active-toolchain` print
       # "overridden by environment variable RUSTUP_TOOLCHAIN" so the log states
       # which compiler actually ran. Keep this == the pin below == root
       # Cargo.toml `rust-version`.
-      RUSTUP_TOOLCHAIN: "1.88"
+      RUSTUP_TOOLCHAIN: "1.89"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Rust (pinned MSRV toolchain 1.88)
+      - name: Rust (pinned MSRV toolchain 1.89)
         # PR #3511 review finding 4: this gate was VACUOUS — the
         # pre-existing step was the SHA-pinned action with a trailing `# 1.88`
         # comment but NO `toolchain:` input (the action's default is `stable`),
@@ -957,8 +949,8 @@ jobs:
         # lane pins the exact floor. Keep the pin == root Cargo.toml
         # rust-version (sq-qmth).
         run: |
-          rustup toolchain install 1.88 --profile minimal --no-self-update
-          rustup default 1.88
+          rustup toolchain install 1.89 --profile minimal --no-self-update
+          rustup default 1.89
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -974,7 +966,7 @@ jobs:
         # compiler ran" must be a CHECKED fact, not a logged one. Before this, the only
         # thing standing between the gate and silent vacuity was the job-level
         # `RUSTUP_TOOLCHAIN` above: delete that one line and the root
-        # `rust-toolchain.toml` (precedence 4) outranks the `rustup default 1.88`
+        # `rust-toolchain.toml` (precedence 4) outranks the `rustup default 1.89`
         # (precedence 5) in the step above, the lane compiles the workspace on pinned
         # stable, `rustup show active-toolchain` dutifully PRINTS the wrong answer, and
         # CI stays GREEN — re-arming exactly the vacuity PR #3511 finding 4 fixed.

@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 # The wrapped `hdt` crate's MSRV is 1.87. Historically this was ABOVE the workspace
 # floor (then 1.85), so it was declared per-crate to keep the rest of the workspace's
-# floor lower. The workspace floor is now 1.88 (sq-qmth — driven by
-# geo@0.33.1), i.e. AT/ABOVE this, so this pin is now redundant; it is kept explicit
+# floor lower. The workspace floor is now 1.89 (std file locking), i.e. AT/ABOVE
+# this, so this pin is now redundant; it is kept explicit
 # (and the crate stays excluded from the `msrv` CI job) only to keep sparq-hdt's own
 # documented floor visible and decoupled from future workspace-floor changes.
 rust-version = "1.87"

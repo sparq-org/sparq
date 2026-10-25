@@ -12,7 +12,7 @@
 # suite is `#![cfg(feature = "write")]`, so the default workspace test lane never ran it —
 # a SILENT GAP (the byte-for-byte upstream-oracle equality proof included). The old
 # feature-matrix SCOPE note excluded sparq-hdt legs for an MSRV reason that is now stale:
-# sparq-hdt declares rust-version 1.87, at/below the 1.88 workspace floor, so the stable
+# sparq-hdt declares rust-version 1.87, at/below the 1.89 workspace floor, so the stable
 # lane covers it. Verified: `cargo test -p sparq-hdt --features write -- --list` shows the
 # write_roundtrip suite.
 - name: "sparq-hdt (write)"

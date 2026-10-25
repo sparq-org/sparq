@@ -41,7 +41,7 @@
 # (`#[cfg(feature = "hdt")]`) and tests/hdt_write_cli.rs (`#[cfg(feature = "hdt-write")]`)
 # never ran in CI because no leg enabled the features (the workflow's old SCOPE note
 # excluded them for an MSRV reason that is now stale — sparq-hdt declares 1.87, at/below
-# the 1.88 workspace floor, so the stable lane covers it). One combined leg: `hdt-write`
+# the 1.89 workspace floor, so the stable lane covers it). One combined leg: `hdt-write`
 # co-enables cleanly with (and implies) `hdt`, so both suites run together.
 # Verified: `cargo test -p sparq-cli --features hdt,hdt-write -- --list` shows the 2
 # hdt_cli + 5 hdt_write_cli tests.

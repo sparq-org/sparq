@@ -76,14 +76,11 @@ spargebra = { path = "vendor/spargebra-shim" }
 version = "0.1.6"
 edition = "2021"
 license = "MIT"
-# (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep
-# of sparq-geo) requires rustc 1.88, and the released oxigraph parser stack
-# (oxrdf/oxttl/oxrdfio/spargebra/… 0.2–0.4) requires 1.87. Verified empirically: the
-# MSRV-scope workspace (--exclude sparq-py --exclude sparq-hdt) fails on 1.87 with ONLY
-# `geo@0.33.1 requires rustc 1.88`, and builds clean on 1.88. Bump this AND the `msrv`
-# job's toolchain pin in .github/workflows/ci.yml together; lower it only if geo (and the
-# ox* stack) lower theirs.
-rust-version = "1.88"
+# MSRV floor 1.89: sparq-lws-core's data-dir LOCK uses std::fs::File::try_lock
+# (stable since 1.89). Keep this and the `msrv` job in .github/workflows/ci.yml
+# in lockstep. The prior 1.88 floor was driven by geo@0.33.1; the released
+# oxigraph parser stack requires 1.87.
+rust-version = "1.89"
 # Shared crates.io metadata (T20). Each publishable crate inherits these via
 # `<field>.workspace = true` and adds its own `description`.
 repository = "https://github.com/sparq-org/sparq"

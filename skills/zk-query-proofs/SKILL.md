@@ -491,8 +491,7 @@ under the ignored target cache. Driver compile/execute calls share a Unix adviso
 workspace lock, and proof/key jobs consume their own ACIR copies. Concurrent driver
 processes may share a local workspace; do not run external nargo writes or remove
 the cache during those jobs. Unique legacy prover tags remain required for legacy
-witness APIs. Lock failures reject; the existing Unix platform and Rust 1.88
-minimum are preserved.
+witness APIs. Lock failures reject; the existing Unix platform requirement remains; the workspace Rust minimum is 1.89.
 
 Both planner selection paths enforce `MAX_DISCLOSURE_CREDENTIALS` on the
 supplied slice before traversing credentials; empty and ineligible graphs count.

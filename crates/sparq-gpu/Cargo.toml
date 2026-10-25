@@ -29,7 +29,7 @@ publish = false
 # wgpu 29: migrated from 22 (sq-5z08, #117). The research/hardware/wgpu-spike
 # prototype originally proved wgpu 22 builds and runs on Metal (M1); the same
 # WGSL source targets Vulkan/DX12/WebGPU. wgpu 29's MSRV is 1.83, below the
-# workspace floor (1.88), so the bump does NOT raise the workspace MSRV.
+# workspace floor (1.89), so the bump does NOT raise the workspace MSRV.
 wgpu = "30"
 pollster = "1.0"
 bytemuck = { version = "1", features = ["derive"] }
