@@ -66,6 +66,11 @@ Set `PSS_SPARQ_BACKEND` to one of:
 - `embedded`: the default-enabled in-process engine. Set
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
   ephemeral.
+  Directory-backed mutations commit through the transaction journal; in-memory
+  mutations retain the engine's atomic update path. `EmbeddedSparqClient::save(dir)`
+  exports a snapshot to a separate directory and refuses the client's open backing
+  directory, including aliases that resolve to the same canonical path, because
+  replacing named-graph files under live WALs can lose later writes.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
   read its own writes: a query sent after an update has completed must see what the
