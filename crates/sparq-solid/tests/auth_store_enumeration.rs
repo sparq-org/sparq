@@ -128,9 +128,9 @@ fn clear_all_before_create_does_not_bypass_the_added_name_cap() {
 }
 
 #[test]
-fn clear_all_after_create_does_not_mask_the_added_name_cap() {
+fn clear_named_after_create_does_not_mask_the_added_name_cap() {
     let name = format!("https://pod.ex/{}", "x".repeat(2100));
-    refuses_transient_name(&name, &format!("CREATE GRAPH <{name}>; DROP ALL"));
+    refuses_transient_name(&name, &format!("CREATE GRAPH <{name}>; DROP NAMED"));
 }
 
 #[test]
