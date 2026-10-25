@@ -80,6 +80,11 @@ The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
 present the native image as a durable production data service.
 
+`CompositeStore` mints opaque blob keys as `b1-<32 lowercase hex>` from 128 bits
+of OS randomness per write. Service-pool records retain the `$pool$` prefix:
+`$pool$b1-<32 lowercase hex>`. Keys contain no resource IRI; metadata remains
+the authoritative pointer to the bytes. RNG failure fails the write closed.
+
 The seed variables are test-only:
 
 - `SOLID_SERVER_SEED_CONFORMANCE=1` provisions conformance fixtures.
