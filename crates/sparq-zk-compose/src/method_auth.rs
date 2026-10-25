@@ -103,9 +103,19 @@ impl AuthenticatedMethod {
 /// The authenticated commitment method of each commitment a verified sub-proof
 /// references, keyed by canonical `sparq_zk::field::field_to_hex` commitment hex.
 ///
-/// A commitment ABSENT from the map had no method authenticated for it. Every
-/// consumer must treat that as [`AuthenticatedMethod::Unbound`] — the state that
-/// predates method authentication — and never as a default method.
+/// A commitment ABSENT from the map had no method authenticated for it. That is
+/// NOT the same fact as an explicit [`AuthenticatedMethod::Unbound`] entry, which
+/// records an attestation that verified and attested no method, and the consumers
+/// do not read it alike:
+///
+/// * the per-sub-proof member resolution (`verifier`, `dual-leaf`) refuses an
+///   absent entry BY NAME (`CheckError::SubProofCommitmentNotAuthenticated`) —
+///   nothing was authenticated for the commitment, so there is nothing to fold;
+/// * the pattern-constant ENCODER selection reads an absent entry as `Unbound`,
+///   which selects the string-canonical encoder — the state that predates method
+///   authentication.
+///
+/// What no consumer may do is read absence as a DEFAULT METHOD.
 pub type AuthenticatedMethods = std::collections::BTreeMap<String, AuthenticatedMethod>;
 
 /// The relying party's policy over an [`AuthenticatedMethod`] — the external

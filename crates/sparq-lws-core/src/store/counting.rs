@@ -353,6 +353,22 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.delete_meta(iri).await
     }
 
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        let _g = self.counters.op_guard();
+        // Model the HTTP default's SELECT + detach + DROP, while preserving the inner
+        // backend's atomic override, just as replace_meta does.
+        self.counters.count_queries(1);
+        self.counters.count_update();
+        if parent.is_some() {
+            self.counters.count_update();
+        }
+        self.inner.delete_resource(iri, parent).await
+    }
+
     async fn delete_meta_if_empty(
         &self,
         iri: &str,
@@ -401,6 +417,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
 
     fn raises_markers(&self) -> bool {
         self.inner.raises_markers()
+    }
+
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
