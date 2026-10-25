@@ -140,6 +140,8 @@ pub fn extension_context() -> Value {
         "ODRLGrants",
         "WebSocketSubscription",
         "SseSubscription",
+        "channelType",
+        "feature",
         "roomTemplate",
         "retention",
         "format",

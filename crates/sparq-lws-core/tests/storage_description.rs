@@ -213,11 +213,15 @@ async fn lws_public_catalog_and_shape() {
         json!(["application/json-patch+json"])
     );
     assert_eq!(
+        patch["mediaType"]["application/ld+json"],
+        json!(["application/json-patch+json"])
+    );
+    assert_eq!(
         patch["mediaType"]["application/linkset+json"],
         json!(["application/json-patch+json"])
     );
     assert_eq!(
-        patch["mediaType"]["application/*+json"],
+        patch["mediaType"]["*/*+json"],
         json!(["application/json-patch+json"])
     );
     assert!(caps
@@ -342,12 +346,13 @@ async fn solid_negotiation_graph_and_goldens() {
     assert!(has(
         &graph,
         &format!("{ROOT}#notifications"),
-        "http://www.w3.org/ns/solid/notifications#channelType",
+        &format!("{SSD}channelType"),
         "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023"
     ));
     for capability in ["PatchSupport", "AccessControl"] {
         assert!(graph.iter().any(|t| t.predicate.as_str() == RDF_TYPE
-            && t.object == NamedNode::new(format!("{SSD}{capability}")).unwrap().into()));
+            && t.object
+                == oxrdf::Term::NamedNode(NamedNode::new(format!("{SSD}{capability}")).unwrap())));
     }
     assert!(!String::from_utf8_lossy(&json_body).contains("MoveResource"));
     assert!(!String::from_utf8_lossy(&json_body).contains("RecursiveDelete"));
@@ -411,6 +416,22 @@ async fn solid_negotiation_graph_and_goldens() {
         json_body
     );
     let public = solid(ServiceCatalog::default(), true).await;
+    let (query_status, _, _) = call(
+        &public,
+        "GET",
+        "/sparql?query=ASK%7B%7D",
+        &[("accept", "application/sparql-results+json")],
+        "",
+    )
+    .await;
+    assert_eq!(
+        query_status,
+        if cfg!(feature = "sparql-endpoint") {
+            StatusCode::OK
+        } else {
+            StatusCode::NOT_FOUND
+        }
+    );
     assert_eq!(
         call(&public, "GET", "/.well-known/solid", &[], "").await.2,
         json_body
@@ -462,13 +483,20 @@ async fn legacy_notification_expansion_is_preserved() {
     ] {
         let (_, _, body) = call(&app, "GET", "/.well-known/solid", &[("accept", accept)], "").await;
         let graph = triples(format, &body);
-        for triple in &before {
-            assert!(graph.contains(triple));
-        }
+        let notification_triples = graph
+            .iter()
+            .filter(|t| {
+                t.predicate
+                    .as_str()
+                    .starts_with("http://www.w3.org/ns/solid/notifications#")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(canonical(&before), canonical(&notification_triples));
         assert!(has(
             &graph,
             &format!("{ROOT}#notifications"),
-            "http://www.w3.org/ns/solid/notifications#channelType",
+            &format!("{SSD}channelType"),
             "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023"
         ));
     }
@@ -538,6 +566,7 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
         "application/json",
         "application/ld+json",
         "application/vnd.test+json",
+        "text/vnd.test+json",
     ] {
         let (status, headers, _) = call(
             &app,
@@ -579,8 +608,11 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
         &app,
         "POST",
         "/",
-        &[("content-type", "application/lws+json")],
-        "{}",
+        &[(
+            "link",
+            "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+        )],
+        "",
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);

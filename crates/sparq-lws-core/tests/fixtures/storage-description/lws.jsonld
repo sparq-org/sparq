@@ -16,6 +16,8 @@
       "VersioningService": "https://jeswr.org/ns/solid-sd#VersioningService",
       "WAC": "https://jeswr.org/ns/solid-sd#WAC",
       "WebSocketSubscription": "https://jeswr.org/ns/solid-sd#WebSocketSubscription",
+      "channelType": "https://jeswr.org/ns/solid-sd#channelType",
+      "feature": "https://jeswr.org/ns/solid-sd#feature",
       "format": "https://jeswr.org/ns/solid-sd#format",
       "model": "https://jeswr.org/ns/solid-sd#model",
       "patchType": "https://jeswr.org/ns/solid-sd#patchType",
@@ -36,10 +38,13 @@
   "capability": [
     {
       "mediaType": {
-        "application/*+json": [
+        "*/*+json": [
           "application/json-patch+json"
         ],
         "application/json": [
+          "application/json-patch+json"
+        ],
+        "application/ld+json": [
           "application/json-patch+json"
         ],
         "application/linkset+json": [

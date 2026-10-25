@@ -57,7 +57,7 @@
         "@id": "https://pod.example/.notifications/WebSocketChannel2023/"
       }
     ],
-    "http://www.w3.org/ns/solid/notifications#channelType": [
+    "https://jeswr.org/ns/solid-sd#channelType": [
       {
         "@id": "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023"
       }

@@ -1,7 +1,8 @@
 # Storage description fixtures
 
 The notification and Activity Streams contexts are vendored from CommunitySolidServer's
-`templates/contexts/notification.jsonld` and `activitystreams.jsonld` (MIT).
+`templates/contexts/notification.jsonld` and `activitystreams.jsonld` (MIT),
+revision `a17747c24fa9948a48f894b8ebdba091030222b9`.
 The legacy notification document is the pre-change description at the fixed test origin.
 
 `cid-context.jsonld` and `lws-context.jsonld` are local discovery-term projections,

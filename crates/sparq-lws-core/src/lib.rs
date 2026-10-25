@@ -89,7 +89,6 @@ pub mod body_limit;
 mod clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod describe;
-pub(crate) mod entity_tag;
 pub mod error;
 pub(crate) mod entity_tag;
 pub(crate) mod http_date;

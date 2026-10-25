@@ -1423,7 +1423,7 @@ pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::Servic
     catalog.capability(capability(
         &format!("{SSD}PatchSupport"),
         json!({"mediaType": {
-            JSON: [ACCEPT_PATCH], "application/*+json": [ACCEPT_PATCH], LINKSET_JSON: [ACCEPT_PATCH]
+            JSON: [ACCEPT_PATCH], LD_JSON: [ACCEPT_PATCH], "*/*+json": [ACCEPT_PATCH], LINKSET_JSON: [ACCEPT_PATCH]
         }}),
     ));
     catalog.capability(capability(&format!("{SSD}RecursiveDelete"), json!({})));

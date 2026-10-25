@@ -1451,6 +1451,48 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
+    #[tokio::test]
+    async fn storage_description_advertises_subscription_service() {
+        use tower::ServiceExt;
+        let mut state = state();
+        let mut service = crate::describe::entry(
+            "notifications",
+            &format!("{}SolidNotificationService", crate::describe::SSD),
+            state.subscription_service_url(),
+        );
+        service
+            .extras
+            .insert("channelType".into(), json!({"@id": WEBSOCKET_CHANNEL_2023_TYPE}));
+        Arc::get_mut(&mut state).unwrap().catalog.service(service);
+        let app = axum::Router::new()
+            .route(
+                SUBSCRIPTION_PATH,
+                axum::routing::post(subscribe_handler::<TestStore>),
+            )
+            .route(
+                WELL_KNOWN_SOLID_PATH,
+                axum::routing::get(storage_description_handler::<TestStore>),
+            )
+            .with_state(state);
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(WELL_KNOWN_SOLID_PATH)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_to_string(resp).await;
+        assert!(body.contains("SolidNotificationService"), "{body}");
+        assert!(body.contains(WEBSOCKET_CHANNEL_2023_TYPE), "{body}");
+        assert!(
+            body.contains("https://pod.example/.notifications/WebSocketChannel2023/"),
+            "{body}"
+        );
+    }
+
     /// A root ACL granting `owner` every mode and `reader` Read alone, over the whole pod.
     fn acl_with_reader(owner: &str, reader: Option<&str>) -> String {
         let mut acl = format!(
