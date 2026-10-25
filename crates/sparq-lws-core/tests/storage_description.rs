@@ -119,9 +119,18 @@ fn offline(mut value: Value) -> Value {
                 "https://www.w3.org/ns/cid/v1" => "cid-context.jsonld",
                 "https://www.w3.org/ns/lws/v1" => "lws-context.jsonld",
                 "https://www.w3.org/ns/solid/notifications-context/v1" => {
-                    "notification-context.jsonld"
+                    return json!({
+                        "id": "@id", "type": "@type",
+                        "channelType": {
+                            "@id": "http://www.w3.org/ns/solid/notifications#channelType",
+                            "@type": "@vocab"
+                        },
+                        "feature": {
+                            "@id": "http://www.w3.org/ns/solid/notifications#feature",
+                            "@type": "@vocab"
+                        }
+                    });
                 }
-                "https://www.w3.org/ns/activitystreams" => "activitystreams-context.jsonld",
                 other => panic!("unvendored context: {other}"),
             };
             serde_json::from_slice::<Value>(&fixture(name)).unwrap()["@context"].clone()
@@ -172,10 +181,6 @@ async fn lws_public_catalog_and_shape() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers["content-type"], "application/lws+cid");
     let doc: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        doc,
-        serde_json::from_slice::<Value>(&fixture("lws.jsonld")).unwrap()
-    );
     assert_eq!(doc["@context"][0], "https://www.w3.org/ns/cid/v1");
     assert_eq!(doc["@context"][1], "https://www.w3.org/ns/lws/v1");
     assert!(doc["@context"][2].is_object());
@@ -231,6 +236,17 @@ async fn lws_public_catalog_and_shape() {
         .iter()
         .any(|c| c["type"] == format!("{SSD}RecursiveDelete")));
     assert!(!String::from_utf8_lossy(&body).contains("MoveResource"));
+    assert_eq!(
+        doc,
+        serde_json::from_slice::<Value>(&fixture("lws.jsonld")).unwrap()
+    );
+    let open = lws(ServiceCatalog::default(), true).await;
+    assert_eq!(
+        call(&open, "GET", "/", &[("accept", "application/lws+cid")], "")
+            .await
+            .2,
+        body
+    );
     let notification = doc["service"]
         .as_array()
         .unwrap()
@@ -509,12 +525,7 @@ async fn root_query_link_tracks_mounted_feature_for_get_and_head() {
 }
 
 #[tokio::test]
-async fn legacy_notification_expansion_is_preserved() {
-    let before: Value = serde_json::from_slice(&fixture("solid-before.jsonld")).unwrap();
-    let before = triples(
-        RdfFormat::JsonLd,
-        &serde_json::to_vec(&offline(before)).unwrap(),
-    );
+async fn notification_discovery_triples_are_preserved() {
     let app = solid(ServiceCatalog::default(), false).await;
     for (accept, format) in [
         ("text/turtle", RdfFormat::Turtle),
@@ -527,20 +538,13 @@ async fn legacy_notification_expansion_is_preserved() {
             body
         };
         let graph = triples(format, &body);
-        for triple in &before {
-            assert!(
-                graph.contains(triple),
-                "lost legacy notification triple: {triple}"
-            );
-        }
-        // The old contexts omit notificationChannel and subscriptionService.
-        // Pin the intended notification graph explicitly as well as the legacy subgraph.
+        assert!(!graph.is_empty(), "discovery graph must not be empty");
         let notify = "http://www.w3.org/ns/solid/notifications#";
         let endpoint = "https://pod.example/.notifications/WebSocketChannel2023/";
         assert!(has(
             &graph,
             ROOT,
-            &format!("{notify}notificationChannel"),
+            &format!("{notify}subscription"),
             endpoint
         ));
         assert!(has(

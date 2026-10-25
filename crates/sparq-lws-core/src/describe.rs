@@ -122,7 +122,7 @@ impl ServiceCatalog {
                 })
             })
             .collect();
-        document["notificationChannel"] = if channels.is_empty() { json!(channels) } else { json!([]) };
+        document["notificationChannel"] = json!(channels);
         for service in &self.services {
             if service.type_term == format!("{SSD}SparqlQueryService") {
                 document[SPARQL_ENDPOINT] = json!({"@id": service.endpoint});
@@ -262,7 +262,7 @@ fn solid_context() -> Value {
     c.insert("ssdChannelType".into(), json!(format!("{SSD}channelType")));
     c.insert(
         "notificationChannel".into(),
-        json!({"@id": format!("{NOTIFY}notificationChannel"), "@container": "@set"}),
+        json!({"@id": format!("{NOTIFY}subscription"), "@type": "@id", "@container": "@set"}),
     );
     c.insert(
         "subscriptionService".into(),

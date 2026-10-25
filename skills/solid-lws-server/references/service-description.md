@@ -40,8 +40,8 @@ The notification entry names the `notify:WebSocketChannel2023` channel type with
 `ssd:channelType`. The original `notificationChannel` array, `channelType`, and
 `subscriptionService` keys remain in compact JSON-LD, whose first context is the
 standard notifications context followed by inline discovery mappings. The graph
-also retains `notify:notificationChannel`, `notify:channelType`, and
-`notify:subscriptionService` discovery statements.
+includes `notify:subscription` from the storage root to the subscription service
+and `notify:channelType` from that service to `notify:WebSocketChannel2023`.
 The query entry carries the ACQ profile and is also linked directly with
 `http://www.w3.org/ns/solid/sparql#endpoint`. Root GET/HEAD responses carry that
 same link on allowed and denied reads. Discovery does not inspect resource ACLs.

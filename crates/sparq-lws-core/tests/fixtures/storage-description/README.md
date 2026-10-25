@@ -1,9 +1,8 @@
 # Storage description fixtures
 
-The notification and Activity Streams contexts are vendored from CommunitySolidServer's
-`templates/contexts/notification.jsonld` and `activitystreams.jsonld` (MIT),
-revision `a17747c24fa9948a48f894b8ebdba091030222b9`.
-The legacy notification document is the pre-change description at the fixed test origin.
+Notification terms are resolved in the test with explicit local mappings. No CSS
+context is vendored. Compatibility checks pin the compact JSON keys and the two
+Solid Notifications discovery statements independently in both RDF renderings.
 
 `cid-context.jsonld` and `lws-context.jsonld` are local discovery-term projections,
 not complete normative context documents. The pinned LWS draft's context is unfinished;

@@ -25,7 +25,8 @@
       "model": "https://jeswr.org/ns/solid-sd#model",
       "notificationChannel": {
         "@container": "@set",
-        "@id": "http://www.w3.org/ns/solid/notifications#notificationChannel"
+        "@id": "http://www.w3.org/ns/solid/notifications#subscription",
+        "@type": "@id"
       },
       "patchType": "https://jeswr.org/ns/solid-sd#patchType",
       "profile": {

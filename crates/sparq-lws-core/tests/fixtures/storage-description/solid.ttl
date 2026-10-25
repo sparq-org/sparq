@@ -8,7 +8,7 @@ _:b1 a <https://jeswr.org/ns/solid-sd#PatchSupport> ;
 _:b2 <https://jeswr.org/ns/solid-sd#patchType> "text/n3" , "application/sparql-update" ;
 	<https://jeswr.org/ns/solid-sd#source> "text/turtle" .
 <https://pod.example/> <http://www.w3.org/ns/solid/sparql#endpoint> <https://pod.example/sparql> ;
-	<http://www.w3.org/ns/solid/notifications#notificationChannel> <https://pod.example/.notifications/WebSocketChannel2023/> .
+	<http://www.w3.org/ns/solid/notifications#subscription> <https://pod.example/.notifications/WebSocketChannel2023/> .
 <https://pod.example/.notifications/WebSocketChannel2023/> <http://www.w3.org/ns/solid/notifications#channelType> <http://www.w3.org/ns/solid/notifications#WebSocketChannel2023> ;
 	<http://www.w3.org/ns/solid/notifications#subscriptionService> <https://pod.example/.notifications/WebSocketChannel2023/> .
 <https://pod.example/> <https://www.w3.org/ns/did#service> <https://pod.example/#storage-root> .
