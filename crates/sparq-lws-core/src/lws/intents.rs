@@ -549,7 +549,9 @@ mod tests {
             .await
             .unwrap()
             .pop()
-            .unwrap().as_str().to_owned();
+            .unwrap()
+            .as_str()
+            .to_owned();
         st.owe_touch(&root, record.clone());
         *store.unsettle_next_delete_of.lock().unwrap() = Some((
             record.clone(),
