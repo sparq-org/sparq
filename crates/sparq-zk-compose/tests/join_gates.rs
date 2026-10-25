@@ -1460,7 +1460,7 @@ fn hidden_only_endpoint_manifest() -> (ProofManifest, KeySet) {
 /// BEFORE the hidden-issuer gate has byte-bound any proof to that candidate. With
 /// the deferral in place that join has no method verdict yet. The structural
 /// pass instead refuses graph B's separate, method-unbound opaque scan at
-/// `sub_proofs[3]`: its member is no longer legal under every admissible method.
+/// `sub_proofs[2]`: its member is no longer legal under every admissible method.
 ///
 /// That the deferred verdict DOES arrive, after the hidden-issuer gate, needs a
 /// real `scan_k2` proof and a real hidden-issuer proof, so it is pinned by the
@@ -1471,7 +1471,7 @@ fn a_hidden_only_commitments_candidate_method_is_not_read_in_the_loop() {
     let (m, k) = hidden_only_endpoint_manifest();
     match run_verify(&m, &k) {
         Err(CheckError::SubProofMethodUnresolved { proof, .. }) => assert_eq!(
-            proof, "sub_proofs[3]",
+            proof, "sub_proofs[2]",
             "the hidden-only join at sub_proofs[0] must defer; only the separate \
              method-unbound opaque scan may be refused in this pass"
         ),
