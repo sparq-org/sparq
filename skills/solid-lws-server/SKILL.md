@@ -645,8 +645,7 @@ What the server exposes, all discoverable from the storage description
   (`Store::call_timeout`: 30 seconds by default, `STORE_CALL_TIMEOUT`; an `http` index built with
   `HttpSparqClient::with_timeout` uses that timeout), clamped between two seconds and
   one hour per attempt, so a fence slower than one hour is retried rather than waited
-  on indefinitely. A
-  removal whose fence lands with the record still stored is answered at once from the listing.
+  on indefinitely. A removal whose fence lands with the record still stored is answered at once from the listing.
   Putting a change back while a request waits on it (its own rollback or commit, with its locks
   held) tries each step up to three times with short growing waits between, each attempt
   waiting for a fence two seconds at most (counted from the store's answer to the write it

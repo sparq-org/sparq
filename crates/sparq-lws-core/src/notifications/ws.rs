@@ -30,11 +30,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -565,7 +566,7 @@ pub async fn receive_handler<S: Store + 'static>(
 }
 
 /// Send a close frame (best effort: the client may be gone already).
-async fn close(socket: &mut WebSocket, code: u16, reason: &'static str) {
+async fn close<W: futures_util::Sink<Message> + Unpin>(socket: &mut W, code: u16, reason: &'static str) {
     let _ = socket
         .send(Message::Close(Some(axum::extract::ws::CloseFrame {
             code,
@@ -638,14 +639,18 @@ fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
 ///   dropped Lag check does too (RECONCILE, rather than OVERFLOW). A subscriber that may not
 ///   read the topic at that point gets the revocation close
 ///   (1008) on the timer and is never told.
-async fn stream_notifications<S: Store + 'static>(
-    mut socket: WebSocket,
+async fn stream_notifications<S: Store + 'static, W>(
+    mut socket: W,
     state: Arc<NotifyState<S>>,
     topic: String,
     web_id: String,
     origin: Option<String>,
     _claim: crate::notifications::SocketClaim,
-) {
+) where
+    W: futures_util::Stream<Item = Result<Message, axum::Error>>
+        + futures_util::Sink<Message>
+        + Unpin,
+{
     let mut rx = state.hub.subscribe(&topic).await;
     let every = state.access_recheck;
     let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
@@ -729,7 +734,7 @@ async fn stream_notifications<S: Store + 'static>(
             }
             // An inbound socket message — only meaningful as a Close / error signal. Read while
             // a check is in progress too, so pings are answered meanwhile.
-            inbound = socket.recv() => {
+            inbound = socket.next() => {
                 match inbound {
                     Some(Ok(Message::Close(_))) | None => break, // clean close or stream end
                     Some(Ok(_)) => { /* ignore any client frame; receive socket is server→client */ }
@@ -1939,6 +1944,72 @@ mod tests {
             elapsed[0].abs_diff(elapsed[1]) < every / 3,
             "close times: {elapsed:?}"
         );
+    }
+
+    /// A finite, always-ready backlog avoids depending on TCP or cooperative I/O yielding.
+    struct ReadyFrames {
+        remaining: usize,
+        sent: Arc<std::sync::Mutex<Vec<Message>>>,
+    }
+
+    impl futures_util::Stream for ReadyFrames {
+        type Item = Result<Message, axum::Error>;
+
+        fn poll_next(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
+            -> std::task::Poll<Option<Self::Item>>
+        {
+            let frame = if self.remaining == 0 {
+                None
+            } else {
+                self.remaining -= 1;
+                Some(Ok(Message::text("frame")))
+            };
+            std::task::Poll::Ready(frame)
+        }
+    }
+
+    impl futures_util::Sink<Message> for ReadyFrames {
+        type Error = std::convert::Infallible;
+
+        fn poll_ready(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
+            -> std::task::Poll<Result<(), Self::Error>>
+        {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn start_send(self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+            self.sent.lock().unwrap().push(item);
+            Ok(())
+        }
+
+        fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
+            -> std::task::Poll<Result<(), Self::Error>>
+        {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
+            -> std::task::Poll<Result<(), Self::Error>>
+        {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    /// A ready timer and its decision outrank every frame in an already-buffered flood.
+    #[tokio::test]
+    async fn ready_frames_cannot_starve_a_revocation_close() {
+        let s = state_with_reader(BY_HAND).await;
+        let topic = format!("{BASE}/doc");
+        let token = s.hub.mint_receive_token(BOB, &topic).await;
+        let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
+        revoke_bob(&s).await;
+        s.tick_now();
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let socket = ReadyFrames { remaining: 1024, sent: sent.clone() };
+        stream_notifications(socket, s, topic, BOB.to_string(), None, claim).await;
+        assert!(matches!(sent.lock().unwrap().as_slice(),
+                         [Message::Close(Some(frame))] if frame.code == 1008 && frame.reason == REVOKED),
+                "a ready frame backlog starved the timer or its decision");
     }
 
     /// Inbound frames cannot starve the timer or its completed access decision.
