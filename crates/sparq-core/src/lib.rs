@@ -3518,10 +3518,15 @@ impl Graph {
         // Persist an empty sub-graph, then open it so it carries its own WAL.
         let empty = Graph::from_parts(Dict::new(), Vec::new());
         empty.save(&sub_dir).map_err(|e| e.to_string())?;
+        // Open first so the same directory sync also persists the new WAL/journal entries.
+        let graph = Graph::open(&sub_dir).map_err(|e| e.to_string())?;
+        sync_saved_graph(&sub_dir).map_err(|e| e.to_string())?;
         // fsync `dir/named/` so the new sub-graph DIRECTORY's existence is durable before the
         // manifest names it (otherwise a crash could leave the manifest pointing at a dir whose
         // creation never reached disk).
         fsync_dir(&named_dir).map_err(|e| e.to_string())?;
+        // `named/` may itself be new. Persist its entry before publishing the manifest.
+        fsync_dir(dir).map_err(|e| e.to_string())?;
         // Rewrite the manifest with the new entry appended (index order == named order).
         // (Copilot review #69, finding 2) `named.bin` lives in the PARENT `dir`, not
         // in `dir/named/`. The old code only fsync'd `dir/named/`, so a crash could lose the
@@ -3531,7 +3536,7 @@ impl Graph {
         let mut names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
         names.push(name.clone());
         write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
-        Graph::open(&sub_dir).map_err(|e| e.to_string())
+        Ok(graph)
     }
 
     /// (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
@@ -3666,8 +3671,8 @@ impl Graph {
     /// The two-rename swap has a window where the canonical `dir` does not exist (between the two
     /// renames); a crash there must NOT lose the dataset. We:
     ///
-    ///   1. write the new base to `<dir>.compact-new` and fsync the DIRECTORY (so its existence +
-    ///      contents are durable before it can become canonical);
+    ///   1. write the new base to `<dir>.compact-new` and fsync every file and directory,
+    ///      then its parent (so the saved base is durable before it can become canonical);
     ///   2. rename `dir` -> `<dir>.compact-old`, fsync the parent (the rename is durable);
     ///   3. rename `<dir>.compact-new` -> `dir`, fsync the parent.
     ///
@@ -3832,6 +3837,29 @@ impl Default for Graph {
     }
 }
 
+/// Sync a saved graph tree before publishing it or retiring its recovery data. `save` only
+/// flushes its writers: every regular base file still needs fsync, followed by its containing
+/// directory. Recurse through named graphs before syncing their parents. The caller must also
+/// sync the parent of a newly created root directory before publishing a manifest or swap.
+#[cfg(feature = "mmap")]
+fn sync_saved_graph(dir: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            sync_saved_graph(&entry.path())?;
+        } else if kind.is_file() {
+            std::fs::File::open(entry.path())?.sync_all()?;
+            #[cfg(test)]
+            persistence_tests::record(persistence_tests::Event::Synced(entry.path()));
+        }
+    }
+    std::fs::File::open(dir)?.sync_all()?;
+    #[cfg(test)]
+    persistence_tests::record(persistence_tests::Event::Synced(dir.to_path_buf()));
+    Ok(())
+}
+
 /// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. On
 /// failure (e.g. a platform/filesystem that rejects opening a dir) it is a best-effort no-op,
 /// matching the durability the rest of the persistence path assumes.
@@ -3839,7 +3867,11 @@ impl Default for Graph {
 fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     match std::fs::File::open(dir) {
         Ok(f) => match f.sync_all() {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                #[cfg(test)]
+                persistence_tests::record(persistence_tests::Event::Synced(dir.to_path_buf()));
+                Ok(())
+            }
             // Some filesystems return EINVAL/unsupported for fsync on a directory handle;
             // that is not a data-loss condition, so treat it as success.
             Err(e) if matches!(e.kind(), std::io::ErrorKind::InvalidInput) => Ok(()),
@@ -3858,8 +3890,8 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// re-opened memory-mapped from it (fresh, empty WAL) is returned.
 ///
 /// The protocol (matching the design recorded on `persist_swap`):
-///   1. clear any stale siblings, then write the new base to `<dir>.compact-new` and fsync that
-///      DIRECTORY (so it is durable before it can become canonical);
+///   1. clear any stale siblings, then write the new base to `<dir>.compact-new` and fsync every
+///      file and directory in that tree, then its parent, before it can become canonical;
 ///   2. rename `dir` -> `<dir>.compact-old`, fsync the parent (the rename is durable);
 ///   3. rename `<dir>.compact-new` -> `dir`, fsync the parent;
 ///   4. re-open from the new base, THEN drop `<dir>.compact-old` (open mmaps keep unlinked files
@@ -3881,14 +3913,20 @@ where
     // Build + sync the new base FIRST. A failure here leaves `dir` untouched (fail-closed) —
     // the two renames below have not started, so the old durable store is intact.
     write_new_base(&new_dir)?;
-    fsync_dir(&new_dir)?;
-    let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
+    sync_saved_graph(&new_dir)?;
+    let parent = dir.parent().filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    fsync_dir(parent)?;
     std::fs::rename(dir, &old_dir)?;
     fsync_dir(parent)?;
     std::fs::rename(&new_dir, dir)?;
+    #[cfg(test)]
+    persistence_tests::record(persistence_tests::Event::SwapPublished(dir.to_path_buf()));
     fsync_dir(parent)?;
     // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
     let reopened = Graph::open(dir)?;
+    #[cfg(test)]
+    persistence_tests::record(persistence_tests::Event::RetiringOldBase(old_dir.clone()));
     std::fs::remove_dir_all(&old_dir).ok();
     Ok(reopened)
 }
@@ -3910,6 +3948,8 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<()> {
     if dir.exists() {
         // Canonical dir is intact; drop any leftover siblings from a crash after the swap.
         std::fs::remove_dir_all(&new_dir).ok();
+        #[cfg(test)]
+        persistence_tests::record(persistence_tests::Event::RetiringOldBase(old_dir.clone()));
         std::fs::remove_dir_all(&old_dir).ok();
         return Ok(());
     }
@@ -4027,6 +4067,8 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
     }
     // Atomically publish: rename can't tear, so `named.bin` is always a COMPLETE manifest.
     std::fs::rename(&tmp_path, &final_path)?;
+    #[cfg(test)]
+    persistence_tests::record(persistence_tests::Event::ManifestPublished(final_path));
     // fsync the dir holding `named.bin` so the rename (the commit) is itself durable.
     fsync_dir(dir)
 }
@@ -4334,6 +4376,8 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    #[cfg(test)]
+    path: std::path::PathBuf,
     /// Set when an append, or the materialisation after one, failed: the journal may then
     /// hold a frame reported as failed, so it takes no further frame, and keeps what it holds,
     /// until reopened.
@@ -4359,6 +4403,8 @@ impl TxnJournal {
             .open(Self::path(dir))?;
         Ok(TxnJournal {
             file,
+            #[cfg(test)]
+            path: Self::path(dir),
             poisoned: false,
         })
     }
@@ -4426,6 +4472,8 @@ impl TxnJournal {
             ));
         }
         self.file.set_len(0)?;
+        #[cfg(test)]
+        persistence_tests::record(persistence_tests::Event::JournalTruncated(self.path.clone()));
         self.file.sync_data()
     }
 
@@ -6396,6 +6444,9 @@ pub(crate) const fn miri_n(full: usize) -> usize {
         full
     }
 }
+
+#[cfg(all(test, feature = "mmap"))]
+mod persistence_tests;
 
 #[cfg(test)]
 mod tests {
