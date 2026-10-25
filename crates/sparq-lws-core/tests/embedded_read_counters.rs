@@ -392,6 +392,13 @@ impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         self.inner.delete_meta(iri).await
     }
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        self.inner.delete_resource(iri, parent).await
+    }
     async fn delete_meta_if_empty(
         &self,
         iri: &str,
