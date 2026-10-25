@@ -50,8 +50,11 @@
 //! dropped and the client is to reconnect and reconcile). The same check runs again before every
 //! frame on an open socket (a frame the subscriber may not read is dropped), and on a timer of the
 //! socket's own ([`ws::ACCESS_RECHECK`]), which closes it (1008) once the subscriber has lost read
-//! access: within two timer periods of the loss (a check in progress is given one period at most,
-//! then counts as undecided and closes it 1011), never on an event.
+//! access. Within two timer periods of losing Read it closes: 1008 for a confirmed denial, or
+//! 1011 if the timer check is undecided. Each check has at most one period; a slower check
+//! counts as undecided and the client must resubscribe. A due tick pre-empts an Event or Lag
+//! check, noting it as missed: a reader then gets a reconcile close (also for a dropped Lag
+//! check, rather than an overflow close). Inbound frames cannot starve the timer or its decision.
 //!
 //! **Existence non-disclosure** (`research/lws-design-records.md` §6): neither gate probes the topic
 //! resource itself — the decision comes ONLY from the ACL-resolution chain — so a denial is the same

@@ -430,6 +430,139 @@ mod tests {
         (st, store, d, before)
     }
 
+    /// A forward removal that answers unsettled cannot delete a later PUT after rollback.
+    #[tokio::test]
+    async fn an_unsettled_delete_cannot_remove_a_later_put() {
+        let (st, store, d, _) = typed_doc().await;
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((d.clone(), gate.clone()));
+        assert_eq!(
+            call(&st, Method::DELETE, "/d", &[], "").await,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            call(
+                &st,
+                Method::PUT,
+                "/d",
+                &[("content-type", "text/turtle")],
+                "<> a <urn:Later> ."
+            )
+            .await,
+            StatusCode::NO_CONTENT
+        );
+        gate.add_permits(1);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            st.store.exists(&d).await.unwrap(),
+            "late delete removed the PUT"
+        );
+        assert!(st
+            .store
+            .list_children(&st.cfg.storage())
+            .await
+            .unwrap()
+            .iter().any(|child| child.as_str() == d));
+    }
+
+    /// An unsettled intent create cannot reappear after rollback or commit clears it.
+    #[tokio::test]
+    async fn an_unsettled_intent_cannot_replay_a_stale_plan() {
+        for commit in [false, true] {
+            let (st, store, d, _) = typed_doc().await;
+            let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+            *store.unsettle_next_intent.lock().unwrap() = Some(gate.clone());
+            let mut journal = st.journal();
+            assert!(matches!(
+                journal
+                    .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
+                    .await,
+                Err(ServerError::Unsettled { .. })
+            ));
+            if commit {
+                assert!(journal.commit(None).await.is_ok());
+            } else {
+                assert!(journal.rollback().await.is_none());
+            }
+            let later = Bytes::from_static(b"<> a <urn:Later> .");
+            st.store
+                .write(&d, later.clone(), "text/turtle")
+                .await
+                .unwrap();
+            gate.add_permits(1);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(intents_left(&st).await, 0, "stale intent arrived");
+            drop(st);
+            let restarted = restart(&store).await;
+            assert_eq!(
+                restarted.store.read(&d).await.unwrap().body,
+                later,
+                "restart replayed a stale plan (commit={commit})"
+            );
+        }
+    }
+
+    /// Commit settles an unsettled Forget before reading whether its intent was kept.
+    #[tokio::test]
+    async fn commit_waits_for_a_slow_forget_fence() {
+        let (st, store, d, _) = typed_doc().await;
+        let mut journal = st.journal();
+        let new = Bytes::from_static(b"<> a <urn:B> .");
+        journal.write(&d, new.clone(), "text/turtle").await.unwrap();
+        let record = journal.intent.clone().unwrap();
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((record.clone(), gate.clone()));
+        let wait = super::super::records::LOCK_WAIT;
+        store.slow_fence_ms.store((wait + Duration::from_millis(500)).as_millis() as u64,
+                                  Ordering::SeqCst);
+        store.fail_reads_after_fence.store(true, Ordering::SeqCst);
+        // The first fence exceeds the request's wait. Commit's next fence succeeds, after
+        // the Forget lands. Reading the intent before that fence would undo the write.
+        let result = async {
+            while store.fences_tried.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+            store.slow_fence_ms.store(500, Ordering::SeqCst);
+            tokio::time::sleep(wait + Duration::from_millis(100)).await;
+            gate.add_permits(1);
+        };
+        let (committed, ()) = tokio::join!(journal.commit(None), result);
+        assert!(committed.is_ok(), "commit was not confirmed");
+        assert_eq!(st.store.read(&d).await.unwrap().body, new);
+        store.fail_exists.store(false, Ordering::SeqCst);
+        store.fail_list.store(false, Ordering::SeqCst);
+        assert!(!st.store.exists(&record).await.unwrap());
+        assert!(store.fences_tried.load(Ordering::SeqCst) > 0);
+    }
+
+    /// Clearing an owed intent in the create path has the request's fence budget.
+    #[tokio::test]
+    async fn touching_a_container_does_not_wait_on_an_owed_intents_stalled_fence() {
+        let (st, store, _, _) = typed_doc().await;
+        let root = st.cfg.storage();
+        store_intent(&st, std::slice::from_ref(&root)).await;
+        let record = st
+            .store
+            .list_children(&container(&root))
+            .await
+            .unwrap()
+            .pop()
+            .unwrap().as_str().to_owned();
+        st.owe_touch(&root, record.clone());
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((
+            record.clone(),
+            std::sync::Arc::new(tokio::sync::Semaphore::new(0)),
+        ));
+        store.hang_fence.store(true, Ordering::SeqCst);
+        tokio::time::timeout(
+            super::super::records::LOCK_WAIT * 2,
+            resources::touch_container(&st, &root),
+        )
+        .await
+        .expect("touch waited on a stalled fence");
+        assert!(st.store.exists(&record).await.unwrap());
+    }
+
     /// A change whose process stops part way (its journal is dropped mid-change, never put
     /// back nor kept) is put back when the server starts again, validators included, and its
     /// intent goes.

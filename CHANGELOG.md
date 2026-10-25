@@ -676,12 +676,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as an unconditional create does, so it no longer waits on a removal being settled or holds up
   other creates. A background fence's attempts are capped at the store's own call timeout
   (`Store::call_timeout`, new, defaulting to `STORE_CALL_TIMEOUT`; the `http` index reports the
-  timeout it was built with). A WebSocket socket closes `1011` for the client to reconcile at the
+  timeout it was built with), clamped to between two seconds and one hour per attempt.
+  Forward removals and intent creates keep their unsettled fences through rollback and commit.
+  A settled removal whose outcome cannot be read stays out of force until the listing answers.
+  A WebSocket socket closes `1011` for the client to reconcile at the
   next point where the subscriber may read the topic after any notification was dropped
   (whether it could not be read or its check could not be made), instead of delivering later
   ones; a receive token has at most one socket open at a time (a second connect gets `401`); pings
-  are answered while an access check runs, a due tick is taken before queued notifications, and
-  an access check that has not answered within one timer period counts as undecided (`1011`). An LDP write also refuses a dot segment around a
+  are answered while an access check runs. A due tick takes priority over inbound frames and
+  queued notifications, pre-empts a running notification or lag check and notes it as missed:
+  a reader gets `RECONCILE` for either dropped check, rather than `OVERFLOW` for a dropped lag
+  check. Within two periods of losing Read the socket closes: `1008` for a confirmed denial,
+  or `1011` if the timer check is undecided. Each check has at most one period; a slower check
+  counts as undecided and the client must resubscribe. An LDP write also refuses a dot segment around a
   %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is,
   whatever metadata the change kept.
 

@@ -1759,7 +1759,7 @@ pub(crate) async fn put_back_until_done<S: Store>(undo: &Undo, store: &S) {
         match undo.apply(store, None).await {
             Ok(()) => Ok(()),
             Err(crate::error::ServerError::Unsettled { fence, .. }) => {
-                until_done(|| store.fence(&fence)).await;
+                records::fence_in_background(store, &fence).await;
                 Err(())
             }
             Err(_) => Err(()),
@@ -1920,7 +1920,13 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         let undo: Vec<&Undo> = self.planned.iter().rev().collect();
         // From here on the intent may be stored (a lost reply), and keeps the holds.
         self.holds.intended = true;
-        intents::store(self.state, &record, existing, &undo, &[]).await?;
+        let outcome = intents::store(self.state, &record, existing, &undo, &[]).await;
+        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = &outcome {
+            self.undo.push(Undo::Fence {
+                fence: fence.clone(),
+            });
+        }
+        outcome?;
         self.persisted = self.planned.len();
         Ok(())
     }
@@ -2018,6 +2024,11 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 kept,
             });
         }
+        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = &outcome {
+            self.undo.push(Undo::Fence {
+                fence: fence.clone(),
+            });
+        }
         outcome
     }
 
@@ -2036,6 +2047,25 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         mut self,
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
+        // An intent create/rewrite that answered unsettled must settle before a later
+        // rewrite or Forget can run; otherwise the original plan could arrive afterwards.
+        while let Some(at) = self
+            .undo
+            .iter()
+            .position(|step| matches!(step, Undo::Fence { .. }))
+        {
+            let Undo::Fence { fence } = &self.undo[at] else {
+                unreachable!()
+            };
+            let deadline = records::deadline_after(records::LOCK_WAIT);
+            if !records::fenced_by(&self.state.store, fence, Some(deadline)).await {
+                return Err((
+                    crate::error::ServerError::Storage("the intent could not be settled".into()),
+                    self.rollback().await,
+                ));
+            }
+            self.undo.remove(at);
+        }
         let Some(record) = self.intent.clone() else {
             self.holds.take().release(self.state).await;
             return Ok(());
@@ -3021,6 +3051,12 @@ pub(crate) mod test_store {
         /// the write is still sent, and commits once the gate opens, unless it has been fenced
         /// ([`Store::fence`]) by then.
         pub unsettle_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// The next intent create answers unsettled, with its write held by this gate.
+        pub unsettle_next_intent: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// Every metadata read stalls while set.
+        pub hang_meta: Arc<AtomicBool>,
+        /// Delay an unsettled delete's answer by this many milliseconds.
+        pub slow_delete_answer_ms: Arc<std::sync::atomic::AtomicU64>,
         /// As `unsettle_next_create`, for the next `delete_container_if_empty` of the IRI named.
         pub unsettle_next_delete_of: GateOf,
         /// As `unsettle_next_create`, for every create of a resource while set (one gate).
@@ -3114,6 +3150,9 @@ pub(crate) mod test_store {
                 fail_restore_of: Default::default(),
                 restores: Default::default(),
                 unsettle_next_create: Default::default(),
+                unsettle_next_intent: Default::default(),
+                hang_meta: Default::default(),
+                slow_delete_answer_ms: Default::default(),
                 unsettle_next_delete_of: Default::default(),
                 unsettle_creates: Default::default(),
                 fail_fence: Default::default(),
@@ -3250,6 +3289,9 @@ pub(crate) mod test_store {
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
             self.traced("meta", iri);
+            if self.hang_meta.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
             let held = self.hold_next_meta.lock().unwrap().take();
             if let Some(gate) = held {
                 gate.acquire().await.expect("gate").forget();
@@ -3353,27 +3395,28 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
-            if !container.starts_with(super::intents::PREFIX) {
-                let gate = self
-                    .unsettle_next_create
+            let gate = if container.starts_with(super::intents::PREFIX) {
+                self.unsettle_next_intent.lock().unwrap().take()
+            } else {
+                self.unsettle_next_create
                     .lock()
                     .unwrap()
                     .take()
-                    .or_else(|| self.unsettle_creates.lock().unwrap().clone());
-                if let Some(gate) = gate {
-                    let (inner, container, child, ct) = (
-                        self.inner.clone(),
-                        container.to_string(),
-                        child.to_string(),
-                        ct.to_string(),
-                    );
-                    let touches = vec![container.clone(), child.clone()];
-                    return Err(self.unsettle(gate, touches, async move {
-                        let _ = inner
-                            .create_in_container(&container, &child, body, &ct)
-                            .await;
-                    }));
-                }
+                    .or_else(|| self.unsettle_creates.lock().unwrap().clone())
+            };
+            if let Some(gate) = gate {
+                let (inner, container, child, ct) = (
+                    self.inner.clone(),
+                    container.to_string(),
+                    child.to_string(),
+                    ct.to_string(),
+                );
+                let touches = vec![container.clone(), child.clone()];
+                return Err(self.unsettle(gate, touches, async move {
+                    let _ = inner
+                        .create_in_container(&container, &child, body, &ct)
+                        .await;
+                }));
             }
             let gate = self.hold_next_create.lock().unwrap().take();
             if let Some(gate) = gate {
@@ -3509,6 +3552,10 @@ pub(crate) mod test_store {
                 return Err(ServerError::InsufficientStorage);
             }
             if let Some(gate) = held(&self.unsettle_next_delete_of, iri) {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    self.slow_delete_answer_ms.load(Ordering::SeqCst),
+                ))
+                .await;
                 let (inner, iri, parent) = (
                     self.inner.clone(),
                     iri.to_string(),

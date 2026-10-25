@@ -73,8 +73,10 @@ Set `PSS_SPARQ_BACKEND` to one of:
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. An update that times out
   can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions, and the content write of a resource create, are fenced
-  against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
+  requests and subscriptions, forward resource removals, intent creates, and the
+  content write of a resource create retain their fences. HTTP index metadata/listing
+  writes and the generic write adapter still need fencing support, so the native LWS
+  server refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -136,11 +138,14 @@ before every notification it sends — so a revoked grant is not replayable thro
 an already-issued `receiveFrom` URL. Notifications follow the subscriber's current
 access: one it may no longer read is dropped (not sent, and it neither closes the
 socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
-closes the socket (code 1008) once its subscriber loses read access, within two
-timer periods of the loss (a check in progress, for a notification or a tick, is
-given one period at most and then counts as one that cannot be made, `1011`; a
-due tick is taken before queued notifications), so when a socket closes never
-turns on changes it may not read. A check that cannot
+closes the socket within two periods of losing Read: `1008` for a confirmed
+denial, or `1011` if the timer check is undecided. Each check has at most one
+period; a slower check counts as undecided and the client must resubscribe.
+A due tick takes priority over inbound frames and queued notifications and
+pre-empts a running notification or lag check, noting it as missed. A reader
+whose notification check spans a tick gets a reconcile close; a dropped lag
+check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). The
+timing of a revocation close follows the timer, even while the client floods frames. A check that cannot
 be made (a backend fault) is no denial: on the timer it closes the socket
 (`1011`); a notification whose check cannot be made is dropped. A dropped
 notification (whichever check dropped it) is noted, and from then on the next
@@ -327,10 +332,10 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later. Only the creates and
-removals of service records (grants, requests, subscriptions), and a resource create's
-content write, are fenced against that (see below); other resource writes, and putting a
-failed change back, are not.
+because a remote write reported as failed may still commit later. Service-record creates
+and removals, forward resource removals, intent creates and a resource create's content
+write retain their fences (see below). HTTP index metadata/listing writes and the generic
+write adapter still need fencing support before this refusal can be lifted.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
 (413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
@@ -626,10 +631,11 @@ What the server exposes, all discoverable from the storage description
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
   takes the record's lock and the container's the same way (at most two seconds, then `503`),
-  and takes the grant out of force while the removal runs, and keeps it out only once the removal
-  is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
-  revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
-  cannot be read again, with the grant left in force. A removal whose outcome can still change
+  and takes the grant out of force while the removal runs: `204` once confirmed revoked;
+  `500` "still stored" when confirmed still listed (the grant back in force). A settled
+  Storage failure whose existence and listing reads both fail answers `500` "not known
+  yet" and keeps the grant out of force until background settlement reads the listing.
+  An insufficient-storage refusal keeps its refusal handling. A removal whose outcome can still change
   is fenced the same way: until its fence lands, the answer is `500` "not known yet", the grant
   stays out of force, and it is removed or put back once the listing read after the fence
   says which. A request waits for its fence at most as long as for a lock (two seconds, shared
@@ -637,7 +643,9 @@ What the server exposes, all discoverable from the storage description
   container stays held until that background settling is done. In the background each attempt
   at the fence is given longer, from two seconds doubling up to the store's own call timeout
   (`Store::call_timeout`: 30 seconds by default, `STORE_CALL_TIMEOUT`; an `http` index built with
-  `HttpSparqClient::with_timeout` uses that timeout), so a slow store's fence still lands. A
+  `HttpSparqClient::with_timeout` uses that timeout), clamped between two seconds and
+  one hour per attempt, so a fence slower than one hour is retried rather than waited
+  on indefinitely. A
   removal whose fence lands with the record still stored is answered at once from the listing.
   Putting a change back while a request waits on it (its own rollback or commit, with its locks
   held) tries each step up to three times with short growing waits between, each attempt
@@ -646,8 +654,11 @@ What the server exposes, all discoverable from the storage description
   again in the request: it is set aside with the rest, its fence first, and the set-aside (which
   holds the locks) fences it before putting the step back, so a write that arrives late can no
   longer undo what was put back since. The background put-back of a set-aside change, and the
-  settling of intents at start-up, wait for a fence as the store's call allows, and likewise
-  fence a step's unsettled write before trying the step again. A removal whose fence lands but
+  settling of intents at start-up, wait for a fence as the store's call allows; background
+  retries use the same capped per-attempt budget. Both fence a step's unsettled write before
+  trying the step again. Forward removals and intent creates retain their fences in the
+  journal: rollback fences before recreation or Forget, and commit fences before changing
+  the intent. A removal whose fence lands but
   whose outcome cannot then be read stays out of force and is settled in the background once the
   listing can be read. A removal the store refuses for
   want of room answers `507`, the record still stored and back in force. A subscription

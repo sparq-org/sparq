@@ -2962,8 +2962,8 @@ mod tests {
     /// grant out of force though a restart would put it back, or answered "still in force" though
     /// the record was gone. The answer says only what is confirmed: a removal that reports a
     /// failure but is confirmed by reading the store again revokes; one that cannot be checked is
-    /// answered as not known, with the grant left in force as the store last had it; and a retry
-    /// once the store answers settles it.
+    /// answered as not known, with the grant out of force until the store answers; a restart
+    /// agrees once the outcome is known.
     #[tokio::test]
     async fn a_revocation_answers_only_what_is_confirmed() {
         use std::sync::atomic::Ordering;
@@ -3003,13 +3003,24 @@ mod tests {
         assert!(status.is_server_error());
         assert!(body.contains("not known"), "{body}");
         assert!(!body.contains("still stored"), "{body}");
+        assert!(
+            state.access.grant_policies().is_empty(),
+            "unread revocation in force"
+        );
         store.fail_exists.store(false, Ordering::SeqCst);
         store.fail_list.store(false, Ordering::SeqCst);
         *store.fail_after_delete_of.lock().unwrap() = None;
-        // A retry, the store answering, settles it: the record is gone, so the grant goes too,
-        // and a restart agrees.
+        eventually("the revocation is settled", || {
+            state.settlements.pending() == 0
+        })
+        .await;
+        assert!(
+            state.access.grant_policies().is_empty(),
+            "grant returned to force"
+        );
+        // The background confirmed it gone, so a retry answers absent; a restart agrees.
         let (status, _) = answer(state.clone(), path).await;
-        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(state.access.grant_policies().is_empty());
         let state = restart(&store).await;
         assert!(state.access.grant_policies().is_empty());
