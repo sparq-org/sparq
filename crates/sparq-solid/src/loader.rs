@@ -1219,6 +1219,15 @@ pub fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn require_writable_refuses_a_frozen_graph() {
+        let mut graph = sparq_core::Graph::new();
+        assert!(super::require_writable(&graph).is_ok());
+        graph.freeze_for_test("storage unavailable");
+        assert!(super::require_writable(&graph).is_err());
+    }
+
     use super::{assemble_facts_default, graph_triples, named, skolemize, System};
     use super::{iri_origin, parent_iri};
     use crate::{

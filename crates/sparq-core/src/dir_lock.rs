@@ -92,6 +92,27 @@ pub(crate) fn resolve_dir(dir: &Path) -> io::Result<PathBuf> {
     Ok(resolved)
 }
 
+/// Resolves a store directory, rejecting any existing non-directory before taking its lock.
+pub(crate) fn resolve_store_dir(dir: &Path) -> io::Result<PathBuf> {
+    #[cfg(windows)]
+    refuse_windows_device_path(dir)?;
+    let check = |path: &Path| match path.metadata() {
+        Ok(meta) if !meta.is_dir() => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a graph store directory", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    };
+    // Inspect the supplied path first: a descriptor path can resolve to a missing
+    // pathname. It still names an existing file, not a directory to create.
+    check(dir)?;
+    let resolved = resolve_dir(dir)?;
+    check(&resolved)?;
+    Ok(resolved)
+}
+
 /// Whether `a` and `b` name one existing file or directory (device and inode on Unix, volume
 /// and file index on Windows), however they are spelled. `false` when either is missing.
 pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
@@ -136,7 +157,7 @@ pub fn store_root(path: &Path) -> io::Result<Option<PathBuf>> {
 /// A file name as the filesystem compares it, for checking it against the names a store
 /// reserves: ASCII case folded (macOS and Windows filesystems ignore case by default), and on
 /// Windows without trailing dots and spaces (which Windows drops from a name).
-fn comparable_name(name: &str) -> String {
+pub(crate) fn comparable_name(name: &str) -> String {
     #[cfg(windows)]
     let name = name.trim_end_matches(['.', ' ']);
     name.to_ascii_lowercase()
@@ -235,7 +256,7 @@ impl LockLocation {
     /// not exclude anything).
     pub(crate) fn at(dir: &Path, path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
-        let dir = resolve_dir(dir)?;
+        let dir = resolve_store_dir(dir)?;
         let resolved = match path.parent().filter(|p| !p.as_os_str().is_empty()) {
             Some(parent) => resolve_dir(parent)?,
             None => std::env::current_dir()?.canonicalize()?,
@@ -268,7 +289,7 @@ impl LockLocation {
     /// resolved path (symbolic links and `.`/`..` resolved, any trailing slash dropped; a
     /// dangling symbolic link is an error). The directory need not exist yet; its parent must.
     pub fn sibling_of(dir: &Path) -> io::Result<Self> {
-        let resolved = resolve_dir(dir)?;
+        let resolved = resolve_store_dir(dir)?;
         let mut name = resolved
             .file_name()
             .ok_or_else(|| unnamed(dir))?
@@ -316,9 +337,8 @@ pub const INSIDE_LOCK: &str = "sparq.lock";
 ///   write access). It stays put when the directory is renamed, so it is what excludes holders
 ///   across a swap's renames, and what a missing directory's recovery or creation needs;
 /// - the INSIDE lock, [`INSIDE_LOCK`] in the directory, always (a holder that cannot open or
-///   create it is refused, except a shared holder that cannot create either lock file, which
-///   holds none). A holder whose parent directory is not writable (a store at a mount root, say)
-///   holds the inside lock alone; it can open, write and read the store, but not rename it.
+///   create it is refused). A holder whose parent directory is not writable (a store at a mount
+///   root, say) holds the inside lock alone; it can open, write and read the store, but not rename it.
 ///
 /// A holder renaming the directory (a compaction or restore swap) must hold the outside lock.
 /// It keeps the old directory's inside lock until the old directory is gone, and takes the new
@@ -333,8 +353,7 @@ pub struct DirLock {
     location: LockLocation,
     shared: bool,
     /// The store directory and the lock held on its inside lock file (`None` for a staging
-    /// path's lock, which has no inside lock; the file `None` while a swap has let go of it,
-    /// or for a shared holder that could open neither lock file).
+    /// path's lock, which has no inside lock; the file is `None` while a swap has let go of it).
     inside: Option<(PathBuf, std::sync::Mutex<Option<File>>)>,
 }
 
@@ -350,6 +369,7 @@ fn unwritable(e: &io::Error) -> bool {
 /// else, or when it cannot be created or written, an existing file read-only. `None` when it
 /// neither exists nor can be created.
 fn open_lock_file(path: &Path, create: bool) -> io::Result<Option<File>> {
+    check_regular_lock_file(path)?;
     if create {
         match OpenOptions::new()
             .read(true)
@@ -366,6 +386,71 @@ fn open_lock_file(path: &Path, create: bool) -> io::Result<Option<File>> {
     match File::open(path) {
         Ok(f) => Ok(Some(f)),
         Err(e) if e.kind() == io::ErrorKind::NotFound || unwritable(&e) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// DOS device basenames remain device names with extensions or trailing spaces and dots.
+#[cfg(any(windows, test))]
+fn windows_device_name(name: &str) -> bool {
+    let stem = name
+        .split(['.', ':'])
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(' ');
+    let stem = stem.to_ascii_lowercase();
+    if matches!(
+        stem.as_str(),
+        "con" | "prn" | "aux" | "nul" | "conin$" | "conout$"
+    ) {
+        return true;
+    }
+    ["com", "lpt"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|port| {
+            matches!(
+                port,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
+}
+
+/// Refuses device endpoints before metadata lookup, including missing DOS aliases.
+#[cfg(windows)]
+fn refuse_windows_device_path(path: &Path) -> io::Result<()> {
+    use std::path::{Component, Prefix};
+    let special = path.components().any(|component| match component {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::DeviceNS(_) => true,
+            Prefix::Verbatim(name) => name.to_string_lossy().eq_ignore_ascii_case("GLOBALROOT"),
+            _ => false,
+        },
+        Component::Normal(name) => windows_device_name(&name.to_string_lossy()),
+        _ => false,
+    });
+    if special {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is a device path, not a store directory or regular lock file",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses special files before opening them: opening a FIFO could otherwise wait forever.
+fn check_regular_lock_file(path: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    refuse_windows_device_path(path)?;
+    match path.metadata() {
+        Ok(meta) if !meta.is_file() => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a regular lock file", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
 }
@@ -390,21 +475,18 @@ fn try_lock(file: &File, path: &Path, shared: bool) -> io::Result<()> {
     }
 }
 
-/// Takes the inside lock of the store directory `dir`: `None` when it can be neither opened nor
-/// created and `shared` (a shared holder then holds none); an error when it is held, or when the
+/// Takes the inside lock of the store directory `dir`: an error when it cannot be opened or
+/// created, when it is held, or when the
 /// file locked is no longer the one at `<dir>/sparq.lock` (a swap renamed it away meanwhile:
 /// `WouldBlock`, retry).
 pub(crate) fn lock_inside(dir: &Path, shared: bool) -> io::Result<Option<File>> {
     let path = dir.join(INSIDE_LOCK);
     let Some(file) = open_lock_file(&path, true)? else {
-        if shared {
-            return Ok(None);
-        }
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!(
-                "the lock file {} cannot be created: the store directory {} must be writable \
-                 to open it writable",
+                "the lock file {} cannot be opened or created: the store directory {} must \
+                 allow access to its inside lock",
                 path.display(),
                 dir.display()
             ),
@@ -431,6 +513,7 @@ impl DirLock {
     /// another holder (another process, or another open in this one, shared or exclusive) has
     /// it. A lock of this kind has no inside lock (a staging path's lock).
     pub fn acquire(location: LockLocation) -> io::Result<Self> {
+        check_regular_lock_file(location.path())?;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -472,8 +555,8 @@ impl DirLock {
     }
 
     /// Takes the inside lock of this store's directory, which must exist now (see
-    /// [`acquire_outside`](Self::acquire_outside)). A shared holder that can open or create
-    /// neither lock file holds none; any other holder that cannot lock it is refused.
+    /// [`acquire_outside`](Self::acquire_outside)). Every holder must take this lock;
+    /// a holder that cannot open or create it is refused.
     pub(crate) fn lock_inside(&self) -> io::Result<()> {
         let Some((dir, held)) = &self.inside else {
             return Ok(());
@@ -537,6 +620,7 @@ impl DirLock {
     /// Whether some holder (exclusive or shared) has the lock file at `path` now: tried
     /// exclusively, and released at once if that succeeds.
     pub(crate) fn is_held(path: &Path) -> io::Result<bool> {
+        check_regular_lock_file(path)?;
         let file = File::open(path)?;
         match fs4::FileExt::try_lock(&file) {
             Ok(()) => Ok(false),
@@ -671,5 +755,84 @@ mod tests {
                 .unwrap()
                 .join(&name)
         );
+    }
+    #[test]
+    fn ensure_inside_locks_the_replacement_directory() {
+        let root = scratch("ensure-inside");
+        let dir = root.join("g");
+        std::fs::create_dir(&dir).unwrap();
+        let lock =
+            DirLock::acquire_outside(LockLocation::sibling_of(&dir).unwrap(), &dir, false, true)
+                .unwrap();
+        lock.lock_inside().unwrap();
+        #[cfg(windows)]
+        lock.release_inside();
+        let old = root.join("old");
+        std::fs::rename(&dir, &old).unwrap();
+        std::fs::create_dir(&dir).unwrap();
+        lock.ensure_inside().unwrap();
+        lock.ensure_inside()
+            .expect("already holding the replacement lock");
+        assert_eq!(
+            lock_inside(&dir, false).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert!(
+            lock_inside(&old, false).unwrap().is_some(),
+            "old lock was kept"
+        );
+        drop(lock);
+        assert!(lock_inside(&dir, false).unwrap().is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_lock_files_exclude_devices_and_accept_missing_files() {
+        let root = scratch("regular-lock");
+        let missing = root.join("missing");
+        check_regular_lock_file(&missing).unwrap();
+        std::fs::write(&missing, b"").unwrap();
+        check_regular_lock_file(&missing).unwrap();
+        assert_eq!(
+            check_regular_lock_file(Path::new("/dev/null"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_device_names_are_matched_before_extensions_and_in_any_case() {
+        for name in [
+            "NUL",
+            "nul.lock",
+            "Con",
+            "PRN.log",
+            "AUX .lock",
+            "COM1",
+            "lpt9.lock",
+            "COM¹.tmp",
+            "LPT²",
+            "CONOUT$",
+            "CONIN$",
+        ] {
+            assert!(windows_device_name(name), "{name}");
+        }
+        for name in ["null", "console", "COM10", "LPT0", "port.COM1", "data.lock"] {
+            assert!(!windows_device_name(name), "{name}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_device_paths_are_refused_before_any_files_are_created() {
+        for name in ["NUL", "nul.lock", "CONOUT$", r"\\.\NUL", r"\\?\GLOBALROOT"] {
+            let path = Path::new(name);
+            assert!(refuse_windows_device_path(path).is_err(), "{name}");
+            assert!(resolve_store_dir(path).is_err(), "{name}");
+            assert!(check_regular_lock_file(path).is_err(), "{name}");
+        }
     }
 }

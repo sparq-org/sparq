@@ -10,7 +10,7 @@ fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq-swap-{tag}-{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    dir.canonicalize().unwrap()
 }
 
 fn iri(s: &str) -> Term {
@@ -58,8 +58,8 @@ fn would_block(dir: &Path) -> bool {
 }
 
 fn is(path: &Path) -> impl Fn(&Path) -> bool + 'static {
-    let path = path.to_path_buf();
-    move |p: &Path| p == path
+    let path = dir_lock::resolve_dir(path).unwrap();
+    move |p: &Path| dir_lock::resolve_dir(p).is_ok_and(|resolved| resolved == path)
 }
 
 /// H1: a named graph's swap fails after its first rename (marking the old half keeps
@@ -423,4 +423,130 @@ fn an_inside_only_opener_never_gets_a_store_mid_swap() {
     drop(g);
     assert_intact(&dir);
     std::fs::remove_dir_all(&root).ok();
+}
+
+/// Fault targets compare resolved paths, including missing staging paths under an alias.
+#[test]
+fn fault_targets_match_resolved_paths_before_and_after_creation() {
+    let root = scratch("fault-path");
+    let alias = root.join(".").join("store.compact-old");
+    let target = is(&alias);
+    let actual = root.join("store.compact-old");
+    assert!(target(&actual));
+    std::fs::create_dir(&actual).unwrap();
+    assert!(target(&actual.canonicalize().unwrap()));
+    #[cfg(unix)]
+    {
+        let link = root.join("alias");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+        assert!(target(&link.join("store.compact-old")));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Cleanup remains recoverable after the last record has gone and before its directory goes.
+#[test]
+fn a_crash_after_removing_the_last_staging_record_is_recovered() {
+    for kind in ["compact-old", "drop-old"] {
+        for step_name in ["rename", "remove-record", "remove-dir"] {
+            let root = scratch(&format!("last-record-{kind}-{step_name}"));
+            let dir = root.join("g");
+            let mut g = open_with_logged_update(&dir);
+            let target = if kind == "compact-old" {
+                staging_path(&dir, kind)
+            } else {
+                staging_path(&dir.join("named"), kind)
+            };
+            let at = is(&target);
+            fault::crash_at(move |step, p| step == step_name && at(p));
+            if kind == "compact-old" {
+                let _ = g.compact();
+            } else {
+                let _ = g.drop_named_durable(&iri("g1"));
+            }
+            assert!(fault::disarm() > 0, "cleanup did not reach {kind} {step_name}");
+            drop(g);
+            let reopened = Graph::open(&dir).unwrap();
+            assert!(has(&reopened, "a2"));
+            assert!(has(sub(&reopened, "g0"), "b2"));
+            assert!(!target.exists());
+            drop(reopened);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+/// A renamed survivor tree recovers its matching names if the manifest publication stops.
+#[test]
+fn a_named_drop_recovers_the_manifest_matching_its_survivors() {
+    let root = scratch("drop-manifest");
+    let dir = root.join("g");
+    let mut g = open_with_logged_update(&dir);
+    let manifest_tmp = is(&dir.join("named.bin.tmp"));
+    fault::crash_at(move |step, p| step == "rename" && manifest_tmp(p));
+    assert!(g.drop_named_durable(&iri("g0")).is_err());
+    assert!(fault::disarm() > 0);
+    drop(g);
+    let g = Graph::open(&dir).expect("recover matching graph names and directories");
+    assert!(g.named_graph(&iri("g0")).is_none());
+    assert!(has(sub(&g, "g1"), "c"));
+    assert_eq!(g.named().len(), 1);
+    drop(g);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Frozen reads include committed frames from the root and each named graph, without
+/// truncating or appending to the files needed by the next writable open.
+#[test]
+fn a_frozen_view_replays_root_and_named_transaction_logs_without_writing() {
+    let root = scratch("frozen-transactions");
+    let dir = root.join("g");
+    let mut g = open_with_logged_update(&dir);
+    g.commit_txn(&[
+        (true, None, triple("root-txn")),
+        (true, Some(iri("g9")), triple("new-named-txn")),
+    ]).unwrap();
+    g.named[0].1.commit_txn(&[(true, None, triple("child-txn"))]).unwrap();
+    let paths = [dir.join("txn.log"), dir.join("named/0/txn.log"), dir.join("wal.log")];
+    let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    let new = is(&staging_path(&dir, "compact-new"));
+    let live = is(&dir);
+    fault::fail_every(move |step, p| (step == "rename" && new(p)) || (step == "clear" && live(p)));
+    assert!(g.publish_staged_base_or_freeze(|graph, target, role| graph.save_unlocked(target, role)).is_err());
+    assert!(fault::disarm() > 1);
+    assert!(g.is_frozen());
+    assert!(has(&g, "root-txn"));
+    assert!(has(sub(&g, "g0"), "child-txn"));
+    assert!(has(sub(&g, "g9"), "new-named-txn"));
+    assert!(g.named().iter().all(|(_, sub)| sub.is_frozen() && sub.check_writable().is_err()));
+    let after: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    assert_eq!(before, after, "frozen replay changed a log");
+    drop(g);
+    let g = Graph::open(&dir).unwrap();
+    assert!(has(&g, "root-txn") && has(sub(&g, "g0"), "child-txn"));
+    assert!(has(sub(&g, "g9"), "new-named-txn"));
+    drop(g);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A named swap that unwinds still makes its root report frozen and refuse further writes.
+#[test]
+fn a_panicking_named_swap_freezes_the_root_and_keeps_its_data() {
+    let root = scratch("named-panic");
+    let dir = root.join("g");
+    let mut g = open_with_logged_update(&dir);
+    let live = is(&dir.join("named/0"));
+    fault::panic_at(move |step, p| step == "rename" && live(p));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.compact()));
+    assert!(fault::disarm() > 0);
+    assert!(result.is_err());
+    assert!(g.is_frozen() && g.check_writable().is_err());
+    assert!(g.apply_delta(&[triple("refused")], &[]).is_err());
+    assert!(g.apply_delta_to_named(1, &[triple("refused")], &[]).is_err());
+    assert!(g.drop_named_durable(&iri("g1")).is_err());
+    assert!(g.drop_all_named_durable().is_err());
+    assert!(would_block(&dir));
+    drop(g);
+    assert_intact(&dir);
+    std::fs::remove_dir_all(root).unwrap();
 }

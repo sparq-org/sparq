@@ -48,6 +48,20 @@ Until saved, legacy opens repeat the dictionary scan and cache allocation.
 Cache versions signal semantic compatibility; they do not authenticate archive
 bytes or change the existing trusted-storage assumption.
 
+## Named graph access
+
+`Graph::named` is private. Read `graph.named()` (an ordered slice) or
+`graph.named_graph(&name)`. Use `add_named`, `extend_named`, `set_named`,
+`remove_named`, `retain_named`, and `take_named` for in-memory members; these
+return `Result` and keep the graph-name prefix index current. Store-backed
+members cannot be replaced, extracted, or shifted through those methods.
+Use `ensure_named` and `apply_delta_to_named(index, inserts, deletes)` for logged
+updates, and `clear_named_durable`, `drop_named_durable`, or
+`drop_all_named_durable` for durable removal. Frozen and read-only graphs refuse
+mutations. `rebuild_default` and `replace_default` keep named members and mapping
+locks while replacing the default graph with an in-memory view; that view's later
+updates are not logged. See [the accessor example](named-accessors.md).
+
 ## Quickstart
 
 Add the dependency (HDT is a separate, native-only crate):
@@ -306,7 +320,7 @@ let g = Graph::load_reader_parallel(reader, "ntriples")?; // N-Triples gets the 
 ```rust
 let trig = r#"<http://ex/g> { <http://ex/a> <http://ex/p> <http://ex/b> . }"#;
 let g = sparq_core::Graph::load_dataset(trig, "trig")?;
-assert_eq!(g.named.len(), 1);          // each named graph is its own sub-Graph
+assert_eq!(g.named().len(), 1);          // each named graph is its own sub-Graph
 ```
 
 **3. Load an HDT archive (and read its header metadata).**
@@ -652,7 +666,7 @@ directory exclusively (`dir_lock`: advisory `flock` on Unix, `LockFileEx` on Win
 files are below) before touching it, all through one ownership check. A store's files are reachable only through its
 `Graph` (`g.dict()` and `g.store()` read them; the store, dictionary and permutation openers
 are crate-internal), and every memory-mapped part of a graph carries the lock: it is held while
-the graph, any named graph taken out of `g.named`, any `fork()`/`snapshot()`, or a graph rebuilt
+the graph, any mapped `fork()`/`snapshot()`, or a graph rebuilt
 around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the graphs `compact`,
 `vacuum` and `restore_in_place` swap in. A second holder, in another process or this one, gets
 `WouldBlock` at once. Rules that follow:
@@ -686,8 +700,12 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   then renamed to its staging name, so it never exists without one. Through the renames one
   half always carries a record: the old base is marked once it is aside, the new one loses its
   record just before it is renamed in; a rollback marks the new half again before renaming the
-  old one back, and clears the old one's record last. A staging directory is removed record
-  last. Recovery, and the next swap, promote or remove a staging directory only when its record
+  old one back, and clears the old one's record last. Cleanup removes the other entries,
+  moves the record-only directory to its `.sparq-part` name, then removes its record and
+  directory; recovery can discard an empty scratch after a stop between those removals.
+  A named drop saves its matching manifest with the staged survivor tree and recovery
+  publishes that manifest before removing the old tree.
+  Recovery, and the next swap, promote or remove a staging directory only when its record
   names this store, take a half caught between a rename and its record only when its own marker
   carries that store's identity, and remove a record a crash left in the live directory.
   Anything else at those names (another store, a scratch directory holding more than a record,
@@ -735,8 +753,9 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   recovery and compaction swaps, so compacting through a link rewrites the real directory and
   leaves the link alone. `open_or_create` recovers an interrupted swap before deciding to
   seed. Two bind mounts of one directory are two paths: not excluded.
-- **Read-only opens:** `Graph::open_read_only(dir)` takes both lock files SHARED (each
-  created when missing and creatable; a reader that can open or create neither holds no lock).
+- **Read-only opens:** `Graph::open_read_only(dir)` takes available outside and inside locks
+  SHARED (each created when missing and creatable). The inside lock is required; a reader
+  that cannot open or create it returns an error.
   Read-only opens coexist with each other, never with a writable holder (`WouldBlock` either
   way), write nothing into the directory but a missing lock file, and refuse every write (also
   the durable clears, and a rebuilding `sparq_engine::update`; `Graph::check_writable` says
@@ -756,9 +775,14 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   the graph is the new store; rolled back, the error is returned and the graph keeps logging to
   the old store. Only when neither works is the graph frozen (`Graph::is_frozen()`): every
   later write is refused, and it reads the directory's contents opened read-only with its logs
-  replayed in memory, or nothing if they do not open. Report a frozen graph as failed, drop it
+  replayed in memory, or nothing if they do not open. Unwinding during a swap also keeps
+  it frozen, with an empty placeholder for the graph being swapped. Report it as failed, drop it
   and re-open the directory: the embedded LWS store and the Python `Graph` (`frozen`) raise an
   error rather than serve one.
+- **Special files:** store paths must name directories, and existing lock targets must be
+  regular files. Devices, pipes, and sockets are refused before they are opened as stores
+  or locks, including special files reached through symbolic links. Windows DOS device
+  aliases are refused by basename before metadata lookup.
 - **The lock files** are `<resolved dir>.lock` beside the directory and `sparq.lock` inside
   it (reserved). Every opener takes the outside one first, when it exists or can be created (an
   existing one is opened read-only when it cannot be written: a lock needs no write access),

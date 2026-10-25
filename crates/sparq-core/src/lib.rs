@@ -1590,8 +1590,8 @@ impl Graph {
     /// The result is EXACTLY the set of graphs a full scan + `STRSTARTS(STR(?g), prefix)` filter
     /// would keep (an empty prefix matches every graph; a no-match prefix yields nothing), so the
     /// indexed path is observationally identical to the unindexed one — see the equivalence tests.
-    /// The index is built lazily on first use and cached, keyed by `named.len()` (the only thing
-    /// that changes when the SET of graph IRIs changes); a length change rebuilds it.
+    /// The index is built lazily on first use and cached. Named graph mutations invalidate it;
+    /// the stored length also detects a changed member count.
     pub fn for_named_graphs_with_prefix<F: FnMut(&Term, &Graph)>(&self, prefix: &str, mut f: F) {
         let n = self.named.len();
         if n == 0 {
@@ -1735,6 +1735,7 @@ impl Graph {
         &mut self,
         graphs: impl IntoIterator<Item = (Term, Graph)>,
     ) -> Result<(), String> {
+        self.refuse_if_detached()?;
         let graphs: Vec<_> = graphs.into_iter().collect();
         for (_, g) in &graphs {
             self.check_named_insertable(g)?;
@@ -1774,10 +1775,9 @@ impl Graph {
     /// Removes the first named graph called `name` and returns it (`None` when there is none),
     /// keeping the others in order. Refused, changing nothing, when it, or any named graph
     /// after it, is a named graph of this graph's store (use
-    /// [`drop_named_durable`](Self::drop_named_durable)). A graph that refuses writes (opened
-    /// read-only, or frozen) may drop named graphs from its in-memory view, writing nothing;
-    /// what it drops refuses writes too and joins no other graph.
+    /// [`drop_named_durable`](Self::drop_named_durable)), or this graph refuses writes.
     pub fn remove_named(&mut self, name: &Term) -> Result<Option<Graph>, String> {
+        self.refuse_if_detached()?;
         let Some(i) = self.named.iter().position(|(n, _)| n == name) else {
             return Ok(None);
         };
@@ -1791,6 +1791,7 @@ impl Graph {
     /// changing nothing, as [`remove_named`](Self::remove_named): when a graph it would drop,
     /// or one after it, is a named graph of this graph's store.
     pub fn retain_named(&mut self, mut keep: impl FnMut(&Term, &Graph) -> bool) -> Result<(), String> {
+        self.refuse_if_detached()?;
         let keeps: Vec<bool> = self.named.iter().map(|(n, g)| keep(n, g)).collect();
         if let Some(first) = keeps.iter().position(|k| !k) {
             self.check_named_movable_from(first)?;
@@ -1804,6 +1805,7 @@ impl Graph {
     /// Takes every named graph out, in order, leaving none. Refused, changing nothing, when
     /// any is a named graph of this graph's store, as [`remove_named`](Self::remove_named).
     pub fn take_named(&mut self) -> Result<Vec<(Term, Graph)>, String> {
+        self.refuse_if_detached()?;
         self.check_named_movable_from(0)?;
         let taken = std::mem::take(&mut self.named);
         self.named_changed();
@@ -3821,6 +3823,7 @@ impl Graph {
         // Refused while this graph, or any named graph under it, refuses writes (a frozen named
         // graph would be re-saved from its view) or keeps a journal frame for the reopen.
         self.refuse_while_txn_poisoned()?;
+        self.named_changed();
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -3865,6 +3868,7 @@ impl Graph {
             return Ok(());
         }
         self.refuse_while_txn_poisoned()?;
+        self.named_changed();
         // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
         // no live map may point into `named/<i>/` across the removal — correct on every platform,
         // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
@@ -3950,6 +3954,10 @@ impl Graph {
                 .map_err(|e| e.to_string())?;
             names.push(name.clone());
         }
+        // Persist the names with their new positional directories. Recovery publishes this
+        // copy if a stop separates the tree rename from the root manifest publication.
+        write_named_manifest_file(&new_dir.join(PENDING_NAMED_MANIFEST), &names)
+            .map_err(|e| e.to_string())?;
         fsync_dir(&new_dir).map_err(|e| e.to_string())?;
         // (Copilot #123, Issue 2) RELEASE every survivor's live mmap/WAL handles
         // BEFORE the rename: each is now fully persisted under `new_dir`, so drop the in-memory
@@ -3980,7 +3988,7 @@ impl Graph {
         fsync_dir(dir).map_err(|e| e.to_string())?;
         // The sub-tree is now the renumbered survivors. Commit the new set by rewriting the
         // manifest (atomic temp+rename, fsyncs the parent dir) — the commit point for the set.
-        write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
+        complete_named_manifest(dir).map_err(|e| e.to_string())?;
         remove_staging_dir(&old_dir).ok();
         // Re-open survivors from their NEW directories so each carries a correctly-indexed WAL
         // (and a fresh, correctly-targeted mmap into the swapped-in `named/`).
@@ -4059,6 +4067,7 @@ impl Graph {
                     if let Some(i) = self.named.iter().position(|(n, _)| *n == name) {
                         self.named[i].1.apply_delta(&ins, &del)?;
                     } else if !ins.is_empty() {
+                        self.named_changed();
                         #[cfg(feature = "mmap")]
                         if let Some(dir) = &parent_dir {
                             let mut g = self.create_durable_named(dir, &name)?;
@@ -4127,6 +4136,7 @@ impl Graph {
             return Ok(i);
         }
         self.refuse_if_detached()?;
+        self.named_changed();
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
             let g = self.create_durable_named(&dir, name)?;
@@ -4204,6 +4214,19 @@ impl Graph {
         // frozen base (so the NEXT fork is O(1) again) and the forked caches flat.
         // No-ops on a never-forked graph.
         for i in 0..self.named.len() {
+            #[cfg(feature = "mmap")]
+            let compacted = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.named[i].1.compact()
+            })) {
+                Ok(compacted) => compacted,
+                Err(panic) => {
+                    if self.named[i].1.is_frozen() {
+                        self.detach("a named graph's directory swap panicked: drop this graph and re-open the directory");
+                    }
+                    std::panic::resume_unwind(panic);
+                }
+            };
+            #[cfg(not(feature = "mmap"))]
             let compacted = self.named[i].1.compact();
             // A named graph whose swap froze it has lost its log: the root must not go on
             // writing (a named-graph drop would re-save the frozen graph's view and lose its
@@ -4440,6 +4463,10 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn replay_logs_in_memory(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
         self.replay_wal_in_memory(dir)?;
+        let named_dir = dir.join(NAMED_SUBDIR);
+        for (i, (_, sub)) in self.named.iter_mut().enumerate() {
+            sub.replay_logs_in_memory(&named_dir.join(i.to_string()))?;
+        }
         for (insert, slot, t) in TxnJournal::read(dir, false)? {
             let target = match slot {
                 None => &mut *self,
@@ -4471,10 +4498,6 @@ impl Graph {
                 self.apply_delta_mem(&[], &[t]);
             }
         }
-        let named_dir = dir.join(NAMED_SUBDIR);
-        for (i, (_, sub)) in self.named.iter_mut().enumerate() {
-            sub.replay_wal_in_memory(&named_dir.join(i.to_string()))?;
-        }
         Ok(())
     }
 
@@ -4491,11 +4514,11 @@ impl Graph {
         }
     }
 
-    /// Whether a failed directory swap froze this graph (a compaction, vacuum or restore whose
+    /// Whether a failed or panicking directory swap froze this graph (a compaction, vacuum or restore whose
     /// swap failed and could not be recovered at once; see
     /// [`restore_in_place`](Self::restore_in_place)): it refuses every write, and what it reads
-    /// is what the directory held when it froze (its logs applied in memory), or nothing when
-    /// that could not be opened. A caller serving it should report it as failed rather than go
+    /// is what the directory held when it froze (its logs applied in memory), or an empty
+    /// placeholder when that could not be opened or a panic interrupted the swap. A caller serving it should report it as failed rather than go
     /// on serving it: drop it and re-open the directory. `false` for a graph opened read-only
     /// (which refuses writes too, [`check_writable`](Self::check_writable)), and always `false`
     /// without the `mmap` feature.
@@ -5230,7 +5253,8 @@ fn clear_staging_mark(dir: &std::path::Path) -> std::io::Result<()> {
 
 /// Removes the staging directory `staging` (checked by the caller) so that it keeps its record
 /// to the end: every other entry first (directories whole, links as links), then the record,
-/// then the directory. A crash part-way leaves a directory that still says whose staging it is.
+/// then the directory. Final record removal happens under the scratch name, where recovery
+/// can discard an empty directory. A crash part-way always leaves a recoverable name.
 #[cfg(feature = "mmap")]
 fn remove_staging_dir(staging: &std::path::Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(staging)? {
@@ -5246,14 +5270,24 @@ fn remove_staging_dir(staging: &std::path::Path) -> std::io::Result<()> {
             std::fs::remove_file(&path)?;
         }
     }
+    // Only the record remains. Move it to the scratch namespace before removing it:
+    // recovery accepts an empty or record-only scratch, but never an unrecorded staging
+    // directory. Thus a stop between the final two removals is recoverable too.
+    let scratch = staging_scratch(staging);
+    remove_staging_scratch(staging, "cleanup")?;
+    fsync_dir(staging)?;
+    publish_rename(staging, &scratch)?;
+    let parent = staging.parent().unwrap_or_else(|| std::path::Path::new("."));
+    fsync_dir(parent)?;
     fault_point("remove-record", staging)?;
-    match std::fs::remove_file(staging.join(STAGING_MARKER)) {
+    match std::fs::remove_file(scratch.join(STAGING_MARKER)) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
     fault_point("remove-dir", staging)?;
-    std::fs::remove_dir(staging)
+    std::fs::remove_dir(&scratch)?;
+    fsync_dir(parent)
 }
 
 /// Whether anything (a directory, a file, a symbolic link, dangling or not) is at `path`.
@@ -5366,7 +5400,7 @@ fn leftover_record(dir: &std::path::Path, kind: &str, id: Option<&str>) -> std::
     };
     let named_as_staging = dir
         .file_name()
-        .is_some_and(|n| n.to_string_lossy().ends_with(&format!(".{kind}")));
+        .is_some_and(|n| dir_lock::comparable_name(&n.to_string_lossy()).ends_with(&format!(".{kind}")));
     Ok(k == kind && id == Some(owner.as_str()) && !named_as_staging)
 }
 
@@ -5489,7 +5523,7 @@ fn claim_store(
     claim: Claim,
     refuse: impl FnOnce(&std::path::Path, &dir_lock::LockLocation) -> std::io::Result<()>,
 ) -> std::io::Result<Owned> {
-    let resolved = dir_lock::resolve_dir(dir)?;
+    let resolved = dir_lock::resolve_store_dir(dir)?;
     refuse_inside_store(&resolved)?;
     refuse_staging(&resolved)?;
     let location = dir_lock::LockLocation::beside(&resolved)?;
@@ -5716,8 +5750,8 @@ fn refuse_foreign_below(dir: &std::path::Path, top: bool) -> std::io::Result<()>
             }
             refuse_foreign_below(&path, false)?;
         } else if kind.is_file()
-            && path.extension() == Some(std::ffi::OsStr::new("lock"))
-            && !(top && entry.file_name() == dir_lock::INSIDE_LOCK)
+            && dir_lock::comparable_name(&entry.file_name().to_string_lossy()).ends_with(".lock")
+            && !(top && dir_lock::comparable_name(&entry.file_name().to_string_lossy()) == dir_lock::INSIDE_LOCK)
             && dir_lock::DirLock::is_held(&path)?
         {
             return refused(format!(
@@ -6139,6 +6173,8 @@ enum Recovered {
 fn recover_compaction(dir: &std::path::Path) -> std::io::Result<Recovered> {
     let new_dir = staging_path(dir, "compact-new");
     let old_dir = staging_path(dir, "compact-old");
+    remove_staging_scratch(&new_dir, "compact-new")?;
+    remove_staging_scratch(&old_dir, "compact-old")?;
     let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
     if dir.exists() {
         // Canonical dir is intact: drop this store's leftover staging from a crash after (or
@@ -6257,11 +6293,15 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
         clear_staging_mark(&named_dir)?;
     }
     remove_staging_scratch(&new_dir, "drop-new")?;
+    remove_staging_scratch(&old_dir, "drop-old")?;
     let (has_new, has_old) = (something_at(&new_dir)?, something_at(&old_dir)?);
     if !has_new && !has_old {
         return Ok(false);
     }
     if something_at(&named_dir)? {
+        if has_old && staging_mark(&old_dir, "drop-old", &named_dir)?.as_deref() == id.as_deref() {
+            complete_named_manifest(dir)?;
+        }
         remove_staging(&new_dir, "drop-new", id.as_deref(), &named_dir)?;
         remove_staging(&old_dir, "drop-old", id.as_deref(), &named_dir)?;
         return Ok(false);
@@ -6307,6 +6347,7 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
         clear_staging_mark(&new_dir)?;
         publish_rename(&new_dir, &named_dir)?;
         fsync_dir(dir)?;
+        complete_named_manifest(dir)?;
         if has_old {
             remove_staging_dir(&old_dir)?;
         }
@@ -6326,6 +6367,9 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
 const NAMED_SUBDIR: &str = "named";
 #[cfg(feature = "mmap")]
 const NAMED_MANIFEST: &str = "named.bin";
+/// Manifest saved beside the staged survivor directories until root publication completes.
+#[cfg(feature = "mmap")]
+const PENDING_NAMED_MANIFEST: &str = ".sparq-named-manifest";
 /// Manifest magic ("NMG1" little-endian) — identifies a named-graph manifest and lets a
 /// stray/legacy file be rejected rather than misread.
 #[cfg(feature = "mmap")]
@@ -6340,6 +6384,22 @@ const NAMED_FORMAT_VERSION: u32 = 1;
 /// pre-allocation to it — a hostile `count` field can never drive an unbounded reservation.
 #[cfg(feature = "mmap")]
 const MIN_MANIFEST_ENTRY_BYTES: usize = 5;
+
+/// Publishes the manifest saved with a renamed survivor tree before discarding the old tree.
+/// Its absence means it was already published, or this tree predates staged manifests.
+#[cfg(feature = "mmap")]
+fn complete_named_manifest(dir: &std::path::Path) -> std::io::Result<()> {
+    let named = dir.join(NAMED_SUBDIR);
+    let pending = named.join(PENDING_NAMED_MANIFEST);
+    let bytes = match std::fs::read(&pending) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    write_fresh(&dir.join(NAMED_MANIFEST), &bytes)?;
+    std::fs::remove_file(pending)?;
+    fsync_dir(&named)
+}
 
 /// (sq-3ui0) Writes the named-graph manifest `dir/named.bin`: the magic +
 /// format version + count, then each graph name in order (see [`encode_graph_name`]). The
@@ -6357,6 +6417,12 @@ const MIN_MANIFEST_ENTRY_BYTES: usize = 5;
 /// dir-fsync discipline the compaction directory-swap uses (`Graph::compact`).
 #[cfg(feature = "mmap")]
 fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
+    write_named_manifest_file(&dir.join(NAMED_MANIFEST), names)
+}
+
+/// Writes a manifest image at its live or pending publication path.
+#[cfg(feature = "mmap")]
+fn write_named_manifest_file(path: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
     use std::io::Write;
     let mut buf = Vec::with_capacity(12 + names.len() * 32);
     buf.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
@@ -6369,7 +6435,7 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
     // file or link) and fsync its CONTENTS before the rename, so the bytes the rename publishes
     // are already durable (a crash can't surface a zero-length/partial file under the canonical
     // name); then fsync `dir`, so the rename (the commit) is itself durable.
-    let mut f = FreshFile::create(&dir.join(NAMED_MANIFEST))?;
+    let mut f = FreshFile::create(path)?;
     f.write_all(&buf)?;
     f.commit()
 }

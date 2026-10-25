@@ -450,7 +450,7 @@ pub struct MaterializeStats {
 /// let stats = sparq_solid::materialize_wac(&mut graph)?;
 /// assert!(stats.auth_triples > 0);
 /// // the view is an ordinary named graph now
-/// assert!(graph.named.iter().any(|(name, _)| matches!(
+/// assert!(graph.named().iter().any(|(name, _)| matches!(
 ///     name, Term::NamedNode(n) if n.as_str() == sparq_solid::AUTH_GRAPH)));
 /// # Ok::<(), String>(())
 /// ```

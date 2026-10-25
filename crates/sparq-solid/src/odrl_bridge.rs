@@ -377,7 +377,7 @@ fn refuse_unimplementable_conflict(policy: &ValidatedPolicy) -> Option<BridgeOut
 /// let out = materialize_permission(&mut graph, &pol, &req);
 /// assert!(out.granted);
 /// // a concrete WAC/ACP grant now lives in the auth view
-/// assert!(graph.named.iter().any(|(name, _)| matches!(
+/// assert!(graph.named().iter().any(|(name, _)| matches!(
 ///     name, Term::NamedNode(n) if n.as_str() == sparq_solid::AUTH_GRAPH)));
 /// # Ok::<(), String>(())
 /// ```
@@ -525,7 +525,7 @@ fn allow_binding(permit: &Permit) -> Result<(Mode, &str, &str), Vec<String>> {
 /// assert!(out.prohibited);
 /// assert_eq!(out.mode, Some(Mode::Write));
 /// // an explicit auth:denyWrite triple now lives in the auth view
-/// assert!(graph.named.iter().any(|(name, _)| matches!(
+/// assert!(graph.named().iter().any(|(name, _)| matches!(
 ///     name, Term::NamedNode(n) if n.as_str() == sparq_solid::AUTH_GRAPH)));
 /// # Ok::<(), String>(())
 /// ```

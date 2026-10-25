@@ -1039,6 +1039,8 @@ fn a_store_in_a_read_only_parent_opens_and_keeps_one_writer() {
     save_dataset(&dir);
     // As left by a version without locks: nothing beside the store.
     std::fs::remove_file(parent.join("store.lock")).unwrap();
+    std::fs::remove_file(dir.join("sparq.lock")).unwrap();
+    std::fs::remove_file(dir.join("sparq-store")).unwrap();
     let set_mode = |mode| {
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(mode)).unwrap();
     };
@@ -1058,15 +1060,25 @@ fn a_store_in_a_read_only_parent_opens_and_keeps_one_writer() {
         drop((r1, r2));
         // One writer, which excludes a second writer and readers.
         let mut g = Graph::open(&dir).unwrap();
+        assert!(dir.join("sparq.lock").is_file(), "upgrade did not create the inside lock");
         assert!(would_block(Graph::open(&dir)), "a second writer got in");
         assert!(would_block(Graph::open_read_only(&dir)), "a reader got in beside the writer");
         g.apply_delta(&[triple("x")], &[]).unwrap();
         let err = g.compact().unwrap_err();
         assert!(err.contains(&parent.display().to_string()), "{err}");
+        let err = g.restore_in_place(Graph::new()).unwrap_err().to_string();
+        assert!(err.contains(&parent.display().to_string()), "{err}");
+        let slot = g.ensure_named(&iri("fresh")).unwrap();
+        g.apply_delta_to_named(slot, &[triple("named-update")], &[]).unwrap();
+        g.clear_named_durable(&iri("g1")).unwrap();
+        g.drop_named_durable(&iri("g0")).unwrap();
         g.apply_delta(&[triple("y")], &[]).unwrap();
         drop(g);
         let g = Graph::open(&dir).unwrap();
         assert!(has(&g, "x") && has(&g, "y") && has(&g, "a"));
+        assert!(has(g.named_graph(&iri("fresh")).unwrap(), "named-update"));
+        assert!(g.named_graph(&iri("g0")).is_none());
+        assert!(g.named_graph(&iri("g1")).unwrap().is_empty());
         drop(g);
         assert!(!parent.join("store.lock").exists());
     });
@@ -1226,7 +1238,11 @@ fn reserved_names_match_in_any_case_and_held_files_are_reserved() {
     use sparq_core::dir_lock::is_reserved_store_path;
     let root = scratch("reserved-case");
     std::fs::create_dir_all(root.join("data")).unwrap();
-    for name in ["data.LOCK", "data.Lock", "SPARQ-STORE", "x.Compact-New", "Sparq.Lock"] {
+    for name in [
+        "data.LOCK", "data.Lock", "SPARQ-STORE", "SPARQ-STAGING", "Sparq.Lock",
+        "x.Compact-New", "x.COMPACT-OLD", "named.Drop-New", "named.DROP-OLD",
+        ".SPARQ-build-1", "x.SPARQ-PART", "x.COMPACT-NEW.LOCK",
+    ] {
         assert!(is_reserved_store_path(&root.join(name)).unwrap(), "{name}");
     }
     // Windows drops trailing dots and spaces from a name: `data.lock.` is `data.lock` there.
@@ -1245,4 +1261,95 @@ fn reserved_names_match_in_any_case_and_held_files_are_reserved() {
     drop(g);
     assert!(!is_reserved_store_path(&renamed_lock).unwrap());
     std::fs::remove_dir_all(&root).ok();
+}
+
+/// Special files are rejected before any store or lock file is opened or created.
+#[cfg(unix)]
+#[test]
+fn special_files_are_neither_store_directories_nor_lock_targets() {
+    use sparq_core::dir_lock::{DirLock, LockLocation};
+    let root = scratch("special-files");
+    let fifo = root.join("fifo");
+    assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    for path in [&fifo, Path::new("/dev/null"), Path::new("/dev/stdout")] {
+        assert!(LockLocation::sibling_of(path).is_err(), "{} was accepted as a directory", path.display());
+        assert!(Graph::open(path).is_err());
+        assert!(Graph::open_read_only(path).is_err());
+        assert!(Graph::open_or_create(path, &Graph::new()).is_err());
+        assert!(Graph::new().save(path).is_err());
+        assert!(Graph::build_external("".as_bytes(), "ntriples", path, 1024).is_err());
+    }
+    assert!(!root.join("fifo.lock").exists());
+    let dir = root.join("store");
+    std::os::unix::fs::symlink("/dev/null", root.join("store.lock")).unwrap();
+    let location = LockLocation::sibling_of(&dir).unwrap();
+    assert_eq!(DirLock::acquire(location).unwrap_err().kind(), ErrorKind::InvalidInput);
+    assert!(Graph::open_or_create(&dir, &Graph::new()).is_err());
+    assert!(!dir.exists());
+    std::fs::remove_file(root.join("store.lock")).unwrap();
+    save_dataset(&dir);
+    std::fs::remove_file(dir.join("sparq.lock")).unwrap();
+    std::os::unix::fs::symlink("/dev/null", dir.join("sparq.lock")).unwrap();
+    assert_eq!(Graph::open(&dir).err().unwrap().kind(), ErrorKind::InvalidInput);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Even a shared holder must acquire the inside lock rather than proceed without one.
+#[cfg(unix)]
+#[test]
+fn a_read_only_open_requires_access_to_the_inside_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = scratch("inside-required");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    std::fs::remove_file(dir.join("sparq.lock")).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let result = Graph::open_read_only(&dir);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(result.err().expect("opened without the inside lock").kind(), ErrorKind::PermissionDenied);
+    assert!(Graph::open_read_only(&dir).is_ok());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn staging_names_in_another_case_are_not_opened_as_live_stores() {
+    let root = scratch("staging-case");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let old = root.join("g.CoMpAcT-OlD");
+    let id = store_id(&dir);
+    std::fs::rename(&dir, &old).unwrap();
+    stage(&old, "compact-old", &id);
+    for result in [Graph::open(&old), Graph::open_read_only(&old)] {
+        assert_eq!(result.err().expect("opened staging as a live store").kind(), ErrorKind::InvalidInput);
+    }
+    assert!(old.join("sparq-staging").is_file());
+    assert!(!dir.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_store_write_refuses_a_held_lock_in_another_case() {
+    let root = scratch("nested-lock-case");
+    let dir = root.join("g");
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("child.LOCK");
+    let held = std::fs::File::create(&path).unwrap();
+    fs4::FileExt::try_lock(&held).unwrap();
+    assert!(Graph::new().save(&dir).is_err());
+    assert!(!dir.join("dict-meta.bin").exists());
+    drop(held);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn store_paths_reject_regular_files_before_creating_locks() {
+    let root = scratch("store-file");
+    let path = root.join("ordinary-file");
+    std::fs::write(&path, b"keep").unwrap();
+    assert!(sparq_core::dir_lock::LockLocation::sibling_of(&path).is_err());
+    assert_eq!(Graph::open_or_create(&path, &Graph::new()).err().unwrap().kind(), ErrorKind::InvalidInput);
+    assert!(!root.join("ordinary-file.lock").exists());
+    assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+    std::fs::remove_dir_all(root).unwrap();
 }

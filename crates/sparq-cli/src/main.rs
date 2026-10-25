@@ -1697,6 +1697,27 @@ fn open_reader(path: &str) -> std::io::Result<Box<dyn std::io::Read + Send>> {
 
 #[cfg(test)]
 mod open_reader_tests {
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn reserved_output_refusal_leaves_the_store_untouched() {
+        const CHILD: &str = "SPARQ_TEST_RESERVED_OUTPUT";
+        if let Some(path) = std::env::var_os(CHILD) {
+            super::refuse_output_in_store(path.to_str().unwrap());
+            panic!("reserved output was accepted");
+        }
+        let dir = std::env::temp_dir().join(format!("sparq-output-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("SPARQ-STAGING");
+        std::fs::write(&path, b"keep").unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "open_reader_tests::reserved_output_refusal_leaves_the_store_untouched"])
+            .env(CHILD, &path)
+            .status().unwrap();
+        assert_eq!(status.code(), Some(2));
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     use super::open_reader;
     use std::io::{Read, Write};
 
