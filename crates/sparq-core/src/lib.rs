@@ -5213,8 +5213,9 @@ fn remove_staging_scratch(staging: &std::path::Path, kind: &str) -> std::io::Res
         && std::fs::read_dir(&scratch)?.all(|e| {
             e.is_ok_and(|e| {
                 let name = e.file_name();
+                let name = dir_lock::comparable_name(&name.to_string_lossy());
                 e.file_type().is_ok_and(|t| t.is_file())
-                    && (name == STAGING_MARKER || name == std::ffi::OsStr::new(&partial))
+                    && (name == STAGING_MARKER || name == partial)
             })
         });
     if !only_a_record {
@@ -5259,7 +5260,7 @@ fn clear_staging_mark(dir: &std::path::Path) -> std::io::Result<()> {
 fn remove_staging_dir(staging: &std::path::Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(staging)? {
         let entry = entry?;
-        if entry.file_name() == STAGING_MARKER {
+        if dir_lock::comparable_name(&entry.file_name().to_string_lossy()) == STAGING_MARKER {
             continue;
         }
         let path = entry.path();
@@ -5653,7 +5654,7 @@ fn remove_stale_scratch(dir: &std::path::Path) -> std::io::Result<()> {
     for entry in entries {
         let entry = entry?;
         let name = entry.file_name();
-        let name = name.to_string_lossy();
+        let name = dir_lock::comparable_name(&name.to_string_lossy());
         if (name.starts_with(".sparq-build-") || name.starts_with(".sparq-quads-spill-"))
             && entry.file_type()?.is_dir()
         {
@@ -5792,11 +5793,12 @@ fn check_store_internals(dir: &std::path::Path) -> std::io::Result<()> {
             let entry = entry?;
             let path = entry.path();
             let meta = std::fs::symlink_metadata(&path)?;
+            let name = dir_lock::comparable_name(&entry.file_name().to_string_lossy());
             if meta.file_type().is_symlink() {
                 return refused(&path, "is a symbolic link");
             }
             if meta.is_file()
-                && IN_PLACE_FILES.iter().any(|f| entry.file_name() == *f)
+                && IN_PLACE_FILES.contains(&name.as_str())
                 && hard_links(&path, &meta)? > 1
             {
                 return refused(&path, "is written in place and has another hard link");
@@ -5874,7 +5876,7 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
         for entry in std::fs::read_dir(&named)? {
             let entry = entry?;
             let name = entry.file_name();
-            let name = name.to_string_lossy();
+            let name = dir_lock::comparable_name(&name.to_string_lossy());
             if [".compact-new", ".compact-old", STAGING_SCRATCH_SUFFIX]
                 .iter()
                 .any(|suffix| name.ends_with(suffix))

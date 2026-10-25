@@ -1227,6 +1227,28 @@ fn a_read_only_open_names_a_named_graph_caught_mid_swap() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+/// Reserved named-staging suffixes are recognized in every case, even on a
+/// case-sensitive filesystem and when the live named graphs are still present.
+#[test]
+fn a_read_only_open_refuses_mixed_case_named_staging() {
+    let root = scratch("ro-named-staging-case");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    for suffix in ["CoMpAcT-NeW", "COMPACT-OLD", "SpArQ-PaRt"] {
+        let staging = dir.join("named").join(format!("0.{suffix}"));
+        std::fs::create_dir(&staging).unwrap();
+        let err = Graph::open_read_only(&dir).err().expect("opened with named staging");
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+        assert!(err.to_string().contains("interrupted swap of a named graph"), "{err}");
+        assert!(staging.is_dir(), "read-only open changed staging");
+        std::fs::remove_dir(staging).unwrap();
+    }
+    let g = Graph::open_read_only(&dir).unwrap();
+    assert!(has(sub_graph(&g, "g0"), "b"));
+    drop(g);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn sub_graph<'a>(g: &'a Graph, name: &str) -> &'a Graph {
     g.named_graph(&iri(name)).unwrap()
 }

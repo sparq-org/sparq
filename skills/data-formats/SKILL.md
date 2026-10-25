@@ -737,7 +737,8 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   `<dir>.lock`, a `<name>.lock` of anything at `<name>`, any lock file held now, swap staging
   names and their `.sparq-part` scratch, `sparq-store`, `sparq-staging`, `sparq.lock`,
   `.sparq-*` scratch), checking the entry itself (so a symbolic link inside a store counts
-  even when it points out) and where it leads. Names match in any ASCII letter case (and, on
+  even when it points out) and where it leads. Reserved names and named-staging suffixes
+  match in any letter case, including Unicode aliases of reserved ASCII letters (and, on
   Windows, ignoring trailing dots and spaces), since a case-insensitive file system resolves
   `data.LOCK` to `data.lock`. `sparq-cli` refuses such a path for `reason`, `classify`, tabular
   and benchmark `--json` outputs (exit 2, before any work), and writes every output to a fresh,
@@ -768,8 +769,9 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
 - **A swap releases the graph's files first.** `compact`, `vacuum` and `restore_in_place`
   stage the new base, then the graph lets go of every file it has in the directory (maps, logs,
   named graphs) before the renames, since Windows refuses to rename a directory with a file in
-  it open or mapped. On Windows, a fork, snapshot or named graph taken out of `named` that is
-  still alive makes the swap fail (the directory is left as it was).
+  it open or mapped. On Windows, a fork or snapshot that still maps the store makes the swap
+  fail (the directory is left as it was). Durable named graphs stay within their root store;
+  the named accessors refuse to take them out.
 - **A failed swap** (`compact`, `vacuum`, `restore_in_place`) leaves the directory old-or-new,
   never lost: it is recovered at once, under the graph's lock. Completed, the call succeeds and
   the graph is the new store; rolled back, the error is returned and the graph keeps logging to
