@@ -191,6 +191,10 @@ cargo run --release -p sparq-cli --features hdt-write -- \
 
 ## Test harness
 
+Direct stream outputs preserve the inherited stream's position and append mode.
+On Unix, `/dev/stdout`, `/dev/stderr`, and their standard descriptor aliases also
+work when the process can use its inherited handles but cannot reopen `/dev`.
+
 The `reserved_output_refusal_leaves_the_store_untouched` unit test uses
 `SPARQ_TEST_RESERVED_OUTPUT` (unset by default) to pass its output path to a child
 test process. This variable exists only in the test harness; setting it makes that

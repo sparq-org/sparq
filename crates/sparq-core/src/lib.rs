@@ -5873,6 +5873,7 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
         }
     }
     if named.is_dir() {
+        let mut children = Vec::new();
         for entry in std::fs::read_dir(&named)? {
             let entry = entry?;
             let name = entry.file_name();
@@ -5889,9 +5890,14 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
                 )));
             }
             if entry.file_type()?.is_dir() {
-                if let Some(why) = needs_writable_open(&entry.path())? {
-                    return Ok(Some(why));
-                }
+                children.push(entry.path());
+            }
+        }
+        // Classify staging before descending into live children, so a sibling found
+        // through case-insensitive lookup gets the same named-swap diagnostic.
+        for child in children {
+            if let Some(why) = needs_writable_open(&child)? {
+                return Ok(Some(why));
             }
         }
     }

@@ -1076,6 +1076,31 @@ fn reason_to_dev_stdout_redirected_to_a_file_writes_the_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A link to stdout uses its inherited descriptor and keeps a redirected prefix.
+#[cfg(unix)]
+#[test]
+fn reason_to_a_stdout_link_preserves_the_redirected_position() {
+    use std::io::Write;
+    let dir = scratch("reason-stdout-link");
+    let data = write(&dir, "data.nt", NT);
+    let out = dir.join("out.nt");
+    let link = dir.join("stdout-link");
+    std::os::unix::fs::symlink("/dev/stdout", &link).unwrap();
+    let mut file = std::fs::File::create(&out).unwrap();
+    file.write_all(b"# prefix\n").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_sparq-cli"))
+        .args(["reason", s(&data), "ntriples", "rdfs", s(&link)])
+        .stdout(file)
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let written = std::fs::read_to_string(&out).unwrap();
+    let closure = written.strip_prefix("# prefix\n").expect("the prefix was overwritten");
+    assert!(!closure.is_empty() && closure.lines().all(|line| line.ends_with(" .")));
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// An output to a symbolic link replaces the file the link leads to; the link stays a link.
 #[cfg(unix)]
 #[test]

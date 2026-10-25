@@ -53,12 +53,12 @@ fn output_target(path: &std::path::Path) -> std::io::Result<Target> {
                     _ => link,
                 };
                 if is_descriptor_or_device_path(&next) {
-                    return Ok(Target::Direct(path.to_path_buf()));
+                    return Ok(Target::Direct(next));
                 }
                 current = next;
             }
             Ok(meta) if !meta.is_file() && !meta.is_dir() => {
-                return Ok(Target::Direct(path.to_path_buf()));
+                return Ok(Target::Direct(current));
             }
             Ok(_) => return Ok(Target::Staged(current)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -86,6 +86,29 @@ fn output_target(path: &std::path::Path) -> std::io::Result<Target> {
         std::io::ErrorKind::InvalidInput,
         format!("{} is a loop of symbolic links", path.display()),
     ))
+}
+
+/// Opens a direct output, reusing inherited standard descriptors on Unix.
+fn open_direct_output(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsFd;
+        // Duplicating the inherited descriptor also works when reopening /dev is
+        // unavailable, and preserves the shell's offset and append mode.
+        let descriptor = match path.to_str() {
+            Some("/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1") => {
+                Some(std::io::stdout().as_fd().try_clone_to_owned()?)
+            }
+            Some("/dev/stderr" | "/dev/fd/2" | "/proc/self/fd/2") => {
+                Some(std::io::stderr().as_fd().try_clone_to_owned()?)
+            }
+            _ => None,
+        };
+        if let Some(descriptor) = descriptor {
+            return Ok(std::fs::File::from(descriptor));
+        }
+    }
+    std::fs::OpenOptions::new().append(true).open(path)
 }
 
 /// `Err` when the output file `out` would replace a graph store's file or a name a store
@@ -174,7 +197,7 @@ impl OutFile {
     pub(crate) fn create(out: &str) -> std::io::Result<OutFile> {
         let path = match check_output_path(out)? {
             Target::Direct(path) => {
-                let file = std::fs::OpenOptions::new().append(true).open(path)?;
+                let file = open_direct_output(&path)?;
                 return Ok(OutFile {
                     file: Some(file),
                     staged: None,
