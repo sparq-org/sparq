@@ -28,6 +28,8 @@ pub mod embedded;
 #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
 pub mod http;
 mod limits;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod lock;
 pub mod reconcile;
 pub mod sparq;
 pub mod sparql;
@@ -91,6 +93,9 @@ pub use limits::{
     DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT, DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES, POOLED_BLOB_KEY_MARK,
     SERVICE_MARKER_FRAGMENT, SERVICE_POOL_PATH, STORE_CALL_TIMEOUT,
 };
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(inline)]
+pub use lock::DataDirLock;
 #[cfg(not(target_arch = "wasm32"))]
 pub use reconcile::spawn_periodic;
 pub use reconcile::{

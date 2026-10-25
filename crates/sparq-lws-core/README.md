@@ -105,6 +105,16 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   - `trust-graph` (off, sq-hed3q) — the LIBRARY-only trust-graph admission
     seam (`authz::trust_admit`); NOT handler-wired. Research prototype (sq-qhy4).
 
+## Data directory lock
+
+`store::DataDirLock::acquire(&data_dir)` locks `<data_dir>/LOCK` and records the PID
+only after acquisition; guard drop releases the lock. Contention returns `WouldBlock` naming the holder PID.
+`SOLID_SERVER_WAIT_FOR_LOCK_SECS=<n>` polls for up to n seconds (default unset:
+fail immediately; nonnegative integers only, otherwise `InvalidInput`). The file
+remains after drop. Keep the guard outside the index directory, which compaction
+replaces. The bare index boot path does not take this outer lock; the in-memory
+blob guard still refuses durable native deployment. See the [server skill](../../skills/solid-lws-server/SKILL.md).
+
 ## 📚 Learn more
 
 - Usage: [`skills/solid-lws-server/SKILL.md`](../../skills/solid-lws-server/SKILL.md). Authorized dataset rewrites retain query VERSION announcements. Unknown or incompatible labels return a bad-request error before evaluation; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).

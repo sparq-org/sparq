@@ -76,6 +76,16 @@ Set `PSS_SPARQ_BACKEND` to one of:
   requests and subscriptions, and the content write of a resource create, are fenced
   against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
 
+Native callers can acquire `store::DataDirLock::acquire(&data_dir)` and retain the
+guard until all storage users stop. It creates `<data_dir>/LOCK`, takes an advisory
+exclusive OS lock, then records the PID. Contention returns `WouldBlock` naming
+the holder PID. `SOLID_SERVER_WAIT_FOR_LOCK_SECS=<n>` accepts a nonnegative integer
+(default unset, immediate failure); it polls for at most that many seconds.
+Invalid values fail with `InvalidInput`. The file remains after guard drop.
+The bare `SOLID_SERVER_SPARQ_DIR` boot path does not acquire this guard: compaction
+renames the index directory, so the service must hold a lock in an outer data
+directory. The combined data-directory boot wiring is separate from this API.
+
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
 present the native image as a durable production data service.
