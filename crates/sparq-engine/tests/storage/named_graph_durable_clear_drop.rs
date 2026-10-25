@@ -128,12 +128,10 @@ fn drop_named_graph_survives_restart_gone() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// DROP of a MIDDLE graph among several must renumber the surviving positional sub-tree and
-/// survive a restart with the survivors' contents intact — exercises the `named/<i>/` ↔ manifest
-/// renumbering the durable drop performs, plus the survivors' WAL re-indexing.
+/// DROP of a middle graph keeps survivor slots and WAL backing stable across restart.
 #[test]
-fn drop_middle_named_graph_renumbers_and_survives_restart() {
-    let dir = tmp("renumber");
+fn drop_middle_named_graph_preserves_slots_and_survives_restart() {
+    let dir = tmp("stable_slots");
     Graph::load_dataset(
         "<http://ex/a1> <http://ex/p> <http://ex/o> <http://ex/g1> .\n\
          <http://ex/a2> <http://ex/p> <http://ex/o> <http://ex/g2> .\n\
@@ -150,7 +148,7 @@ fn drop_middle_named_graph_renumbers_and_survives_restart() {
         update_in_place(&mut g, "PREFIX : <http://ex/> DROP GRAPH :g2").unwrap();
         assert_eq!(g.named.len(), 2);
         assert!(named(&g, "g2").is_none());
-        // Mutate a survivor AFTER the renumber to prove its WAL is correctly re-indexed.
+        // Mutate a survivor after deletion to prove its WAL still targets the same slot.
         update_in_place(
             &mut g,
             "PREFIX : <http://ex/> INSERT DATA { GRAPH :g3 { :extra :p :o } }",
@@ -169,7 +167,7 @@ fn drop_middle_named_graph_renumbers_and_survives_restart() {
     assert_eq!(
         rows(named(&g2, "g3").expect("g3 survives")),
         2,
-        "g3 (renumbered) keeps its original + post-drop triple across the restart"
+        "g3 keeps its original + post-drop triple across the restart"
     );
     std::fs::remove_dir_all(&dir).ok();
 }

@@ -1,4 +1,5 @@
-//! Ordering checks observe real fsync calls; they do not simulate power loss.
+//! Ordering checks observe real fsync calls; injected failures model interrupted operations.
+//! Removing a directory entry at a crash point models its loss, not a physical power cut.
 
 use super::*;
 use std::cell::RefCell;
@@ -8,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub(super) enum Event {
     Synced(PathBuf),
     ManifestPublished(PathBuf),
+    ManifestReady(PathBuf),
+    DropPublished(PathBuf),
     JournalTruncated(PathBuf),
     SwapPublished(PathBuf),
     RetiringOldBase(PathBuf),
@@ -15,6 +18,7 @@ pub(super) enum Event {
 
 thread_local! {
     static EVENTS: RefCell<Option<Vec<Event>>> = const { RefCell::new(None) };
+    static FAIL_AT: RefCell<Option<Event>> = const { RefCell::new(None) };
 }
 
 pub(super) fn record(event: Event) {
@@ -23,6 +27,43 @@ pub(super) fn record(event: Event) {
             events.push(event);
         }
     });
+}
+
+/// Fail once at a real persistence boundary; production builds contain no injection path.
+pub(super) fn checkpoint(event: Event) -> std::io::Result<()> {
+    let fail = FAIL_AT.with_borrow_mut(|target| {
+        if target.as_ref() == Some(&event) {
+            target.take();
+            true
+        } else {
+            false
+        }
+    });
+    record(event);
+    if fail {
+        Err(std::io::Error::other("injected persistence interruption"))
+    } else {
+        Ok(())
+    }
+}
+
+struct Failure;
+
+impl Failure {
+    fn at(event: Event) -> Self {
+        FAIL_AT.with_borrow_mut(|target| *target = Some(event));
+        Self
+    }
+
+    fn assert_hit(&self) {
+        FAIL_AT.with_borrow(|target| assert!(target.is_none(), "crash point was not reached"));
+    }
+}
+
+impl Drop for Failure {
+    fn drop(&mut self) {
+        FAIL_AT.with_borrow_mut(|target| *target = None);
+    }
 }
 
 struct Trace;
@@ -210,4 +251,254 @@ fn compact_syncs_saved_tree_before_swap_and_old_base_retirement() {
     let reopened = Graph::open(&store).unwrap();
     assert_eq!(reopened.store.len(), 2);
     assert_eq!(reopened.named[0].1.store.len(), 2);
+}
+
+fn deletion_fixture(dir: &Path) -> Graph {
+    Graph::load_dataset(
+        concat!(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n",
+            "<http://ex/base> <http://ex/p> <http://ex/o> <http://ex/first> .\n",
+            "<http://ex/base> <http://ex/p> <http://ex/o> <http://ex/remove> .\n",
+            "<http://ex/base> <http://ex/p> <http://ex/o> <http://ex/last> .\n",
+        ),
+        "nquads",
+    )
+    .unwrap()
+    .save(dir)
+    .unwrap();
+    let mut graph = Graph::open(dir).unwrap();
+    graph
+        .apply_delta_nquads(
+            concat!(
+                "<http://ex/ack> <http://ex/p> <http://ex/o> .\n",
+                "<http://ex/ack> <http://ex/p> <http://ex/o> <http://ex/first> .\n",
+                "<http://ex/ack> <http://ex/p> <http://ex/o> <http://ex/remove> .\n",
+                "<http://ex/ack> <http://ex/p> <http://ex/o> <http://ex/last> .\n",
+            ),
+            "",
+        )
+        .unwrap();
+    graph
+}
+
+fn contents(graph: &Graph) -> Vec<String> {
+    let scan = graph.store.scan(&[None, None, None]);
+    let mut triples: Vec<_> = scan
+        .rows
+        .iter()
+        .map(|row| {
+            let spo = scan.to_spo(row);
+            format!(
+                "{} {} {}",
+                graph.dict.term(spo[0]),
+                graph.dict.term(spo[1]),
+                graph.dict.term(spo[2])
+            )
+        })
+        .collect();
+    triples.sort();
+    triples
+}
+
+fn dataset(graph: &Graph) -> Vec<(Option<Term>, Vec<String>)> {
+    let mut result = vec![(None, contents(graph))];
+    result.extend(
+        graph
+            .named
+            .iter()
+            .map(|(name, sub)| (Some(name.clone()), contents(sub))),
+    );
+    result
+}
+
+#[test]
+fn interrupted_delete_preserves_acknowledged_survivor_files_and_wals() {
+    let dir = TestDir::new("drop_survivors");
+    let mut graph = deletion_fixture(&dir.0);
+    let before = dataset(&graph);
+    // Survivor data includes acknowledged WAL-only inserts. Deletion must leave every
+    // survivor file and its physical path alone, so no unsynced replacement can lose it.
+    let paths: Vec<_> = ["named/0", "named/2"]
+        .into_iter()
+        .flat_map(|slot| saved_paths(&dir.0.join(slot)))
+        .filter(|path| path.is_file())
+        .collect();
+    let files: Vec<_> = paths
+        .iter()
+        .map(|path| std::fs::read(path).unwrap())
+        .collect();
+    let trace = Trace::start();
+    let failure = Failure::at(Event::DropPublished(dir.0.clone()));
+    assert!(graph.drop_named_durable(&named("remove")).is_err());
+    failure.assert_hit();
+    let events = trace.take();
+    let published = position(&events, Event::ManifestPublished(dir.0.join("named.bin")));
+    let reclaim = position(&events, Event::DropPublished(dir.0.clone()));
+    assert!(
+        events[published + 1..reclaim].contains(&Event::Synced(dir.0.clone())),
+        "persist the new manifest before reclaiming the dropped slot"
+    );
+    drop(graph);
+    for (path, bytes) in paths.iter().zip(files) {
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            bytes,
+            "survivor {path:?} was rewritten"
+        );
+    }
+    let expected: Vec<_> = before
+        .into_iter()
+        .filter(|(name, _)| *name != Some(named("remove")))
+        .collect();
+    for _ in 0..2 {
+        let reopened = Graph::open(&dir.0).unwrap();
+        assert_eq!(dataset(&reopened), expected);
+        assert_eq!(
+            reopened.named[1].1.wal.as_ref().unwrap().dir,
+            dir.0.join("named/2")
+        );
+    }
+}
+
+#[test]
+fn interrupted_delete_manifest_publish_reopens_whole_old_or_new_dataset() {
+    // Cover middle, trailing, last-only and batch drops, on both sides of publication.
+    for batch in [false, true] {
+        for target in ["first", "remove", "last", "only"] {
+            for published in [false, true] {
+                let dir = TestDir::new("drop_publish");
+                let mut graph = deletion_fixture(&dir.0);
+                if target == "only" {
+                    graph.drop_named_durable(&named("first")).unwrap();
+                    graph.drop_named_durable(&named("last")).unwrap();
+                }
+                let before = dataset(&graph);
+                let removed = if target == "only" { "remove" } else { target };
+                // An all-graphs drop publishes by removing the manifest; interrupt just
+                // after that durable removal. Other pre-publication cases fail after the
+                // complete temporary manifest has been fsync'd, before its atomic rename.
+                let removes_manifest = batch || target == "only";
+                if removes_manifest && !published {
+                    continue;
+                }
+                let event = if published {
+                    Event::DropPublished(dir.0.clone())
+                } else {
+                    Event::ManifestReady(dir.0.join("named.bin.tmp"))
+                };
+                let failure = Failure::at(event);
+                let result = if batch {
+                    graph.drop_all_named_durable().map(|()| true)
+                } else {
+                    graph.drop_named_durable(&named(removed))
+                };
+                assert!(result.is_err());
+                failure.assert_hit();
+                drop(graph);
+                let expected: Vec<_> = before
+                    .into_iter()
+                    .filter(|(name, _)| {
+                        !published || name.is_none() || (!batch && *name != Some(named(removed)))
+                    })
+                    .collect();
+                for _ in 0..2 {
+                    assert_eq!(dataset(&Graph::open(&dir.0).unwrap()), expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn sparse_slots_survive_create_drop_compact_and_legacy_reopen() {
+    let dir = TestDir::new("sparse_slots");
+    let mut graph = deletion_fixture(&dir.0);
+    // The dense fixture retains legacy version 1 bytes.
+    let version = |dir: &Path| {
+        u32::from_le_bytes(
+            std::fs::read(dir.join("named.bin")).unwrap()[4..8]
+                .try_into()
+                .unwrap(),
+        )
+    };
+    assert_eq!(version(&dir.0), 1);
+    graph.drop_named_durable(&named("remove")).unwrap();
+    assert_eq!(version(&dir.0), 2);
+    drop(graph);
+    let mut graph = Graph::open(&dir.0).unwrap();
+    graph
+        .apply_delta_nquads(
+            "<http://ex/new> <http://ex/p> <http://ex/o> <http://ex/added> .",
+            "",
+        )
+        .unwrap();
+    assert_eq!(
+        graph.named.last().unwrap().1.wal.as_ref().unwrap().dir,
+        dir.0.join("named/3")
+    );
+    assert_eq!(
+        graph.named[1].1.wal.as_ref().unwrap().dir,
+        dir.0.join("named/2")
+    );
+    let expected = dataset(&graph);
+    drop(graph);
+    let mut graph = Graph::open(&dir.0).unwrap();
+    assert_eq!(dataset(&graph), expected);
+    graph.compact().unwrap();
+    assert_eq!(
+        version(&dir.0),
+        1,
+        "compaction packs slots into the legacy dense format"
+    );
+    drop(graph);
+    let graph = Graph::open(&dir.0).unwrap();
+    assert_eq!(dataset(&graph), expected);
+    assert_eq!(
+        graph.named[1].1.wal.as_ref().unwrap().dir,
+        dir.0.join("named/1")
+    );
+}
+
+#[test]
+fn interrupted_delete_orphan_logs_are_not_replayed_into_a_new_graph() {
+    let dir = TestDir::new("drop_orphan");
+    let mut graph = deletion_fixture(&dir.0);
+    let failure = Failure::at(Event::DropPublished(dir.0.clone()));
+    assert!(graph.drop_named_durable(&named("last")).is_err());
+    failure.assert_hit();
+    drop(graph);
+    assert!(
+        dir.0.join("named/2/wal.log").exists(),
+        "interruption leaves an orphan"
+    );
+    let mut graph = Graph::open(&dir.0).unwrap();
+    graph
+        .apply_delta_nquads(
+            "<http://ex/fresh> <http://ex/p> <http://ex/o> <http://ex/new> .",
+            "",
+        )
+        .unwrap();
+    let expected = vec!["<http://ex/fresh> <http://ex/p> <http://ex/o>".to_string()];
+    assert_eq!(contents(&graph.named[2].1), expected);
+    drop(graph);
+    let graph = Graph::open(&dir.0).unwrap();
+    assert_eq!(contents(&graph.named[2].1), expected);
+}
+
+#[test]
+fn sparse_manifest_rejects_truncated_or_nonempty_tombstones() {
+    for payload in [&[2][..], &[2, 0, 0][..], &[2, 1, 0, 0, 0, b'x'][..]] {
+        let dir = TestDir::new("bad_tombstone");
+        Graph::new().save(&dir.0).unwrap();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(payload);
+        std::fs::write(dir.0.join("named.bin"), bytes).unwrap();
+        assert_eq!(
+            Graph::open(&dir.0).err().unwrap().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
 }

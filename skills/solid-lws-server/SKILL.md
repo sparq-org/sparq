@@ -85,6 +85,8 @@ tested in-process. Mutators evaluate on a private fork,
 then commit resolved effects to the original graph through one fsync'd `txn.log`
 frame before materializing per-graph WALs. Successful writes survive reopening
 without compaction, including child metadata and parent containment from one create.
+Resource deletion publishes a manifest tombstone before reclaiming its slot; survivor
+bases and WALs stay in place, including through an interrupted deletion.
 Evaluation failures leave the original graph untouched. A possibly applied commit failure puts
 the actor into a sticky needs-reopen state: every subsequent job, including reads, writes,
 snapshots and compaction through any clone, fails with the original cause until the client is

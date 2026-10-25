@@ -333,6 +333,12 @@ assert_eq!(label_stats.triples, labels.len());
 //    sparq-hdt/UPSTREAM.md for the queued in-memory-builder contribution)
 ```
 
+Directory-backed `drop_named_durable` keeps survivor slots and WAL handles stable:
+it publishes a tombstone through one atomic, fsync'd manifest replacement before
+reclaiming the dropped graph's files. `drop_all_named_durable` removes and syncs
+the manifest before reclaiming the subtree. Reopen accepts legacy dense manifests
+and sparse tombstone manifests; a base rewrite during save/compaction packs slots.
+
 **4. Out-of-core build for a dataset larger than RAM** (requires `sparq-core` `mmap` feature):
 
 ```rust
