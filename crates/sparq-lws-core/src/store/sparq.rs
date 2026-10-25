@@ -213,6 +213,32 @@ pub trait SparqClient: Send + Sync {
     /// caller's existence check governs the 404, so this is a no-op-on-absent at the index layer).
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError>;
 
+    /// Delete a resource and its parent edge, returning the removed record's blob key.
+    ///
+    /// Embedded and in-memory clients read the key and remove both index entries atomically.
+    /// The default preserves the HTTP client's separate read, detach, and delete operations.
+    /// `None` means the resource was absent; an existing parent edge is still removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend's read or mutation error without reclaiming any bytes.
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        let key = match self.get_meta(iri).await {
+            Ok(meta) => Some(meta.blob_key),
+            Err(SparqError::NotFound) => None,
+            Err(e) => return Err(e),
+        };
+        if let Some(parent) = parent {
+            self.remove_child(parent, iri).await?;
+        }
+        self.delete_meta(iri).await?;
+        Ok(key)
+    }
+
     /// ATOMICALLY delete a container's record + its (empty) containment set + its edge in the PARENT's
     /// graph, ONLY if it is empty — all in ONE index operation.
     ///
@@ -671,6 +697,25 @@ impl SparqClient for InMemorySparqClient {
         Ok(())
     }
 
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let key = guard.meta.remove(iri).map(|meta| meta.blob_key);
+        guard.children.remove(iri);
+        if let Some(parent) = parent {
+            if let Some(children) = guard.children.get_mut(parent) {
+                children.retain(|child| child != iri);
+            }
+        }
+        Ok(key)
+    }
+
     async fn delete_meta_if_empty(
         &self,
         iri: &str,
@@ -824,6 +869,33 @@ mod tests {
             etag: "\"etag\"".into(),
             last_modified: None,
         }
+    }
+
+    #[tokio::test]
+    async fn ordinary_delete_returns_the_removed_key_and_detaches_even_an_absent_record() {
+        let index = InMemorySparqClient::new();
+        index.put_meta("urn:parent", meta("parent")).await.unwrap();
+        index
+            .create_child("urn:parent", "urn:child", meta("old"))
+            .await
+            .unwrap();
+        index.replace_meta("urn:child", meta("new")).await.unwrap();
+        assert_eq!(
+            index.delete_resource("urn:child", Some("urn:parent")).await.unwrap(),
+            Some("new".into())
+        );
+        assert!(!index.exists("urn:child").await.unwrap());
+        assert!(index.list_children("urn:parent").await.unwrap().is_empty());
+        index
+            .create_child("urn:parent", "urn:child", meta("again"))
+            .await
+            .unwrap();
+        index.delete_meta("urn:child").await.unwrap();
+        assert_eq!(
+            index.delete_resource("urn:child", Some("urn:parent")).await.unwrap(),
+            None
+        );
+        assert!(index.list_children("urn:parent").await.unwrap().is_empty());
     }
 
     #[tokio::test]
