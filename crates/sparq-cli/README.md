@@ -104,6 +104,13 @@ cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT * WHERE { ?s ?
   backend for gzip inflate at zero code change. Off by default; native-only, so it never
   reaches the wasm build.
 
+## Tests
+
+The `reserved_output_refusal_leaves_the_store_untouched` unit test uses
+`SPARQ_TEST_RESERVED_OUTPUT` (unset by default) to pass its output path to a child
+test process. This variable exists only in the test harness; setting it makes that
+child exercise the output refusal guard.
+
 ## 📚 Learn more
 
 - **How-to** — [`skills/cli/SKILL.md`](../../skills/cli/SKILL.md) (full subcommand reference)
