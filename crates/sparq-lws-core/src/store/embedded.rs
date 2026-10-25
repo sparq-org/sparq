@@ -1220,6 +1220,20 @@ mod tests {
     }
 
     #[test]
+    fn open_or_create_preserves_existing_client_writes() {
+        block_on(async {
+            let dir = TestDir::new();
+            let iri = "http://pod/alice/doc";
+            let expected = meta("text/turtle", "blob-1", "\"e1\"");
+            let c = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            c.put_meta(iri, expected.clone()).await.unwrap();
+            drop(c);
+            let reopened = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+        });
+    }
+
+    #[test]
     fn open_or_create_refuses_foreign_contents_and_corrupt_stores() {
         let dir = TestDir::new();
         std::fs::write(dir.0.join("foreign"), b"preserve me").unwrap();
