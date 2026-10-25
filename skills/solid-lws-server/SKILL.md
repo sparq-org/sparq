@@ -88,7 +88,9 @@ without compaction, including child metadata and parent containment from one cre
 Evaluation failures leave the original graph untouched. A possibly applied commit failure puts
 the actor into a sticky needs-reopen state: every subsequent job, including reads, writes,
 snapshots and compaction through any clone, fails with the original cause until the client is
-reopened for journal recovery. `save` remains a test snapshot helper. Arrange
+reopened for journal recovery. Any compaction error also puts the actor in this state,
+because a failed directory swap may have detached a named graph's WAL; reopen the store
+before serving further jobs. `save` remains a test snapshot helper. Arrange
 exclusive access with a lock outside the graph directory, which compaction swaps.
 For a configured index directory, the native server drains listeners on
 SIGINT/SIGTERM, then awaits an embedded compaction actor job for at most 30 seconds,

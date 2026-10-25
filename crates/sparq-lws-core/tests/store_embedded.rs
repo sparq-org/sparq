@@ -70,6 +70,82 @@ fn durable_meta(key: &str) -> ResourceMeta {
 }
 
 #[tokio::test]
+async fn failed_compaction_refuses_every_job_until_reopen() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    let parent = "https://pod.example/alice/";
+    let child = "https://pod.example/alice/note";
+    let refused = "https://pod.example/alice/refused";
+    let parent_meta = durable_meta("parent");
+    let child_meta = durable_meta("child");
+    client.put_meta(parent, parent_meta.clone()).await.unwrap();
+    client
+        .create_child(parent, child, child_meta.clone())
+        .await
+        .unwrap();
+
+    // persist_swap drops named/0's WAL before it tries to remove this stale sibling.
+    // A regular file cannot be removed as a directory, so compaction fails for real.
+    let obstruction = dir.0.join("named/0.compact-new");
+    std::fs::write(&obstruction, b"not a directory").unwrap();
+    let cause = client.compact().await.unwrap_err().to_string();
+    assert!(cause.contains("compact"), "{cause}");
+    assert!(cause.contains("store requires reopen"), "{cause}");
+    let journal = std::fs::read(dir.0.join("txn.log")).unwrap();
+    let wal = std::fs::read(dir.0.join("named/0/wal.log")).unwrap();
+    assert!(!wal.is_empty(), "retain the previously acknowledged writes");
+
+    // A write to the affected existing graph would otherwise succeed in memory only.
+    let clone = client.clone();
+    assert_eq!(
+        clone
+            .put_meta(parent, durable_meta("lost-write"))
+            .await
+            .unwrap_err()
+            .to_string(),
+        cause
+    );
+    // Repairing the filesystem must not unpoison any clone in-process.
+    std::fs::remove_file(obstruction).unwrap();
+    let snapshot = dir.0.join("refused-snapshot");
+    for _ in 0..2 {
+        assert_eq!(
+            client.get_meta(parent).await.unwrap_err().to_string(),
+            cause
+        );
+        assert_eq!(clone.exists(child).await.unwrap_err().to_string(), cause);
+        assert_eq!(
+            client.list_children(parent).await.unwrap_err().to_string(),
+            cause
+        );
+        assert_eq!(
+            clone
+                .put_meta(refused, durable_meta("refused"))
+                .await
+                .unwrap_err()
+                .to_string(),
+            cause
+        );
+        assert_eq!(client.compact().await.unwrap_err().to_string(), cause);
+        assert_eq!(clone.save(&snapshot).await.unwrap_err().to_string(), cause);
+        assert_eq!(std::fs::read(dir.0.join("txn.log")).unwrap(), journal);
+        assert_eq!(std::fs::read(dir.0.join("named/0/wal.log")).unwrap(), wal);
+    }
+    assert!(!snapshot.exists(), "refused actor jobs must not run");
+    drop(clone);
+    let client = dir.reopen(client);
+    assert_eq!(client.get_meta(parent).await.unwrap(), parent_meta);
+    assert_eq!(client.get_meta(child).await.unwrap(), child_meta);
+    assert_eq!(client.list_children(parent).await.unwrap(), vec![child]);
+    assert!(!client.exists(refused).await.unwrap());
+
+    let rewritten = durable_meta("after-reopen");
+    client.put_meta(parent, rewritten.clone()).await.unwrap();
+    let client = dir.reopen(client);
+    assert_eq!(client.get_meta(parent).await.unwrap(), rewritten);
+}
+
+#[tokio::test]
 async fn durable_create_child_keeps_metadata_and_parent_containment_together() {
     let dir = TestDir::new();
     let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();

@@ -71,8 +71,8 @@
 //! empty directory. Mutators evaluate on a private fork, then commit the resolved effects to the
 //! original graph. Directory-backed writes use one fsync'd `txn.log` frame before materializing
 //! the per-graph WALs; acknowledged writes survive reopening without a snapshot or compaction.
-//! A possibly applied commit failure stops all subsequent actor jobs (reads and writes) with the
-//! original cause until the client is reopened to replay the journal.
+//! A possibly applied commit failure or any compaction failure stops all subsequent actor jobs
+//! (reads and writes) with the original cause until the client is reopened for recovery.
 //! [`EmbeddedSparqClient::save`] is a snapshot helper for tests, not the production durability path.
 
 use std::panic::AssertUnwindSafe;
@@ -100,7 +100,7 @@ const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped (a prior engine
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
 /// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
 /// internally), so the channel stays monomorphic across every differently-typed engine call.
-/// The second argument holds the sticky reopen cause; only `commit_update` sets it, and the
+/// The second argument holds the sticky reopen cause from a commit or compaction failure, and the
 /// call wrapper refuses every later job before it can access the graph.
 type Job = Box<dyn FnOnce(&mut Graph, &mut Option<String>) + Send + 'static>;
 
@@ -176,7 +176,7 @@ impl GraphActor {
 /// left the `Graph` half-mutated, so the fail-closed posture is to serve nothing further rather than
 /// hand out reads of a torn index.
 fn actor_loop(mut graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
-    // A possibly applied commit keeps its original cause for every subsequent job.
+    // A possibly applied commit or failed compaction keeps its cause for every subsequent job.
     let mut needs_reopen = None;
     // `blocking_recv` is correct here precisely because this thread is NOT a tokio worker — it has
     // no runtime context, so parking it blocks nothing but itself.
@@ -374,17 +374,28 @@ impl EmbeddedSparqClient {
     /// cannot interrupt a job already submitted to the actor.
     ///
     /// # Errors
-    /// Returns [`SparqError::Backend`] if compaction fails or the actor stops.
+    /// Returns [`SparqError::Backend`] if compaction fails or the actor stops. Any compaction
+    /// failure requires reopening the client: a failed directory swap may have detached a WAL,
+    /// so every subsequent actor job fails with the original cause.
     pub async fn compact(&self) -> Result<(), SparqError> {
         self.actor
-            .call(|graph, _| {
+            .call(|graph, needs_reopen| {
                 let wal = graph.persist_dir().map(|dir| dir.join("wal.log"));
                 let wal_bytes = || {
                     wal.as_ref().and_then(|path| std::fs::metadata(path).ok().map(|m| m.len()))
                 };
                 let before = wal_bytes();
                 eprintln!("  SHUTDOWN: embedded graph compaction starting; parent WAL bytes before={before:?}.");
-                let result = graph.compact().map_err(|e| engine_err("compact", e));
+                let result = graph.compact().map_err(|e| {
+                    // The engine exposes no failure stage. Even a named-graph swap can
+                    // detach its WAL before failing, leaving the parent directory intact.
+                    // Refuse all later jobs rather than acknowledging memory-only writes.
+                    let cause = format!(
+                        "fatal: embedded engine compact: {e}; store requires reopen because compaction may have detached WAL backing"
+                    );
+                    *needs_reopen = Some(cause.clone());
+                    SparqError::Backend(cause)
+                });
                 let after = wal_bytes();
                 eprintln!(
                     "  SHUTDOWN: embedded graph compaction finished; parent WAL bytes before={before:?} after={after:?}; success={}.",
