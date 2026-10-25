@@ -1,5 +1,5 @@
 // AUTHORED-BY Claude Opus 4.8
-//! Store-trait tests against the in-memory composite (SPARQ-authoritative metadata + blob bytes),
+//! Shared Store contract against memory and filesystem bytes (SPARQ-authoritative metadata),
 //! plus the RDF content-type classification + validation.
 
 use std::sync::Arc;
@@ -17,26 +17,81 @@ const IRI: &str = "https://pod.example/alice/data";
 const TURTLE: &str =
     "<https://pod.example/alice/data#me> <http://xmlns.com/foaf/0.1/name> \"Alice\" .";
 
-fn store() -> impl Store {
-    CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new())
+fn store(inner: Arc<dyn BlobStore>) -> impl Store {
+    CompositeStore::new(InMemorySparqClient::new(), SharedBlob { inner })
 }
 
+// Each body runs unchanged against both real blob backends. Keep quota-specific
+// tests separate: admission limits belong to the in-memory implementation only.
+macro_rules! blob_store_contract {
+    (#[$test_attr:meta] async fn $name:ident($inner:ident) $body:block) => {
+        mod $name {
+            use super::*;
+
+            #[$test_attr]
+            async fn memory() {
+                let $inner: Arc<dyn BlobStore> = Arc::new(InMemoryBlobStore::new());
+                $body
+            }
+
+            #[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+            #[$test_attr]
+            async fn filesystem() {
+                let dir = FsTestDir::new();
+                let $inner: Arc<dyn BlobStore> = Arc::new(
+                    sparq_lws_core::store::FsBlobStore::open(&dir.0)
+                        .await
+                        .unwrap(),
+                );
+                $body
+            }
+        }
+    };
+}
+
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+struct FsTestDir(std::path::PathBuf);
+
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+impl FsTestDir {
+    fn new() -> Self {
+        let mut random = [0; 16];
+        getrandom::getrandom(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let path = std::env::temp_dir().join(format!("sparq-store-contract-{suffix}"));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
+
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+impl Drop for FsTestDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+
+blob_store_contract! {
 #[tokio::test]
-async fn read_of_a_missing_resource_is_not_found() {
-    let s = store();
+async fn read_of_a_missing_resource_is_not_found(inner) {
+    let s = store(inner.clone());
     let err = s.read(IRI).await.unwrap_err();
     assert!(matches!(err, ServerError::NotFound));
 }
-
-#[tokio::test]
-async fn exists_is_false_before_a_write() {
-    let s = store();
-    assert!(!s.exists(IRI).await.unwrap());
 }
 
+blob_store_contract! {
 #[tokio::test]
-async fn write_then_read_round_trips_bytes_and_content_type() {
-    let s = store();
+async fn exists_is_false_before_a_write(inner) {
+    let s = store(inner.clone());
+    assert!(!s.exists(IRI).await.unwrap());
+}
+}
+
+blob_store_contract! {
+#[tokio::test]
+async fn write_then_read_round_trips_bytes_and_content_type(inner) {
+    let s = store(inner.clone());
     let body = Bytes::from_static(TURTLE.as_bytes());
     let meta = s.write(IRI, body.clone(), "text/turtle").await.unwrap();
     assert_eq!(meta.content_type, "text/turtle");
@@ -47,6 +102,7 @@ async fn write_then_read_round_trips_bytes_and_content_type() {
     assert_eq!(resource.body, body);
     assert_eq!(resource.meta.content_type, "text/turtle");
     assert_eq!(resource.meta.etag, meta.etag);
+}
 }
 
 #[tokio::test]
@@ -84,9 +140,10 @@ async fn bounded_store_reports_usage_and_refuses_bytes_beyond_quota() {
     assert!(!s.exists("urn:b").await.unwrap());
 }
 
+blob_store_contract! {
 #[tokio::test]
-async fn rewrite_replaces_the_bytes() {
-    let s = store();
+async fn rewrite_replaces_the_bytes(inner) {
+    let s = store(inner.clone());
     s.write(IRI, Bytes::from_static(b"<a> <b> <c> ."), "text/turtle")
         .await
         .unwrap();
@@ -95,14 +152,15 @@ async fn rewrite_replaces_the_bytes() {
     let resource = s.read(IRI).await.unwrap();
     assert_eq!(resource.body, new_body);
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn each_write_to_the_same_iri_mints_a_distinct_blob_key() {
+async fn each_write_to_the_same_iri_mints_a_distinct_blob_key(inner) {
     // The ROOT fix, observed at the Store seam: two successive writes to the SAME IRI must land their
     // bytes under DISTINCT blob keys (no deterministic key reuse). The metadata pointer moves to the
     // newest key, a read resolves the latest committed blob through it, and the first write's key is
     // reclaimed once the index has moved off it (its bytes were never overwritten in place).
-    let inner = Arc::new(InMemoryBlobStore::new());
     let blob = SharedBlob {
         inner: inner.clone(),
     };
@@ -135,9 +193,11 @@ async fn each_write_to_the_same_iri_mints_a_distinct_blob_key() {
     assert_eq!(resource.body, Bytes::from_static(b"<a> <b> <v2> ."));
     assert_eq!(resource.meta.blob_key, m2.blob_key);
 }
+}
 
+blob_store_contract! {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key() {
+async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key(inner) {
     // THE CONCURRENCY PROOF (the race the unique-key fix retires): N concurrent writes to the SAME IRI
     // must each land their bytes under a DIFFERENT key, so no two writes can collide / interleave on a
     // shared object. We assert:
@@ -150,7 +210,6 @@ async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key() {
     //
     // Under the OLD deterministic key, all N writes shared ONE key: their bytes raced on a single
     // object (only the last `put` survived; the others' bytes were lost), so (1) and (2) would FAIL.
-    let inner = Arc::new(InMemoryBlobStore::new());
     let blob = SharedBlob {
         inner: inner.clone(),
     };
@@ -193,7 +252,7 @@ async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key() {
         }
     }
     assert_eq!(
-        inner.usage().unwrap().resource_count,
+        inner.list().await.unwrap().len(),
         1,
         "every superseded key is reclaimed; only the winning write's bytes remain"
     );
@@ -212,10 +271,12 @@ async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key() {
         "a read after concurrent writes must return the bytes of whichever write committed its index last"
     );
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn different_bytes_yield_a_different_etag() {
-    let s = store();
+async fn different_bytes_yield_a_different_etag(inner) {
+    let s = store(inner.clone());
     let m1 = s
         .write(IRI, Bytes::from_static(b"<a> <b> <c> ."), "text/turtle")
         .await
@@ -233,12 +294,14 @@ async fn different_bytes_yield_a_different_etag() {
         "different content must yield a different ETag"
     );
 }
+}
 
 // --- M2: delete + containment ---
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_removes_metadata_and_bytes() {
-    let s = store();
+async fn delete_removes_metadata_and_bytes(inner) {
+    let s = store(inner.clone());
     s.write(IRI, Bytes::from_static(TURTLE.as_bytes()), "text/turtle")
         .await
         .unwrap();
@@ -251,17 +314,21 @@ async fn delete_removes_metadata_and_bytes() {
         ServerError::NotFound
     ));
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_is_idempotent_on_absent() {
-    let s = store();
+async fn delete_is_idempotent_on_absent(inner) {
+    let s = store(inner.clone());
     // Deleting a never-written resource is not an error at the store layer.
     s.delete(IRI, None).await.unwrap();
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn create_in_container_records_membership() {
-    let s = store();
+async fn create_in_container_records_membership(inner) {
+    let s = store(inner.clone());
     let container = "https://pod.example/alice/";
     let child = "https://pod.example/alice/note1";
     // The container must exist before a child can be attached (atomic parent-exists invariant).
@@ -288,10 +355,12 @@ async fn create_in_container_records_membership() {
     );
     assert!(s.exists(child).await.unwrap());
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn create_in_a_missing_container_is_not_found() {
-    let s = store();
+async fn create_in_a_missing_container_is_not_found(inner) {
+    let s = store(inner.clone());
     // The container was never created — create_in_container must refuse + write nothing.
     let err = s
         .create_in_container(
@@ -306,12 +375,14 @@ async fn create_in_a_missing_container_is_not_found() {
     // Nothing was written under the missing container.
     assert!(!s.exists("https://pod.example/missing/child").await.unwrap());
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn create_in_container_twice_keeps_a_single_membership() {
+async fn create_in_container_twice_keeps_a_single_membership(inner) {
     // Re-creating the same child IRI in a container must not duplicate the membership edge
     // (add_child is idempotent).
-    let s = store();
+    let s = store(inner.clone());
     let container = "https://pod.example/alice/";
     let child = "https://pod.example/alice/note1";
     s.write(
@@ -340,6 +411,7 @@ async fn create_in_container_twice_keeps_a_single_membership() {
             .collect::<Vec<_>>(),
         vec![child]
     );
+}
 }
 
 #[tokio::test]
@@ -375,9 +447,10 @@ async fn create_child_commits_metadata_and_membership_atomically() {
     );
 }
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_detaches_from_parent_container() {
-    let s = store();
+async fn delete_detaches_from_parent_container(inner) {
+    let s = store(inner.clone());
     let container = "https://pod.example/alice/";
     let child = "https://pod.example/alice/note1";
     s.write(
@@ -401,12 +474,14 @@ async fn delete_detaches_from_parent_container() {
     assert!(s.list_children(container).await.unwrap().is_empty());
     assert!(!s.exists(child).await.unwrap());
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn deleting_a_container_clears_its_own_containment_set() {
+async fn deleting_a_container_clears_its_own_containment_set(inner) {
     // Deleting a container removes its OWN record AND its `ldp:contains` set (parity with the live
     // `DROP SILENT GRAPH`): a container re-created at the same IRI must not inherit a stale member.
-    let s = store();
+    let s = store(inner.clone());
     let parent = "https://pod.example/alice/";
     let container = "https://pod.example/alice/sub/";
     let child = "https://pod.example/alice/sub/note1";
@@ -447,15 +522,17 @@ async fn deleting_a_container_clears_its_own_containment_set() {
         "a deleted container must leave no stale containment set"
     );
 }
+}
 
 // --- M2: ATOMIC empty-container delete (the TOCTOU fix) ---
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_container_if_empty_refuses_a_populated_container() {
+async fn delete_container_if_empty_refuses_a_populated_container(inner) {
     // The atomic op must report NotEmpty for a populated container AND delete NOTHING — the container
     // and its child both survive (no orphaning). This is the safety invariant: a non-empty container
     // is never deleted, so a concurrently-added child can't be orphaned under a deleted parent.
-    let s = store();
+    let s = store(inner.clone());
     let container = "https://pod.example/alice/";
     let child = "https://pod.example/alice/note1";
     s.write(
@@ -496,11 +573,13 @@ async fn delete_container_if_empty_refuses_a_populated_container() {
         "a NotEmpty result must leave the membership edge intact"
     );
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_container_if_empty_deletes_an_empty_container() {
+async fn delete_container_if_empty_deletes_an_empty_container(inner) {
     // The atomic op returns Deleted for an empty container, and it is gone afterwards.
-    let s = store();
+    let s = store(inner.clone());
     let container = "https://pod.example/alice/empty/";
     s.write(
         container,
@@ -519,24 +598,28 @@ async fn delete_container_if_empty_deletes_an_empty_container() {
         ServerError::NotFound
     ));
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_container_if_empty_reports_not_found_for_an_absent_container() {
+async fn delete_container_if_empty_reports_not_found_for_an_absent_container(inner) {
     // An absent container ⇒ NotFound (the handler maps this to 404), nothing touched.
-    let s = store();
+    let s = store(inner.clone());
     let outcome = s
         .delete_container_if_empty("https://pod.example/alice/nope/", None)
         .await
         .unwrap();
     assert_eq!(outcome, DeleteOutcome::NotFound);
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_container_if_empty_detaches_from_parent_and_routes_recreate_clean() {
+async fn delete_container_if_empty_detaches_from_parent_and_routes_recreate_clean(inner) {
     // The atomic empty-delete detaches the (deleted) container from its parent's containment, and a
     // container re-created at the same IRI inherits no stale membership — the delete-then-recreate
     // no-stale-membership case routed through the NEW atomic op.
-    let s = store();
+    let s = store(inner.clone());
     let parent = "https://pod.example/alice/";
     let container = "https://pod.example/alice/sub/";
     let child = "https://pod.example/alice/sub/note1";
@@ -599,6 +682,7 @@ async fn delete_container_if_empty_detaches_from_parent_and_routes_recreate_clea
         s.list_children(container).await.unwrap().is_empty(),
         "a re-created container must not inherit a stale containment set"
     );
+}
 }
 
 #[tokio::test]
@@ -690,11 +774,11 @@ async fn delete_meta_if_empty_folds_the_parent_detach_into_the_one_op() {
     );
 }
 
-/// A pass-through [`BlobStore`] over an `Arc`-shared [`InMemoryBlobStore`], so a test can build a
+/// A pass-through [`BlobStore`] over an `Arc`-shared backend, so a test can build a
 /// [`CompositeStore`] AND retain a handle to the underlying blob store to inspect which physical keys
 /// the writes landed under (the unique-per-write-key proof). Pure delegation — no behaviour change.
 struct SharedBlob {
-    inner: Arc<InMemoryBlobStore>,
+    inner: Arc<dyn BlobStore>,
 }
 
 #[async_trait]
@@ -730,7 +814,7 @@ impl BlobStore for SharedBlob {
 /// the test can prove the store no longer issues an inline blob delete. The inner store is shared
 /// (`Arc`) so the test can stage the in-window recreate and inspect the surviving bytes directly.
 struct CountingBlob {
-    inner: Arc<InMemoryBlobStore>,
+    inner: Arc<dyn BlobStore>,
     deletes_seen: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -773,8 +857,9 @@ impl BlobStore for CountingBlob {
     }
 }
 
+blob_store_contract! {
 #[tokio::test]
-async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recreate() {
+async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recreate(inner) {
     // Regression: deleting a container must NOT remove a concurrent same-IRI recreate's bytes. Blob
     // keys are UNIQUE PER WRITE, so a recreate mints a DIFFERENT key from the original, and the inline
     // reclaim after the index delete removes exactly the key the index held — the original's — never
@@ -783,7 +868,6 @@ async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recrea
     // We model the concurrent recreate writing its bytes (under its own unique key) before the index
     // delete returns. The recreate's bytes must survive; the original's are reclaimed (one delete).
     let deletes_seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let inner = Arc::new(InMemoryBlobStore::new());
     let blob = CountingBlob {
         inner: inner.clone(),
         deletes_seen: deletes_seen.clone(),
@@ -810,7 +894,7 @@ async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recrea
     // Stage a concurrent same-IRI recreate. With unique-per-write keys it lands its bytes under its OWN
     // distinct key — NOT the original's. (We assert the keys differ below.) These bytes must survive.
     let recreate_bytes = Bytes::from_static(b"<#recreated> <#p> \"v2\" .");
-    let recreate_key = store()
+    let recreate_key = store(Arc::new(InMemoryBlobStore::new()))
         .write(container, recreate_bytes.clone(), "text/turtle")
         .await
         .unwrap()
@@ -850,10 +934,12 @@ async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recrea
         "the recreated resource's bytes must be intact (never clobbered)"
     );
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn meta_returns_etag_without_bytes() {
-    let s = store();
+async fn meta_returns_etag_without_bytes(inner) {
+    let s = store(inner.clone());
     let written = s
         .write(IRI, Bytes::from_static(TURTLE.as_bytes()), "text/turtle")
         .await
@@ -866,6 +952,7 @@ async fn meta_returns_etag_without_bytes() {
     assert_eq!(meta.etag, written.etag);
     // Absent resource ⇒ None.
     assert!(s.meta("https://pod.example/nope").await.unwrap().is_none());
+}
 }
 
 // --- content-type classification + RDF validation ---
@@ -1075,22 +1162,25 @@ impl SparqClient for StaleOnceSparq {
 
 type StaleSlot = Arc<std::sync::Mutex<Option<ResourceMeta>>>;
 
-fn stale_once_store() -> (CompositeStore<StaleOnceSparq, InMemoryBlobStore>, StaleSlot) {
+fn stale_once_store(
+    inner: Arc<dyn BlobStore>,
+) -> (CompositeStore<StaleOnceSparq, SharedBlob>, StaleSlot) {
     let slot = StaleSlot::default();
     let store = CompositeStore::with_body_cache(
         StaleOnceSparq {
             inner: InMemorySparqClient::new(),
             stale: slot.clone(),
         },
-        InMemoryBlobStore::new(),
+        SharedBlob { inner },
         sparq_lws_core::store::BodyCache::disabled(),
     );
     (store, slot)
 }
 
+blob_store_contract! {
 #[tokio::test]
-async fn a_reclaimed_blob_is_retried_by_read_but_never_substituted_by_read_at() {
-    let (s, stale) = stale_once_store();
+async fn a_reclaimed_blob_is_retried_by_read_but_never_substituted_by_read_at(inner) {
+    let (s, stale) = stale_once_store(inner.clone());
     let v1 = s
         .write(IRI, Bytes::from_static(b"<a> <b> \"v1\" ."), "text/turtle")
         .await
@@ -1133,11 +1223,12 @@ async fn a_reclaimed_blob_is_retried_by_read_but_never_substituted_by_read_at() 
     let err = s.read_at(IRI, &v2).await.unwrap_err();
     assert!(matches!(err, ServerError::NotFound), "got {err:?}");
 }
+}
 
+blob_store_contract! {
 #[tokio::test]
-async fn read_reports_inconsistency_when_the_index_still_points_at_a_missing_blob() {
+async fn read_reports_inconsistency_when_the_index_still_points_at_a_missing_blob(inner) {
     // Not a race: the current pointer itself names a missing blob. The retry must not loop or mask it.
-    let inner = Arc::new(InMemoryBlobStore::new());
     let s = CompositeStore::new(
         InMemorySparqClient::new(),
         SharedBlob {
@@ -1151,4 +1242,123 @@ async fn read_reports_inconsistency_when_the_index_still_points_at_a_missing_blo
     inner.delete(&m.blob_key).await.unwrap();
     let err = s.read(IRI).await.unwrap_err();
     assert!(matches!(err, ServerError::Storage(_)), "got {err:?}");
+}
+}
+
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+mod filesystem_adapter {
+    use super::*;
+    use sparq_lws_core::store::{reconcile_orphans, FsBlobStore, ReconcileOptions};
+
+    const KEY: &str = "b1-0123456789abcdef0123456789abcdef";
+    const POOLED: &str = "$pool$b1-abcdef0123456789abcdef0123456789";
+
+    #[tokio::test]
+    async fn trait_errors_metadata_and_versionless_delete_match_the_contract() {
+        let dir = FsTestDir::new();
+        let fs = FsBlobStore::open(&dir.0).await.unwrap();
+        let blob: &dyn BlobStore = &fs;
+        for key in [KEY, POOLED] {
+            assert!(matches!(blob.get(key).await, Err(BlobError::NotFound)));
+            assert!(blob.stat(key).await.unwrap().is_none());
+            assert!(!blob.exists(key).await.unwrap());
+            blob.delete(key).await.unwrap();
+            assert!(!blob.delete_if_unchanged(key, 0).await.unwrap());
+            blob.put(key, Bytes::from_static(b"original"))
+                .await
+                .unwrap();
+            let error = blob.put(key, Bytes::new()).await.unwrap_err();
+            assert!(
+                matches!(error, BlobError::Backend(ref message) if message.contains("already exists"))
+            );
+            let metadata = blob.stat(key).await.unwrap().unwrap();
+            assert_eq!(metadata.key, key);
+            assert!(metadata.last_modified.is_some());
+            assert_eq!(metadata.generation, None);
+            for witness in [0, 1, u64::MAX] {
+                assert!(!blob.delete_if_unchanged(key, witness).await.unwrap());
+                assert_eq!(blob.get(key).await.unwrap(), "original");
+            }
+        }
+        let entries = blob.list().await.unwrap();
+        assert_eq!(entries.len(), 2);
+        for entry in entries {
+            assert!(entry.last_modified.is_some());
+            assert_eq!(entry.generation, None);
+            assert_eq!(
+                entry.last_modified,
+                blob.stat(&entry.key).await.unwrap().unwrap().last_modified
+            );
+        }
+        for key in ["../escape", "$pool$b1-invalid"] {
+            assert!(matches!(blob.get(key).await, Err(BlobError::Backend(_))));
+            assert!(matches!(
+                blob.put(key, Bytes::new()).await,
+                Err(BlobError::Backend(_))
+            ));
+            assert!(matches!(blob.exists(key).await, Err(BlobError::Backend(_))));
+            assert!(matches!(blob.stat(key).await, Err(BlobError::Backend(_))));
+            assert!(matches!(blob.delete(key).await, Err(BlobError::Backend(_))));
+            assert!(matches!(
+                blob.delete_if_unchanged(key, 0).await,
+                Err(BlobError::Backend(_))
+            ));
+        }
+        // An actual filesystem error must remain a backend failure through the adapter.
+        std::fs::remove_dir_all(dir.0.join("objects")).unwrap();
+        std::fs::write(dir.0.join("objects"), b"file instead of directory").unwrap();
+        assert!(matches!(blob.get(KEY).await, Err(BlobError::Backend(_))));
+        assert!(matches!(
+            blob.delete_if_unchanged(KEY, 0).await,
+            Err(BlobError::Backend(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn reconciler_reclaims_versionless_orphans_and_keeps_referenced_bytes() {
+        let dir = FsTestDir::new();
+        let fs = FsBlobStore::open(&dir.0).await.unwrap();
+        let blob: &dyn BlobStore = &fs;
+        let index = InMemorySparqClient::new();
+        blob.put(KEY, Bytes::from_static(b"referenced"))
+            .await
+            .unwrap();
+        blob.put(POOLED, Bytes::from_static(b"orphan"))
+            .await
+            .unwrap();
+        index
+            .put_meta(
+                IRI,
+                ResourceMeta {
+                    content_type: "text/plain".into(),
+                    blob_key: KEY.into(),
+                    etag: "\"e\"".into(),
+                    last_modified: None,
+                },
+            )
+            .await
+            .unwrap();
+        let opts = ReconcileOptions {
+            grace: std::time::Duration::ZERO,
+            ..Default::default()
+        };
+        let report = reconcile_orphans(&index, blob, &opts).await.unwrap();
+        assert_eq!(report.scanned, 2);
+        assert_eq!(report.referenced, 1);
+        assert_eq!(report.deleted, 1);
+        assert_eq!(report.delete_errors, 0);
+        assert_eq!(blob.get(KEY).await.unwrap(), "referenced");
+        assert!(!blob.exists(POOLED).await.unwrap());
+        assert_eq!(
+            reconcile_orphans(&index, blob, &opts)
+                .await
+                .unwrap()
+                .deleted,
+            0
+        );
+        drop(fs);
+        let reopened = FsBlobStore::open(&dir.0).await.unwrap();
+        assert_eq!(reopened.get(KEY).await.unwrap(), "referenced");
+        assert!(!reopened.exists(POOLED).await.unwrap());
+    }
 }

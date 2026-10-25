@@ -48,6 +48,7 @@ fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
         "spargebra",
         "sparq-core",
         "sparq-engine",
+        "sparq-lws-blob-fs",
         "tokio v",
     ] {
         assert!(
