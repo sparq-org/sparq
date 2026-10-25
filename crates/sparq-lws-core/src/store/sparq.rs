@@ -277,6 +277,12 @@ pub trait SparqClient: Send + Sync {
         false
     }
 
+    /// How long one call to this index may take before it is given up (see
+    /// `Store::call_timeout`). The default is [`crate::store::STORE_CALL_TIMEOUT`].
+    fn call_timeout(&self) -> std::time::Duration {
+        crate::store::STORE_CALL_TIMEOUT
+    }
+
     /// Raise the time stored as a marker under `iri` to `value`, unless a later one is stored,
     /// reading and writing in one step under this index's own write lock, and return the time
     /// stored once it is done (see `Store::raise_marker`). The marker is an index record with no

@@ -403,6 +403,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.raises_markers()
     }
 
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
+    }
+
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
         // One update: the read and the write are one step.
         let _g = self.counters.op_guard();
