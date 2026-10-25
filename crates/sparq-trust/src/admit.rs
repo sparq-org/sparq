@@ -78,6 +78,8 @@
 //!
 //! sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
 
+use std::collections::HashSet;
+
 use crate::policy::{ShapeRef, TrustRule};
 use crate::vocab;
 use oxrdf::{NamedNode, NamedOrBlankNode, Term, Triple};
@@ -132,7 +134,7 @@ pub struct PresentedCredential {
 /// A fact that passed admission, issuer-tagged and marked `trust:admitted` (§2.1
 /// stratum boundary). It enters the **unchanged** `sparq-solid` materialiser ahead of
 /// the derivation stratum.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdmittedFact {
     /// The admitted triple (e.g. `<Jesse> schema:age 25`).
     pub triple: Triple,
@@ -150,7 +152,7 @@ pub struct AdmittedFact {
 /// MUST NOT be frozen into the materialise-once view; they ride the shipped sq-0q7n
 /// conditional-grant path (`auth:agent` re-checked against `Session.agent`,
 /// `auth:notAfter` re-checked against `Session.now`) and are re-evaluated per request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StaticAdmittedFact {
     /// The admitted triple (e.g. `<Jesse> schema:age 25`).
     pub triple: Triple,
@@ -179,6 +181,7 @@ pub fn admit(
     target: &NamedNode,
 ) -> Vec<AdmittedFact> {
     let mut admitted: Vec<AdmittedFact> = Vec::new();
+    let mut seen = HashSet::new();
 
     // Step 1: canonicalise + commit G (sparq-canon RDFC-1.0, the same canonical unit
     // the ZK estate commits over). A graph that cannot be committed admits nothing.
@@ -245,7 +248,7 @@ pub fn admit(
                 triple: t.clone(),
                 issuer: r.source.clone(),
             };
-            if !admitted.contains(&fact) {
+            if seen.insert(fact.clone()) {
                 admitted.push(fact);
             }
         }
@@ -278,6 +281,7 @@ pub fn admit_static(
     target: &NamedNode,
 ) -> Vec<StaticAdmittedFact> {
     let mut admitted: Vec<StaticAdmittedFact> = Vec::new();
+    let mut seen = HashSet::new();
 
     // Step 1: canonicalise + commit G (the same canonical unit the ZK estate commits
     // over). A graph that cannot be committed admits nothing.
@@ -339,7 +343,7 @@ pub fn admit_static(
                 holder: holder.clone(),
                 not_after_unix_secs,
             };
-            if !admitted.contains(&fact) {
+            if seen.insert(fact.clone()) {
                 admitted.push(fact);
             }
         }

@@ -336,6 +336,9 @@ where
 /// same materialised store handle, so the N3 materialisation is paid ONCE per generation rather
 /// than once per request.
 pub(crate) struct CachedAuthView {
+    /// Retaining the core prevents identity reuse after an in-memory restore.
+    #[cfg(feature = "backup")]
+    core: Arc<crate::http::ServingCore>,
     /// The ring generation number this view is a pure function of.
     generation: u64,
     /// Which auth model was materialised (a request that asks for the other one rebuilds).
@@ -409,6 +412,8 @@ struct AuthzRequest {
     /// The pod dataset as N-Quads (documents + `.acl`/`.acr` control graphs), owned. EMPTY (and
     /// never read) under [`AuthzSource::Server`], which forbids the field outright.
     dataset: String,
+    #[cfg(feature = "odrl-authz")]
+    carries_odrl: bool,
     /// The already-resolved principal — agent (WebID) / client / issuer, all optional; anonymous
     /// when all are absent (fail-closed — an anonymous session sees only public grants).
     agent: Option<String>,
@@ -628,6 +633,8 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
     };
     Ok(AuthzRequest {
         source,
+        #[cfg(feature = "odrl-authz")]
+        carries_odrl: source == AuthzSource::Body && dataset_carries_odrl(&dataset),
         dataset,
         agent: field("agent"),
         client: field("client"),
@@ -830,6 +837,11 @@ fn build_server_view(
     state: &AppState,
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, ServerViewError> {
+    #[cfg(feature = "backup")]
+    let core = state.authz_core();
+    #[cfg(feature = "backup")]
+    let pinned = core.ring.current();
+    #[cfg(not(feature = "backup"))]
     let pinned = state.current();
     let generation = pinned.number();
     let graph = pinned.snapshot();
@@ -846,7 +858,11 @@ fn build_server_view(
     }
     if let Ok(cache) = state.authz_view_cache().read() {
         if let Some(cached) = cache.as_ref() {
-            if cached.generation == generation && cached.view == view {
+            #[cfg(feature = "backup")]
+            let same_lineage = Arc::ptr_eq(&cached.core, &core);
+            #[cfg(not(feature = "backup"))]
+            let same_lineage = true;
+            if same_lineage && cached.generation == generation && cached.view == view {
                 return Ok(cached.store.clone());
             }
         }
@@ -861,13 +877,26 @@ fn build_server_view(
     materialized.map_err(|e| ServerViewError::Materialize(materialize_refusal_kind(&e)))?;
     let store = Arc::new(store);
     if let Ok(mut cache) = state.authz_view_cache().write() {
-        // Never let a slow build overwrite a NEWER generation's view with an older one.
+        // An old lineage must never install after restore, even into an empty cache.
+        #[cfg(feature = "backup")]
+        let current_lineage = Arc::ptr_eq(&state.authz_core(), &core);
+        #[cfg(not(feature = "backup"))]
+        let current_lineage = true;
+        // Within the same lineage, never replace a newer generation with an older one.
         let install = match cache.as_ref() {
             None => true,
-            Some(cached) => cached.generation <= generation,
+            Some(cached) => {
+                #[cfg(feature = "backup")]
+                let same_lineage = Arc::ptr_eq(&cached.core, &core);
+                #[cfg(not(feature = "backup"))]
+                let same_lineage = true;
+                !same_lineage || cached.generation <= generation
+            }
         };
-        if install {
+        if current_lineage && install {
             *cache = Some(CachedAuthView {
+                #[cfg(feature = "backup")]
+                core,
                 generation,
                 view,
                 inferred_view,
@@ -888,12 +917,21 @@ async fn server_store(
     state: &AppState,
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, Response> {
-    // The generation identifies the snapshot, including its auto-selected view and ODRL
-    // refusal. A matching cache entry therefore needs no graph scan or pool claim.
+    // Lineage plus generation identifies the snapshot, including automatic view selection
+    // and the ODRL refusal. Restores can reuse generation zero with different policies.
+    #[cfg(feature = "backup")]
+    let core = state.authz_core();
+    #[cfg(feature = "backup")]
+    let generation = core.ring.current().number();
+    #[cfg(not(feature = "backup"))]
     let generation = state.current().number();
     if let Ok(cache) = state.authz_view_cache().read() {
         if let Some(cached) = cache.as_ref() {
-            if cached.generation == generation
+            #[cfg(feature = "backup")]
+            let same_lineage = Arc::ptr_eq(&cached.core, &core);
+            #[cfg(not(feature = "backup"))]
+            let same_lineage = true;
+            if same_lineage && cached.generation == generation
                 && requested_view.unwrap_or(cached.inferred_view) == cached.view
             {
                 return Ok(cached.store.clone());
@@ -929,7 +967,7 @@ async fn body_store(
         #[cfg(feature = "odrl-authz")]
         {
             let mut store = store;
-            if dataset_carries_odrl(&owned.dataset) {
+            if owned.carries_odrl {
                 apply_odrl_lane(&mut store, &owned, mode)?;
             }
             Ok(store)
@@ -995,7 +1033,7 @@ pub(crate) async fn decide_endpoint(
         Err(resp) => return resp,
     };
     // The resource IRI + mode are decide-specific fields.
-    let v: serde_json::Value = match serde_json::from_slice(&body) {
+    let mut v: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(_) => return json_error(StatusCode::BAD_REQUEST, "request body is not valid JSON"),
     };
@@ -1020,7 +1058,7 @@ pub(crate) async fn decide_endpoint(
     #[cfg(all(feature = "solid-authz-trust", feature = "odrl-authz"))]
     if state.config().solid_authz_trust
         && v.get("trust").is_some()
-        && dataset_carries_odrl(&req.dataset)
+        && req.carries_odrl
     {
         return json_error(
             StatusCode::BAD_REQUEST,
@@ -1034,7 +1072,7 @@ pub(crate) async fn decide_endpoint(
     // (fail-closed: the trust path can only narrow, never broaden, the admission gate).
     #[cfg(feature = "solid-authz-trust")]
     if state.config().solid_authz_trust {
-        if let Some(trust_val) = v.get("trust") {
+        if let Some(trust_val) = v.get_mut("trust") {
             // sq-snopa.8 — the trust lane decides over its OWN store, built by
             // injecting admitted facts into the BODY dataset, so it cannot compose with the
             // stateful lane's shared per-generation view. Refuse rather than silently authorise
@@ -1046,7 +1084,7 @@ pub(crate) async fn decide_endpoint(
                      with 'source':'server' (fail-closed)",
                 );
             }
-            return trust_authz_decide(&state, trust_val, &req, &resource, mode).await;
+            return trust_authz_decide(&state, trust_val.take(), req, resource, mode).await;
         }
     }
     let store = match resolve_store(&state, &req, mode).await {
@@ -1054,7 +1092,7 @@ pub(crate) async fn decide_endpoint(
         Err(resp) => return resp,
     };
     #[cfg(feature = "odrl-authz")]
-    let odrl_lane_fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
+    let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
     // Deciding is CPU-light here (the materialise already ran), so it stays inline.
     let decision = store.get().decide(&req.session(), &resource, mode);
     // sq-3mu76 — read-scoped advertisement (module doc): when the lane fired, mask
@@ -1456,16 +1494,14 @@ fn predicate_shape_with_labels(
 #[allow(clippy::result_large_err)]
 async fn trust_authz_decide(
     state: &AppState,
-    trust_val: &serde_json::Value,
-    req: &AuthzRequest,
-    resource: &str,
+    trust: serde_json::Value,
+    req: AuthzRequest,
+    resource: String,
     mode: sparq_solid::Mode,
 ) -> Response {
-    let trust = trust_val.clone();
-    let req = req.clone();
-    let resource = resource.to_owned();
+    let config = state.config().clone();
     match on_build_pool(state, move || {
-        trust_authz_decide_blocking(&trust, &req, &resource, mode)
+        trust_authz_decide_blocking(&trust, &req, &resource, mode, &config)
     })
     .await
     {
@@ -1479,6 +1515,7 @@ fn trust_authz_decide_blocking(
     req: &AuthzRequest,
     resource: &str,
     mode: sparq_solid::Mode,
+    config: &crate::http::ServerConfig,
 ) -> Response {
     use sparq_trust::{
         admit, derive_effective_rules, policy::TrustRule, AdmittedFact,
@@ -1687,12 +1724,6 @@ fn trust_authz_decide_blocking(
         });
     }
 
-    // ── 5. Run the cert-graph closure ────────────────────────────────────────
-    // Depth-1 closure: derived rules are NOT re-used as anchors (sq-tu4e discipline).
-    let pre_count = direct_rules.len();
-    let effective_rules = derive_effective_rules(&direct_rules, &certifications, now_unix_secs, 1);
-    let cert_graph_derived = effective_rules.len() > pre_count;
-
     // ── 6. Parse presented credentials ──────────────────────────────────────
     let creds_val = match trust_obj.get("credentials").and_then(|v| v.as_array()) {
         Some(a) => a,
@@ -1713,7 +1744,7 @@ fn trust_authz_decide_blocking(
         }
     };
 
-    let mut all_admitted: Vec<AdmittedFact> = Vec::new();
+    let mut credentials = Vec::new();
     for (idx, cred_v) in creds_val.iter().enumerate() {
         let obj = match cred_v.as_object() {
             Some(o) => o,
@@ -1770,10 +1801,34 @@ fn trust_authz_decide_blocking(
             issued_at_unix_secs: wire.issued_at_unix_secs,
             revoked: wire.revoked,
         };
-        // Run the admission gate (fail-closed: empty result is fine — that credential just admits
-        // nothing, only a complete trust-block failure => 403).
-        let admitted = admit(&cred, &effective_rules, &trust_session, &resource_node);
-        all_admitted.extend(admitted);
+        credentials.push(cred);
+    }
+
+    // A depth-one certification produces at most one additional rule. Price the upper
+    // bound before deriving any edge or verifying any credential, including empty graphs.
+    let rules_bound = direct_rules.len().saturating_add(certifications.len());
+    let pairs = rules_bound.saturating_mul(creds_val.len());
+    let triples = credentials.iter().fold(0usize, |n, c| n.saturating_add(c.graph.len()));
+    let validation_work = rules_bound.saturating_mul(triples);
+    if pairs > config.solid_authz_trust_max_pairs {
+        return json_response(StatusCode::FORBIDDEN, trust_deny_json("trust rule/credential pair limit exceeded"));
+    }
+    if certifications.len() > config.solid_authz_trust_max_certifications {
+        return json_response(StatusCode::FORBIDDEN, trust_deny_json("trust certification limit exceeded"));
+    }
+    if validation_work > config.solid_authz_trust_max_validation_work {
+        return json_response(StatusCode::FORBIDDEN, trust_deny_json("trust validation-work limit exceeded"));
+    }
+
+    // ── 5. Run the cert-graph closure ────────────────────────────────────────
+    // Depth-1 closure: derived rules are NOT re-used as anchors (sq-tu4e discipline).
+    let pre_count = direct_rules.len();
+    let effective_rules = derive_effective_rules(&direct_rules, &certifications, now_unix_secs, 1);
+    let cert_graph_derived = effective_rules.len() > pre_count;
+
+    let mut all_admitted: Vec<AdmittedFact> = Vec::new();
+    for cred in &credentials {
+        all_admitted.extend(admit(cred, &effective_rules, &trust_session, &resource_node));
     }
 
     // ── 7. Build the WAC/ACP store and decide ───────────────────────────────
@@ -1877,6 +1932,8 @@ fn build_store_with_admitted(
         // sq-snopa.8 — the trust lane decides over THIS augmented body dataset; the
         // stateful lane is refused before `trust_authz_decide` is ever reached.
         source: AuthzSource::Body,
+        #[cfg(feature = "odrl-authz")]
+        carries_odrl: false,
         dataset: augmented,
         agent: req.agent.clone(),
         client: req.client.clone(),
@@ -1960,7 +2017,7 @@ pub(crate) async fn wac_allow_endpoint(
         Err(resp) => return resp,
     };
     #[cfg(feature = "odrl-authz")]
-    let odrl_lane_fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
+    let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
     // sq-snopa.7 FR-5: resolve the governing ACL for the Link header BEFORE
     // `wac_allow` consumes the store. `resolve_acl` is a pure index lookup (no mode needed) and
     // returns `None` when no ACL was discovered — fail-closed: no header emitted in that case.
@@ -2519,6 +2576,8 @@ mod tests {
     fn build_store_denies_on_unparseable_dataset() {
         let req = AuthzRequest {
             source: AuthzSource::Body,
+            #[cfg(feature = "odrl-authz")]
+            carries_odrl: false,
             dataset: "this is not n-quads @@@".to_owned(),
             agent: None,
             client: None,
@@ -2538,6 +2597,8 @@ mod tests {
     fn build_store_then_decide_is_authorized_and_anonymous_fails_closed() {
         let req = AuthzRequest {
             source: AuthzSource::Body,
+            #[cfg(feature = "odrl-authz")]
+            carries_odrl: false,
             dataset: WAC_NQUADS.to_owned(),
             agent: Some("https://alice.ex/card#me".to_owned()),
             client: None,
@@ -2836,7 +2897,9 @@ mod odrl_tests {
     fn authz_req(dataset: String, agent: Option<&str>) -> AuthzRequest {
         AuthzRequest {
             source: AuthzSource::Body,
-            dataset,
+            #[cfg(feature = "odrl-authz")]
+            carries_odrl: dataset_carries_odrl(&dataset),
+        dataset,
             agent: agent.map(str::to_owned),
             client: None,
             issuer: None,

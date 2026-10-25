@@ -128,5 +128,3 @@ metrics/runtime/
 # instead, via `failure_persistence: None` in its proptest Config — see
 # crates/sparq-terse/tests/proptest_keyword.rs for the in-repo precedent.
 
-# Local comparison checkout and release benchmark artifacts.
-/bench-main/

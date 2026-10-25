@@ -812,10 +812,31 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
+    /// Maximum potential rule/credential pairs in a trust block.
+    ///
+    /// Default: 4096. Depth-one certifications each count as one potential rule.
+    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits no pairs.
+    /// Exceeding it refuses the whole block with 403 before signature verification.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_pairs: usize,
+    /// Maximum certifications parsed from one trust block.
+    ///
+    /// Default: 4096. `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` overrides it;
+    /// zero permits no certifications. Exceeding it refuses the block with 403.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_certifications: usize,
+    /// Maximum potential rule/triple validations in a trust block.
+    ///
+    /// Default: 65536. The sum of credential triple counts is multiplied by the
+    /// direct-rule count plus certification count, before derivation or admission.
+    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK` overrides it; zero permits no work.
+    /// Exceeding it refuses the block with 403 before signature verification.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_validation_work: usize,
     /// How many authorization-view builds may run AT ONCE on the blocking pool, across
-    /// every `/authz/*` lane (the stateless per-request build, the stateful per-generation
-    /// view, the ODRL extension's re-parse + re-materialisation, and the trust lane's
-    /// augmented build).
+    /// every `/authz/*` lane (the stateless per-request build, the stateful
+    /// cache misses, the ODRL store and policy builds under one claim, and the trust
+    /// lane's whole parse-through-decision pipeline).
     ///
     /// Materialising an authorization view is CPU-bound and its cost is set by the request
     /// (the body dataset) or by the store, so it runs on `spawn_blocking` rather than an
@@ -1001,6 +1022,14 @@ impl Default for ServerConfig {
             // SPARQ_SOLID_AUTHZ_TRUST=1. Fail-closed: trust block is ignored until set.
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust: false,
+            // Calibrated against the main trust lane; bound verification and SHACL work
+            // independently because a small pair count can still carry a large graph.
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_pairs: 4096,
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_certifications: 4096,
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_validation_work: 65536,
             // The authorization build is CPU-bound, so the default cap is the CPU count:
             // more concurrent builds than cores adds queueing, not throughput. Clamped to
             // at least 1 on a box that reports no parallelism.
@@ -1332,6 +1361,18 @@ impl ServerConfig {
         #[cfg(feature = "solid-authz-trust")]
         if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_TRUST") {
             cfg.solid_authz_trust = env_truthy(&v);
+        }
+        #[cfg(feature = "solid-authz-trust")]
+        for (name, limit) in [
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS", &mut cfg.solid_authz_trust_max_pairs),
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS", &mut cfg.solid_authz_trust_max_certifications),
+            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK", &mut cfg.solid_authz_trust_max_validation_work),
+        ] {
+            if let Ok(value) = std::env::var(name) {
+                if let Ok(n) = value.trim().parse::<usize>() {
+                    *limit = n;
+                }
+            }
         }
         // SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY caps how many authorization-view builds run at
         // once on the blocking pool (default: the CPU count); 0 is read as 1. An unparseable
@@ -2353,9 +2394,9 @@ impl ApplyUpdates for ServerApplier {
 /// byte-identical to `main` and never loads an `ArcSwap` in `AppState` (sq-0g6g resolved in the
 /// lean direction — the cost is paid only when you opt into `backup`).
 #[cfg(feature = "backup")]
-struct ServingCore {
+pub(crate) struct ServingCore {
     /// The generation ring (Wave A1): lock-free `current()`, bounded retention.
-    ring: Arc<GenerationRing<Graph>>,
+    pub(crate) ring: Arc<GenerationRing<Graph>>,
     /// The single sequenced writer (Wave A2): the sole publisher of generations.
     /// `submit` blocks for the group-commit window + batch application, so update
     /// handlers call it on the blocking pool.
@@ -2522,7 +2563,7 @@ pub struct AppState {
     /// pre-#941. Under the `backup` feature the ring (and the writer below) move behind the
     /// swappable [`ServingCore`] so an online restore can atomically install a rehydrated pair.
     #[cfg(not(feature = "backup"))]
-    ring: Arc<GenerationRing<Graph>>,
+    pub(crate) ring: Arc<GenerationRing<Graph>>,
     /// The single sequenced writer (Wave A2): the sole publisher of generations.
     /// `submit` blocks for the group-commit window + batch application, so update
     /// handlers call it on the blocking pool.
@@ -2583,13 +2624,13 @@ pub struct AppState {
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
     /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
-    /// the server's OWN loaded store, cached per generation. `None` until the first
+    /// the server's OWN loaded store, cached per serving lineage and generation. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
     /// WHERE THE AUTH VIEW LIVES relative to the ring's immutable generations (the design
     /// question sq-snopa.8 exists to settle): the materialised
     /// [`PodStore`](sparq_solid::PodStore) is a PURE FUNCTION of one published generation, so it
-    /// is cached BESIDE the ring and KEYED BY THE GENERATION NUMBER rather than threaded through
+    /// is cached BESIDE the ring and KEYED BY THE SERVING LINEAGE AND GENERATION NUMBER rather than threaded through
     /// the writer. Every commit — including an `.acl`/`.acr` write — publishes a new generation,
     /// which makes the cached entry stale by construction and forces a re-materialise on the next
     /// request. That is the "re-materialise on ACL change" contract, obtained without any writer
@@ -3154,6 +3195,12 @@ impl AppState {
     /// being produced; `gen.snapshot()` is the immutable [`Graph`] to evaluate against.
     pub fn current(&self) -> PinnedGen {
         self.ring().current()
+    }
+
+    /// Pins the serving lineage and its generation together for authorization caching.
+    #[cfg(all(feature = "solid-authz", feature = "backup"))]
+    pub(crate) fn authz_core(&self) -> Arc<ServingCore> {
+        self.core.load_full()
     }
 
     /// (sq-o5bi) Pins the current generation for an ONLINE backup export: a
