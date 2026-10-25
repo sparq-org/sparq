@@ -349,7 +349,7 @@ pub fn resolve_circuit(
         // Legacy opaque members remain available for already-issued V1 graphs.
         match method {
             CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1 => true,
-            CommitmentMethod::DualLeafV2 => true,
+            CommitmentMethod::DualLeafV2 => false,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => false,
         }
