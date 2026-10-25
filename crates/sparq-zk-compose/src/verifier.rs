@@ -16506,7 +16506,7 @@ mod member_from_authenticated_method_tests {
         }
         // Agreeing commitments resolve normally, so the refusal is about the
         // disagreement and not about `k = 2`.
-        assert!(resolve(&m, 0, &map_of(&[(&c1, Some(V2)), (&c2, Some(V2))])).is_ok());
+        assert!(resolve(&m, 0, &map_of(&[(&c1, Some(CANON)), (&c2, Some(CANON))])).is_ok());
     }
 
     fn join_over(a: &FieldHex, b: &FieldHex) -> ProofInputs {

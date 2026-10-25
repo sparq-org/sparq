@@ -1,29 +1,12 @@
 <!-- sq-puyy: trimmed to the concise internal-stub README template (sq-9jw5). -->
 # sparq-zk-compose
 
-With `dual-leaf`, dispatch coverage includes `CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }`
-and `CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 }`. These select the component-witnessed
-`scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16` packages only under `DualLeafV2`.
-Opaque `Scan`/`JoinEq` ids are refused under V2; they remain legal under
-`StringCanonicalV1` and legacy `DualLeafV1`. V2 ids are refused under every other method,
-including the `ValueOnlyV1` research dial. An edge-less V2 join cannot derive a method.
-The extended-fragment entry point still refuses non-string-canonical commitments,
-and stage 0 still refuses value-FILTER sub-proofs. No value gate opens.
+With `dual-leaf`, `ScanV2Dl { k: 1, n: 16, r: 4 }` and `JoinEqV2Dl { n_a: 16, n_b: 16 }` select the two component-witnessed V2 packages only under `DualLeafV2`; opaque `Scan`/`JoinEq` refuse V2 and retain string-canonical / legacy V1 legality. V2 ids refuse every other method and cannot resolve without an authenticated method. Extended fragments still require string-canonical commitments; value-FILTER sub-proofs remain refused at stage 0. No value gate opens.
+`CircuitId::package()` returns `Result<String, CircuitIdError>`; checked constructors, `FromStr`, serde and driver entry points refuse uncompiled V2 shapes with `UncompiledV2Member`. The opaque renderer returns `V2ComponentsRequired`; raw-driver component witnesses are required. See the [skill](../../skills/zk-query-proofs/SKILL.md) for the API and scope.
 
-`CircuitId::package()` now returns `Result<String, CircuitIdError>`.
-The checked `scan_v2_dl`/`join_eq_v2_dl` constructors, package-name parsing (`FromStr`),
-serde and driver entry points refuse uncompiled V2 shapes with `UncompiledV2Member`.
-The opaque witness renderer returns `ProverTomlError::V2ComponentsRequired` for V2 ids;
-component witnesses must be supplied to the raw driver. This completes dispatch coverage
-without adding a general V2 witness builder. The estate remains experimental and unaudited.
-
-
-ZK proof **composition** for [sparq](../../README.md) — stage 2 of the query-proof
-design ([`research/zkp-query-proofs-plan.md`](../../research/zkp-query-proofs-plan.md)
-v3, §S4.E). Drives the per-property Noir circuit family at
-[`zk/compose/`](../../zk/compose) into a full query-result proof
-(`manifest::ProofManifest` + the nargo/bb subprocess prover) and verifies one
-(`verifier::verify_manifest`). `capture` packages native per-circuit `driver::ProofArtifacts` into the browser-shippable *captured* manifest the `/showcase/zk-car-hire` in-tab verify fallback consumes (sq-1s2.3 / FL1 follow-up) — research-grade, NOT externally audited (sq-qhy4).
+ZK proof **composition** for [sparq](../../README.md) — stage 2 of the [query-proof design](../../research/zkp-query-proofs-plan.md) (v3, §S4.E).
+Drives the per-property Noir circuit family at [`zk/compose/`](../../zk/compose) into a full query-result proof (`manifest::ProofManifest` + the nargo/bb subprocess prover)
+and verifies one (`verifier::verify_manifest`). `capture` packages native per-circuit `driver::ProofArtifacts` into the browser-shippable *captured* manifest the `/showcase/zk-car-hire` in-tab verify fallback consumes (sq-1s2.3 / FL1 follow-up) — research-grade, NOT externally audited (sq-qhy4).
 
 > **Internal crate — not published** to crates.io (`publish = false`): nothing in
 > the workspace depends on it, so default and wasm builds are byte-identical either way.
