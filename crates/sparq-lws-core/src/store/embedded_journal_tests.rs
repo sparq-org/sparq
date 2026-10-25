@@ -360,6 +360,81 @@ async fn indeterminate_commit_stops_reads_writes_and_snapshots() {
 }
 
 #[tokio::test]
+async fn materialization_failure_stops_the_actor_and_reopens_the_committed_frame() {
+    let dir = Directory::empty();
+    let c = dir.open();
+    c.put_meta(PARENT, meta("parent")).await.unwrap();
+    // The parent occupies named/0. Refuse creation of the child's named/1 directory
+    // after the engine has committed the whole transaction frame.
+    let blocker = dir.0.join("named/1");
+    std::fs::write(&blocker, b"refuse child materialization").unwrap();
+    let error = c.create_child(PARENT, CHILD, meta("committed")).await;
+    assert!(matches!(
+        error,
+        Err(SparqError::Backend(ref e))
+            if e.contains("indeterminate") && e.contains("restart to recover")
+    ));
+    assert!(std::fs::metadata(dir.0.join("txn.log")).unwrap().len() > 0);
+    for error in [
+        c.exists(CHILD).await.unwrap_err(),
+        c.put_meta(CHILD, meta("later")).await.unwrap_err(),
+        c.save(&dir.0).await.unwrap_err(),
+    ] {
+        assert!(matches!(error, SparqError::Backend(ref e) if e.contains("restart to recover")));
+    }
+    drop(c);
+    std::fs::remove_file(blocker).unwrap();
+    for _ in 0..2 {
+        let c = dir.open();
+        assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("committed"));
+        assert_eq!(c.list_children(PARENT).await.unwrap(), [CHILD]);
+    }
+}
+
+#[tokio::test]
+async fn journal_cannot_repair_an_incomplete_named_snapshot() {
+    let dir = Directory::empty();
+    let c = dir.open();
+    c.put_meta(PARENT, meta("parent")).await.unwrap();
+    c.dispatch(|graph| {
+        graph
+            .ensure_named(&oxrdf::NamedNode::new(CHILD).unwrap().into())
+            .unwrap();
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let update = sparql::update_create_child(
+        PARENT,
+        CHILD,
+        "text/plain",
+        "replayed",
+        "tag",
+        None,
+        "nonce",
+    )
+    .unwrap();
+    leave_frame(&c, update, false).await;
+    drop(c);
+    // Model a published manifest whose new snapshot was not fully persisted. Core
+    // opens every named snapshot before replaying the parent's transaction journal.
+    // This is a filesystem-state simulation, not an injected power loss.
+    let snapshot = dir.0.join("named/1/dict-meta.bin");
+    let saved = std::fs::read(&snapshot).unwrap();
+    std::fs::remove_file(&snapshot).unwrap();
+    assert!(matches!(
+        EmbeddedSparqClient::open(&dir.0),
+        Err(SparqError::Backend(_))
+    ));
+    assert!(std::fs::metadata(dir.0.join("txn.log")).unwrap().len() > 0);
+    // Repairing that base snapshot lets the untouched frame recover both graphs.
+    std::fs::write(snapshot, saved).unwrap();
+    let c = dir.open();
+    assert_eq!(c.get_meta(CHILD).await.unwrap().blob_key, "replayed");
+    assert_eq!(c.list_children(PARENT).await.unwrap(), [CHILD]);
+}
+
+#[tokio::test]
 async fn a_whole_job_is_captured_before_committing() {
     let dir = Directory::empty();
     let c = dir.open();
