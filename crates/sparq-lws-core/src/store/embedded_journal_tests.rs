@@ -33,7 +33,20 @@ impl Directory {
     }
 
     fn open(&self) -> EmbeddedSparqClient {
-        EmbeddedSparqClient::open(&self.0).unwrap()
+        // Dropping the last client closes the channel; the actor releases its lock when
+        // its thread exits. Wait only for that lock, never for a corrupt store to heal.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match Graph::open(&self.0) {
+                Ok(graph) => return EmbeddedSparqClient::over(graph).unwrap(),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+                    && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => panic!("graph reopen({}) failed: {error}", self.0.display()),
+            }
+        }
     }
 }
 
