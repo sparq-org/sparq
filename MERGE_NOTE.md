@@ -13,15 +13,19 @@ Resolution:
 - Retained #7192's create-then-canonicalise ordering before `is_backed_by`.
   Otherwise a nonexistent component before `..` could bypass compaction routing.
 - Each direct, dot, missing-component/parent, and Unix symlink spelling uses a fresh
-  store. After save, an unchanged pre-save parent record, updated child record,
+  store. The symlink is a sibling of the store: links inside a store are correctly
+  refused on reopen. After save, an unchanged pre-save parent record, updated child record,
   new child and containment all survive drop/reopen. The independent snapshot
   keeps its prior content and can be changed without changing the original.
 - Added the Unix M5 case: no outside lock can be created under a read-only parent;
-  refused compaction returns a backend error and reads and journaled writes keep
+  a pending default-graph WAL delta requires a root-directory swap. That refused
+  compaction returns a backend error and reads and journaled writes keep
   working, including after reopen. Permissions restore on early return or unwind.
   As with the core permission test, this case skips if permissions are not enforced.
 - Updated `skills/solid-lws-server/SKILL.md` to describe in-place compaction,
   independent snapshots, durability after save, and unavailable-compaction errors.
+  Clarified the M5 wording: it refuses compaction requiring a root swap; a named-only
+  compaction need not rename the root.
 
 Semantic overlap review:
 
@@ -43,7 +47,25 @@ captured effects on the authoritative graph with `apply_effects_checked`.
 A refused commit leaves the actor usable; an indeterminate commit stops it.
 The new tests use `named()`, `dict()`, and guarded named-delta application.
 
-Validation results will be completed below before handoff.
+Validation (still running; final results will be appended):
+
+- Initial all-target/all-feature clippy passed.
+- Initial default test run: 1,125 passed, 3 failed. Two regression fixtures needed
+  correction: the M5 parent was itself a store (nested stores are refused), and
+  the symlink alias was inside the store (internal links are refused on reopen).
+  The third failure was the WebSocket frame-flood revocation-close deadline.
+  A subsequent focused run was 14 passed / 1 failed: the M5 fixture also needed
+  a pending default-graph delta to force a root-directory swap. Named-only
+  compaction can finish without swapping the root. After that correction,
+  `cargo test -p sparq-lws-core --lib store::embedded::journal_tests --
+  --nocapture --test-threads=2` passed all 15 tests, with the permission case
+  exercised (no permission-skip message). Full suites use six test threads.
+- `python3 scripts/preflight.py`: six checks passed; privacy-claims could not run
+  because `/bin/bash` has no `mapfile` (the script requires a newer Bash).
+  No gate script was changed or weakened.
+- `git diff --check HEAD -- <three resolution files>` passed.
+- Conflict-marker scan passed for all 33 incoming paths.
+
 
 Operator action: no staging, commit, merge, push, or git-index write was attempted.
 The working file contains no conflict markers. Git still lists embedded.rs as
@@ -53,3 +75,8 @@ merge. Keep this note operator-only. Existing PR_BODY.md and ROUND7.md are retai
 Suggested logical commit message: `fix(lws): preserve compaction and journaled writes during main merge`.
 Keep the save implementation, regression tests, and matching skill together in
 the merge resolution.
+
+Final default suite: PASS, 1,473 passed / 0 failed / 14 ignored, across 41 test
+executables/doc-test groups. Command: `RUSTC_WRAPPER= CARGO_TARGET_DIR=$PWD/target
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=6 cargo test -p sparq-lws-core`.
+The WebSocket frame-flood revocation-close test passed in this complete rerun.
