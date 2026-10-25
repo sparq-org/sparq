@@ -1098,6 +1098,28 @@ mod tests {
         });
     }
 
+    /// The notification marker is as durable as the embedded index is: a snapshot keeps the
+    /// value raised before it, and a raise after it is not in the snapshot.
+    #[test]
+    fn a_marker_is_as_durable_as_the_last_snapshot() {
+        block_on(async {
+            let c = client();
+            let iri = "http://pod/.lws/subscriptions/#high-water";
+            assert_eq!(c.raise_marker(iri, 10).await.unwrap(), 10);
+            let dir = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            c.save(&dir).await.expect("snapshot written");
+            assert_eq!(c.raise_marker(iri, 20).await.unwrap(), 20);
+            let reopened = EmbeddedSparqClient::open(&dir).expect("snapshot reopened");
+            let stored = reopened.get_meta(iri).await.unwrap();
+            assert!(super::super::sparq::is_marker(&stored));
+            assert_eq!(
+                stored.etag, "10",
+                "the snapshot holds the mark as it was saved"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
     #[test]
     fn put_then_get_meta_round_trips() {
         block_on(async {

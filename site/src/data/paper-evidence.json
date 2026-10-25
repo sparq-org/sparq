@@ -149,7 +149,7 @@
       "note": "Number of distinct conformance suites the central scoreboard registers and ratchets across crates (W3C SPARQL, inference, SHACL core, SHACL-SPARQL, OGC GeoSPARQL, Solid WAC decision parity, Solid ACP decision parity)."
     },
     "memsafety.unsafe_sites_total": {
-      "value": 104,
+      "value": 118,
       "unit": "unsafe-sites",
       "environment": "canonical",
       "kind": "unsafe-count-ratchet-ceiling",
@@ -163,35 +163,35 @@
       "note": "Total first-party unsafe sites across the whole crates/ workspace, as counted by a deterministic comment-/string-stripped keyword scan (scripts/unsafe-gate.py). This is a CI-ENFORCED RATCHET CEILING: the gate fails a PR whose live count RISES above this snapshot without a matching register row + a // SAFETY: comment + a re-seed; smaller is always allowed. Deterministic and machine-independent (a source scan over committed code, not a timing). It is a COUNT/COVERAGE discipline, NOT a proof of memory safety — it bounds and documents the unsafe surface, it does not prove the absence of undefined behaviour."
     },
     "memsafety.unsafe_crates": {
-      "value": 10,
+      "value": 11,
       "unit": "crates",
       "environment": "canonical",
       "kind": "unsafe-surface-partition",
       "family": "memory-safety attestation",
-      "source": "bench/unsafe-snapshot.json::crates (keys: sparq-core, sparq-vectors, sparq-engine, sparq-py, sparq-cli, sparq-zk-compose, sparq-bench, sparq-lws-core, sparq-lws-wasm, sparq-reason); accounting in compliance/memsafety/evidence.md MS-1",
+      "source": "bench/unsafe-snapshot.json::crates (keys: sparq-core, sparq-vectors, sparq-engine, sparq-py, sparq-cli, sparq-zk-compose, sparq-bench, sparq-lws-core, sparq-lws-wasm, sparq-reason, sparq-solid); accounting in compliance/memsafety/evidence.md MS-1",
       "binding": {
         "kind": "doc-anchor",
         "file": "compliance/memsafety/evidence.md",
-        "quote": "**10** are unsafe-bearing"
+        "quote": "**11** are unsafe-bearing"
       },
-      "note": "[GPT-5.6] Number of first-party crates carrying at least one counted unsafe site in bench/unsafe-snapshot.json. Three of the ten (sparq-py, sparq-lws-core and sparq-reason) ALSO carry a source forbid(unsafe_code): sparq-py's sites are arrow-feature-gated (conditional forbid), and sparq-lws-core's are EXAMPLE-only counting allocators (sq-gg0qq.2). sparq-engine is now an unsafe-bearing library because sq-kq9ia adds four shipped cancellation-pointer sites; its four test-only allocator sites remain registered too. [SONNET-4.6] sq-wubkf adds sparq-lws-wasm as the ninth: its four sites are a SHIPPING bounded #[global_allocator], so that crate's root is deny(unsafe_code) plus one #[allow(unsafe_code)] module rather than forbid — it is the one unsafe-bearing crate deliberately absent from the forbid set. sparq-reason is the tenth: its library is forbid(unsafe_code) and its seven sites are a test-only counting allocator (tests/n3_builtin_alloc.rs, GH #6833). The count is a machine-independent partition of the workspace, not a measurement. NOTE: doc-anchor is existence-strength only (the quote must be present verbatim in evidence.md — it does not parse the number); the snapshot key count is the machine source of truth."
+      "note": "[GPT-5.6] Number of first-party crates carrying at least one counted unsafe site in bench/unsafe-snapshot.json. Four of the eleven (sparq-py, sparq-lws-core, sparq-reason and sparq-solid) ALSO carry a source forbid(unsafe_code): sparq-py's sites are arrow-feature-gated (conditional forbid), and sparq-lws-core's are EXAMPLE-only counting allocators (sq-gg0qq.2). sparq-engine is now an unsafe-bearing library because sq-kq9ia adds four shipped cancellation-pointer sites; its four test-only allocator sites remain registered too. [SONNET-4.6] sq-wubkf adds sparq-lws-wasm as the ninth: its four sites are a SHIPPING bounded #[global_allocator], so that crate's root is deny(unsafe_code) plus one #[allow(unsafe_code)] module rather than forbid — it is the one unsafe-bearing crate deliberately absent from the forbid set. sparq-reason is the tenth: its library is forbid(unsafe_code) and its 14 sites are two test-only counting allocators (tests/n3_builtin_alloc.rs, GH #6833; tests/n3_input_fact_memory.rs, GH #7173). sparq-solid is the eleventh: its library is forbid(unsafe_code) and its seven sites are a test-only counting allocator (tests/auth_resource_enumeration_memory.rs, GH #7175). The count is a machine-independent partition of the workspace, not a measurement. NOTE: doc-anchor is existence-strength only (the quote must be present verbatim in evidence.md — it does not parse the number); the snapshot key count is the machine source of truth."
     },
     "memsafety.forbid_crates": {
-      "value": 55,
+      "value": 56,
       "unit": "crates",
       "environment": "canonical",
       "kind": "unsafe-surface-partition",
       "family": "memory-safety attestation",
-      "source": "compliance/memsafety/evidence.md MS-1 (grep -rlE '^\\s*#!?\\[[^]]*forbid\\(unsafe_code\\)' crates/ --include='*.rs' | sed 's#crates/##;s#/.*##' | sort -u | wc -l); 55 of 70 workspace crates",
+      "source": "compliance/memsafety/evidence.md MS-1 (grep -rlE '^\\s*#!?\\[[^]]*forbid\\(unsafe_code\\)' crates/ --include='*.rs' | sed 's#crates/##;s#/.*##' | sort -u | wc -l); 56 of 71 workspace crates",
       "binding": {
         "kind": "doc-anchor",
         "file": "compliance/memsafety/evidence.md",
-        "quote": "→ **55 crates** carry a `forbid(unsafe_code)` attribute in their source"
+        "quote": "→ **56 crates** carry a `forbid(unsafe_code)` attribute in their source"
       },
-      "note": "Number of first-party crates carrying a source forbid(unsafe_code) attribute; sparq-py is conditional — forbid without the arrow feature, deny-level with it. Deterministic and machine-independent (a de-duplicated attribute grep over committed code). The forbid set (55) and the unsafe-bearing set (10) OVERLAP on sparq-py, sparq-lws-core and sparq-reason, so they do NOT sum to the 70 total — see evidence.md MS-1. NOTE: doc-anchor is existence-strength only (verbatim quote presence); the grep in `source` is the machine source of truth."
+      "note": "Number of first-party crates carrying a source forbid(unsafe_code) attribute; sparq-py is conditional — forbid without the arrow feature, deny-level with it. Deterministic and machine-independent (a de-duplicated attribute grep over committed code). The forbid set (56) and the unsafe-bearing set (11) OVERLAP on sparq-py, sparq-lws-core, sparq-reason and sparq-solid, so they do NOT sum to the 71 total — see evidence.md MS-1. NOTE: doc-anchor is existence-strength only (verbatim quote presence); the grep in `source` is the machine source of truth."
     },
     "memsafety.total_crates": {
-      "value": 70,
+      "value": 71,
       "unit": "crates",
       "environment": "canonical",
       "kind": "unsafe-surface-partition",
@@ -200,9 +200,9 @@
       "binding": {
         "kind": "doc-anchor",
         "file": "compliance/memsafety/evidence.md",
-        "quote": "ls -d crates/*/ | wc -l       # → 70 total crates"
+        "quote": "ls -d crates/*/ | wc -l       # → 71 total crates"
       },
-      "note": "Total first-party crates in the workspace. Deterministic structural count. The forbid-in-src set (55) and the unsafe-bearing set (10) overlap on sparq-py, sparq-lws-core and sparq-reason and 8 crates carry neither, so the two do NOT partition the 70 cleanly — see evidence.md MS-1. NOTE: doc-anchor is existence-strength only (verbatim quote presence); the `ls -d` count in `source` is the machine source of truth."
+      "note": "Total first-party crates in the workspace. Deterministic structural count. The forbid-in-src set (56) and the unsafe-bearing set (11) overlap on sparq-py, sparq-lws-core, sparq-reason and sparq-solid and 8 crates carry neither, so the two do NOT partition the 71 cleanly — see evidence.md MS-1. NOTE: doc-anchor is existence-strength only (verbatim quote presence); the `ls -d` count in `source` is the machine source of truth."
     },
     "memsafety.unsafe_sites_core": {
       "value": 51,
