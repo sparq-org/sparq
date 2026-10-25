@@ -723,6 +723,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Crucially, the OFF path keeps the original direct backend construction (no Arc allocation or
     // indirection); only an explicitly-present interval selects shared handles for request path + sweep.
     let reconcile_interval = reconcile_interval_from_env()?;
+    #[cfg(feature = "embedded-sparq")]
+    let mut shutdown_sparq = None;
     let (app, reconcile_task) = match backend.as_str() {
         "memory" => {
             eprintln!("  STORAGE: SPARQ backend = MEMORY (in-memory double — boot-without-SPARQ; the conformance/test default).");
@@ -779,7 +781,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 Some(dir) => {
                     eprintln!("  STORAGE: SPARQ backend = EMBEDDED (in-process engine; directory-backed graph at {dir}).");
-                    sparq_lws_core::store::embedded::EmbeddedSparqClient::open(
+                    sparq_lws_core::store::embedded::EmbeddedSparqClient::open_or_create(
                         std::path::Path::new(&dir),
                     )
                     .map_err(|e| format!("failed to open the embedded SPARQ graph at {dir}: {e}"))?
@@ -790,6 +792,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .map_err(|e| format!("failed to init the embedded SPARQ graph: {e}"))?
                 }
             };
+            if sparq_dir_set {
+                shutdown_sparq = Some(sparq.clone());
+            }
             build_app_for_backend(
                 sparq,
                 InMemoryBlobStore::new(),
@@ -1060,8 +1065,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // drains so the task's ownership/lifetime stays bounded to the server boot that created it.
     if let Some(task) = reconcile_task {
         task.abort();
+        let _ = task.await;
+    }
+    #[cfg(feature = "embedded-sparq")]
+    if let Some(sparq) = shutdown_sparq {
+        compact_on_shutdown(&sparq).await;
     }
     Ok(())
+}
+
+/// Compact only after the listeners have drained, so no request can append after it.
+#[cfg(feature = "embedded-sparq")]
+async fn compact_on_shutdown(sparq: &sparq_lws_core::store::EmbeddedSparqClient) {
+    // Bound process shutdown while allowing the actor to finish ordinary compactions.
+    const COMPACT_TIMEOUT: Duration = Duration::from_secs(30);
+    match tokio::time::timeout(COMPACT_TIMEOUT, sparq.compact()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("  WARNING: shutdown compaction failed: {e}"),
+        Err(_) => eprintln!("  WARNING: shutdown compaction exceeded 30 seconds; exiting with WAL recovery available."),
+    }
 }
 
 /// Build one selected backend in one of two shapes: the original direct store when reconciliation is
@@ -1504,6 +1526,102 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn shutdown_compaction_empties_parent_and_named_wals_and_preserves_data() {
+        use sparq_lws_core::store::{EmbeddedSparqClient, ResourceMeta, SparqClient};
+        struct TestDir(std::path::PathBuf);
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = TestDir(std::env::temp_dir().join(format!(
+            "sparq-lws-shutdown-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        // Seed through the public durable Graph API; the existing client's atomic
+        // mutators discard WAL backing. Exercise named-only and parent-overlay paths.
+        for write_default in [false, true] {
+            let dir = root.0.join(if write_default {
+                "default-and-named"
+            } else {
+                "named-only"
+            });
+            std::fs::create_dir_all(&dir).unwrap();
+            sparq_core::Graph::load_str("", "ntriples")
+                .unwrap()
+                .save(&dir)
+                .unwrap();
+            if write_default {
+                let mut graph = sparq_core::Graph::open(&dir).unwrap();
+                for i in 0..4 {
+                    sparq_engine::update_in_place(
+                        &mut graph,
+                        &format!("INSERT DATA {{ <urn:subject:{i}> <urn:predicate> <urn:object> }}"),
+                    )
+                    .unwrap();
+                }
+                assert!(dir.join("wal.log").metadata().unwrap().len() > 0);
+            }
+            let expected = ResourceMeta {
+                content_type: "text/plain".into(),
+                blob_key: "test-blob".into(),
+                etag: "\"durable\"".into(),
+                last_modified: None,
+            };
+            let mut graph = sparq_core::Graph::open(&dir).unwrap();
+            for _ in 0..4 {
+                let update = sparq_lws_core::store::sparql::update_put_meta(
+                    "http://pod/alice/doc",
+                    &expected.content_type,
+                    &expected.blob_key,
+                    &expected.etag,
+                    None,
+                )
+                .unwrap();
+                sparq_engine::update_in_place(&mut graph, &update).unwrap();
+            }
+            drop(graph);
+            let client = EmbeddedSparqClient::open_or_create(&dir).unwrap();
+            let named_wals: Vec<_> = std::fs::read_dir(dir.join("named"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path().join("wal.log"))
+                .collect();
+            assert_eq!(named_wals.len(), 1);
+            assert!(named_wals
+                .iter()
+                .all(|path| path.metadata().unwrap().len() > 0));
+            let trips = client.engine_round_trips();
+            compact_on_shutdown(&client).await;
+            assert_eq!(
+                client.engine_round_trips(),
+                trips,
+                "compaction is not a query round-trip"
+            );
+            assert_eq!(dir.join("wal.log").metadata().unwrap().len(), 0);
+            assert!(named_wals
+                .iter()
+                .all(|path| path.metadata().unwrap().len() == 0));
+            drop(client);
+            let graph = sparq_core::Graph::open(&dir).unwrap();
+            let rows = sparq_engine::query(
+                &graph,
+                "SELECT ?s WHERE { ?s <urn:predicate> <urn:object> }",
+            )
+            .unwrap()
+            .rows;
+            assert_eq!(rows.len(), if write_default { 4 } else { 0 });
+            drop(graph);
+            let reopened = EmbeddedSparqClient::open(&dir).unwrap();
+            assert_eq!(
+                reopened.get_meta("http://pod/alice/doc").await.unwrap(),
+                expected
+            );
+        }
+    }
 
     /// sq-oprna.2: the QUIC endpoint must gain `h3` without mutating the TCP ALPN list.
     /// A missing `h3` mutation is rejected by `sparq_http3::quic_server_config`; mutating the shared

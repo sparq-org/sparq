@@ -86,34 +86,24 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   header-count, aggregate-byte, and slow-header timeout bounds); request timeouts, body
   limits, per-connection max-requests, rate limiting, and overload shedding.
 - **LWS 1.0 mode** — `SOLID_SERVER_PROTOCOL=lws` serves W3C Linked Web Storage (`src/lws/`, skill § *Run the LWS 1.0 protocol*, [`conformance/lws/`](./conformance/lws)).
-- Cargo features:
-  - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
-    SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
-    `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only
-    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
-  - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
-    (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
-  - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve
-    the same hardened LDP router over HTTP/3 on UDP at the resolved `SOLID_SERVER_BIND`
-    address+port; TCP stays HTTP/2 + HTTP/1.1 (and WS).
-  - `redis-replay` (off) — a shared Redis-backed DPoP `jti` replay store for horizontally-scaled deployments.
-  - `authn-ssi` + `authn-openid` (**default-on**) and `authn-saml` (off) — the LWS 1.0 authorization server's authentication suites, each its own `sparq-lws-authn-*` crate implementing `sparq_lws_authn::Suite`; `SOLID_SERVER_LWS_AUTHN` picks among those compiled in.
-  - `odrl-authz` (off, sq-elg47) — the native ODRL policy gate seam on the
-    read/query path (`authz::odrl`, via `LdpState::set_odrl_gate`; deny-overrides /
-    permit-extends over the WAC decision, fail-closed).
-  - `trust-graph` (off, sq-hed3q) — the LIBRARY-only trust-graph admission
-    seam (`authz::trust_admit`); NOT handler-wired. Research prototype (sq-qhy4).
+- Cargo features (details: [server skill](../../skills/solid-lws-server/SKILL.md)):
+  - Defaults: `embedded-sparq`, `sparql-endpoint`, `authn-ssi`, `authn-openid`.
+  - Opt-in: `http-sparq`, `http3`, `redis-replay`, `authn-saml`, `odrl-authz`;
+    `trust-graph` is a library-only research seam.
 
-## Data directory lock
+## Embedded index lifecycle
 
-`store::DataDirLock::acquire(&data_dir)` locks `<data_dir>/LOCK` and records the PID
-only after acquisition; guard drop releases the lock. Contention returns `WouldBlock` naming the holder PID.
-`SOLID_SERVER_WAIT_FOR_LOCK_SECS=<n>` polls for up to n seconds (default unset:
-fail immediately; nonnegative integers only, otherwise `InvalidInput`). The file
-remains after drop. Keep the guard outside the index directory, which compaction
-replaces. The bare index boot path does not take this outer lock; the in-memory
-blob guard still refuses durable native deployment. See the [server skill](../../skills/solid-lws-server/SKILL.md).
+`EmbeddedSparqClient::open_or_create` bootstraps or reopens `SOLID_SERVER_SPARQ_DIR`; strict `open` requires a store. Foreign non-empty directories are refused.
+Existing atomic mutators discard WAL backing; bootstrap does not fix that limitation.
+`save` remains a test snapshot helper. After SIGINT/SIGTERM drains listeners,
+directory-backed shutdown awaits actor compaction for up to 30 seconds, logging
+parent WAL bytes before/after and compacting named WALs. Timeout stops waiting, not the job.
+
+`store::DataDirLock::acquire(&dir)` holds `<dir>/LOCK` until drop, recording the PID
+after acquisition. `SOLID_SERVER_WAIT_FOR_LOCK_SECS=<n>` polls for up to n seconds
+(default unset: fail immediately; nonnegative integers only, else `InvalidInput`).
+Contention returns `WouldBlock` naming the PID; the file remains after drop.
+Keep guards outside the index directory, which compaction replaces; its bare boot path does not lock. The in-memory blob guard still refuses durable deployments.
 
 ## 📚 Learn more
 

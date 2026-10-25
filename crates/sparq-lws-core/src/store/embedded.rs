@@ -66,13 +66,12 @@
 //! no explicit shutdown handshake, no leaked thread.
 //!
 //! ## Persistence
-//! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
-//! directory-backed graph loaded with [`Graph::open`] ([`EmbeddedSparqClient::open`]); the optional
-//! on-disk snapshot is taken with [`EmbeddedSparqClient::save`] — itself an actor job, so a snapshot
-//! is consistent by construction (it cannot interleave with a write). The current slice keeps the
-//! in-memory graph and offers `save`/`open` as the durable seam; a WAL/durable-on-every-write story
-//! is the directory-backed `update_in_place` path (a follow-up to wire through), which now has a
-//! single place to live: the actor loop.
+//! [`EmbeddedSparqClient::in_memory`] creates an ephemeral graph. [`EmbeddedSparqClient::open`]
+//! strictly opens an existing store; [`EmbeddedSparqClient::open_or_create`] also bootstraps an
+//! empty directory. The engine supports WAL-backed writes, but the client's existing atomic
+//! mutators replace the graph with an in-memory fork and lose that backing. Bootstrap and
+//! compaction do not fix that separate limitation.
+//! [`EmbeddedSparqClient::save`] is a snapshot helper for tests, not the production durability path.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -212,8 +211,9 @@ impl EmbeddedSparqClient {
         Self::over(graph)
     }
 
-    /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
-    /// snapshot). The on-disk path the persistence option selects.
+    /// Open an existing directory-backed graph, replaying its write-ahead log.
+    ///
+    /// Unlike [`Self::open_or_create`], this never initializes an empty directory.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
         let graph = Graph::open(dir).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
@@ -221,8 +221,59 @@ impl EmbeddedSparqClient {
         Self::over(graph)
     }
 
+    /// Open an existing graph or initialize an empty directory with a durable graph.
+    ///
+    /// An existing `dict-meta.bin` or legacy `dict.bin` selects [`Self::open`], including
+    /// its corruption errors. A directory containing only a regular `LOCK` file counts as
+    /// empty; other non-empty directories are refused without overwriting their contents.
+    /// Callers must arrange exclusive access, with a lock outside the graph directory:
+    /// compaction replaces that directory. The existing client mutators use in-memory
+    /// atomic forks, so opening a directory alone does not make those writes durable.
+    ///
+    /// # Errors
+    /// Returns [`SparqError::Backend`] for foreign contents, filesystem errors, an invalid
+    /// existing graph, or an actor startup failure.
+    pub fn open_or_create(dir: &Path) -> Result<Self, SparqError> {
+        let io_error =
+            |e| SparqError::Backend(format!("fatal: graph init({}) failed: {e}", dir.display()));
+        if dir.join("dict-meta.bin").try_exists().map_err(io_error)?
+            || dir.join("dict.bin").try_exists().map_err(io_error)?
+        {
+            return Self::open(dir);
+        }
+        // Let Graph::open recover an interrupted directory swap before creating anything.
+        // Creating an empty canonical directory here would discard the recoverable store.
+        if !dir.try_exists().map_err(io_error)?
+            && (dir
+                .with_extension("compact-new")
+                .try_exists()
+                .map_err(io_error)?
+                || dir
+                    .with_extension("compact-old")
+                    .try_exists()
+                    .map_err(io_error)?)
+        {
+            return Self::open(dir);
+        }
+        std::fs::create_dir_all(dir).map_err(io_error)?;
+        for entry in std::fs::read_dir(dir).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            if entry.file_name() != "LOCK" || !entry.file_type().map_err(io_error)?.is_file() {
+                return Err(SparqError::Backend(format!(
+                    "fatal: refusing to initialize non-empty non-graph directory {}",
+                    dir.display()
+                )));
+            }
+        }
+        Graph::load_str("", "ntriples")
+            .map_err(|e| engine_err("empty graph init", e))?
+            .save(dir)
+            .map_err(io_error)?;
+        Self::open(dir)
+    }
+
     /// Hand `graph` to a freshly-spawned [`GraphActor`] and wrap it as a client. The single place a
-    /// `Graph` is moved onto its owning thread, shared by both constructors.
+    /// `Graph` is moved onto its owning thread, shared by the constructors.
     fn over(graph: Graph) -> Result<Self, SparqError> {
         Ok(Self {
             actor: Arc::new(GraphActor::spawn(graph)?),
@@ -293,7 +344,36 @@ impl EmbeddedSparqClient {
         self.actor.call(f).await
     }
 
-    /// Snapshot the current graph to `dir` (the durable seam for the in-memory path). Runs on the
+    /// Compact the graph and its named graphs on the owning actor thread.
+    ///
+    /// Logs the parent WAL bytes before and after compaction. Directory-backed graphs
+    /// persist the rebuilt base and truncate their WALs; in-memory graphs fold their
+    /// overlays. Call after draining writes. Cancelling this future stops waiting, but
+    /// cannot interrupt a job already submitted to the actor.
+    ///
+    /// # Errors
+    /// Returns [`SparqError::Backend`] if compaction fails or the actor stops.
+    pub async fn compact(&self) -> Result<(), SparqError> {
+        self.actor
+            .call(|graph| {
+                let wal = graph.persist_dir().map(|dir| dir.join("wal.log"));
+                let wal_bytes = || {
+                    wal.as_ref().and_then(|path| std::fs::metadata(path).ok().map(|m| m.len()))
+                };
+                let before = wal_bytes();
+                eprintln!("  SHUTDOWN: embedded graph compaction starting; parent WAL bytes before={before:?}.");
+                let result = graph.compact().map_err(|e| engine_err("compact", e));
+                let after = wal_bytes();
+                eprintln!(
+                    "  SHUTDOWN: embedded graph compaction finished; parent WAL bytes before={before:?} after={after:?}; success={}.",
+                    result.is_ok()
+                );
+                result
+            })
+            .await
+    }
+
+    /// Snapshot the current graph to `dir` for tests. Runs on the
     /// actor thread, so the snapshot cannot interleave with a write — but is deliberately NOT counted
     /// as an engine round-trip (it is an operator/persistence action, not a data-path query), keeping
     /// [`Self::engine_round_trips`] the same metric the counter tests pin.
@@ -1063,6 +1143,113 @@ mod tests {
                 matches!(c.clone().get_meta(iri).await, Err(SparqError::Backend(_))),
                 "a clone shares the poisoned actor"
             );
+        });
+    }
+
+    struct TestDir(std::path::PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("sparq-lws-bootstrap-{}", next_nonce()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn open_or_create_bootstraps_empty_missing_and_lock_only_directories() {
+        let root = TestDir::new();
+        for dir in [
+            root.0.join("empty"),
+            root.0.join("missing/graph"),
+            root.0.join("locked"),
+        ] {
+            if dir.ends_with("empty") {
+                std::fs::create_dir(&dir).unwrap();
+                assert!(
+                    EmbeddedSparqClient::open(&dir).is_err(),
+                    "open stays strict"
+                );
+            } else if dir.ends_with("locked") {
+                std::fs::create_dir(&dir).unwrap();
+                std::fs::write(dir.join("LOCK"), b"1234\n").unwrap();
+            }
+            let c = EmbeddedSparqClient::open_or_create(&dir).unwrap();
+            assert!(dir.join("dict-meta.bin").is_file());
+            assert!(Graph::open(&dir).unwrap().is_directory_backed());
+            if dir.ends_with("locked") {
+                assert_eq!(std::fs::read(dir.join("LOCK")).unwrap(), b"1234\n");
+            }
+            drop(c);
+        }
+    }
+
+    // Seed through the public WAL-backed Graph path: the existing client atomic
+    // mutators discard directory backing, independently of bootstrap (see module docs).
+    fn write_durable_meta(dir: &Path, iri: &str, expected: &ResourceMeta) {
+        let mut graph = Graph::open(dir).unwrap();
+        let update = sparql::update_put_meta(
+            iri,
+            &expected.content_type,
+            &expected.blob_key,
+            &expected.etag,
+            None,
+        )
+        .unwrap();
+        sparq_engine::update_in_place(&mut graph, &update).unwrap();
+    }
+
+    #[test]
+    fn open_or_create_preserves_existing_durable_writes() {
+        block_on(async {
+            let dir = TestDir::new();
+            let iri = "http://pod/alice/doc";
+            let expected = meta("text/turtle", "blob-1", "\"e1\"");
+            let c = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            drop(c);
+            write_durable_meta(&dir.0, iri, &expected);
+            let reopened = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+        });
+    }
+
+    #[test]
+    fn open_or_create_refuses_foreign_contents_and_corrupt_stores() {
+        let dir = TestDir::new();
+        std::fs::write(dir.0.join("foreign"), b"preserve me").unwrap();
+        assert!(EmbeddedSparqClient::open_or_create(&dir.0).is_err());
+        assert_eq!(
+            std::fs::read(dir.0.join("foreign")).unwrap(),
+            b"preserve me"
+        );
+        assert!(!dir.0.join("dict-meta.bin").exists());
+        std::fs::write(dir.0.join("dict-meta.bin"), b"corrupt").unwrap();
+        assert!(EmbeddedSparqClient::open_or_create(&dir.0).is_err());
+        assert_eq!(
+            std::fs::read(dir.0.join("dict-meta.bin")).unwrap(),
+            b"corrupt"
+        );
+    }
+
+    #[test]
+    fn open_or_create_recovers_an_interrupted_compaction() {
+        block_on(async {
+            let root = TestDir::new();
+            let dir = root.0.join("graph");
+            let c = EmbeddedSparqClient::open_or_create(&dir).unwrap();
+            let iri = "http://pod/alice/doc";
+            let expected = meta("text/plain", "blob-2", "\"e2\"");
+            drop(c);
+            write_durable_meta(&dir, iri, &expected);
+            std::fs::rename(&dir, dir.with_extension("compact-old")).unwrap();
+            let reopened = EmbeddedSparqClient::open_or_create(&dir).unwrap();
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
         });
     }
 

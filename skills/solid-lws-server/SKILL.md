@@ -65,7 +65,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
 - `memory` (default): an ephemeral in-memory test double.
 - `embedded`: the default-enabled in-process engine. Set
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
-  ephemeral.
+  ephemeral. An empty or missing directory is initialized; an existing store is
+  opened with WAL replay. Foreign non-empty directories are refused.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
   read its own writes: a query sent after an update has completed must see what the
@@ -75,6 +76,18 @@ Set `PSS_SPARQ_BACKEND` to one of:
   can still commit on the service afterwards. The creates and removals of grants,
   requests and subscriptions, and the content write of a resource create, are fenced
   against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
+
+Rust callers use `store::EmbeddedSparqClient::open_or_create(&dir)` for bootstrap,
+or `open(&dir)` to require an existing graph. The engine supports durable WAL writes,
+but existing client atomic mutators replace the graph with an in-memory fork and
+lose directory backing. Bootstrap does not fix that limitation. `save` remains a
+test snapshot helper. Arrange
+exclusive access with a lock outside the graph directory, which compaction swaps.
+For a configured index directory, the native server drains listeners on
+SIGINT/SIGTERM, then awaits an embedded compaction actor job for at most 30 seconds,
+logging parent WAL bytes before/after.
+`EmbeddedSparqClient::compact().await` also compacts durable named-graph WALs.
+A timeout stops waiting; the actor job itself cannot be interrupted.
 
 Native callers can acquire `store::DataDirLock::acquire(&data_dir)` and retain the
 guard until all storage users stop. It creates `<data_dir>/LOCK`, takes an advisory
