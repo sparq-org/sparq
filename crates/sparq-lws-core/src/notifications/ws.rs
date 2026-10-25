@@ -30,12 +30,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
-use axum::extract::ws::{Message, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -565,8 +564,29 @@ pub async fn receive_handler<S: Store + 'static>(
     ws.on_upgrade(move |socket| stream_notifications(socket, state, topic, web_id, origin, claim))
 }
 
+/// The receive loop's frame transport, also exercised with an always-ready input in tests.
+trait NotificationSocket: Send {
+    fn recv(
+        &mut self,
+    ) -> impl std::future::Future<Output = Option<Result<Message, axum::Error>>> + Send;
+    fn send(
+        &mut self,
+        frame: Message,
+    ) -> impl std::future::Future<Output = Result<(), axum::Error>> + Send;
+}
+
+impl NotificationSocket for WebSocket {
+    async fn recv(&mut self) -> Option<Result<Message, axum::Error>> {
+        WebSocket::recv(self).await
+    }
+
+    async fn send(&mut self, frame: Message) -> Result<(), axum::Error> {
+        WebSocket::send(self, frame).await
+    }
+}
+
 /// Send a close frame (best effort: the client may be gone already).
-async fn close<W: futures_util::Sink<Message> + Unpin>(socket: &mut W, code: u16, reason: &'static str) {
+async fn close<W: NotificationSocket>(socket: &mut W, code: u16, reason: &'static str) {
     let _ = socket
         .send(Message::Close(Some(axum::extract::ws::CloseFrame {
             code,
@@ -647,9 +667,7 @@ async fn stream_notifications<S: Store + 'static, W>(
     origin: Option<String>,
     _claim: crate::notifications::SocketClaim,
 ) where
-    W: futures_util::Stream<Item = Result<Message, axum::Error>>
-        + futures_util::Sink<Message>
-        + Unpin,
+    W: NotificationSocket,
 {
     let mut rx = state.hub.subscribe(&topic).await;
     let every = state.access_recheck;
@@ -734,7 +752,7 @@ async fn stream_notifications<S: Store + 'static, W>(
             }
             // An inbound socket message — only meaningful as a Close / error signal. Read while
             // a check is in progress too, so pings are answered meanwhile.
-            inbound = socket.next() => {
+            inbound = socket.recv() => {
                 match inbound {
                     Some(Ok(Message::Close(_))) | None => break, // clean close or stream end
                     Some(Ok(_)) => { /* ignore any client frame; receive socket is server→client */ }
@@ -1952,46 +1970,19 @@ mod tests {
         sent: Arc<std::sync::Mutex<Vec<Message>>>,
     }
 
-    impl futures_util::Stream for ReadyFrames {
-        type Item = Result<Message, axum::Error>;
-
-        fn poll_next(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
-            -> std::task::Poll<Option<Self::Item>>
-        {
-            let frame = if self.remaining == 0 {
+    impl NotificationSocket for ReadyFrames {
+        async fn recv(&mut self) -> Option<Result<Message, axum::Error>> {
+            if self.remaining == 0 {
                 None
             } else {
                 self.remaining -= 1;
                 Some(Ok(Message::text("frame")))
-            };
-            std::task::Poll::Ready(frame)
-        }
-    }
-
-    impl futures_util::Sink<Message> for ReadyFrames {
-        type Error = std::convert::Infallible;
-
-        fn poll_ready(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
-            -> std::task::Poll<Result<(), Self::Error>>
-        {
-            std::task::Poll::Ready(Ok(()))
+            }
         }
 
-        fn start_send(self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
-            self.sent.lock().unwrap().push(item);
+        async fn send(&mut self, frame: Message) -> Result<(), axum::Error> {
+            self.sent.lock().unwrap().push(frame);
             Ok(())
-        }
-
-        fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
-            -> std::task::Poll<Result<(), Self::Error>>
-        {
-            std::task::Poll::Ready(Ok(()))
-        }
-
-        fn poll_close(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>)
-            -> std::task::Poll<Result<(), Self::Error>>
-        {
-            std::task::Poll::Ready(Ok(()))
         }
     }
 
@@ -2005,7 +1996,10 @@ mod tests {
         revoke_bob(&s).await;
         s.tick_now();
         let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let socket = ReadyFrames { remaining: 1024, sent: sent.clone() };
+        let socket = ReadyFrames {
+            remaining: 1024,
+            sent: sent.clone(),
+        };
         stream_notifications(socket, s, topic, BOB.to_string(), None, claim).await;
         assert!(matches!(sent.lock().unwrap().as_slice(),
                          [Message::Close(Some(frame))] if frame.code == 1008 && frame.reason == REVOKED),

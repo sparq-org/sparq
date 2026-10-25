@@ -1,7 +1,7 @@
 //! The lifecycle of a service container's records (access grants and requests, notification
 //! subscriptions), shared by every kind so their rules cannot drift: a record is created in one
-//! store write and removed in one store step, memory follows the store (a record is in force
-//! only once it is confirmed stored, and leaves only once it is confirmed gone), the locks a
+//! store write and removed in one store step, memory follows the store (a record enters force
+//! only once confirmed stored, and stays out of force while an unread removal is settled), the locks a
 //! request takes are waited for a bounded time ([`within_wait`]), the steps after the locks are
 //! held run in a task holding the request's admission, and each change is announced once it is
 //! made ([`announce_record`]).

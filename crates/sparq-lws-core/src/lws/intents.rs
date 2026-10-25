@@ -513,8 +513,10 @@ mod tests {
         let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
         *store.unsettle_next_delete_of.lock().unwrap() = Some((record.clone(), gate.clone()));
         let wait = super::super::records::LOCK_WAIT;
-        store.slow_fence_ms.store((wait + Duration::from_millis(500)).as_millis() as u64,
-                                  Ordering::SeqCst);
+        store.slow_fence_ms.store(
+            (wait + Duration::from_millis(500)).as_millis() as u64,
+            Ordering::SeqCst,
+        );
         store.fail_reads_after_fence.store(true, Ordering::SeqCst);
         // The first fence exceeds the request's wait. Commit's next fence succeeds, after
         // the Forget lands. Reading the intent before that fence would undo the write.
