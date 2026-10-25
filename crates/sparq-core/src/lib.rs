@@ -5751,7 +5751,7 @@ fn refuse_foreign_below(dir: &std::path::Path, top: bool) -> std::io::Result<()>
             refuse_foreign_below(&path, false)?;
         } else if kind.is_file()
             && dir_lock::comparable_name(&entry.file_name().to_string_lossy()).ends_with(".lock")
-            && !(top && dir_lock::comparable_name(&entry.file_name().to_string_lossy()) == dir_lock::INSIDE_LOCK)
+            && !(top && dir_lock::same_file(&path, &dir.join(dir_lock::INSIDE_LOCK)))
             && dir_lock::DirLock::is_held(&path)?
         {
             return refused(format!(

@@ -1238,7 +1238,9 @@ fn reserved_names_match_in_any_case_and_held_files_are_reserved() {
     use sparq_core::dir_lock::is_reserved_store_path;
     let root = scratch("reserved-case");
     std::fs::create_dir_all(root.join("data")).unwrap();
+    std::fs::create_dir_all(root.join("gK")).unwrap();
     for name in [
+        "ſparq-ſtore", "ſparq-stagıng", "data.locK", "gK.LOCK",
         "data.LOCK", "data.Lock", "SPARQ-STORE", "SPARQ-STAGING", "Sparq.Lock",
         "x.Compact-New", "x.COMPACT-OLD", "named.Drop-New", "named.DROP-OLD",
         ".SPARQ-build-1", "x.SPARQ-PART", "x.COMPACT-NEW.LOCK",
@@ -1330,16 +1332,18 @@ fn staging_names_in_another_case_are_not_opened_as_live_stores() {
 
 #[test]
 fn a_store_write_refuses_a_held_lock_in_another_case() {
-    let root = scratch("nested-lock-case");
-    let dir = root.join("g");
-    std::fs::create_dir(&dir).unwrap();
-    let path = dir.join("child.LOCK");
-    let held = std::fs::File::create(&path).unwrap();
-    fs4::FileExt::try_lock(&held).unwrap();
-    assert!(Graph::new().save(&dir).is_err());
-    assert!(!dir.join("dict-meta.bin").exists());
-    drop(held);
-    std::fs::remove_dir_all(root).unwrap();
+    for name in ["child.LOCK", "SPARQ.LOCK"] {
+        let root = scratch(&format!("nested-lock-case-{name}"));
+        let dir = root.join("g");
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join(name);
+        let held = std::fs::File::create(&path).unwrap();
+        fs4::FileExt::try_lock(&held).unwrap();
+        assert!(Graph::new().save(&dir).is_err(), "{name}");
+        assert!(!dir.join("dict-meta.bin").exists());
+        drop(held);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]

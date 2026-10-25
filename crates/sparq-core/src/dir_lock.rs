@@ -155,12 +155,13 @@ pub fn store_root(path: &Path) -> io::Result<Option<PathBuf>> {
 }
 
 /// A file name as the filesystem compares it, for checking it against the names a store
-/// reserves: ASCII case folded (macOS and Windows filesystems ignore case by default), and on
+/// reserves: uppercased then lowercased, also matching Unicode aliases of reserved ASCII
+/// letters (macOS and Windows filesystems ignore case by default), and on
 /// Windows without trailing dots and spaces (which Windows drops from a name).
 pub(crate) fn comparable_name(name: &str) -> String {
     #[cfg(windows)]
     let name = name.trim_end_matches(['.', ' ']);
-    name.to_ascii_lowercase()
+    name.to_uppercase().to_lowercase()
 }
 
 /// The names a store reserves beside or inside itself: its marker, staging record and inside
@@ -204,7 +205,12 @@ fn is_reserved_entry(entry: &Path) -> io::Result<bool> {
         let given = entry.file_name().map(|n| n.to_string_lossy().into_owned());
         let stem = given
             .as_deref()
-            .map_or(stem, |g| g.get(..stem.len()).unwrap_or(stem));
+            .and_then(|given| {
+                #[cfg(windows)]
+                let given = given.trim_end_matches(['.', ' ']);
+                given.rsplit_once('.').map(|(stem, _)| stem)
+            })
+            .unwrap_or(stem);
         let locked = entry.with_file_name(stem);
         if locked.symlink_metadata().is_ok() || is_reserved_entry(&locked)? {
             return Ok(true);
@@ -398,7 +404,7 @@ fn windows_device_name(name: &str) -> bool {
         .next()
         .unwrap_or(name)
         .trim_end_matches(' ');
-    let stem = stem.to_ascii_lowercase();
+    let stem = comparable_name(stem);
     if matches!(
         stem.as_str(),
         "con" | "prn" | "aux" | "nul" | "conin$" | "conout$"
@@ -419,13 +425,19 @@ fn windows_device_name(name: &str) -> bool {
 #[cfg(windows)]
 fn refuse_windows_device_path(path: &Path) -> io::Result<()> {
     use std::path::{Component, Prefix};
+    // Verbatim filesystem paths address literal filenames rather than DOS aliases.
+    let verbatim = matches!(path.components().next(), Some(Component::Prefix(prefix))
+        if matches!(prefix.kind(), Prefix::VerbatimDisk(_) | Prefix::VerbatimUNC(..) | Prefix::Verbatim(_)));
     let special = path.components().any(|component| match component {
         Component::Prefix(prefix) => match prefix.kind() {
             Prefix::DeviceNS(_) => true,
-            Prefix::Verbatim(name) => name.to_string_lossy().eq_ignore_ascii_case("GLOBALROOT"),
+            Prefix::Verbatim(name) => {
+                let name = name.to_string_lossy();
+                name.eq_ignore_ascii_case("GLOBALROOT") || windows_device_name(&name)
+            }
             _ => false,
         },
-        Component::Normal(name) => windows_device_name(&name.to_string_lossy()),
+        Component::Normal(name) => !verbatim && windows_device_name(&name.to_string_lossy()),
         _ => false,
     });
     if special {
@@ -817,6 +829,7 @@ mod tests {
             "LPT²",
             "CONOUT$",
             "CONIN$",
+            "CONıN$",
         ] {
             assert!(windows_device_name(name), "{name}");
         }
@@ -834,5 +847,6 @@ mod tests {
             assert!(resolve_store_dir(path).is_err(), "{name}");
             assert!(check_regular_lock_file(path).is_err(), "{name}");
         }
+        assert!(refuse_windows_device_path(Path::new(r"\\?\C:\data\nul.lock")).is_ok());
     }
 }
