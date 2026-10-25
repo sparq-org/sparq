@@ -1442,8 +1442,8 @@ impl Undo {
     /// step waits for a fence (an [`Undo::Fence`], or an unsettled removal's in
     /// [`records::delete_record`]): [`records::LOCK_WAIT`] while a request waits on it
     /// ([`settle`]), so a fence that stalls leaves the step to be set aside rather than holding
-    /// the request and its locks; `None` for as long as the store's own call takes (the
-    /// background put-back, and the settling of intents at start-up).
+    /// the request and its locks; a capped store call timeout for background put-back;
+    /// `None` for as long as the store's own call takes at start-up.
     async fn apply<S: Store>(
         &self,
         store: &S,
@@ -1697,7 +1697,8 @@ const UNDO_ATTEMPTS: u32 = 3;
 
 /// Apply `undo` in order while a request waits on it (with its locks held), each tried a few
 /// times ([`UNDO_ATTEMPTS`], with short waits between): `None` once all are applied, else what is
-/// left, from the step that kept failing on. Each attempt waits for a fence for
+/// left, from the step that kept failing on. A failed Fence step is left at once.
+/// Each attempt waits for a fence for
 /// [`records::LOCK_WAIT`] at most ([`Undo::apply`]). A step whose write failed unsettled (its
 /// fence not succeeding in that time) is not tried again: it is left at once with its fence
 /// first, for the set-aside, which holds the locks, to fence before it puts the step back
@@ -1736,6 +1737,9 @@ async fn settle_within<S: Store>(
                     let left = [Undo::Fence { fence }, step].into_iter().chain(steps);
                     return Some(Unsettled::new(left.collect()));
                 }
+                Err(_) if within.is_some() && matches!(step, Undo::Fence { .. }) => {
+                    return Some(Unsettled::new(std::iter::once(step).chain(steps).collect()));
+                }
                 Err(_) => {}
             }
             if attempt < UNDO_ATTEMPTS {
@@ -1755,8 +1759,15 @@ async fn settle_within<S: Store>(
 /// the step that failed unsettled (whose fence did not succeed) may still land, so its fence is
 /// made to succeed before the step is tried again: no later attempt is outlived by an earlier one.
 pub(crate) async fn put_back_until_done<S: Store>(undo: &Undo, store: &S) {
+    if let Undo::Fence { fence } = undo {
+        records::fence_in_background(store, fence).await;
+        return;
+    }
+    let within = store
+        .call_timeout()
+        .clamp(records::LOCK_WAIT, records::MAX_FENCE_ATTEMPT);
     until_done(|| async {
-        match undo.apply(store, None).await {
+        match undo.apply(store, Some(within)).await {
             Ok(()) => Ok(()),
             Err(crate::error::ServerError::Unsettled { fence, .. }) => {
                 records::fence_in_background(store, &fence).await;
@@ -2047,8 +2058,8 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         mut self,
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
-        // An intent create/rewrite that answered unsettled must settle before a later
-        // rewrite or Forget can run; otherwise the original plan could arrive afterwards.
+        // An unsettled write must settle before a later rewrite or Forget can run;
+        // otherwise the earlier write could arrive afterwards.
         while let Some(at) = self
             .undo
             .iter()
@@ -2060,7 +2071,9 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             let deadline = records::deadline_after(records::LOCK_WAIT);
             if !records::fenced_by(&self.state.store, fence, Some(deadline)).await {
                 return Err((
-                    crate::error::ServerError::Storage("the intent could not be settled".into()),
+                    crate::error::ServerError::Storage(
+                        "the unsettled write could not be settled".into(),
+                    ),
                     self.rollback().await,
                 ));
             }

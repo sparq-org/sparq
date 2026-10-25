@@ -425,7 +425,8 @@ mod wasm_store {
     ///
     /// Reads are pass-through, including the `read_plan`/`read_at` overrides, so wrapping a
     /// [`CompositeStore`](sparq_lws_core::store::CompositeStore) keeps its single-round-trip read
-    /// path rather than falling back to the trait's per-IRI defaults.
+    /// path rather than falling back to the trait's per-IRI defaults. The reported call timeout
+    /// and atomic marker capability also come from the inner store.
     pub struct PersistentStore<S: Store> {
         inner: S,
         journal: Arc<Journal>,
@@ -440,6 +441,14 @@ mod wasm_store {
 
     #[async_trait]
     impl<S: Store> Store for PersistentStore<S> {
+        fn call_timeout(&self) -> std::time::Duration {
+            self.inner.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.inner.raises_markers()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             self.inner.read(iri).await
         }

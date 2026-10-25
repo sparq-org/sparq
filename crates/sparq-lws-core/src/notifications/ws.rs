@@ -134,6 +134,9 @@ pub struct NotifyState<S: Store> {
     /// with it, so its phase is theirs).
     #[cfg(test)]
     recheck_now: Arc<tokio::sync::Notify>,
+    /// Counts lag checks started by this state, independently of process-wide metrics.
+    #[cfg(test)]
+    lag_checks: Arc<AtomicU64>,
 }
 
 /// How often an open receive socket checks, on a timer of its own, that its subscriber may still
@@ -157,6 +160,8 @@ impl<S: Store> NotifyState<S> {
             access_recheck: ACCESS_RECHECK,
             #[cfg(test)]
             recheck_now: Default::default(),
+            #[cfg(test)]
+            lag_checks: Default::default(),
         }
     }
 
@@ -586,13 +591,20 @@ impl NotificationSocket for WebSocket {
 }
 
 /// Send a close frame (best effort: the client may be gone already).
-async fn close<W: NotificationSocket>(socket: &mut W, code: u16, reason: &'static str) {
-    let _ = socket
-        .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+async fn close<W: NotificationSocket>(
+    socket: &mut W,
+    code: u16,
+    reason: &'static str,
+    every: std::time::Duration,
+) {
+    let _ = tokio::time::timeout(
+        every,
+        socket.send(Message::Close(Some(axum::extract::ws::CloseFrame {
             code,
             reason: reason.into(),
-        })))
-        .await;
+        }))),
+    )
+    .await;
 }
 
 /// The close reason once the subscriber may no longer read the topic.
@@ -647,7 +659,8 @@ fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
 ///   notifications, dropping any running Event or Lag check and noting it as missed. Within
 ///   two periods of losing Read the socket closes: 1008 for a confirmed denial, or 1011 if
 ///   the timer check is undecided. Each check has at most one period; a slower check counts
-///   as undecided and the client must resubscribe.
+///   as undecided and the client must resubscribe. Sending a notification or close frame
+///   has one further period at most before the connection task ends.
 /// - A check that cannot be made is neither a grant nor a denial. On the timer it closes the
 ///   socket (1011).
 /// - A notification (or an overflow) that is dropped, because the subscriber may not read it or
@@ -656,8 +669,9 @@ fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
 ///   client to reconcile, instead of delivering: nothing is sent after a gap without saying so,
 ///   and a subscriber whose Read was restored before the next tick is still told it missed
 ///   something. An Event check spanning a tick therefore asks a reader to reconcile; a
-///   dropped Lag check does too (RECONCILE, rather than OVERFLOW). A subscriber that may not
-///   read the topic at that point gets the revocation close
+///   dropped Lag check does too (RECONCILE, rather than OVERFLOW). A tick that becomes ready
+///   while a finished but unpolled Event decision waits drops it too, and a reader gets RECONCILE.
+///   A subscriber that may not read the topic at that point gets the revocation close
 ///   (1008) on the timer and is never told.
 async fn stream_notifications<S: Store + 'static, W>(
     mut socket: W,
@@ -694,7 +708,15 @@ async fn stream_notifications<S: Store + 'static, W>(
             // A due tick pre-empts an event/lag check. A timer check already running
             // finishes (or times out) before another tick starts.
             () = state.next_tick(&mut recheck), if !matches!(check, Some((_, Due::Tick))) => {
-                if check.take().is_some() {
+                if let Some((_, due)) = check.take() {
+                    if let Due::Lag(skipped) = due {
+                        NOTIFICATION_METRICS
+                            .dropped_subscribers_total
+                            .fetch_add(1, Ordering::Relaxed);
+                        NOTIFICATION_METRICS
+                            .lagged_events_total
+                            .fetch_add(skipped, Ordering::Relaxed);
+                    }
                     missed = true;
                 }
                 check = Some((access(), Due::Tick));
@@ -711,24 +733,27 @@ async fn stream_notifications<S: Store + 'static, W>(
                 let decided = decided.unwrap_or(ReadAccess::Undecided);
                 match (due, decided) {
                     (Due::Tick, ReadAccess::Allowed) if missed => {
-                        close(&mut socket, 1011, RECONCILE).await;
+                        close(&mut socket, 1011, RECONCILE, every).await;
                         break;
                     }
                     (Due::Tick, ReadAccess::Allowed) => {}
                     (Due::Tick, ReadAccess::Denied) => {
-                        close(&mut socket, 1008, REVOKED).await;
+                        close(&mut socket, 1008, REVOKED, every).await;
                         break;
                     }
                     (Due::Tick, ReadAccess::Undecided) => {
-                        close(&mut socket, 1011, UNDECIDED).await;
+                        close(&mut socket, 1011, UNDECIDED, every).await;
                         break;
                     }
                     (Due::Event(_), ReadAccess::Allowed) if missed => {
-                        close(&mut socket, 1011, RECONCILE).await;
+                        close(&mut socket, 1011, RECONCILE, every).await;
                         break;
                     }
                     (Due::Event(body), ReadAccess::Allowed) => {
-                        if socket.send(Message::text(body.to_string())).await.is_err() {
+                        if !matches!(
+                            tokio::time::timeout(every, socket.send(Message::text(body.to_string()))).await,
+                            Ok(Ok(()))
+                        ) {
                             break; // the client went away mid-send
                         }
                     }
@@ -740,7 +765,7 @@ async fn stream_notifications<S: Store + 'static, W>(
                             .lagged_events_total
                             .fetch_add(skipped, Ordering::Relaxed);
                         // "internal error" / server overload — client reconnects
-                        close(&mut socket, 1011, OVERFLOW).await;
+                        close(&mut socket, 1011, OVERFLOW, every).await;
                         break;
                     }
                     // Dropped, and noted: the next point where the subscriber may read the
@@ -768,6 +793,8 @@ async fn stream_notifications<S: Store + 'static, W>(
                     // to reconcile by closing — it should re-subscribe + re-read (missed-update
                     // safety) — once it is known that it may read what it missed.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        #[cfg(test)]
+                        state.lag_checks.fetch_add(1, Ordering::Relaxed);
                         check = Some((access(), Due::Lag(skipped)));
                     }
                     // The sender was dropped (the topic channel went away) — nothing more will arrive.
@@ -1901,6 +1928,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_tick_preempts_event_and_lag_checks() {
         for lag in [false, true] {
+            let before = NotificationMetrics::snapshot();
             let (s, store) = faulting_state().await;
             let topic = format!("{BASE}/doc");
             let mut ws = open_for_bob(&s, &topic).await;
@@ -1911,11 +1939,15 @@ mod tests {
             } else {
                 1
             };
-            for _ in 0..count {
-                s.hub
-                    .notify(&topic, crate::notifications::ActivityType::Update, None)
-                    .await;
-            }
+            // Fill the buffer before the connection task can consume it.
+            tokio::task::unconstrained(async {
+                for _ in 0..count {
+                    s.hub
+                        .notify(&topic, crate::notifications::ActivityType::Update, None)
+                        .await;
+                }
+            })
+            .await;
             tokio::time::timeout(std::time::Duration::from_secs(2), async {
                 while store.hold_next_meta.lock().unwrap().is_some() {
                     tokio::task::yield_now().await;
@@ -1923,12 +1955,18 @@ mod tests {
             })
             .await
             .expect("event/lag check started");
+            assert_eq!(s.lag_checks.load(Ordering::Relaxed), u64::from(lag));
             s.tick_now();
             assert_eq!(
                 next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
                 Some(Err((1011, RECONCILE.to_string()))),
                 "lag={lag}"
             );
+            if lag {
+                let after = NotificationMetrics::snapshot();
+                assert!(after.dropped_subscribers_total > before.dropped_subscribers_total);
+                assert!(after.lagged_events_total > before.lagged_events_total);
+            }
         }
     }
 
@@ -2004,6 +2042,68 @@ mod tests {
         assert!(matches!(sent.lock().unwrap().as_slice(),
                          [Message::Close(Some(frame))] if frame.code == 1008 && frame.reason == REVOKED),
                 "a ready frame backlog starved the timer or its decision");
+    }
+
+    /// A peer that never drains sends cannot retain a revoked connection.
+    #[tokio::test(start_paused = true)]
+    async fn a_nonreading_revoked_socket_ends_within_three_periods() {
+        struct StalledSocket {
+            ready: Arc<tokio::sync::Semaphore>,
+            sending: Arc<tokio::sync::Semaphore>,
+        }
+        impl NotificationSocket for StalledSocket {
+            async fn recv(&mut self) -> Option<Result<Message, axum::Error>> {
+                self.ready.add_permits(1);
+                std::future::pending().await
+            }
+            async fn send(&mut self, _: Message) -> Result<(), axum::Error> {
+                self.sending.add_permits(1);
+                std::future::pending().await
+            }
+        }
+        for event in [false, true] {
+            let every = std::time::Duration::from_millis(100);
+            let s = state_with_reader(every).await;
+            let topic = format!("{BASE}/doc");
+            let token = s.hub.mint_receive_token(BOB, &topic).await;
+            let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
+            let ready = Arc::new(tokio::sync::Semaphore::new(0));
+            let sending = Arc::new(tokio::sync::Semaphore::new(0));
+            let task = tokio::spawn(stream_notifications(
+                StalledSocket {
+                    ready: ready.clone(),
+                    sending: sending.clone(),
+                },
+                s.clone(),
+                topic.clone(),
+                BOB.to_string(),
+                None,
+                claim,
+            ));
+            ready.acquire().await.unwrap().forget();
+            if event {
+                s.hub
+                    .notify(&topic, crate::notifications::ActivityType::Update, None)
+                    .await;
+                sending.acquire().await.unwrap().forget();
+            }
+            revoke_bob(&s).await;
+            tokio::time::timeout(every * 3 + std::time::Duration::from_millis(1), task)
+                .await
+                .expect("a stalled send retained the revoked connection")
+                .unwrap();
+            assert!(
+                s.hub.claim_receive_socket(&token, &topic).await.is_some(),
+                "connection claim released"
+            );
+            if !event {
+                assert_eq!(
+                    sending.available_permits(),
+                    1,
+                    "revocation reached the close send"
+                );
+            }
+        }
     }
 
     /// Inbound frames cannot starve the timer or its completed access decision.

@@ -140,11 +140,14 @@ access: one it may no longer read is dropped (not sent, and it neither closes th
 socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
 closes the socket within two periods of losing Read: `1008` for a confirmed
 denial, or `1011` if the timer check is undecided. Each check has at most one
-period; a slower check counts as undecided and the client must resubscribe.
+period; a slower check counts as undecided and the client must resubscribe. Sending
+a notification or close frame has one further period at most before the connection ends.
 A due tick takes priority over inbound frames and queued notifications and
 pre-empts a running notification or lag check, noting it as missed. A reader
 whose notification check spans a tick gets a reconcile close; a dropped lag
-check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). The
+check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). A tick that
+becomes ready while a finished but unpolled Event decision waits drops that decision,
+and the reader gets `RECONCILE`. The
 timing of a revocation close follows the timer, even while the client floods frames. A check that cannot
 be made (a backend fault) is no denial: on the timer it closes the socket
 (`1011`); a notification whose check cannot be made is dropped. A dropped
@@ -649,12 +652,14 @@ What the server exposes, all discoverable from the storage description
   Putting a change back while a request waits on it (its own rollback or commit, with its locks
   held) tries each step up to three times with short growing waits between, each attempt
   waiting for a fence two seconds at most (counted from the store's answer to the write it
-  fences); a step whose write failed unsettled and whose fence has not succeeded is never tried
+  fences). A stalled `Fence` step is left at once; a step whose write failed unsettled and
+  whose fence has not succeeded is never tried
   again in the request: it is set aside with the rest, its fence first, and the set-aside (which
   holds the locks) fences it before putting the step back, so a write that arrives late can no
   longer undo what was put back since. The background put-back of a set-aside change, and the
-  settling of intents at start-up, wait for a fence as the store's call allows; background
-  retries use the same capped per-attempt budget. Both fence a step's unsettled write before
+  settling of intents at start-up, differ in their waits: start-up waits as the store's call
+  allows; every background call uses a capped per-attempt budget, including the first call.
+  Both fence a step's unsettled write before
   trying the step again. Forward removals and intent creates retain their fences in the
   journal: rollback fences before recreation or Forget, and commit fences before changing
   the intent. A removal whose fence lands but

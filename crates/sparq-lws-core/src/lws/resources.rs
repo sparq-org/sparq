@@ -765,9 +765,15 @@ pub(crate) async fn touch_container<S: Store + 'static>(state: &LwsState<S>, con
         }
         return;
     }
+    let deadline = super::records::deadline_after(super::records::LOCK_WAIT);
     for record in owed {
         // A failure leaves the intent, and the next start touches the container again.
-        let _ = super::intents::clear(&state.store, &record, Some(super::records::LOCK_WAIT)).await;
+        if tokio::time::timeout_at(deadline, super::intents::clear(&state.store, &record, None))
+            .await
+            .is_err()
+        {
+            break;
+        }
     }
 }
 
@@ -9885,6 +9891,45 @@ mod tests {
             }
             (etag, doc) = (now_etag, now_doc);
         }
+    }
+
+    /// Clearing several owed intents shares one deadline after the touch lands.
+    #[tokio::test(start_paused = true)]
+    async fn a_touch_shares_one_deadline_for_owed_intents() {
+        use super::super::{records::LOCK_WAIT, test_store::state};
+        use std::sync::{atomic::Ordering, Arc};
+        let (st, store) = state(100).await;
+        let container = st.cfg.storage();
+        let records = [format!("{container}intent1"), format!("{container}intent2")];
+        for record in &records {
+            store
+                .create_in_container(&container, record, Bytes::from_static(b"{}"), LWS_JSON)
+                .await
+                .unwrap();
+            st.owe_touch(&container, record.clone());
+        }
+        let gate = || Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((records[0].clone(), gate()));
+        store
+            .slow_fence_ms
+            .store((LOCK_WAIT * 3 / 4).as_millis() as u64, Ordering::SeqCst);
+        let arm_second = async {
+            while store.fences_tried.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            *store.unsettle_next_delete_of.lock().unwrap() = Some((records[1].clone(), gate()));
+        };
+        let began = tokio::time::Instant::now();
+        tokio::join!(touch_container(&st, &container), arm_second);
+        assert!(
+            began.elapsed() <= LOCK_WAIT + std::time::Duration::from_millis(1),
+            "each intent received a fresh deadline"
+        );
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), 2);
+        assert!(
+            store.exists(&records[1]).await.unwrap(),
+            "unfinished intent remains for recovery"
+        );
     }
 
     /// Review finding: a touch of a member container changes the date its parent's listing

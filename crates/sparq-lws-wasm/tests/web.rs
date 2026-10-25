@@ -333,3 +333,62 @@ async fn a_snapshot_that_cannot_be_decoded_is_refused_rather_than_partly_applied
         "a half-written snapshot file must not boot a half-populated pod"
     );
 }
+
+/// Persistence reports the inner store's settlement budget and atomic marker capability.
+#[wasm_bindgen_test]
+fn persistence_preserves_store_capabilities() {
+    use async_trait::async_trait;
+    use axum::body::Bytes;
+    use sparq_lws_core::store::{DeleteOutcome, Resource, ResourceMeta, Store, ValidatedChildIri};
+    use sparq_lws_core::{ServerError, ServerResult};
+    use sparq_lws_wasm::persist::{Journal, PersistentStore};
+    use std::{sync::Arc, time::Duration};
+
+    struct CapableStore;
+    #[async_trait]
+    impl Store for CapableStore {
+        fn call_timeout(&self) -> Duration {
+            Duration::from_secs(17)
+        }
+        fn raises_markers(&self) -> bool {
+            true
+        }
+        async fn read(&self, _: &str) -> ServerResult<Resource> {
+            Err(ServerError::NotFound)
+        }
+        async fn meta(&self, _: &str) -> ServerResult<Option<ResourceMeta>> {
+            Ok(None)
+        }
+        async fn exists(&self, _: &str) -> ServerResult<bool> {
+            Ok(false)
+        }
+        async fn write(&self, _: &str, _: Bytes, _: &str) -> ServerResult<ResourceMeta> {
+            Err(ServerError::NotFound)
+        }
+        async fn create_in_container(
+            &self,
+            _: &str,
+            _: &str,
+            _: Bytes,
+            _: &str,
+        ) -> ServerResult<ResourceMeta> {
+            Err(ServerError::NotFound)
+        }
+        async fn delete(&self, _: &str, _: Option<&str>) -> ServerResult<()> {
+            Err(ServerError::NotFound)
+        }
+        async fn delete_container_if_empty(
+            &self,
+            _: &str,
+            _: Option<&str>,
+        ) -> ServerResult<DeleteOutcome> {
+            Ok(DeleteOutcome::NotFound)
+        }
+        async fn list_children(&self, _: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            Ok(Vec::new())
+        }
+    }
+    let store = PersistentStore::new(CapableStore, Arc::new(Journal::new()));
+    assert_eq!(store.call_timeout(), Duration::from_secs(17));
+    assert!(store.raises_markers());
+}
