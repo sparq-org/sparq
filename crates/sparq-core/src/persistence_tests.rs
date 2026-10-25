@@ -11,6 +11,7 @@ pub(super) enum Event {
     ManifestPublished(PathBuf),
     ManifestReady(PathBuf),
     DropPublished(PathBuf),
+    LogFileSynced(PathBuf),
     JournalTruncated(PathBuf),
     SwapPublished(PathBuf),
     RetiringOldBase(PathBuf),
@@ -164,13 +165,21 @@ fn new_named_base_syncs_precede_manifest_and_journal_retirement() {
         }
         let events = trace.take();
         let sub = dir.0.join("named/0");
-        let sub_sync = position(&events, Event::Synced(sub.clone()));
+        let manifest = position(&events, Event::ManifestPublished(dir.0.join("named.bin")));
+        // Log open now also syncs its directory. Check the final base-tree sync before
+        // manifest publication, which must follow every saved base file and log.
+        let final_sync = |path: PathBuf| {
+            events[..manifest]
+                .iter()
+                .rposition(|event| *event == Event::Synced(path.clone()))
+                .unwrap()
+        };
+        let sub_sync = final_sync(sub.clone());
         for file in base_files {
             assert!(position(&events, Event::Synced(sub.join(file))) < sub_sync);
         }
-        let named_sync = position(&events, Event::Synced(dir.0.join("named")));
-        let root_sync = position(&events, Event::Synced(dir.0.clone()));
-        let manifest = position(&events, Event::ManifestPublished(dir.0.join("named.bin")));
+        let named_sync = final_sync(dir.0.join("named"));
+        let root_sync = final_sync(dir.0.clone());
         let truncated = position(&events, Event::JournalTruncated(dir.0.join("txn.log")));
         for log in ["wal.log", "txn.log"] {
             assert!(position(&events, Event::Synced(sub.join(log))) < sub_sync);
@@ -266,6 +275,7 @@ fn deletion_fixture(dir: &Path) -> Graph {
     .unwrap()
     .save(dir)
     .unwrap();
+    sync_saved_graph(dir).unwrap();
     let mut graph = Graph::open(dir).unwrap();
     graph
         .apply_delta_nquads(
@@ -500,5 +510,105 @@ fn sparse_manifest_rejects_truncated_or_nonempty_tombstones() {
             Graph::open(&dir.0).err().unwrap().kind(),
             std::io::ErrorKind::InvalidData
         );
+    }
+}
+
+#[test]
+fn interrupted_compaction_log_creation_reopens_without_losing_acknowledged_writes() {
+    // Interrupt between each fresh log's file fsync and its directory fsync, for the
+    // root and a named graph. These are real compaction swaps, not hand-built layouts.
+    for slot in ["", "named/0"] {
+        for log in ["wal.log", "txn.log"] {
+            let dir = TestDir::new("compact_log_crash");
+            let mut graph = deletion_fixture(&dir.0);
+            let expected = dataset(&graph);
+            let path = dir.0.join(slot).join(log);
+            let trace = Trace::start();
+            let failure = Failure::at(Event::LogFileSynced(path.clone()));
+            assert!(graph.compact().is_err());
+            failure.assert_hit();
+            let events = trace.take();
+            let root = dir.0.join(slot);
+            let swapped = position(&events, Event::SwapPublished(root));
+            let failed = position(&events, Event::LogFileSynced(path.clone()));
+            assert!(
+                swapped < failed,
+                "must fail opening the replacement base's log"
+            );
+            drop(graph);
+            // Model power loss discarding the newly created, unsynced directory entry.
+            // No append was acknowledged on this handle: open/compaction must fail first.
+            std::fs::remove_file(&path).unwrap();
+            for _ in 0..2 {
+                let graph = Graph::open(&dir.0).unwrap();
+                assert_eq!(dataset(&graph), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn compacted_log_entries_are_synced_before_the_first_acknowledged_update() {
+    let dir = TestDir::new("compact_log_sync");
+    let mut graph = deletion_fixture(&dir.0);
+    let trace = Trace::start();
+    graph.compact().unwrap();
+    let events = trace.take();
+    for slot in ["", "named/0", "named/1", "named/2"] {
+        let root = dir.0.join(slot);
+        for log in ["wal.log", "txn.log"] {
+            let path = root.join(log);
+            // Named logs can be opened more than once during recursive compaction.
+            // Check every instance, including opens in the final parent replacement.
+            let opens: Vec<_> = events
+                .iter()
+                .enumerate()
+                .filter_map(|(i, event)| {
+                    (*event == Event::LogFileSynced(path.clone())).then_some(i)
+                })
+                .collect();
+            assert!(!opens.is_empty(), "replacement log {path:?} was not synced");
+            for opened in opens {
+                assert!(
+                    events[opened + 1..]
+                        .iter()
+                        .take_while(|event| {
+                            !matches!(event, Event::LogFileSynced(_) | Event::JournalTruncated(_))
+                        })
+                        .any(|event| *event == Event::Synced(root.clone())),
+                    "persist {path:?}'s entry before exposing the handle or retiring the journal"
+                );
+            }
+        }
+    }
+    // Clear the parent journal after materializing updates to EXISTING slots, so reopening
+    // can recover them only from the new per-graph WALs, rather than from transaction redo.
+    let mut expected = dataset(&graph);
+    let triple = [named("after-compact"), named("p"), named("o")];
+    graph
+        .commit_txn(&[
+            (true, None, triple.clone()),
+            (true, Some(named("last")), triple.clone()),
+        ])
+        .unwrap();
+    graph.apply_delta(&[triple], &[]).unwrap();
+    graph
+        .apply_delta_nquads(
+            "<http://ex/after-compact> <http://ex/p> <http://ex/o> <http://ex/last> .",
+            "",
+        )
+        .unwrap();
+    graph.clear_txn().unwrap();
+    assert_eq!(std::fs::metadata(dir.0.join("txn.log")).unwrap().len(), 0);
+    for (slot, triples) in &mut expected {
+        if slot.is_none() || *slot == Some(named("last")) {
+            triples.push("<http://ex/after-compact> <http://ex/p> <http://ex/o>".into());
+            triples.sort();
+        }
+    }
+    assert_eq!(dataset(&graph), expected);
+    drop(graph);
+    for _ in 0..2 {
+        assert_eq!(dataset(&Graph::open(&dir.0).unwrap()), expected);
     }
 }

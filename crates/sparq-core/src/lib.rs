@@ -3316,7 +3316,8 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn drop_named_durable_dir(&mut self, idx: usize, dir: &std::path::Path) -> Result<bool, String> {
         let mut slots = self.durable_named_slots(dir)?;
-        let slot = slots.iter().position(|n| n.as_ref() == Some(&self.named[idx].0))
+        let slot = slots.iter()
+            .position(|n| n.as_ref() == Some(&self.named[idx].0))
             .ok_or("missing durable named slot")?;
         slots[slot] = None;
         if slots.iter().all(Option::is_none) {
@@ -3364,7 +3365,8 @@ impl Graph {
         let mut slots = Vec::new();
         for (name, sub) in &self.named {
             let backing = &sub.wal.as_ref().ok_or("named graph has no durable backing")?.dir;
-            let slot = backing.strip_prefix(&named_dir).ok()
+            let slot = backing.strip_prefix(&named_dir)
+                .ok()
                 .filter(|path| path.components().count() == 1)
                 .and_then(|path| path.to_str())
                 .and_then(|slot| slot.parse::<usize>().ok())
@@ -3981,7 +3983,11 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
 fn write_named_slots(dir: &std::path::Path, slots: &[Option<Term>]) -> std::io::Result<()> {
     use std::io::Write;
     let mut buf = Vec::with_capacity(12 + slots.len() * 32);
-    let version = if slots.iter().any(Option::is_none) { NAMED_TOMBSTONE_VERSION } else { NAMED_FORMAT_VERSION };
+    let version = if slots.iter().any(Option::is_none) {
+        NAMED_TOMBSTONE_VERSION
+    } else {
+        NAMED_FORMAT_VERSION
+    };
     buf.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
     buf.extend_from_slice(&version.to_le_bytes());
     buf.extend_from_slice(&(slots.len() as u32).to_le_bytes());
@@ -4071,6 +4077,24 @@ fn decode_graph_name(bytes: &[u8], pos: usize) -> Result<(Term, usize), String> 
     Ok((term, val_end))
 }
 
+/// Make a log's contents and directory entry durable before exposing its append handle.
+/// This also covers fresh logs created by reopening a compacted/restored base, recursively
+/// for named graphs. Sync on every open: an earlier interrupted open may have created an
+/// entry without syncing it, so mere existence is not evidence of durability.
+#[cfg(feature = "mmap")]
+fn open_durable_log(dir: &std::path::Path, name: &str) -> std::io::Result<std::fs::File> {
+    let path = dir.join(name);
+    let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    file.sync_all()?;
+    #[cfg(test)]
+    {
+        persistence_tests::record(persistence_tests::Event::Synced(path.clone()));
+        persistence_tests::checkpoint(persistence_tests::Event::LogFileSynced(path))?;
+    }
+    fsync_dir(dir)?;
+    Ok(file)
+}
+
 /// The append-only write-ahead log of update operations for a directory-backed graph.
 ///
 /// (review 1593) Entries are framed as ATOMIC BATCHES, not independent per-triple
@@ -4108,7 +4132,7 @@ impl Wal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<Wal> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
+        let file = open_durable_log(dir, "wal.log")?;
         Ok(Wal { file, dir: dir.to_path_buf() })
     }
 
@@ -4336,10 +4360,7 @@ impl TxnJournal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(Self::path(dir))?;
+        let file = open_durable_log(dir, "txn.log")?;
         Ok(TxnJournal {
             file,
             #[cfg(test)]

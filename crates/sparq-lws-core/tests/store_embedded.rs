@@ -146,6 +146,66 @@ async fn failed_compaction_refuses_every_job_until_reopen() {
 }
 
 #[tokio::test]
+async fn durable_middle_delete_and_post_compaction_rewrites_preserve_other_resources() {
+    let dir = TestDir::new();
+    let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
+    let parent = "https://pod.example/alice/";
+    let first = "https://pod.example/alice/first";
+    let removed = "https://pod.example/alice/removed";
+    let last = "https://pod.example/alice/last";
+    let added = "https://pod.example/alice/added";
+    client
+        .put_meta(parent, durable_meta("parent"))
+        .await
+        .unwrap();
+    for (child, key) in [(first, "first"), (removed, "removed"), (last, "last")] {
+        client
+            .create_child(parent, child, durable_meta(key))
+            .await
+            .unwrap();
+    }
+    client.delete_meta(removed).await.unwrap();
+    client.remove_child(parent, removed).await.unwrap();
+    let client = dir.reopen(client);
+    assert!(!client.exists(removed).await.unwrap());
+    assert_eq!(client.get_meta(first).await.unwrap(), durable_meta("first"));
+    assert_eq!(client.get_meta(last).await.unwrap(), durable_meta("last"));
+    client
+        .create_child(parent, added, durable_meta("added"))
+        .await
+        .unwrap();
+    client.compact().await.unwrap();
+    // These updates must survive solely in the replacement WALs after the parent journal
+    // is cleared, including an existing resource whose physical slot followed the deletion.
+    client
+        .put_meta(last, durable_meta("after-compact"))
+        .await
+        .unwrap();
+    client
+        .put_meta(parent, durable_meta("parent-after-compact"))
+        .await
+        .unwrap();
+    let mut client = client;
+    for _ in 0..2 {
+        client = dir.reopen(client);
+        assert_eq!(
+            client.get_meta(parent).await.unwrap(),
+            durable_meta("parent-after-compact")
+        );
+        assert_eq!(client.get_meta(first).await.unwrap(), durable_meta("first"));
+        assert_eq!(
+            client.get_meta(last).await.unwrap(),
+            durable_meta("after-compact")
+        );
+        assert_eq!(client.get_meta(added).await.unwrap(), durable_meta("added"));
+        assert!(!client.exists(removed).await.unwrap());
+        let mut children = client.list_children(parent).await.unwrap();
+        children.sort();
+        assert_eq!(children, vec![added, first, last]);
+    }
+}
+
+#[tokio::test]
 async fn durable_create_child_keeps_metadata_and_parent_containment_together() {
     let dir = TestDir::new();
     let client = EmbeddedSparqClient::open_or_create(&dir.0).unwrap();
