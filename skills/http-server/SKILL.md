@@ -1997,11 +1997,24 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   the store's own `named/` container, its interrupted-drop siblings and its `named/<slot>` paths —
   a graph opened from somewhere else and pushed onto the public named set is refused, not
   dropped, and a name under any of those that is not a real directory is refused too.
-- **An undeclared slot directory is swept on the next open.** The manifest is the commit point
-  for the whole named set, so a `named/<slot>` it does not name is garbage: the directory of a
-  create whose manifest write never landed, or of a drop interrupted between its manifest rewrite
-  and the removal. The open removes it before anything is opened, so a `DROP` that reported
-  success does not leave the dropped graph's bytes on disk until the next whole-store rewrite.
+- **A store is durable when the call returns, not merely written.** Every manifest publish
+  fsyncs the sub-trees it names, the `named/` container, the store root AND the root's own files
+  — the indexes, the dictionary and the numeric/temporal/per-predicate caches, which are written
+  through buffers that are otherwise only flushed. A file that cannot be made durable refuses the
+  publish. A `save` or external build of a store with NO named graphs writes no manifest, so it
+  runs that last rung directly rather than returning with its bytes in the page cache.
+- **A named graph's slot is reserved by creating its directory**, in one `mkdir`: an id whose
+  directory already exists is skipped, and any other error refuses the create instead of being
+  read as a free id — so a new graph can never be put on top of an interrupted create's residue
+  and inherit its log.
+- **An open never removes a slot the manifest does not declare.** A drop commits at its
+  manifest rewrite and removes the slot directory after it, so a crash in between leaves the
+  dropped graph's bytes under a slot nothing names. They STAY there — an orphan nothing opens —
+  until a whole-store rewrite (`save`, compaction, vacuum) writes a fresh image; that is the
+  boundary for an erasure runbook, because "undeclared" is not "garbage" (a create made while a
+  caller holds a child detached leaves that live child's slot undeclared, writes and all). A drop
+  reports what it removed and never removes data it cannot attribute to the slot it was asked to
+  drop, so a `DROP` whose removal failed is an error you retry or vacuum, not a silent success.
 - **A drop that cannot remove its directories is an error.** The removals are reported, not
   discarded, and the failure freezes the store until it is reopened: for a `DROP` performed to
   ERASE data (the retention/erasure runbook), reporting success while the data is still on disk

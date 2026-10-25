@@ -437,39 +437,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle's next write was ACKNOWLEDGED into a directory the store no longer named and was gone on
   the next open; when the drop had emptied the set, `named/` itself was removed and the write was
   acknowledged into an unlinked log. The invalidated set is now derived from the manifest diff
-  (declared before, not declared after), so such a write is refused with the reason instead.
+  (declared before, not declared after), so such a write is refused with the reason instead; and
+  the slot a drop REMOVES is recorded whether or not that diff notices it, because the diff
+  compares declared sets and another attached child can still claim the removed slot.
 
 - **sparq-core (`sq-ycle`): a drop removes the store's OWN slot directory, and a slot id is
   the store's own.** The directory a drop removed used to be the dropped handle's own `wal.dir()`
   — whatever directory that handle was opened from. Since the named set is public, a graph opened
   from ANOTHER store could be pushed onto it and dropped, and the removal then deleted that other
   store's directory. Every removal on these paths is now built from this store's `named/` plus a
-  slot id, and refuses a name under it that is not a real directory, so no drop or recovery sweep
-  can follow a link out of the store. For the same reason a child's slot id is accepted only when
+  slot id, and refuses a symlink or a file planted under that name instead of removing it, so
+  the last component of a path the store built cannot redirect a removal out of the store (a
+  `named/` container that is itself a link is a documented boundary, not a case this covers). For the same reason a child's slot id is accepted only when
   its directory is exactly `named/<slot>` of THIS store: a foreign child's basename used to be
   recorded as a local slot, which left the manifest naming a directory that was not there or —
   when the id collided with a local child's — opened two graph names onto one directory, sharing
   one base and one WAL. A manifest may not name one slot twice, where it is written or where it
-  is read, and a slot name is its plain decimal spelling only, so a stray `named/05` is not a
-  second name for slot 5. The residue and slot probes on these paths are fallible: an unreadable
+  is read — and a third time where a republish is built FROM, the attached set, which is where
+  the state can first be seen — and a slot name is its plain decimal spelling only, so a stray
+  `named/05` is not a second name for slot 5. A manifest must also END at its last declared
+  entry: a publish rewrites the whole file, so trailing bytes are a longer manifest partly
+  overwritten or a file edited underneath the store, and reading the prefix would adopt a named
+  set that is a truncation of what is on disk. The residue and slot probes on these paths are fallible: an unreadable
   path is an error, not an "absent".
 
 - **sparq-core (`sq-ycle`): the layout record is a per-directory map, not a scanned log.**
   Staleness is a question about a handle's directory and its ancestors, so it is asked of those —
   a bounded number of lookups — instead of scanning every directory the tree has ever replaced,
   and recording a directory now drops the entries beneath it, which a replacement of that
-  directory already answers for. Because slot ids are monotonic, each create/drop cycle added a
-  distinct entry that nothing ever removed, and every durable write to every handle in the tree
-  then paid for each drop since the last whole-tree swap.
+  directory already answers for. The map is ORDERED so that those entries are one range of it —
+  `Path` compares component-wise — and a recording therefore costs the entries it actually
+  subsumes rather than testing every entry in the log. Because slot ids are monotonic, each
+  create/drop cycle added a distinct entry that nothing ever removed, and every durable write to
+  every handle in the tree then paid for each drop since the last whole-tree swap. A drop of
+  every named graph records the `named/` container once, whatever the store holds, and resolving
+  the attached set tests each slot against a SET rather than scanning what it has collected so
+  far, which made creating graphs one at a time quadratic in the set's size per create.
 
-- **sparq-core (`sq-ycle`): an undeclared named-graph slot is swept on the next open.** The
-  manifest is the commit point for the whole named set, so a `named/<slot>` directory it does not
-  name is garbage by construction: a create whose manifest write never landed, or a drop
-  interrupted between its manifest rewrite and the removal. Nothing opened such a directory, but
-  nothing removed it either until the next whole-store rewrite, and a retried drop reported
-  success with the dropped graph's bytes still on disk — which for a DROP performed to erase them
-  is the answer that may not be given. The open removes them before anything is opened, when no
-  handle can point at them, and reports a failure to do so.
+- **sparq-core (`sq-ycle`): a named-graph slot id is reserved by CREATING its
+  directory.** One `mkdir` decides it: the id is taken when that reports `AlreadyExists`, and any
+  other error is propagated — and freezes the store — rather than read as a free id. Asking
+  `exists()` first and creating later decided nothing, because `exists()` answers "no" for a
+  directory it cannot stat and the create that followed was idempotent: a transient stat error on
+  an occupied slot made the new graph ADOPT that directory, keeping the previous graph's base,
+  WAL and journal for the next open to replay under the new graph's name. The format-1 upgrade
+  path is where that bit hardest, because a version-1 manifest carries no counter and the next id
+  is its entry count — exactly where an interrupted create leaves a directory.
+
+- **sparq-core (`sq-ycle`): the durability barrier syncs the store's own FILES, not just
+  its directories — and a store written with no named graphs is made durable too.** A sub-tree
+  handed to the barrier had every file in it synced, but the root's files were synced by nothing:
+  the permutation indexes, the dictionary, and the numeric, temporal and per-predicate caches,
+  whose writers only flush their buffers. `open` accepts such a cache when its length and marker
+  agree with the dictionary, so a crash that lost part of one left a store that opens and answers
+  queries from torn cache cells instead of recomputing them. A file that cannot be made durable
+  now REFUSES the manifest publish. And the publish is not the only path: a default-graph-only
+  `save` or external build writes no manifest, so it ran no barrier at all and reported success
+  with every byte still in the page cache — it now runs the same rung.
+
+- **sparq-core (`sq-ycle`): an open never removes a named-graph slot the manifest does not
+  declare.** A drop commits at its manifest rewrite and removes the slot directory after it, so
+  an interruption in between leaves the dropped graph's bytes under a slot nothing names, and the
+  bytes stay until a whole-store rewrite (`save`, `compact`, `vacuum`) writes a fresh image — an
+  orphan nothing opens, and a documented boundary rather than something an open tidies away.
+  "Undeclared" is not the same as "garbage": a republish is built from the ATTACHED children, so
+  a create, or a drop of a sibling, performed while a caller holds a child detached leaves that
+  child's slot undeclared with every write it acknowledged still in it, and a manifest restored
+  from a different point in time than `named/` leaves live graphs undeclared too. A drop reports
+  what it removed and never removes data it cannot attribute to the slot it was asked to drop.
 
 - **sparq-core (`sq-ycle`): one bottom-up durability barrier for every named-graph
   manifest publish.** Each level is made durable before the level that names it — the sub-trees'

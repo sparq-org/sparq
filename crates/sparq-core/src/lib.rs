@@ -1949,7 +1949,11 @@ impl Graph {
             // Default-graph-only: ensure no stale named state lingers, then write nothing.
             std::fs::remove_dir_all(&named_dir).ok();
             std::fs::remove_file(&manifest).ok();
-            return Ok(());
+            // (sq-ycle) But DO make what was just written durable. There is no manifest
+            // here, so there is no barrier either, and a default-graph-only save returned
+            // success with every byte of the store — indexes, dictionary and caches — still
+            // only in the page cache. This is the same rung the barrier's root level runs.
+            return fsync_files_in(dir);
         }
         // Rewrite the subtree from scratch so removed/renamed graphs cannot survive a re-save.
         std::fs::remove_dir_all(&named_dir).ok();
@@ -2002,27 +2006,18 @@ impl Graph {
             return Ok((Vec::new(), 0));
         };
         let named_dir = dir.join(NAMED_SUBDIR);
-        // (sq-ycle) SWEEP the slots the manifest does not declare, before anything is
-        // opened. The manifest is the commit point for the whole named set, so a `named/<slot>`
-        // it does not name is garbage by construction — the directory of a create whose manifest
-        // write never landed, or of a drop interrupted between its manifest rewrite (which
-        // committed the drop) and the removal of the slot. Nothing has a handle on it at open
-        // time, and `open_named` itself only ever opens declared slots, so leaving it there made
-        // a drop that had reported success leave the dropped graph's bytes on disk until the next
-        // whole-tree rewrite — and a retried drop then reported success again with the data still
-        // there. The removal's failure is propagated for the same reason the drop's is.
-        let declared: std::collections::BTreeSet<u32> =
-            manifest.entries.iter().map(|(slot, _)| *slot).collect();
-        let undeclared: Vec<u32> = present_named_slots(&named_dir)?
-            .difference(&declared)
-            .copied()
-            .collect();
-        if !undeclared.is_empty() {
-            for slot in undeclared {
-                remove_named_slot(&named_dir, slot)?;
-            }
-            fsync_dir(&named_dir)?;
-        }
+        // (sq-ycle) An open NEVER REMOVES a slot the manifest does not declare. It is
+        // tempting to: the manifest is the commit point for the named set, so an undeclared
+        // `named/<slot>` looks like the residue of a create whose manifest write never landed, or
+        // of a drop interrupted after its manifest rewrite committed. But "undeclared" is not the
+        // same as "garbage". A republish is built from the ATTACHED children, so a create, or a
+        // drop of a sibling, performed while a caller holds a child detached leaves that child's
+        // slot undeclared with its data — including writes it acknowledged — still in it; and a
+        // manifest restored from a different point in time than `named/`, or one whose slot field
+        // was corrupted, leaves live graphs undeclared. A sweep here deleted all of those, and the
+        // refusal a stale handle gets advises exactly the reopen that would do it. Residue
+        // therefore STAYS, as an orphan nothing opens, and the documented way to erase it is the
+        // whole-store rewrite that `vacuum` and `compact` perform.
         let mut out = Vec::new();
         out.try_reserve(manifest.entries.len())
             .map_err(std::io::Error::other)?;
@@ -2565,6 +2560,12 @@ impl Graph {
         let store = TripleStore::open(dir).map_err(|e| e.to_string())?;
         store.save_pred_stats(dir).map_err(|e| e.to_string())?;
         std::fs::remove_dir_all(&tmp).ok();
+        // (sq-ycle) Make the store this build just wrote DURABLE before reporting
+        // success: its files are written through buffered writers that are only flushed, and
+        // the per-predicate stats above land last of all. A named-graph build publishes its
+        // manifest through the barrier, which syncs the sub-trees and the root — but a
+        // default-graph-only build has no manifest and so had no barrier at all.
+        fsync_files_in(dir).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -2988,6 +2989,12 @@ impl Graph {
         let store = TripleStore::open(dir).map_err(|e| e.to_string())?;
         store.save_pred_stats(dir).map_err(|e| e.to_string())?;
         std::fs::remove_dir_all(&tmp).ok();
+        // (sq-ycle) Make the store this build just wrote DURABLE before reporting
+        // success: its files are written through buffered writers that are only flushed, and
+        // the per-predicate stats above land last of all. A named-graph build publishes its
+        // manifest through the barrier, which syncs the sub-trees and the root — but a
+        // default-graph-only build has no manifest and so had no barrier at all.
+        fsync_files_in(dir).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -3617,7 +3624,7 @@ impl Graph {
         if let Some(dir) = self.wal.dir() {
             if let Some((replaced, at)) = self.tree.replaced_since(&dir, self.generation) {
                 return Err(format!(
-                    "durable write refused: this handle's directory {} was replaced at layout generation {} (the handle was opened at {}) when {} was swapped by a compaction, vacuum, restore or named-graph drop; reopen the store",
+                    "durable write refused: this handle's directory {} is stale at layout generation {} (the handle was opened at {}) because {} was replaced — by a compaction, a vacuum, a restore, a named-graph drop, or a republish of the named set that stopped naming it; reopen the store to work against its current named set. A graph the store no longer names is not reopened, and the slot this handle holds is left on disk as it is.",
                     dir.display(),
                     at,
                     self.generation,
@@ -3637,6 +3644,16 @@ impl Graph {
     /// opens the new sub-graph. Carrying on from there acknowledges later writes against a state
     /// no reopen will reproduce, so the tree stops taking durable writes until it is reopened,
     /// which replays what is actually on disk.
+    ///
+    /// (sq-ycle) A FAILED LOG APPEND is the sharpest case, and the invariant a new log
+    /// writer has to keep: a partial frame at the end of a log is where replay stops, so every
+    /// frame appended after one is truncated with it however firmly it was acknowledged. There
+    /// are exactly TWO places a log grows — `Wal::append_batch`, reached only from
+    /// [`apply_delta`](Self::apply_delta), and `TxnJournal::append`, reached only from
+    /// [`commit_txn_ops_checked`](Self::commit_txn_ops_checked) — and each must make the whole
+    /// tree refuse the next durable write when its append fails: the first through this
+    /// function, the second through [`poison_txn`](Self::poison_txn). A third append site must do
+    /// the same, which `io_fault` exists to test.
     #[cfg(feature = "mmap")]
     fn freeze_on_err<T>(&self, result: Result<T, String>, what: &str) -> Result<T, String> {
         match result {
@@ -3752,16 +3769,17 @@ impl Graph {
     /// `self.named.retain(...)` dropped the entry in memory only, leaving the on-disk
     /// `named/<i>/` + manifest entry behind, so a reopen RESTORED the dropped graph.
     ///
-    /// The named sub-tree is positional (`named/<i>/` ↔ `self.named[i]`) and the manifest's
-    /// presence is the commit point, so a drop must RENUMBER the surviving sub-graphs to stay
-    /// contiguous. To make that crash-safe we mirror [`compact`](Self::compact)'s rollback-safe
-    /// directory swap, scoped to the `named/` sub-tree: the renumbered survivors are built in a
-    /// staging `named.drop-new/`, fsync'd, then swapped in (`named` → `named.drop-old`,
-    /// `named.drop-new` → `named`), and only THEN is the shrunk manifest written (the manifest
-    /// rewrite is itself atomic+dir-fsync'd via `write_named_manifest`). An interrupted swap
-    /// is completed/rolled back deterministically by `recover_named_drop` on the next
-    /// `open`. Surviving sub-graphs are re-opened from their new directories so
-    /// each re-acquires a correctly-indexed per-graph WAL.
+    /// (sq-ycle) A slot id is now a NAME, not a position: the manifest records which slot
+    /// each graph lives in, so the survivors keep theirs and a drop is the manifest rewrite that
+    /// stops naming the dropped slot (the commit point, atomic + dir-fsync'd by
+    /// `write_named_manifest`) followed by the removal of that one `named/<slot>` directory. The
+    /// removal's failure is reported, not swallowed. Before that, a drop RENUMBERED every
+    /// survivor into a staging `named.drop-new/`, fsync'd it and swapped it in (`named` →
+    /// `named.drop-old`, `named.drop-new` → `named`), so deleting one graph rewrote the whole
+    /// named set and reopened every surviving sub-graph; `recover_named_drop` still completes or
+    /// rolls back a swap left by such a build. An interruption between the manifest rewrite and
+    /// the removal leaves the dropped slot on disk as an orphan nothing opens — no later open
+    /// removes it, and a whole-store rewrite (`save`, `compact`, `vacuum`) is what erases it.
     ///
     /// Returns `true` if a matching named graph existed (and was removed), `false` if absent —
     /// the caller keeps the SPARQL DROP no-op-on-absent semantics. An in-memory parent (or any
@@ -3870,6 +3888,15 @@ impl Graph {
         let Some(slot) = slot else {
             return Ok(());
         };
+        // (sq-ycle) Record the removed slot UNCONDITIONALLY, not only when the manifest
+        // diff happens to notice it. The diff compares declared sets, so if another attached
+        // child claims the dropped child's slot — which a handle left stale by a whole-tree
+        // renumbering can do — the slot is still in the new manifest and the diff records
+        // nothing, while the removal below deletes the directory under that child's open log and
+        // its next write is acknowledged into it. This directory is being removed right here, so
+        // nothing needs to infer that from a diff.
+        self.tree
+            .record_replacement(&named_dir.join(slot.to_string()));
         remove_named_slot(&named_dir, slot).map_err(|e| e.to_string())?;
         if entries.is_empty() {
             // Nothing is named any more: the container goes too, so the store persists as a
@@ -3952,11 +3979,17 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn commit_drop_all_named(&mut self, dir: &std::path::Path) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
-        // Every slot the old manifest declared is recorded as replaced, so a handle a caller
-        // detached before this drop refuses its next write rather than acknowledging one into a
-        // directory that is about to be removed.
-        self.publish_named_set(dir, &[], &[])
-            .map_err(|e| e.to_string())?;
+        // (sq-ycle) Published WITHOUT the per-slot manifest diff that a single drop
+        // records. The whole `named/` sub-tree is about to go, so recording the CONTAINER once
+        // makes every handle anywhere inside it — including one a caller detached from this
+        // graph — stale, and it does so in one entry whatever the store's size; routing this
+        // through the diff instead recorded one entry per declared slot, so dropping a store with
+        // K named graphs did K recordings, each of which walked the log.
+        publish_named_manifest(dir, &[], &[], self.next_slot).map_err(|e| e.to_string())?;
+        // Recorded BEFORE the removals: once the manifest names none of them the drop has
+        // committed, so no handle inside the sub-tree may be allowed another durable write even
+        // if a removal below fails and this returns an error.
+        self.tree.record_replacement(&named_dir);
         // Only this store's own paths, and only if each is really a directory.
         remove_dir_tree_checked(&named_dir).map_err(|e| e.to_string())?;
         remove_dir_tree_checked(&staging_sibling(&named_dir, "drop-new"))
@@ -3964,9 +3997,6 @@ impl Graph {
         remove_dir_tree_checked(&staging_sibling(&named_dir, "drop-old"))
             .map_err(|e| e.to_string())?;
         fsync_dir(dir).map_err(|e| e.to_string())?;
-        // The whole sub-tree is gone: every handle into it, including one a caller detached from
-        // this graph, refuses its next durable write.
-        self.tree.record_replacement(&named_dir);
         Ok(())
     }
 
@@ -4138,6 +4168,11 @@ impl Graph {
         skip: Option<usize>,
     ) -> Result<Vec<(u32, Term)>, String> {
         let mut out: Vec<(u32, Term)> = Vec::with_capacity(self.named.len());
+        // (sq-ycle) The seen slots are a SET, not a scan of what has been collected so
+        // far: a linear `find` inside this loop made resolving the set O(n²), and the set is
+        // resolved on every create and every drop, so creating n graphs one at a time was cubic.
+        let mut seen: std::collections::HashMap<u32, Term> =
+            std::collections::HashMap::with_capacity(self.named.len());
         for (i, (name, sub)) in self.named.iter().enumerate() {
             if Some(i) == skip {
                 continue;
@@ -4149,7 +4184,7 @@ impl Graph {
                     named_dir.display()
                 )
             })?;
-            if let Some((_, other)) = out.iter().find(|(s, _)| *s == slot) {
+            if let Some(other) = seen.insert(slot, name.clone()) {
                 return Err(format!(
                     "two named graphs claim slot {} of {}: {} and {}",
                     slot,
@@ -4209,10 +4244,19 @@ impl Graph {
         Ok(())
     }
 
-    /// (sq-ycle) Reserve a FRESH `named/<slot>` id: the monotonic counter, advanced past
-    /// any id whose directory is already occupied by residue a failed cleanup left behind. The
-    /// counter is advanced before the id is used, so a slot is never handed out twice even if
-    /// the create that reserved it fails.
+    /// (sq-ycle) Reserve a FRESH `named/<slot>` id by CREATING its directory: the
+    /// monotonic counter, advanced past any id whose directory already exists because residue a
+    /// failed cleanup or an interrupted create left it behind. The counter is advanced before
+    /// the id is used, so a slot is never handed out twice even if the create that reserved it
+    /// fails.
+    ///
+    /// The reservation IS the creation, in one `mkdir`, because asking first and creating later
+    /// does not decide anything: `exists()` answers "no" for a directory it cannot stat, and the
+    /// create that followed used `create_dir_all`, which is idempotent — so a transient stat
+    /// error on an occupied slot made the new graph adopt that directory, keeping the previous
+    /// graph's WAL and journal for the next open to replay under the NEW graph's name. `mkdir`
+    /// cannot say "no" about a directory that is there: it either creates the name or reports
+    /// `AlreadyExists`, and any other error is propagated rather than read as a free id.
     #[cfg(feature = "mmap")]
     fn claim_named_slot(&mut self, named_dir: &std::path::Path) -> Result<u32, String> {
         loop {
@@ -4221,9 +4265,18 @@ impl Graph {
                 "no named-graph slot id is left in this store; re-save it with save() to renumber"
                     .to_string()
             })?;
-            // FALLIBLY: an unreadable slot directory must not read as a free id to write into.
-            if !path_exists(&named_dir.join(slot.to_string())).map_err(|e| e.to_string())? {
-                return Ok(slot);
+            match std::fs::create_dir(named_dir.join(slot.to_string())) {
+                Ok(()) => return Ok(slot),
+                // The id is taken: move past it, leaving whatever is there an orphan.
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(format!(
+                        "could not reserve named-graph slot {} under {}: {}",
+                        slot,
+                        named_dir.display(),
+                        e
+                    ))
+                }
             }
         }
     }
@@ -4806,14 +4859,23 @@ fn remove_tree(dir: &std::path::Path) -> std::io::Result<()> {
 /// store), or a file — is REFUSED rather than removed: the store did not create it, so removing
 /// it is not this function's business, and reporting the drop as a success while it is still
 /// there would be a lie.
+///
+/// What is checked is the LAST component. A `named/` container that is itself a symlink, or a
+/// store under a symlinked ancestor, resolves elsewhere and a removal follows it: the paths a
+/// store removes are its own by construction, and whose directories those are is a question
+/// about how the store was laid out, which this function does not re-answer. A store whose own
+/// directories are links to data that must not be removed with it is outside what this build
+/// supports.
 #[cfg(feature = "mmap")]
 fn remove_named_slot(named_dir: &std::path::Path, slot: u32) -> std::io::Result<()> {
     remove_dir_tree_checked(&named_dir.join(slot.to_string()))
 }
 
 /// (sq-ycle) [`remove_tree`] for a path that must be a DIRECTORY this store owns: a
-/// symlink or a file under that name is refused instead of removed, so no removal on a store's
-/// own paths can follow a link out of it.
+/// symlink or a file planted under that name is refused instead of removed, so a removal cannot
+/// be redirected out of the store by the last component of a path the store built. An ancestor
+/// of that path — `named/` itself, or the store's own directory — is not re-checked; see
+/// `remove_named_slot`.
 #[cfg(feature = "mmap")]
 fn remove_dir_tree_checked(target: &std::path::Path) -> std::io::Result<()> {
     let meta = match std::fs::symlink_metadata(target) {
@@ -4877,7 +4939,42 @@ fn durability_barrier(root: &std::path::Path, trees: &[&std::path::Path]) -> std
     if path_exists(&named)? {
         fsync_dir(&named)?;
     }
-    fsync_dir(root)
+    // (sq-ycle) The root's OWN files, not just its directory entry. A sub-tree went
+    // through `fsync_tree`, which syncs every file in it, but the root's files were never
+    // synced by anything: the permutation indexes, the dictionary and — the ones that bite —
+    // the numeric, temporal and per-predicate caches, whose writers only flush their
+    // `BufWriter`. `open` accepts such a cache when its length and marker agree with the
+    // dictionary, so a crash that lost part of one left a store that opens and answers
+    // queries from torn cache cells instead of recomputing them.
+    fsync_files_in(root)
+}
+
+/// (sq-ycle) fsync every regular FILE directly inside `dir`, then `dir` itself —
+/// [`fsync_tree`] without the recursion, for a store root whose sub-directories are synced (or
+/// deliberately not) by their own rung of the barrier.
+///
+/// A directory entry is not its file's contents: fsyncing only the directory makes the NAME
+/// durable and leaves the bytes in the page cache.
+#[cfg(feature = "mmap")]
+fn fsync_files_in(dir: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        // TEST ONLY (`io_fault`): report this file's sync as failing, so the barrier's
+        // contract — a file that cannot be made durable REFUSES the publish — is testable.
+        #[cfg(test)]
+        if io_fault::sync_fails(&path) {
+            return Err(std::io::Error::other(format!(
+                "injected fsync fault for {}",
+                path.display()
+            )));
+        }
+        std::fs::File::open(&path)?.sync_all()?;
+    }
+    fsync_dir(dir)
 }
 
 /// (sq-ft7u) The ONE crash-safe directory-base swap, factored out of
@@ -5699,6 +5796,19 @@ fn read_named_manifest(dir: &std::path::Path) -> std::io::Result<Option<NamedMan
         }
         entries.push((slot, name));
     }
+    // (sq-ycle) The entries must end where the FILE ends. The manifest is published by a
+    // whole-file rewrite, so bytes past the last entry are not something this build ever wrote:
+    // they are a longer manifest overwritten in place by a shorter one — a partial write that
+    // the publish's own rename is there to prevent, or a file edited underneath the store.
+    // Reading the prefix and ignoring the rest would silently adopt a named set that is a
+    // truncation of what is on disk, so a store in that state is refused instead.
+    if pos != bytes.len() {
+        return Err(bad(&format!(
+            "{} bytes follow the last of the {} declared entries",
+            bytes.len() - pos,
+            count
+        )));
+    }
     let next_slot = if versioned {
         u32::from_le_bytes(bytes[12..16].try_into().expect("4 bytes"))
     } else {
@@ -5801,6 +5911,84 @@ struct Wal {
     dir: std::path::PathBuf,
 }
 
+/// (sq-ycle) TEST-ONLY I/O-fault injection for the two durability paths whose failure
+/// mode cannot otherwise be reached in process.
+///
+/// * A log APPEND is a single `write_all` of a single buffer, so nothing short of a full disk
+///   produces the state the freeze is FOR: a partial frame at the end of a log, which replay
+///   truncates — taking every batch appended after it along with it, however firmly acknowledged.
+/// * An `fsync` of a store FILE fails for reasons (EIO on writeback, a quota, a failing device)
+///   that no in-process test can provoke, and the durability barrier's contract is precisely
+///   that such a failure REFUSES the manifest publish instead of letting it name bytes that are
+///   not on disk.
+///
+/// Compiled only under `cfg(test)`, so a release build carries neither the knobs nor the
+/// branches that read them. They are process-global, so a test that arms one holds
+/// `io_fault::lock` for as long as it needs the arming to be its own.
+#[cfg(all(test, feature = "mmap"))]
+mod io_fault {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Nothing is injected.
+    pub(crate) const DISARMED: usize = usize::MAX;
+
+    /// How many trailing bytes of the next per-graph WAL frame to WITHHOLD (at least one, so the
+    /// frame on disk is always genuinely torn).
+    pub(crate) static WAL_DROP_TAIL: AtomicUsize = AtomicUsize::new(DISARMED);
+    /// The same, for the next redo-journal frame.
+    pub(crate) static JOURNAL_DROP_TAIL: AtomicUsize = AtomicUsize::new(DISARMED);
+
+    /// The EXACT store file whose `fsync` the durability barrier should report as FAILING.
+    /// A whole path, not a file name, so an arming is confined to the arming test's own store
+    /// and cannot reach a test running beside it.
+    pub(crate) static SYNC_FAILS_FOR: std::sync::Mutex<Option<std::path::PathBuf>> =
+        std::sync::Mutex::new(None);
+
+    /// Arm the file-sync failure for the duration of the returned guard, so a test that panics
+    /// while it is armed cannot leave it armed for the next one.
+    pub(crate) fn fail_sync_for(path: &std::path::Path) -> SyncFault {
+        *SYNC_FAILS_FOR.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
+        SyncFault
+    }
+
+    /// Disarms the file-sync failure when dropped.
+    pub(crate) struct SyncFault;
+
+    impl Drop for SyncFault {
+        fn drop(&mut self) {
+            *SYNC_FAILS_FOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+
+    /// Whether `path`'s `fsync` is currently armed to fail.
+    pub(crate) fn sync_fails(path: &std::path::Path) -> bool {
+        SYNC_FAILS_FOR
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            == Some(path)
+    }
+
+    /// Serialises the tests that arm an injection point against each other.
+    pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Arm one injection point for exactly ONE append.
+    pub(crate) fn arm(point: &AtomicUsize, drop_tail: usize) {
+        point.store(drop_tail, Ordering::SeqCst);
+    }
+
+    /// Disarm and report, so one arming injects one failure and the next append is normal.
+    pub(crate) fn take(point: &AtomicUsize) -> Option<usize> {
+        match point.swap(DISARMED, Ordering::SeqCst) {
+            DISARMED => None,
+            drop_tail => Some(drop_tail.max(1)),
+        }
+    }
+}
+
 #[cfg(feature = "mmap")]
 impl Wal {
     const INSERT: u8 = 0;
@@ -5874,6 +6062,17 @@ impl Wal {
         let crc = Self::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Self::COMMIT_MARKER.to_le_bytes());
+        // TEST ONLY (`io_fault`): write a PARTIAL frame and fail, so the freeze this
+        // failure triggers can be tested against the state it exists for.
+        #[cfg(test)]
+        if let Some(drop_tail) = io_fault::take(&io_fault::WAL_DROP_TAIL) {
+            let keep = buf.len().saturating_sub(drop_tail);
+            self.file.write_all(&buf[..keep])?;
+            self.file.sync_data()?;
+            return Err(std::io::Error::other(
+                "injected WAL append fault: a partial frame is on disk",
+            ));
+        }
         self.file.write_all(&buf)?;
         self.file.sync_data()
     }
@@ -6059,6 +6258,11 @@ fn scan_committed_frames<T>(
                 &format!("{} byte(s) follow the last record", body.len() - pos),
             ));
         }
+        // The per-frame reservation above is fallible, but growing the AGGREGATE was not: a
+        // log of many small frames reserved each one safely and then aborted the process on the
+        // `extend` that grew `out` past what the allocator would give. Both are fallible now.
+        out.try_reserve(frame.len())
+            .map_err(|e| std::io::Error::other(format!("{}: {}", path.display(), e)))?;
         out.extend(frame);
         good = trailer_end;
     }
@@ -6210,12 +6414,20 @@ struct TreeState {
 ///
 /// (sq-ycle) The map is what keeps both operations off the length of the log. A handle is
 /// stale exactly when ONE OF ITS ANCESTOR DIRECTORIES (or its own) carries a later generation,
-/// and a path has as many ancestors as it has components — so a lookup asks that many hash
-/// questions and never scans the log. Recording a directory also SUBSUMES everything beneath it:
-/// a handle inside a directory that was just replaced is stale through that directory, so the
-/// separate entries for its children can go, and a whole-tree swap (a compaction, a vacuum, a
-/// restore) therefore collapses the log to one entry. What remains is bounded by the directories
-/// replaced SINCE that swap, and is never consulted by a write to a handle outside them.
+/// and a path has as many ancestors as it has components — so a lookup asks that many questions
+/// of the map and never scans the log. Recording a directory also SUBSUMES everything beneath
+/// it: a handle inside a directory that was just replaced is stale through that directory, so
+/// the separate entries for its children can go, and a whole-tree swap (a compaction, a vacuum,
+/// a restore) therefore collapses the log to one entry. What remains is bounded by the
+/// directories replaced SINCE that swap, and is never consulted by a write to a handle outside
+/// them.
+///
+/// The map is ORDERED for the sake of that subsumption. `Path`'s ordering is component-wise, so
+/// the entries beneath a directory are exactly the entries that sort at or after it and still
+/// start with it: one range, found in logarithmic time and walked only over the entries actually
+/// being removed. A hash map had to test every entry in the log against the directory on every
+/// recording, which put the cost of each drop back on the number of directories replaced since
+/// the last whole-tree swap.
 ///
 /// Before this, a `Vec` was searched linearly to record and scanned linearly on every durable
 /// write, and because slot ids are monotonic each create/drop cycle added a distinct directory
@@ -6225,7 +6437,7 @@ struct TreeState {
 #[derive(Default)]
 struct LayoutLog {
     generation: u64,
-    replaced: std::collections::HashMap<std::path::PathBuf, u64>,
+    replaced: std::collections::BTreeMap<std::path::PathBuf, u64>,
 }
 
 #[cfg(feature = "mmap")]
@@ -6255,12 +6467,22 @@ impl TreeState {
     ///
     /// (sq-ycle) Entries BENEATH `dir` are dropped as they are subsumed: a handle inside
     /// one of them is inside `dir` too, so this one entry answers for all of them — which is
-    /// what keeps the log from growing once per dropped named graph forever.
+    /// what keeps the log from growing once per dropped named graph forever. They are found as a
+    /// RANGE of the ordered map rather than by testing every entry in it, so a recording costs
+    /// the entries it actually subsumes and not the length of the log.
     fn record_replacement(&self, dir: &std::path::Path) -> u64 {
         let mut log = self.layout.lock().unwrap_or_else(|e| e.into_inner());
         log.generation += 1;
         let generation = log.generation;
-        log.replaced.retain(|path, _| !path.starts_with(dir));
+        let subsumed: Vec<std::path::PathBuf> = log
+            .replaced
+            .range(dir.to_path_buf()..)
+            .take_while(|(path, _)| path.starts_with(dir))
+            .map(|(path, _)| path.clone())
+            .collect();
+        for path in subsumed {
+            log.replaced.remove(&path);
+        }
         log.replaced.insert(dir.to_path_buf(), generation);
         generation
     }
@@ -6695,6 +6917,21 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
+        // TEST ONLY (`io_fault`): as in `Wal::append_batch`, write a PARTIAL frame and
+        // fail — and poison exactly as the real failure path does.
+        #[cfg(test)]
+        if let Some(drop_tail) = io_fault::take(&io_fault::JOURNAL_DROP_TAIL) {
+            let keep = buf.len().saturating_sub(drop_tail);
+            let partial = self
+                .file
+                .write_all(&buf[..keep])
+                .and_then(|()| self.file.sync_data());
+            self.poisoned = true;
+            partial?;
+            return Err(std::io::Error::other(
+                "injected txn journal append fault: a partial frame is on disk",
+            ));
+        }
         let written = self
             .file
             .write_all(&buf)
@@ -13358,7 +13595,7 @@ mod tests {
             .apply_delta(std::slice::from_ref(&t2), &[])
             .expect_err("the child's directory is gone: the write is refused, not acknowledged");
         assert!(
-            err.contains("was replaced at layout generation"),
+            err.contains("is stale at layout generation"),
             "unexpected error: {}",
             err
         );
@@ -13801,7 +14038,7 @@ mod tests {
         let refused = writer.join().expect("the writer thread does not panic");
         let e = refused.expect_err("a write that lands after the swap must be refused");
         assert!(
-            e.contains("was replaced at layout generation"),
+            e.contains("is stale at layout generation"),
             "unexpected error: {}",
             e
         );
@@ -15466,7 +15703,7 @@ mod tests {
             assert_eq!(g.named.len(), 3);
             // The on-disk sub-tree has 3 positional sub-dirs before the drop.
             assert!(dir.join("named").join("0").exists() && dir.join("named").join("2").exists());
-            // Drop the MIDDLE graph; g3 must renumber down a slot.
+            // Drop the MIDDLE graph; g3 keeps slot 2.
             assert!(g.drop_named_durable(&nn("http://ex/g2")).unwrap(), "existing graph reports dropped = true");
             assert_eq!(g.named.len(), 2);
             assert_eq!(count(&g, "g2"), None);
@@ -15526,6 +15763,307 @@ mod tests {
         [named("probe-s"), named("probe-p"), named("probe-o")]
     }
 
+    /// (sq-ycle) A FORMAT-1 manifest for `names`, as a build before the slot ids wrote it:
+    /// a 12-byte header and no per-entry slot, so the ids ARE the positions.
+    #[cfg(feature = "mmap")]
+    fn write_v1_manifest(dir: &std::path::Path, names: &[Term]) {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&NAMED_FORMAT_VERSION_V1.to_le_bytes());
+        buf.extend_from_slice(&(names.len() as u32).to_le_bytes());
+        for name in names {
+            encode_graph_name(&mut buf, name).unwrap();
+        }
+        std::fs::write(dir.join(NAMED_MANIFEST), &buf).unwrap();
+    }
+
+    /// (loop review H2) A slot id is reserved by CREATING its directory, so an id whose
+    /// directory is already there — residue of an interrupted create, or of a cleanup that
+    /// failed — can never be handed to a new graph.
+    ///
+    /// Asking `exists()` first and creating later decided nothing: the answer is "no" for a
+    /// directory that cannot be stat'd, and the create that followed was idempotent, so the new
+    /// graph adopted the occupied directory — base, WAL and journal — and the next open replayed
+    /// the PREVIOUS graph's records under the new graph's name. `mkdir` cannot say "no" about a
+    /// directory that is there.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_create_never_adopts_an_orphan_slot_directory() {
+        let dir = txn_tmp_dir("orphan-slot-create");
+        save_named_store(&dir, &["g0"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        // The state a crash between reserving slot 1 and publishing the manifest leaves: a
+        // populated `named/1` that no manifest names. It carries g0's triple.
+        let orphan = named_dir.join("1");
+        copy_tree(&named_dir.join("0"), &orphan).unwrap();
+        assert_eq!(declared_manifest_slots(&dir), vec![0]);
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert_eq!(
+                present_named_slots(&named_dir).unwrap(),
+                [0, 1].into_iter().collect(),
+                "the open leaves the undeclared slot exactly where it found it"
+            );
+            let i = g.ensure_named(&named("fresh")).unwrap();
+            assert_eq!(
+                g.named[i].1.named_slot_in(&named_dir),
+                Some(2),
+                "the create moves PAST the occupied id instead of adopting it"
+            );
+            assert_eq!(g.named[i].1.len(), 0, "and the new graph starts empty");
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        let fresh = reopened
+            .named_graph(&named("fresh"))
+            .expect("the created graph is there");
+        assert_eq!(
+            fresh.len(),
+            0,
+            "the orphan's records never replay under the new graph's name"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (loop review H2) The same, on the FORMAT-1 upgrade path, which is where it bites
+    /// hardest: a version-1 manifest carries no counter, so the next id is its entry COUNT —
+    /// exactly the id an interrupted create would have left a directory at.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_create_never_adopts_an_orphan_slot_on_the_format_1_upgrade_path() {
+        let dir = txn_tmp_dir("orphan-slot-v1");
+        save_named_store(&dir, &["g0"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        // A version-1 store: ids are positions, so `named/0` is g0 and the next id is 1.
+        write_v1_manifest(&dir, &[named("g0")]);
+        let orphan = named_dir.join("1");
+        copy_tree(&named_dir.join("0"), &orphan).unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            let i = g.ensure_named(&named("fresh")).unwrap();
+            assert_eq!(
+                g.named[i].1.named_slot_in(&named_dir),
+                Some(2),
+                "a v1 store's next id is its count, and an occupied one is skipped"
+            );
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.named_graph(&named("fresh")).map(Graph::len),
+            Some(0),
+            "the upgraded store's new graph is empty, not the orphan's contents"
+        );
+        assert_eq!(
+            reopened.named_graph(&named("g0")).map(Graph::len),
+            Some(1),
+            "and the v1 graph keeps its own triple"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (loop review H3) A store FILE that cannot be made durable REFUSES the manifest
+    /// publish. The barrier fsynced the sub-trees it was handed, the `named/` container and the
+    /// root's DIRECTORY ENTRY — but never the root's own files, and the numeric, temporal and
+    /// per-predicate caches are written through buffered writers that are only flushed. `open`
+    /// accepts a cache whose length and marker agree with the dictionary, so a crash that lost
+    /// part of one left a store that opens and answers queries from torn cells.
+    ///
+    /// The failure is injected through `io_fault`, because an `fsync` that fails cannot be
+    /// provoked in process.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_root_file_that_cannot_be_synced_refuses_the_manifest_publish() {
+        let _serialised = io_fault::lock();
+        let dir = txn_tmp_dir("root-sync-refuses");
+        save_named_store(&dir, &["g0"]);
+        {
+            // The ROOT's numeric cache specifically: the child sub-tree the create just wrote
+            // syncs fine, and the rung that was missing is the root's own files.
+            let _fault = io_fault::fail_sync_for(&dir.join(NUMERIC_CACHE_FILE));
+            let mut g = Graph::open(&dir).unwrap();
+            let err = g
+                .ensure_named(&named("fresh"))
+                .expect_err("the publish cannot make the root's numeric cache durable");
+            assert!(
+                err.contains("injected fsync fault"),
+                "the publish is refused with the reason: {}",
+                err
+            );
+            assert_eq!(
+                declared_manifest_slots(&dir),
+                vec![0],
+                "and the manifest never named the new graph"
+            );
+        }
+        // The same rung runs where there is no manifest at all: a default-graph-only save used
+        // to report success with every byte of the store still only in the page cache.
+        let plain = txn_tmp_dir("root-sync-default-only");
+        std::fs::remove_dir_all(&plain).ok();
+        {
+            let _fault = io_fault::fail_sync_for(&plain.join(NUMERIC_CACHE_FILE));
+            let err = Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nt")
+                .unwrap()
+                .save(&plain)
+                .expect_err("a default-graph-only save syncs its files too");
+            assert!(
+                err.to_string().contains("injected fsync fault"),
+                "{}",
+                err
+            );
+        }
+        // Disarmed again, the same store saves and opens normally.
+        let plain2 = txn_tmp_dir("root-sync-default-only-ok");
+        std::fs::remove_dir_all(&plain2).ok();
+        Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nt")
+            .unwrap()
+            .save(&plain2)
+            .unwrap();
+        assert_eq!(Graph::open(&plain2).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&plain).ok();
+        std::fs::remove_dir_all(&plain2).ok();
+    }
+
+    /// (round 4 review follow-up) An append that fails PART-WAY leaves a torn frame at
+    /// the end of the log, and replay truncates at it — so every batch appended after it, however
+    /// firmly acknowledged, is truncated with it. The tree therefore stops taking durable writes
+    /// the moment an append fails, and nothing is appended after the partial frame at all.
+    ///
+    /// The failure is injected through `io_fault`, which writes the frame short and then
+    /// reports the error, because that is the one state no in-process test can otherwise reach:
+    /// an append is a single `write_all` of a single buffer.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_torn_wal_append_freezes_the_tree_and_keeps_every_acknowledged_batch() {
+        let _serialised = io_fault::lock();
+        let dir = txn_tmp_dir("torn-wal-append");
+        save_named_store(&dir, &[]);
+        let tr = |s: &str| [named(s), named("p"), named("o")];
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta(&[tr("acked-a")], &[]).unwrap();
+        g.apply_delta(&[tr("acked-b")], &[]).unwrap();
+
+        io_fault::arm(&io_fault::WAL_DROP_TAIL, 1);
+        let failed = g
+            .apply_delta(&[tr("torn-c")], &[])
+            .expect_err("the injected append reports its failure");
+        assert!(
+            failed.contains("a WAL append failed; the store is frozen"),
+            "the failure freezes the tree and says so: {}",
+            failed
+        );
+        // THE point: a write after the failure is refused UNWRITTEN, so nothing is appended
+        // behind the partial frame to be truncated with it.
+        let refused = g
+            .apply_delta(&[tr("after-d")], &[])
+            .expect_err("the frozen tree refuses");
+        assert!(
+            refused.contains("durable write refused"),
+            "and later writes are refused rather than acknowledged: {}",
+            refused
+        );
+        drop(g);
+
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.len(),
+            3,
+            "the seed plus both acknowledged batches survive the reopen"
+        );
+        assert!(reopened.id_of(&named("acked-a")).is_some());
+        assert!(reopened.id_of(&named("acked-b")).is_some());
+        assert!(
+            reopened.id_of(&named("torn-c")).is_none(),
+            "the torn batch was never acknowledged, so it is not there"
+        );
+        assert!(
+            reopened.id_of(&named("after-d")).is_none(),
+            "and the refused batch reached no log"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (round 4 review follow-up) The same property for the redo journal: a frame whose
+    /// append fails may be partly on disk, so the journal takes no further frame and the whole
+    /// tree refuses durable writes until it is reopened and replayed.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_torn_journal_append_poisons_the_tree_and_keeps_every_acknowledged_batch() {
+        let _serialised = io_fault::lock();
+        let dir = txn_tmp_dir("torn-journal-append");
+        save_named_store(&dir, &["g0"]);
+        let tr = |s: &str| [named(s), named("p"), named("o")];
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta(&[tr("acked-a")], &[]).unwrap();
+
+        io_fault::arm(&io_fault::JOURNAL_DROP_TAIL, 1);
+        let (applied, failed) = g
+            .commit_txn_ops_checked(&[TxnOp::Insert {
+                slot: None,
+                triple: tr("torn-c"),
+            }])
+            .expect_err("the injected frame append reports its failure");
+        assert!(
+            applied,
+            "part of the frame may be on disk, so the commit is reported as possibly applied"
+        );
+        assert!(
+            failed.contains("txn journal commit failed"),
+            "and it says the journal commit failed: {}",
+            failed
+        );
+        // A direct write now would be replayed BEFORE the kept frame, so it is refused — this
+        // graph's own (the journal's own flag) and, because the frame may name ANY graph in the
+        // tree, every other graph's too (the tree-wide flag `poison_txn` sets).
+        let refused = g
+            .apply_delta(&[tr("after-d")], &[])
+            .expect_err("the poisoned tree refuses this graph's own write");
+        assert!(refused.contains("durable write refused"), "{}", refused);
+        let refused_child = g.named[0]
+            .1
+            .apply_delta(&[tr("after-child")], &[])
+            .expect_err("and a named graph's write in the same tree");
+        assert!(
+            refused_child.contains("durable write refused"),
+            "the whole TREE stops taking durable writes, not just the graph that failed: {}",
+            refused_child
+        );
+        // So is another frame, so nothing is ever appended after the partial one.
+        let refused_frame = g
+            .commit_txn_ops_checked(&[TxnOp::Insert {
+                slot: None,
+                triple: tr("after-e"),
+            }])
+            .expect_err("and so is a second frame");
+        assert!(!refused_frame.0, "refused unwritten");
+        drop(g);
+
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.len(),
+            2,
+            "the seed plus the acknowledged batch survive the reopen"
+        );
+        assert!(reopened.id_of(&named("acked-a")).is_some());
+        assert_eq!(reopened.named.len(), 1, "and the named graph is still there");
+        assert_eq!(
+            reopened.named[0].1.len(),
+            1,
+            "with exactly the triple it was saved with"
+        );
+        for never_acked in ["torn-c", "after-d", "after-e", "after-child"] {
+            assert!(
+                reopened.id_of(&named(never_acked)).is_none(),
+                "{} was never acknowledged",
+                never_acked
+            );
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// (round 4 review, N1) A handle DETACHED from the public
     /// [`named`](Graph::named) set must never ACKNOWLEDGE a durable write after the parent has
     /// republished a manifest that no longer names it.
@@ -15568,19 +16106,29 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// (round 4 review, N1) The variant where the drop empties the set: `named/` is
-    /// removed outright, so a detached handle's log file is unlinked. Its write must be refused.
+    /// (round 4 review N1 / loop review H1) The LAST-CHILD DROP sequence, exactly:
+    /// detach B with `parent.named.pop()`, `drop_named_durable(A)`, then write to B.
+    ///
+    /// The survivors are empty, so the drop removes the whole `named/` container — B's directory
+    /// with it — while recording a replacement for A's slot alone. B's own staleness check
+    /// passed, and B appended to and fsynced an UNLINKED log, acknowledging a write that no
+    /// reopen could ever see. The container's own removal is now recorded too, and the manifest
+    /// diff records every slot the republish stopped naming, so B is refused instead.
     #[cfg(feature = "mmap")]
     #[test]
     fn a_detached_named_handle_refuses_writes_after_the_last_attached_graph_is_dropped() {
         let dir = txn_tmp_dir("detached-last-drop");
         save_named_store(&dir, &["g0", "g1"]);
         let mut root = Graph::open(&dir).unwrap();
-        let (_, mut detached) = root.named.pop().expect("two named graphs");
+        // Detach B (g1, `named/1`) and keep it; drop A (g0), the last ATTACHED graph.
+        let (detached_name, mut detached) = root.named.pop().expect("two named graphs");
+        assert_eq!(detached_name, named("g1"));
+        let b_log = dir.join(NAMED_SUBDIR).join("1").join("wal.log");
+        let b_log_len = std::fs::metadata(&b_log).map(|m| m.len()).unwrap_or(0);
         assert!(root.drop_named_durable(&named("g0")).unwrap());
         assert!(
             !dir.join(NAMED_SUBDIR).exists(),
-            "the drop emptied the set, so the container is gone"
+            "the drop emptied the set, so the container — and B's directory — is gone"
         );
         let err = detached
             .apply_delta(&[one_triple()], &[])
@@ -15590,8 +16138,30 @@ mod tests {
             "a write into an unlinked log must be refused, not acknowledged: {}",
             err
         );
+        // Refused UNWRITTEN: the refusal is the gate, before any byte reaches the unlinked log,
+        // and before the triple reaches B's in-memory image either.
+        assert_eq!(
+            detached.pending_delta_len(),
+            0,
+            "nothing was applied in memory"
+        );
+        assert!(
+            std::fs::metadata(&b_log).is_err(),
+            "B's log is unlinked, so there is nothing left to append to"
+        );
+        let _ = b_log_len;
         drop(detached);
         drop(root);
+        let reopened = Graph::open(&dir).unwrap();
+        assert!(
+            reopened.named.is_empty(),
+            "the store is default-graph-only after the drop"
+        );
+        assert!(
+            reopened.id_of(&named("probe-s")).is_none(),
+            "and the refused write is nowhere on disk"
+        );
+        drop(reopened);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -15619,13 +16189,15 @@ mod tests {
     }
 
     /// (round 4 review, N2) NO drop path may remove or modify a path outside the
-    /// store's own `named/` root — not a single drop, not a batch drop, not the recovery sweep.
+    /// store's own `named/` root — not a single drop, not a batch drop, not the staging recovery.
     ///
     /// The removal used to be the dropped handle's OWN directory, taken from its WAL. `named` is
     /// public, so a graph opened from another store can be pushed onto it; dropping it then
     /// deleted that other store's directory. Every removal is now built from this store's
-    /// `named/` and a slot id, and refuses anything under that name that is not a real directory,
-    /// so it cannot follow a link out of the store either.
+    /// `named/` and a slot id, and refuses anything planted under that name that is not a real
+    /// directory, so the last component of a path the store built cannot redirect it either. A
+    /// `named/` container that is itself a link is a documented boundary, not a case this
+    /// covers.
     #[cfg(feature = "mmap")]
     #[test]
     fn no_drop_path_removes_a_path_outside_the_stores_named_root() {
@@ -15686,8 +16258,8 @@ mod tests {
             std::fs::remove_file(named_dir.join("7")).unwrap();
         }
 
-        // The recovery sweep removes only this store's three named paths, and refuses a symlink
-        // under any of them too.
+        // The staging recovery removes only this store's three named paths, and refuses a
+        // symlink under any of them too.
         {
             let staged = staging_sibling(&dir.join(NAMED_SUBDIR), "drop-old");
             std::os::unix::fs::symlink(&outside, &staged).unwrap();
@@ -15840,7 +16412,7 @@ mod tests {
     /// write must not pay for its length.
     ///
     /// Staleness is a question about a handle's own directory and its ANCESTORS, so it is asked
-    /// of those (a bounded number of hash lookups) instead of scanning the log. And recording a
+    /// of those (a bounded number of map lookups) instead of scanning the log. And recording a
     /// directory SUBSUMES every entry beneath it — a handle inside one of those is inside this
     /// one — so a whole-tree swap collapses the log to a single entry instead of leaving one
     /// entry per named graph ever dropped, each of them consulted by every later write.
@@ -15940,55 +16512,245 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// (round 4 review, N6) A slot the manifest does not declare is swept on the next
-    /// open, and a retried drop is then truthful.
+    /// (round 5 review, NEW-C) A drop records the slot it REMOVES, whether or not the
+    /// manifest diff notices it.
     ///
-    /// The manifest rewrite is the commit point of a drop, and the slot's removal follows it, so
-    /// a crash in between leaves the dropped graph's bytes on disk under a slot nothing names.
-    /// Nothing opened them, but nothing removed them either until the next whole-tree rewrite —
-    /// and a retried drop reported success with the data still there, which for a DROP performed
-    /// to erase it is the one answer that may not be given. Undeclared slots are garbage by
-    /// construction, and at open time no handle points at them, so they go.
+    /// The diff compares the declared set before the republish with the one after, which misses
+    /// the case where ANOTHER attached child claims the dropped child's slot: the slot is still
+    /// declared, so the diff records nothing, while the drop removes the directory from under
+    /// that child's open log and its next write is acknowledged into a directory that is gone.
+    /// The removal happens right here, so nothing has to infer it from a diff.
+    ///
+    /// (Two names on one slot is itself a corrupt set — a whole-tree renumbering can leave a
+    /// detached handle pointing at a slot later reused — and this guard is about the write that
+    /// follows, not about rescuing that set.)
     #[cfg(feature = "mmap")]
     #[test]
-    fn residue_of_an_interrupted_single_drop_is_swept_on_the_next_open() {
-        let dir = txn_tmp_dir("drop-residue-sweep");
+    fn a_drop_records_the_slot_it_removes_even_when_the_manifest_still_declares_it() {
+        let dir = txn_tmp_dir("drop-records-removed-slot");
         save_named_store(&dir, &["g0", "g1"]);
         let named_dir = dir.join(NAMED_SUBDIR);
-        let keep = dir.with_file_name("drop-residue-copy");
-        std::fs::remove_dir_all(&keep).ok();
-        copy_tree(&named_dir.join("0"), &keep).unwrap();
         {
-            let mut g = Graph::open(&dir).unwrap();
-            assert!(g.drop_named_durable(&named("g0")).unwrap());
+            let mut root = Graph::open(&dir).unwrap();
+            // A second handle on slot 1, attached under another name and sharing the tree: the
+            // state a stale handle onto a reused slot leaves.
+            let mut alias = Graph::open_dir(&named_dir.join("1"), Role::Child).unwrap();
+            alias.tree = std::sync::Arc::clone(&root.tree);
+            alias.generation = root.tree.generation();
+            assert_eq!(alias.named_slot_in(&named_dir), Some(1));
+            root.named.push((named("alias"), alias));
+
+            assert!(root.drop_named_durable(&named("g1")).unwrap());
+            assert!(
+                !named_dir.join("1").exists(),
+                "the dropped graph's slot is removed"
+            );
+            assert!(
+                declared_manifest_slots(&dir).contains(&1),
+                "and the manifest still declares slot 1, so no diff notices it"
+            );
+            let err = root
+                .named
+                .last_mut()
+                .expect("the alias")
+                .1
+                .apply_delta(&[one_triple()], &[])
+                .expect_err("a write into a removed directory must be refused");
+            assert!(err.contains("durable write refused"), "{}", err);
         }
-        // The state a crash between the manifest commit and the removal leaves behind.
-        copy_tree(&keep, &named_dir.join("0")).unwrap();
-        assert_eq!(declared_manifest_slots(&dir), vec![1]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (round 5 review, NEW-D) Two ATTACHED children on one slot are refused where the
+    /// set is resolved, before any manifest is published.
+    ///
+    /// A manifest naming one slot twice opens two graph names onto one directory — one base, one
+    /// WAL — so later writes to either land in both. It is refused where it is written and where
+    /// it is read; this is the third place, the in-memory set a republish is built FROM, which is
+    /// where the state can first be seen. The seen slots are a set, so the check costs the size
+    /// of the set rather than its square.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn two_attached_children_on_one_slot_are_refused_before_anything_is_published() {
+        let dir = txn_tmp_dir("duplicate-attached-slot");
+        save_named_store(&dir, &["g0", "g1"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
         {
-            let mut g = Graph::open(&dir).unwrap();
-            assert!(
-                !named_dir.join("0").exists(),
-                "the undeclared slot is swept on the open"
-            );
-            assert_eq!(g.named.len(), 1, "and only the declared graph is opened");
-            assert!(
-                !g.drop_named_durable(&named("g0")).unwrap(),
-                "the retried drop reports the graph is not there"
-            );
-            assert!(
-                !named_dir.join("0").exists(),
-                "and that report is true: nothing of it is on disk"
+            let mut root = Graph::open(&dir).unwrap();
+            let mut alias = Graph::open_dir(&named_dir.join("1"), Role::Child).unwrap();
+            alias.tree = std::sync::Arc::clone(&root.tree);
+            alias.generation = root.tree.generation();
+            root.named.push((named("alias"), alias));
+            let err = root
+                .ensure_named(&named("fresh"))
+                .expect_err("a set that names one slot twice is not published");
+            assert!(err.contains("claim slot 1 of"), "{}", err);
+            // Refused before anything was written: the manifest and the slots are as they were.
+            assert_eq!(declared_manifest_slots(&dir), vec![0, 1]);
+            assert_eq!(
+                present_named_slots(&named_dir).unwrap(),
+                [0, 1].into_iter().collect(),
+                "and no slot was reserved for the graph that was not created"
             );
         }
         std::fs::remove_dir_all(&dir).ok();
-        std::fs::remove_dir_all(&keep).ok();
+    }
+
+    /// (round 5 review, NEW-E) DROP ALL records the `named/` CONTAINER once, not one
+    /// entry per slot.
+    ///
+    /// Every handle inside the sub-tree is inside the container, so one entry answers for all of
+    /// them; routing drop-all through the per-slot manifest diff instead made a store with K
+    /// named graphs do K recordings, each walking the log, to delete a sub-tree it removes whole.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_all_named_records_the_container_once_whatever_the_store_holds() {
+        let dir = txn_tmp_dir("drop-all-one-record");
+        save_named_store(&dir, &["g0", "g1", "g2", "g3", "g4", "g5"]);
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert_eq!(g.named.len(), 6);
+            let entries = |g: &Graph| {
+                g.tree
+                    .layout
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .replaced
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            assert!(entries(&g).is_empty(), "nothing replaced yet");
+            g.drop_all_named_durable().unwrap();
+            assert_eq!(
+                entries(&g),
+                vec![dir.join(NAMED_SUBDIR)],
+                "one entry, the container, however many graphs were dropped"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (round 5 review, L2) A manifest must END at its last declared entry. Bytes
+    /// after it are not something a publish — a whole-file rewrite — ever leaves, so reading the
+    /// prefix and ignoring them would adopt a named set that is a truncation of what is on disk.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_manifest_with_bytes_after_its_last_entry_is_refused() {
+        let dir = txn_tmp_dir("manifest-trailing-bytes");
+        save_named_store(&dir, &["g0", "g1"]);
+        let path = dir.join(NAMED_MANIFEST);
+        let good = std::fs::read(&path).unwrap();
+        assert_eq!(declared_manifest_slots(&dir), vec![0, 1]);
+
+        let mut trailing = good.clone();
+        trailing.extend_from_slice(b"an older, longer manifest's tail");
+        std::fs::write(&path, &trailing).unwrap();
+        match read_named_manifest(&dir) {
+            Err(e) => assert!(
+                e.to_string().contains("bytes follow the last of the"),
+                "{}",
+                e
+            ),
+            Ok(_) => panic!("a manifest with trailing bytes must not be read"),
+        }
+        // And the store itself refuses to open rather than opening the prefix.
+        assert!(Graph::open(&dir).is_err(), "the open is refused too");
+        std::fs::write(&path, &good).unwrap();
+        assert_eq!(
+            Graph::open(&dir).unwrap().named.len(),
+            2,
+            "the intact manifest still opens"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (round 5 review, NEW-A/F-I) An open NEVER REMOVES a slot the manifest does not
+    /// declare, and the drop that left it is truthful about having removed nothing.
+    ///
+    /// The manifest rewrite commits a drop and the slot's removal follows it, so a crash in
+    /// between leaves the dropped graph's bytes under a slot nothing names, and sweeping those on
+    /// the next open looks like the tidy answer. It is not one: a republish is built from the
+    /// ATTACHED children, so a CREATE performed while a caller holds a child detached leaves that
+    /// child's slot undeclared with every write it had acknowledged still in it. A sweep deletes
+    /// a live graph's data there, and the same goes for a manifest restored from a different
+    /// point in time than `named/`. Residue therefore stays, as an orphan nothing opens, until a
+    /// whole-store rewrite; it is `vacuum`/`compact`, which write a fresh image, that erase it.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_open_never_removes_a_slot_the_manifest_does_not_declare() {
+        let dir = txn_tmp_dir("undeclared-slot-kept");
+        save_named_store(&dir, &["g0", "g1"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            // A caller DETACHES g1, writes through it — the write is acknowledged and durable —
+            // and the store then republishes its manifest from the children still attached.
+            let (_, mut detached) = g.named.pop().expect("g1");
+            assert_eq!(detached.named_slot_in(&named_dir), Some(1));
+            detached
+                .apply_delta(&[one_triple()], &[])
+                .expect("the write is acknowledged");
+            drop(detached);
+            g.ensure_named(&named("g2")).unwrap();
+        }
+        // Slot 1 is now undeclared, and holds a write this store said it had taken.
+        assert_eq!(declared_manifest_slots(&dir), vec![0, 2]);
+        let slot1 = named_dir.join("1");
+        let before = tree_image(&slot1);
+        assert!(
+            before.iter().any(|(_, len)| *len > 0),
+            "the acknowledged write is on disk in the undeclared slot"
+        );
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert_eq!(
+                tree_image(&slot1),
+                before,
+                "the open left the undeclared slot byte-for-byte as it found it"
+            );
+            assert_eq!(g.named.len(), 2, "and opened only the declared graphs");
+            // The drop that left it is truthful: it reports that it removed nothing, and it
+            // removes nothing — least of all data it cannot attribute to the slot it was asked
+            // to drop.
+            assert!(
+                !g.drop_named_durable(&named("g1")).unwrap(),
+                "the retried drop reports the graph is not named by this store"
+            );
+            assert_eq!(
+                tree_image(&slot1),
+                before,
+                "and it removed nothing while reporting that"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every regular file under `dir`, by relative path and length: what a step must not
+    /// have changed when it is asserted to have left a sub-tree alone.
+    #[cfg(feature = "mmap")]
+    fn tree_image(dir: &std::path::Path) -> Vec<(std::path::PathBuf, u64)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(at) = stack.pop() {
+            for entry in std::fs::read_dir(&at).expect("the sub-tree is readable") {
+                let entry = entry.unwrap();
+                let meta = entry.metadata().unwrap();
+                if meta.is_dir() {
+                    stack.push(entry.path());
+                } else {
+                    let rel = entry.path().strip_prefix(dir).unwrap().to_path_buf();
+                    out.push((rel, meta.len()));
+                }
+            }
+        }
+        out.sort();
+        out
     }
 
     /// (round 4 review, L5) A slot id is its CANONICAL decimal spelling and nothing
     /// else, so `named/05` is not a second name for slot 5. Loose parsing let such a directory be
-    /// reconciled against, or recorded for, a slot it is not — and, now that undeclared slots are
-    /// swept, would have had the sweep decide it owned a name the store never wrote.
+    /// reconciled against, or recorded for, a slot it is not.
     #[cfg(feature = "mmap")]
     #[test]
     fn only_a_canonical_slot_name_is_a_slot_id() {
@@ -16011,7 +16773,7 @@ mod tests {
         assert_eq!(g.named.len(), 1, "the store opens with its one named graph");
         assert!(
             named_dir.join("05").exists(),
-            "a name the store never writes is not a slot it sweeps"
+            "and an open removes nothing it did not open"
         );
         drop(g);
         std::fs::remove_dir_all(&dir).ok();
