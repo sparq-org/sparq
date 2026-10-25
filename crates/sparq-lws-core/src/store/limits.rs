@@ -235,10 +235,10 @@ mod tests {
         assert!(!in_service_pool(&format!("{}.lws/grants/abc", root)));
         assert!(!in_service_pool(&format!("{}doc.txt", root)));
         assert!(is_pooled_blob_key(&format!(
-            "{}http___localhost_3000_.lws_subscriptions_abc-00",
+            "{}b1-00000000000000000000000000000000",
             POOLED_BLOB_KEY_MARK
         )));
-        assert!(!is_pooled_blob_key("http___localhost_3000_doc.txt-00"));
+        assert!(!is_pooled_blob_key("b1-00000000000000000000000000000000"));
     }
 }
 

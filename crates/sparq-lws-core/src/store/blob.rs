@@ -5,6 +5,9 @@
 //! authoritative index, and the blob store holds a durable copy of the bytes keyed by an opaque
 //! `s3Key`. This module defines the [`BlobStore`] trait and an in-memory test impl. The real
 //! `object_store`-backed impl (S3 / Local) is an M2 adapter behind the same trait.
+//!
+//! Composite-store keys use `b1-<32 lowercase hex>` with 128 bits of OS randomness per write.
+//! Service-pool keys retain the `$pool$` prefix; neither form includes the resource IRI.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -622,7 +625,8 @@ mod tests {
         for n in 0..64 {
             let blob = Arc::clone(&blob);
             handles.push(tokio::spawn(async move {
-                blob.put(&format!("k{n}"), Bytes::from_static(b"x")).await
+                blob.put(&format!("b1-{n:032x}"), Bytes::from_static(b"x"))
+                    .await
             }));
         }
 
@@ -664,7 +668,7 @@ mod tests {
             let blob = Arc::clone(&blob);
             handles.push(tokio::spawn(async move {
                 // Each task writes a DISTINCT body so the surviving body identifies the winning write.
-                blob.put(&format!("k{i}"), Bytes::from(format!("v{i}")))
+                blob.put(&format!("b1-{i:032x}"), Bytes::from(format!("v{i}")))
                     .await
                     .unwrap();
             }));

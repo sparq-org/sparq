@@ -581,7 +581,7 @@ impl SparqClient for ChurningSparq {
             let n = self
                 .version
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            meta.blob_key = format!("churned-{n}");
+            meta.blob_key = format!("b1-{n:032x}");
             meta.etag = format!("\"churned-{n}\"");
         }
         Ok(meta)

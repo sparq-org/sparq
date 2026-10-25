@@ -352,10 +352,10 @@ mod tests {
     fn zero_length_bodies_still_consume_budget_map_stays_bounded() {
         // The ENTRY_OVERHEAD floor: a flood of empty bodies cannot grow the map unbounded — each
         // entry is charged its key+overhead, so the count is capped by budget/charge.
-        let per_entry = 3 + 3 + ENTRY_OVERHEAD_BYTES; // key(3) + etag(3) + empty body
+        let per_entry = 35 + 3 + ENTRY_OVERHEAD_BYTES; // key(35) + etag(3) + empty body
         let c = BodyCache::with_max_entry_bytes(4 * per_entry, per_entry);
         for i in 0..100 {
-            c.insert(&format!("k{i:02}"), "\"e\"", &Bytes::new());
+            c.insert(&format!("b1-{i:032x}"), "\"e\"", &Bytes::new());
         }
         assert!(
             c.len() <= 4,

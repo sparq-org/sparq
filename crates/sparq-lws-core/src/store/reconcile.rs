@@ -83,8 +83,9 @@
 //! leaked forever. It still passes every safety guard a versioned candidate does — age-gated against the
 //! grace window, re-checked against a FRESH referenced set, and re-statted (still old enough, still
 //! present) immediately before the delete — and is then removed with a plain [`BlobStore::delete`]. This
-//! is sound because a later recreate of the same IRI mints a DIFFERENT key (so the orphan's key can never
-//! be the live recreate's): there is nothing live to clobber. The earlier code skipped versionless
+//! is sound because a later recreate of the same IRI mints a DIFFERENT opaque `b1-<32 lowercase hex>`
+//! key (prefixed with `$pool$` for service-pool records), so the orphan's key can never
+//! be the live recreate's: there is nothing live to clobber. The earlier code skipped versionless
 //! candidates unconditionally, which leaked every old orphan forever on a versionless backend — the bug
 //! this path fixes.
 //!

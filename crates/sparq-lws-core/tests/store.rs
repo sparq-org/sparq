@@ -810,7 +810,11 @@ async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recrea
     // Stage a concurrent same-IRI recreate. With unique-per-write keys it lands its bytes under its OWN
     // distinct key — NOT the original's. (We assert the keys differ below.) These bytes must survive.
     let recreate_bytes = Bytes::from_static(b"<#recreated> <#p> \"v2\" .");
-    let recreate_key = format!("{original_key}-recreate-distinct");
+    let recreate_key = store()
+        .write(container, recreate_bytes.clone(), "text/turtle")
+        .await
+        .unwrap()
+        .blob_key;
     assert_ne!(
         original_key, recreate_key,
         "a unique-per-write recreate must NOT share the original's blob key (the root fix)"

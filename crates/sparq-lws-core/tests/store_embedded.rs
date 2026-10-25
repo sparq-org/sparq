@@ -617,7 +617,7 @@ async fn concurrent_same_child_creates_commit_exactly_one_untorn_record() {
                     child,
                     ResourceMeta {
                         content_type: "text/turtle".into(),
-                        blob_key: format!("k{i}"),
+                        blob_key: format!("b1-{i:032x}"),
                         etag: format!("\"e{i}\""),
                         last_modified: None,
                     },

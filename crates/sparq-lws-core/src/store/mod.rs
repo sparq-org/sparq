@@ -735,9 +735,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// forcing the elaborate `generation`-CAS + grace-window + snapshot-threading machinery in
     /// [`super::blob`] and [`super::reconcile`] to exist purely to make a reused key safe.
     ///
-    /// This mints a NEW key on EVERY write: an IRI-derived prefix (kept for operator-debuggability — a
-    /// key still traces back to its resource) plus a hyphen-joined **128-bit cryptographically-random
-    /// suffix** from the OS RNG. So:
+    /// This mints a NEW key on EVERY write: `b1-` followed by **128 cryptographically-random bits**
+    /// from the OS RNG encoded as 32 lowercase hex characters. Service-pool keys retain the
+    /// [`POOLED_BLOB_KEY_MARK`] prefix. No part of the resource IRI is included. So:
     ///
     /// - **Two concurrent writes to the same IRI get DIFFERENT keys** — they write to disjoint blob
     ///   objects and can never collide or interleave. The "latest committed" winner is decided solely by
@@ -755,7 +755,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; the IRI prefix is cosmetic (debuggability) and carries no uniqueness requirement.
+    /// negligible; the fixed `b1-` prefix identifies the key scheme without revealing resource names
+    /// or allowing resource IRI length to affect key length.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -768,9 +769,6 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
     fn mint_blob_key(iri: &str) -> ServerResult<String> {
-        // The IRI-derived prefix is for human/operator traceability only; uniqueness comes entirely from
-        // the random suffix, so the prefix need not be collision-free.
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -790,9 +788,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
         if limits::in_service_pool(iri) {
-            return Ok(format!("{}{prefix}-{hex}", limits::POOLED_BLOB_KEY_MARK));
+            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
         }
-        Ok(format!("{prefix}-{hex}"))
+        Ok(format!("b1-{hex}"))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -2173,29 +2171,45 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mint_blob_key_keeps_an_iri_derived_prefix_for_traceability() {
-        // Uniqueness comes from the random suffix; the IRI-derived prefix is retained (cosmetic) so an
-        // operator can still trace a key back to its resource. The minted key must START with the
-        // percent-flattened IRI followed by the `-` separator.
-        let iri = "https://pod.example/alice/data";
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        let key = S::mint_blob_key(iri).expect("the OS RNG must be available in tests");
-        assert!(
-            key.starts_with(&format!("{prefix}-")),
-            "minted key {key:?} must keep the IRI-derived prefix {prefix:?} for traceability"
-        );
-        // ...and the suffix is the 32-hex-char (128-bit) random tail.
-        let suffix = &key[prefix.len() + 1..];
+    fn assert_b1_blob_key(key: &str, pooled: bool) {
+        // Check ^(\$pool\$)?b1-[0-9a-f]{32}$ without adding a regex dependency.
+        let prefix = if pooled { "$pool$b1-" } else { "b1-" };
+        let suffix = key.strip_prefix(prefix).expect("the b1 scheme prefix");
         assert_eq!(
             suffix.len(),
             32,
             "the random suffix is 16 bytes = 32 hex chars"
         );
         assert!(
-            suffix.bytes().all(|b| b.is_ascii_hexdigit()),
+            suffix
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
             "the suffix must be lowercase hex"
         );
+        assert_eq!(limits::is_pooled_blob_key(key), pooled);
+    }
+
+    #[test]
+    fn mint_blob_key_uses_the_opaque_b1_scheme() {
+        let long_name = "private-資料".repeat(128);
+        for (iri, pooled) in [
+            ("https://pod.example/alice/data".to_string(), false),
+            (
+                "https://pod.example/.lws/subscriptions/abc".to_string(),
+                true,
+            ),
+            (
+                format!("https://pod.example/{long_name}?q=secret#fragment"),
+                false,
+            ),
+            (
+                format!("https://pod.example/.lws/subscriptions/{long_name}"),
+                true,
+            ),
+        ] {
+            let key = S::mint_blob_key(&iri).expect("the OS RNG must be available in tests");
+            assert_b1_blob_key(&key, pooled);
+        }
     }
 
     #[test]
@@ -2209,11 +2223,7 @@ mod tests {
         let iri = "https://pod.example/alice/data";
         let key =
             S::mint_blob_key(iri).expect("the OS RNG is available on every supported platform");
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        assert!(
-            key.starts_with(&format!("{prefix}-")) && key.len() == prefix.len() + 1 + 32,
-            "the success path still mints a prefix + 32-hex-char random suffix"
-        );
+        assert_b1_blob_key(&key, false);
 
         // And a write through the public API succeeds end-to-end (the fallible mint does not regress the
         // happy path): the resource is then readable, its bytes resolved through the minted blob key.
@@ -2223,10 +2233,7 @@ mod tests {
                 .write(iri, Bytes::from_static(b"body"), "text/turtle")
                 .await
                 .expect("a write with a working RNG must succeed");
-            assert!(
-                meta.blob_key.starts_with(&format!("{prefix}-")),
-                "the persisted pointer names the minted unique key"
-            );
+            assert_b1_blob_key(&meta.blob_key, false);
             let resource = store.read(iri).await.expect("read-after-write");
             assert_eq!(resource.body, Bytes::from_static(b"body"));
         });
