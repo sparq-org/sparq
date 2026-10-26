@@ -192,12 +192,29 @@ pub fn without_dp_planner<T>(f: impl FnOnce() -> T) -> T {
 /// A (bushy) join tree over pattern indices, the output of the DP enumerator. The
 /// executor evaluates it recursively: a `Leaf` scans one BGP pattern, a `Join`
 /// natural-joins the two sub-results.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), derive(Clone))]
 pub(crate) enum JoinTree {
     /// Scan the BGP pattern at this index.
     Leaf(usize),
     /// Natural-join the two sub-trees.
     Join(Box<JoinTree>, Box<JoinTree>),
+}
+
+#[cfg(test)]
+thread_local! {
+    static TREE_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+impl Clone for JoinTree {
+    fn clone(&self) -> Self {
+        TREE_CLONES.with(|count| count.set(count.get() + 1));
+        match self {
+            Self::Leaf(i) => Self::Leaf(*i),
+            Self::Join(left, right) => Self::Join(left.clone(), right.clone()),
+        }
+    }
 }
 
 // ---- the query graph (cardinality/adjacency inputs) ---------------------------
@@ -483,10 +500,22 @@ impl QueryGraph {
     }
 }
 
-/// Best plan found for a subset so far: the minimum-`Cout` join tree and its cost.
+/// Best plan found for a subset so far: its cost and shared child subset keys.
+/// Union-size ordering finalizes each child before any parent refers to it.
 struct Entry {
     cost: f64,
-    tree: JoinTree,
+    children: Option<(u64, u64)>,
+}
+
+/// Builds only the winning tree after enumeration, without cloning any subtrees.
+fn materialize_tree(best: &FxHashMap<u64, Entry>, s: u64) -> JoinTree {
+    match best[&s].children {
+        None => JoinTree::Leaf(s.trailing_zeros() as usize),
+        Some((s1, s2)) => JoinTree::Join(
+            Box::new(materialize_tree(best, s1)),
+            Box::new(materialize_tree(best, s2)),
+        ),
+    }
 }
 
 /// Runs the DPccp enumerator over `qg`, returning the minimum-`Cout` bushy join tree
@@ -535,7 +564,7 @@ pub(crate) fn plan(qg: &QueryGraph, max_subgraphs: usize) -> Option<JoinTree> {
 
     let mut best: FxHashMap<u64, Entry> = FxHashMap::default();
     for v in 0..n {
-        best.insert(1u64 << v, Entry { cost: 0.0, tree: JoinTree::Leaf(v) });
+        best.insert(1u64 << v, Entry { cost: 0.0, children: None });
     }
     for (s1, s2) in pairs {
         let s = s1 | s2;
@@ -545,12 +574,10 @@ pub(crate) fn plan(qg: &QueryGraph, max_subgraphs: usize) -> Option<JoinTree> {
         };
         let cost = cost1 + cost2 + qg.card(s);
         if best.get(&s).is_none_or(|e| cost < e.cost) {
-            let t1 = best[&s1].tree.clone();
-            let t2 = best[&s2].tree.clone();
-            best.insert(s, Entry { cost, tree: JoinTree::Join(Box::new(t1), Box::new(t2)) });
+            best.insert(s, Entry { cost, children: Some((s1, s2)) });
         }
     }
-    best.remove(&full).map(|e| e.tree)
+    best.get(&full).map(|_| materialize_tree(&best, full))
 }
 
 #[cfg(test)]
@@ -652,6 +679,34 @@ mod tests {
         let (cost, span) = tree_cost(&g, &tree);
         assert_eq!(span, 0b1111);
         assert_eq!(Some(cost), ref_opt_cost(&g, 4));
+    }
+
+    #[test]
+    fn larger_plans_preserve_output_without_cloning_subtrees() {
+        // Snapshots from the deep-cloning planner: tied clique costs and a cycle
+        // with an extra shared variable and unequal estimates exercise tie-breaking
+        // and replacement of earlier candidates. The clone count is thread-local.
+        let graphs = [
+            qg(&[10.0; 8], &[(0xff, 5.0)]),
+            qg(
+                &[10.0, 100_000.0, 20.0, 500.0, 5.0, 2000.0, 40.0, 100.0],
+                &[
+                    (0x03, 5.0), (0x06, 10.0), (0x0c, 20.0), (0x18, 5.0),
+                    (0x30, 5.0), (0x60, 10.0), (0xc0, 20.0), (0x81, 5.0),
+                    (0x55, 5.0),
+                ],
+            ),
+        ];
+        let expected = [
+            "Join(Join(Join(Leaf(0), Leaf(7)), Join(Leaf(5), Leaf(6))), Join(Join(Leaf(1), Leaf(4)), Join(Leaf(2), Leaf(3))))",
+            "Join(Join(Join(Join(Join(Leaf(0), Leaf(6)), Leaf(7)), Join(Join(Leaf(2), Leaf(4)), Leaf(3))), Leaf(5)), Leaf(1))",
+        ];
+        TREE_CLONES.with(|count| count.set(0));
+        for (g, expected) in graphs.into_iter().zip(expected) {
+            let tree = plan(&g, DEFAULT_MAX_SUBGRAPHS).expect("eight-pattern graph must plan");
+            assert_eq!(format!("{tree:?}"), expected);
+        }
+        assert_eq!(TREE_CLONES.with(|count| count.get()), 0, "planning must share subtrees");
     }
 
     #[test]
