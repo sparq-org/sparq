@@ -42,9 +42,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::MalformedInput => {
-                "malformed encryption input (key files must be exactly 32 bytes)"
-            }
+            Self::MalformedInput => "malformed encryption input",
             Self::UnsupportedVersion => "unsupported encryption format version",
             Self::WrongProvider => "wrong key provider",
             Self::WrongKek => "wrong KEK",
