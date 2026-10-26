@@ -4,6 +4,11 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
+use sparq_lws_core::store::blob_fs::FsBlobStore;
+#[cfg(feature = "embedded-sparq")]
+use sparq_lws_core::store::{BlobEntry, BlobError, BlobStore, InMemoryBlobStore};
+
 const ENV_DATA_DIR: &str = "SOLID_SERVER_DATA_DIR";
 const ENV_SPARQ_DIR: &str = "SOLID_SERVER_SPARQ_DIR";
 const ENV_BACKEND: &str = "PSS_SPARQ_BACKEND";
@@ -161,21 +166,89 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }
 
-/// Single filesystem blob construction point: the adapter is supplied by the sibling storage lane.
 #[cfg(feature = "embedded-sparq")]
-pub(super) fn make_blobs(
-    path: Option<&std::path::Path>,
-) -> io::Result<sparq_lws_core::store::InMemoryBlobStore> {
+pub(super) enum NativeBlobs {
+    InMemory(InMemoryBlobStore),
+    #[cfg(feature = "blob-fs")]
+    Filesystem(FsBlobStore),
+}
+
+#[cfg(feature = "embedded-sparq")]
+#[async_trait::async_trait]
+impl BlobStore for NativeBlobs {
+    async fn get(&self, key: &str) -> Result<bytes::Bytes, BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::get(store, key).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::get(store, key).await,
+        }
+    }
+
+    async fn put(&self, key: &str, body: bytes::Bytes) -> Result<(), BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::put(store, key, body).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::put(store, key, body).await,
+        }
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::exists(store, key).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::exists(store, key).await,
+        }
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::delete(store, key).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::delete(store, key).await,
+        }
+    }
+
+    async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::list(store).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::list(store).await,
+        }
+    }
+
+    async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::stat(store, key).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::stat(store, key).await,
+        }
+    }
+
+    async fn delete_if_unchanged(&self, key: &str, generation: u64) -> Result<bool, BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::delete_if_unchanged(store, key, generation).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::delete_if_unchanged(store, key, generation).await,
+        }
+    }
+}
+
+/// Single blob construction point, called with the index lock held for a data directory.
+#[cfg(feature = "embedded-sparq")]
+pub(super) fn make_blobs(path: Option<&std::path::Path>) -> io::Result<NativeBlobs> {
     if let Some(path) = path {
+        #[cfg(feature = "blob-fs")]
+        return FsBlobStore::open(path).map(NativeBlobs::Filesystem);
+        #[cfg(not(feature = "blob-fs"))]
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!(
-                "{ENV_DATA_DIR} cannot boot: the filesystem blob store is not built in (requested {})",
+                "{ENV_DATA_DIR} cannot boot: the filesystem blob store is not built in; enable the `blob-fs` feature (requested {})",
                 path.display()
             ),
         ));
     }
-    Ok(sparq_lws_core::store::InMemoryBlobStore::new())
+    Ok(NativeBlobs::InMemory(InMemoryBlobStore::new()))
 }
 
 #[cfg(feature = "embedded-sparq")]

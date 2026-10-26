@@ -35,11 +35,103 @@ fn storage_selection_and_invalid_configuration() {
 }
 
 #[cfg(feature = "embedded-sparq")]
+use std::fs;
+#[cfg(feature = "embedded-sparq")]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(feature = "embedded-sparq")]
+struct Directory(PathBuf);
+
+#[cfg(feature = "embedded-sparq")]
+impl Directory {
+    fn new() -> Self {
+        static NONCE: AtomicU64 = AtomicU64::new(0);
+        let dir = Self(std::env::temp_dir().join(format!(
+            "lws-datadir-{}-{}",
+            std::process::id(),
+            NONCE.fetch_add(1, Ordering::Relaxed)
+        )));
+        fs::create_dir(&dir.0).unwrap();
+        dir
+    }
+
+    fn config(&self) -> StorageConfig {
+        config(&[(ENV_DATA_DIR, self.0.to_str().unwrap())]).unwrap()
+    }
+}
+
+#[cfg(feature = "embedded-sparq")]
+impl Drop for Directory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(feature = "embedded-sparq")]
+#[tokio::test]
+async fn boot_without_data_dir_keeps_ephemeral_blobs_and_delegates_their_lifecycle() {
+    use bytes::Bytes;
+    let cfg = config(&[(ENV_BACKEND, "embedded")]).unwrap();
+    let (client, blobs) = cfg.open_embedded_with(false, make_blobs).await.unwrap();
+    let key = "b1-0123456789abcdef0123456789abcdef";
+    assert!(blobs.list().await.unwrap().is_empty());
+    blobs
+        .put(key, Bytes::from_static(b"ephemeral"))
+        .await
+        .unwrap();
+    assert_eq!(blobs.get(key).await.unwrap(), b"ephemeral"[..]);
+    assert!(blobs.exists(key).await.unwrap());
+    let entry = blobs.stat(key).await.unwrap().unwrap();
+    assert_eq!(entry.key, key);
+    assert_eq!(blobs.list().await.unwrap().len(), 1);
+    assert!(!blobs
+        .delete_if_unchanged(key, entry.generation.unwrap() + 1)
+        .await
+        .unwrap());
+    assert_eq!(blobs.get(key).await.unwrap(), b"ephemeral"[..]);
+    assert!(blobs
+        .delete_if_unchanged(key, entry.generation.unwrap())
+        .await
+        .unwrap());
+    assert!(!blobs.exists(key).await.unwrap());
+    let key = "b1-1123456789abcdef0123456789abcdef";
+    blobs.put(key, Bytes::new()).await.unwrap();
+    blobs.delete(key).await.unwrap();
+    assert!(blobs.stat(key).await.unwrap().is_none());
+    let key = "b1-2123456789abcdef0123456789abcdef";
+    blobs
+        .put(key, Bytes::from_static(b"discard on drop"))
+        .await
+        .unwrap();
+    drop((client, blobs));
+    let (_client, blobs) = cfg.open_embedded_with(false, make_blobs).await.unwrap();
+    assert!(blobs.list().await.unwrap().is_empty());
+}
+
+#[cfg(all(feature = "embedded-sparq", not(feature = "blob-fs")))]
+#[tokio::test]
+async fn unavailable_filesystem_adapter_refuses_and_releases_the_index_lock() {
+    let dir = Directory::new();
+    let failure = dir
+        .config()
+        .open_embedded_with(true, make_blobs)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(failure.kind(), io::ErrorKind::Unsupported);
+    assert!(failure
+        .to_string()
+        .contains("filesystem blob store is not built in"));
+    assert!(failure.to_string().contains("blob-fs"));
+    assert!(!dir.0.join("blobs").exists());
+    drop(sparq_lws_core::store::EmbeddedSparqClient::open_or_create(&dir.0.join("index")).unwrap());
+}
+
+#[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
 mod embedded {
     use super::*;
-    use std::fs;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::AtomicBool;
 
     use async_trait::async_trait;
     use axum::body::{to_bytes, Body};
@@ -53,31 +145,6 @@ mod embedded {
     const BASE: &str = "https://pod.example";
     const CHILD: &str = "https://pod.example/item";
     const FORMAT: &str = r#"{"schema":1,"index":{"major":1},"blobs":{"major":1}}"#;
-
-    struct Directory(PathBuf);
-
-    impl Directory {
-        fn new() -> Self {
-            static NONCE: AtomicU64 = AtomicU64::new(0);
-            let dir = Self(std::env::temp_dir().join(format!(
-                "lws-datadir-{}-{}",
-                std::process::id(),
-                NONCE.fetch_add(1, Ordering::Relaxed)
-            )));
-            fs::create_dir(&dir.0).unwrap();
-            dir
-        }
-
-        fn config(&self) -> StorageConfig {
-            config(&[(ENV_DATA_DIR, self.0.to_str().unwrap())]).unwrap()
-        }
-    }
-
-    impl Drop for Directory {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     // Test-only durable bytes. Keys are hex-encoded to keep opaque store keys inside this fixture.
     // No generation or timestamp is advertised, so the reconciler never collects these test files.
@@ -169,17 +236,131 @@ mod embedded {
         }
     }
 
-    type Boot = (EmbeddedSparqClient, DirectoryBlobs);
+    type Boot = (EmbeddedSparqClient, NativeBlobs);
 
     async fn boot(config: &StorageConfig) -> io::Result<Boot> {
-        config.open_embedded_with(true, DirectoryBlobs::open).await
+        config
+            .open_embedded_with(config.has_data_dir(), make_blobs)
+            .await
     }
 
-    fn error(result: io::Result<Boot>) -> io::Error {
+    fn error<B>(result: io::Result<(EmbeddedSparqClient, B)>) -> io::Error {
         match result {
             Err(error) => error,
             Ok(_) => panic!("boot unexpectedly succeeded"),
         }
+    }
+
+    #[tokio::test]
+    async fn fresh_data_dir_boots_with_the_filesystem_layout() {
+        let dir = Directory::new();
+        let held = boot(&dir.config()).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &fs::read(dir.0.join("format.json")).unwrap()
+            )
+            .unwrap(),
+            serde_json::json!({"schema":1,"index":{"major":1},"blobs":{"major":1}})
+        );
+        assert!(dir.0.join("index").is_dir());
+        for path in ["blobs/objects", "blobs/pool", "blobs/tmp"] {
+            assert!(dir.0.join(path).is_dir(), "missing {path}");
+        }
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn filesystem_boot_reclaims_replaced_and_deleted_resource_bytes() {
+        use sparq_lws_core::store::BodyCache;
+
+        let dir = Directory::new();
+        let (client, blobs) = boot(&dir.config()).await.unwrap();
+        let blobs = crate::reconcile_runtime::SharedStore::new(blobs);
+        let store = CompositeStore::with_body_cache(client, blobs.clone(), BodyCache::disabled());
+        let first = store
+            .write(CHILD, Bytes::from_static(b"first"), "text/plain")
+            .await
+            .unwrap();
+        let second = store
+            .write(CHILD, Bytes::from_static(b"second"), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(store.read(CHILD).await.unwrap().body, b"second"[..]);
+        assert!(!blobs.exists(&first.blob_key).await.unwrap());
+        assert!(matches!(
+            blobs.get(&first.blob_key).await,
+            Err(BlobError::NotFound)
+        ));
+        assert!(blobs.exists(&second.blob_key).await.unwrap());
+        assert!(matches!(
+            blobs
+                .put(&second.blob_key, Bytes::from_static(b"overwrite"))
+                .await,
+            Err(BlobError::Backend(_))
+        ));
+        assert_eq!(blobs.get(&second.blob_key).await.unwrap(), b"second"[..]);
+        let entries = blobs.list().await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, second.blob_key);
+        let entry = blobs.stat(&second.blob_key).await.unwrap().unwrap();
+        assert_eq!(entry.key, second.blob_key);
+        assert!(entry.last_modified.is_some());
+        assert_eq!(entry.generation, None);
+        assert!(blobs
+            .delete_if_unchanged(&second.blob_key, 0)
+            .await
+            .is_err());
+        assert_eq!(store.read(CHILD).await.unwrap().body, b"second"[..]);
+        store.delete(CHILD, None).await.unwrap();
+        assert!(blobs.list().await.unwrap().is_empty());
+        assert!(blobs.stat(&second.blob_key).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn filesystem_open_failure_releases_the_lock_and_preserves_recoverable_data() {
+        let dir = Directory::new();
+        let cfg = dir.config();
+        let (client, blobs) = boot(&cfg).await.unwrap();
+        let store = CompositeStore::new(client, blobs);
+        store
+            .write(
+                CHILD,
+                Bytes::from_static(b"keep after failed boot"),
+                "text/plain",
+            )
+            .await
+            .unwrap();
+        let expected = store.meta(CHILD).await.unwrap();
+        drop(store);
+        let marker = fs::read(dir.0.join("format.json")).unwrap();
+        let journals: Vec<_> = logs(&dir.0.join("index"))
+            .into_iter()
+            .map(|path| {
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect();
+        assert!(journals.iter().any(|(_, bytes)| !bytes.is_empty()));
+        // A real filesystem failure, after opening the index, must abort boot.
+        let temporary = dir.0.join("blobs/tmp");
+        fs::remove_dir(&temporary).unwrap();
+        fs::write(&temporary, b"not a directory").unwrap();
+        let failure = error(boot(&cfg).await);
+        assert_eq!(failure.kind(), io::ErrorKind::NotADirectory);
+        assert_eq!(fs::read(&temporary).unwrap(), b"not a directory");
+        assert_eq!(fs::read(dir.0.join("format.json")).unwrap(), marker);
+        for (path, bytes) in journals {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
+        drop(EmbeddedSparqClient::open_or_create(&dir.0.join("index")).unwrap());
+        fs::remove_file(temporary).unwrap();
+        let (client, blobs) = boot(&cfg).await.unwrap();
+        let store = CompositeStore::new(client, blobs);
+        assert_eq!(store.meta(CHILD).await.unwrap(), expected);
+        assert_eq!(
+            store.read(CHILD).await.unwrap().body,
+            b"keep after failed boot"[..]
+        );
     }
 
     #[tokio::test]
@@ -198,10 +379,15 @@ mod embedded {
                     .err()
                     .unwrap();
                 assert_eq!(lock.kind(), io::ErrorKind::WouldBlock);
-                DirectoryBlobs::open(path)
+                make_blobs(path)
             })
             .await
             .unwrap();
+        assert!(dir.0.join("format.json").is_file());
+        assert!(dir.0.join("index").is_dir());
+        for path in ["blobs/objects", "blobs/pool", "blobs/tmp"] {
+            assert!(dir.0.join(path).is_dir(), "missing {path}");
+        }
         assert!(dir.0.join("index.lock").is_file());
         assert!(dir.0.join("index/sparq.lock").is_file());
         assert!(!dir.0.join("LOCK").exists());
@@ -215,11 +401,23 @@ mod embedded {
         let dir = Directory::new();
         let cfg = dir.config();
         let held = boot(&cfg).await.unwrap();
+        let temporary = dir.0.join("blobs/tmp/in-flight");
+        fs::write(&temporary, b"pending publication").unwrap();
+        let failure = error(
+            tokio::time::timeout(Duration::from_secs(2), boot(&cfg))
+                .await
+                .expect("contending boot must fail promptly"),
+        );
+        assert_eq!(failure.kind(), io::ErrorKind::WouldBlock);
+        assert!(failure
+            .to_string()
+            .contains(&dir.0.join("index.lock").display().to_string()));
+        assert_eq!(fs::read(&temporary).unwrap(), b"pending publication");
         let called = AtomicBool::new(false);
         let result = cfg
             .open_embedded_with(true, |path| {
                 called.store(true, Ordering::SeqCst);
-                DirectoryBlobs::open(path)
+                make_blobs(path)
             })
             .await;
         let error = error(result);
@@ -228,7 +426,14 @@ mod embedded {
             .to_string()
             .contains(&dir.0.join("index.lock").display().to_string()));
         assert!(!called.load(Ordering::SeqCst));
+        assert_eq!(fs::read(&temporary).unwrap(), b"pending publication");
         drop(held);
+        let reopened = boot(&cfg).await.unwrap();
+        assert!(
+            !temporary.exists(),
+            "the next lock holder must sweep abandoned writes"
+        );
+        drop(reopened);
     }
 
     #[tokio::test]
@@ -309,22 +514,6 @@ mod embedded {
                 dir.0.join("index/dict-meta.bin").exists() || dir.0.join("index/dict.bin").exists()
             );
         }
-    }
-
-    #[tokio::test]
-    async fn unavailable_filesystem_adapter_refuses_and_releases_the_index_lock() {
-        let dir = Directory::new();
-        let failure = dir
-            .config()
-            .open_embedded_with(true, make_blobs)
-            .await
-            .err()
-            .unwrap();
-        assert!(failure
-            .to_string()
-            .contains("filesystem blob store is not built in"));
-        assert!(!dir.0.join("blobs").exists());
-        drop(boot(&dir.config()).await.unwrap());
     }
 
     #[tokio::test]
@@ -456,7 +645,7 @@ mod embedded {
 
     async fn protocol_router(
         client: EmbeddedSparqClient,
-        blobs: DirectoryBlobs,
+        blobs: NativeBlobs,
         lws: bool,
         seed: bool,
         issuer: &auth_fixture::KeyKit,
