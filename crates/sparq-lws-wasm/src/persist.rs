@@ -617,7 +617,13 @@ mod tests {
             .await
             .err()
             .expect("unsupported markers must refuse startup");
-        assert!(error.contains("raises a stored time atomically"), "{error}");
+        // Either refusal is made before any read or write: the exclusive-index check runs
+        // first, then the atomic-marker check.
+        assert!(
+            error.contains("raises a stored time atomically")
+                || error.contains("may be written by other processes too"),
+            "{error}"
+        );
         assert!(decode(&journal.encode()).unwrap().is_empty());
     }
 
