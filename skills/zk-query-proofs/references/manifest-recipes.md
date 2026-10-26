@@ -19,7 +19,7 @@ The [exact-evaluator experiment adapter](../../../zk/sparql-evaluator/experiment
 
 The [query-coverage corpus](evaluator-conformance.md) separates executed host semantics, explicit unsupported features, and guest proof evidence. Its opt-in NPS comparison recipe records other engines' observations without installing dependencies or treating their output as a conformance oracle.
 
-### 1. Commit a credential graph and attest it as an issuer
+## 1. Commit a credential graph and attest it as an issuer
 ```rust
 use sparq_zk::commit::{commit_triples, CommitmentMethod};
 use sparq_zk::encode::salt_from_bytes;
@@ -48,7 +48,7 @@ let attestation = CommitmentAttestation {
 };
 ```
 
-### 2. Build a BGP scan proof for `{ ?s <http://ex/age> ?o }`
+## 2. Build a BGP scan proof for `{ ?s <http://ex/age> ?o }`
 ```rust
 use oxrdf::{NamedNode, Term};
 use sparq_zk_compose::build::{build_scan, Pattern, Slot};
@@ -68,7 +68,7 @@ let operand_enc = match &scan.inputs {
 };
 ```
 
-### 3. Assemble + prove a full manifest (scan + bound integer FILTER)
+## 3. Assemble + prove a full manifest (scan + bound integer FILTER)
 ```rust
 use sparq_zk_compose::build::build_filter_int;
 use sparq_zk_compose::driver::CircuitProver;
@@ -119,7 +119,7 @@ let manifest = ProofManifest {
 let json = manifest.to_json().unwrap(); // ships to the verifier
 ```
 
-### 4. Verify a manifest as a relying party (the full-binding path)
+## 4. Verify a manifest as a relying party (the full-binding path)
 ```rust
 use sparq_zk_compose::driver::CircuitProver;
 use sparq_zk_compose::verifier::{
@@ -154,7 +154,7 @@ match verify_manifest(&manifest, &prover, std::path::Path::new("/tmp/verify"),
 ```
 The nonce is **burned on presentation** (consumed even if verification then fails) — a rejection is never a free retry; mint a new nonce for the next attempt.
 
-### 5. Fast structural pre-check without the toolchain
+## 5. Fast structural pre-check without the toolchain
 ```rust
 use sparq_zk_compose::verifier::{prefilter_manifest_structure, KeySet, RevocationPolicy};
 // Re-parses the query (Q6 cross-graph bnode-join guard + arity), re-derives circuit ids,
@@ -168,7 +168,7 @@ use sparq_zk_compose::verifier::{prefilter_manifest_structure, KeySet, Revocatio
 let _required = prefilter_manifest_structure(&manifest, &KeySet::empty(), &RevocationPolicy::accept_version(1))?;
 ```
 
-### 6. Hidden-index revocation proof (privacy upgrade — index never disclosed)
+## 6. Hidden-index revocation proof (privacy upgrade — index never disclosed)
 ```rust
 use sparq_zk_compose::revocation::{merkle_root, merkle_witness, revoke_prover_toml};
 use sparq_zk_compose::manifest::{CircuitId, HiddenIndexRevocation, FieldHex};
