@@ -24,45 +24,6 @@ use crate::error::ServerResult;
 use crate::store::sparq::{DeleteOutcome, ResourceMeta};
 use crate::store::{Fence, ReadPlan, Resource, Store, ValidatedChildIri};
 
-// The storage-wide generation guard has an optimistic read side: a query starts only
-// between logical changes and validates the generation after evaluation. Each store call
-// and logical change marks activity (including in-memory grant publication). Mutators stay
-// independent; any overlapping change invalidates the entire assembled answer.
-#[cfg(feature = "sparql-endpoint")]
-#[derive(Default)]
-struct SnapshotGate {
-    activity: std::sync::Mutex<(u64, usize)>,
-    idle: tokio::sync::Notify,
-}
-
-#[cfg(feature = "sparql-endpoint")]
-pub(crate) struct Changing(std::sync::Arc<SnapshotGate>);
-
-#[cfg(feature = "sparql-endpoint")]
-impl Drop for Changing {
-    fn drop(&mut self) {
-        let mut activity = self.0.activity.lock().unwrap_or_else(|e| e.into_inner());
-        activity.0 = activity.0.wrapping_add(1);
-        activity.1 -= 1;
-        self.0.idle.notify_waiters();
-    }
-}
-
-#[cfg(feature = "sparql-endpoint")]
-pub(crate) struct Snapshot {
-    gate: std::sync::Arc<SnapshotGate>,
-    epoch: u64,
-}
-
-#[cfg(feature = "sparql-endpoint")]
-impl Snapshot {
-    // Every mutation advances the epoch at both boundaries, including changes that finish
-    // during assembly. An answer is usable only if its whole generation remained stable.
-    pub(crate) fn unchanged(&self) -> bool {
-        *self.gate.activity.lock().unwrap_or_else(|e| e.into_inner()) == (self.epoch, 0)
-    }
-}
-
 /// How many counters the resources are spread over.
 const SLOTS: usize = 256;
 
@@ -162,7 +123,7 @@ pub struct Tracked<S> {
     inner: std::sync::Arc<S>,
     gens: std::sync::Arc<Generations>,
     #[cfg(feature = "sparql-endpoint")]
-    snapshot: std::sync::Arc<SnapshotGate>,
+    snapshot: std::sync::Arc<super::snapshot::Gate>,
     /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one (so a
     /// `Tracked` over a `Tracked` shares its lease), shared by every clone, so a service built
     /// over a clone, or over a wrapper of one, is refused while this one runs.
@@ -195,37 +156,38 @@ impl<S: Store> Tracked<S> {
         }
     }
 
-    #[cfg(feature = "sparql-endpoint")]
-    pub(crate) fn changing(&self) -> Changing {
-        let mut activity = self
-            .snapshot
-            .activity
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        activity.0 = activity.0.wrapping_add(1);
-        activity.1 += 1;
-        Changing(self.snapshot.clone())
+    pub(crate) async fn change<T>(
+        &self,
+        work: impl std::future::Future<Output = T>,
+    ) -> ServerResult<T> {
+        #[cfg(feature = "sparql-endpoint")]
+        {
+            self.snapshot.change(work).await
+        }
+        #[cfg(not(feature = "sparql-endpoint"))]
+        {
+            Ok(work.await)
+        }
+    }
+
+    pub(crate) async fn publish<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        let mut work = std::pin::pin!(work);
+        loop {
+            if let Ok(out) = self.change(work.as_mut()).await {
+                return out;
+            }
+            tokio::task::yield_now().await;
+        }
     }
 
     #[cfg(feature = "sparql-endpoint")]
-    pub(crate) async fn snapshot(&self) -> Snapshot {
-        loop {
-            let idle = self.snapshot.idle.notified();
-            tokio::pin!(idle);
-            idle.as_mut().enable();
-            let (epoch, active) = *self
-                .snapshot
-                .activity
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if active == 0 {
-                return Snapshot {
-                    gate: self.snapshot.clone(),
-                    epoch,
-                };
-            }
-            idle.await;
-        }
+    pub(crate) async fn snapshot(&self, barrier: bool) -> Option<super::snapshot::Snapshot> {
+        self.snapshot.snapshot(barrier).await
+    }
+
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    pub(crate) fn barrier_pending(&self) -> bool {
+        self.snapshot.barrier_pending()
     }
 
     /// The snapshot counters.
@@ -263,10 +225,11 @@ impl<S: Store> Store for Tracked<S> {
         body: Bytes,
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&[iri]);
-        self.inner.write(iri, body, content_type).await
+        self.change(async {
+            let _m = self.gens.mutating(&[iri]);
+            self.inner.write(iri, body, content_type).await
+        })
+        .await?
     }
 
     async fn create_in_container(
@@ -276,12 +239,13 @@ impl<S: Store> Store for Tracked<S> {
         body: Bytes,
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&[container, child]);
-        self.inner
-            .create_in_container(container, child, body, content_type)
-            .await
+        self.change(async {
+            let _m = self.gens.mutating(&[container, child]);
+            self.inner
+                .create_in_container(container, child, body, content_type)
+                .await
+        })
+        .await?
     }
 
     async fn restore(
@@ -292,10 +256,11 @@ impl<S: Store> Store for Tracked<S> {
         meta: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&keys);
-        self.inner.restore(iri, container, body, meta).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.restore(iri, container, body, meta).await
+        })
+        .await?
     }
 
     async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
@@ -309,10 +274,11 @@ impl<S: Store> Store for Tracked<S> {
         held: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&keys);
-        self.inner.reinstate(iri, container, held).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.reinstate(iri, container, held).await
+        })
+        .await?
     }
 
     async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
@@ -333,10 +299,11 @@ impl<S: Store> Store for Tracked<S> {
 
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&keys);
-        self.inner.delete(iri, parent).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.delete(iri, parent).await
+        })
+        .await?
     }
 
     async fn delete_container_if_empty(
@@ -345,10 +312,11 @@ impl<S: Store> Store for Tracked<S> {
         parent: Option<&str>,
     ) -> ServerResult<DeleteOutcome> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&keys);
-        self.inner.delete_container_if_empty(iri, parent).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.delete_container_if_empty(iri, parent).await
+        })
+        .await?
     }
 
     /// A write not settled ([`crate::error::ServerError::Unsettled`]) may still land after its
@@ -356,10 +324,19 @@ impl<S: Store> Store for Tracked<S> {
     /// write changes (the fence carries it, so nothing is kept per unsettled write).
     async fn fence(&self, fence: &Fence) -> ServerResult<()> {
         let keys: Vec<&str> = fence.touches().iter().map(String::as_str).collect();
-        #[cfg(feature = "sparql-endpoint")]
-        let _snapshot = self.changing();
-        let _m = self.gens.mutating(&keys);
-        self.inner.fence(fence).await
+        if !keys.is_empty()
+            && keys
+                .iter()
+                .all(|key| crate::ldp::target::names_lws_service_record(key, &self.gens.root))
+        {
+            let _m = self.gens.mutating(&keys);
+            return self.inner.fence(fence).await;
+        }
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.fence(fence).await
+        })
+        .await?
     }
 
     async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {

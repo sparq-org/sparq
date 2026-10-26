@@ -670,3 +670,26 @@ async fn a_change_during_assembly_discards_the_attempt_and_rebuilds_the_view() {
     let result = query.await.unwrap();
     assert_eq!(values(&result, "o"), BTreeSet::from(["2".to_owned()]));
 }
+
+#[tokio::test]
+async fn malformed_rdf_has_an_empty_graph_and_anonymous_queries_use_their_view() {
+    let h = Harness::new(|_| {}).await;
+    assert_eq!(h.graphs(OWNER).await, iris(&["/", "/broken"]));
+    let result = h.query(OWNER, "SELECT ?g { GRAPH ?g { ?s ?p ?o } }").await;
+    assert!(values(&result, "g").is_empty());
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(PATH)
+                .header("content-type", "application/sparql-query")
+                .body(Body::from("SELECT ?g { GRAPH ?g {} }"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(values(&body_json(response).await, "g").is_empty());
+}

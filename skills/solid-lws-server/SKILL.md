@@ -362,7 +362,9 @@ return SPARQL Results JSON; `CONSTRUCT` returns N-Triples. LWS also accepts
 `DESCRIBE` as N-Triples. Solid retains its existing rejection of `DESCRIBE`.
 LWS includes readable containers and non-RDF or malformed RDF resources as
 empty named graphs, so `GRAPH ?g {}` lists them. Service records and linksets
-are absent. LWS Update forms receive `405`.
+are absent. LWS Update forms receive `405`. Under sustained writes, queries switch from
+optimistic attempts to a fair barrier. Independent mutations retain shared
+leases, and new changes have a bounded admission wait.
 
 See [query requests, access context and bounds](references/query.md) for examples,
 Solid behavior, LWS snapshot semantics, and configuration defaults.

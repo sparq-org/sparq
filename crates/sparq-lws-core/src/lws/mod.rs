@@ -36,6 +36,8 @@ mod records;
 pub mod resources;
 #[cfg(feature = "sparql-endpoint")]
 mod sparql;
+#[cfg(feature = "sparql-endpoint")]
+mod snapshot;
 pub mod tokens;
 pub mod tracked;
 
@@ -3075,9 +3077,17 @@ pub(crate) mod test_store {
     pub type GateOf = Arc<std::sync::Mutex<Option<(String, Arc<tokio::sync::Semaphore>)>>>;
 
     #[derive(Clone)]
+    pub struct WriteCycles {
+        pub uris: Vec<String>,
+        pub entered: Arc<tokio::sync::Semaphore>,
+        pub release: Arc<tokio::sync::Semaphore>,
+    }
+
+    #[derive(Clone)]
     pub struct FlakyStore {
         inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
         pub fail_delete: Arc<AtomicBool>,
+        pub write_cycles: Arc<std::sync::Mutex<Option<WriteCycles>>>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
         /// The index is not this process's alone ([`Store::exclusive`]).
@@ -3236,6 +3246,7 @@ pub(crate) mod test_store {
                     InMemoryBlobStore::with_limits(limits),
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
+                write_cycles: Default::default(),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
                 hold_next_write_of: Default::default(),
@@ -3453,6 +3464,11 @@ pub(crate) mod test_store {
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
             self.step()?;
+            let cycles = self.write_cycles.lock().unwrap().clone();
+            if let Some(cycles) = cycles.filter(|cycles| cycles.uris.iter().any(|key| key == iri)) {
+                cycles.entered.add_permits(1);
+                cycles.release.acquire().await.expect("write cycle").forget();
+            }
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri)
                 || self
                     .fail_write_under

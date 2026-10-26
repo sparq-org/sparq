@@ -14,6 +14,28 @@ const UNION_DEFAULT_GRAPH_IRI: &str = "http://www.w3.org/ns/solid/sparql#union-d
 const RESULTS_JSON: &str = "application/sparql-results+json";
 const N_TRIPLES: &str = "application/n-triples";
 
+pub(crate) enum ProtocolError {
+    Update,
+    Other(ServerError),
+}
+
+impl From<ServerError> for ProtocolError {
+    fn from(error: ServerError) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<ProtocolError> for ServerError {
+    fn from(error: ProtocolError) -> Self {
+        match error {
+            ProtocolError::Update => Self::BadRequest(
+                "SPARQL Update is not supported by the query-only endpoint".to_owned(),
+            ),
+            ProtocolError::Other(error) => error,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ProtocolRequest {
     query: Option<String>,
@@ -21,7 +43,7 @@ pub(crate) struct ProtocolRequest {
     named_graphs: Vec<String>,
 }
 
-pub(crate) fn parse_parameters(input: &[u8]) -> Result<ProtocolRequest, ServerError> {
+pub(crate) fn parse_parameters(input: &[u8]) -> Result<ProtocolRequest, ProtocolError> {
     let mut request = ProtocolRequest::default();
     for (name, value) in form_urlencoded::parse(input) {
         match name.as_ref() {
@@ -29,15 +51,14 @@ pub(crate) fn parse_parameters(input: &[u8]) -> Result<ProtocolRequest, ServerEr
                 if request.query.replace(value.into_owned()).is_some() {
                     return Err(ServerError::BadRequest(
                         "exactly one query parameter is required".to_owned(),
-                    ));
+                    )
+                    .into());
                 }
             }
             "default-graph-uri" => request.default_graphs.push(value.into_owned()),
             "named-graph-uri" => request.named_graphs.push(value.into_owned()),
             "update" => {
-                return Err(ServerError::BadRequest(
-                    "SPARQL Update is not supported by the query-only endpoint".to_owned(),
-                ));
+                return Err(ProtocolError::Update);
             }
             _ => {}
         }
@@ -175,7 +196,7 @@ pub(crate) fn parse_post(
     raw: Option<&str>,
     headers: &HeaderMap,
     body: &[u8],
-) -> Result<ProtocolRequest, ServerError> {
+) -> Result<ProtocolRequest, ProtocolError> {
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -190,7 +211,8 @@ pub(crate) fn parse_post(
             if request.query.is_some() {
                 return Err(ServerError::BadRequest(
                     "a direct query body cannot also carry a query parameter".to_owned(),
-                ));
+                )
+                .into());
             }
             request.query = Some(
                 std::str::from_utf8(body)
@@ -203,11 +225,12 @@ pub(crate) fn parse_post(
             if raw.is_some_and(|query| !query.is_empty()) {
                 return Err(ServerError::BadRequest(
                     "form query parameters must be carried in the request body".to_owned(),
-                ));
+                )
+                .into());
             }
             parse_parameters(body)?
         }
-        other => return Err(ServerError::UnsupportedMediaType(other.to_owned())),
+        other => return Err(ServerError::UnsupportedMediaType(other.to_owned()).into()),
     };
 
     Ok(request)
