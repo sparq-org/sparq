@@ -729,6 +729,357 @@ async fn selection_keeps_the_request_s_admission_slot() {
 }
 
 #[tokio::test]
+async fn owner_patch_keeps_a_snapshot_for_pending_subscriptions() {
+    use tower::ServiceExt;
+    for unknown in [false, true] {
+        let (state, store) = test_store::closed_state(100).await;
+        let topic = test_store::data(&state, "r").await;
+        store
+            .write(
+                &topic,
+                Bytes::from_static(br#"{"value":0}"#),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let reader = "https://reader.example/";
+        test_store::grant_read(&state, reader, &[&topic]).await;
+        run_ready().await;
+        let selection = Arc::new(tokio::sync::Semaphore::new(0));
+        *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+        let registration = Arc::new(tokio::sync::Semaphore::new(0));
+        if unknown {
+            *store.unsettle_creates.lock().unwrap() = Some(registration.clone());
+            store.fail_fence.store(true, Ordering::SeqCst);
+        } else {
+            *store.hold_next_create.lock().unwrap() = Some(registration.clone());
+        }
+        let mut subscribing = Some(tokio::spawn({
+            let (state, topic) = (state.clone(), topic.clone());
+            async move {
+                call(
+                    &state,
+                    "POST",
+                    SUBSCRIPTIONS_PATH,
+                    Some(reader),
+                    &json!({"type": streams::SSE, "topic": [topic]}).to_string(),
+                )
+                .await
+            }
+        }));
+        if unknown {
+            assert_eq!(
+                subscribing.take().unwrap().await.unwrap().status(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+        } else {
+            tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+                while store.hold_next_create.lock().unwrap().is_some() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("subscription did not reach the store");
+        }
+        assert!(state.notify.subs.read().unwrap().is_empty());
+        let writing = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((topic.clone(), writing.clone()));
+        *store.trace.lock().unwrap() = Some(Vec::new());
+        let patching = tokio::spawn({
+            let state = state.clone();
+            async move {
+                let token = crate::lws::tokens::mint(
+                    &state.cfg,
+                    test_store::OWNER,
+                    "https://app.example/",
+                    &state.cfg.realm(),
+                );
+                let request = axum::http::Request::builder()
+                    .method("PATCH")
+                    .uri("/r")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", crate::lws::JSON_PATCH)
+                    .body(axum::body::Body::from(
+                        r#"[{"op":"replace","path":"/value","value":1}]"#,
+                    ))
+                    .unwrap();
+                axum::Router::new()
+                    .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+                    .with_state(state)
+                    .oneshot(request)
+                    .await
+                    .unwrap()
+            }
+        });
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+            while store.hold_next_write_of.lock().unwrap().is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("PATCH did not reach the content write");
+        assert!(
+            store
+                .trace
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .contains(&format!("read {topic}.meta")),
+            "pending registration lost its commit snapshot"
+        );
+        *store.unsettle_creates.lock().unwrap() = None;
+        registration.add_permits(1);
+        if unknown {
+            let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+            tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+                while store.list_children(&container).await.unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("subscription did not land before its fence");
+        }
+        store.fail_fence.store(false, Ordering::SeqCst);
+        let doc = if let Some(subscribing) = subscribing {
+            let response = subscribing.await.unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+            Some(test_store::body_json(response).await)
+        } else {
+            tokio::time::timeout(crate::lws::records::LOCK_WAIT * 4, async {
+                while state.notify.subs.read().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("subscription was not confirmed");
+            None
+        };
+        // Registration precedes the commit, although PATCH initially saw no live subscriptions.
+        assert_eq!(
+            state.notify.registering_non_owners.load(Ordering::SeqCst),
+            0
+        );
+        writing.add_permits(1);
+        assert_eq!(patching.await.unwrap().status(), StatusCode::NO_CONTENT);
+        if let Some(doc) = doc {
+            let mut received = stream(&state, &doc).await;
+            selection.add_permits(1);
+            assert!(next_notification(&mut received).await.contains("Update"));
+        } else {
+            selection.add_permits(1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn delayed_record_selection_keeps_a_shared_place() {
+    use crate::lws::records::{MAX_SETTLING, MAX_SETTLING_PER_PRINCIPAL};
+    let count = MAX_SETTLING_PER_PRINCIPAL;
+    for removal in [false, true] {
+        let (state, store) = test_store::closed_state(100).await;
+        let body = grant_body(&state);
+        let mut records = Vec::new();
+        if removal {
+            for _ in 0..count {
+                let response = call(
+                    &state,
+                    "POST",
+                    crate::lws::GRANTS_PATH,
+                    Some(test_store::OWNER),
+                    &body,
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::CREATED);
+                records.push(
+                    response.headers()[header::LOCATION]
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+        } else {
+            records.resize(count, String::new());
+        }
+        run_ready().await;
+        let mut occupied = Vec::new();
+        for i in 0..MAX_SETTLING - count {
+            occupied.push(
+                state
+                    .settlements
+                    .reserve(Some(&format!("https://p{i}.example/")))
+                    .unwrap(),
+            );
+        }
+        let before = state.notify.selected.load(Ordering::SeqCst);
+        let selection = Arc::new(tokio::sync::Semaphore::new(0));
+        *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+        let store_gate = Arc::new(tokio::sync::Semaphore::new(0));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        if !removal {
+            *store.unsettle_creates.lock().unwrap() = Some(store_gate.clone());
+        }
+        for iri in &records {
+            let response = if removal {
+                *store.unsettle_next_delete_of.lock().unwrap() =
+                    Some((iri.clone(), store_gate.clone()));
+                call(
+                    &state,
+                    "DELETE",
+                    iri.strip_prefix(&state.cfg.base_url).unwrap(),
+                    Some(test_store::OWNER),
+                    "",
+                )
+                .await
+            } else {
+                call(
+                    &state,
+                    "POST",
+                    crate::lws::GRANTS_PATH,
+                    Some(test_store::OWNER),
+                    &body,
+                )
+                .await
+            };
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        assert_eq!(state.settlements.pending(), count);
+        *store.unsettle_creates.lock().unwrap() = None;
+        store_gate.add_permits(count);
+        // Let every sent operation land before fencing it; a fence may otherwise cancel
+        // the operation, leaving no committed change to announce.
+        let container = state.cfg.absolute(crate::lws::GRANTS_PATH);
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT * 4, async {
+            loop {
+                let held = store.list_children(&container).await.unwrap().len();
+                if held == if removal { 0 } else { count } {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("sent operations did not land");
+        store.fail_fence.store(false, Ordering::SeqCst);
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT * 4, async {
+            while state.settlements.pending() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("record outcomes were not settled");
+        assert_eq!(state.notify.selected.load(Ordering::SeqCst), before);
+        assert_eq!(
+            call(
+                &state,
+                "POST",
+                crate::lws::GRANTS_PATH,
+                Some(test_store::OWNER),
+                &body
+            )
+            .await
+            .status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "delayed selection released its shared work bound"
+        );
+        drop(occupied.pop());
+        assert_eq!(
+            call(
+                &state,
+                "POST",
+                crate::lws::GRANTS_PATH,
+                Some(test_store::OWNER),
+                &body
+            )
+            .await
+            .status(),
+            StatusCode::CREATED,
+            "known outcomes kept principal settlement places during selection"
+        );
+        selection.add_permits(count + 1);
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+            while state.notify.selected.load(Ordering::SeqCst) < before + count + 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            call(
+                &state,
+                "POST",
+                crate::lws::GRANTS_PATH,
+                Some(test_store::OWNER),
+                &body
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn maintenance_selection_keeps_its_maintenance_place() {
+    use crate::lws::records::MAINTENANCE_PLACES;
+    let (state, _) = test_store::closed_state(100).await;
+    let expires = format_rfc3339(state.notify.clock() + 60);
+    let body = json!({"type": WEBHOOK, "topic": [state.cfg.storage()],
+        "inbox": "https://inbox.example/", "expires": expires})
+    .to_string();
+    for _ in 0..MAINTENANCE_PLACES {
+        assert_eq!(
+            call(
+                &state,
+                "POST",
+                SUBSCRIPTIONS_PATH,
+                Some(test_store::OWNER),
+                &body
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+    run_ready().await;
+    let before = state.notify.selected.load(Ordering::SeqCst);
+    let selection = Arc::new(tokio::sync::Semaphore::new(0));
+    *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+    state.notify.clock_offset.store(120, Ordering::SeqCst);
+    tokio::time::sleep(EXPIRY_SWEEP_EVERY).await;
+    run_ready().await;
+    assert!(
+        state.notify.subs.read().unwrap().is_empty(),
+        "expiry did not remove the records"
+    );
+    assert_eq!(
+        state.settlements.maintenance_free(),
+        0,
+        "maintenance selection released its work bound"
+    );
+    // Maintenance places are separate: a client create still has its shared place.
+    assert_eq!(
+        call(
+            &state,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some(test_store::OWNER),
+            &subscription_body(&state, &state.cfg.storage())
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    selection.add_permits(1);
+    run_ready().await;
+    assert_eq!(
+        state.notify.selected.load(Ordering::SeqCst),
+        before + MAINTENANCE_PLACES + 1
+    );
+    assert_eq!(state.settlements.maintenance_free(), MAINTENANCE_PLACES);
+}
+
+#[tokio::test]
 async fn withdrawn_state_is_captured_at_commit() {
     use futures_util::FutureExt;
     use http_body_util::BodyExt;

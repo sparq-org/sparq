@@ -263,9 +263,11 @@ where
     let principal = author.clone();
     let register = {
         let (container, iri) = (container.to_string(), iri.to_string());
-        move |state: &LwsState<S>, admission| {
+        move |state: &LwsState<S>, admission, settlement| {
             register(state);
-            announce_record(state, "Create", &iri, &container, author, admission);
+            announce_record(
+                state, "Create", &iri, &container, author, admission, settlement,
+            );
         }
     };
     use crate::error::ServerError;
@@ -317,7 +319,7 @@ where
             .create_in_container(&container, &iri, body, LWS_JSON)
             .await;
         let Err(e) = written else {
-            register(&state, _admission.clone());
+            register(&state, _admission.clone(), None);
             drop(gate);
             return Ok(());
         };
@@ -334,7 +336,8 @@ where
         }
         match still_listed(&state.store, &iri, &container).await {
             Ok(true) => {
-                register(&state, _admission.clone());
+                place.settled();
+                register(&state, _admission.clone(), None);
                 Ok(())
             }
             Ok(false) if unsettled.is_none() => Err(e),
@@ -373,7 +376,6 @@ where
                     if !stored {
                         return;
                     }
-                    let _place = place;
                     // Registered under the container's lock, shared (taken after the record's,
                     // as a revocation takes them, unless still held), so no conditional create
                     // sees the listing change between its check and its own registration. This
@@ -385,7 +387,7 @@ where
                         ),
                     };
                     if let Some(state) = weak.upgrade() {
-                        register(&state, None);
+                        register(&state, None, Some(place));
                     }
                 });
                 Err(ServerError::Storage(
@@ -687,18 +689,27 @@ where
                 let (weak, store) = (state.downgrade(), state.store.clone());
                 let (iri, container) = (iri.clone(), container.clone());
                 state.settlements.spawn(async move {
-                    let _held = (place, own_listing);
+                    let _held = own_listing;
                     if let Some(fence) = fence {
                         fence_in_background(&store, &fence).await;
                     }
                     let listed = until_done(|| still_listed(&store, &iri, &container)).await;
+                    place.settled();
                     let Some(state) = weak.upgrade() else {
                         return;
                     };
                     let author = settle(&state, !listed, held);
                     drop((own, listing));
                     if !listed {
-                        announce_record(&state, "Delete", &iri, &container, author, None);
+                        announce_record(
+                            &state,
+                            "Delete",
+                            &iri,
+                            &container,
+                            author,
+                            None,
+                            Some(place),
+                        );
                     }
                 });
                 return Err((
@@ -711,7 +722,8 @@ where
             }
         };
         let author = settle(&state, gone == Some(true), held);
-        drop((own, listing, place, own_listing));
+        place.settled();
+        drop((own, listing, own_listing));
         match gone {
             Some(true) => {
                 announce_record(
@@ -721,6 +733,7 @@ where
                     &container,
                     author,
                     _admission.clone(),
+                    _admission.is_none().then_some(place),
                 );
                 Ok(Removed::Gone)
             }
@@ -810,7 +823,12 @@ pub(crate) struct Settlements {
 }
 
 type PrincipalCounts =
-    Arc<std::sync::Mutex<std::collections::HashMap<Option<String>, Arc<tokio::sync::Semaphore>>>>;
+    Arc<std::sync::Mutex<std::collections::HashMap<Option<String>, PrincipalPlaces>>>;
+
+struct PrincipalPlaces {
+    places: Arc<tokio::sync::Semaphore>,
+    changes: usize,
+}
 
 /// Holds a shared change place; its principal permit is taken only for an unknown outcome.
 pub(crate) struct SettlementPlace {
@@ -845,10 +863,13 @@ impl SettlementPlace {
 impl Drop for SettlementPlace {
     fn drop(&mut self) {
         drop(self.settling.take());
-        if let Some((counts, principal, places)) = &self.principal {
+        if let Some((counts, principal, _)) = &self.principal {
             let mut counts = counts.lock().unwrap_or_else(|e| e.into_inner());
-            // Only the map and this change still refer to the principal's semaphore.
-            if Arc::strong_count(places) == 2 {
+            let entry = counts.get_mut(principal).expect("reserved principal");
+            entry.changes -= 1;
+            // Arc references can outlive this drop's critical section in another drop.
+            // Count changes under the map lock instead of inferring them from references.
+            if entry.changes == 0 {
                 counts.remove(principal);
             }
         }
@@ -912,15 +933,19 @@ impl Settlements {
         let principal = principal.map(str::to_string);
         if counts
             .get(&principal)
-            .is_some_and(|places| places.available_permits() == 0)
+            .is_some_and(|entry| entry.places.available_permits() == 0)
         {
             return None;
         }
         let place = self.places.clone().try_acquire_owned().ok()?;
-        let places = counts
+        let entry = counts
             .entry(principal.clone())
-            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(MAX_SETTLING_PER_PRINCIPAL)))
-            .clone();
+            .or_insert_with(|| PrincipalPlaces {
+                places: Arc::new(tokio::sync::Semaphore::new(MAX_SETTLING_PER_PRINCIPAL)),
+                changes: 0,
+            });
+        entry.changes += 1;
+        let places = entry.places.clone();
         Some(SettlementPlace {
             _place: place,
             principal: Some((self.principals.clone(), principal, places)),
@@ -964,6 +989,7 @@ pub(crate) fn announce_record<S: Store + 'static>(
     container: &str,
     author: Option<String>,
     admission: Option<crate::overload::AdmissionSlot>,
+    settlement: Option<SettlementPlace>,
 ) {
     let relation = if kind == "Create" { "target" } else { "origin" };
     let event = super::notify::Event {
@@ -974,7 +1000,7 @@ pub(crate) fn announce_record<S: Store + 'static>(
     };
     state
         .notify
-        .announce_service(state, event, author, admission);
+        .announce_service_held(state, event, author, admission, settlement);
 }
 
 #[cfg(test)]
@@ -986,6 +1012,66 @@ mod tests {
     /// A gate that is never opened: the unsettled write it holds is still to come.
     fn shut() -> Arc<tokio::sync::Semaphore> {
         Arc::new(tokio::sync::Semaphore::new(0))
+    }
+
+    #[tokio::test]
+    async fn principal_bookkeeping_ends_with_the_last_change() {
+        use super::super::test_store::{self, call};
+        let (state, store) = test_store::closed_state(100).await;
+        let gate = shut();
+        *store.hold_creates.lock().unwrap() = Some(gate.clone());
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..2 {
+            let state = state.clone();
+            tasks.spawn(async move {
+                let body = serde_json::json!({"@context": [super::super::LWS_CONTEXT],
+                    "type": "AccessGrant", "storage": state.cfg.storage(),
+                    "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://reader.example/"}]});
+                call(
+                    &state,
+                    "POST",
+                    super::super::GRANTS_PATH,
+                    Some(test_store::OWNER),
+                    &body.to_string(),
+                )
+                .await
+                .status()
+            });
+        }
+        tokio::time::timeout(LOCK_WAIT, async {
+            while store.creates_waiting.load(Ordering::SeqCst) != 2 {
+                assert!(
+                    tasks.try_join_next().is_none(),
+                    "create did not reach the store"
+                );
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both creates entered the store");
+        // Retain the reference that a concurrent drop can still hold after leaving its
+        // map critical section, before Rust drops the SettlementPlace's fields.
+        let late_reference = state
+            .settlements
+            .principals
+            .lock()
+            .unwrap()
+            .get(&Some(test_store::OWNER.to_string()))
+            .unwrap()
+            .places
+            .clone();
+        gate.add_permits(2);
+        while let Some(result) = tasks.join_next().await {
+            assert_eq!(result.unwrap(), StatusCode::CREATED);
+        }
+        assert!(
+            state.settlements.principals.lock().unwrap().is_empty(),
+            "completed changes retained principal bookkeeping"
+        );
+        assert_eq!(
+            late_reference.available_permits(),
+            MAX_SETTLING_PER_PRINCIPAL
+        );
     }
 
     /// A removal that failed unsettled is fenced before the record is read back, so a record the

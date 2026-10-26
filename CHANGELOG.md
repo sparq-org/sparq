@@ -823,13 +823,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - LWS content-only PATCH retains metadata from its Read authorization check for
   notification capture, skips LWS metadata lookups in open mode, and reads metadata for a
-  closed-mode owner only when a non-owner subscription exists.
+  closed-mode owner only when a non-owner subscription exists or can still register from an
+  earlier topic check.
 
 - LWS quarantined access requests no longer take places from live requests; held-back and
   quarantined subscriptions count only against the owner's total. Record settlements reserve
   places per principal only for unknown outcomes in closed mode, while the shared bound
   covers each whole change. Notification selection retains request admission through queueing,
-  and withdrawal eligibility uses the state captured at commit.
+  and delayed record announcements retain a shared or maintenance place through that work.
+  Principal bookkeeping ends with the last change; withdrawal eligibility uses the state
+  captured at commit.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a

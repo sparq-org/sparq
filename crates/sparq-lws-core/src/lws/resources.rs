@@ -3705,7 +3705,8 @@ async fn patch<S: Store + 'static>(
     let rmeta = match authorization_meta {
         Some(meta) => meta,
         // Open mode and owner-only subscribers need no metadata decision. The indexed
-        // non-owner count avoids a lookup when no other reader can hear this capture.
+        // non-owner count includes pending registrations, avoiding a lookup only when no
+        // other reader can enter before this capture.
         None if state.cfg.open || !state.notify.has_non_owner_subscriptions() => ResourceMeta {
             pending: true,
             ..ResourceMeta::default()

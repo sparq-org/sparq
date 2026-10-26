@@ -392,7 +392,7 @@ write adapter still need fencing support before this refusal can be lifted.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (the owner's
 subscriptions are counted separately), and each such request body is at most 16 KiB (413).
 Both the principal's bound and the storage-wide bound return the same `429`, headers and
-problem detail: "this agent may not hold more {what} now". A subscription create refused by
+problem detail: "this agent may not hold more {what} now". A subscription or access-request create refused by
 the store's service pool returns that same answer. Every subscriber has its own capacity in
 full; quarantined or held-back subscriptions count only against the owner's total, and
 quarantined access requests take no place from live requests or their authors.
@@ -708,6 +708,9 @@ What the server exposes, all discoverable from the storage description
   automatic cancellation after a failed delivery uses the subscriber's subject.
   Both bounds answer the same `503` with `Retry-After`. Dropping a place releases every
   permit it holds. The expiry sweeper keeps its separate maintenance places.
+  Once a delayed outcome is known, its principal permit is released. Its shared place follows
+  the resulting notification through selection and queueing; maintenance announcements retain
+  their maintenance place through that work. Principal bookkeeping ends with the last change.
   Residual: the shared places can be filled by multiple principals, so a caller under its own
   bound can still receive that same refusal. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
@@ -808,8 +811,9 @@ What the server exposes, all discoverable from the storage description
   owed. Both are counted in memory from the start, and only for a change that happened (a delete
   that fails counts nothing). The authorization for one change has no budget of its own (one
   party's subscriptions that may not read the resource could spend it before an authorized one is
-  reached): the subscription totals cap it at one check per subscription in force (at most
-  1,024). Each decision uses the commit snapshot and grant policies shared by that change.
+  reached): selection checks each subscription in force at most once. The admission totals
+  normally cap these at 1,024; already-stored records past a bound remain loaded as described above.
+  Each decision uses the commit snapshot and grant policies shared by that change.
   `Snapshot::from_parts(meta, format)` constructs that snapshot from state the change already
   holds, and `AccessStore::grant_policies()` returns a shared `Arc<[Policy]>`, rebuilt when a
   grant changes. Subscriptions registered after capture are excluded. The withdrawn set is
@@ -826,8 +830,10 @@ What the server exposes, all discoverable from the storage description
   tasks and have no cross-commit delivery-order guarantee; stream cursors follow publication
   order. Content-only PATCH reuses the metadata read by its locked Read authorization check;
   open mode needs no LWS metadata lookup because every subscriber may read. Closed-mode owner
-  writes read a snapshot only when the notifier holds a non-owner subscription, checked through
-  an indexed count. With no subscriptions or only owner subscriptions they read no LWS metadata.
+  PATCH reads a snapshot only when the notifier holds a non-owner subscription or one can still
+  register from an earlier topic check, checked through constant-time counts. Pending registrations
+  keep their count through an unknown store outcome until confirmed or absent. With no non-owner
+  subscriptions or pending registrations, owner PATCH reads no LWS metadata.
   In-memory blob/index ceilings emit `BlobError::ServicePoolFull` or `SparqError::ServicePoolFull`;
   record creates preserve them as `ServerError::ServicePoolFull`. That typed signal maps to a
   quota `429` for subscriptions and access requests; general `InsufficientStorage` refusals retain `507`.

@@ -67,9 +67,12 @@ WebSocket sends one Notification envelope per text frame, pings every 30 seconds
 and ignores client application frames. It has no replay; after close, subscribe
 again for a new connection URL.
 
-Both bindings prepare authorization while the change's locks are held and check
-it again before retaining or sending. Delete checks use the pre-delete access
-snapshot. Open connections recheck topic access every 10 seconds; losing some
+Both bindings capture resource state, grant policies and registration eligibility while
+the change's locks are held. Selection and initial authorization run on a background task
+the response never awaits; subscriptions registered after capture are excluded. Access is
+checked again before retaining or sending. Separate commits have no delivery-order guarantee;
+stream sequences follow publication order. Delete checks use the pre-delete access snapshot.
+Open connections recheck topic access every 10 seconds; losing some
 topics filters their events. Losing all topic access sends terminal `event: revoked`
 (SSE) or close code 4403 (WebSocket), closes the connection and deactivates the
 subscription. These timer checks have a bounded deadline so revocation closes

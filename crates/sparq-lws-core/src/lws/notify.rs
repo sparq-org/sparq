@@ -483,6 +483,14 @@ struct Subs {
     non_owners: usize,
 }
 
+struct NonOwnerRegistration(Arc<AtomicUsize>);
+
+impl Drop for NonOwnerRegistration {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 impl Subs {
     fn new(owner: Option<String>) -> Self {
         Self {
@@ -636,6 +644,7 @@ pub struct Notifier {
     /// neither authorized nor notified, so whether each was owed a notification is not known.
     unprepared: AtomicU64,
     seq: AtomicU64,
+    registering_non_owners: Arc<AtomicUsize>,
     #[cfg(test)]
     selection_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
     #[cfg(test)]
@@ -894,6 +903,7 @@ impl Notifier {
             dropped: AtomicU64::new(0),
             unprepared: AtomicU64::new(0),
             seq: AtomicU64::new(0),
+            registering_non_owners: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             selection_gate: Default::default(),
             #[cfg(test)]
@@ -1506,10 +1516,11 @@ impl Notifier {
         removed
     }
 
-    /// Whether any stored live subscription belongs to someone other than the owner.
-    /// The count is maintained with the subscriber indexes, so this takes fixed work.
+    /// Whether a non-owner subscription is held or can still register after checking a topic.
+    /// Both counts take fixed work; registration keeps its place until its outcome is known.
     pub(crate) fn has_non_owner_subscriptions(&self) -> bool {
-        self.subs.read().expect("lock").non_owners != 0
+        let subs = self.subs.read().expect("lock");
+        subs.non_owners != 0 || self.registering_non_owners.load(Ordering::SeqCst) != 0
     }
 
     /// Capture the resource state and policies already held at commit, without store calls
@@ -1541,9 +1552,21 @@ impl Notifier {
         author: Option<String>,
         admission: Option<crate::overload::AdmissionSlot>,
     ) {
+        self.announce_service_held(state, event, author, admission, None);
+    }
+
+    /// Retain a delayed or maintenance announcement's existing shared work place.
+    pub(crate) fn announce_service_held<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: Event,
+        author: Option<String>,
+        admission: Option<crate::overload::AdmissionSlot>,
+        settlement: Option<super::records::SettlementPlace>,
+    ) {
         let mut committed = self.commit(state, event, access::Snapshot::default());
         committed.service = Some(author);
-        self.send(state, committed, admission);
+        self.send_all_held(state, vec![committed], admission, settlement);
     }
 
     #[cfg(test)]
@@ -1724,12 +1747,23 @@ impl Notifier {
         committed: Vec<Committed>,
         admission: Option<crate::overload::AdmissionSlot>,
     ) {
+        self.send_all_held(state, committed, admission, None);
+    }
+
+    fn send_all_held<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        committed: Vec<Committed>,
+        admission: Option<crate::overload::AdmissionSlot>,
+        settlement: Option<super::records::SettlementPlace>,
+    ) {
         if committed.iter().all(|change| change.event.is_none()) {
             return;
         }
         let state = state.detached();
         tokio::spawn(async move {
             let _admission = admission;
+            let _settlement = settlement;
             let mut room = state.notify.limits.queue;
             let mut pending = Vec::new();
             for change in committed {
@@ -2952,6 +2986,13 @@ async fn subscribe<S: Store + 'static>(
                 && state.store.exists(&resource).await.unwrap_or(false)
         }
     };
+    // Start before releasing any topic lock. A later owner PATCH may skip metadata only
+    // if nobody can register from an earlier topic check while that PATCH holds its lock.
+    let registering = (!access::is_owner(state, agent)).then(|| {
+        let count = state.notify.registering_non_owners.clone();
+        count.fetch_add(1, Ordering::SeqCst);
+        NonOwnerRegistration(count)
+    });
     for topic in &topics {
         let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
         // A linkset's record is no resource, and has no linkset: whatever is stored, it is not
@@ -3117,6 +3158,7 @@ async fn subscribe<S: Store + 'static>(
             *state.notify.etag.write().expect("lock") = new_etag();
             // Counted as registered from here on.
             drop(slot);
+            drop(registering);
         }
     };
     // Nothing is created while the service is halted, whatever halted it since the request

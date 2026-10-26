@@ -191,8 +191,8 @@ impl Streams {
     }
 }
 
-/// Recheck the original Watch immediately before retaining/pushing an event. Preparing it earlier
-/// under the change's locks is what prevents a later grant from exposing an earlier change.
+/// Recheck the original Watch immediately before retaining/pushing an event. Initial selection
+/// uses the captured policies, so a later grant cannot expose an earlier change.
 pub(super) async fn publish<S: Store + 'static>(state: &LwsState<S>, pending: Pending) {
     let id = &pending.watch.subscription;
     let Some(slot) = state
