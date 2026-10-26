@@ -135,7 +135,9 @@ pub(super) fn fixture(
         id: CircuitId::scan_v2_dl(1, 16, 4).unwrap(),
         commitments: vec![FieldHex::from_field(&graph.commitment)],
         pattern_is_const: [false, true, false],
-        pattern_const_enc: [zero()[0].clone(), rows[0][1].clone(), zero()[0].clone()],
+        // Match build_scan's exact variable-slot filler. The structural pattern
+        // check compares FieldHex strings, so a padded field zero is different.
+        pattern_const_enc: [FieldHex("0x0".into()), rows[0][1].clone(), FieldHex("0x0".into())],
         rows: rows.clone(),
         row_count: rows.len() as u32,
         attribution: vec![true],
@@ -254,4 +256,108 @@ pub(super) fn honest(datatype: &str, value: &str, bound: &str, tag: &str) {
         ),
         "every value member reaches bb verification"
     );
+}
+
+// These use the live fixture unchanged, including its signed V2 commitment,
+// typed builders, query and explicit pattern_scans. Proof bytes are placeholders:
+// passing the prefilter establishes structure only, never proof verification.
+fn structure(m: &ProofManifest) -> Result<(), CheckError> {
+    prefilter_manifest_structure(m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .map(|_| ())
+}
+
+#[test]
+fn live_positive_fixtures_pass_structure() {
+    for (datatype, value, bound) in [
+        ("integer", "25", "18"),
+        ("decimal", "2.50", "1.5"),
+        ("dateTime", "2024-01-02T03:04:05Z", "2024-01-01T00:00:00Z"),
+        ("double", "2.5E0", "1.5E0"),
+        ("boolean", "true", "true"),
+    ] {
+        let (mut m, _, _) = fixture(&[literal(value, datatype)], &literal(bound, datatype));
+        // Nonempty placeholders also ensure this test never asks a proof driver
+        // to create artifacts merely to reach the structural check.
+        for sp in &mut m.sub_proofs {
+            sp.proof_hex = "00".into();
+        }
+        structure(&m).unwrap_or_else(|e| panic!("live {datatype} fixture: {e:?}"));
+    }
+}
+
+#[test]
+fn live_wrong_row_reaches_binding_check() {
+    let (mut m, _, _) = fixture(
+        &[literal("25", "integer"), literal("26", "integer")],
+        &literal("18", "integer"),
+    );
+    structure(&m).expect("live wrong-row control");
+    m.binding_edges[0].from_row = 1;
+    assert!(matches!(structure(&m), Err(CheckError::BindingInconsistent { edge: 0 })));
+}
+
+#[test]
+fn live_false_verdict_reaches_pin_check() {
+    let value = literal("25", "integer");
+    let (mut m, _, _) = fixture(std::slice::from_ref(&value), &literal("18", "integer"));
+    structure(&m).expect("live false-verdict control");
+    let (inputs, _) = built(&value, &literal("99", "integer"));
+    assert!(matches!(inputs, ProofInputs::FilterValueDl { expected: false, .. }));
+    m.sub_proofs[1].inputs = inputs;
+    m.query = "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o >= 99) }".into();
+    assert!(matches!(structure(&m), Err(CheckError::ValueObligation(
+        sparq_zk_compose::value_obligation::ObligationError::PinMismatch { proof: 1, ref reason }
+    )) if reason == &sparq_zk_compose::value_pin::PinError::VerdictNotTrue.to_string()));
+}
+
+#[test]
+fn live_different_constant_reaches_pin_check() {
+    let value = literal("25", "integer");
+    let (mut m, _, _) = fixture(std::slice::from_ref(&value), &literal("18", "integer"));
+    structure(&m).expect("live different-constant control");
+    let (inputs, _) = built(&value, &literal("17", "integer"));
+    assert!(matches!(inputs, ProofInputs::FilterValueDl { expected: true, .. }));
+    m.sub_proofs[1].inputs = inputs;
+    assert!(matches!(structure(&m), Err(CheckError::ValueObligation(
+        sparq_zk_compose::value_obligation::ObligationError::PinMismatch { proof: 1, ref reason }
+    )) if reason == &sparq_zk_compose::value_pin::PinError::BoundMismatch.to_string()));
+}
+
+#[test]
+fn live_crypto_setup_passes_structure() {
+    let (m, _, _) = fixture(&[literal("25", "integer")], &literal("18", "integer"));
+    structure(&m).expect("live crypto control");
+    assert!(matches!(super::v2_members::check(&m, "value_crypto_structure"),
+        Err(CheckError::MissingProof { proof: 0 })),
+        "full verification must reach the proof stage without artifacts");
+}
+
+#[test]
+fn mixed_string_integer_and_live_decimal_pass_structure() {
+    let bound = literal("1.5", "decimal");
+    let (mut m, _, _) = fixture(&[literal("2.50", "decimal")], &bound);
+    // Keep the V2 scan/value pair at 0/1 and append the existing genuine
+    // string-canonical scan/filter pair at 2/3. Separate variables avoid joins.
+    let integer = sample_manifest();
+    m.sub_proofs.extend(integer.sub_proofs);
+    m.commitment_attestations.extend(integer.commitment_attestations);
+    m.query = format!("SELECT ?s ?x WHERE {{ ?x <http://ex/age> ?age . \
+        ?s <http://ex/p> ?o FILTER(?age >= 18 && ?o >= {bound}) }}");
+    m.pattern_scans = vec![vec![2], vec![0]];
+    m.attributions = vec![vec![0], vec![0]];
+    m.binding_edges[0].filter = Some(1);
+    m.binding_edges.push(BindingEdge {
+        from_proof: 2, from_row: 0, from_slot: 2, to_proof: 3, filter: None,
+    });
+    structure(&m).expect("mixed integer-string/decimal-value control");
+
+    // Retain both scans and the integer filter, but omit the decimal conjunct's
+    // proof and edge. Remap indices after removing sub-proof 1.
+    m.sub_proofs.remove(1);
+    m.binding_edges.remove(0);
+    m.binding_edges[0].from_proof = 1;
+    m.binding_edges[0].to_proof = 2;
+    m.pattern_scans[0] = vec![1];
+    assert!(matches!(structure(&m), Err(CheckError::UnboundFilter { .. })),
+        "the integer string edge cannot cover the decimal conjunct");
 }
