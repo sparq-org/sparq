@@ -66,8 +66,8 @@ fn timed<T>(label: &str, mut f: impl FnMut() -> T) -> T {
 fn main() {
     let nq = wac_fixture();
     let graph = Graph::load_dataset(&nq, "nquads").unwrap();
-    let n_graphs = graph.named.len();
-    let n_quads: usize = graph.named.iter().map(|(_, g)| g.len()).sum();
+    let n_graphs = graph.named().len();
+    let n_quads: usize = graph.named().iter().map(|(_, g)| g.len()).sum();
     println!("WAC fixture: {n_graphs} named graphs, {n_quads} quads\n");
 
     let mut store = PodStore::new(graph);
@@ -134,7 +134,7 @@ fn main() {
     //     build_active is O(authorized data) PER QUERY — this is the number the L1
     //     zero-copy view deletes.
     let fat = Graph::load_dataset(&sparq_solid::fixture::wac_fixture_sized(50), "nquads").unwrap();
-    let fat_quads: usize = fat.named.iter().map(|(_, g)| g.len()).sum();
+    let fat_quads: usize = fat.named().iter().map(|(_, g)| g.len()).sum();
     let mut fat_store = PodStore::new(fat);
     fat_store.materialize_wac().unwrap();
     println!("\nfat fixture: {fat_quads} quads");

@@ -24,7 +24,9 @@
 //!
 //! Fragment honesty (stage 1): SELECT/ASK over BGP + FILTER, with the
 //! solution modifiers that do not change pattern input sets (DISTINCT /
-//! REDUCED / LIMIT-OFFSET / projection). Everything else — property paths,
+//! REDUCED / projection). A solution slice (`LIMIT` / `OFFSET`) is refused
+//! wherever it appears, since it can change which solutions exist.
+//! Everything else — property paths,
 //! OPTIONAL, MINUS, UNION, `GRAPH` (contradictory with graph-set privacy,
 //! plan §2.4), `FROM` / `FROM NAMED` dataset clauses (which would re-define
 //! the dataset the fixed statement is about, so ignoring one mis-scopes the
@@ -154,6 +156,32 @@ pub fn fragment_patterns(sparql: &str) -> Result<Vec<PatternKey>, VerifyError> {
     Ok(out)
 }
 
+/// The refusal every extractor raises for a solution-SLICE node (`LIMIT` and/or
+/// `OFFSET`), at the top level or inside a subquery.
+///
+/// A proof of this design states that a disclosed solution is a MEMBER of the
+/// query's answer. A slice makes that statement unprovable from the disclosed
+/// data in both directions, and neither direction is a privacy choice:
+///
+/// * a positive `OFFSET` (or a `LIMIT` smaller than the answer) selects an
+///   implementation-nondeterministic SUBSET of the unsliced answer, so a witness
+///   for the unsliced evaluation is not a witness for every legal evaluation of
+///   the sliced one — `OFFSET 1` over a one-solution answer makes the answer
+///   EMPTY while the witness for that one solution still checks out;
+/// * `LIMIT 0` makes the answer the empty multiset whatever the data.
+///
+/// Peeling the modifier off and proving membership in the UNSLICED answer would
+/// therefore accept a solution the query text itself excludes. Refused instead,
+/// in every extractor, which is the simplest rule that is sound for all of them.
+/// The compose planner already refuses to PLAN a sliced query
+/// (`sparq_zk_compose::planner`), so this closes the verifier side of the same
+/// rule rather than narrowing what a prover can ask for.
+fn slice_refused() -> VerifyError {
+    VerifyError::UnsupportedFragment(
+        "LIMIT / OFFSET (a solution slice selects an implementation-nondeterministic subset of the answer, and LIMIT 0 empties it, so membership in the unsliced answer does not establish membership in the sliced one)".into(),
+    )
+}
+
 fn collect_patterns(gp: &GraphPattern, out: &mut Vec<PatternKey>) -> Result<(), VerifyError> {
     match gp {
         GraphPattern::Bgp { patterns } => {
@@ -177,8 +205,8 @@ fn collect_patterns(gp: &GraphPattern, out: &mut Vec<PatternKey>) -> Result<(), 
         }
         GraphPattern::Project { inner, .. }
         | GraphPattern::Distinct { inner }
-        | GraphPattern::Reduced { inner }
-        | GraphPattern::Slice { inner, .. } => collect_patterns(inner, out),
+        | GraphPattern::Reduced { inner } => collect_patterns(inner, out),
+        GraphPattern::Slice { .. } => Err(slice_refused()),
         GraphPattern::Path { .. } => {
             Err(VerifyError::UnsupportedFragment("property path".into()))
         }
@@ -411,24 +439,24 @@ fn flip_cmp(op: FilterCmp) -> FilterCmp {
 /// by any honest proof and must fail closed (audit hardening, lexical-form
 /// note).
 fn comparison_filter(op: FilterCmp, a: &Expression, b: &Expression) -> Option<QueryFilter> {
-    let var_of = |e: &Expression| match e {
-        Expression::Variable(v) => Some(v.as_str().to_string()),
-        _ => None,
-    };
-    let int_of = |e: &Expression| match e {
-        Expression::Literal(l) if l.datatype().as_str() == XSD_INTEGER => {
-            canonical_u64(l.value())
-        }
-        _ => None,
-    };
-    if let (Some(variable), Some(bound)) = (var_of(a), int_of(b)) {
-        return Some(QueryFilter { variable, op, bound });
+    let typed = TypedQueryFilter::from_comparison(op, a, b)?;
+    query_filter_u64(&typed)
+}
+
+/// Reduce a typed conjunct to the established string-lane integer view.
+///
+/// This is the same reduction used by [`fragment_filters`]: only canonical,
+/// non-negative `xsd:integer` literals that fit `u64` have a view. No query is
+/// parsed here; `None` means this conjunct needs a typed value-lane proof.
+pub fn query_filter_u64(filter: &TypedQueryFilter) -> Option<QueryFilter> {
+    if filter.constant.datatype().as_str() != XSD_INTEGER {
+        return None;
     }
-    // `const op ?var` — flip so the variable is on the left.
-    if let (Some(bound), Some(variable)) = (int_of(a), var_of(b)) {
-        return Some(QueryFilter { variable, op: flip_cmp(op), bound });
-    }
-    None
+    Some(QueryFilter {
+        variable: filter.variable.clone(),
+        op: filter.op,
+        bound: canonical_u64(filter.constant.value())?,
+    })
 }
 
 /// Parse a canonical non-negative xsd:integer lexical form to `u64`. Rejects
@@ -585,8 +613,8 @@ fn collect_filters_gp<T: FilterExtraction>(
         }
         GraphPattern::Project { inner, .. }
         | GraphPattern::Distinct { inner }
-        | GraphPattern::Reduced { inner }
-        | GraphPattern::Slice { inner, .. } => collect_filters_gp(inner, out),
+        | GraphPattern::Reduced { inner } => collect_filters_gp(inner, out),
+        GraphPattern::Slice { .. } => Err(slice_refused()),
         // Every other node is already rejected by `collect_patterns`; the
         // verifier always calls `recheck` (which runs `fragment_patterns`)
         // before/with the filter extraction, so a structurally-unsupported
@@ -1074,8 +1102,8 @@ fn collect_expr_obligations_gp(
         }
         GraphPattern::Project { inner, .. }
         | GraphPattern::Distinct { inner }
-        | GraphPattern::Reduced { inner }
-        | GraphPattern::Slice { inner, .. } => collect_expr_obligations_gp(inner, out),
+        | GraphPattern::Reduced { inner } => collect_expr_obligations_gp(inner, out),
+        GraphPattern::Slice { .. } => Err(slice_refused()),
         // Everything else (paths, UNION, OPTIONAL, MINUS, GRAPH, VALUES,
         // aggregates/Group — so HAVING over an aggregate — ORDER BY, SERVICE,
         // …) is outside the structural surface this extractor models and FAILS
@@ -1435,14 +1463,20 @@ pub fn fragment_query(sparql: &str) -> Result<FragmentQuery, VerifyError> {
     reject_dataset_clause(&query)?;
 
     // Peel the OUTER solution-modifier stack (membership-indifferent:
-    // LIMIT/OFFSET, DISTINCT/REDUCED) down to the query's own projection.
-    // Any Project encountered DEEPER in the tree is a subquery.
+    // DISTINCT/REDUCED) down to the query's own projection. Any Project
+    // encountered DEEPER in the tree is a subquery.
+    //
+    // A solution SLICE is NOT membership-indifferent and is refused rather than
+    // peeled — see `slice_refused`.
     let mut node = pattern;
-    while let GraphPattern::Slice { inner, .. }
-    | GraphPattern::Distinct { inner }
-    | GraphPattern::Reduced { inner } = node
-    {
-        node = inner.as_ref();
+    loop {
+        match node {
+            GraphPattern::Slice { .. } => return Err(slice_refused()),
+            GraphPattern::Distinct { inner } | GraphPattern::Reduced { inner } => {
+                node = inner.as_ref();
+            }
+            _ => break,
+        }
     }
     let (projected, body): (Vec<String>, &GraphPattern) =
         if let GraphPattern::Project { inner, variables } = node {
@@ -1534,14 +1568,12 @@ fn collect_extended(
         GraphPattern::Distinct { inner } | GraphPattern::Reduced { inner } => {
             collect_extended(inner, fresh)
         }
-        // A Slice HERE is inside a subquery (the top-level one was peeled):
-        // it selects an implementation-nondeterministic subset of the inner
-        // evaluation, so a membership witness for the unrestricted inner
-        // evaluation is NOT a witness for every legal evaluation of the
-        // sliced one. Fail closed.
-        GraphPattern::Slice { .. } => Err(VerifyError::UnsupportedFragment(
-            "LIMIT / OFFSET inside a subquery (nondeterministic subset selection — the membership statement is defined over the unrestricted inner evaluation)".into(),
-        )),
+        // A Slice at ANY depth is refused, here as at the top level
+        // (`slice_refused`): inside a subquery it selects an
+        // implementation-nondeterministic subset of the inner evaluation, so a
+        // membership witness for the unrestricted inner evaluation is not a
+        // witness for every legal evaluation of the sliced one.
+        GraphPattern::Slice { .. } => Err(slice_refused()),
         GraphPattern::OrderBy { .. } => Err(VerifyError::UnsupportedFragment(
             "ORDER BY (membership-indifferent but implies an unproved top-k claim; excluded pending an explicit order-not-proved manifest flag)".into(),
         )),
@@ -2148,6 +2180,29 @@ mod tests {
         assert!(fs.is_empty());
     }
 
+    #[test]
+    fn typed_integer_reduction_matches_the_established_filter_view() {
+        for (expr, reducible) in [
+            ("?o >= 18", true), ("18 < ?o", true), ("!(?o = 18)", true),
+            ("?o = 18446744073709551615", true),
+            ("?o = 18446744073709551616", false),
+            ("?o = \"018\"^^<http://www.w3.org/2001/XMLSchema#integer>", false),
+            ("?o = \"+18\"^^<http://www.w3.org/2001/XMLSchema#integer>", false),
+            ("?o = \"-1\"^^<http://www.w3.org/2001/XMLSchema#integer>", false),
+            ("?o = 1.5", false), ("?o = true", false), ("?o = \"18\"", false),
+        ] {
+            let query = format!("SELECT * WHERE {{ ?s ?p ?o FILTER({expr}) }}");
+            let typed = fragment_typed_filters(&query).unwrap();
+            let view = query_filter_u64(&typed[0]);
+            assert_eq!(view.is_some(), reducible, "{expr}");
+            if let Some(view) = view {
+                assert_eq!(fragment_filters(&query).unwrap(), vec![view]);
+            } else {
+                assert!(fragment_filters(&query).is_err(), "{expr}");
+            }
+        }
+    }
+
     // =====================================================================
     // Typed FILTER extraction (`fragment_typed_filters`) + the regression that
     // factoring the walk left `fragment_filters` byte-identical.
@@ -2554,10 +2609,9 @@ mod tests {
         assert!(fq.projected.is_empty());
         assert_eq!(fq.branches[0].path_reach[0].closure, PathClosure::ZeroOrMore);
 
-        let fq = fragment_query(
-            "SELECT DISTINCT ?s WHERE { ?s <http://ex/p> ?o } LIMIT 5 OFFSET 2",
-        )
-        .unwrap();
+        // DISTINCT / REDUCED are peeled; a solution SLICE is refused instead of
+        // peeled (`every_solution_slice_is_refused`).
+        let fq = fragment_query("SELECT DISTINCT ?s WHERE { ?s <http://ex/p> ?o }").unwrap();
         assert_eq!(fq.projected, vec!["s".to_string()]);
         assert_eq!(fq.branches[0].patterns.len(), 1);
     }
@@ -2665,7 +2719,7 @@ mod tests {
             // Subquery composed of NON-fragment operators.
             (
                 "SELECT * WHERE { { SELECT ?x WHERE { ?x <http://ex/p> ?y } LIMIT 3 } }",
-                "LIMIT / OFFSET inside a subquery",
+                "LIMIT / OFFSET",
             ),
             (
                 "SELECT * WHERE { { SELECT ?x WHERE { ?x <http://ex/p> ?y } ORDER BY ?x } }",
@@ -2702,6 +2756,76 @@ mod tests {
             }
         }
         assert!(matches!(fragment_query("SELECT WHERE"), Err(VerifyError::Parse(_))));
+    }
+
+    /// EVERY solution slice is refused rather than peeled away — at the top
+    /// level and inside a subquery, with any `LIMIT`, any `OFFSET`, or both.
+    ///
+    /// The case that forces the whole-node rule rather than a `LIMIT 0` one is a
+    /// positive OFFSET: `SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has
+    /// the EMPTY answer (its one solution is skipped), yet peeling the slice off
+    /// left the rest to be re-derived as the unsliced query, whose answer does
+    /// contain that solution — so a presentation disclosing it was an answer to a
+    /// query that has none. `LIMIT 0` is the same fault with a different
+    /// modifier, and a `LIMIT` smaller than the answer selects an
+    /// implementation-nondeterministic subset. The membership-indifferent
+    /// modifiers (`DISTINCT` / `REDUCED`) are still peeled.
+    #[test]
+    fn every_solution_slice_is_refused() {
+        for q in [
+            // The counterexample: a positive OFFSET empties a one-solution answer.
+            "SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1",
+            "SELECT ?s WHERE { VALUES ?s { <http://ex/a> } } LIMIT 0",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 0",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 0 OFFSET 3",
+            "ASK { ?s <http://ex/p> ?o } LIMIT 0",
+            // Slices that keep SOME solution are refused too: which solutions
+            // they keep is not determined by the query.
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 1",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 10 OFFSET 2",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } OFFSET 5",
+            "SELECT DISTINCT ?s WHERE { ?s <http://ex/p> ?o } LIMIT 5 OFFSET 2",
+            "ASK { ?s <http://ex/a>* ?o } LIMIT 1",
+            // ... and at depth, inside a subquery.
+            "SELECT * WHERE { { SELECT ?x WHERE { ?x <http://ex/p> ?y } LIMIT 3 } }",
+            "SELECT * WHERE { { SELECT ?x WHERE { ?x <http://ex/p> ?y } OFFSET 1 } }",
+        ] {
+            match fragment_query(q) {
+                Err(VerifyError::UnsupportedFragment(msg)) => {
+                    assert!(msg.contains("LIMIT / OFFSET"), "{q}: got `{msg}`")
+                }
+                other => panic!("{q}: every solution slice must be refused, got {other:?}"),
+            }
+        }
+        // The FLAT extractors refuse it too, each on its own: `recheck`'s pattern
+        // walk, the FILTER extraction and the expression-tree extraction all used
+        // to descend THROUGH a slice.
+        let flat = "SELECT * WHERE { ?s <http://ex/p> ?o FILTER(?o >= 18) } LIMIT 1";
+        for (what, got) in [
+            ("fragment_patterns", fragment_patterns(flat).map(|_| ())),
+            ("fragment_filters", fragment_filters(flat).map(|_| ())),
+            ("fragment_expr_trees", fragment_expr_trees(flat).map(|_| ())),
+        ] {
+            match got {
+                Err(VerifyError::UnsupportedFragment(msg)) => {
+                    assert!(msg.contains("LIMIT / OFFSET"), "{what}: got `{msg}`")
+                }
+                other => panic!("{what}: a sliced query must be refused, got {other:?}"),
+            }
+        }
+        // CONTROL: the membership-indifferent modifiers are still peeled, and the
+        // branch structure under them is unchanged.
+        let base = fragment_query("SELECT * WHERE { ?s <http://ex/p> ?o }").unwrap();
+        for q in [
+            "SELECT DISTINCT * WHERE { ?s <http://ex/p> ?o }",
+            "SELECT REDUCED * WHERE { ?s <http://ex/p> ?o }",
+        ] {
+            assert_eq!(fragment_query(q).as_ref(), Ok(&base), "{q} must still be peeled");
+        }
+        // CONTROL: the same queries without their slice are accepted, so the
+        // refusals above are the slice's doing and not the fixtures'.
+        assert!(fragment_query("SELECT ?x WHERE { VALUES ?x { <urn:a> } }").is_ok());
+        assert!(fragment_patterns("SELECT * WHERE { ?s <http://ex/p> ?o FILTER(?o >= 18) }").is_ok());
     }
 
     #[test]

@@ -245,7 +245,7 @@ fn functional_properties(data: &sparq_core::Graph) -> rustc_hash::FxHashSet<Stri
         if p == type_id && o == fp_id {
             // Resolve the subject id back to its IRI string (a non-IRI subject of an
             // owl:FunctionalProperty axiom is malformed and simply ignored).
-            if let Term::NamedNode(n) = data.dict.term(s) {
+            if let Term::NamedNode(n) = data.dict().term(s) {
                 out.insert(n.into_string());
             }
         }

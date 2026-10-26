@@ -40,21 +40,15 @@ fn on_path(tool: &str) -> bool {
 /// `eprintln!` goes through std's thread-local output capture, which libtest
 /// installs and then DISCARDS for a test that passes — so a skip announced with
 /// `eprintln!` alone is invisible in CI, which is the exact failure mode this gate
-/// exists to end. Opening `/dev/stderr` writes to the process's real stderr instead,
-/// in one write so parallel tests cannot interleave a line. Where that file does not
-/// exist (non-Unix), fall back to the captured path, which is still shown under
-/// `--nocapture`. A runner that captures the process's stderr itself (nextest does,
+/// exists to end. Writing through `std::io::stderr` bypasses that capture without
+/// opening `/dev/stderr`, which is unavailable on some runners. Lock the stream
+/// while writing the notice so parallel tests cannot interleave a line.
+/// A runner that captures the process's stderr itself (nextest does,
 /// for a passing test, unless `success-output` is set) still hides the line; the
 /// skip is then declared by the lane's environment rather than printed.
 fn skip_line(msg: &str) {
     use std::io::Write;
-    let direct = std::fs::OpenOptions::new()
-        .append(true)
-        .open("/dev/stderr")
-        .and_then(|mut f| f.write_all(format!("{msg}\n").as_bytes()));
-    if direct.is_err() {
-        eprintln!("{}", msg);
-    }
+    let _ = std::io::stderr().lock().write_all(format!("{msg}\n").as_bytes());
 }
 
 fn allow_missing() -> bool {
@@ -221,6 +215,14 @@ pub fn gate(test: &str, tools: &[&str]) -> Option<LiveToolchain> {
 #[track_caller]
 pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
     gate(test, tools).is_some()
+}
+
+/// Emit an explicit completion marker after a live test's final assertion.
+/// The existing ledger records gate entry; this marker does not alter its keys.
+#[allow(dead_code)]
+#[track_caller]
+pub fn complete(_gate: LiveToolchain) {
+    skip_line(&format!("COMPLETE {}", ledger_key(std::panic::Location::caller())));
 }
 
 // --------------------------------------------------------------------------- #

@@ -18,6 +18,11 @@ use crate::manifest::{CircuitId, FieldHex, ProofInputs};
 /// (a `unimplemented!` in a public fn is a downstream-crash footgun).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProverTomlError {
+    /// The opaque-witness renderer cannot supply V2 leaf components.
+    #[cfg(feature = "dual-leaf")]
+    V2ComponentsRequired,
+    /// The declared V2 circuit shape is not compiled.
+    CircuitId(crate::manifest::CircuitIdError),
     /// A [`ProofInputs::JoinEq`] was passed without its private [`JoinWitness`]:
     /// the `join_eq` member's private inputs
     /// (`enc_a`/`counts_a`/`enc_b`/`counts_b`/`row_a`/`row_b`/`blinding`) live in
@@ -70,6 +75,9 @@ pub enum ProverTomlError {
 impl std::fmt::Display for ProverTomlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ProverTomlError::CircuitId(e) => write!(f, "{e}"),
+            #[cfg(feature = "dual-leaf")]
+            ProverTomlError::V2ComponentsRequired => write!(f, "V2ComponentsRequired: supply the component witness to the V2 member"),
             ProverTomlError::JoinEqMissingWitness => write!(
                 f,
                 "join_eq Prover.toml generation requires the private JoinWitness \
@@ -899,6 +907,11 @@ pub fn prover_toml_for(
     // PRIVATE sign flag + canonical digits. sq-7lrq.
     filter_signed_witness: Option<&FilterSignedWitness>,
 ) -> Result<(CircuitId, String), ProverTomlError> {
+    inputs.circuit_id().validate().map_err(ProverTomlError::CircuitId)?;
+    #[cfg(feature = "dual-leaf")]
+    if matches!(inputs.circuit_id(), CircuitId::ScanV2Dl { .. } | CircuitId::JoinEqV2Dl { .. }) {
+        return Err(ProverTomlError::V2ComponentsRequired);
+    }
     let out = match inputs {
         ProofInputs::Scan {
             id,

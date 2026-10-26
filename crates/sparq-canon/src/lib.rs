@@ -432,9 +432,9 @@ pub fn issue_triples(triples: &[Triple]) -> Result<HashMap<String, String>, Cano
 pub fn graph_triples(g: &Graph) -> Result<Vec<Triple>, CanonError> {
     let mut out = Vec::with_capacity(g.len());
     for t in g.iter_ids() {
-        let s = g.dict.term(t[0]);
-        let p = g.dict.term(t[1]);
-        let o = g.dict.term(t[2]);
+        let s = g.dict().term(t[0]);
+        let p = g.dict().term(t[1]);
+        let o = g.dict().term(t[2]);
         out.push(terms_to_triple(s, p, o)?);
     }
     Ok(out)

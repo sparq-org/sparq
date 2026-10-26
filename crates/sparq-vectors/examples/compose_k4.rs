@@ -319,7 +319,7 @@ impl<'g> Index<'g> {
     /// All subjects of a given `rdf:type`.
     fn instances_of(&self, class_local: &str) -> Vec<String> {
         let Some(type_pid) = self.pid(RDF_TYPE) else { return vec![] };
-        let scan = self.graph.store.scan(&[None, Some(type_pid), None]);
+        let scan = self.graph.store().scan(&[None, Some(type_pid), None]);
         let mut out = std::collections::BTreeSet::new();
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
@@ -335,7 +335,7 @@ impl<'g> Index<'g> {
         if dict::is_inline(id) {
             return None;
         }
-        match self.graph.dict.term_parts(id) {
+        match self.graph.dict().term_parts(id) {
             TermParts::Iri { prefix, suffix } => Some(format!("{prefix}{suffix}")),
             _ => None,
         }
@@ -348,7 +348,7 @@ impl<'g> Index<'g> {
 
     fn objects(&self, subj: &str, pred: &str) -> Vec<String> {
         let (Some(sid), Some(pid)) = (self.pid(subj), self.pid(pred)) else { return vec![] };
-        let scan = self.graph.store.scan(&[Some(sid), Some(pid), None]);
+        let scan = self.graph.store().scan(&[Some(sid), Some(pid), None]);
         let mut out = Vec::new();
         for row in scan.rows.iter() {
             let [_, _, o] = scan.to_spo(row);
@@ -364,10 +364,10 @@ impl<'g> Index<'g> {
     /// First literal object of (subj, pred).
     fn object_lit(&self, subj: &str, pred: &str) -> Option<String> {
         let (Some(sid), Some(pid)) = (self.pid(subj), self.pid(pred)) else { return None };
-        let scan = self.graph.store.scan(&[Some(sid), Some(pid), None]);
+        let scan = self.graph.store().scan(&[Some(sid), Some(pid), None]);
         for row in scan.rows.iter() {
             let [_, _, o] = scan.to_spo(row);
-            if let TermParts::Lit { value, .. } = self.graph.dict.term_parts(o) {
+            if let TermParts::Lit { value, .. } = self.graph.dict().term_parts(o) {
                 return Some(value.to_string());
             }
         }

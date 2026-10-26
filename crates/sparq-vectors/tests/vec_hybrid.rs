@@ -650,7 +650,7 @@ fn an_admissible_inline_integer_id_beyond_the_dictionary_length_is_still_found()
             NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
         )))
         .unwrap();
-    let len = g.dict.len() as Id;
+    let len = g.dict().len() as Id;
     assert!(
         inline_id > len,
         "the constraining literal must inline (id {} outside 1..={})",

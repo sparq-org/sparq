@@ -165,7 +165,7 @@ fn types_present(graph: &Graph) -> Vec<(String, Vec<Term>)> {
     };
     let mut by_class: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         std::collections::BTreeMap::new();
-    let scan = graph.store.scan(&[None, Some(type_pid), None]);
+    let scan = graph.store().scan(&[None, Some(type_pid), None]);
     for row in scan.rows.iter() {
         let [s, _, o] = scan.to_spo(row);
         let (Some(class_iri), Some(subj_iri)) = (iri_of(graph, o), iri_of(graph, s)) else {
@@ -195,7 +195,7 @@ fn iri_of(graph: &Graph, id: dict::Id) -> Option<String> {
     if dict::is_inline(id) {
         return None;
     }
-    match graph.dict.term_parts(id) {
+    match graph.dict().term_parts(id) {
         TermParts::Iri { prefix, suffix } => Some(format!("{prefix}{suffix}")),
         _ => None,
     }

@@ -264,5 +264,6 @@
 # ever compile. Workspace crates only — no new external dependency.
 - name: "sparq-server (odrl-authz + solid-authz-trust combined)"
   crate: "sparq-server"
-  features: "odrl-authz,solid-authz-trust"
+  # Also executes the restore-lineage cache regressions against WAC, ACP and ODRL.
+  features: "odrl-authz,solid-authz-trust,backup"
   test: true

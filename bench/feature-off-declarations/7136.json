@@ -1,0 +1,5 @@
+{
+  "pr": 7136,
+  "date": "2026-10-25",
+  "reason": "Encapsulate Graph named membership and invalidate cached named-graph prefix lookups when membership changes. These always-compiled core accessors also change the lean wasm build; directory locking remains behind mmap."
+}

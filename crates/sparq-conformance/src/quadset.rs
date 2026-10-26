@@ -51,9 +51,9 @@ pub fn dataset_quads(g: &sparq_core::Graph) -> Vec<[String; 4]> {
     let mut push_graph = |sub: &sparq_core::Graph, gname: &str| {
         for [s, p, o] in sub.iter_ids() {
             out.push([
-                sub.dict.term(s).to_string(),
-                sub.dict.term(p).to_string(),
-                sub.dict.term(o).to_string(),
+                sub.dict().term(s).to_string(),
+                sub.dict().term(p).to_string(),
+                sub.dict().term(o).to_string(),
                 gname.to_string(),
             ]);
         }

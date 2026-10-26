@@ -58,6 +58,44 @@ Terminate TLS at a trusted reverse proxy, or set both
 Setting only one makes startup fail. See `skills/http3-server/SKILL.md` for the
 default-off `http3` feature and `skills/helm-deploy/SKILL.md` for Kubernetes.
 
+## Browser clients
+
+Both protocol modes reflect any request `Origin` by default, with credentials enabled
+and `Vary: Origin`. Authentication uses the `Authorization` and `DPoP` headers;
+the server sets no cookies. This default supports browser apps served from arbitrary
+origins.
+
+Set `SOLID_SERVER_CORS_ORIGINS` to a comma-separated list of exact
+`scheme://host[:port]` origins to restrict browser access, for example
+`https://app.example,http://localhost:8080`. It is unset by default. Scheme and host
+compare after ASCII lowercasing; ports compare exactly, with no default port inferred.
+Use ASCII hostnames (punycode for internationalized names) and bracket IPv6 addresses.
+Whitespace around entries is ignored. An empty entry, `*`, or a malformed origin
+(including a path, trailing slash, user information, query, or fragment) refuses startup.
+An unlisted Origin receives no `Access-Control-Allow-*` headers, including on overload
+responses; `Vary: Origin` remains. Its admitted preflight still receives an empty `204`
+without an allow-origin header. Actual requests are served normally: CORS controls
+browser reads, while authorization controls access. Public identity-document responses
+retain `Access-Control-Allow-Origin: *` for allowed origins, without
+`Access-Control-Allow-Credentials`.
+
+Embedders can parse a list with `ldp::cors::CorsPolicy::from_origins`, then set
+`AppState::cors` (Solid) or `LwsConfig::cors` (LWS). `LwsConfig::from_env` reads the
+environment policy too. Both overload helpers preserve completed inner CORS decisions,
+including responses without CORS grants. `app::with_overload_layers(router, overload)`
+uses default reflection only for responses that did not reach an inner CORS layer
+(such as rate-limit, timeout, or body-limit rejections). Pass the router's policy to
+`app::with_overload_layers_and_cors(router, overload, policy)` to apply it to those
+responses too.
+
+Browser scripts can read `Link`, `ETag`, `Location`,
+`WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`
+(the LWS linkset preference response), alongside the existing content and discovery
+headers. The expose list is explicit, with no wildcard. Overload responses carry
+the same CORS headers; preflights still pass rate limiting and admission control.
+Preflights echo requested headers, or advertise a default set including `Depth`.
+LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
+
 ## Choose a data backend
 
 Set `PSS_SPARQ_BACKEND` to one of:
@@ -66,6 +104,20 @@ Set `PSS_SPARQ_BACKEND` to one of:
 - `embedded`: the default-enabled in-process engine. Set
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
   ephemeral.
+  Directory-backed mutations commit through the transaction journal; in-memory
+  mutations retain the engine's atomic update path. `EmbeddedSparqClient::save(dir)`
+  exports an independent snapshot to a different directory. Into the client's open
+  backing directory (by file identity, including path and symlink aliases), it compacts
+  the graph and reopens its journals so later writes remain durable. Repeated refused
+  compactions retain pending writes for reopen. Path components created while resolving a
+  save alias are removed when empty on compaction or failure. A frozen graph,
+  path resolution or snapshot/compaction I/O failure, unavailable compaction (including
+  a missing outside lock or poisoned transaction journal), or stopped actor returns a
+  backend error. After an indeterminate commit or job panic, the actor closes its queue and
+  drops pending jobs, including sends already in flight; their callers receive the stopped-actor
+  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
+  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
   read its own writes: a query sent after an update has completed must see what the
@@ -73,8 +125,10 @@ Set `PSS_SPARQ_BACKEND` to one of:
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. An update that times out
   can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions, and the content write of a resource create, are fenced
-  against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
+  requests and subscriptions, forward resource removals, intent creates, and the
+  content write of a resource create retain their fences. HTTP index metadata/listing
+  writes and the generic write adapter still need fencing support, so the native LWS
+  server refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -134,19 +188,47 @@ WAC also covers notification subscriptions: a `POST` to the
 re-checks that same mode for the subscriber when the socket connects and again
 before every notification it sends — so a revoked grant is not replayable through
 an already-issued `receiveFrom` URL. Notifications follow the subscriber's current
-access: one it may no longer read is not sent (nor does it close the socket, or
-decide a lag close, `1011`), and an access timer (every 30 seconds) closes the
-socket (code 1008) once its subscriber loses read access, up to one timer period
-after the loss, so when a socket closes never turns on changes it may not read. A
-check that cannot be made (a backend fault) is no denial: on the timer it closes
-the socket (`1011`); for a notification, the notification is held back and, at
-the next tick where the subscriber may read the topic, the socket is closed
-(`1011`) for the client to reconnect and reconcile (a subscriber that may not read
-it is not told). The receive token gates connecting only: its 5-minute window is
-for connecting and reconnecting, and a socket opened within it stays open until
-the client closes it, its subscriber loses read access, or its backlog overflows.
-A token that has expired never connects again, even when its `receiveFrom` URL is
-used again in the same process; subscribe again for a new one. With the `odrl-authz` gate attached, its deny
+access: one it may no longer read is dropped (not sent, and it neither closes the
+socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
+closes the socket within two periods of losing Read: `1008` for a confirmed
+denial, or `1011` if the timer check is undecided. Each check has at most one
+period; a slower check counts as undecided and the client must resubscribe. Sending
+a notification or close frame has one further period at most before the connection ends.
+A due tick takes priority over inbound frames and queued notifications and
+pre-empts a running notification or lag check, noting it as missed. A reader
+whose notification check spans a tick gets a reconcile close; a dropped lag
+check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). A tick that
+becomes ready while a finished but unpolled Event decision waits drops that decision,
+and the reader gets `RECONCILE`. The
+timing of a revocation close follows the timer, even while the client floods frames. A check that cannot
+be made (a backend fault) is no denial: on the timer it closes the socket
+(`1011`); a notification whose check cannot be made is dropped. A dropped
+notification (whichever check dropped it) is noted, and from then on the next
+point where the subscriber may read the topic, a notification or a tick, closes
+the socket (`1011`, "reconnect and reconcile") instead of delivering, so nothing
+is delivered after a gap without saying so, also when read access came back
+before the timer ticked; a subscriber that may not read the topic at that point
+gets the revocation close and is never told. Residual: a subscriber whose read
+access is revoked and restored between two ticks learns, from that reconcile
+close, that the topic changed while it could not read it (not what changed). A
+socket closes when the client
+closes it, on the revocation close (`1008`), or on a `1011`: a backlog overflow,
+a timer check that cannot be made, or a reconcile after a dropped notification.
+`NotificationMetrics` counts overflow closes and their skipped events only after confirmed
+read access. This includes `RECONCILE` after a lag check preempted by a tick that confirms
+read access; a completed denied or undecided lag check does not count toward either counter.
+A `REVOKED` or undecided timer close does not count toward either overflow counter.
+Pings are answered while a check is in progress. The receive token gates
+connecting only: its 5-minute window is for connecting and reconnecting, and a
+socket opened within it stays open until one of those closes. A token has at most
+one socket open at a time: a connect while a socket it opened is still open is
+refused with the same `401` as an invalid token, and it reconnects once that
+socket has closed (a client whose previous socket the server has not yet seen
+close subscribes again). A token that has expired never connects again, even when
+its `receiveFrom` URL is used again in the same process, so a client told to
+reconnect after the window subscribes again (the old URL answers `401`). Whoever
+holds a `receiveFrom` URL within its window can hold one socket open for as long
+as the subscriber may read the topic. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
 server's storage root is refused with `400` before the WAC gate runs. A topic on it is taken
@@ -155,7 +237,8 @@ the WAC check, the receive token and the notifications alike; a topic with none 
 record (`X.meta`, in any case), anything under `/.lws/`, a dot segment (%-decoded or between
 backslashes too) — gets the same `403` as a topic the caller may not read. (A resource stored
 under an encoded dot segment before writes refused one can still be read and deleted, but not
-subscribed to.)
+subscribed to over WebSocket. LWS webhook subscriptions, below, decide a topic by Read on its
+stored key as given, so such a resource can be subscribed to there by whoever may read it.)
 
 ## Serve provider WebIDs off the pod (optional)
 
@@ -241,7 +324,7 @@ whichever surfaces are enabled. A container of that name (`X.meta/`) and what li
 ordinary resources: a stored record never lists as a member, conflicts with that container or
 serves as a group document, and a container whose only members are such records is empty. So
 is any path under `/.lws/` below the storage root, where the LWS surface keeps its grants, access
-requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`), or a raw dot segment (`.` or `..`), is a `400`; an encoded separator (`%2F`) is part of a name; a `PUT`, `PATCH` or `POST` (a `POST`'s container included) naming a dot segment a URL normaliser could resolve away (%-decoded, `%2E%2E`, or between raw backslashes, `..\x`) is a `400`, while what is stored under such a name from before can still be read and deleted; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
+requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`), or a raw dot segment (`.` or `..`), is a `400`; an encoded separator (`%2F`) is part of a name; a `PUT`, `PATCH` or `POST` (a `POST`'s container included) naming a dot segment a URL normaliser could resolve away (%-decoded, `%2E%2E`, between raw backslashes, `..\x`, or between a decoded slash or backslash, `..%2Fx`; `a%2Fb` holds none) is a `400` (a doubly encoded dot, `%252E`, is decoded once only, as by standard normalisers, and is a name), while what is stored under such a name from before can still be read and deleted; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
 
 ## Negotiate RDF representations
 
@@ -271,6 +354,27 @@ An unknown `Accept` media type falls back to the Solid default
 `text/turtle`. Explicitly refusing every producible type with `q=0` returns
 `406 Not Acceptable`. Non-RDF resources preserve their binary media type and
 support byte-range reads.
+
+## Discover deployed services and capabilities
+
+Both modes expose a public catalog built with their mounted routes. The Solid router
+renders both description formats and their ETags at construction; a rendering failure
+prevents startup. Requests reuse the cached representation. Solid serves
+`/.well-known/solid` as JSON-LD by default (`Accept: */*` included) or Turtle with
+`Accept: text/turtle`; unsupported types, including `application/lws+cid`, get `406`.
+JSON-LD keeps the compact `notificationChannel` discovery array and names the
+notifications context first, followed by inline extension mappings.
+Both representations carry `Vary: Accept` and representation ETags with conditional
+GET/HEAD support. The SPARQL service and root GET/HEAD discovery link appear only
+with `sparql-endpoint`, independent of the requester's readable resources.
+
+LWS serves its CID description at `/` with `Accept: application/lws+cid`, preserving
+its verification key and validators. It includes the storage-description service,
+protocol conformance URI, JSON Patch formats and recursive deletion; `MoveResource`
+is absent because `up` is server-managed. Notification subscription types come from
+the catalog (currently webhooks). Draft extension terms use an inline context.
+See [catalog entries and embedding](references/service-description.md) for the
+RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
 ## Query readable RDF with `/sparql`
 
@@ -308,10 +412,10 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later. Only the creates and
-removals of service records (grants, requests, subscriptions), and a resource create's
-content write, are fenced against that (see below); other resource writes, and putting a
-failed change back, are not.
+because a remote write reported as failed may still commit later. Service-record creates
+and removals, forward resource removals, intent creates and a resource create's content
+write retain their fences (see below). HTTP index metadata/listing writes and the generic
+write adapter still need fencing support before this refusal can be lifted.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
 (413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
@@ -363,9 +467,11 @@ write lock, so a raise that lands late never lowers it; it needs no blob capacit
 entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
 one IRI, the first marker stored; any other IRI of that shape takes room in the pool). The mark
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
-the process, and the embedded index writes it to disk only when it saves a snapshot
-(`EmbeddedSparqClient::save`), so a start from a snapshot taken before a raise finds the earlier
-mark, and the expiries decided after that snapshot are not durable. A listing,
+the process; the directory-backed embedded index journals each raise before acknowledging it.
+Restoring an independent snapshot taken before a raise restores the earlier mark and loses
+expiries decided after that snapshot. The wasm adapter's `PersistentStore` reports no
+atomic-marker capability: its snapshot journal does not yet preserve marker mutations or forward
+the lifecycle lease, so `LwsState::new` refuses it before reading or writing. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -461,7 +567,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
 | `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK` | `1` runs the notification recovery once at start, before anything is served: every stored subscription with an expiry is removed, then the clock is stored as the notification high water (the start fails, the mark unchanged, while one is left). For a mark stored while the clock had jumped forward; correct the clock first and unset it afterwards. |
-| `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
+| `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes), and issue HTTP/WS notification capability URLs. Test-suite use only. |
 | `SOLID_SERVER_LWS_AUTHN` | Comma-separated authentication suites to offer, of `ssi` (did:key and controlled identifiers), `openid` (OpenID Connect) and `saml` (SAML 2.0). Unset, every suite built in is offered (SAML when `SOLID_SERVER_LWS_SAML_IDPS_FILE` is set). A name that is no suite or that the build does not hold, `saml` without its identity providers, and a suite's own variable set while that suite is left out each stop the start. |
 | `SOLID_SERVER_LWS_SAML_IDPS_FILE` | A JSON object of trusted SAML identity provider entity ids to their signing keys (PEM certificate, PEM public key, or public JWK); offers the SAML 2.0 suite. Needs a build with `--features authn-saml`; set without it, or with `SOLID_SERVER_LWS_AUTHN` leaving `saml` out, the server refuses to start. A key that cannot be read also stops the start. |
 | `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS` | Comma-separated OpenID Provider issuers (exactly as their ID Tokens' `iss`, which must equal the discovery document's `issuer`) whose identities get the reserved half of the DPoP replay cache. Every other provider shares the other half, each provider and each identity held to its own share, so open registration elsewhere cannot lock out these providers' users. Needs the `authn-openid` feature (on by default); set without it, or with `SOLID_SERVER_LWS_AUTHN` leaving `openid` out, the server refuses to start. |
@@ -566,7 +672,25 @@ What the server exposes, all discoverable from the storage description
   suite takes), `LwsConfig::suites` lists them, and the metadata lists their token and
   identifier types. `SOLID_SERVER_LWS_AUTHN` picks among the suites built in.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
-  gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
+  gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", realm="…", as_uri="…"`.
+  RFC 9728 discovery is public at `<base>/.well-known/oauth-protected-resource`,
+  obtained by inserting the well-known path before the storage root path. Only that
+  computed path is served; other suffixes return `404`. GET and HEAD return JSON
+  with an ETag and `Cache-Control: public, max-age=300`; `If-None-Match` revalidates it.
+  The document has `resource` and `jlws_storage_description` equal to `<base>/`,
+  `authorization_servers: ["<base>"]` (exactly the AS metadata issuer, without a
+  trailing slash), and `bearer_methods_supported: ["header"]`. It omits `resource_name`
+  and DPoP algorithm metadata: storage access uses bearer tokens; a DPoP proof on the
+  subject-token exchange is a separate operation. AS metadata is also available at
+  `/.well-known/oauth-authorization-server`. Both AS aliases and the protected resource
+  metadata support CORS fetches without credentials. The storage-description pointer
+  serves the existing CID with `Accept: application/lws+cid`.
+  Every LWS challenge keeps the `Link` with `rel="https://www.w3.org/ns/lws#storage"`.
+  The first auth parameter is `resource_metadata`; `realm` equals the storage root and
+  access-token audience, and `as_uri` is retained for transitioning clients. An anonymous
+  challenge has no `error`; a rejected bearer token adds `error="invalid_token"`.
+  For child resource requests, validate containment within the PRM's storage-root
+  `resource`, rather than string equality with the child's URL.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
   `/.lws/requests/`. Documents need an `@context` that includes
   `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
@@ -592,7 +716,11 @@ What the server exposes, all discoverable from the storage description
   settled, the record's narrowest listing stays held, shared: a subscriber's own listing for
   a subscription, the container's for a grant, a request or an owner's subscription. So a
   conditional create evaluated on that listing waits for the outcome (`503` past the lock
-  wait), and two with one entity tag cannot both register. A fence is
+  wait), and two with one entity tag cannot both register. A conditional create whose
+  precondition compares no state (a bare `*`, the only form anyone but the owner may send to
+  the grant and request containers, or a date, which a service listing does not carry) asks only whether the container exists, and
+  takes its listings shared as an unconditional create does, so it neither waits on a removal
+  being settled nor holds up other creates. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
@@ -603,18 +731,42 @@ What the server exposes, all discoverable from the storage description
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
   takes the record's lock and the container's the same way (at most two seconds, then `503`),
-  and takes the grant out of force while the removal runs, and keeps it out only once the removal
-  is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
-  revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
-  cannot be read again, with the grant left in force. A removal whose outcome can still change
+  and takes the grant out of force while the removal runs: `204` once confirmed revoked;
+  `500` "still stored" when confirmed still listed (the grant back in force). A settled
+  Storage failure whose existence and listing reads both fail answers `500` "not known
+  yet" and keeps the grant out of force until background settlement reads the listing.
+  An insufficient-storage refusal keeps its refusal handling. A removal whose outcome can still change
   is fenced the same way: until its fence lands, the answer is `500` "not known yet", the grant
   stays out of force, and it is removed or put back once the listing read after the fence
   says which. A request waits for its fence at most as long as for a lock (two seconds, shared
   between the fences it writes), then answers so and leaves the fence to the background; the
   container stays held until that background settling is done. In the background each attempt
   at the fence is given longer, from two seconds doubling up to the store's own call timeout
-  (30 seconds), so a slow store's fence still lands; removing a record outside a request
-  (putting a change back, clearing an intent) waits for its fence as the store's call allows. A removal the store refuses for
+  (`Store::call_timeout`: 30 seconds by default, `STORE_CALL_TIMEOUT`; an `http` index built with
+  `HttpSparqClient::with_timeout` uses that timeout), clamped between two seconds and
+  one hour per attempt, so a fence slower than one hour is retried rather than waited
+  on indefinitely. A removal whose fence lands with the record still stored is answered at once from the listing.
+  Putting a change back while a request waits on it (its own rollback or commit, with its locks
+  held) tries each step up to three times with short growing waits between, each attempt
+  waiting for a fence two seconds at most (counted from the store's answer to the write it
+  fences). A `Fence` step whose deadline expires is left at once; quick errors get the normal
+  retries; a step whose write failed unsettled and whose fence has not succeeded is never tried
+  again in the request: it is set aside with the rest, its fence first, and the set-aside (which
+  holds the locks) fences it before putting the step back, so a write that arrives late can no
+  longer undo what was put back since. The background put-back of a set-aside change, and the
+  settling of intents at start-up, differ in their waits: start-up waits as the store's call
+  allows; every background fence call uses a capped per-attempt budget, including the first call.
+  After a container touch lands, owed intents are cleared under a shared two-second fence
+  budget. At the deadline the request returns while a detached task holding only the store
+  finishes any in-flight delete and clears remaining records with capped fence attempts,
+  without retaining the state or its lifecycle lease or owing another touch. A touch with no
+  owed intents starts no clearing task.
+  Both fence a step's unsettled write before
+  trying the step again. Forward removals and intent creates retain their fences in the
+  journal: rollback fences before recreation or Forget, and commit fences before changing
+  the intent. A removal whose fence lands but
+  whose outcome cannot then be read stays out of force and is settled in the background once the
+  listing can be read. A removal the store refuses for
   want of room answers `507`, the record still stored and back in force. A subscription
   being cancelled hears of no change from the moment its removal begins until it is back in
   force. A record holds its place in the request
@@ -627,6 +779,16 @@ What the server exposes, all discoverable from the storage description
   A new request notifies the owner's inbox when the owner's JSON(-LD) identity document
   names one. A new grant notifies the inboxes of the requests its assignees made themselves,
   as well as its own `inbox`.
+- **SSE and WebSocket notifications** share `/.lws/subscriptions/` with webhooks.
+  POST `SseSubscription` or `WebSocketSubscription` with `topic` and optional `expires`.
+  Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
+  WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
+  DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
+  SSE retention is bounded by event count, age and serialized body bytes, with
+  Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
+  without holding the registration gate; webhooks enter their delivery queue independently
+  of stream publication. See the [stream bindings reference](references/notification-streams.md)
+  for connection limits, expiry defaults, control events, record compatibility and examples.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
   key in the storage description's `verificationMethod`. The signature covers `@method`,
   `@scheme`, `@authority`, `@path`, `@query` (so a notification for an inbox with a query is not
@@ -705,7 +867,18 @@ What the server exposes, all discoverable from the storage description
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
-  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
+  storage is served by one process at a time. The LWS service starts only over a store whose
+  index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
+  whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
+  by the graph on its actor's thread). If that thread panics the graph, and with it the lock,
+  is dropped, and every later store call fails (`5xx`): the index is never used without the
+  lock. Over any other index (a remote SPARQL endpoint, or a store that does not say; the wasm
+  host's persistent store does not say) the start fails before anything is read or written.
+  The lock is `<dir>.lock` beside the index directory, when it exists or can be created, and
+  `sparq.lock` inside it; an index directory whose parent is not writable is held by the inside
+  lock alone and serves; compaction that must swap the index's root directory is refused.
+  A graph a failed compaction froze is reported
+  as a failed store call (`5xx`), never served: restart to re-open the directory. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
@@ -818,7 +991,10 @@ What the server exposes, all discoverable from the storage description
   be readable), its listing read and charged to the walk's budget as any is. When any listing,
   permission check or metadata read fails, the whole index fails with one generic `500` that
   names no resource; a resource whose access cannot be decided is passed over unless a grant
-  names the caller itself for it (a grant to everyone does not count). Names of
+  names the caller itself for it (a grant to everyone does not count). So a resource whose
+  metadata cannot be read, and which the caller could read only as its creator or through a
+  grant to everyone, is left out of a `200` answer: a client should not take an index or search
+  answer as proof that nothing else matching is there. Names of
   linkset records a listing holds are not followed and not charged to the walk's budget. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
   While walking the storage they keep only what they return (a search its matches, the index
@@ -853,7 +1029,13 @@ the server pins:
   DPoP proof is verified locally on every request — proof signature, `htm`/`htu`/`iat`,
   `ath`, the `jti` replay mark against the same shared replay store, and the `cnf.jkt`
   binding — orchestrated from the verifier's own public primitives
-  (`crates/sparq-lws-core/src/auth_cache.rs`). Separately, the
+  (`crates/sparq-lws-core/src/auth_cache.rs`). Residual: `htu` is compared after
+  normalising both URLs, as RFC 9449 calls for, by parsing and serialising them with
+  `url::Url::parse` (WHATWG URL parsing): that resolves `%2E%2E` as a dot segment (the RFC 3986
+  §6.2.2 syntax-based normalisation) and also takes a backslash as a slash (from the WHATWG
+  parser, not RFC 3986), so a proof made for `GET /x` also verifies for `GET /alice/%2E%2E/x`, a request the server answers for that literal stored key
+  (readable when a key was stored under it before writes refused one). This is the spec's
+  comparison; the proof's single-use `jti` limits it to one request. Separately, the
   server layers **opt-in** proof-of-possession tiers on top of an already-verified token:
   RFC 8705 mTLS cert-bound tokens, and DPoP-SK below. Both are off by default
   (`crates/sparq-lws-core/src/auth.rs`).

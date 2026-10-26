@@ -32,7 +32,7 @@ let g = Graph::load_str(r#"
 // 1. Library-level: build the BM25 index (one dict scan), search returns Hit { id, score }.
 let index = TextIndex::build(&g);
 for hit in index.search("quick fox") {          // AND of tokens, BM25 best-first
-    let literal = g.dict.term(hit.id);           // hit.id IS the dict id of the literal
+    let literal = g.dict().term(hit.id);           // hit.id IS the dict id of the literal
     println!("{literal} (bm25 {})", hit.score);
 }
 

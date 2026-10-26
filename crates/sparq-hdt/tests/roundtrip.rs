@@ -31,15 +31,15 @@ fn scratch_dir() -> TempDir {
 
 /// Dumps a graph as a canonical, comparable triple set (N-Triples term rendering).
 fn triple_set(g: &Graph) -> BTreeSet<[String; 3]> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     scan.rows
         .iter()
         .map(|r| {
             let [s, p, o] = scan.to_spo(r);
             [
-                g.dict.term(s).to_string(),
-                g.dict.term(p).to_string(),
-                g.dict.term(o).to_string(),
+                g.dict().term(s).to_string(),
+                g.dict().term(p).to_string(),
+                g.dict().term(o).to_string(),
             ]
         })
         .collect()
@@ -64,7 +64,7 @@ fn snikmeta_hdt_matches_ntriples() {
     let n = triple_set(&from_nt);
     assert_eq!(h.len(), 328, "snikmeta is 328 distinct triples");
     assert_eq!(h, n, "HDT and N-Triples loads must agree triple-for-triple");
-    assert_eq!(from_hdt.store.len(), from_nt.store.len());
+    assert_eq!(from_hdt.store().len(), from_nt.store().len());
 }
 
 /// Full binary round trip with the term zoo: N-Triples -> HDT archive (via the
@@ -103,7 +103,7 @@ fn generated_hdt_round_trips() {
     let from_nt = Graph::load_str(nt, "ntriples").unwrap();
 
     assert_eq!(triple_set(&from_hdt), triple_set(&from_nt));
-    assert_eq!(from_hdt.store.len(), 11);
+    assert_eq!(from_hdt.store().len(), 11);
 }
 
 /// `load_reader` is the same decode from any buffered source.
@@ -116,7 +116,7 @@ fn load_reader_from_memory() {
     }
     let bytes = std::fs::read(&hdt_path).unwrap();
     let g = sparq_hdt::load_reader(std::io::Cursor::new(bytes)).unwrap();
-    assert_eq!(g.store.len(), 328);
+    assert_eq!(g.store().len(), 328);
 }
 
 /// Garbage input must error, not panic.
@@ -148,7 +148,7 @@ fn gzipped_hdt_loads_transparently() {
     let Some(gz) = gzipped_snikmeta() else { return };
     // Through a reader…
     let g = sparq_hdt::load_reader(std::io::Cursor::new(gz.clone())).unwrap();
-    assert_eq!(g.store.len(), 328);
+    assert_eq!(g.store().len(), 328);
     assert_eq!(
         triple_set(&g),
         triple_set(&sparq_hdt::load(fixture("snikmeta.hdt")).unwrap())
@@ -157,7 +157,7 @@ fn gzipped_hdt_loads_transparently() {
     let dir = scratch_dir();
     let path = dir.path().join("disguised.hdt");
     std::fs::write(&path, &gz).unwrap();
-    assert_eq!(sparq_hdt::load(&path).unwrap().store.len(), 328);
+    assert_eq!(sparq_hdt::load(&path).unwrap().store().len(), 328);
 }
 
 // H5: zstd / bzip2 compressed-HDT container compressors, mirroring
@@ -196,12 +196,12 @@ fn zstd_hdt_loads_transparently() {
     let Some(zst) = zstd_snikmeta() else { return };
     let plain = sparq_hdt::load(fixture("snikmeta.hdt")).unwrap();
     let g = sparq_hdt::load_reader(std::io::Cursor::new(zst.clone())).unwrap();
-    assert_eq!(g.store.len(), 328);
+    assert_eq!(g.store().len(), 328);
     assert_eq!(triple_set(&g), triple_set(&plain));
     let dir = scratch_dir();
     let path = dir.path().join("disguised.hdt"); // sniffed by content, not name
     std::fs::write(&path, &zst).unwrap();
-    assert_eq!(sparq_hdt::load(&path).unwrap().store.len(), 328);
+    assert_eq!(sparq_hdt::load(&path).unwrap().store().len(), 328);
 }
 
 /// `.hdt.bz2` containers are sniffed by magic bytes and streamed-decoded, from a
@@ -211,12 +211,12 @@ fn bzip2_hdt_loads_transparently() {
     let Some(bz) = bzip2_snikmeta() else { return };
     let plain = sparq_hdt::load(fixture("snikmeta.hdt")).unwrap();
     let g = sparq_hdt::load_reader(std::io::Cursor::new(bz.clone())).unwrap();
-    assert_eq!(g.store.len(), 328);
+    assert_eq!(g.store().len(), 328);
     assert_eq!(triple_set(&g), triple_set(&plain));
     let dir = scratch_dir();
     let path = dir.path().join("disguised.hdt"); // sniffed by content, not name
     std::fs::write(&path, &bz).unwrap();
-    assert_eq!(sparq_hdt::load(&path).unwrap().store.len(), 328);
+    assert_eq!(sparq_hdt::load(&path).unwrap().store().len(), 328);
 }
 
 /// The HDT header (dataset metadata triples) is exposed as a queryable graph,
@@ -272,8 +272,8 @@ fn assert_direct_matches_upstream(bytes: &[u8], min_triples: usize) {
         "direct decoder and upstream oracle must agree triple-for-triple"
     );
     assert_eq!(
-        direct.store.len(),
-        upstream.store.len(),
+        direct.store().len(),
+        upstream.store().len(),
         "same stored triple count"
     );
     // The id-translation must intern the same set of distinct terms. The exact
@@ -281,8 +281,8 @@ fn assert_direct_matches_upstream(bytes: &[u8], min_triples: usize) {
     // both walk SPO order; comparing distinct-term counts plus the triple-set
     // equality above pins the dictionary translation.
     assert_eq!(
-        direct.dict.len(),
-        upstream.dict.len(),
+        direct.dict().len(),
+        upstream.dict().len(),
         "same number of distinct interned terms"
     );
 }
@@ -373,7 +373,7 @@ fn direct_decoder_gzip_matches_plain() {
     let from_gz = sparq_hdt::load_reader(std::io::Cursor::new(gz)).unwrap();
     let from_plain = sparq_hdt::load(fixture("snikmeta.hdt")).unwrap();
     assert_eq!(triple_set(&from_gz), triple_set(&from_plain));
-    assert_eq!(from_gz.store.len(), from_plain.store.len());
+    assert_eq!(from_gz.store().len(), from_plain.store().len());
 }
 
 /// H5 differential gate: the SAME bytes compressed as gzip, zstd and
@@ -452,7 +452,7 @@ fn direct_decoder_matches_upstream_tiny() {
         let direct = sparq_hdt::load_reader(std::io::Cursor::new(buf.clone())).unwrap();
         let upstream = sparq_hdt::load_reader_via_upstream(std::io::Cursor::new(buf)).unwrap();
         assert_eq!(triple_set(&direct), triple_set(&upstream));
-        assert_eq!(direct.store.len(), upstream.store.len());
+        assert_eq!(direct.store().len(), upstream.store().len());
     }
 }
 
@@ -552,13 +552,13 @@ fn hdt_load_matches_ntriples_load() {
             "[{name}] HDT id-translation must yield the same term set as direct N-Triples ingest",
         );
         assert_eq!(
-            from_hdt.store.len(),
-            from_nt.store.len(),
+            from_hdt.store().len(),
+            from_nt.store().len(),
             "[{name}] same stored triple count",
         );
         assert_eq!(
-            from_hdt.dict.len(),
-            from_nt.dict.len(),
+            from_hdt.dict().len(),
+            from_nt.dict().len(),
             "[{name}] same number of distinct interned terms",
         );
 
@@ -712,7 +712,7 @@ fn classify(bytes: &[u8]) -> Result<usize, String> {
     // Cursor<Vec<u8>> is UnwindSafe; the loader holds no cross-unwind state.
     let owned = bytes.to_vec();
     match std::panic::catch_unwind(move || sparq_hdt::load_reader(std::io::Cursor::new(owned))) {
-        Ok(Ok(g)) => Ok(g.store.len()),
+        Ok(Ok(g)) => Ok(g.store().len()),
         Ok(Err(e)) => Err(format!("Err: {e}")),
         Err(_) => Err("PANIC".to_string()),
     }
@@ -725,7 +725,7 @@ fn classify_upstream(bytes: &[u8]) -> Result<usize, String> {
     match std::panic::catch_unwind(move || {
         sparq_hdt::load_reader_via_upstream(std::io::Cursor::new(owned))
     }) {
-        Ok(Ok(g)) => Ok(g.store.len()),
+        Ok(Ok(g)) => Ok(g.store().len()),
         Ok(Err(e)) => Err(format!("Err: {e}")),
         Err(_) => Err("PANIC".to_string()),
     }

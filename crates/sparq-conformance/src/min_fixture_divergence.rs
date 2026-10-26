@@ -110,9 +110,9 @@ mod tests {
             .map(|row| {
                 format!(
                     "{} {} {} .\n",
-                    graph.dict.term(row[0]),
-                    graph.dict.term(row[1]),
-                    graph.dict.term(row[2])
+                    graph.dict().term(row[0]),
+                    graph.dict().term(row[1]),
+                    graph.dict().term(row[2])
                 )
             })
             .collect();

@@ -87,6 +87,8 @@ pub mod authz;
 pub(crate) mod accept;
 pub mod body_limit;
 mod clock;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod describe;
 pub mod error;
 pub(crate) mod entity_tag;
 pub(crate) mod http_date;

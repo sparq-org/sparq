@@ -18,7 +18,7 @@
 //!   identifier and OpenID Connect subject tokens; the storage accepts the RFC 9068 access tokens
 //!   it issues ([`tokens`]);
 //! - **access grants and access requests** ([`access`]): the LWS Access Profile;
-//! - **webhook notifications** ([`notify`]), signed per RFC 9421;
+//! - **notifications** ([`notify`]): signed webhooks, SSE and WebSocket subscriptions;
 //! - the **type index and type search** services ([`index`]).
 //!
 //! Authorization: the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, the agent that
@@ -27,6 +27,7 @@
 
 pub mod access;
 pub mod authz_server;
+mod discovery;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;
@@ -84,6 +85,8 @@ pub const META_SUFFIX: &str = ".meta";
 pub struct LwsConfig {
     /// The public origin, without a trailing slash: `https://storage.example`.
     pub base_url: String,
+    /// Browser origin policy shared with the outer overload response layer.
+    pub cors: crate::ldp::cors::CorsPolicy,
     /// The agent (WebID or DID) that owns the storage and may do anything in it.
     pub owner: Option<String>,
     /// Development mode: no authentication, every request may do everything.
@@ -238,6 +241,7 @@ impl LwsConfig {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            cors: crate::ldp::cors::CorsPolicy::default(),
             owner: None,
             open: false,
             page_size: 100,
@@ -300,8 +304,10 @@ impl LwsConfig {
     ///   ids to their keys, which offers the SAML 2.0 suite (set when that suite is not offered,
     ///   it is an error; `saml` in `SOLID_SERVER_LWS_AUTHN` without it is an error too);
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
+    /// - `SOLID_SERVER_CORS_ORIGINS`: an optional comma-separated exact-origin allowlist.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
+        cfg.cors = crate::ldp::cors::CorsPolicy::from_env()?;
         cfg.max_body = crate::body_limit::max_body_bytes_from_env();
         let var = |k: &str| {
             std::env::var(k)
@@ -628,6 +634,8 @@ pub struct Inner<S: Store> {
     /// Every change to the store moves the listing snapshots it concerns (see [`tracked`]).
     pub store: tracked::Tracked<S>,
     pub cfg: LwsConfig,
+    /// Services mounted by the LWS dispatcher.
+    pub catalog: crate::describe::ServiceCatalog,
     pub access: access::AccessStore,
     pub notify: notify::Notifier,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
@@ -703,7 +711,23 @@ impl<S: Store + 'static> LwsState<S> {
     /// Build the state: ensure the storage root and the service containers exist, put back any
     /// change a process stop cut short (see the `intents` module), and load the stored access
     /// grants, requests and subscriptions.
+    ///
+    /// Only over a store whose index is this process's alone ([`Store::exclusive`]): what the
+    /// state keeps in memory (grants, subscriptions, what it has set aside or holds) and what a
+    /// start puts back are true only while no other process writes the index. Over any other
+    /// store nothing is read or written, and the start fails.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
+        Self::with_catalog(store, cfg, crate::describe::ServiceCatalog::default()).await
+    }
+
+    pub(crate) async fn with_catalog(
+        store: S,
+        cfg: LwsConfig,
+        additional: crate::describe::ServiceCatalog,
+    ) -> Result<Self, String> {
+        store
+            .exclusive()
+            .map_err(|e| format!("the storage cannot be served over this store: {e}"))?;
         // Refused before anything is read or written: notifications keep a time the store must
         // raise atomically.
         notify::refuse_without_atomic_markers(&store)?;
@@ -736,10 +760,13 @@ impl<S: Store + 'static> LwsState<S> {
         let notify = notify::Notifier::new(&cfg)?;
         notify.hold(lease);
         let (owner, closed) = tokio::sync::watch::channel(());
+        let mut catalog = resources::service_catalog(&cfg);
+        catalog.extend(additional);
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
                 store,
+                catalog,
                 cfg,
                 access,
                 notify,
@@ -996,7 +1023,7 @@ impl<S: Store + 'static> LwsState<S> {
         let state = self.detached();
         tokio::spawn(async move {
             for undo in &left.0 {
-                until_done(|| undo.apply(&state.store)).await;
+                put_back_until_done(undo, &state.store).await;
                 if let Undo::Resolve {
                     record,
                     touch: Some(container),
@@ -1103,13 +1130,18 @@ impl<S: Store + 'static> LwsState<S> {
             .map(|_| ())
     }
 
-    /// A 401 with the Bearer challenge naming this authorization server and realm, and the storage
-    /// link (section 9.2).
+    /// A 401 with RFC 9728 metadata, the transitional issuer, realm, and storage link.
+    /// Pass an error only when a presented access token was rejected.
     pub fn challenge(&self, error: Option<&str>) -> Response {
+        let metadata = match discovery::prm_url(&self.cfg.storage()) {
+            Ok(url) => url,
+            Err(_) => return problem(StatusCode::INTERNAL_SERVER_ERROR, None),
+        };
         let mut c = format!(
-            "Bearer as_uri=\"{}\", realm=\"{}\"",
-            self.cfg.issuer(),
-            self.cfg.realm()
+            "Bearer resource_metadata=\"{}\", realm=\"{}\", as_uri=\"{}\"",
+            metadata,
+            self.cfg.realm(),
+            self.cfg.issuer()
         );
         if let Some(e) = error {
             c.push_str(&format!(", error=\"{e}\""));
@@ -1437,10 +1469,31 @@ pub(crate) enum Undo {
     },
 }
 
+/// A fence deadline is distinct from an error returned by the store.
+enum ApplyError {
+    Failed(crate::error::ServerError),
+    FenceTimedOut,
+}
+
+impl From<crate::error::ServerError> for ApplyError {
+    fn from(error: crate::error::ServerError) -> Self {
+        Self::Failed(error)
+    }
+}
+
 impl Undo {
-    /// Put this change back, with the mutation's locks still held.
-    async fn apply<S: Store>(&self, store: &S) -> Result<(), crate::error::ServerError> {
-        match self {
+    /// Put this change back, with the mutation's locks still held. `within` bounds how long a
+    /// step waits for a fence (an [`Undo::Fence`], or an unsettled removal's in
+    /// [`records::delete_record`]): [`records::LOCK_WAIT`] while a request waits on it
+    /// ([`settle`]), so a fence that stalls leaves the step to be set aside rather than holding
+    /// the request and its locks; a capped store call timeout for background put-back;
+    /// `None` for as long as the store's own call takes at start-up.
+    async fn apply<S: Store>(
+        &self,
+        store: &S,
+        within: Option<std::time::Duration>,
+    ) -> Result<(), ApplyError> {
+        let result = match self {
             Undo::Restore {
                 key,
                 prior: Some(kept),
@@ -1457,20 +1510,29 @@ impl Undo {
                 }
                 kept.put_back(store, iri, parent.as_deref()).await
             }
-            Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
-            Undo::Fence { fence } => store.fence(fence).await,
+            Undo::Remove { iri, parent } => {
+                records::delete_record(store, iri, parent, within).await
+            }
+            Undo::Fence { fence } => match within {
+                Some(within) => match tokio::time::timeout(within, store.fence(fence)).await {
+                    Ok(result) => return result.map_err(ApplyError::Failed),
+                    Err(_) => return Err(ApplyError::FenceTimedOut),
+                },
+                None => store.fence(fence).await,
+            },
             Undo::Locked { .. } => Ok(()),
-            Undo::Forget { record, .. } => intents::clear(store, record).await,
+            Undo::Forget { record, .. } => intents::clear(store, record, within).await,
             Undo::Resolve { record, undo, .. } => {
                 if intents::kept(store, record).await? {
                     return Ok(());
                 }
                 for step in undo {
-                    Box::pin(step.apply(store)).await?;
+                    Box::pin(step.apply(store, within)).await?;
                 }
-                intents::clear(store, record).await
+                intents::clear(store, record, within).await
             }
-        }
+        };
+        result.map_err(ApplyError::Failed)
     }
 
     /// The resources this change is to: a member's container too, when its listing changes.
@@ -1673,17 +1735,54 @@ fn iris_of(undo: &[Undo]) -> Vec<String> {
 /// change waits on it, before what is left is set aside ([`LwsState::set_aside`]).
 const UNDO_ATTEMPTS: u32 = 3;
 
-/// Apply `undo` in order, each tried a few times ([`UNDO_ATTEMPTS`], with short waits between):
-/// `None` once all are applied, else what is left, from the step that kept failing on.
+/// Apply `undo` in order while a request waits on it (with its locks held), each tried a few
+/// times ([`UNDO_ATTEMPTS`], with short waits between): `None` once all are applied, else what is
+/// left, from the step that kept failing on. A Fence step whose deadline elapsed is left at
+/// once; a quick error gets the normal retries. Each attempt waits for a fence for
+/// [`records::LOCK_WAIT`] at most ([`Undo::apply`]). A step whose write failed unsettled (its
+/// fence not succeeding in that time) is not tried again: it is left at once with its fence
+/// first, for the set-aside, which holds the locks, to fence before it puts the step back
+/// ([`put_back_until_done`]), so the first write cannot land after a later attempt.
 pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unsettled> {
+    settle_within(store, undo, Some(records::LOCK_WAIT)).await
+}
+
+/// [`settle`] with no request waiting: each fence is waited for as long as the store's own call
+/// takes. For the settling of intents at start-up (see [`intents`]), before anything is served.
+pub(crate) async fn settle_at_start<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unsettled> {
+    settle_within(store, undo, None).await
+}
+
+/// [`settle`], each fence waited for `within` at most (`None`: as long as the store takes).
+async fn settle_within<S: Store>(
+    store: &S,
+    undo: Vec<Undo>,
+    within: Option<std::time::Duration>,
+) -> Option<Unsettled> {
     let mut steps = undo.into_iter();
     while let Some(step) = steps.next() {
         let mut wait = std::time::Duration::from_millis(50);
         let mut done = false;
         for attempt in 1..=UNDO_ATTEMPTS {
-            if step.apply(store).await.is_ok() {
-                done = true;
-                break;
+            match step.apply(store, within).await {
+                Ok(()) => {
+                    done = true;
+                    break;
+                }
+                // A write of the step that failed unsettled may still land, after anything
+                // tried now: the step is not tried again until its fence has succeeded. It is
+                // left with its fence first, for the set-aside (which holds the locks) to fence
+                // before it puts the step back.
+                Err(ApplyError::FenceTimedOut) => {
+                    return Some(Unsettled::new(std::iter::once(step).chain(steps).collect()));
+                }
+                Err(ApplyError::Failed(crate::error::ServerError::Unsettled { fence, .. }))
+                    if !matches!(step, Undo::Fence { .. }) =>
+                {
+                    let left = [Undo::Fence { fence }, step].into_iter().chain(steps);
+                    return Some(Unsettled::new(left.collect()));
+                }
+                Err(_) => {}
             }
             if attempt < UNDO_ATTEMPTS {
                 tokio::time::sleep(wait).await;
@@ -1695,6 +1794,31 @@ pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unset
         }
     }
     None
+}
+
+/// Put `undo` back in the background until it is done, waiting between attempts (growing to
+/// [`UNDO_MAX_WAIT`]): how a set-aside change is put back while its locks are held. A write of
+/// the step that failed unsettled (whose fence did not succeed) may still land, so its fence is
+/// made to succeed before the step is tried again: no later attempt is outlived by an earlier one.
+pub(crate) async fn put_back_until_done<S: Store>(undo: &Undo, store: &S) {
+    if let Undo::Fence { fence } = undo {
+        records::fence_in_background(store, fence).await;
+        return;
+    }
+    let within = store
+        .call_timeout()
+        .clamp(records::LOCK_WAIT, records::MAX_FENCE_ATTEMPT);
+    until_done(|| async {
+        match undo.apply(store, Some(within)).await {
+            Ok(()) => Ok(()),
+            Err(ApplyError::Failed(crate::error::ServerError::Unsettled { fence, .. })) => {
+                records::fence_in_background(store, &fence).await;
+                Err(())
+            }
+            Err(_) => Err(()),
+        }
+    })
+    .await
 }
 
 /// How many bytes set-aside changes may hold to put back before new changes are refused (see
@@ -1849,7 +1973,13 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         let undo: Vec<&Undo> = self.planned.iter().rev().collect();
         // From here on the intent may be stored (a lost reply), and keeps the holds.
         self.holds.intended = true;
-        intents::store(self.state, &record, existing, &undo, &[]).await?;
+        let outcome = intents::store(self.state, &record, existing, &undo, &[]).await;
+        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = &outcome {
+            self.undo.push(Undo::Fence {
+                fence: fence.clone(),
+            });
+        }
+        outcome?;
         self.persisted = self.planned.len();
         Ok(())
     }
@@ -1947,6 +2077,11 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 kept,
             });
         }
+        if let Err(crate::error::ServerError::Unsettled { fence, .. }) = &outcome {
+            self.undo.push(Undo::Fence {
+                fence: fence.clone(),
+            });
+        }
         outcome
     }
 
@@ -1965,35 +2100,81 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         mut self,
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
+        // An unsettled write must settle before a later rewrite or Forget can run;
+        // otherwise the earlier write could arrive afterwards.
+        while let Some(at) = self
+            .undo
+            .iter()
+            .position(|step| matches!(step, Undo::Fence { .. }))
+        {
+            let Undo::Fence { fence } = &self.undo[at] else {
+                unreachable!()
+            };
+            let deadline = records::deadline_after(records::LOCK_WAIT);
+            if !records::fenced_by(&self.state.store, fence, Some(deadline)).await {
+                return Err((
+                    crate::error::ServerError::Storage(
+                        "the unsettled write could not be settled".into(),
+                    ),
+                    self.rollback().await,
+                ));
+            }
+            self.undo.remove(at);
+        }
         let Some(record) = self.intent.clone() else {
             self.holds.take().release(self.state).await;
             return Ok(());
         };
+        // The fence of a rewrite or clearing of the intent that failed unsettled: until it has
+        // succeeded, that write may still land, and the intent read now says nothing final.
+        let mut unfenced = None;
         let kept = match touch {
             Some(container) => {
                 let owed = [container.to_string()];
-                let rewritten = intents::store(self.state, &record, true, &[], &owed).await;
-                if rewritten.is_ok() {
-                    self.state.owe_touch(container, record.clone());
+                match intents::store(self.state, &record, true, &[], &owed).await {
+                    Ok(()) => {
+                        self.state.owe_touch(container, record.clone());
+                        true
+                    }
+                    Err(crate::error::ServerError::Unsettled { fence, .. }) => {
+                        unfenced = Some(fence);
+                        false
+                    }
+                    Err(_) => false,
                 }
-                rewritten.is_ok()
             }
             None => {
                 let forget = Undo::Forget {
                     record: record.clone(),
                     iris: Vec::new(),
                 };
-                settle(&self.state.store, vec![forget]).await.is_none()
+                match settle(&self.state.store, vec![forget]).await {
+                    None => true,
+                    Some(left) => {
+                        if let Some(Undo::Fence { fence }) = left.0.first() {
+                            unfenced = Some(fence.clone());
+                        }
+                        false
+                    }
+                }
             }
         };
         if kept {
             self.holds.take().release(self.state).await;
             return Ok(());
         }
+        // Fenced first, waiting as long as for a lock: one that does not succeed by then leaves
+        // the intent unread, and the change is set aside to be settled, its fence first.
+        if let Some(fence) = unfenced.take() {
+            let deadline = records::deadline_after(records::LOCK_WAIT);
+            if !records::fenced_by(&self.state.store, &fence, Some(deadline)).await {
+                unfenced = Some(fence);
+            }
+        }
         // Whether the store did it anyway is read back from the intent: still holding its plan,
         // the change is put back; cleared or naming only the container, it is kept.
         let mut wait = std::time::Duration::from_millis(50);
-        for attempt in 1..=UNDO_ATTEMPTS {
+        for attempt in (1..=UNDO_ATTEMPTS).filter(|_| unfenced.is_none()) {
             match intents::kept(&self.state.store, &record).await {
                 Ok(true) => {
                     if let Some(container) = touch {
@@ -2027,9 +2208,14 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             iris: iris_of(&self.planned),
             undo: self.undo.into_iter().rev().collect(),
         };
+        let left = unfenced
+            .map(|fence| Undo::Fence { fence })
+            .into_iter()
+            .chain([resolve])
+            .collect();
         Err((
             crate::error::ServerError::Storage("the change could not be recorded as kept".into()),
-            Some(Unsettled(vec![resolve], self.in_flight, self.holds.take())),
+            Some(Unsettled(left, self.in_flight, self.holds.take())),
         ))
     }
 
@@ -2258,11 +2444,29 @@ pub(crate) fn encode_meta(meta: &ResourceMeta) -> Result<Vec<u8>, crate::error::
 
 /// Build the LWS router over `store`.
 pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Router, String> {
-    let state = LwsState::new(store, cfg).await?;
+    router_with_catalog(store, cfg, crate::describe::ServiceCatalog::default()).await
+}
+
+/// Build the LWS router with entries for additional mounted routes.
+///
+/// The caller must mount every endpoint registered in `catalog` on the returned router.
+///
+/// # Errors
+/// Returns an error when storage initialization or recovery fails.
+pub async fn router_with_catalog<S: Store + 'static>(
+    store: S,
+    cfg: LwsConfig,
+    catalog: crate::describe::ServiceCatalog,
+) -> Result<Router, String> {
+    let cors = cfg.cors.clone();
+    let state = LwsState::with_catalog(store, cfg, catalog).await?;
     Ok(Router::new()
         .fallback(dispatch::<S>)
         .with_state(state)
-        .layer(axum::middleware::from_fn(crate::ldp::cors::cors_middleware)))
+        .layer(axum::middleware::from_fn_with_state(
+            cors,
+            crate::ldp::cors::cors_middleware_with_policy,
+        )))
 }
 
 /// The largest body a request to `path` may carry: the service routes that anyone may send to
@@ -2284,6 +2488,12 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
+    if notify::stream_path(req.uri().path()) {
+        if let Err(refused) = check_headers(req.headers()) {
+            return refused;
+        }
+        return notify::connect(&state, req).await;
+    }
     let (parts, body) = req.into_parts();
     if let Err(refused) = check_headers(&parts.headers) {
         return refused;
@@ -2372,6 +2582,9 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         return authz_server::handle(state, &req).await;
     }
     if path.starts_with("/.well-known/") {
+        if discovery::prm_url(&state.cfg.storage()).is_ok_and(|url| url.path() == path) {
+            return discovery::handle(state, &req);
+        }
         return problem(StatusCode::NOT_FOUND, None);
     }
     let agent = match tokens::authenticate(state, &req) {
@@ -2837,6 +3050,8 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
+        /// The index is not this process's alone ([`Store::exclusive`]).
+        pub shared: Arc<AtomicBool>,
         /// How many more `holds` listings fail with a backend error.
         pub failing_holds: Arc<std::sync::atomic::AtomicUsize>,
         /// `delete` of this IRI alone fails with a backend error.
@@ -2884,6 +3099,9 @@ pub(crate) mod test_store {
         pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
+        /// The next `meta` (of any IRI) waits for a permit of this gate before it reads, as a
+        /// call to a slow store.
+        pub hold_next_meta: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// `meta` of this IRI reports no modification time, as a backend that keeps none does.
         pub timeless: Arc<std::sync::Mutex<Option<String>>>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
@@ -2917,12 +3135,25 @@ pub(crate) mod test_store {
         /// the write is still sent, and commits once the gate opens, unless it has been fenced
         /// ([`Store::fence`]) by then.
         pub unsettle_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// The next intent create answers unsettled, with its write held by this gate.
+        pub unsettle_next_intent: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// Every metadata read stalls while set.
+        pub hang_meta: Arc<AtomicBool>,
+        /// Delay every conditional delete by this many milliseconds.
+        pub slow_delete_ms: Arc<std::sync::atomic::AtomicU64>,
+        /// Delay an unsettled delete's answer by this many milliseconds.
+        pub slow_delete_answer_ms: Arc<std::sync::atomic::AtomicU64>,
         /// As `unsettle_next_create`, for the next `delete_container_if_empty` of the IRI named.
         pub unsettle_next_delete_of: GateOf,
         /// As `unsettle_next_create`, for every create of a resource while set (one gate).
         pub unsettle_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// `fence` fails, as while the remote store cannot be reached.
         pub fail_fence: Arc<AtomicBool>,
+        /// Fail the next fence once, before changing anything.
+        pub fail_next_fence: Arc<AtomicBool>,
+        /// Once a `fence` succeeds, `exists` and `list_children` fail (`fail_exists`,
+        /// `fail_list`), as when the store becomes unreachable just after it.
+        pub fail_reads_after_fence: Arc<AtomicBool>,
         /// How many times `fence` was called.
         pub fences_tried: Arc<std::sync::atomic::AtomicUsize>,
         /// `fence` never answers, as a call to a store that stalls.
@@ -2930,6 +3161,9 @@ pub(crate) mod test_store {
         /// Every `fence` takes this many milliseconds before answering (0: at once), as a call
         /// to a slow store.
         pub slow_fence_ms: Arc<std::sync::atomic::AtomicU64>,
+        /// The store's call timeout in milliseconds (`Store::call_timeout`; 0: the inner
+        /// store's; `u64::MAX`: `Duration::MAX`).
+        pub call_timeout_ms: Arc<std::sync::atomic::AtomicU64>,
         /// What the last write reported unsettled changes (its fence's `touches`).
         pub last_unsettled: Arc<std::sync::Mutex<Vec<String>>>,
         /// Each unsettled write by its fence's nonce: whether it is fenced, locked while it
@@ -2992,6 +3226,7 @@ pub(crate) mod test_store {
                 lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
+                hold_next_meta: Default::default(),
                 timeless: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
@@ -3003,13 +3238,21 @@ pub(crate) mod test_store {
                 fail_restore_of: Default::default(),
                 restores: Default::default(),
                 unsettle_next_create: Default::default(),
+                unsettle_next_intent: Default::default(),
+                hang_meta: Default::default(),
+                slow_delete_ms: Default::default(),
+                slow_delete_answer_ms: Default::default(),
                 unsettle_next_delete_of: Default::default(),
                 unsettle_creates: Default::default(),
                 fail_fence: Default::default(),
+                fail_next_fence: Default::default(),
                 fences_tried: Default::default(),
+                fail_reads_after_fence: Default::default(),
                 hang_fence: Default::default(),
                 slow_fence_ms: Default::default(),
+                call_timeout_ms: Default::default(),
                 fail_release: Default::default(),
+                shared: Default::default(),
                 failing_holds: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
@@ -3137,6 +3380,13 @@ pub(crate) mod test_store {
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
             self.traced("meta", iri);
+            if self.hang_meta.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            let held = self.hold_next_meta.lock().unwrap().take();
+            if let Some(gate) = held {
+                gate.acquire().await.expect("gate").forget();
+            }
             if self.fail_meta.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
@@ -3236,27 +3486,28 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
-            if !container.starts_with(super::intents::PREFIX) {
-                let gate = self
-                    .unsettle_next_create
+            let gate = if container.starts_with(super::intents::PREFIX) {
+                self.unsettle_next_intent.lock().unwrap().take()
+            } else {
+                self.unsettle_next_create
                     .lock()
                     .unwrap()
                     .take()
-                    .or_else(|| self.unsettle_creates.lock().unwrap().clone());
-                if let Some(gate) = gate {
-                    let (inner, container, child, ct) = (
-                        self.inner.clone(),
-                        container.to_string(),
-                        child.to_string(),
-                        ct.to_string(),
-                    );
-                    let touches = vec![container.clone(), child.clone()];
-                    return Err(self.unsettle(gate, touches, async move {
-                        let _ = inner
-                            .create_in_container(&container, &child, body, &ct)
-                            .await;
-                    }));
-                }
+                    .or_else(|| self.unsettle_creates.lock().unwrap().clone())
+            };
+            if let Some(gate) = gate {
+                let (inner, container, child, ct) = (
+                    self.inner.clone(),
+                    container.to_string(),
+                    child.to_string(),
+                    ct.to_string(),
+                );
+                let touches = vec![container.clone(), child.clone()];
+                return Err(self.unsettle(gate, touches, async move {
+                    let _ = inner
+                        .create_in_container(&container, &child, body, &ct)
+                        .await;
+                }));
             }
             let gate = self.hold_next_create.lock().unwrap().take();
             if let Some(gate) = gate {
@@ -3343,6 +3594,12 @@ pub(crate) mod test_store {
         async fn finish_reclaims(&self) -> ServerResult<()> {
             self.inner.finish_reclaims().await
         }
+        fn exclusive(&self) -> ServerResult<()> {
+            if self.shared.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("shared".into()));
+            }
+            self.inner.exclusive()
+        }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;
             if self.refuse_delete_of.lock().unwrap().as_deref() == Some(iri) {
@@ -3386,12 +3643,20 @@ pub(crate) mod test_store {
             iri: &str,
             parent: Option<&str>,
         ) -> ServerResult<DeleteOutcome> {
+            let slow = self.slow_delete_ms.load(Ordering::SeqCst);
+            if slow > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(slow)).await;
+            }
             // The same failures as `delete`: a resource is removed by either.
             self.step()?;
             if self.refuse_delete_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::InsufficientStorage);
             }
             if let Some(gate) = held(&self.unsettle_next_delete_of, iri) {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    self.slow_delete_answer_ms.load(Ordering::SeqCst),
+                ))
+                .await;
                 let (inner, iri, parent) = (
                     self.inner.clone(),
                     iri.to_string(),
@@ -3438,7 +3703,9 @@ pub(crate) mod test_store {
             if slow > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(slow)).await;
             }
-            if self.fail_fence.load(Ordering::SeqCst) {
+            if self.fail_fence.load(Ordering::SeqCst)
+                || self.fail_next_fence.swap(false, Ordering::SeqCst)
+            {
                 return Err(ServerError::Storage("the store cannot be reached".into()));
             }
             let write = self.unsettled.lock().unwrap().get(fence.nonce()).cloned();
@@ -3446,6 +3713,10 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("no such write".into()));
             };
             *write.lock().await = true;
+            if self.fail_reads_after_fence.load(Ordering::SeqCst) {
+                self.fail_exists.store(true, Ordering::SeqCst);
+                self.fail_list.store(true, Ordering::SeqCst);
+            }
             Ok(())
         }
         async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
@@ -3453,6 +3724,13 @@ pub(crate) mod test_store {
         }
         fn raises_markers(&self) -> bool {
             !self.no_atomic_markers.load(Ordering::SeqCst) && self.inner.raises_markers()
+        }
+        fn call_timeout(&self) -> std::time::Duration {
+            match self.call_timeout_ms.load(Ordering::SeqCst) {
+                0 => self.inner.call_timeout(),
+                u64::MAX => std::time::Duration::MAX,
+                ms => std::time::Duration::from_millis(ms),
+            }
         }
         async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
             self.marker_writes.fetch_add(1, Ordering::SeqCst);

@@ -683,6 +683,24 @@ pub enum CircuitId {
     /// `scan_k{k}_n{n}_r{r}` — a BGP triple-pattern scan over `k` graphs,
     /// `n` slots/graph, `r` disclosed rows.
     Scan { k: u32, n: u32, r: u32 },
+    /// Component-witnessed V2 scan; only `(1, 16, 4)` is compiled.
+    #[cfg(feature = "dual-leaf")]
+    ScanV2Dl {
+        #[serde(with = "v2_one")]
+        k: u32,
+        #[serde(with = "v2_sixteen")]
+        n: u32,
+        #[serde(with = "v2_four")]
+        r: u32,
+    },
+    /// Component-witnessed V2 join; only `(16, 16)` is compiled.
+    #[cfg(feature = "dual-leaf")]
+    JoinEqV2Dl {
+        #[serde(with = "v2_sixteen")]
+        n_a: u32,
+        #[serde(with = "v2_sixteen")]
+        n_b: u32,
+    },
     /// `filter_int_d{d}` — hidden xsd:integer FILTER with `d` decimal digits.
     FilterInt { d: u32 },
     /// `filter_f64_d{d}` — MANIFEST-COMPOSABLE hidden xsd:double FILTER with `d`
@@ -994,9 +1012,17 @@ pub enum CircuitId {
 
 impl CircuitId {
     /// The on-disk package directory name under `zk/compose/`.
-    pub fn package(&self) -> String {
-        match self {
+    ///
+    /// # Errors
+    /// Returns `UncompiledV2Member` for an uncompiled V2 shape.
+    pub fn package(&self) -> Result<String, CircuitIdError> {
+        self.validate()?;
+        Ok(match self {
             CircuitId::Scan { k, n, r } => format!("scan_k{k}_n{n}_r{r}"),
+            #[cfg(feature = "dual-leaf")]
+            CircuitId::ScanV2Dl { k, n, r } => format!("scan_v2dl_k{k}_n{n}_r{r}"),
+            #[cfg(feature = "dual-leaf")]
+            CircuitId::JoinEqV2Dl { n_a, n_b } => format!("join_eq_v2dl_na{n_a}_nb{n_b}"),
             CircuitId::FilterInt { d } => format!("filter_int_d{d}"),
             CircuitId::FilterF64 { d } => format!("filter_f64_d{d}"),
             // sq-7lrq: the `md` magnitude-digit count names the compiled
@@ -1042,7 +1068,156 @@ impl CircuitId {
             // bounded-depth path member, e.g. `path_reach_d4_k2_n16`.
             #[cfg(feature = "extended-fragment")]
             CircuitId::PathReach { d, k, n } => format!("path_reach_d{d}_k{k}_n{n}"),
+        })
+    }
+
+    /// Check the compiled V2 shape without constructing a package name.
+    ///
+    /// # Errors
+    /// Returns `UncompiledV2Member` for any other V2 parameter tuple.
+    pub fn validate(&self) -> Result<(), CircuitIdError> {
+        #[cfg(feature = "dual-leaf")]
+        match self {
+            Self::ScanV2Dl { k: 1, n: 16, r: 4 }
+            | Self::JoinEqV2Dl { n_a: 16, n_b: 16 } => {},
+            Self::ScanV2Dl { .. } | Self::JoinEqV2Dl { .. } => {
+                return Err(CircuitIdError::UncompiledV2Member(format!("{self:?}")));
+            }
+            _ => {},
         }
+        Ok(())
+    }
+
+    /// Construct the compiled component-witnessed V2 scan.
+    ///
+    /// # Errors
+    /// Returns `UncompiledV2Member` unless the shape is `(1, 16, 4)`.
+    #[cfg(feature = "dual-leaf")]
+    pub fn scan_v2_dl(k: u32, n: u32, r: u32) -> Result<Self, CircuitIdError> {
+        let id = Self::ScanV2Dl { k, n, r };
+        id.validate()?;
+        Ok(id)
+    }
+
+    /// Construct the compiled component-witnessed V2 join.
+    ///
+    /// # Errors
+    /// Returns `UncompiledV2Member` unless both buckets are `16`.
+    #[cfg(feature = "dual-leaf")]
+    pub fn join_eq_v2_dl(n_a: u32, n_b: u32) -> Result<Self, CircuitIdError> {
+        let id = Self::JoinEqV2Dl { n_a, n_b };
+        id.validate()?;
+        Ok(id)
+    }
+
+    // Diagnostics must remain available even for a directly constructed invalid id.
+    pub(crate) fn label(&self) -> String {
+        self.package().unwrap_or_else(|e| e.to_string())
+    }
+}
+
+/// Why a circuit member name or V2 shape was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CircuitIdError {
+    /// No component-witnessed V2 member is compiled for this shape.
+    UncompiledV2Member(String),
+    /// The package name is not a circuit-family name in this build.
+    UnknownMember(String),
+}
+
+impl std::fmt::Display for CircuitIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UncompiledV2Member(s) => write!(f, "UncompiledV2Member: {s}"),
+            Self::UnknownMember(s) => write!(f, "UnknownMember: {s}"),
+        }
+    }
+}
+
+impl std::error::Error for CircuitIdError {}
+
+// Each V2 dimension is fixed by the only compiled member of its family.
+#[cfg(feature = "dual-leaf")]
+macro_rules! v2_dimension {
+    ($module:ident, $expected:literal) => {
+        mod $module {
+            use serde::{Deserialize, Deserializer, Serializer};
+            pub fn serialize<S: Serializer>(v: &u32, s: S) -> Result<S::Ok, S::Error> {
+                if *v != $expected {
+                    return Err(serde::ser::Error::custom("UncompiledV2Member"));
+                }
+                s.serialize_u32(*v)
+            }
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+                let v = u32::deserialize(d)?;
+                if v != $expected {
+                    return Err(serde::de::Error::custom("UncompiledV2Member"));
+                }
+                Ok(v)
+            }
+        }
+    };
+}
+#[cfg(feature = "dual-leaf")]
+v2_dimension!(v2_one, 1);
+#[cfg(feature = "dual-leaf")]
+v2_dimension!(v2_four, 4);
+#[cfg(feature = "dual-leaf")]
+v2_dimension!(v2_sixteen, 16);
+
+impl std::str::FromStr for CircuitId {
+    type Err = CircuitIdError;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        // The serde schema owns the variant/field vocabulary. Require canonical
+        // spelling by comparing the resulting package name with the input.
+        let families: &[(&str, &str, &[&str])] = &[
+            ("scan_v2dl_k", "scan_v2_dl", &["k", "n", "r"]),
+            ("join_eq_v2dl_na", "join_eq_v2_dl", &["n_a", "n_b"]),
+            ("scan_k", "scan", &["k", "n", "r"]),
+            ("join_eq_na", "join_eq", &["n_a", "n_b"]),
+            ("filter_int_d", "filter_int", &["d"]),
+            ("filter_f64_d", "filter_f64", &["d"]),
+            ("filter_signed_int_d", "filter_signed_int", &["md"]),
+            ("filter_decimal_i", "filter_decimal", &["id", "fd"]),
+            ("revoke_unset_d", "revoke_unset", &["depth"]),
+            ("revoke_hidden_ref_d", "revoke_hidden_ref", &["depth", "set_depth"]),
+            ("hidden_issuer_d", "hidden_issuer", &["depth"]),
+            ("holder_set_d", "holder_set", &["depth"]),
+            ("path_reach_d", "path_reach", &["d", "k", "n"]),
+        ];
+        for &(prefix, kind, fields) in families {
+            if let Some(tail) = name.strip_prefix(prefix) {
+                let nums: Vec<_> = tail.split('_').collect();
+                let mut obj = serde_json::Map::new();
+                obj.insert("kind".into(), kind.into());
+                if nums.len() != fields.len() { break; }
+                for (i, (&key, part)) in fields.iter().zip(nums).enumerate() {
+                    let digits = if i == 0 { part } else { part.trim_start_matches(char::is_alphabetic) };
+                    let n: u32 = digits.parse().map_err(|_| CircuitIdError::UnknownMember(name.into()))?;
+                    obj.insert(key.into(), n.into());
+                }
+                let id: Self = serde_json::from_value(obj.into()).map_err(|_| {
+                    if prefix.contains("v2dl") {
+                        CircuitIdError::UncompiledV2Member(name.into())
+                    } else {
+                        CircuitIdError::UnknownMember(name.into())
+                    }
+                })?;
+                if id.package()? == name { return Ok(id); }
+                break;
+            }
+        }
+        // Fixed members use serde names except for the integer value member.
+        let kind = match name {
+            "filter_value_dl_int" => "filter_value_dl",
+            "filter_value_dl_datetime" => "filter_value_dl_date_time",
+            _ => name,
+        };
+        if let Ok(id) = serde_json::from_value::<Self>(serde_json::json!({"kind": kind})) {
+            if id.package()? == name { return Ok(id); }
+        }
+        Err(CircuitIdError::UnknownMember(name.into()))
     }
 }
 
@@ -1544,7 +1719,7 @@ pub struct SubProof {
 /// # Canonical ordering (sq-y2wy)
 /// `binding_edges` is canonicalised by [`ProofManifest::canonicalize`] (applied
 /// before hashing/serialisation) to ascending `(from_proof, from_row, from_slot,
-/// to_proof)` — the field-declaration tuple, which is a TOTAL order over edges.
+/// to_proof, filter)` — the field-declaration tuple, which is a TOTAL order over edges.
 /// Each edge is SELF-CONTAINED (it carries its own scan/row/slot/filter indices),
 /// so reordering the edge VECTOR never invalidates those references: the verifier
 /// resolves every edge against `sub_proofs` by the edge's own indices, not by the
@@ -1561,6 +1736,11 @@ pub struct BindingEdge {
     pub from_slot: usize,
     /// Index into `sub_proofs` of the consuming filter proof.
     pub to_proof: usize,
+    /// Query FILTER conjunct index for value obligations; legacy edges omit it.
+    /// Flat verification requires `Some(index)` on V2 value edges and `None`
+    /// on string-lane edges. Extended verification refuses all value members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<usize>,
 }
 
 /// A hidden cross-credential JOIN edge (sq-bwwl / sq-fi03,
@@ -2534,11 +2714,14 @@ impl ProofManifest {
     /// deterministic in edge order WITHOUT mutating `self`: two manifests that
     /// differ only in edge order produce byte-identical JSON (and thus the same
     /// hash over those bytes).
+    ///
+    /// # Errors
+    /// Returns an error if a public field contains an uncompiled V2 circuit id.
     // sq-y2wy: canonicalise edge order before serialisation.
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
         let mut canonical = self.clone();
         canonical.canonicalize();
-        serde_json::to_string_pretty(&canonical).expect("manifest is serializable")
+        serde_json::to_string_pretty(&canonical)
     }
 
     pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
@@ -2603,12 +2786,15 @@ impl FragmentManifest {
 
     /// Serialise to pretty JSON (the embedded manifest is canonicalised via
     /// [`ProofManifest::to_json`]'s edge-ordering discipline on serialise).
-    pub fn to_json(&self) -> String {
+    ///
+    /// # Errors
+    /// Returns an error if the embedded manifest contains an uncompiled V2 circuit id.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
         // Canonicalise the embedded manifest's edge vectors, mirroring
         // `ProofManifest::to_json`, without mutating `self`.
         let mut canonical = self.clone();
         canonical.manifest.canonicalize();
-        serde_json::to_string_pretty(&canonical).expect("fragment manifest is serializable")
+        serde_json::to_string_pretty(&canonical)
     }
 
     pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
@@ -2771,7 +2957,7 @@ mod holder_binding_tests {
             fully_hidden_revocation: None,
         };
 
-        let json = manifest.to_json();
+        let json = manifest.to_json().unwrap();
         let back = ProofManifest::from_json(&json).expect("manifest round-trips");
         assert_eq!(back, manifest, "manifest with holder binding round-trips");
 
@@ -2905,13 +3091,13 @@ mod join_schema_tests {
     #[test]
     fn circuit_id_join_eq_packages_like_other_members() {
         assert_eq!(
-            CircuitId::JoinEq { n_a: 16, n_b: 16 }.package(),
+            CircuitId::JoinEq { n_a: 16, n_b: 16 }.package().unwrap(),
             "join_eq_na16_nb16",
             "matches the landed Noir member directory (PR #170)"
         );
         // Asymmetric buckets name distinctly (forward-looking; v1 compiles 16x16).
         assert_eq!(
-            CircuitId::JoinEq { n_a: 16, n_b: 64 }.package(),
+            CircuitId::JoinEq { n_a: 16, n_b: 64 }.package().unwrap(),
             "join_eq_na16_nb64"
         );
         // The id round-trips through serde with its `kind` tag like every variant.
@@ -3050,7 +3236,22 @@ mod canonical_edge_tests {
     }
 
     fn binding_edge(from_proof: usize, from_row: usize, from_slot: usize, to_proof: usize) -> BindingEdge {
-        BindingEdge { from_proof, from_row, from_slot, to_proof }
+        BindingEdge { filter: None, from_proof, from_row, from_slot, to_proof }
+    }
+
+    #[test]
+    fn binding_edge_filter_is_optional_and_part_of_the_canonical_order() {
+        let legacy = binding_edge(0, 0, 2, 1);
+        let wire = r#"{"from_proof":0,"from_row":0,"from_slot":2,"to_proof":1}"#;
+        assert_eq!(serde_json::from_str::<BindingEdge>(wire).unwrap(), legacy);
+        assert_eq!(serde_json::to_string(&legacy).unwrap(), wire);
+        let first = BindingEdge { filter: Some(0), ..legacy.clone() };
+        let second = BindingEdge { filter: Some(1), ..legacy.clone() };
+        let mut m = manifest_with_edges(vec![second.clone(), first.clone(), legacy.clone()], vec![]);
+        m.canonicalize();
+        assert_eq!(m.binding_edges, vec![legacy, first.clone(), second]);
+        let wire = serde_json::to_string(&first).unwrap();
+        assert_eq!(serde_json::from_str::<BindingEdge>(&wire).unwrap(), first);
     }
 
     fn join_edge(scan_a: usize, graph_a: usize, scan_b: usize, graph_b: usize, join_proof: usize) -> JoinEdge {
@@ -3058,7 +3259,7 @@ mod canonical_edge_tests {
     }
 
     /// `canonicalize` sorts `binding_edges` to ascending
-    /// `(from_proof, from_row, from_slot, to_proof)` regardless of insertion order,
+    /// `(from_proof, from_row, from_slot, to_proof, filter)` regardless of insertion order,
     /// and is idempotent.
     #[test]
     fn binding_edges_canonicalise_to_total_order() {
@@ -3155,8 +3356,8 @@ mod canonical_edge_tests {
         let m_x = manifest_with_edges(binding_x, joins_x);
         let m_y = manifest_with_edges(binding_y, joins_y);
 
-        let json_x = m_x.to_json();
-        let json_y = m_y.to_json();
+        let json_x = m_x.to_json().unwrap();
+        let json_y = m_y.to_json().unwrap();
         assert_eq!(json_x, json_y, "edge-order-only difference => identical canonical JSON");
 
         // to_json does NOT mutate self (canonicalises a clone): the in-memory
@@ -3208,11 +3409,11 @@ mod path_schema_tests {
     #[test]
     fn path_reach_circuit_id_packages_like_the_other_members() {
         assert_eq!(
-            CircuitId::PathReach { d: 4, k: 2, n: 16 }.package(),
+            CircuitId::PathReach { d: 4, k: 2, n: 16 }.package().unwrap(),
             "path_reach_d4_k2_n16"
         );
         assert_eq!(
-            CircuitId::PathReach { d: 8, k: 1, n: 16 }.package(),
+            CircuitId::PathReach { d: 8, k: 1, n: 16 }.package().unwrap(),
             "path_reach_d8_k1_n16"
         );
     }
@@ -3348,7 +3549,7 @@ mod path_schema_tests {
             }],
         );
         assert_eq!(fm.r#type, "urn:sparq:zk:FragmentManifest");
-        let json = fm.to_json();
+        let json = fm.to_json().unwrap();
         let back = FragmentManifest::from_json(&json).expect("fragment manifest round-trips");
         assert_eq!(back, fm);
         assert_eq!(back.manifest, manifest);

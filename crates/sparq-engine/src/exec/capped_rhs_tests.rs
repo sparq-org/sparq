@@ -211,7 +211,7 @@ fn capped_rhs_named_view_overlay_and_residual_exists() {
     );
     let visible = crate::DatasetView {
         base: &graph,
-        named: std::sync::Arc::new([graph.named[0].0.clone()].into_iter().collect()),
+        named: std::sync::Arc::new([graph.named()[0].0.clone()].into_iter().collect()),
         default: crate::DefaultGraphMode::Empty,
     };
     assert_eq!(
@@ -234,7 +234,7 @@ fn capped_rhs_named_view_overlay_and_residual_exists() {
         hidden_steps.is_empty(),
         "hidden graph must not enter RHS cache"
     );
-    let mut fork = graph.named[0].1.fork();
+    let mut fork = graph.named()[0].1.fork();
     fork.apply_delta(
         &[],
         &[[
@@ -244,7 +244,8 @@ fn capped_rhs_named_view_overlay_and_residual_exists() {
         ]],
     )
     .unwrap();
-    graph.named[0].1 = fork;
+    let name = graph.named()[0].0.clone();
+    graph.set_named(name, fork).unwrap();
     let (changed, changed_steps) = trace(|| crate::query(&graph, query).unwrap());
     assert_eq!(changed.rows.len(), 1);
     assert_eq!(changed.rows[0], base.rows[0]);

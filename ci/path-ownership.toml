@@ -243,6 +243,13 @@ crates = ["sparq-zk-compose"]
 pattern = "zk/compose/compose_core/src/result_m5.nr"
 crates = ["sparq-zk-compose"]
 
+# sq-j506: the value-obligation diagnostic tests (crates/sparq-zk-compose/src/
+# value_obligation.rs) read the boolean value relation with include_str! to pin
+# that it constrains both operands, so a change to it must re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/compose_core/src/filter_value_bool.nr"
+crates = ["sparq-zk-compose"]
+
 # [FABLE-5] sq-0iqzw: the ADJUDICATED cross-engine divergence allowlist, read at
 # runtime by the sparq-bench differential fuzzer (crates/sparq-bench/src/fuzz.rs
 # DivergenceAllowlist, via an env!("CARGO_MANIFEST_DIR")-relative path) AND by its
@@ -353,6 +360,13 @@ readers = ["sparq-acbench"]
 # entries above keep `site/src/lib/zk-prover.ts` engine-classified), and a `safe`
 # entry can still never rescue a §4.1 trigger or a `crates/`-owned path.
 # ---------------------------------------------------------------------------
+
+# Pattern-scope README + measurement JSONs. No crate reads these files;
+# sparq-solid's pattern_scope_bench example emits JSON to stdout for humans to
+# commit here. Its references to this directory are docs/comments only.
+[[map]]
+pattern = "bench/pattern-scope/**"
+safe = true
 
 # Design records / research notes. No crate compiles or reads research/.
 [[map]]

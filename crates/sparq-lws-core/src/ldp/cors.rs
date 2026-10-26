@@ -14,8 +14,11 @@
 //!    every CORS response including the preflight.
 //!
 //! The posture:
+//! - An optional exact-origin allowlist applies to both CORS layers. Unlisted origins receive no
+//!   `Access-Control-Allow-*` headers; responses still vary on Origin.
 //! - **`Access-Control-Allow-Origin` REFLECTS the request `Origin`** verbatim (never a bare `*` — a
 //!   credentialed request requires an exact origin, and the harness asserts ACAO == its origin).
+//! - Handler-set `Access-Control-Allow-Origin: *` is preserved without credentials.
 //! - **`Access-Control-Allow-Credentials: true`** (the browser may send the DPoP/Authorization
 //!   credentials cross-origin) — which is WHY the origin is reflected, not `*`.
 //! - **`Vary: Origin`** (capital), so a cache never serves one origin's CORS response to another.
@@ -25,14 +28,109 @@
 //!   `Access-Control-Expose-Headers`.
 //! - A **simple/actual** request's response carries ACAO + ACAC + expose-headers + `Vary: Origin`.
 //!
-//! The middleware is the OUTERMOST layer, so the CORS headers ride on EVERY response (incl. the
-//! anonymous 401 the `cors-simple-requests` scenario asserts ACAO on) and a preflight is answered
-//! before auth runs (a browser preflight carries no credentials).
+//! Preflights are answered before auth, inside overload protection. A decorate-only outer layer
+//! preserves completed CORS decisions and applies its own policy to overload rejections without
+//! answering or admitting requests.
 
-use axum::extract::Request;
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+
+/// Browser origin policy shared by the preflight and response-decoration layers.
+/// The default reflects any Origin; an explicit list matches scheme and host after
+/// ASCII lowercasing, keeping the port exactly as supplied (no default-port inference).
+#[derive(Debug, Clone, Default)]
+pub struct CorsPolicy {
+    origins: Option<Arc<BTreeSet<String>>>,
+}
+
+impl CorsPolicy {
+    /// Parse a comma-separated list of exact `scheme://host[:port]` origins.
+    /// Whitespace around entries is ignored; empty entries and wildcards are errors.
+    pub fn from_origins(origins: &str) -> Result<Self, String> {
+        let mut allowed = BTreeSet::new();
+        for entry in origins.split(',') {
+            let origin = normalize_origin(entry.trim()).ok_or_else(|| {
+                format!(
+                    "SOLID_SERVER_CORS_ORIGINS: invalid origin {entry:?}; expected an exact \
+                     scheme://host[:port] without a path, credentials, query, fragment or wildcard; \
+                     unset the variable to reflect any origin"
+                )
+            })?;
+            allowed.insert(origin);
+        }
+        Ok(Self {
+            origins: Some(Arc::new(allowed)),
+        })
+    }
+
+    /// Read `SOLID_SERVER_CORS_ORIGINS`. Unset reflects any Origin; malformed
+    /// entries refuse startup rather than falling back to the default.
+    pub fn from_env() -> Result<Self, String> {
+        match std::env::var("SOLID_SERVER_CORS_ORIGINS") {
+            Ok(origins) => Self::from_origins(&origins),
+            Err(std::env::VarError::NotPresent) => Ok(Self::default()),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("SOLID_SERVER_CORS_ORIGINS must be valid Unicode".into())
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn is_restricted(&self) -> bool {
+        self.origins.is_some()
+    }
+
+    fn allows(&self, origin: Option<&str>) -> bool {
+        match &self.origins {
+            None => true,
+            Some(origins) => origin
+                .and_then(normalize_origin)
+                .is_some_and(|origin| origins.contains(&origin)),
+        }
+    }
+}
+
+fn normalize_origin(raw: &str) -> Option<String> {
+    let (scheme, authority) = raw.split_once("://")?;
+    let _ = scheme.parse::<axum::http::uri::Scheme>().ok()?;
+    if !authority.is_ascii()
+        || authority.bytes().any(|b| b.is_ascii_whitespace())
+        || authority.contains(['/', '\\', '?', '#', '@', '%', '*'])
+    {
+        return None;
+    }
+    let authority = authority.parse::<axum::http::uri::Authority>().ok()?;
+    let host = authority.host();
+    // Validate without canonicalizing host spelling (including IPv6 compression).
+    if let Some(ipv6) = host.strip_prefix('[') {
+        let _ = ipv6.strip_suffix(']')?.parse::<std::net::Ipv6Addr>().ok()?;
+    } else if host.is_empty()
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_'))
+        || host.trim_end_matches('.').split('.').any(str::is_empty)
+    {
+        return None;
+    }
+    let port = &authority.as_str()[host.len()..];
+    if !port.is_empty() {
+        let digits = port.strip_prefix(':')?;
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let _ = digits.parse::<u16>().ok()?;
+    }
+    Some(format!(
+        "{}://{}{port}",
+        scheme.to_ascii_lowercase(),
+        host.to_ascii_lowercase()
+    ))
+}
 
 /// The methods advertised in a preflight `Access-Control-Allow-Methods` — the LDP verb set, plus
 /// `QUERY` for LWS type search.
@@ -44,21 +142,32 @@ const ALLOW_METHODS: &str = "OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH, QUERY
 /// `Location`/`Allow`/`Accept-*` advertisements, the `WWW-Authenticate` challenge, and `WAC-Allow`.
 const EXPOSE_HEADERS: &str = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, \
      Last-Modified, Link, Location, Vary, Allow, WWW-Authenticate, Accept-Post, Accept-Patch, \
-     Updates-Via, WAC-Allow, Accept-Query, Content-Location";
+     Updates-Via, WAC-Allow, Accept-Query, Content-Location, Retry-After, Preference-Applied";
 
 /// The default `Access-Control-Allow-Headers` for a preflight that did NOT send
 /// `Access-Control-Request-Headers` (a safe baseline covering the Solid auth + content headers).
 const DEFAULT_ALLOW_HEADERS: &str = "Authorization, DPoP, Content-Type, Accept, Slug, Link, \
-     If-Match, If-None-Match, Range";
+     If-Match, If-None-Match, Range, Depth";
+
+// Absence of CORS headers can be a completed decision too. Keep that distinction in response
+// extensions so outer decorators preserve both allowed and denied responses without guessing
+// from headers. The marker is private and never goes on the wire.
+#[derive(Clone, Copy)]
+struct CorsDecided;
 
 /// The axum CORS middleware. Reflects the `Origin` + the preflight's requested headers; answers a
 /// preflight itself; otherwise runs the inner service and decorates the response.
 pub async fn cors_middleware(req: Request, next: Next) -> Response {
-    let origin = req
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
+    cors_middleware_with_policy(State(CorsPolicy::default()), req, next).await
+}
+
+/// The same preflight middleware with a router-configured origin policy.
+pub(crate) async fn cors_middleware_with_policy(
+    State(policy): State<CorsPolicy>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let origin = req.headers().get(header::ORIGIN).cloned();
     let is_options = req.method() == Method::OPTIONS;
     let acrm_present = req
         .headers()
@@ -78,46 +187,87 @@ pub async fn cors_middleware(req: Request, next: Next) -> Response {
     if is_options && acrm_present {
         let mut resp = StatusCode::NO_CONTENT.into_response();
         let h = resp.headers_mut();
-        decorate_common(h, origin.as_deref());
-        set(h, header::ACCESS_CONTROL_ALLOW_METHODS, ALLOW_METHODS);
-        let allow_headers = requested_headers
-            .as_deref()
-            .unwrap_or(DEFAULT_ALLOW_HEADERS);
-        set(h, header::ACCESS_CONTROL_ALLOW_HEADERS, allow_headers);
+        if decorate_common(h, origin.as_ref(), &policy) {
+            set(h, header::ACCESS_CONTROL_ALLOW_METHODS, ALLOW_METHODS);
+            let allow_headers = requested_headers
+                .as_deref()
+                .unwrap_or(DEFAULT_ALLOW_HEADERS);
+            set(h, header::ACCESS_CONTROL_ALLOW_HEADERS, allow_headers);
+        }
+        resp.extensions_mut().insert(CorsDecided);
         return resp;
     }
 
     // Otherwise run the inner service and decorate the response with the CORS headers (on EVERY
     // response, including an error/401, so a cross-origin script can read the outcome + challenge).
     let mut resp = next.run(req).await;
-    decorate_common(resp.headers_mut(), origin.as_deref());
+    decorate_common(resp.headers_mut(), origin.as_ref(), &policy);
+    resp.extensions_mut().insert(CorsDecided);
+    resp
+}
+
+/// Preserve completed CORS decisions; apply this policy only to responses without one.
+pub(crate) async fn cors_response_middleware(
+    State(policy): State<CorsPolicy>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let origin = req.headers().get(header::ORIGIN).cloned();
+    let mut resp = next.run(req).await;
+    if resp.extensions().get::<CorsDecided>().is_none() {
+        decorate_common(resp.headers_mut(), origin.as_ref(), &policy);
+        resp.extensions_mut().insert(CorsDecided);
+    }
     resp
 }
 
 /// The CORS headers common to a preflight and a simple/actual response: reflected ACAO, credentials,
 /// the exposed-headers enumeration, and `Vary: Origin`. When there is no `Origin`, only `Vary:
 /// Origin` is added (so a cache keys correctly) — no ACAO is emitted for a non-CORS request.
-fn decorate_common(headers: &mut HeaderMap, origin: Option<&str>) {
-    // `Vary: Origin` (capital O — the harness's `contains 'Origin'` is case-sensitive). Appended so
-    // it coexists with any Vary the handler already set (e.g. content negotiation).
-    if let Ok(v) = HeaderValue::from_static("Origin")
-        .to_str()
-        .map(str::to_string)
-    {
-        // Merge with an existing Vary rather than clobber it.
-        merge_vary(headers, &v);
+fn decorate_common(
+    headers: &mut HeaderMap,
+    origin: Option<&HeaderValue>,
+    policy: &CorsPolicy,
+) -> bool {
+    // Preserve content-negotiation tokens and avoid adding Origin twice across the two layers.
+    merge_vary(headers, "Origin");
+    let origin_present = origin.is_some();
+    let origin = origin.and_then(|value| value.to_str().ok());
+    if origin_present && !policy.allows(origin) {
+        // Handlers can set their own CORS headers too (for example public id-docs).
+        let grants: Vec<_> = headers
+            .keys()
+            .filter(|name| name.as_str().starts_with("access-control-allow-"))
+            .cloned()
+            .collect();
+        for name in grants {
+            headers.remove(name);
+        }
+        headers.remove(header::ACCESS_CONTROL_EXPOSE_HEADERS);
+        return false;
+    }
+    let wildcard = headers
+        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+        .is_some_and(|value| value == "*");
+    if wildcard {
+        headers.remove(header::ACCESS_CONTROL_ALLOW_CREDENTIALS);
     }
     if let Some(o) = origin {
         if let Ok(value) = HeaderValue::from_str(o) {
-            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+            headers
+                .entry(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .or_insert(value);
         }
-        set(headers, header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true");
-        set(
-            headers,
-            header::ACCESS_CONTROL_EXPOSE_HEADERS,
-            EXPOSE_HEADERS,
-        );
+        if !wildcard {
+            headers
+                .entry(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .or_insert(HeaderValue::from_static("true"));
+        }
+        headers
+            .entry(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .or_insert(HeaderValue::from_static(EXPOSE_HEADERS));
     }
+    policy.allows(origin)
 }
 
 /// Append `value` to the `Vary` header, preserving any existing Vary tokens (de-duplicated,
@@ -162,6 +312,56 @@ mod tests {
         Router::new()
             .route("/r", get(|| async { "ok" }))
             .layer(axum::middleware::from_fn(cors_middleware))
+    }
+
+    #[tokio::test]
+    async fn response_decoration_preserves_existing_headers_and_body() {
+        let app = Router::new()
+            .route(
+                "/r",
+                get(|| async {
+                    let mut response = "unchanged".into_response();
+                    let h = response.headers_mut();
+                    set(
+                        h,
+                        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                        "https://allowed.example",
+                    );
+                    set(h, header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "false");
+                    set(h, header::ACCESS_CONTROL_EXPOSE_HEADERS, "ETag");
+                    set(h, header::VARY, "Accept, Origin");
+                    response
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                CorsPolicy::default(),
+                cors_response_middleware,
+            ));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/r")
+                    .header(header::ORIGIN, "https://suite.jeswr.org")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let h = response.headers();
+        assert_eq!(
+            h[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://allowed.example"
+        );
+        assert_eq!(h[header::ACCESS_CONTROL_ALLOW_CREDENTIALS], "false");
+        assert_eq!(h[header::ACCESS_CONTROL_EXPOSE_HEADERS], "ETag");
+        assert_eq!(h[header::VARY], "Accept, Origin");
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap(),
+            "unchanged"
+        );
     }
 
     #[tokio::test]

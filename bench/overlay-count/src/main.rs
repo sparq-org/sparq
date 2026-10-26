@@ -26,7 +26,7 @@ fn base() -> Graph {
         }
     }
     let graph = Graph::load_str(&ttl, "turtle").unwrap();
-    assert_eq!(graph.store.len(), SUBJECTS * PREDICATES);
+    assert_eq!(graph.store().len(), SUBJECTS * PREDICATES);
     // Freeze the dictionary outside every measured window, including no-delta cases.
     drop(graph.fork());
     graph
@@ -52,7 +52,7 @@ fn fork(base: &Graph, delta: &[[Term; 3]], added: bool) -> Graph {
     } else {
         graph.apply_delta(&[], delta).unwrap();
     }
-    assert_eq!(graph.store.overlay_len(), delta.len());
+    assert_eq!(graph.store().overlay_len(), delta.len());
     graph
 }
 
@@ -64,14 +64,14 @@ fn check_query(graph: &Graph) {
 
 fn run(graph: &Graph, workload: &str, iterations: usize) -> usize {
     let pattern = [
-        Some(graph.dict.lookup(&iri("urn:s:49999"))),
-        Some(graph.dict.lookup(&iri("urn:p:0"))),
+        Some(graph.dict().lookup(&iri("urn:s:49999"))),
+        Some(graph.dict().lookup(&iri("urn:p:0"))),
         None,
     ];
     let mut count = 0;
     for _ in 0..iterations {
         if workload == "scan" {
-            count += black_box(graph.store.scan(black_box(&pattern)).rows.len());
+            count += black_box(graph.store().scan(black_box(&pattern)).rows.len());
         } else {
             let result = query(black_box(graph), black_box(QUERY)).unwrap();
             let b = black_box(result);
@@ -113,7 +113,7 @@ fn main() {
         return;
     }
     let graph = base();
-    println!("{{\"kind\":\"fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"base_triples\":{},\"setup_process_peak_rss_bytes\":{},\"rayon_threads\":1,\"counting\":{}}}", graph.store.len(), rss(), cfg!(feature = "count-alloc"));
+    println!("{{\"kind\":\"fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"base_triples\":{},\"setup_process_peak_rss_bytes\":{},\"rayon_threads\":1,\"counting\":{}}}", graph.store().len(), rss(), cfg!(feature = "count-alloc"));
     for (n, added) in DELETIONS
         .into_iter()
         .map(|n| (n, false))
@@ -138,11 +138,11 @@ fn main() {
                 // Two unrecorded samples warm code/pages, each on an independent fork.
                 for rep in 0..reps + 2 {
                     let sample = fork(&graph, &changes, added);
-                    let heap_cold = sample.store.heap_bytes();
+                    let heap_cold = sample.store().heap_bytes();
                     if phase == "warm" {
                         assert_eq!(run(&sample, workload, 1), 1);
                     }
-                    let heap_before = sample.store.heap_bytes();
+                    let heap_before = sample.store().heap_bytes();
                     let rss_before = rss();
                     #[cfg(feature = "count-alloc")]
                     let baseline = counting::begin();
@@ -155,7 +155,7 @@ fn main() {
                     let counts = (0_u64, 0_u64, 0_u64, 0_u64, 0_u64);
                     assert_eq!(rows, iterations);
                     if rep >= 2 {
-                        println!("{{\"kind\":\"sample\",\"delta\":{n},\"added\":{added},\"workload\":\"{workload}\",\"phase\":\"{phase}\",\"rep\":{},\"iterations\":{iterations},\"elapsed_ns\":{elapsed},\"allocs\":{},\"reallocs\":{},\"requested_bytes\":{},\"peak_live_delta_bytes\":{},\"store_heap_cold\":{heap_cold},\"store_heap_before\":{heap_before},\"store_heap_after\":{},\"process_peak_rss_before\":{rss_before},\"process_peak_rss_after\":{}}}", rep - 2, counts.0, counts.1, counts.2, counts.3, sample.store.heap_bytes(), rss());
+                        println!("{{\"kind\":\"sample\",\"delta\":{n},\"added\":{added},\"workload\":\"{workload}\",\"phase\":\"{phase}\",\"rep\":{},\"iterations\":{iterations},\"elapsed_ns\":{elapsed},\"allocs\":{},\"reallocs\":{},\"requested_bytes\":{},\"peak_live_delta_bytes\":{},\"store_heap_cold\":{heap_cold},\"store_heap_before\":{heap_before},\"store_heap_after\":{},\"process_peak_rss_before\":{rss_before},\"process_peak_rss_after\":{}}}", rep - 2, counts.0, counts.1, counts.2, counts.3, sample.store().heap_bytes(), rss());
                     }
                 }
             }
