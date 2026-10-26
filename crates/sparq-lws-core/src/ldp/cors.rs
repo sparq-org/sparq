@@ -29,7 +29,8 @@
 //! - A **simple/actual** request's response carries ACAO + ACAC + expose-headers + `Vary: Origin`.
 //!
 //! Preflights are answered before auth, inside overload protection. A decorate-only outer layer
-//! adds the same headers to overload rejections without answering or admitting requests.
+//! preserves completed CORS decisions and applies its own policy to overload rejections without
+//! answering or admitting requests.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -148,6 +149,12 @@ const EXPOSE_HEADERS: &str = "Accept-Ranges, Content-Length, Content-Range, Cont
 const DEFAULT_ALLOW_HEADERS: &str = "Authorization, DPoP, Content-Type, Accept, Slug, Link, \
      If-Match, If-None-Match, Range, Depth";
 
+// Absence of CORS headers can be a completed decision too. Keep that distinction in response
+// extensions so outer decorators preserve both allowed and denied responses without guessing
+// from headers. The marker is private and never goes on the wire.
+#[derive(Clone, Copy)]
+struct CorsDecided;
+
 /// The axum CORS middleware. Reflects the `Origin` + the preflight's requested headers; answers a
 /// preflight itself; otherwise runs the inner service and decorates the response.
 pub async fn cors_middleware(req: Request, next: Next) -> Response {
@@ -187,6 +194,7 @@ pub(crate) async fn cors_middleware_with_policy(
                 .unwrap_or(DEFAULT_ALLOW_HEADERS);
             set(h, header::ACCESS_CONTROL_ALLOW_HEADERS, allow_headers);
         }
+        resp.extensions_mut().insert(CorsDecided);
         return resp;
     }
 
@@ -194,10 +202,11 @@ pub(crate) async fn cors_middleware_with_policy(
     // response, including an error/401, so a cross-origin script can read the outcome + challenge).
     let mut resp = next.run(req).await;
     decorate_common(resp.headers_mut(), origin.as_ref(), &policy);
+    resp.extensions_mut().insert(CorsDecided);
     resp
 }
 
-/// Decorate overload responses without short-circuiting preflights or replacing existing CORS headers.
+/// Preserve completed CORS decisions; apply this policy only to responses without one.
 pub(crate) async fn cors_response_middleware(
     State(policy): State<CorsPolicy>,
     req: Request,
@@ -205,7 +214,10 @@ pub(crate) async fn cors_response_middleware(
 ) -> Response {
     let origin = req.headers().get(header::ORIGIN).cloned();
     let mut resp = next.run(req).await;
-    decorate_common(resp.headers_mut(), origin.as_ref(), &policy);
+    if resp.extensions().get::<CorsDecided>().is_none() {
+        decorate_common(resp.headers_mut(), origin.as_ref(), &policy);
+        resp.extensions_mut().insert(CorsDecided);
+    }
     resp
 }
 

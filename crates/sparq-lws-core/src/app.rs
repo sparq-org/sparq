@@ -225,6 +225,8 @@ where
 /// Linked Web Storage router, so both protocol surfaces carry the same DoS protections.
 /// A decorate-only CORS layer outside the stack makes rejections readable by browser clients;
 /// preflight handling stays inside the stack and remains subject to admission and rate limits.
+/// Completed inner CORS decisions are preserved; the default reflection policy applies to
+/// responses that have not passed through an inner CORS layer.
 ///
 /// The body-limit layer sets the `DefaultBodyLimit` that axum's extractors read; a handler that
 /// reads the body itself (the LWS dispatcher) must apply `overload.body_limit_bytes` on its own.
@@ -233,7 +235,8 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
 }
 
 /// Wrap application routes in the overload stack with an explicit browser origin policy.
-/// Pass the same policy configured on the inner Solid or LWS router.
+/// Completed inner CORS decisions are preserved. This policy governs responses that have not
+/// passed through an inner CORS layer; pass the router's policy to use it for overload rejections too.
 pub fn with_overload_layers_and_cors(
     app: Router,
     overload: OverloadConfig,

@@ -81,9 +81,12 @@ retain `Access-Control-Allow-Origin: *` for allowed origins, without
 
 Embedders can parse a list with `ldp::cors::CorsPolicy::from_origins`, then set
 `AppState::cors` (Solid) or `LwsConfig::cors` (LWS). `LwsConfig::from_env` reads the
-environment policy too. When wrapping an LWS router with overload protection, pass the
-same policy to `app::with_overload_layers_and_cors(router, overload, policy)`; the
-existing `with_overload_layers` helper uses the default reflection policy.
+environment policy too. Both overload helpers preserve completed inner CORS decisions,
+including responses without CORS grants. `app::with_overload_layers(router, overload)`
+uses default reflection only for responses that did not reach an inner CORS layer
+(such as rate-limit, timeout, or body-limit rejections). Pass the router's policy to
+`app::with_overload_layers_and_cors(router, overload, policy)` to apply it to those
+responses too.
 
 Browser scripts can read `Link`, `ETag`, `Location`,
 `WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`

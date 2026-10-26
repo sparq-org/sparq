@@ -16,8 +16,8 @@ use solid_oidc_verifier::{
     config::VerifierConfig, replay::InMemoryReplayStore, verifier::Verifier,
 };
 use sparq_lws_core::app::{
-    build_router, build_router_with_overload, with_overload_layers_and_cors, AppState,
-    OverloadConfig,
+    build_router, build_router_with_overload, with_overload_layers, with_overload_layers_and_cors,
+    AppState, OverloadConfig,
 };
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::identity::IdentityConfig;
@@ -316,6 +316,82 @@ async fn overload_rejections_apply_the_allowlist_in_both_modes() {
                     .contains_key(header::ACCESS_CONTROL_ALLOW_METHODS));
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn default_overload_wrapper_preserves_inner_cors_decisions() {
+    for method in ["GET", "OPTIONS"] {
+        for origin in [ALLOWED, UNLISTED] {
+            let router = app(true, CorsPolicy::from_origins(LIST).unwrap(), None, false).await;
+            let mut overload = OverloadConfig::new(8, None);
+            overload.rate_limiter = Some(RateLimiter::new(1.0 / 86400.0, 1.0, 0, false, false));
+            let app = with_overload_layers(router, overload);
+            let response = app
+                .clone()
+                .oneshot(request(method, "/", Some(origin)))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if method == "OPTIONS" {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::OK
+                }
+            );
+            if origin == ALLOWED {
+                assert_allowed(&response, origin);
+            } else {
+                assert_unlisted(&response);
+            }
+
+            let rejected = app
+                .oneshot(request(method, "/", Some(origin)))
+                .await
+                .unwrap();
+            assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert!(rejected.headers().contains_key(header::RETRY_AFTER));
+            assert_allowed(&rejected, origin);
+            assert!(!rejected
+                .headers()
+                .contains_key(header::ACCESS_CONTROL_ALLOW_METHODS));
+        }
+    }
+}
+
+#[tokio::test]
+async fn explicit_overload_policy_preserves_inner_allowed_responses() {
+    for method in ["GET", "OPTIONS"] {
+        let router = app(true, CorsPolicy::from_origins(LIST).unwrap(), None, false).await;
+        let mut overload = OverloadConfig::new(8, None);
+        overload.rate_limiter = Some(RateLimiter::new(1.0 / 86400.0, 1.0, 0, false, false));
+        let app = with_overload_layers_and_cors(
+            router,
+            overload,
+            CorsPolicy::from_origins("https://outer.example").unwrap(),
+        );
+        let response = app
+            .clone()
+            .oneshot(request(method, "/", Some(ALLOWED)))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            if method == "OPTIONS" {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::OK
+            }
+        );
+        assert_allowed(&response, ALLOWED);
+
+        let rejected = app
+            .oneshot(request(method, "/", Some(ALLOWED)))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_unlisted(&rejected);
     }
 }
 
