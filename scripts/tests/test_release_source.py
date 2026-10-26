@@ -312,6 +312,20 @@ class TestWorkflowWiring(unittest.TestCase):
         self.assertLess(steps[publish]["run"].index("check-release-source.py"),
                         steps[publish]["run"].index("npm publish"))
 
+    def test_native_release_uses_the_shared_matrix_and_requires_all_platforms(self):
+        release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        package = release["jobs"]["package"]
+        self.assertEqual(package["uses"], "./.github/workflows/build-matrix.yml")
+        self.assertTrue(package["with"]["solid-server-native"])
+        matrix = yaml.safe_load((ROOT / ".github/workflows/build-matrix.yml").read_text())
+        build = matrix["jobs"]["build"]
+        self.assertIn("!(inputs.solid-server-native && matrix.tier == 'arm64-linux')", build["continue-on-error"])
+        native = next(step for step in build["steps"] if step.get("name") == "Build native Solid/LWS server")
+        for tier in ("x64-baseline", "arm64-linux", "x64-darwin", "arm64-darwin", "win-x64-baseline"):
+            self.assertIn(f'"{tier}"', native["if"])
+        self.assertIn("cargo auditable build --release --locked -p sparq-lws-core --features authn-saml", native["run"])
+        self.assertNotIn("RUSTFLAGS", native["run"])
+
     def test_source_regressions_run_in_ci(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/docs-quality.yml").read_text())
         checks = [step for job in workflow["jobs"].values() for step in job.get("steps", [])

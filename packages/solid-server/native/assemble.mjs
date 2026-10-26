@@ -25,6 +25,7 @@ for (const platform of platforms) {
     execFileSync(os === 'win32' ? 'unzip' : 'tar', os === 'win32' ? ['-q', path, '-d', scratch] : ['-xzf', path, '-C', scratch]);
     const root = join(scratch, `sparq-cli-v${host.version}-${tier}`);
     const output = resolve(destination, platform);
+    rmSync(output, { recursive: true, force: true });
     mkdirSync(join(output, 'bin'), { recursive: true });
     copyFileSync(join(root, executable), join(output, 'bin', executable));
     chmodSync(join(output, 'bin', executable), 0o755);

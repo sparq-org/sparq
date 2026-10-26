@@ -102,9 +102,10 @@ jobs:
     # a failed soft row reports success to `needs`, uploads neither its digests nor its archive
     # (digests are uploaded before the archive, so a published archive always has a subject),
     # and the release ships without it. The `hashes` job re-checks the blocking set by name.
+    # Native npm assembly requires arm64-linux too when requested.
     # `binary` mode (dist.yml) stays all-blocking: scripts/sparq-launch.sh falls back across
     # tiers, so a missing tier there could select a binary the CPU cannot run.
-    continue-on-error: ${{ inputs.mode == 'archive' && matrix.soft }}
+    continue-on-error: ${{ inputs.mode == 'archive' && matrix.soft && !(inputs.solid-server-native && matrix.tier == 'arm64-linux') }}
     strategy:
       fail-fast: false
       matrix:

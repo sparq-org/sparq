@@ -1,40 +1,26 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createConnection, createServer } from 'node:net';
-import { setTimeout as delay } from 'node:timers/promises';
 import { nativePackageName } from './native-platforms.js';
 
 const require = createRequire(import.meta.url);
+const host = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 export function resolveNativeBinary() {
   const name = nativePackageName();
   const executable = process.platform === 'win32' ? 'sparq-lws-core.exe' : 'sparq-lws-core';
+  let manifest;
+  let binary;
   try {
-    return require.resolve(`${name}/bin/${executable}`);
+    manifest = JSON.parse(readFileSync(require.resolve(`${name}/package.json`), 'utf8'));
+    binary = require.resolve(`${name}/bin/${executable}`);
   } catch (cause) {
-    throw new Error(`missing native server package ${name}; install ${name} at the same version as @sparq-org/solid-server and enable optional dependencies`, { cause });
+    throw new Error(`missing native server package ${name}; install ${name}@${host.version} and enable optional dependencies`, { cause });
   }
-}
-
-async function choosePort(port) {
-  const probe = createServer();
-  await new Promise((resolve, reject) => {
-    probe.once('error', reject);
-    probe.listen(port, '127.0.0.1', resolve);
-  });
-  const chosen = probe.address().port;
-  await new Promise((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
-  return chosen;
-}
-
-function listening(port) {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: '127.0.0.1', port });
-    const finish = (ready) => { socket.destroy(); resolve(ready); };
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-    socket.setTimeout(200, () => finish(false));
-  });
+  if (manifest.name !== name || manifest.version !== host.version) {
+    throw new Error(`native server package ${name} must match @sparq-org/solid-server version ${host.version}`);
+  }
+  return binary;
 }
 
 export async function startNativeServer(options, { normalizePort, normalizeBaseUrl }) {
@@ -44,56 +30,95 @@ export async function startNativeServer(options, { normalizePort, normalizeBaseU
   if (options.data !== undefined && (typeof options.data !== 'string' || !options.data.trim())) {
     throw new TypeError('data must be a non-empty directory path');
   }
+  if (options.signal !== undefined && !(options.signal instanceof AbortSignal)) {
+    throw new TypeError('signal must be an AbortSignal');
+  }
+  options.signal?.throwIfAborted();
   const requestedPort = normalizePort(options.port);
   const baseUrl = normalizeBaseUrl(options.baseUrl, requestedPort);
   const binary = resolveNativeBinary();
-  const port = await choosePort(requestedPort);
   const env = {
     ...process.env,
     SOLID_SERVER_PROTOCOL: options.protocol ?? 'solid',
-    SOLID_SERVER_BIND: `127.0.0.1:${port}`,
+    SOLID_SERVER_BIND: `127.0.0.1:${requestedPort}`,
     SOLID_SERVER_BASE_URL: baseUrl,
+    SOLID_SERVER_READY_STDOUT: '1',
     PSS_SPARQ_BACKEND: process.env.PSS_SPARQ_BACKEND ?? 'memory',
   };
   if (options.data !== undefined) {
     env.PSS_SPARQ_BACKEND = 'embedded';
     env.SOLID_SERVER_SPARQ_DIR = options.data;
   }
-  const child = spawn(binary, [], { env, stdio: ['ignore', 'inherit', 'pipe'], windowsHide: true });
+  const child = spawn(binary, [], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let stderr = '';
-  let spawnError;
   child.stderr.on('data', (chunk) => {
     stderr = (stderr + chunk).slice(-8192);
-    process.stderr.write(chunk);
   });
-  child.once('error', (error) => { spawnError = error; });
+  child.stderr.pipe(process.stderr, { end: false });
   const exited = new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })));
-  const stop = async (signal = 'SIGTERM') => {
-    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
-    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
-    timer.unref();
-    try { await exited; } finally { clearTimeout(timer); }
-  };
-  try {
-    const deadline = Date.now() + 30_000;
-    for (;;) {
-      if (spawnError) throw spawnError;
-      if (child.exitCode !== null || child.signalCode !== null) {
-        throw Object.assign(new Error(`native server exited during startup: ${stderr.trim()}`), {
-          nativeExitCode: child.exitCode, nativeSignal: child.signalCode,
-        });
-      }
-      if (await listening(port)) break;
-      if (Date.now() >= deadline) throw new Error('native server did not start listening');
-      await delay(25);
+  let stopping;
+  const stop = (signal = 'SIGTERM') => {
+    if (!stopping) {
+      stopping = (async () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+        const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+        timer.unref();
+        try { await exited; } finally { clearTimeout(timer); }
+      })();
     }
+    return stopping;
+  };
+  const onAbort = () => { void stop(options.signal.reason === 'SIGINT' ? 'SIGINT' : 'SIGTERM'); };
+  options.signal?.addEventListener('abort', onAbort, { once: true });
+  void exited.then(() => options.signal?.removeEventListener('abort', onAbort));
+  try {
+    const address = await new Promise((resolve, reject) => {
+      let pending = '';
+      let settled = false;
+      const finish = (error, address) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error); else resolve(address);
+      };
+      const timer = setTimeout(() => finish(new Error('native server did not report its bound listener')), 30_000);
+      child.once('error', (error) => finish(error));
+      void exited.then(({ code, signal }) => finish(Object.assign(
+        new Error(`native server exited during startup: ${stderr.trim()}`),
+        { nativeExitCode: code, nativeSignal: signal },
+      )));
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        if (settled) return;
+        // The child reports its bound listener in one bounded JSON line.
+        if (pending.length + chunk.length > 8192) {
+          finish(new Error('native server listener report is too large'));
+          return;
+        }
+        pending += chunk;
+        if (!pending.includes('\n')) return;
+        try {
+          const report = JSON.parse(pending.slice(0, pending.indexOf('\n')));
+          const match = /^127\.0\.0\.1:(\d+)$/.exec(report.address);
+          const port = Number(match?.[1]);
+          if (report.event !== 'native-listening' || !['http', 'https'].includes(report.scheme)
+            || !Number.isInteger(port) || port < 1 || port > 65535
+            || (requestedPort !== 0 && port !== requestedPort)) {
+            throw new Error('native server returned an invalid listener report');
+          }
+          finish(null, { address: '127.0.0.1', family: 'IPv4', port, scheme: report.scheme });
+        } catch (error) { finish(error); }
+        pending = '';
+      });
+    });
+    options.signal?.throwIfAborted();
+    return {
+      child, exited, baseUrl, scheme: address.scheme,
+      address: () => ({ address: address.address, family: address.family, port: address.port }),
+      closeAsync: (signal) => stop(signal),
+    };
   } catch (error) {
     await stop();
     throw error;
   }
-  return {
-    child, exited, baseUrl,
-    address: () => ({ address: '127.0.0.1', family: 'IPv4', port }),
-    closeAsync: () => stop(),
-  };
 }

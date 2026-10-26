@@ -938,6 +938,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // resolved address (and avoids re-binding through the numeric-only `SocketAddr` path).
             let std_listener = tokio_listener.into_std()?;
             std_listener.set_nonblocking(true)?;
+            report_bound_listener(std_listener.local_addr()?, "https")?;
 
             // Graceful-shutdown PARITY: wire `shutdown_signal()` to `Handle::graceful_shutdown` so
             // Ctrl-C drains in-flight TLS connections instead of dropping them, matching the plain
@@ -1038,6 +1039,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // defences (admission control, the per-IP rate limiter, the request timeout) DO apply here.
         None => {
             let listener = tokio::net::TcpListener::bind(&bind).await?;
+            report_bound_listener(listener.local_addr()?, "http")?;
             // `connection_limiter` is unused on this path (see above); a fronting proxy / the TLS path
             // owns the connection cap in production. Drop it explicitly so the intent is clear.
             drop(connection_limiter);
@@ -1060,6 +1062,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // drains so the task's ownership/lifetime stays bounded to the server boot that created it.
     if let Some(task) = reconcile_task {
         task.abort();
+    }
+    Ok(())
+}
+
+// Optional parent-process handoff, emitted only after this process owns the listener.
+fn report_bound_listener(address: std::net::SocketAddr, scheme: &str) -> std::io::Result<()> {
+    if std::env::var("SOLID_SERVER_READY_STDOUT").as_deref() == Ok("1") {
+        use std::io::Write;
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{}", serde_json::json!({
+            "event": "native-listening", "address": address.to_string(), "scheme": scheme,
+        }))?;
+        stdout.flush()?;
     }
     Ok(())
 }

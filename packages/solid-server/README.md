@@ -57,7 +57,7 @@ npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:300
 `sparq-lws-core` executable; `--native` selects that executable for Solid mode,
 including WebSocketChannel2023 notifications. The native server keeps its own
 authentication and protocol configuration; see the
-[Solid/LWS server skill](../../skills/solid-lws-server/SKILL.md).
+[Solid/LWS server skill](https://github.com/sparq-org/sparq/blob/main/skills/solid-lws-server/SKILL.md).
 `ownerWebid` and `oidc` are wasm host options and are rejected in native mode.
 
 npm installs an optional `@sparq-org/solid-server-native-<platform>` package at
@@ -65,7 +65,8 @@ exactly the host version for `linux-x64`, `linux-arm64`, `darwin-x64`,
 `darwin-arm64`, or `win32-x64`. These packages ship their executables without
 lifecycle scripts, so installation with `ignore-scripts=true` works. Resolution
 uses only installed files. A missing platform package produces an error naming
-that package. The CLI forwards SIGINT/SIGTERM and exits with the native process.
+that package. Installed package versions must match the host. The CLI forwards
+SIGINT/SIGTERM, bounds shutdown, and exits with the native process.
 
 Native mode binds loopback and maps `--port` to `SOLID_SERVER_BIND`, and
 `--base-url` to `SOLID_SERVER_BASE_URL`. It inherits the other documented native
@@ -83,12 +84,16 @@ const nativeServer = await startSolidServer({
   baseUrl: 'http://127.0.0.1:3000',
 });
 // nativeServer.child is the ChildProcess; nativeServer.exited reports code/signal.
-// nativeServer.address() exposes the listener; await nativeServer.closeAsync() stops it.
+// nativeServer.address() exposes the bound listener; nativeServer.scheme is http or https.
+// await nativeServer.closeAsync() stops it; closeAsync('SIGINT') forwards SIGINT instead.
 ```
 
 The default Solid mode continues to return the existing Node `http.Server`.
+Native callers can supply an `AbortSignal` through `signal` to cancel startup or
+stop the child later. The launcher waits for the child's bound-listener report,
+including its actual ephemeral port and transport scheme.
 
-## ✨ Scope
+## ✨ Default wasm scope
 
 - PUT/GET/POST/PATCH/DELETE and WAC run through the real `sparq-lws-core`
   router over in-wasm metadata and blob stores.

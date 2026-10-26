@@ -37,8 +37,10 @@ test('release archives assemble all platform packages with matching versions, bi
     } else {
       execFileSync('tar', ['czf', join(artifacts, `${root}.tar.gz`), root], { cwd: dir });
     }
-    execFileSync(process.execPath, [join(packageDir, 'native/assemble.mjs'), artifacts, join(dir, 'packages'), platform]);
     const generated = join(dir, 'packages', platform);
+    await mkdir(join(generated, 'bin'), { recursive: true });
+    await writeFile(join(generated, 'bin', 'stale-executable'), 'old build');
+    execFileSync(process.execPath, [join(packageDir, 'native/assemble.mjs'), artifacts, join(dir, 'packages'), platform]);
     const pkg = JSON.parse(await readFile(join(generated, 'package.json')));
     const name = `@sparq-org/solid-server-native-${platform}`;
     assert.equal(pkg.name, name);
@@ -50,6 +52,7 @@ test('release archives assemble all platform packages with matching versions, bi
     assert.equal(await readFile(join(generated, 'LICENSE'), 'utf8'), 'license fixture');
     assert.ok((await readFile(join(generated, 'README.md'), 'utf8')).includes(name));
     const packed = JSON.parse(execFileSync('npm', ['pack', generated, '--dry-run', '--ignore-scripts', '--json'], { encoding: 'utf8' }));
+    assert.deepEqual(packed[0].files.map((entry) => entry.path).sort(), ['LICENSE', 'README.md', `bin/${executable}`, 'package.json'].sort());
     for (const file of ['package.json', 'README.md', 'LICENSE', `bin/${executable}`]) {
       assert.ok(packed[0].files.some((entry) => entry.path === file), `${name} must pack ${file}`);
     }

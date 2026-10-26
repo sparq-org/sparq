@@ -13,11 +13,13 @@ async function main() {
 
   let server;
   let pendingSignal;
+  const controller = new AbortController();
   const shutdown = (signal) => {
     pendingSignal = signal;
+    controller.abort(signal);
     if (!server) return;
     if (server.child) {
-      server.child.kill(signal);
+      void server.closeAsync(signal);
     } else {
       void server.closeAsync().catch((error) => {
         process.stderr.write(`${error.message}\n`);
@@ -27,13 +29,19 @@ async function main() {
   };
   const onInt = () => shutdown('SIGINT');
   const onTerm = () => shutdown('SIGTERM');
-  process.once('SIGINT', onInt);
-  process.once('SIGTERM', onTerm);
+  process.on('SIGINT', onInt);
+  process.on('SIGTERM', onTerm);
   try {
-    server = await startSolidServer(parsed.options);
+    server = await startSolidServer({
+      ...parsed.options,
+      ...((parsed.options.native || parsed.options.protocol === 'lws') ? { signal: controller.signal } : {}),
+    });
   } catch (error) {
     process.off('SIGINT', onInt);
     process.off('SIGTERM', onTerm);
+    if (controller.signal.aborted && error === controller.signal.reason) {
+      throw Object.assign(new Error(`startup interrupted by ${pendingSignal}`), { nativeSignal: pendingSignal });
+    }
     throw error;
   }
   if (pendingSignal) shutdown(pendingSignal);
@@ -43,7 +51,7 @@ async function main() {
   }
   process.stdout.write(`${JSON.stringify({
     event: 'listening',
-    url: `http://127.0.0.1:${address.port}`,
+    url: `${server.scheme ?? 'http'}://127.0.0.1:${address.port}`,
     baseUrl: parsed.options.baseUrl ?? `http://127.0.0.1:${address.port}`,
     ...(server.child ? {
       protocol: parsed.options.protocol ?? 'solid',

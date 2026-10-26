@@ -141,6 +141,9 @@ export async function startSolidServer(options = {}) {
   if (options.data !== undefined) {
     throw new TypeError('data requires --native or --protocol lws');
   }
+  if (options.signal !== undefined) {
+    throw new TypeError('signal requires --native or --protocol lws');
+  }
   const port = normalizePort(options.port);
   const baseUrl = normalizeBaseUrl(options.baseUrl, port);
   const ownerWebid = normalizeOwnerWebid(options.ownerWebid);

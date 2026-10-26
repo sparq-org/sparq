@@ -32,12 +32,17 @@ npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:300
 native executable. npm supplies optional platform packages for Linux x64/arm64,
 Darwin x64/arm64 and Windows x64, at exactly the host version. They install with
 `ignore-scripts=true`. Runtime resolution uses installed files; a missing
-package is an error naming the required package. Signals reach the native child.
+package is an error naming the required package, and an installed version must
+match the host. Signals reach the native child and shutdown has a deadline.
 
 `startSolidServer({ protocol: 'lws', port, baseUrl })` and
 `startSolidServer({ protocol: 'solid', native: true, port, baseUrl })` return a
-handle with `child`, `exited` (a promise of `{ code, signal }`), `address()` and
-`closeAsync()`. Default Solid mode returns the existing Node server. Native mode
+handle with `child`, `exited` (a promise of `{ code, signal }`), `address()`,
+`scheme` (`http` or `https`) and `closeAsync(signal = 'SIGTERM')` (also accepts
+`SIGINT`). Native `signal: AbortSignal` cancels startup or stops the child after
+startup. Readiness comes from the child's bound listener, including the actual
+port when `port: 0` is used; provide `baseUrl` explicitly with an ephemeral port.
+Default Solid mode returns the existing Node server. Native mode
 uses the native authentication settings below; wasm `ownerWebid`/`oidc` options
 are rejected. `--port` sets `SOLID_SERVER_BIND=127.0.0.1:<port>`;
 `--base-url` sets `SOLID_SERVER_BASE_URL`. Other native environment settings are
@@ -45,6 +50,13 @@ inherited. `PSS_SPARQ_BACKEND` defaults to `memory`. `--data <dir>` (API: `data`
 sets `PSS_SPARQ_BACKEND=embedded` and `SOLID_SERVER_SPARQ_DIR=<dir>`; the current
 binary's startup checks refuse this durable configuration pending the durable
 blob backend. Use the default ephemeral backend for local development.
+
+`SOLID_SERVER_READY_STDOUT` defaults to unset. At `1`, the native binary emits
+one flushed JSON line on stdout after binding its TCP listener:
+`{"event":"native-listening","address":"127.0.0.1:3000","scheme":"http"}`.
+The scheme is `https` when terminating TLS. The npm launcher sets this variable
+and consumes the line; native callers can use it for process supervision. Other
+values leave stdout unchanged.
 
 ## Start a local server
 

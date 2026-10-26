@@ -16,6 +16,8 @@ export interface SolidServerOptions {
   native?: boolean;
   /** Native embedded snapshot directory, subject to the binary's backend checks. */
   data?: string;
+  /** Native mode: abort startup or stop the child with a bounded shutdown. */
+  signal?: AbortSignal;
 }
 
 export interface SolidHttpServer extends Server {
@@ -27,8 +29,9 @@ export interface NativeSolidServer {
   child: ChildProcess;
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   baseUrl: string;
+  scheme: 'http' | 'https';
   address(): { address: string; family: 'IPv4'; port: number };
-  closeAsync(): Promise<void>;
+  closeAsync(signal?: 'SIGINT' | 'SIGTERM'): Promise<void>;
 }
 
 /** Start a loopback-only local-development server, with ephemeral storage by default. */
