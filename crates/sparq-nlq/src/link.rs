@@ -519,10 +519,10 @@ impl<'g> EntityLinker<'g> {
             let Some(pid) = self.graph.id_of(&Term::NamedNode(pred)) else {
                 continue;
             };
-            let scan = self.graph.store.scan(&[Some(sid), Some(pid), None]);
+            let scan = self.graph.store().scan(&[Some(sid), Some(pid), None]);
             for row in scan.rows.iter() {
                 let [_, _, o] = scan.to_spo(row);
-                if let Term::Literal(lit) = self.graph.dict.term(o) {
+                if let Term::Literal(lit) = self.graph.dict().term(o) {
                     return Some(lit.value().to_string());
                 }
             }
@@ -665,7 +665,7 @@ fn build_value_index(graph: &Graph) -> BTreeMap<String, Vec<ValueEntry>> {
             Some((cur, preds, uses)) if *cur == o => {
                 *uses += 1;
                 if preds.len() < MAX_VALUE_PREDICATES {
-                    if let Term::NamedNode(pred) = graph.dict.term(p) {
+                    if let Term::NamedNode(pred) = graph.dict().term(p) {
                         if !preds.contains(&pred) {
                             preds.push(pred);
                         }
@@ -682,7 +682,7 @@ fn build_value_index(graph: &Graph) -> BTreeMap<String, Vec<ValueEntry>> {
                     return finish_value_index(idx);
                 }
                 let mut preds = Vec::new();
-                if let Term::NamedNode(pred) = graph.dict.term(p) {
+                if let Term::NamedNode(pred) = graph.dict().term(p) {
                     preds.push(pred);
                 }
                 run = Some((o, preds, 1));
@@ -705,7 +705,7 @@ fn push_value(
     predicates: Vec<NamedNode>,
     uses: u64,
 ) -> bool {
-    let Term::Literal(literal) = graph.dict.term(object) else {
+    let Term::Literal(literal) = graph.dict().term(object) else {
         return false;
     };
     if literal.value().is_empty() || literal.value().chars().count() > MAX_VALUE_CHARS {
@@ -753,11 +753,11 @@ fn build_label_index(graph: &Graph) -> BTreeMap<String, (NamedNode, String, f64)
         };
         // Subject-bound is unavailable on the public scan; iterate predicate-bound via
         // the store's pattern scan.
-        let scan = graph.store.scan(&[None, Some(pid), None]);
+        let scan = graph.store().scan(&[None, Some(pid), None]);
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
             let (Term::NamedNode(subj), Term::Literal(lit)) =
-                (graph.dict.term(s), graph.dict.term(o))
+                (graph.dict().term(s), graph.dict().term(o))
             else {
                 continue;
             };
@@ -827,10 +827,10 @@ fn build_predicate_index(graph: &Graph) -> BTreeMap<String, (NamedNode, u64)> {
             continue;
         }
         last = Some(p);
-        let Term::NamedNode(pred) = graph.dict.term(p) else {
+        let Term::NamedNode(pred) = graph.dict().term(p) else {
             continue;
         };
-        let triples = graph.store.pred_stat(p).map_or(0, |s| s.count) as u64;
+        let triples = graph.store().pred_stat(p).map_or(0, |s| s.count) as u64;
         for name in local_name_forms(pred.as_str()) {
             // Prefer the higher-triple predicate when two share a local name.
             match idx.get(&name) {

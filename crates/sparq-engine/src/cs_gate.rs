@@ -27,7 +27,7 @@ fn star_patterns(graph: &Graph, preds: &[Id]) -> Vec<TriplePattern> {
         .iter()
         .enumerate()
         .map(|(i, &p)| {
-            let oxrdf::Term::NamedNode(nn) = graph.dict.term(p) else { panic!("predicate is an IRI") };
+            let oxrdf::Term::NamedNode(nn) = graph.dict().term(p) else { panic!("predicate is an IRI") };
             TriplePattern {
                 subject: TermPattern::Variable(s.clone()),
                 predicate: NamedNodePattern::NamedNode(nn),
@@ -68,7 +68,7 @@ fn true_card(graph: &Graph, preds: &[Id]) -> usize {
     let where_clause: String = preds
         .iter()
         .enumerate()
-        .map(|(i, &p)| format!("?s {} ?o{i} . ", graph.dict.term(p)))
+        .map(|(i, &p)| format!("?s {} ?o{i} . ", graph.dict().term(p)))
         .collect();
     crate::count(graph, &format!("SELECT * WHERE {{ {where_clause}}}")).unwrap()
 }

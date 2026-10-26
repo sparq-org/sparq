@@ -862,16 +862,16 @@ fn triple_from_ids(
     p: sparq_core::dict::Id,
     o: sparq_core::dict::Id,
 ) -> Triple {
-    let subject: NamedOrBlankNode = match graph.dict.term(s) {
+    let subject: NamedOrBlankNode = match graph.dict().term(s) {
         Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
         Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
         other => unreachable!("non-IRI/blank subject in store: {other}"),
     };
-    let predicate = match graph.dict.term(p) {
+    let predicate = match graph.dict().term(p) {
         Term::NamedNode(n) => n,
         other => unreachable!("non-IRI predicate in store: {other}"),
     };
-    let object = graph.dict.term(o);
+    let object = graph.dict().term(o);
     Triple {
         subject,
         predicate,
@@ -959,7 +959,7 @@ impl<'g> IdTurtleWriter<'g> {
             return None;
         }
         let start = self.arena.len();
-        let is_type = match self.graph.dict.term_parts(id) {
+        let is_type = match self.graph.dict().term_parts(id) {
             TermParts::Iri { prefix, suffix } => {
                 self.iri.clear();
                 self.iri.push_str(prefix);
@@ -1015,7 +1015,7 @@ impl<'g> IdTurtleWriter<'g> {
             return;
         }
         let graph = self.graph;
-        match graph.dict.term_parts(id) {
+        match graph.dict().term_parts(id) {
             TermParts::Lit { value, datatype, lang: None } => {
                 out.push('"');
                 escape_string(value, out);
@@ -1036,7 +1036,7 @@ impl<'g> IdTurtleWriter<'g> {
             }
             _ => {
                 // Triple terms / directional language tags: the generic renderer + header walk.
-                let term = graph.dict.term(id);
+                let term = graph.dict().term(id);
                 write_term(&term, self.prefixes, out);
                 let (table, used) = (&self.table, &mut self.used);
                 collect_iris(&term, &mut |iri: &str| table.note(iri, used));
@@ -1159,7 +1159,7 @@ pub fn graph_to_turtle_streaming<W: std::io::Write>(
 /// the dataset writers.
 fn dataset_graphs(graph: &Graph) -> Vec<(Option<Term>, Vec<Triple>)> {
     let mut out: Vec<(Option<Term>, Vec<Triple>)> = vec![(None, graph_triples(graph))];
-    for (name, g) in &graph.named {
+    for (name, g) in graph.named() {
         out.push((Some(name.clone()), graph_triples(g)));
     }
     out
@@ -2714,11 +2714,11 @@ mod tests {
             nt_sorted(b),
             "default graph\n--- serialized ---\n{ser}"
         );
-        assert_eq!(a.named.len(), b.named.len(), "named graph count\n{ser}");
+        assert_eq!(a.named().len(), b.named().len(), "named graph count\n{ser}");
         // Match named graphs by name term, compare contents.
-        for (name, ag) in &a.named {
+        for (name, ag) in a.named() {
             let bg = b
-                .named
+                .named()
                 .iter()
                 .find(|(n, _)| n == name)
                 .map(|(_, g)| g)
@@ -3379,13 +3379,13 @@ ex:bob
                 "{form:?} default-graph round-trip\n--- doc ---\n{doc}\n--- nq ---\n{nq}"
             );
             assert_eq!(
-                g0.named.len(),
-                g1.named.len(),
+                g0.named().len(),
+                g1.named().len(),
                 "{form:?} named graph count\n{doc}"
             );
-            for (name, ag) in &g0.named {
+            for (name, ag) in g0.named() {
                 let bg = g1
-                    .named
+                    .named()
                     .iter()
                     .find(|(n, _)| n == name)
                     .map(|(_, g)| g)
@@ -3401,7 +3401,7 @@ ex:bob
 
     /// Total triple count across the default graph and every named graph.
     fn triple_count(g: &Graph) -> usize {
-        g.iter_ids().count() + g.named.iter().map(|(_, ng)| ng.iter_ids().count()).sum::<usize>()
+        g.iter_ids().count() + g.named().iter().map(|(_, ng)| ng.iter_ids().count()).sum::<usize>()
     }
 
     /// Blank-node-blind round-trip check for graphs that exercise `@list` collapsing.
@@ -4444,10 +4444,10 @@ ex:bob
             nt_sorted(&g1),
             "compaction round-trip not lossless\n--- doc ---\n{doc}"
         );
-        assert_eq!(g0.named.len(), g1.named.len(), "named graph count\n{doc}");
-        for (name, ag) in &g0.named {
+        assert_eq!(g0.named().len(), g1.named().len(), "named graph count\n{doc}");
+        for (name, ag) in g0.named() {
             let bg = g1
-                .named
+                .named()
                 .iter()
                 .find(|(n, _)| n == name)
                 .map(|(_, g)| g)
@@ -4472,8 +4472,8 @@ ex:bob
 
     /// Distinct blank nodes across the dataset (graph names and every graph's terms).
     fn blank_count(g: &Graph) -> usize {
-        let mut v: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
-        for graph in std::iter::once(g).chain(g.named.iter().map(|(_, ng)| ng)) {
+        let mut v: Vec<String> = g.named().iter().map(|(n, _)| n.to_string()).collect();
+        for graph in std::iter::once(g).chain(g.named().iter().map(|(_, ng)| ng)) {
             v.extend(nt_sorted(graph).iter().flat_map(|t| t.split(' ').map(str::to_string)));
         }
         v.retain(|t| t.starts_with("_:"));
@@ -4485,7 +4485,7 @@ ex:bob
     /// Per-graph triple counts, keyed by graph name (`""` for the default graph).
     fn graph_counts(g: &Graph) -> Vec<(String, usize)> {
         let mut v = vec![(String::new(), g.iter_ids().count())];
-        v.extend(g.named.iter().map(|(n, ng)| (n.to_string(), ng.iter_ids().count())));
+        v.extend(g.named().iter().map(|(n, ng)| (n.to_string(), ng.iter_ids().count())));
         v.retain(|(_, c)| *c > 0);
         v.sort();
         v

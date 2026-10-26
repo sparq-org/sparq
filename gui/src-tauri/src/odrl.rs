@@ -133,7 +133,7 @@ fn run_odrl_preview(
     let refused = policy.as_ref().is_some_and(|p| conflict_admissibility(p).is_err());
 
     let graph_names: Vec<(&str, &Term)> = graph
-        .named
+        .named()
         .iter()
         .filter_map(|(name, _)| match name {
             Term::NamedNode(n) if !n.as_str().starts_with(RESERVED_PREFIX) => {

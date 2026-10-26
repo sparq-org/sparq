@@ -65,13 +65,13 @@ fn sample_graph() -> Graph {
 fn exercise(g: &Graph) -> Vec<[String; 3]> {
     let mut dump: Vec<[String; 3]> = g
         .iter_ids()
-        .map(|t| [g.dict.term(t[0]).to_string(), g.dict.term(t[1]).to_string(), g.dict.term(t[2]).to_string()])
+        .map(|t| [g.dict().term(t[0]).to_string(), g.dict().term(t[1]).to_string(), g.dict().term(t[2]).to_string()])
         .collect();
     dump.sort();
     // Also drive the mmap LOOKUP path (binary search over dict-hash/dict-hid → stored()).
     for row in g.iter_ids().take(64) {
         for &id in &row {
-            let _ = g.dict.term(id);
+            let _ = g.dict().term(id);
         }
     }
     dump
@@ -328,7 +328,7 @@ fn dict_blob_non_utf8_is_rejected_not_ub() {
                 // Materialise every term — this is the UB site on pre-fix code.
                 g.iter_ids().for_each(|t| {
                     for &id in &t {
-                        let _ = g.dict.term(id).to_string();
+                        let _ = g.dict().term(id).to_string();
                     }
                 });
                 "ok"

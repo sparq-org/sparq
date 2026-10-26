@@ -33,7 +33,8 @@ impl Directory {
     }
 
     fn open(&self) -> EmbeddedSparqClient {
-        EmbeddedSparqClient::open(&self.0).unwrap()
+        EmbeddedSparqClient::open(&self.0)
+            .unwrap_or_else(|error| panic!("graph reopen({}) failed: {error}", self.0.display()))
     }
 }
 
@@ -64,42 +65,145 @@ fn every_embedded_update_uses_the_commit_helper() {
 }
 
 #[tokio::test]
-async fn save_refuses_the_open_directory_and_aliases_without_losing_later_writes() {
-    let dir = Directory::empty();
-    let c = dir.open();
-    c.put_meta(PARENT, meta("parent")).await.unwrap();
-    c.create_child(PARENT, CHILD, meta("before")).await.unwrap();
-    let mut destinations = vec![dir.0.clone(), dir.0.join("."), dir.0.join("new/..")];
-    #[cfg(unix)]
-    {
-        let alias = dir.0.join("alias");
-        std::os::unix::fs::symlink(&dir.0, &alias).unwrap();
-        destinations.push(alias);
-    }
-    for destination in destinations {
-        assert!(matches!(
-            c.save(&destination).await,
-            Err(SparqError::Backend(ref e)) if e.contains("open backing directory")
-        ));
+async fn save_compacts_the_open_directory_and_aliases_without_losing_later_writes() {
+    let spellings = [
+        "direct",
+        "dot",
+        "missing-parent",
+        #[cfg(unix)]
+        "symlink",
+    ];
+    for spelling in spellings {
+        let dir = Directory::empty();
+        let c = dir.open();
+        c.put_meta(PARENT, meta("parent")).await.unwrap();
+        c.create_child(PARENT, CHILD, meta("before")).await.unwrap();
+        #[cfg(unix)]
+        let alias = Directory(dir.0.with_extension("alias"));
+        let destination = match spelling {
+            "direct" => dir.0.clone(),
+            "dot" => dir.0.join("."),
+            "missing-parent" => {
+                assert!(!dir.0.join("new").exists());
+                dir.0.join("new/..")
+            }
+            #[cfg(unix)]
+            "symlink" => {
+                std::os::unix::fs::symlink(&dir.0, &alias.0).unwrap();
+                alias.0.clone()
+            }
+            _ => unreachable!(),
+        };
+        c.save(&destination).await.expect(spelling);
+        assert!(!dir.0.join("new").exists());
         assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("before"));
         assert_eq!(c.list_children(PARENT).await.unwrap(), [CHILD]);
+        // Compaction folds each named graph's overlay into its base and reopens its log.
+        c.dispatch(|graph| {
+            assert!(graph.is_directory_backed());
+            assert!(graph.named().iter().all(|(_, sub)| sub.is_directory_backed()));
+            assert_eq!(graph.pending_delta_len(), 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let snapshot = Directory(dir.0.with_extension("snapshot"));
+        c.save(&snapshot.0).await.unwrap();
+        c.put_meta(CHILD, meta("after")).await.unwrap();
+        let later = "https://pod.example/c/later";
+        c.create_child(PARENT, later, meta("later")).await.unwrap();
+        drop(c);
+        let reopened = dir.open();
+        assert_eq!(reopened.get_meta(PARENT).await.unwrap(), meta("parent"));
+        assert_eq!(reopened.get_meta(CHILD).await.unwrap(), meta("after"));
+        assert_eq!(reopened.get_meta(later).await.unwrap(), meta("later"));
+        let mut children = reopened.list_children(PARENT).await.unwrap();
+        children.sort();
+        assert_eq!(children, [CHILD, later]);
+
+        let independent = snapshot.open();
+        assert_eq!(independent.get_meta(CHILD).await.unwrap(), meta("before"));
+        assert!(!independent.exists(later).await.unwrap());
+        assert_eq!(independent.list_children(PARENT).await.unwrap(), [CHILD]);
+        independent.put_meta(CHILD, meta("snapshot-only")).await.unwrap();
+        assert_eq!(reopened.get_meta(CHILD).await.unwrap(), meta("after"));
     }
-    let snapshot = Directory(dir.0.join("snapshot"));
-    c.save(&snapshot.0).await.unwrap();
-    assert_eq!(
-        snapshot.open().get_meta(CHILD).await.unwrap(),
-        meta("before")
+}
+
+// Match the M5 upgrade case: the store has an inside lock but cannot create an outside lock.
+#[cfg(unix)]
+#[tokio::test]
+async fn refused_inside_only_compaction_keeps_reads_and_writes_available() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct RestorePermissions(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    let parent = Directory(std::env::temp_dir().join(format!(
+        "lws-inside-only-{}-{}",
+        std::process::id(),
+        next_nonce()
+    )));
+    std::fs::create_dir(&parent.0).unwrap();
+    let dir = Directory(parent.0.join("store"));
+    Graph::load_str("", "ntriples").unwrap().save(&dir.0).unwrap();
+    // A pending default-graph delta requires the root directory swap, which needs the
+    // outside lock. Named-only compaction can finish without renaming the root.
+    let mut seed = Graph::open(&dir.0).unwrap();
+    let triple = ["urn:m5:s", "urn:m5:p", "urn:m5:o"]
+        .map(|iri| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(iri)));
+    seed.apply_delta(&[triple], &[]).unwrap();
+    drop(seed);
+    std::fs::remove_file(parent.0.join("store.lock")).unwrap();
+    let permissions = RestorePermissions(
+        parent.0.clone(),
+        std::fs::metadata(&parent.0).unwrap().permissions(),
     );
-    c.put_meta(CHILD, meta("after")).await.unwrap();
-    let later = "https://pod.example/c/later";
-    c.create_child(PARENT, later, meta("later")).await.unwrap();
+    std::fs::set_permissions(&parent.0, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(parent.0.join("probe"), b"").is_ok() {
+        std::fs::remove_file(parent.0.join("probe")).unwrap();
+        eprintln!("skipped: parent permissions are not enforced");
+        return;
+    }
+
+    let c = dir.open();
+    assert!(dir.0.join("sparq.lock").is_file());
+    assert!(!parent.0.join("store.lock").exists());
+    c.put_meta(PARENT, meta("before")).await.unwrap();
+    for _ in 0..2 {
+        let error = c.save(&dir.0.join("new/..")).await.unwrap_err();
+        assert!(
+            matches!(error, SparqError::Backend(ref message)
+                if message.contains(&parent.0.display().to_string())),
+            "{error}"
+        );
+        assert!(!dir.0.join("new").exists());
+    }
+    assert_eq!(c.get_meta(PARENT).await.unwrap(), meta("before"));
+    c.create_child(PARENT, CHILD, meta("after")).await.unwrap();
     drop(c);
+    let read_only = Graph::open_read_only(&dir.0).unwrap();
+    assert!(sparq_engine::ask(&read_only, "ASK { <urn:m5:s> <urn:m5:p> <urn:m5:o> }").unwrap());
+    drop(read_only);
     let reopened = dir.open();
+    assert_eq!(reopened.get_meta(PARENT).await.unwrap(), meta("before"));
     assert_eq!(reopened.get_meta(CHILD).await.unwrap(), meta("after"));
-    assert_eq!(reopened.get_meta(later).await.unwrap(), meta("later"));
-    let mut children = reopened.list_children(PARENT).await.unwrap();
-    children.sort();
-    assert_eq!(children, [CHILD, later]);
+    assert_eq!(reopened.list_children(PARENT).await.unwrap(), [CHILD]);
+    reopened
+        .dispatch(|g| {
+            assert!(sparq_engine::ask(g, "ASK { <urn:m5:s> <urn:m5:p> <urn:m5:o> }").unwrap());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(!parent.0.join("store.lock").exists());
+    drop(reopened);
+    drop(permissions);
 }
 
 #[tokio::test]
@@ -198,10 +302,10 @@ async fn leave_frame(c: &EmbeddedSparqClient, update: String, partial: bool) {
         fn quads(g: &Graph) -> std::collections::HashSet<(Option<oxrdf::Term>, [oxrdf::Term; 3])> {
             let mut quads = std::collections::HashSet::new();
             for (slot, graph) in std::iter::once((None, g))
-                .chain(g.named.iter().map(|(name, sub)| (Some(name.clone()), sub)))
+                .chain(g.named().iter().map(|(name, sub)| (Some(name.clone()), sub)))
             {
                 for ids in graph.iter_ids() {
-                    quads.insert((slot.clone(), ids.map(|id| graph.dict.term(id))));
+                    quads.insert((slot.clone(), ids.map(|id| graph.dict().term(id))));
                 }
             }
             quads
@@ -240,10 +344,7 @@ async fn leave_frame(c: &EmbeddedSparqClient, update: String, partial: bool) {
                 .iter()
                 .find(|r| matches!(&r.1, Some(oxrdf::Term::NamedNode(n)) if n.as_str() == PARENT))
                 .unwrap();
-            let i = g
-                .graph
-                .named
-                .iter()
+            let i = g.graph.named().iter()
                 .position(|(name, _)| Some(name) == slot.as_ref())
                 .unwrap();
             let (ins, del) = if *insert {
@@ -251,7 +352,9 @@ async fn leave_frame(c: &EmbeddedSparqClient, update: String, partial: bool) {
             } else {
                 (&[][..], std::slice::from_ref(triple))
             };
-            g.graph.named[i].1.apply_delta(ins, del).unwrap();
+            g.graph
+                .apply_delta_to_named(i, ins, del)
+                .unwrap();
         }
         g.graph.poison_txn();
         g.stopped = true;
@@ -404,7 +507,75 @@ async fn indeterminate_commit_stops_reads_writes_and_snapshots() {
             );
         }
     }
+    drop(c);
     assert!(!dir.open().exists(CHILD).await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn concurrent_calls_during_actor_shutdown_all_resolve() {
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    let dir = Directory::empty();
+    for round in 0..200 {
+        let c = dir.open();
+        let start = Arc::new(tokio::sync::Notify::new());
+        let ready = Arc::new(tokio::sync::Barrier::new(65));
+        let mut callers = tokio::task::JoinSet::new();
+        for _ in 0..64 {
+            let c = c.clone();
+            let start = Arc::clone(&start);
+            let ready = Arc::clone(&ready);
+            callers.spawn(async move {
+                // Register before the stop job wakes every contender at once.
+                let notified = start.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                ready.wait().await;
+                notified.await;
+                timeout(Duration::from_secs(5), async {
+                    for _ in 0..8 {
+                        let error = c.exists(CHILD).await.unwrap_err();
+                        assert!(matches!(error, SparqError::Backend(ref e) if e == ACTOR_STOPPED));
+                    }
+                })
+                .await
+                .expect("a shutdown caller did not receive ACTOR_STOPPED");
+            });
+        }
+        ready.wait().await;
+        let error = timeout(
+            Duration::from_secs(5),
+            c.dispatch(move |g| {
+                g.apply_failure = Some(sparq_engine::ApplyError {
+                    applied: true,
+                    message: "injected shutdown".into(),
+                });
+                let result = commit(g, "INSERT DATA { <urn:s> <urn:p> <urn:o> }", "shutdown");
+                // Release callers after stopped is set, racing the reply and receiver shutdown.
+                start.notify_waiters();
+                result
+            }),
+        )
+        .await
+        .expect("stop reply timed out")
+        .unwrap_err();
+        assert!(matches!(error, SparqError::Backend(ref e) if e.contains("indeterminate")));
+        while let Some(result) = callers.join_next().await {
+            result.unwrap_or_else(|error| panic!("shutdown round {round}: {error}"));
+        }
+        // The last-client drop joins the actor; it must not wait for an unserved job.
+        // A separate thread lets the timeout fail without blocking runtime shutdown.
+        let (joined_tx, joined_rx) = oneshot::channel();
+        std::thread::spawn(move || {
+            drop(c);
+            let _ = joined_tx.send(());
+        });
+        timeout(Duration::from_secs(5), joined_rx)
+            .await
+            .expect("actor join timed out")
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -470,6 +641,10 @@ async fn journal_cannot_repair_an_incomplete_named_snapshot() {
     let snapshot = dir.0.join("named/1/dict-meta.bin");
     let saved = std::fs::read(&snapshot).unwrap();
     std::fs::remove_file(&snapshot).unwrap();
+    let error = Graph::open(&dir.0)
+        .err()
+        .expect("incomplete named snapshot is refused");
+    assert_ne!(error.kind(), std::io::ErrorKind::WouldBlock, "{error}");
     assert!(matches!(
         EmbeddedSparqClient::open(&dir.0),
         Err(SparqError::Backend(_))
@@ -676,4 +851,22 @@ async fn composite_delete_delegates_one_atomic_index_job_and_reclaims_its_key() 
     assert!(store.blob.exists(&unrelated.blob_key).await.unwrap());
     assert!(!c.exists(CHILD).await.unwrap());
     assert!(c.list_children(PARENT).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn failed_saves_remove_only_empty_directories_they_created() {
+    let dir = Directory::empty();
+    let c = dir.open();
+    let destination = dir.0.join("new/deep");
+    assert!(c.save(&destination).await.is_err());
+    assert!(!dir.0.join("new").exists());
+    std::fs::create_dir(dir.0.join("kept")).unwrap();
+    assert!(c.save(&dir.0.join("kept/new/deep")).await.is_err());
+    assert!(dir.0.join("kept").is_dir());
+    assert!(!dir.0.join("kept/new").exists());
+    let blocker = dir.0.join("file");
+    std::fs::write(&blocker, b"existing").unwrap();
+    assert!(c.save(&dir.0.join("new/../file/deep")).await.is_err());
+    assert!(!dir.0.join("new").exists());
+    assert_eq!(std::fs::read(blocker).unwrap(), b"existing");
 }

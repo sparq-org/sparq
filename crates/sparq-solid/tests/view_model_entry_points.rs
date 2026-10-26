@@ -135,7 +135,7 @@ fn a_store_with_no_view_in_force_refuses_neither_entry_point_for_its_model() {
 fn snapshot(store: &PodStore) -> (Vec<(String, usize)>, AccessProvenance, Vec<bool>) {
     let mut graphs: Vec<(String, usize)> = store
         .graph()
-        .named
+        .named()
         .iter()
         .map(|(n, g)| (format!("{}", n), g.len()))
         .collect();
@@ -330,21 +330,21 @@ fn a_mismatched_update_that_rebuilds_no_rules_is_refused_and_changes_nothing() {
 /// size, would pass a count comparison unchanged.
 fn all_quads(store: &PodStore) -> Vec<String> {
     fn dump(g: &Graph, name: &str, out: &mut Vec<String>) {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {
             let [s, p, o] = scan.to_spo(r);
             out.push(format!(
                 "{} {} {} {}",
                 name,
-                g.dict.term(s),
-                g.dict.term(p),
-                g.dict.term(o)
+                g.dict().term(s),
+                g.dict().term(p),
+                g.dict().term(o)
             ));
         }
     }
     let mut out = Vec::new();
     dump(store.graph(), "<default>", &mut out);
-    for (name, g) in &store.graph().named {
+    for (name, g) in store.graph().named() {
         dump(g, &format!("{}", name), &mut out);
     }
     out.sort();

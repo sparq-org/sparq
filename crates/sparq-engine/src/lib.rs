@@ -666,13 +666,13 @@ pub trait SpatialProvider: Send + Sync {
     /// index holds an opinion on — the exact id-set of the terms for which
     /// [`is_indexed`](Self::is_indexed) returns `true` — returned ONLY when that
     /// set was resolved against the SAME dict identified by `dict_ptr`
-    /// (`std::ptr::from_ref(&graph.dict) as usize`), else `None`.
+    /// (`std::ptr::from_ref(graph.dict()) as usize`), else `None`.
     ///
     /// This lets the pushdown replace a per-row `Term` materialisation +
     /// `is_indexed` hash with a pure `FxHashSet<Id>` lookup on the scanned
     /// column. It is a PURE OPTIMISATION of the `is_indexed` decision: for a row
     /// whose binding id is `i`, `set.contains(&i)` MUST equal
-    /// `is_indexed(&graph.dict.term(i))` — same keep/drop verdict, so the result
+    /// `is_indexed(&graph.dict().term(i))` — same keep/drop verdict, so the result
     /// is byte-identical to the per-row path. The FRESHNESS contract is
     /// load-bearing: an id-set only maps to the right terms against the dict it
     /// came from, so the provider returns `Some` ONLY when certain the dict

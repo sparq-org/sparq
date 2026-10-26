@@ -216,7 +216,7 @@ impl<'g> ControlWrites<'g> {
         let replaced = self.replaced.as_ref().map(|(doc, _)| *doc);
         let mut graphs: Vec<(&'g str, Vec<[Term; 3]>)> = self
             .graph
-            .named
+            .named()
             .iter()
             .filter_map(|(n, g)| {
                 graph_iri(n)
@@ -406,11 +406,101 @@ fn document_view<'a>(
 /// `<urn:sparq:auth>`: a loaded dataset must not be able to smuggle in the rewrite
 /// sentinel (`urn:sparq:nothing`) or a FORGED auth view; only `install_auth_view`
 /// creates `<urn:sparq:auth>`, after a successful materialization (roborev 1727).
-pub(crate) fn strip_reserved_graphs(graph: &mut Graph) {
-    graph.named.retain(|(name, _)| match name {
+///
+/// Directory-backed roots remove reserved slots through the durable drop methods.
+/// Returns an error when a removal cannot complete.
+pub(crate) fn strip_reserved_graphs(graph: &mut Graph) -> Result<(), String> {
+    if graph.is_directory_backed() {
+        let reserved: Vec<_> = graph
+            .named()
+            .iter()
+            .filter_map(|(name, _)| match name {
+                Term::NamedNode(n) if n.as_str().starts_with(RESERVED_PREFIX) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        for name in reserved {
+            drop_named_view(graph, &name)?;
+        }
+        return Ok(());
+    }
+    graph.retain_named(|name, _| match name {
         Term::NamedNode(n) => !n.as_str().starts_with(RESERVED_PREFIX),
         _ => true,
-    });
+    })
+}
+
+/// Remove a view only when its slot exists; a durable drop rewrites surviving slots.
+pub(crate) fn drop_named_view(graph: &mut Graph, name: &Term) -> Result<(), String> {
+    if graph.named_graph(name).is_none() {
+        return Ok(());
+    }
+    view_write_fault()?;
+    if graph.is_directory_backed() {
+        while graph.named_graph(name).is_some() {
+            graph.drop_named_durable(name)?;
+        }
+        Ok(())
+    } else {
+        graph.retain_named(|n, _| n != name)
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static FAIL_VIEW_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static FAIL_ALL_VIEW_WRITES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[inline]
+fn view_write_fault() -> Result<(), String> {
+    #[cfg(test)]
+    if FAIL_VIEW_WRITE.replace(false) || FAIL_ALL_VIEW_WRITES.get() {
+        return Err("injected authorization view write failure".into());
+    }
+    Ok(())
+}
+
+/// Install a named view through logged writes when the dataset has a durable root.
+pub(crate) fn install_named_view(graph: &mut Graph, name: Term, view: Graph) -> Result<(), String> {
+    if graph.is_directory_backed() {
+        let slot = graph.ensure_named(&name)?;
+        let old: FxHashSet<_> = graph_triples(&graph.named()[slot].1).into_iter().collect();
+        let new: FxHashSet<_> = graph_triples(&view).into_iter().collect();
+        let inserts: Vec<_> = new.difference(&old).cloned().collect();
+        let deletes: Vec<_> = old.difference(&new).cloned().collect();
+        if inserts.is_empty() && deletes.is_empty() {
+            return Ok(());
+        }
+        view_write_fault()?;
+        graph.apply_delta_to_named(slot, &inserts, &deletes)
+    } else {
+        graph.set_named(name, view).map(|_| ())
+    }
+}
+
+/// Empties writable in-memory reserved slots when removal did not complete, preserving their
+/// positions. Durable slots stay in place; the caller disables the authorization view until
+/// materialization succeeds.
+pub(crate) fn empty_reserved_graphs(graph: &mut Graph) {
+    let reserved: Vec<Term> = graph
+        .named()
+        .iter()
+        .filter(|(name, g)| {
+            !g.is_directory_backed()
+                && matches!(name, Term::NamedNode(n) if n.as_str().starts_with(RESERVED_PREFIX))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in reserved {
+        let _ = graph.set_named(name, Graph::new());
+    }
+}
+
+/// `Err` unless the auth view can be installed in `graph`: it accepts writes (checked before
+/// anything changes, so a refusal leaves the previous view in place).
+pub(crate) fn require_writable(graph: &Graph) -> Result<(), String> {
+    graph.check_writable()
 }
 
 /// Whether a session-supplied agent/client value may participate in principal
@@ -447,12 +537,12 @@ pub(crate) fn graph_triples_metered(
     meter: &mut InputMeter,
 ) -> Result<Vec<[Term; 3]>, String> {
     let pat: sparq_core::store::Pattern = [None, None, None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     meter.open();
     let mut out = Vec::with_capacity(scan.rows.len());
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);
-        let triple = [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])];
+        let triple = [g.dict().term(t[0]), g.dict().term(t[1]), g.dict().term(t[2])];
         for term in &triple {
             meter.term(iri, term)?;
         }
@@ -464,12 +554,16 @@ pub(crate) fn graph_triples_metered(
 /// The triples of one named graph as ground term triples.
 pub(crate) fn graph_triples(g: &Graph) -> Vec<[Term; 3]> {
     let pat: sparq_core::store::Pattern = [None, None, None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     scan.rows
         .iter()
         .map(|r| {
             let t = scan.to_spo(r);
-            [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])]
+            [
+                g.dict().term(t[0]),
+                g.dict().term(t[1]),
+                g.dict().term(t[2]),
+            ]
         })
         .collect()
 }
@@ -635,7 +729,7 @@ pub(crate) fn assemble_facts(
         }
     }
     if system == System::Wac {
-        for (name, sub) in &graph.named {
+        for (name, sub) in graph.named() {
             let Some(iri) = graph_iri(name) else { continue };
             // Same reserved-space skip as the resource pass above: a forged
             // `<urn:sparq:…>` graph named by an `acl:agentGroup` must never be read.
@@ -818,7 +912,7 @@ fn group_doc_of(group_iri: &str) -> &str {
 /// document, so a write to one cannot change the auth view either.
 pub(crate) fn referenced_group_docs(graph: &Graph) -> FxHashSet<String> {
     let mut docs: FxHashSet<String> = FxHashSet::default();
-    for (name, sub) in graph.named.iter() {
+    for (name, sub) in graph.named().iter() {
         let Some(iri) = graph_iri(name) else { continue };
         if iri.starts_with(RESERVED_PREFIX)
             || !(iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX))
@@ -914,7 +1008,7 @@ fn enumerate<'g>(
 ) -> Result<Enumerated<'g>, String> {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
-    for (name, sub) in &graph.named {
+    for (name, sub) in graph.named() {
         let Some(iri) = graph_iri(name) else { continue };
         // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
         // never reasoning input. [`strip_reserved_graphs`] also drops these from the
@@ -947,7 +1041,7 @@ fn is_control_graph(iri: &str) -> bool {
 /// document the ACP view, the one reader of creators and owners, reads.
 pub(crate) fn controlled_resources(graph: &Graph) -> FxHashSet<&str> {
     graph
-        .named
+        .named()
         .iter()
         .filter_map(|(n, _)| graph_iri(n))
         .filter_map(|iri| iri.strip_suffix(ACR_SUFFIX))
@@ -1036,7 +1130,7 @@ pub(crate) fn held(graph: &Graph, resources: &[String]) -> Vec<bool> {
     if resources.is_empty() {
         return held;
     }
-    for name in graph.named.iter().filter_map(|(n, _)| graph_iri(n)) {
+    for name in graph.named().iter().filter_map(|(n, _)| graph_iri(n)) {
         if !is_resource_graph(name) {
             continue;
         }
@@ -1055,7 +1149,7 @@ pub(crate) fn held(graph: &Graph, resources: &[String]) -> Vec<bool> {
 impl<'a> ResourceGraphs<'a> {
     /// The resource graphs among the names of `graph`'s named graphs.
     pub(crate) fn of(graph: &'a Graph) -> Self {
-        Self::from_names(graph.named.iter().filter_map(|(n, _)| graph_iri(n)))
+        Self::from_names(graph.named().iter().filter_map(|(n, _)| graph_iri(n)))
     }
 
     /// The resource graphs among `names`.
@@ -1162,7 +1256,7 @@ impl<'a> ResourceGraphs<'a> {
 /// Whether an access-control resource document in `graph` names `acp:CreatorAgent` or
 /// `acp:OwnerAgent`: whether an ACP view built from it depends on the trusted provenance.
 pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
-    graph.named.iter().any(|(name, g)| {
+    graph.named().iter().any(|(name, g)| {
         graph_iri(name).is_some_and(|iri| iri.ends_with(ACR_SUFFIX))
             && graph_triples(g).iter().any(|t| {
                 matches!(&t[2], Term::NamedNode(o) if SPECIAL_AGENTS[2..4].contains(&o.as_str()))
@@ -1215,6 +1309,15 @@ pub fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn require_writable_refuses_a_frozen_graph() {
+        let mut graph = sparq_core::Graph::new();
+        assert!(super::require_writable(&graph).is_ok());
+        graph.freeze_for_test("storage unavailable");
+        assert!(super::require_writable(&graph).is_err());
+    }
+
     use super::{assemble_facts_default, graph_triples, named, skolemize, System};
     use super::{iri_origin, parent_iri};
     use crate::{
@@ -1364,7 +1467,7 @@ mod tests {
             let mut sub = Graph::new();
             sub.insert_triple(BlankNode::new("shared").unwrap(), named(predicate), named(object))
                 .unwrap();
-            graph.named.push((named(iri), sub));
+            graph.add_named(named(iri), sub).unwrap();
         }
         let facts = |g: &Graph| -> FxHashSet<_> {
             assemble_facts_default(
@@ -1388,24 +1491,26 @@ mod tests {
             2,
             "the same label belongs to separate documents"
         );
-        graph.named.reverse();
+        let mut reversed = graph.take_named().unwrap();
+        reversed.reverse();
+        graph.extend_named(reversed).unwrap();
         assert_eq!(facts(&graph), before);
     }
 
     fn blank_matcher_store() -> PodStore {
         let mut graph = Graph::new();
-        graph.named.push((named(OTHER_ACR), Graph::new()));
+        graph.add_named(named(OTHER_ACR), Graph::new()).unwrap();
+        graph.add_named(named("https://pod.ex/doc"), Graph::new()).unwrap();
         graph
-            .named
-            .push((named("https://pod.ex/doc"), Graph::new()));
-        graph.named.push((
-            named(ACR),
-            Graph::load_str(
-                include_str!("../tests/fixtures/blank_node_matcher.ttl"),
-                "turtle",
+            .add_named(
+                named(ACR),
+                Graph::load_str(
+                    include_str!("../tests/fixtures/blank_node_matcher.ttl"),
+                    "turtle",
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        ));
+            .unwrap();
         let mut store = PodStore::new(graph);
         store.materialize_acp().unwrap();
         store
@@ -1465,7 +1570,7 @@ mod tests {
             let old_auth = store.auth.clone();
             let auth_graph = &store
                 .graph()
-                .named
+                .named()
                 .iter()
                 .find(|(n, _)| *n == named(AUTH_GRAPH))
                 .unwrap()
@@ -1479,7 +1584,7 @@ mod tests {
             );
             let position = |s: &PodStore| {
                 s.graph
-                    .named
+                    .named()
                     .iter()
                     .position(|(n, _)| *n == named(ACR))
                     .unwrap()
@@ -1859,7 +1964,7 @@ mod tests {
         );
         let graph = Graph::load_dataset(&base, "nquads").unwrap();
         let blank = graph
-            .named
+            .named()
             .iter()
             .filter(|(name, _)| matches!(name, Term::NamedNode(n) if n.as_str() == acl))
             .flat_map(|(_, sub)| graph_triples(sub))

@@ -84,8 +84,8 @@ pub(super) fn quoted_relation(graph: &Graph, c: &QuotedConstraint) -> Bindings {
     let mut vars = vec![c.var.clone()];
     collect_quoted_vars(&c.pattern, &mut vars);
     let mut rows: Vec<Row> = Vec::new();
-    for id in 1..=graph.dict.len() as Id {
-        let dict::TermParts::Triple(comps) = graph.dict.term_parts(id) else {
+    for id in 1..=graph.dict().len() as Id {
+        let dict::TermParts::Triple(comps) = graph.dict().term_parts(id) else {
             continue;
         };
         let mut binds: Row = std::iter::repeat_n(NO_ID, vars.len()).collect();
@@ -120,7 +120,7 @@ pub(super) fn unify_quoted(graph: &Graph, pat: &TriplePattern, comps: [Id; 3], v
                 if dict::is_inline(id) {
                     return false;
                 }
-                match graph.dict.term_parts(id) {
+                match graph.dict().term_parts(id) {
                     dict::TermParts::Triple(c) => unify_quoted(graph, inner, c, vars, binds),
                     _ => false,
                 }

@@ -120,14 +120,18 @@ fn a_loaded_acl_naming_a_reserved_agent_governs_with_no_grants() {
     let iri = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(s));
     let slot = store
         .graph_unchecked_mut()
-        .named
+        .named()
         .iter()
         .position(|(n, _)| *n == iri("https://pod.ex/bob/.acl"))
         .expect("bob's acl");
-    let _ = store.graph_unchecked_mut().named[slot].1.insert_triple(
-        iri("https://pod.ex/bob/.acl#bad"),
-        iri("http://www.w3.org/ns/auth/acl#agent"),
-        iri("urn:sparq:forged"),
+    let _ = store.graph_unchecked_mut().apply_delta_to_named(
+        slot,
+        &[[
+            iri("https://pod.ex/bob/.acl#bad"),
+            iri("http://www.w3.org/ns/auth/acl#agent"),
+            iri("urn:sparq:forged"),
+        ]],
+        &[],
     );
     store.materialize_wac().expect("rejected, not fatal");
     assert!(reads(&store, ALICE));
@@ -293,18 +297,18 @@ fn uniform_dependency_refusal(doc: &str) -> String {
 /// Every stored quad outside the reserved space, sorted.
 fn snapshot(g: &Graph) -> Vec<String> {
     let mut quads = Vec::new();
-    for (name, sub) in &g.named {
+    for (name, sub) in g.named() {
         if name.to_string().starts_with("<urn:sparq:") {
             continue;
         }
-        let scan = sub.store.scan(&[None, None, None]);
+        let scan = sub.store().scan(&[None, None, None]);
         for row in scan.rows.iter() {
             let t = scan.to_spo(row);
             quads.push(format!(
                 "{} {} {} {name}",
-                sub.dict.term(t[0]),
-                sub.dict.term(t[1]),
-                sub.dict.term(t[2])
+                sub.dict().term(t[0]),
+                sub.dict().term(t[1]),
+                sub.dict().term(t[2])
             ));
         }
     }

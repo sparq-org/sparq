@@ -315,7 +315,7 @@ impl TextIndex {
     fn build_with(graph: &Graph, positions: bool, analyzer: Analyzer) -> TextIndex {
         let mut idx = Self::build_docs(graph, positions, analyzer);
         // Pin the generation marker to the dictionary we just scanned in full.
-        idx.indexed_dict_len = graph.dict.len();
+        idx.indexed_dict_len = graph.dict().len();
         idx
     }
 
@@ -326,7 +326,7 @@ impl TextIndex {
             // because shard id ranges are disjoint and increasing (posting
             // lists — and per-token position maps — stay keyed by doc id).
             const MIN_PARALLEL_TERMS: usize = 4096;
-            let n = graph.dict.len();
+            let n = graph.dict().len();
             if n >= MIN_PARALLEL_TERMS {
                 use rayon::prelude::*;
                 let shards = rayon::current_num_threads().max(1) * 4;
@@ -337,7 +337,7 @@ impl TextIndex {
                         let mut idx = Self::new(positions, analyzer);
                         for i in (s * chunk)..((s + 1) * chunk).min(n) {
                             let id = (i + 1) as Id;
-                            if let Some(text) = text_value(&graph.dict.term_parts(id)) {
+                            if let Some(text) = text_value(&graph.dict().term_parts(id)) {
                                 idx.add_doc(id, text);
                             }
                         }
@@ -352,7 +352,7 @@ impl TextIndex {
             }
         }
         let mut idx = Self::new(positions, analyzer);
-        for (id, parts) in graph.dict.iter() {
+        for (id, parts) in graph.dict().iter() {
             if let Some(text) = text_value(&parts) {
                 idx.add_doc(id, text);
             }
@@ -533,7 +533,7 @@ impl TextIndex {
         // a fresh `build` would — the batch may have interned more terms than it
         // indexed (subject/predicate IRIs, non-text objects), so pin to the
         // graph's current length, not just the literals seen here.
-        self.indexed_dict_len = graph.dict.len();
+        self.indexed_dict_len = graph.dict().len();
     }
 
     // ---- Rebuild-on-boot + reconcile contract --------------------------------------
@@ -560,7 +560,7 @@ impl TextIndex {
     /// or post-[`Graph::compact`](sparq_core::Graph::compact) comparisons are
     /// only meaningful through [`needs_rebuild`](Self::needs_rebuild).
     pub fn is_consistent_with(&self, graph: &Graph) -> bool {
-        self.indexed_dict_len == graph.dict.len()
+        self.indexed_dict_len == graph.dict().len()
     }
 
     /// Whether the index MUST be discarded and rebuilt from scratch (rather than
@@ -575,7 +575,7 @@ impl TextIndex {
     /// [`build`](Self::build) (or
     /// [`build_with_positions`](Self::build_with_positions)) afresh.
     pub fn needs_rebuild(&self, graph: &Graph) -> bool {
-        graph.dict.len() < self.indexed_dict_len
+        graph.dict().len() < self.indexed_dict_len
     }
 
     /// The warm fast-path of the rebuild-on-boot + reconcile contract: bring this
@@ -605,7 +605,7 @@ impl TextIndex {
     /// with [`needs_rebuild`](Self::needs_rebuild) when the index might be
     /// applied to a reopened/durably-recompacted graph.
     pub fn reconcile(&mut self, graph: &Graph) -> usize {
-        let now = graph.dict.len();
+        let now = graph.dict().len();
         assert!(
             now >= self.indexed_dict_len,
             "TextIndex::reconcile cannot repair a shrunken dictionary (the persisted base was recompacted + renumbered); rebuild with TextIndex::build"
@@ -615,7 +615,7 @@ impl TextIndex {
         // terms are exactly (indexed_dict_len, now].
         for i in self.indexed_dict_len..now {
             let id = (i + 1) as Id;
-            if let Some(text) = text_value(&graph.dict.term_parts(id)) {
+            if let Some(text) = text_value(&graph.dict().term_parts(id)) {
                 // The build/apply_delta path never indexes a term twice; the
                 // tail is fresh, but guard for robustness against an unexpected
                 // overlap (keeps reconcile idempotent).

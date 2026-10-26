@@ -192,7 +192,7 @@ pub fn build_window_store() -> Result<PodStore, String> {
         .on(WINDOW_RESOURCE)
         .by(CAROL)
         .at(INSIDE);
-    let outcome = store.materialize_odrl_permission_conditional(&policy, &request);
+    let outcome = store.materialize_odrl_permission_conditional(&policy, &request)?;
     if outcome.granted {
         return Err(format!("the bridge stored a windowed grant: {:?}", outcome));
     }

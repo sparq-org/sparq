@@ -72,8 +72,8 @@ fn apply_delta_with_a_different_graph_invalidates_indexed_ids() {
         "ntriples",
     )
     .expect("valid second graph fixture");
-    let graph_a_dict_ptr = std::ptr::from_ref(&graph_a.dict) as usize;
-    let graph_b_dict_ptr = std::ptr::from_ref(&graph_b.dict) as usize;
+    let graph_a_dict_ptr = std::ptr::from_ref(graph_a.dict()) as usize;
+    let graph_b_dict_ptr = std::ptr::from_ref(graph_b.dict()) as usize;
     let mut index = GeoIndex::build(&graph_a);
 
     assert!(index.indexed_ids_for(graph_a_dict_ptr).is_some());

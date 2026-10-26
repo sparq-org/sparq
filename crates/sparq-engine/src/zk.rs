@@ -403,9 +403,9 @@ fn record_ids_with_key(graph: &Graph, pattern: PatternKey, matched: &[[Id; 3]], 
             if ps.seen.insert(spo) {
                 ps.ids.push(spo);
                 ps.matches.triples.push([
-                    graph.dict.term(spo[0]),
-                    graph.dict.term(spo[1]),
-                    graph.dict.term(spo[2]),
+                    graph.dict().term(spo[0]),
+                    graph.dict().term(spo[1]),
+                    graph.dict().term(spo[2]),
                 ]);
             }
         }
@@ -432,7 +432,7 @@ pub(crate) fn record_scan_ids(
 ) {
     let slot = |i: usize| -> SlotPattern {
         match (id_pat[i], &pos_vars[i]) {
-            (Some(id), _) => SlotPattern::Term(graph.dict.term(id)),
+            (Some(id), _) => SlotPattern::Term(graph.dict().term(id)),
             (None, Some(v)) => SlotPattern::Var(v.as_str().to_string()),
             (None, None) => SlotPattern::Wildcard,
         }

@@ -57,9 +57,9 @@ fn assert_round_trip(expected: &[Triple], serialized: &str) {
         .map(|ids| {
             format!(
                 "{} {} {}",
-                parsed.dict.term(ids[0]),
-                parsed.dict.term(ids[1]),
-                parsed.dict.term(ids[2])
+                parsed.dict().term(ids[0]),
+                parsed.dict().term(ids[1]),
+                parsed.dict().term(ids[2])
             )
         })
         .collect();

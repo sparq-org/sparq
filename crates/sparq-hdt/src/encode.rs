@@ -167,7 +167,7 @@ fn build_dict_and_triples(graph: &Graph) -> Result<(FourSectDict, Vec<TripleId>)
     // Scan the default graph once. `scan.rows` already holds the triples as cheap
     // `[Id; 3]` sparq ids (borrowed or a single owned overlay-merged Vec); we keep
     // those and never clone a per-triple string tuple out of them.
-    let scan = graph.store.scan(&[None, None, None]);
+    let scan = graph.store().scan(&[None, None, None]);
 
     // ONE sparq Id -> rendered HDT string cache, shared across S/P/O positions: each
     // DISTINCT term is rendered a single time even when it appears in many triples or
@@ -191,9 +191,9 @@ fn build_dict_and_triples(graph: &Graph) -> Result<(FourSectDict, Vec<TripleId>)
     // collect the distinct predicate ids. No per-triple string tuples are kept.
     for row in scan.rows.iter() {
         let [s, p, o] = scan.to_spo(row);
-        render(&graph.dict, &mut render_cache, s)?;
-        render(&graph.dict, &mut render_cache, p)?;
-        render(&graph.dict, &mut render_cache, o)?;
+        render(graph.dict(), &mut render_cache, s)?;
+        render(graph.dict(), &mut render_cache, p)?;
+        render(graph.dict(), &mut render_cache, o)?;
         roles.entry(s).or_default().subject = true;
         roles.entry(o).or_default().object = true;
         predicate_ids.insert(p);
