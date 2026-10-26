@@ -385,7 +385,7 @@ standard toolchain. Miri does not model a `#[global_allocator]` that calls `Syst
 
 ## NEEDS-REVIEW
 
-**None.** Every one of the 118 sites now carries a literal `// SAFETY:` comment
+**None.** Every one of the 119 sites now carries a literal `// SAFETY:` comment
 immediately preceding the `unsafe` block/impl, mechanically enforced by
 `clippy::undocumented_unsafe_blocks` (MS-G2 closed, sq-8wbn, [OPUS-4.8]) — set
 at crate root on unsafe-bearing libraries (including `sparq-lws-wasm`, sq-wubkf)
