@@ -129,10 +129,9 @@ A backup is only as consistent as the stop that preceded it. A SIGKILL, forced
 container termination, failed compaction or non-zero exit is not a clean stop;
 retain the original files for recovery rather than labelling their copy clean.
 
-A clean stop compacts the index but currently can leave unreferenced blob files,
-including after Solid container creation. It does not guarantee an orphan-free
-blob plane. The offline archive preserves those files too; do not omit blobs
-from the backup or delete files by guessing which keys are live.
+A crash can leave unreferenced blob files until the reconciler runs. The
+offline archive preserves them with the rest of the directory; do not omit
+blobs from the backup or delete files by guessing which keys are live.
 
 For a container, stop it and wait for clean exit before detaching the data
 volume. On Kubernetes, scale the workload to zero, wait for its pod to finish

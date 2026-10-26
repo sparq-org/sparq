@@ -164,8 +164,8 @@ configuration/signing keys. Online or hot backup is unsupported; copying a
 running data directory is unsafe. A backup is only as consistent as the stop
 that preceded it.
 
-A clean stop compacts the index but can leave unreferenced blob files; archive
-the whole directory, including those files.
+Archive the whole directory rather than picking files: a crash can leave
+unreferenced blob files until the reconciler runs, and they belong in the copy.
 
 In a container or Kubernetes, stop the container or scale the workload to zero,
 wait for clean exit and volume detachment, then snapshot the detached volume.
