@@ -932,4 +932,87 @@ mod tests {
         let result: Value = serde_json::from_slice(&bytes).unwrap();
         assert!(result["results"]["bindings"].as_array().unwrap().is_empty());
     }
+
+    #[tokio::test]
+    async fn recovery_publication_rebuilds_an_overlapping_query_view() {
+        let (state, app) = fixture(Duration::from_secs(5)).await;
+        let mut undo = Vec::new();
+        for name in ["a0/", "z/"] {
+            let container = format!("{BASE}/{name}");
+            state
+                .store
+                .create_in_container(&state.cfg.storage(), &container, Bytes::new(), LWS_JSON)
+                .await
+                .unwrap();
+            let child = format!("{container}r");
+            state
+                .store
+                .create_in_container(&container, &child, Bytes::new(), "text/plain")
+                .await
+                .unwrap();
+            undo.push(super::super::Undo::Locked { iri: child });
+            if name == "a0/" {
+                state
+                    .store
+                    .create_in_container(
+                        &state.cfg.storage(),
+                        &format!("{BASE}/middle"),
+                        Bytes::from_static(b"<urn:s> <urn:p> 0 ."),
+                        "text/turtle",
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        // A recovery has restored the store and still holds both branches aside.
+        let hidden = state.hide_all(vec![super::super::Unsettled::new(undo)]);
+        let release = Arc::new(Semaphore::new(0));
+        *state.store.hold_next_read_reply_of.lock().unwrap() =
+            Some((format!("{BASE}/middle"), release.clone()));
+        let reading = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                call(
+                    &state,
+                    app,
+                    READER,
+                    "POST",
+                    PATH,
+                    "SELECT ?g { GRAPH ?g {} }",
+                )
+                .await
+            })
+        };
+        wait_until(|| {
+            state
+                .store
+                .hold_next_read_reply_of
+                .lock()
+                .unwrap()
+                .is_none()
+        })
+        .await;
+        // The traversal skipped z/ and has not reached a0/ yet. They return together.
+        state.settle_hidden(hidden);
+        wait_until(|| state.visible(&format!("{BASE}/z/"))).await;
+        release.add_permits(1);
+        let response = reading.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let data: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        let names: BTreeSet<_> = data["results"]["bindings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["g"]["value"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            names,
+            ["/", "/a", "/b", "/a0/", "/a0/r", "/middle", "/z/", "/z/r"]
+                .map(|path| format!("{BASE}{path}"))
+                .into_iter()
+                .collect()
+        );
+    }
 }

@@ -50,9 +50,9 @@ omits that branch. No placeholder triples are added. Blank node identifiers
 are scoped separately for each document, including nested triple terms.
 
 LWS uses a storage-wide generation guard through enumeration, authorization
-and reads. Every tracked store mutation and logical content/metadata change
-marks activity and advances the generation; grant publication and settlement
-do the same. Queries start only between
+and reads. Changes to resource data or metadata mark activity and advance
+the generation; grant publication, settlement and
+restored resource visibility do the same. Queries start only between
 logical changes and validate the generation immediately after assembly. An
 overlapping change discards the whole attempt, including any error, and the
 query rebuilds after activity settles. After two unsuccessful optimistic attempts, a query
@@ -65,8 +65,8 @@ and owned RDF bodies. Parse outside the assembly barrier: RDF parsing, dataset
 construction, named-graph restriction and evaluation run together in a single
 blocking task after release. Blank node scoping follows the collected document
 order. Concurrent changes do not invalidate that collected view.
-Peak memory remains bounded by the existing byte cap because retained bodies
-are exactly the RDF bytes counted during authorized reads.
+Memory retained for document bodies stays within the existing byte cap because
+these are exactly the RDF bytes counted during authorized reads.
 
 `LwsConfig::sparql_barrier_budget` bounds waiting for in-flight changes to drain
 and enumeration, authorization and reads under the barrier together. It defaults

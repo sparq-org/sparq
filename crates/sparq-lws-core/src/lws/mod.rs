@@ -1095,11 +1095,16 @@ impl<S: Store + 'static> LwsState<S> {
             }
             // Released while its locks are held: nothing can stage what it put back meanwhile.
             left.2.release(&state).await;
-            drop(left);
-            state.locks.show(&iris);
             state
-                .set_aside_bytes
-                .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
+                .store
+                .publish(async {
+                    drop(left);
+                    state.locks.show(&iris);
+                    state
+                        .set_aside_bytes
+                        .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
+                })
+                .await;
             drop(locks);
             state.touch_owed().await;
         });

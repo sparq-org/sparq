@@ -321,6 +321,48 @@ async fn default_union_protocol_datasets_and_serialization_use_the_visible_view(
 }
 
 #[tokio::test]
+async fn document_blank_nodes_stay_distinct_including_nested_triple_terms() {
+    let h = Harness::new(|_| {}).await;
+    for name in ["left", "right"] {
+        h.create(
+            name,
+            "text/turtle",
+            &format!("_:same <urn:p> \"{name}\"; <urn:term> <<( _:same <urn:q> _:same )>> ."),
+        )
+        .await;
+    }
+    let result = h
+        .query(
+            OWNER,
+            &format!(
+                "SELECT ?left ?right {{
+                    GRAPH <{BASE}/left> {{ ?left <urn:p> \"left\" }}
+                    GRAPH <{BASE}/right> {{ ?right <urn:p> \"right\" }}
+                }}"
+            ),
+        )
+        .await;
+    let rows = result["results"]["bindings"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["left"]["type"], "bnode");
+    assert_eq!(rows[0]["right"]["type"], "bnode");
+    assert_ne!(rows[0]["left"]["value"], rows[0]["right"]["value"]);
+    assert_eq!(
+        h.query(
+            OWNER,
+            &format!(
+                "ASK {{
+                    GRAPH <{BASE}/left> {{ ?s <urn:term> ?term }}
+                    GRAPH <{BASE}/right> {{ ?s2 <urn:term> ?term }}
+                }}"
+            )
+        )
+        .await["boolean"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn grants_are_live_and_apply_client_date_format_type_and_purpose_constraints() {
     let h = Harness::new(|_| {}).await;
     h.create("r1", "text/turtle", "<> a <urn:Document> .").await;

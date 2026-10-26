@@ -396,6 +396,7 @@ one blocking task after release. `LwsConfig::sparql_barrier_budget`
 defaults to 500 ms for waiting and reads together; set it with
 `SOLID_SERVER_LWS_SPARQL_BARRIER_MS`. Exhaustion returns `503` problem details
 with `Retry-After`. Independent mutations retain shared leases.
+Recovery publishes restored resource visibility through the same generation gate.
 
 See [query requests, access context and bounds](references/query.md) for examples,
 Solid behavior, LWS snapshot semantics, and configuration defaults.
