@@ -25,9 +25,8 @@
 //!   `Access-Control-Expose-Headers`.
 //! - A **simple/actual** request's response carries ACAO + ACAC + expose-headers + `Vary: Origin`.
 //!
-//! The middleware is the OUTERMOST layer, so the CORS headers ride on EVERY response (incl. the
-//! anonymous 401 the `cors-simple-requests` scenario asserts ACAO on) and a preflight is answered
-//! before auth runs (a browser preflight carries no credentials).
+//! Preflights are answered before auth, inside overload protection. A decorate-only outer layer
+//! adds the same headers to overload rejections without answering or admitting requests.
 
 use axum::extract::Request;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
@@ -44,12 +43,12 @@ const ALLOW_METHODS: &str = "OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH, QUERY
 /// `Location`/`Allow`/`Accept-*` advertisements, the `WWW-Authenticate` challenge, and `WAC-Allow`.
 const EXPOSE_HEADERS: &str = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, \
      Last-Modified, Link, Location, Vary, Allow, WWW-Authenticate, Accept-Post, Accept-Patch, \
-     Updates-Via, WAC-Allow, Accept-Query, Content-Location";
+     Updates-Via, WAC-Allow, Accept-Query, Content-Location, Retry-After, Preference-Applied";
 
 /// The default `Access-Control-Allow-Headers` for a preflight that did NOT send
 /// `Access-Control-Request-Headers` (a safe baseline covering the Solid auth + content headers).
 const DEFAULT_ALLOW_HEADERS: &str = "Authorization, DPoP, Content-Type, Accept, Slug, Link, \
-     If-Match, If-None-Match, Range";
+     If-Match, If-None-Match, Range, Depth";
 
 /// The axum CORS middleware. Reflects the `Origin` + the preflight's requested headers; answers a
 /// preflight itself; otherwise runs the inner service and decorates the response.
@@ -94,29 +93,35 @@ pub async fn cors_middleware(req: Request, next: Next) -> Response {
     resp
 }
 
+/// Decorate overload responses without short-circuiting preflights or replacing existing CORS headers.
+pub(crate) async fn cors_response_middleware(req: Request, next: Next) -> Response {
+    let origin = req.headers().get(header::ORIGIN).cloned();
+    let mut resp = next.run(req).await;
+    decorate_common(
+        resp.headers_mut(),
+        origin.as_ref().and_then(|value| value.to_str().ok()),
+    );
+    resp
+}
+
 /// The CORS headers common to a preflight and a simple/actual response: reflected ACAO, credentials,
 /// the exposed-headers enumeration, and `Vary: Origin`. When there is no `Origin`, only `Vary:
 /// Origin` is added (so a cache keys correctly) — no ACAO is emitted for a non-CORS request.
 fn decorate_common(headers: &mut HeaderMap, origin: Option<&str>) {
-    // `Vary: Origin` (capital O — the harness's `contains 'Origin'` is case-sensitive). Appended so
-    // it coexists with any Vary the handler already set (e.g. content negotiation).
-    if let Ok(v) = HeaderValue::from_static("Origin")
-        .to_str()
-        .map(str::to_string)
-    {
-        // Merge with an existing Vary rather than clobber it.
-        merge_vary(headers, &v);
-    }
+    // Preserve content-negotiation tokens and avoid adding Origin twice across the two layers.
+    merge_vary(headers, "Origin");
     if let Some(o) = origin {
         if let Ok(value) = HeaderValue::from_str(o) {
-            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+            headers
+                .entry(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .or_insert(value);
         }
-        set(headers, header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true");
-        set(
-            headers,
-            header::ACCESS_CONTROL_EXPOSE_HEADERS,
-            EXPOSE_HEADERS,
-        );
+        headers
+            .entry(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .or_insert(HeaderValue::from_static("true"));
+        headers
+            .entry(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .or_insert(HeaderValue::from_static(EXPOSE_HEADERS));
     }
 }
 
@@ -162,6 +167,53 @@ mod tests {
         Router::new()
             .route("/r", get(|| async { "ok" }))
             .layer(axum::middleware::from_fn(cors_middleware))
+    }
+
+    #[tokio::test]
+    async fn response_decoration_preserves_existing_headers_and_body() {
+        let app = Router::new()
+            .route(
+                "/r",
+                get(|| async {
+                    let mut response = "unchanged".into_response();
+                    let h = response.headers_mut();
+                    set(
+                        h,
+                        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                        "https://allowed.example",
+                    );
+                    set(h, header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "false");
+                    set(h, header::ACCESS_CONTROL_EXPOSE_HEADERS, "ETag");
+                    set(h, header::VARY, "Accept, Origin");
+                    response
+                }),
+            )
+            .layer(axum::middleware::from_fn(cors_response_middleware));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/r")
+                    .header(header::ORIGIN, "https://suite.jeswr.org")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let h = response.headers();
+        assert_eq!(
+            h[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://allowed.example"
+        );
+        assert_eq!(h[header::ACCESS_CONTROL_ALLOW_CREDENTIALS], "false");
+        assert_eq!(h[header::ACCESS_CONTROL_EXPOSE_HEADERS], "ETag");
+        assert_eq!(h[header::VARY], "Accept, Origin");
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap(),
+            "unchanged"
+        );
     }
 
     #[tokio::test]

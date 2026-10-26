@@ -12,8 +12,8 @@
 //! ## Overload protection (admission control + timeout) — the layer ORDER is security-critical
 //! [`build_router_with_overload`] wraps the application routes with two overload layers (the
 //! [`crate::overload`] backpressure layer):
-//! - the **admission-control** middleware ([`crate::overload::admission_middleware`]) is the
-//!   **OUTERMOST** layer — it sheds excess load (503 + jittered `Retry-After`) BEFORE auth/WAC/storage
+//! - the **admission-control** middleware ([`crate::overload::admission_middleware`]) runs
+//!   **outside auth** — it sheds excess load (503 + jittered `Retry-After`) BEFORE auth/WAC/storage
 //!   ever run, so a shed request can never bypass authorization (it gets strictly LESS than it would
 //!   otherwise — a 503), and the expensive DPoP crypto is never spent on a request about to be
 //!   rejected; and
@@ -67,7 +67,7 @@ pub struct OverloadConfig {
     /// The per-request timeout (504 on expiry). `None` ⇒ no timeout layer.
     pub request_timeout: Option<Duration>,
     /// The pre-crypto per-IP rate limiter (429 before auth/crypto on a per-source flood). `None` ⇒ no
-    /// rate-limit layer (the `off` sentinel). When present it is the OUTERMOST application layer — see
+    /// rate-limit layer (the `off` sentinel). When present it is the outermost rejecting layer — see
     /// [`build_router_with_overload`].
     pub rate_limiter: Option<RateLimiter>,
     /// The maximum request-body size in bytes (a body over this ⇒ 413). An explicit, audited,
@@ -167,7 +167,7 @@ where
 }
 
 /// Build the router WITH overload protection (the binary's path): admission control (load shedding)
-/// as the OUTERMOST layer + an optional request timeout just inside it, wrapping the application
+/// outside auth + an optional request timeout just inside it, wrapping the application
 /// routes — but NOT the health routes, which are merged OUTSIDE the layers so a load balancer's
 /// readiness probe is never shed/timed-out. See the module's "Overload protection" note for why the
 /// layer order is security-critical (a shed request 503s before auth/WAC/storage — never a bypass).
@@ -187,6 +187,8 @@ where
 /// control, and the pre-crypto per-IP rate limiter, in that order from the inside out — and merge
 /// the health routes OUTSIDE it. Shared by the Solid router ([`build_router_with_overload`]) and the
 /// Linked Web Storage router, so both protocol surfaces carry the same DoS protections.
+/// A decorate-only CORS layer outside the stack makes rejections readable by browser clients;
+/// preflight handling stays inside the stack and remains subject to admission and rate limits.
 ///
 /// The body-limit layer sets the `DefaultBodyLimit` that axum's extractors read; a handler that
 /// reads the body itself (the LWS dispatcher) must apply `overload.body_limit_bytes` on its own.
@@ -221,8 +223,8 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
         admission_middleware,
     ));
 
-    // OUTERMOST: the pre-crypto per-IP rate limiter. Applied LAST, so (axum applies layers bottom-up)
-    // it is the OUTERMOST application layer — it runs FIRST on every request, BEFORE admission control,
+    // OUTERMOST REJECTING LAYER: the pre-crypto per-IP rate limiter. Applied after admission, so
+    // it is outside the other rejecting layers and runs before admission control,
     // auth, WAC, and the expensive DPoP crypto. A per-source flood gets a cheap 429 and NEVER reaches
     // the verifier, so attacker traffic cannot make every bogus proof pay the ES256 verify cost.
     //
@@ -237,6 +239,11 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
             rate_limit_middleware,
         ));
     }
+
+    // Response decoration must surround every rejecting layer, but must never answer a preflight.
+    app = app.layer(axum::middleware::from_fn(
+        crate::ldp::cors::cors_response_middleware,
+    ));
 
     // Health routes are OUTSIDE the overload + rate-limit layers (merged last) — never shed, timed-out,
     // or rate-limited.

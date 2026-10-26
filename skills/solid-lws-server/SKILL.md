@@ -58,6 +58,17 @@ Terminate TLS at a trusted reverse proxy, or set both
 Setting only one makes startup fail. See `skills/http3-server/SKILL.md` for the
 default-off `http3` feature and `skills/helm-deploy/SKILL.md` for Kubernetes.
 
+## Browser clients
+
+Both protocol modes reflect the request's `Origin` with credentials enabled and
+`Vary: Origin`. Browser scripts can read `Link`, `ETag`, `Location`,
+`WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`
+(the LWS linkset preference response), alongside the existing content and discovery
+headers. The expose list is explicit, with no wildcard. Overload responses carry
+the same CORS headers; preflights still pass rate limiting and admission control.
+Preflights echo requested headers, or advertise a default set including `Depth`.
+LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
+
 ## Choose a data backend
 
 Set `PSS_SPARQ_BACKEND` to one of:

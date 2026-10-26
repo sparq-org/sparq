@@ -995,6 +995,8 @@ async fn read<S: Store + 'static>(
     if let Some(m) = modified {
         set(h, header::LAST_MODIFIED, &http_date(m));
     }
+    // JLWS web-platform integration: serve stored data without MIME sniffing.
+    set(h, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
     set(h, header::ACCEPT_RANGES, "bytes");
     resource_links(state, h, uri, &types);
     resp
