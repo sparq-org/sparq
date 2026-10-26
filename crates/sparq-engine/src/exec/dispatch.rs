@@ -2261,7 +2261,7 @@ pub(super) fn eval_graph_named_pref(
                     // boundary + (empty) pattern input sets under its name.
                     #[cfg(feature = "zk")]
                     let _zk = crate::zk::graph_scope(&target);
-                    let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
+                    let empty = Graph::new();
                     let mut el = LocalVocab { ebv_semantics: local.ebv_semantics, dataset: local.dataset, ..LocalVocab::default() };
                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
                     b.rows.clear();

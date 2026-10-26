@@ -939,10 +939,10 @@ async fn resource_removal_preserves_unrelated_graph_files() {
                     .named_graph(&oxrdf::Term::NamedNode(
                         oxrdf::NamedNode::new(CHILD).unwrap()
                     ))
-                    .is_none_or(Graph::is_empty)))
+                    .is_none()))
                 .await
                 .unwrap(),
-            "resource statements remain after {operation}"
+            "removed resource's named-graph slot remains after {operation}"
         );
         assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
         drop(c);
@@ -950,6 +950,17 @@ async fn resource_removal_preserves_unrelated_graph_files() {
         assert!(
             !c.exists(CHILD).await.unwrap(),
             "removed record stays absent after {operation}"
+        );
+        assert!(
+            c.actor
+                .call(|graph| Ok(graph
+                    .named_graph(&oxrdf::Term::NamedNode(
+                        oxrdf::NamedNode::new(CHILD).unwrap()
+                    ))
+                    .is_none()))
+                .await
+                .unwrap(),
+            "removed resource's named-graph slot returns after reopening {operation}"
         );
         assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
         if operation == "member" {

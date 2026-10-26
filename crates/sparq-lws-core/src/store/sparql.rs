@@ -658,9 +658,6 @@ pub fn update_delete_resource(resource: &str) -> Result<String, BuildError> {
 /// Build a resource deletion and parent detach for one captured transaction.
 ///
 /// The embedded client captures the entire request and commits its effects once.
-/// Clear the resource's statements while retaining its internal graph slot: dropping a slot
-/// renumbers and persists every surviving graph in a directory-backed index. Resource existence
-/// is determined by its index record, so an empty slot represents no resource.
 ///
 /// # Errors
 ///
@@ -670,7 +667,7 @@ pub(super) fn update_delete_resource_with_parent(
     resource: &str,
     parent: Option<&str>,
 ) -> Result<String, BuildError> {
-    let delete = format!("CLEAR SILENT GRAPH {}", iri(resource)?);
+    let delete = update_delete_resource(resource)?;
     match parent {
         Some(parent) => Ok(format!("{}; {delete}", update_remove_child(parent, resource)?)),
         None => Ok(delete),
@@ -954,16 +951,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn delete_with_parent_validates_both_iris_and_clears_the_resource() {
+    fn delete_with_parent_validates_both_iris_and_reuses_the_delete_builders() {
         let child = "https://pod.example/c/item";
         let parent = "https://pod.example/c/";
         assert_eq!(
             update_delete_resource_with_parent(child, None).unwrap(),
-            format!("CLEAR SILENT GRAPH <{child}>")
+            update_delete_resource(child).unwrap()
         );
         assert_eq!(
             update_delete_resource_with_parent(child, Some(parent)).unwrap(),
-            format!("{}; CLEAR SILENT GRAPH <{child}>", update_remove_child(parent, child).unwrap())
+            format!("{}; {}", update_remove_child(parent, child).unwrap(), update_delete_resource(child).unwrap())
         );
         assert_eq!(
             update_delete_resource_with_parent("bad>iri", None),

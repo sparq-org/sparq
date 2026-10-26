@@ -96,6 +96,33 @@ fn invisible_graph_is_indistinguishable_from_absent() {
 }
 
 #[test]
+fn optional_absent_graph_preserves_schema_and_correlated_left_rows() {
+    let g = store();
+    let v = view(&g, &["http://ex/g1"], DefaultGraphMode::StoreDefault);
+    for visible in [false, true] {
+        let run = |q: &str| {
+            if visible { query_view(&v, q).unwrap() } else { query(&g, q).unwrap() }
+        };
+        let pattern = "GRAPH <http://ex/nope> { ?s <http://ex/p> ?o BIND(?d AS ?inner) }";
+        let absent = run(&format!("SELECT ?s ?o ?inner WHERE {{ {pattern} }}"));
+        assert_eq!(absent.vars.iter().map(|v| v.as_str()).collect::<Vec<_>>(), ["s", "o", "inner"]);
+        assert!(absent.rows.is_empty());
+        let optional = run(&format!(
+            "SELECT ?s ?d ?o ?inner WHERE {{ ?s <http://ex/p> ?d OPTIONAL {{ {pattern} }} }} ORDER BY ?s"
+        ));
+        assert_eq!(optional.vars.iter().map(|v| v.as_str()).collect::<Vec<_>>(), ["s", "d", "o", "inner"]);
+        let iri = |name| Some(Term::NamedNode(NamedNode::new(format!("http://ex/{name}")).unwrap()));
+        assert_eq!(optional.rows, vec![
+            vec![iri("d1"), iri("d2"), None, None],
+            vec![iri("d2"), iri("d3"), None, None],
+        ]);
+        let unit = run("SELECT * WHERE { GRAPH <http://ex/nope> {} }");
+        assert!(unit.vars.is_empty());
+        assert!(unit.rows.is_empty());
+    }
+}
+
+#[test]
 fn default_graph_modes() {
     let g = store();
     // StoreDefault: today's behaviour — the store's default graph is visible.

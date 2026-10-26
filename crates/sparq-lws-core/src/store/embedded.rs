@@ -702,8 +702,9 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
-        // Remove the statements through the same transaction path as a resource deletion.
-        let u = sparql::update_delete_resource_with_parent(iri, None)?;
+        // DROP SILENT the resource's whole named graph (idempotent on an absent graph) — the SAME
+        // `update_delete_resource` builder. Atomic single-op.
+        let u = sparql::update_delete_resource(iri)?;
         self.dispatch(move |graph| {
             commit(graph, &u, "delete_meta")
         })
