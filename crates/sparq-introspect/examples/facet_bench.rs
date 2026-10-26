@@ -95,8 +95,8 @@ fn naive_facets(graph: &Graph, req: &FacetRequest) -> FacetResponse {
         candidates.retain(|subject| {
             rows.iter().any(|row| {
                 row[0] == *subject
-                    && named_iri(&graph.dict.term(row[1])) == Some(RDF_TYPE)
-                    && named_iri(&graph.dict.term(row[2])) == Some(class.as_str())
+                    && named_iri(&graph.dict().term(row[1])) == Some(RDF_TYPE)
+                    && named_iri(&graph.dict().term(row[2])) == Some(class.as_str())
             })
         });
     }
@@ -104,8 +104,8 @@ fn naive_facets(graph: &Graph, req: &FacetRequest) -> FacetResponse {
         candidates.retain(|subject| {
             rows.iter().any(|row| {
                 row[0] == *subject
-                    && named_iri(&graph.dict.term(row[1])) == Some(predicate.as_str())
-                    && graph.dict.term(row[2]).to_string() == *object
+                    && named_iri(&graph.dict().term(row[1])) == Some(predicate.as_str())
+                    && graph.dict().term(row[2]).to_string() == *object
             })
         });
     }
@@ -121,12 +121,12 @@ fn naive_facets(graph: &Graph, req: &FacetRequest) -> FacetResponse {
         if !candidates.contains(&row[0]) {
             continue;
         }
-        let predicate_term = graph.dict.term(row[1]);
+        let predicate_term = graph.dict().term(row[1]);
         let Some(predicate) = named_iri(&predicate_term) else {
             continue;
         };
         *predicate_counts.entry(predicate.to_owned()).or_insert(0) += 1;
-        let object = graph.dict.term(row[2]);
+        let object = graph.dict().term(row[2]);
         if predicate == RDF_TYPE {
             let value = named_iri(&object).map_or_else(|| object.to_string(), str::to_owned);
             *type_counts.entry(value).or_insert(0) += 1;

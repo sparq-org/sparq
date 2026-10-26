@@ -266,7 +266,7 @@ fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need, odrl: &Gate
 /// write grant.
 fn store_named_graphs(graph: &sparq_core::Graph) -> Vec<NamedNode> {
     graph
-        .named
+        .named()
         .iter()
         .filter_map(|(n, _)| match n {
             Term::NamedNode(nn) if nn.as_str() != crate::AUTH_GRAPH => Some(nn.clone()),

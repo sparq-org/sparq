@@ -32,11 +32,11 @@ fn main() {
     let g_upstream =
         sparq_hdt::load_reader_via_upstream(std::io::Cursor::new(bytes.clone())).unwrap();
     assert_eq!(
-        g_direct.store.len(),
-        g_upstream.store.len(),
+        g_direct.store().len(),
+        g_upstream.store().len(),
         "graphs must match"
     );
-    let triples = g_direct.store.len();
+    let triples = g_direct.store().len();
     println!("loaded {triples} triples (direct == upstream store len)\n");
 
     let mut best_direct = f64::MAX;

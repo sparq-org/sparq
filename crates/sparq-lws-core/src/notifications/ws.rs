@@ -19,7 +19,7 @@
 //!
 //! ## Discovery (per the Solid Notifications Protocol)
 //! A client finds the channel two ways, both implemented here:
-//! 1. the `/.well-known/solid` storage description lists the `notificationChannel` subscription
+//! 1. the `/.well-known/solid` storage description lists the notification subscription
 //!    service + its supported `channelType`, and
 //! 2. [`link_headers`] returns the `Link` rels (`describedby` + `solid:storageDescription`) the LDP
 //!    GET/HEAD handler can attach so a client can `HEAD` a resource and discover the same service.
@@ -127,6 +127,10 @@ fn authorization_unavailable() -> Response {
 pub struct NotifyState<S: Store> {
     pub hub: NotificationHub,
     pub base_url: String,
+    /// The services mounted by this host, snapshotted in the description at construction.
+    pub catalog: crate::describe::ServiceCatalog,
+    description_jsonld: CachedDescription,
+    description_turtle: CachedDescription,
     /// The LDP state — the store + ACL cache the [`WacAuthorizer`] reads `.acl` resources through.
     ldp: Arc<LdpState<S>>,
     /// How often an open socket's subscriber is checked for read access apart from any event
@@ -153,12 +157,55 @@ pub struct NotifyState<S: Store> {
 /// may not read.
 pub const ACCESS_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// One representation of the static storage description, rendered before serving requests.
+struct CachedDescription {
+    body: bytes::Bytes,
+    etag: axum::http::HeaderValue,
+}
+
+impl CachedDescription {
+    fn render(
+        catalog: &crate::describe::ServiceCatalog,
+        storage: &str,
+        format: crate::ldp::content::RdfFormat,
+    ) -> Result<Self, crate::error::ServerError> {
+        use sha2::{Digest, Sha256};
+        let body = bytes::Bytes::from(catalog.solid(storage, format)?);
+        let etag = format!(
+            "\"sd-{}\"",
+            crate::lws::jose::b64url(&Sha256::digest(&body))
+        )
+        .parse()
+        .expect("valid description ETag");
+        Ok(Self { body, etag })
+    }
+}
+
 impl<S: Store> NotifyState<S> {
     /// Derive the notification state from the LDP state: the hub and base URL are TAKEN from it
     /// (single-sourced), so a subscriber registered via `…/receive` is on the same registry the LDP
     /// emit path fans to and the advertised URLs match the LDP layer's own base.
+    ///
+    /// # Panics
+    /// Panics if the static storage description cannot be rendered.
     pub fn new(ldp: Arc<LdpState<S>>) -> Self {
+        Self::with_catalog(ldp, crate::describe::ServiceCatalog::default())
+    }
+
+    pub(crate) fn with_catalog(
+        ldp: Arc<LdpState<S>>,
+        catalog: crate::describe::ServiceCatalog,
+    ) -> Self {
+        use crate::ldp::content::RdfFormat;
+        let storage = format!("{}/", ldp.base_url().trim_end_matches('/'));
+        let description_jsonld = CachedDescription::render(&catalog, &storage, RdfFormat::JsonLd)
+            .expect("render static JSON-LD storage description before boot");
+        let description_turtle = CachedDescription::render(&catalog, &storage, RdfFormat::Turtle)
+            .expect("render static Turtle storage description before boot");
         Self {
+            catalog,
+            description_jsonld,
+            description_turtle,
             hub: ldp.notifications.clone(),
             base_url: ldp.base_url().to_string(),
             ldp,
@@ -284,6 +331,7 @@ impl<S: Store> NotifyState<S> {
     }
 
     /// The absolute subscription-service URL (the POST target).
+    #[cfg(test)]
     fn subscription_service_url(&self) -> String {
         format!("{}{SUBSCRIPTION_PATH}", self.base_url.trim_end_matches('/'))
     }
@@ -836,24 +884,60 @@ async fn stream_notifications<S: Store + 'static, W>(
 /// storage description).
 pub async fn storage_description_handler<S: Store>(
     State(state): State<Arc<NotifyState<S>>>,
+    headers: HeaderMap,
 ) -> Response {
-    let body = json!({
-        "@context": [NOTIFICATIONS_CONTEXT, AS2_CONTEXT],
-        "notificationChannel": [
-            {
-                "id": state.subscription_service_url(),
-                "channelType": WEBSOCKET_CHANNEL_2023_TYPE,
-                // The subscription service: POST a channel request here to obtain a `receiveFrom` URL.
-                "subscriptionService": state.subscription_service_url(),
-            }
-        ],
-    });
-    (
-        StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/ld+json")],
-        body.to_string(),
-    )
-        .into_response()
+    use crate::lws::resources::negotiate;
+    let Some(media) = negotiate(
+        headers
+            .get(axum::http::header::ACCEPT)
+            .and_then(|v| v.to_str().ok()),
+        &["application/ld+json", "text/turtle"],
+    ) else {
+        return (
+            StatusCode::NOT_ACCEPTABLE,
+            [(axum::http::header::VARY, "Accept")],
+        )
+            .into_response();
+    };
+    let description = if media == "text/turtle" {
+        &state.description_turtle
+    } else {
+        &state.description_jsonld
+    };
+    let etag = description.etag.to_str().expect("valid description ETag");
+    use crate::ldp::conditional::{
+        evaluate_read, evaluate_read_guard, Precondition, ReadPrecondition,
+    };
+    let if_match = crate::entity_tag::field(&headers, axum::http::header::IF_MATCH);
+    let if_none_match = crate::entity_tag::field(&headers, axum::http::header::IF_NONE_MATCH);
+    let status =
+        if evaluate_read_guard(if_match.as_deref(), None, etag, None) == Precondition::Failed {
+            StatusCode::PRECONDITION_FAILED
+        } else if evaluate_read(if_none_match.as_deref(), None, etag, None)
+            == ReadPrecondition::NotModified
+        {
+            StatusCode::NOT_MODIFIED
+        } else {
+            StatusCode::OK
+        };
+    let body = if status == StatusCode::OK {
+        description.body.clone()
+    } else {
+        bytes::Bytes::new()
+    };
+    let mut response = (status, body).into_response();
+    response
+        .headers_mut()
+        .insert(axum::http::header::ETAG, description.etag.clone());
+    for (name, value) in [
+        (axum::http::header::CONTENT_TYPE, media.as_str()),
+        (axum::http::header::VARY, "Accept"),
+    ] {
+        response
+            .headers_mut()
+            .insert(name, value.parse().expect("valid description header"));
+    }
+    response
 }
 
 /// The discovery `Link` header VALUES the LDP GET/HEAD handler can attach to a resource response so a
@@ -1466,10 +1550,44 @@ mod tests {
 
     #[tokio::test]
     async fn storage_description_advertises_subscription_service() {
-        let resp = storage_description_handler(State(state())).await;
+        use tower::ServiceExt;
+        let mut state = state();
+        let mut service = crate::describe::entry(
+            "notifications",
+            &format!("{}SolidNotificationService", crate::describe::SSD),
+            state.subscription_service_url(),
+        );
+        service.extras.insert(
+            format!("{}channelType", crate::describe::SSD),
+            json!({"@id": WEBSOCKET_CHANNEL_2023_TYPE}),
+        );
+        Arc::get_mut(&mut state).unwrap().catalog.service(service);
+        let state = Arc::new(NotifyState::with_catalog(
+            state.ldp.clone(),
+            state.catalog.clone(),
+        ));
+        let app = axum::Router::new()
+            .route(
+                SUBSCRIPTION_PATH,
+                axum::routing::post(subscribe_handler::<TestStore>),
+            )
+            .route(
+                WELL_KNOWN_SOLID_PATH,
+                axum::routing::get(storage_description_handler::<TestStore>),
+            )
+            .with_state(state);
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(WELL_KNOWN_SOLID_PATH)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_to_string(resp).await;
-        assert!(body.contains("notificationChannel"), "{body}");
+        assert!(body.contains("SolidNotificationService"), "{body}");
         assert!(body.contains(WEBSOCKET_CHANNEL_2023_TYPE), "{body}");
         assert!(
             body.contains("https://pod.example/.notifications/WebSocketChannel2023/"),

@@ -598,8 +598,8 @@ mod tests {
             for sort_col in [None, Some(0), Some(1), Some(2)] {
                 let predicted = predicted_perm(pat, sort_col);
                 let actual = match sort_col {
-                    Some(c) => g.store.scan_sorted(pat, c).perm,
-                    None => g.store.scan(pat).perm,
+                    Some(c) => g.store().scan_sorted(pat, c).perm,
+                    None => g.store().scan(pat).perm,
                 };
                 assert_eq!(predicted as usize, actual as usize, "pattern {pat:?} sort {sort_col:?}");
             }

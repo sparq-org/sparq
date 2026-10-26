@@ -58,6 +58,17 @@ Terminate TLS at a trusted reverse proxy, or set both
 Setting only one makes startup fail. See `skills/http3-server/SKILL.md` for the
 default-off `http3` feature and `skills/helm-deploy/SKILL.md` for Kubernetes.
 
+## Browser clients
+
+Both protocol modes reflect the request's `Origin` with credentials enabled and
+`Vary: Origin`. Browser scripts can read `Link`, `ETag`, `Location`,
+`WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`
+(the LWS linkset preference response), alongside the existing content and discovery
+headers. The expose list is explicit, with no wildcard. Overload responses carry
+the same CORS headers; preflights still pass rate limiting and admission control.
+Preflights echo requested headers, or advertise a default set including `Depth`.
+LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
+
 ## Choose a data backend
 
 Set `PSS_SPARQ_BACKEND` to one of:
@@ -68,9 +79,18 @@ Set `PSS_SPARQ_BACKEND` to one of:
   ephemeral.
   Directory-backed mutations commit through the transaction journal; in-memory
   mutations retain the engine's atomic update path. `EmbeddedSparqClient::save(dir)`
-  exports a snapshot to a separate directory and refuses the client's open backing
-  directory, including aliases that resolve to the same canonical path, because
-  replacing named-graph files under live WALs can lose later writes.
+  exports an independent snapshot to a different directory. Into the client's open
+  backing directory (by file identity, including path and symlink aliases), it compacts
+  the graph and reopens its journals so later writes remain durable. Repeated refused
+  compactions retain pending writes for reopen. Path components created while resolving a
+  save alias are removed when empty on compaction or failure. A frozen graph,
+  path resolution or snapshot/compaction I/O failure, unavailable compaction (including
+  a missing outside lock or poisoned transaction journal), or stopped actor returns a
+  backend error. After an indeterminate commit or job panic, the actor closes its queue and
+  drops pending jobs, including sends already in flight; their callers receive the stopped-actor
+  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
+  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
   read its own writes: a query sent after an update has completed must see what the
@@ -308,6 +328,27 @@ An unknown `Accept` media type falls back to the Solid default
 `406 Not Acceptable`. Non-RDF resources preserve their binary media type and
 support byte-range reads.
 
+## Discover deployed services and capabilities
+
+Both modes expose a public catalog built with their mounted routes. The Solid router
+renders both description formats and their ETags at construction; a rendering failure
+prevents startup. Requests reuse the cached representation. Solid serves
+`/.well-known/solid` as JSON-LD by default (`Accept: */*` included) or Turtle with
+`Accept: text/turtle`; unsupported types, including `application/lws+cid`, get `406`.
+JSON-LD keeps the compact `notificationChannel` discovery array and names the
+notifications context first, followed by inline extension mappings.
+Both representations carry `Vary: Accept` and representation ETags with conditional
+GET/HEAD support. The SPARQL service and root GET/HEAD discovery link appear only
+with `sparql-endpoint`, independent of the requester's readable resources.
+
+LWS serves its CID description at `/` with `Accept: application/lws+cid`, preserving
+its verification key and validators. It includes the storage-description service,
+protocol conformance URI, JSON Patch formats and recursive deletion; `MoveResource`
+is absent because `up` is server-managed. Notification subscription types come from
+the catalog (currently webhooks). Draft extension terms use an inline context.
+See [catalog entries and embedding](references/service-description.md) for the
+RDF terms, media maps and the `describe::ServiceCatalog` registration API.
+
 ## Query readable RDF with `/sparql`
 
 The default `sparql-endpoint` feature exposes authenticated `GET` and `POST`
@@ -399,12 +440,11 @@ write lock, so a raise that lands late never lowers it; it needs no blob capacit
 entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
 one IRI, the first marker stored; any other IRI of that shape takes room in the pool). The mark
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
-the process, and the embedded index writes it to disk only when it saves a snapshot
-(`EmbeddedSparqClient::save`), so a start from a snapshot taken before a raise finds the earlier
-mark, and the expiries decided after that snapshot are not durable. The wasm adapter's
-`PersistentStore` reports no atomic-marker capability: its snapshot journal does not yet
-preserve marker mutations or forward the lifecycle lease, so `LwsState::new` refuses it
-before reading or writing. A listing,
+the process; the directory-backed embedded index journals each raise before acknowledging it.
+Restoring an independent snapshot taken before a raise restores the earlier mark and loses
+expiries decided after that snapshot. The wasm adapter's `PersistentStore` reports no
+atomic-marker capability: its snapshot journal does not yet preserve marker mutations or forward
+the lifecycle lease, so `LwsState::new` refuses it before reading or writing. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -605,7 +645,25 @@ What the server exposes, all discoverable from the storage description
   suite takes), `LwsConfig::suites` lists them, and the metadata lists their token and
   identifier types. `SOLID_SERVER_LWS_AUTHN` picks among the suites built in.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
-  gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
+  gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", realm="…", as_uri="…"`.
+  RFC 9728 discovery is public at `<base>/.well-known/oauth-protected-resource`,
+  obtained by inserting the well-known path before the storage root path. Only that
+  computed path is served; other suffixes return `404`. GET and HEAD return JSON
+  with an ETag and `Cache-Control: public, max-age=300`; `If-None-Match` revalidates it.
+  The document has `resource` and `jlws_storage_description` equal to `<base>/`,
+  `authorization_servers: ["<base>"]` (exactly the AS metadata issuer, without a
+  trailing slash), and `bearer_methods_supported: ["header"]`. It omits `resource_name`
+  and DPoP algorithm metadata: storage access uses bearer tokens; a DPoP proof on the
+  subject-token exchange is a separate operation. AS metadata is also available at
+  `/.well-known/oauth-authorization-server`. Both AS aliases and the protected resource
+  metadata support CORS fetches without credentials. The storage-description pointer
+  serves the existing CID with `Accept: application/lws+cid`.
+  Every LWS challenge keeps the `Link` with `rel="https://www.w3.org/ns/lws#storage"`.
+  The first auth parameter is `resource_metadata`; `realm` equals the storage root and
+  access-token audience, and `as_uri` is retained for transitioning clients. An anonymous
+  challenge has no `error`; a rejected bearer token adds `error="invalid_token"`.
+  For child resource requests, validate containment within the PRM's storage-root
+  `resource`, rather than string equality with the child's URL.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
   `/.lws/requests/`. Documents need an `@context` that includes
   `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
@@ -772,7 +830,18 @@ What the server exposes, all discoverable from the storage description
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
-  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
+  storage is served by one process at a time. The LWS service starts only over a store whose
+  index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
+  whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
+  by the graph on its actor's thread). If that thread panics the graph, and with it the lock,
+  is dropped, and every later store call fails (`5xx`): the index is never used without the
+  lock. Over any other index (a remote SPARQL endpoint, or a store that does not say; the wasm
+  host's persistent store does not say) the start fails before anything is read or written.
+  The lock is `<dir>.lock` beside the index directory, when it exists or can be created, and
+  `sparq.lock` inside it; an index directory whose parent is not writable is held by the inside
+  lock alone and serves; compaction that must swap the index's root directory is refused.
+  A graph a failed compaction froze is reported
+  as a failed store call (`5xx`), never served: restart to re-open the directory. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees

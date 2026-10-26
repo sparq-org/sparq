@@ -108,7 +108,7 @@ fn unrelated_shorter_graph_honestly_needs_rebuild() {
     )
     .unwrap();
 
-    assert!(unrelated.dict.len() < index.indexed_dict_len());
+    assert!(unrelated.dict().len() < index.indexed_dict_len());
     assert!(index.needs_rebuild(&unrelated));
     assert!(!index.is_consistent_with(&unrelated));
 }

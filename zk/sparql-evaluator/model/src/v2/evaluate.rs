@@ -119,10 +119,13 @@ pub(crate) fn build_dataset(dataset: &PrivateDataset, policy: &Policy, blank_nod
     let mut graph = graphs
         .next()
         .ok_or(Rejected("V2 default graph construction"))?;
-    graph.named = graph_names
-        .into_iter()
-        .zip(graphs)
-        .map(|(name, graph)| (Term::NamedNode(name), graph))
-        .collect();
+    graph
+        .extend_named(
+            graph_names
+                .into_iter()
+                .zip(graphs)
+                .map(|(name, graph)| (Term::NamedNode(name), graph)),
+        )
+        .map_err(|_| Rejected("V2 named graph construction"))?;
     Ok(graph)
 }

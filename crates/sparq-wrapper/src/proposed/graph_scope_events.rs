@@ -140,26 +140,38 @@ impl ObservableDataset {
         if let Some(name) = graph_name.filter(|name| !is_graph_name(name)) {
             return Err(ObserveError::InvalidGraphName(name.clone()));
         }
-        let target = match graph_name {
-            None => &mut self.dataset,
+        let index = match graph_name {
+            None => None,
             // An absent graph holds nothing to delete; do not create it.
             Some(name)
                 if kind == ChangeKind::Delete && self.dataset.named_graph(name).is_none() =>
             {
                 return Ok(false)
             }
-            Some(name) => {
-                let index = self
-                    .dataset
+            Some(name) => Some(
+                self.dataset
                     .ensure_named(name)
-                    .map_err(ObserveError::Graph)?;
-                &mut self.dataset.named[index].1
-            }
+                    .map_err(ObserveError::Graph)?,
+            ),
+        };
+        let target = match index {
+            None => &self.dataset,
+            Some(i) => &self.dataset.named()[i].1,
         };
         if !kind.is_effective(contains(target, &subject, &predicate, &object)) {
             return Ok(false);
         }
-        apply(target, kind, &subject, &predicate, &object)?;
+        match index {
+            None => apply(&mut self.dataset, kind, &subject, &predicate, &object)?,
+            Some(i) => {
+                let triple = [subject.clone(), Term::NamedNode(predicate.clone()), object.clone()];
+                match kind {
+                    ChangeKind::Add => self.dataset.apply_delta_to_named(i, &[triple], &[]),
+                    ChangeKind::Delete => self.dataset.apply_delta_to_named(i, &[], &[triple]),
+                }
+                .map_err(ObserveError::Graph)?
+            }
+        }
 
         let event = ChangeEvent {
             kind,

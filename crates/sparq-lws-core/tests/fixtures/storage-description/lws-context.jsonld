@@ -1,0 +1,18 @@
+{
+  "@context": {
+    "@vocab": "https://www.w3.org/ns/lws#",
+    "capability": "https://www.w3.org/ns/lws#capability",
+    "subscriptionType": {
+      "@id": "https://www.w3.org/ns/lws#subscriptionType",
+      "@type": "@vocab"
+    },
+    "conformsTo": {
+      "@id": "http://purl.org/dc/terms/conformsTo",
+      "@type": "@id"
+    },
+    "mediaType": {
+      "@id": "https://www.w3.org/ns/activitystreams#mediaType",
+      "@type": "@json"
+    }
+  }
+}

@@ -111,11 +111,11 @@ fn load_dataset_with_graphs(
             continue;
         };
         let t = Term::NamedNode(nn);
-        if !graph.named.iter().any(|(g, _)| *g == t) {
-            graph.named.push((
+        if !graph.named().iter().any(|(g, _)| *g == t) {
+            graph.add_named(
                 t,
                 sparq_core::Graph::from_parts(sparq_core::dict::Dict::new(), Vec::new()),
-            ));
+            )?;
         }
     }
     Ok(graph)
@@ -689,19 +689,19 @@ pub fn run_update_test(entry: &TestEntry) -> Status {
             // Dump the resulting dataset: default graph + every named graph.
             let mut rows: Vec<Row> = Vec::new();
             let mut dump = |g: &sparq_core::Graph, name: Option<&Term>| {
-                let scan = g.store.scan(&[None, None, None]);
+                let scan = g.store().scan(&[None, None, None]);
                 for r in scan.rows.iter() {
                     let [s, p, o] = scan.to_spo(r);
                     rows.push(vec![
-                        Some(g.dict.term(s)),
-                        Some(g.dict.term(p)),
-                        Some(g.dict.term(o)),
+                        Some(g.dict().term(s)),
+                        Some(g.dict().term(p)),
+                        Some(g.dict().term(o)),
                         name.cloned(),
                     ]);
                 }
             };
             dump(&updated, None);
-            for (name, g) in &updated.named {
+            for (name, g) in updated.named() {
                 dump(g, Some(name));
             }
             Ok::<_, String>(rows)

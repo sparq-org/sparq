@@ -61,8 +61,8 @@
 //! call fails closed with a [`SparqError::Backend`], exactly as a poisoned `Mutex` did. FIFO order is
 //! the one strict improvement: `Mutex` wakeups were arbitrary, so a caller could be starved.
 //!
-//! The actor thread exits when the last [`EmbeddedSparqClient`] clone drops (the channel closes) —
-//! no explicit shutdown handshake, no leaked thread.
+//! Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the actor thread.
+//! Its graph and directory lock are released before drop returns.
 //!
 //! ## Persistence
 //! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
@@ -133,17 +133,17 @@ struct GraphActor {
     /// reply, so a task can have at most ONE job outstanding — the queue is bounded in practice by
     /// the number of in-flight requests, which the server's own concurrency limits already cap.
     tx: mpsc::UnboundedSender<Job>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl GraphActor {
     /// Move `graph` onto a fresh dedicated OS thread and start serving jobs.
     ///
-    /// The thread runs until the channel closes (i.e. until the last [`EmbeddedSparqClient`] clone
-    /// drops the sender), so there is no shutdown handshake to get wrong and no leaked thread. A
-    /// spawn failure (the OS refused a thread) is a fail-closed backend error rather than a panic.
+    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread, releasing
+    /// the graph's directory lock before returning. A spawn failure is a backend error.
     fn spawn(graph: Graph) -> Result<Self, SparqError> {
         let (tx, rx) = mpsc::unbounded_channel::<Job>();
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name(ACTOR_THREAD_NAME.to_string())
             .spawn(move || actor_loop(graph, rx))
             .map_err(|e| {
@@ -152,7 +152,10 @@ impl GraphActor {
                     e
                 ))
             })?;
-        Ok(Self { tx })
+        Ok(Self {
+            tx,
+            thread: Some(thread),
+        })
     }
 
     /// Send one engine closure to the actor and await its result off the reactor.
@@ -181,11 +184,50 @@ impl GraphActor {
     }
 }
 
+impl Drop for GraphActor {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Box::new(|graph| graph.stopped = true));
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Directories this save created, removed when empty unless the snapshot uses them.
+#[derive(Default)]
+struct SaveDirectories(Vec<std::path::PathBuf>);
+
+impl SaveDirectories {
+    fn create(&mut self, path: &Path) -> std::io::Result<()> {
+        if path.is_dir() {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            self.create(parent)?;
+        }
+        match std::fs::create_dir(path) {
+            Ok(()) => self.0.push(path.to_path_buf()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {}
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SaveDirectories {
+    fn drop(&mut self) {
+        for path in self.0.iter().rev() {
+            let _ = std::fs::remove_dir(path);
+        }
+    }
+}
+
 /// The actor thread's body: run jobs one at a time until the channel closes.
 ///
 /// A panicking job POISONS the actor — it is caught (so the panic never unwinds out of the thread
-/// and is never silently swallowed either), then the loop BREAKS, dropping the receiver. That makes
-/// every subsequent `send` fail, so all later calls get the fail-closed [`ACTOR_STOPPED`] error.
+/// and is never silently swallowed either), then the loop breaks and closes the receiver. Queued
+/// jobs are dropped, including sends already in flight, so all waiting and later callers receive
+/// the fail-closed [`ACTOR_STOPPED`] error.
 /// This deliberately reproduces the previous slice's `Mutex` poisoning: a panic mid-update may have
 /// left the `Graph` half-mutated, so the fail-closed posture is to serve nothing further rather than
 /// hand out reads of a torn index. An indeterminate commit stops the actor the same way.
@@ -204,6 +246,12 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
         if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut graph))).is_err() || graph.stopped {
             break;
         }
+    }
+    rx.close();
+    // Receive until all sends admitted before close have finished pushing. Dropping the
+    // receiver alone can miss an in-flight send and leave its reply sender alive forever.
+    while let Some(job) = rx.blocking_recv() {
+        drop(job);
     }
 }
 
@@ -317,49 +365,73 @@ impl EmbeddedSparqClient {
         T: Send + 'static,
     {
         self.round_trips.fetch_add(1, Ordering::Relaxed);
-        self.actor.call(f).await
+        self.actor
+            .call(move |graph| {
+                refuse_frozen(graph)?;
+                f(graph)
+            })
+            .await
     }
 
-    /// Snapshot the current graph to a separate directory.
+    /// Save a snapshot elsewhere, or compact the graph in its backing directory.
     ///
     /// Runs on the actor thread, so the snapshot cannot interleave with a write. It is not counted
     /// as an engine round-trip (it is an operator/persistence action, not a data-path query), keeping
     /// [`Self::engine_round_trips`] the same metric the counter tests pin.
     ///
+    /// Into the directory the graph is open from (by file identity, whatever the spelling) the
+    /// snapshot is a compaction: that directory already holds the graph's state, and a plain
+    /// save there is refused (it would truncate files the graph still maps). Compaction reopens
+    /// the graph over the new base, so later writes keep their journals and survive a reopen.
+    ///
     /// # Errors
-    /// Returns a backend error if `dir` resolves to the client's open backing directory, path
-    /// resolution or snapshot I/O fails, or the actor has stopped. Saving over live WALs would
-    /// replace their named-graph files and lose subsequent writes.
+    ///
+    /// Returns a backend error if the graph is frozen, path resolution or snapshot/compaction
+    /// I/O fails, compaction is unavailable (including a missing outside lock or poisoned
+    /// transaction journal), or the actor has stopped.
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
             .call(move |graph| {
-                if let Some(backing) = graph.persist_dir() {
-                    let backing = backing.canonicalize().map_err(|e| {
-                        SparqError::Backend(format!(
-                            "fatal: backing directory resolution failed: {e}"
-                        ))
-                    })?;
-                    // Resolve after creating the destination, as save itself would: a missing
-                    // component followed by `..` can otherwise hide an alias of the live directory.
-                    std::fs::create_dir_all(&dir).map_err(|e| {
-                        SparqError::Backend(format!("fatal: save directory creation failed: {e}"))
-                    })?;
-                    let destination = dir.canonicalize().map_err(|e| {
-                        SparqError::Backend(format!("fatal: save directory resolution failed: {e}"))
-                    })?;
-                    if destination == backing {
-                        return Err(SparqError::Backend(
-                            "refusing to save over the open backing directory".into(),
-                        ));
+                refuse_frozen(graph)?;
+                // Resolve through any newly created components, retaining only directories
+                // used by a successful snapshot to a separate destination.
+                let mut created = SaveDirectories::default();
+                created.create(&dir).map_err(|e| {
+                    SparqError::Backend(format!("fatal: save directory creation failed: {e}"))
+                })?;
+                let dir = dir.canonicalize().map_err(|e| {
+                    SparqError::Backend(format!("fatal: save directory resolution failed: {e}"))
+                })?;
+                let saved = if graph.is_backed_by(&dir) {
+                    drop(created);
+                    graph.compact()
+                } else {
+                    let saved = graph.save(&dir).map_err(|e| e.to_string());
+                    if saved.is_ok() {
+                        created.0.clear();
                     }
-                }
-                graph.save(&dir).map_err(|e| {
+                    saved
+                };
+                saved.map_err(|e| {
                     SparqError::Backend(format!("fatal: graph save({}) failed: {e}", dir.display()))
                 })
             })
             .await
     }
+}
+
+/// A graph a failed directory swap froze ([`Graph::is_frozen`]) is reported as failed, never
+/// served: what it still reads may be empty or older than its directory. The store has to be
+/// re-opened.
+fn refuse_frozen(graph: &Graph) -> Result<(), SparqError> {
+    if !graph.is_frozen() {
+        return Ok(());
+    }
+    let why = graph.check_writable().err().unwrap_or_default();
+    Err(SparqError::Backend(format!(
+        "fatal: the embedded graph is frozen and must be re-opened from its directory: {why}"
+    )))
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -460,6 +532,12 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
 
 #[async_trait]
 impl SparqClient for EmbeddedSparqClient {
+    /// The graph is this process's: held in its memory, or opened from a directory it holds
+    /// locked for as long as the graph lives ([`Graph::open`]).
+    fn exclusive(&self) -> Result<(), SparqError> {
+        Ok(())
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         // SAME query as the HTTP/in-mem paths — the injection-safe `select_meta` builder VERBATIM.
         let q = sparql::select_meta(iri)?;
@@ -740,7 +818,7 @@ impl SparqClient for EmbeddedSparqClient {
             };
             let id = |iri: &str| {
                 let id = g
-                    .dict
+                    .dict()
                     .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
                         iri,
                     )));
@@ -750,16 +828,16 @@ impl SparqClient for EmbeddedSparqClient {
                 return Ok(Some(Vec::new()));
             };
             let pattern = [Some(s), Some(p), None];
-            if g.store.estimate(&pattern) > rows {
+            if g.store().estimate(&pattern) > rows {
                 return Ok(None);
             }
-            let scan = g.store.scan(&pattern);
+            let scan = g.store().scan(&pattern);
             let mut children = Vec::with_capacity(scan.rows.len());
             let mut bytes = 0usize;
             for row in scan.rows.iter() {
                 let [_, _, o] = scan.to_spo(row);
                 // A member is an IRI; anything else is a malformed index (see `children`).
-                let oxrdf::Term::NamedNode(child) = g.dict.term(o) else {
+                let oxrdf::Term::NamedNode(child) = g.dict().term(o) else {
                     return Err(SparqError::Backend(
                         "fatal: a containment member is not an IRI".into(),
                     ));
@@ -930,6 +1008,33 @@ mod tests {
 
     fn client() -> EmbeddedSparqClient {
         EmbeddedSparqClient::in_memory().expect("empty in-memory graph")
+    }
+
+    /// A graph a failed directory swap froze is reported as failed by every data-path call and
+    /// by `save`, never served (what it still reads may be empty or older than its directory).
+    #[test]
+    fn a_frozen_graph_is_reported_not_served() {
+        block_on(async {
+            let c = client();
+            c.put_meta("http://pod/alice/doc", meta("text/turtle", "b", "\"e\""))
+                .await
+                .unwrap();
+            c.actor
+                .call(|g| {
+                    g.freeze_for_test("injected swap failure");
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let read = c.get_meta("http://pod/alice/doc").await;
+            let Err(SparqError::Backend(msg)) = read else {
+                panic!("a frozen graph was served: {read:?}");
+            };
+            assert!(msg.contains("frozen") && msg.contains("injected swap failure"), "{msg}");
+            let dir = std::env::temp_dir().join(format!("sparq-lws-frozen-{}", std::process::id()));
+            assert!(c.save(&dir).await.is_err(), "a frozen graph was saved");
+            assert!(!dir.exists(), "a refused save wrote {}", dir.display());
+        });
     }
 
     fn meta(ct: &str, bk: &str, etag: &str) -> ResourceMeta {
@@ -1185,7 +1290,9 @@ mod tests {
                 .unwrap();
             let before = c.engine_round_trips();
 
-            let dir = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            // The store and its lock file (`store.lock`, beside it) share one scratch root.
+            let root = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            let dir = root.join("store");
             c.save(&dir).await.expect("snapshot written");
             assert_eq!(
                 c.engine_round_trips(),
@@ -1199,7 +1306,39 @@ mod tests {
                 meta("text/turtle", "blob-1", "\"e1\""),
                 "the snapshot round-trips the record"
             );
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(reopened);
+            let _ = std::fs::remove_dir_all(&root);
+        });
+    }
+
+    /// A directory is opened by one client at a time, whichever process: a second open (or a
+    /// save into it from another graph) fails while the first client's graph lives, and the lock
+    /// goes with the graph, on its actor's thread, not with the last handle to it.
+    #[test]
+    fn a_directory_is_opened_by_one_client_at_a_time() {
+        block_on(async {
+            // The store and its lock file (`store.lock`, beside it) share one scratch root.
+            let root = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            let dir = root.join("store");
+            client().save(&dir).await.expect("snapshot written");
+            let first = EmbeddedSparqClient::open(&dir).expect("opened");
+            assert!(first.exclusive().is_ok());
+            assert!(EmbeddedSparqClient::open(&dir).is_err(), "opened twice");
+            assert!(client().save(&dir).await.is_err(), "written while open");
+            // Its own directory it may save into: a compaction, under any spelling of it.
+            first
+                .save(&dir)
+                .await
+                .expect("saved over its own directory");
+            first
+                .save(&dir.join("..").join(dir.file_name().unwrap()))
+                .await
+                .expect("saved over its own directory, spelled differently");
+            drop(first);
+            let reopened =
+                EmbeddedSparqClient::open(&dir).expect("lock released before drop returns");
+            drop(reopened);
+            let _ = std::fs::remove_dir_all(&root);
         });
     }
 

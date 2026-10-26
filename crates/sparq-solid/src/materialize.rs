@@ -450,7 +450,7 @@ pub struct MaterializeStats {
 /// let stats = sparq_solid::materialize_wac(&mut graph)?;
 /// assert!(stats.auth_triples > 0);
 /// // the view is an ordinary named graph now
-/// assert!(graph.named.iter().any(|(name, _)| matches!(
+/// assert!(graph.named().iter().any(|(name, _)| matches!(
 ///     name, Term::NamedNode(n) if n.as_str() == sparq_solid::AUTH_GRAPH)));
 /// # Ok::<(), String>(())
 /// ```
@@ -472,6 +472,7 @@ pub(crate) fn materialize_wac_limited(
     // the dataset — including any previously materialized `<urn:sparq:auth>` view —
     // byte-for-byte untouched, as the contract above promises. Assembly ignores the
     // reserved graph space itself, so it does not depend on the strip having run.
+    crate::loader::require_writable(graph)?;
     let rules = wac_rules()?;
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
@@ -485,8 +486,8 @@ pub(crate) fn materialize_wac_limited(
     )?;
     let mut work = DecisionWork::new(budget);
     let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
-    strip_reserved_graphs(graph);
-    let mut stats = install_auth_view(graph, &dict, &closure);
+    prepare_auth_view(graph)?;
+    let mut stats = install_auth_view(graph, &dict, &closure)?;
     stats.strata_facts = vec![closure.len()];
     stats.millis = elapsed_millis(
         #[cfg(not(target_arch = "wasm32"))]
@@ -613,6 +614,7 @@ pub(crate) fn materialize_acp_limited(
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
+    crate::loader::require_writable(graph)?;
     let rules = acp_rules()?;
     let mut dict = Dict::new();
     let facts = assemble_input_ids(
@@ -634,8 +636,8 @@ pub(crate) fn materialize_acp_limited(
         strata_facts.push(closure.len());
     }
 
-    strip_reserved_graphs(graph);
-    let mut stats = install_auth_view(graph, &dict, &closure);
+    prepare_auth_view(graph)?;
+    let mut stats = install_auth_view(graph, &dict, &closure)?;
     stats.strata_facts = strata_facts;
     stats.millis = elapsed_millis(
         #[cfg(not(target_arch = "wasm32"))]
@@ -658,10 +660,37 @@ fn elapsed_millis() -> f64 {
     0.0
 }
 
+/// Remove other reserved graphs while retaining a durable auth slot for replacement.
+fn prepare_auth_view(graph: &mut Graph) -> Result<(), String> {
+    if !graph.is_directory_backed() {
+        return strip_reserved_graphs(graph);
+    }
+    let reserved: Vec<_> = graph
+        .named()
+        .iter()
+        .filter_map(|(name, _)| match name {
+            Term::NamedNode(n)
+                if n.as_str().starts_with("urn:sparq:") && n.as_str() != AUTH_GRAPH =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    for name in reserved {
+        crate::loader::drop_named_view(graph, &name)?;
+    }
+    Ok(())
+}
+
 /// Whether a closure triple belongs in the auth view: `auth:*` predicates, `rdf:type`
 /// with an `auth:` class, plus the accept-set facts of matchers referenced by
 /// `auth:exceptMatcher` (collected in a first pass).
-fn install_auth_view(graph: &mut Graph, dict: &Dict, closure: &[[sparq_core::dict::Id; 3]]) -> MaterializeStats {
+fn install_auth_view(
+    graph: &mut Graph,
+    dict: &Dict,
+    closure: &[[sparq_core::dict::Id; 3]],
+) -> Result<MaterializeStats, String> {
     // pass 1: matchers referenced by conditional grants
     let mut except_matchers: FxHashSet<sparq_core::dict::Id> = FxHashSet::default();
     for t in closure {
@@ -692,12 +721,8 @@ fn install_auth_view(graph: &mut Graph, dict: &Dict, closure: &[[sparq_core::dic
     let stats = MaterializeStats { auth_triples: ids.len(), ..Default::default() };
     let auth = Graph::from_parts(adict, ids);
     let name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    if let Some(slot) = graph.named.iter_mut().find(|(n, _)| *n == name) {
-        slot.1 = auth;
-    } else {
-        graph.named.push((name, auth));
-    }
-    stats
+    crate::loader::install_named_view(graph, name, auth)?;
+    Ok(stats)
 }
 
 /// sq-zgbso.4 — the RESULT-EQUIVALENCE oracle for the compiled flip.
@@ -717,7 +742,7 @@ mod tests {
 
     /// The WAC auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
     fn wac_text(graph: &mut Graph) -> Result<MaterializeStats, String> {
-        strip_reserved_graphs(graph);
+        strip_reserved_graphs(graph)?;
         let input = assemble_input(
             graph,
             System::Wac,
@@ -728,7 +753,7 @@ mod tests {
         let src = format!("{}\n{}\n{}", input, COMMON_RULES, WAC_RULES);
         let mut dict = Dict::new();
         let closure = reason_n3(&mut dict, &src)?;
-        Ok(install_auth_view(graph, &dict, &closure))
+        install_auth_view(graph, &dict, &closure)
     }
 
     /// The ACP auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
@@ -737,7 +762,7 @@ mod tests {
         provenance: &AccessProvenance,
         credentials: &VerifiedCredentials,
     ) -> Result<MaterializeStats, String> {
-        strip_reserved_graphs(graph);
+        strip_reserved_graphs(graph)?;
         let input = assemble_input(
             graph,
             System::Acp,
@@ -753,13 +778,13 @@ mod tests {
             &[&accepts, ACP_B, ACP_C],
             NegationCycles::SinglePass,
         )?;
-        Ok(install_auth_view(graph, &dict, &closure.facts))
+        install_auth_view(graph, &dict, &closure.facts)
     }
 
     /// The installed `<urn:sparq:auth>` view as a comparable set of `s p o` strings.
     fn auth_view(graph: &Graph) -> BTreeSet<String> {
         let name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-        let Some((_, g)) = graph.named.iter().find(|(n, _)| *n == name) else {
+        let Some((_, g)) = graph.named().iter().find(|(n, _)| *n == name) else {
             return BTreeSet::new();
         };
         crate::loader::graph_triples(g)
@@ -813,7 +838,7 @@ mod tests {
     fn acp_with_provenance_auth_view_is_identical_to_the_text_engine() {
         let src = crate::acp_fixture();
         let mut prov = AccessProvenance::new();
-        for (name, _) in Graph::load_dataset(&src, "nquads").expect("fixture loads").named.iter() {
+        for (name, _) in Graph::load_dataset(&src, "nquads").expect("fixture loads").named().iter() {
             if let Term::NamedNode(n) = name {
                 if !n.as_str().ends_with(".acr") {
                     prov.set_creator(n.as_str(), "https://carol.ex/card#me");
@@ -836,7 +861,7 @@ mod tests {
             (System::Acp, crate::acp_fixture()),
         ] {
             let mut graph = Graph::load_dataset(&src, "nquads").expect("fixture loads");
-            strip_reserved_graphs(&mut graph);
+            strip_reserved_graphs(&mut graph).unwrap();
             let prov = AccessProvenance::new();
 
             let mut dict = Dict::new();
@@ -883,7 +908,10 @@ mod tests {
             "<{}#a> <{}> <urn:sparq:evil> <{}> .\n",
             control_doc, agent_predicate, control_doc
         );
-        Graph::load_dataset(&nq, "nquads").expect("poison graph loads").named
+        Graph::load_dataset(&nq, "nquads")
+            .expect("poison graph loads")
+            .take_named()
+            .expect("an in-memory dataset")
     }
 
     /// The documented contract is that an `Err` leaves the dataset's previous auth view
@@ -896,10 +924,11 @@ mod tests {
     fn a_failed_rematerialization_leaves_the_previous_auth_view_in_place() {
         let mut graph = Graph::load_dataset(&crate::wac_fixture(), "nquads").expect("fixture loads");
         materialize_wac(&mut graph).expect("first WAC materialization succeeds");
-        graph.named.extend(poison_graph(
+        graph.extend_named(poison_graph(
             "https://pod.ex/evil.acl",
             "http://www.w3.org/ns/auth/acl#agent",
-        ));
+        ))
+        .unwrap();
         materialize_wac(&mut graph).expect("a document naming a reserved agent is rejected, not fatal");
         assert!(
             !auth_view(&graph).iter().any(|t| t.contains("urn:sparq:evil")),

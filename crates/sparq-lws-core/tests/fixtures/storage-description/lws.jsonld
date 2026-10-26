@@ -1,0 +1,129 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/cid/v1",
+    "https://www.w3.org/ns/lws/v1",
+    {
+      "ACP": "https://jeswr.org/ns/solid-sd#ACP",
+      "AccessControl": "https://jeswr.org/ns/solid-sd#AccessControl",
+      "CrdtSyncService": "https://jeswr.org/ns/solid-sd#CrdtSyncService",
+      "ODRLGrants": "https://jeswr.org/ns/solid-sd#ODRLGrants",
+      "PatchSupport": "https://jeswr.org/ns/solid-sd#PatchSupport",
+      "RecursiveDelete": "https://jeswr.org/ns/solid-sd#RecursiveDelete",
+      "SolidNotificationService": "https://jeswr.org/ns/solid-sd#SolidNotificationService",
+      "SparqlQueryService": "https://jeswr.org/ns/solid-sd#SparqlQueryService",
+      "SseSubscription": "https://jeswr.org/ns/solid-sd#SseSubscription",
+      "TrashService": "https://jeswr.org/ns/solid-sd#TrashService",
+      "VersioningService": "https://jeswr.org/ns/solid-sd#VersioningService",
+      "WAC": "https://jeswr.org/ns/solid-sd#WAC",
+      "WebSocketSubscription": "https://jeswr.org/ns/solid-sd#WebSocketSubscription",
+      "channelType": "https://jeswr.org/ns/solid-sd#channelType",
+      "feature": "https://jeswr.org/ns/solid-sd#feature",
+      "format": "https://jeswr.org/ns/solid-sd#format",
+      "model": "https://jeswr.org/ns/solid-sd#model",
+      "patchType": "https://jeswr.org/ns/solid-sd#patchType",
+      "profile": {
+        "@id": "http://purl.org/dc/terms/conformsTo",
+        "@type": "@id"
+      },
+      "protocol": "https://jeswr.org/ns/solid-sd#protocol",
+      "retention": "https://jeswr.org/ns/solid-sd#retention",
+      "roomTemplate": "https://jeswr.org/ns/solid-sd#roomTemplate",
+      "source": "https://jeswr.org/ns/solid-sd#source",
+      "target": "https://jeswr.org/ns/solid-sd#target"
+    }
+  ],
+  "authentication": [
+    "https://pod.example/#test-key"
+  ],
+  "capability": [
+    {
+      "mediaType": {
+        "application/json": [
+          "application/json-patch+json"
+        ],
+        "application/ld+json": [
+          "application/json-patch+json"
+        ],
+        "application/linkset+json": [
+          "application/json-patch+json"
+        ]
+      },
+      "type": "https://jeswr.org/ns/solid-sd#PatchSupport"
+    },
+    {
+      "type": "https://jeswr.org/ns/solid-sd#RecursiveDelete"
+    }
+  ],
+  "conformsTo": [
+    "https://www.w3.org/TR/lws10-core/"
+  ],
+  "id": "https://pod.example/",
+  "service": [
+    {
+      "id": "https://pod.example/#storage-root",
+      "serviceEndpoint": "https://pod.example/",
+      "type": "StorageRoot"
+    },
+    {
+      "id": "https://pod.example/#storage-description",
+      "serviceEndpoint": "https://pod.example/",
+      "type": "StorageDescription"
+    },
+    {
+      "id": "https://pod.example/#authorization-server",
+      "serviceEndpoint": "https://pod.example",
+      "type": "AuthorizationServer"
+    },
+    {
+      "conformsTo": [
+        "https://www.w3.org/ns/lws#AccessProfile"
+      ],
+      "id": "https://pod.example/#access-grants",
+      "serviceEndpoint": "https://pod.example/.lws/grants/",
+      "type": "AccessGrantService"
+    },
+    {
+      "conformsTo": [
+        "https://www.w3.org/ns/lws#AccessProfile"
+      ],
+      "id": "https://pod.example/#access-requests",
+      "serviceEndpoint": "https://pod.example/.lws/requests/",
+      "type": "AccessRequestService"
+    },
+    {
+      "id": "https://pod.example/#notifications",
+      "serviceEndpoint": "https://pod.example/.lws/subscriptions/",
+      "subscriptionType": [
+        "WebhookSubscription"
+      ],
+      "type": "NotificationService"
+    },
+    {
+      "id": "https://pod.example/#type-index",
+      "serviceEndpoint": "https://pod.example/.lws/types/index",
+      "type": "TypeIndexService"
+    },
+    {
+      "id": "https://pod.example/#type-search",
+      "serviceEndpoint": "https://pod.example/.lws/types/search",
+      "type": "TypeSearchService"
+    }
+  ],
+  "type": "Storage",
+  "verificationMethod": [
+    {
+      "controller": "https://pod.example/",
+      "id": "https://pod.example/#test-key",
+      "publicKeyJwk": {
+        "alg": "ES256",
+        "crv": "P-256",
+        "kid": "test-key",
+        "kty": "EC",
+        "use": "sig",
+        "x": "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU"
+      },
+      "type": "JsonWebKey"
+    }
+  ]
+}

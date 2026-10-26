@@ -126,7 +126,7 @@ fn main() {
         let t = Instant::now();
         let g = sparq_hdt::load(&hdt_path).unwrap();
         let dt = t.elapsed().as_secs_f64();
-        n = g.store.len();
+        n = g.store().len();
         best_hdt = best_hdt.min(dt);
     }
     println!(
@@ -142,7 +142,7 @@ fn main() {
         let g =
             sparq_core::Graph::load_reader(flate2::read::GzDecoder::new(f), "ntriples").unwrap();
         let dt = t.elapsed().as_secs_f64();
-        assert_eq!(g.store.len(), n);
+        assert_eq!(g.store().len(), n);
         best_gz = best_gz.min(dt);
     }
     println!(

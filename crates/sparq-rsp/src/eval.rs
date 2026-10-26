@@ -131,7 +131,7 @@ enum Materializer {
     PersistentDict {
         /// `None` only transiently while the dictionary is lent to the
         /// per-window graph (`Graph::from_parts` takes it by value; it is
-        /// moved back out of `graph.dict` after evaluation).
+        /// moved back out with `Graph::into_dict` after evaluation).
         dict: Option<Dict>,
         window: WindowedStream<[Id; 3]>,
         /// `dict.len()` (distinct non-inline terms) at the last
@@ -275,7 +275,7 @@ impl WindowEval {
                     let d = dict.take().expect("dict is always restored after evaluation");
                     let graph = Graph::from_parts(d, ids);
                     let r = f(w.start, w.end, &graph);
-                    *dict = Some(graph.dict);
+                    *dict = Some(graph.into_dict());
                     r?;
                 }
                 // Reclaim the dictionary entries of terms that have

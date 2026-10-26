@@ -2012,24 +2012,13 @@ impl TouchedPods {
 /// only an unrelated file) is treated as fresh — we create the store from `seed`. A directory
 /// that holds a store but fails to open (corruption) surfaces the open error rather than
 /// silently clobbering it.
+///
+/// The check, the seed's save and the open happen under one hold of the directory's lock
+/// ([`Graph::open_or_create`]), kept while the returned graph lives: a second server (or any
+/// other writer) over the same directory is refused.
 fn open_or_create_durable(dir: &std::path::Path, seed: Graph) -> Result<Graph, String> {
-    let has_store = dir.join("dict-meta.bin").exists() || dir.join("dict.bin").exists();
-    if has_store {
-        // Existing durable store IS the source of truth: open + WAL-replay, no rebuild.
-        return Graph::open(dir).map_err(|e| format!("opening persist dir {}: {e}", dir.display()));
-    }
-    // Fresh: persist the seed, then open it so the returned graph is directory-backed
-    // (carries its own WAL) and ready for WAL-durable updates.
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("creating persist dir {}: {e}", dir.display()))?;
-    seed.save(dir)
-        .map_err(|e| format!("initialising persist dir {}: {e}", dir.display()))?;
-    Graph::open(dir).map_err(|e| {
-        format!(
-            "opening freshly-initialised persist dir {}: {e}",
-            dir.display()
-        )
-    })
+    Graph::open_or_create(dir, &seed)
+        .map_err(|e| format!("opening persist dir {}: {e}", dir.display()))
 }
 
 /// (sq-vpx4) Internal marker prefixed onto the error string of a
@@ -2340,37 +2329,34 @@ impl ApplyUpdates for ServerApplier {
     /// snapshot the ring should publish so reads serve the restored data. Runs on the WRITER THREAD
     /// (the only thread that mutates the durable store), so the on-disk swap never races a commit.
     ///
-    /// Sequence: release the OLD durable graph's WAL handle (close its log), then
-    /// [`Graph::restore_into_durable`] writes `fresh`'s image to a sibling, two-rename-swaps it over
-    /// `dir` (parent fsync'd between the renames), re-opens the new base memory-mapped with a fresh
-    /// WAL, and drops the old base — the EXACT crash-safe protocol the in-process compaction uses,
-    /// healed by `recover_compaction` on the next open if a crash interrupts it. We adopt the
-    /// re-opened directory-backed graph as the new durable store (so subsequent updates WAL-append
-    /// to it), and return an independent in-memory snapshot of it for the ring to publish.
+    /// Sequence: [`Graph::restore_in_place`] on the durable graph, under the lock it holds,
+    /// writes `fresh`'s image to a staging sibling, releases the graph's files, two-rename-swaps
+    /// the staging directory over `dir` (parent fsync'd between the renames) and re-opens the
+    /// durable graph from the new base with a fresh WAL, dropping the old base — the EXACT
+    /// crash-safe protocol the in-process compaction uses, healed by `recover_compaction` on the
+    /// next open if a crash interrupts it. Subsequent updates WAL-append to the restored store;
+    /// an independent in-memory snapshot of it is returned for the ring to publish.
     ///
-    /// FAIL-CLOSED: `fresh` is fully built before this runs; if the swap fails before the first
-    /// rename the OLD durable store is untouched, and a crash mid-swap heals to old-or-new. An
-    /// in-memory applier (no durable store) is a clean `Err` — there is no durable dir to write
-    /// through, so the in-memory restore path (the ring/writer swap) is used instead.
+    /// FAIL-CLOSED: `fresh` is fully built before this runs. A failure part-way through the swap
+    /// is recovered at once: completed (the restore succeeded) or rolled back (an error; the old
+    /// store is intact and the durable graph keeps writing to it). When neither works the
+    /// durable graph is frozen and refuses every later update until the server re-opens the
+    /// directory; a crash mid-swap heals to old-or-new on the next open. An in-memory applier
+    /// (no durable store) is a clean `Err` — there is no durable dir to write through, so the
+    /// in-memory restore path (the ring/writer swap) is used instead.
     fn restore_durable(&mut self, fresh: Graph) -> Result<Graph, String> {
         let durable = self.durable.as_mut().ok_or_else(|| {
             "restore-into-durable requested on an applier with no --persist store".to_string()
         })?;
-        // The directory the OLD durable graph is backed by; the swap targets it.
-        let dir = durable
+        // The swap targets the directory the durable graph is backed by, under the lock it holds:
+        // its WAL handle is released first (its `wal.log` is renamed away with the directory),
+        // and the graph becomes the restored one, so subsequent updates WAL-append to it.
+        durable
             .graph
-            .persist_dir()
-            .ok_or_else(|| "durable graph is not directory-backed".to_string())?;
-        // Release the OLD durable graph's WAL handle before the directory swap (its `wal.log` is
-        // about to be renamed away with `dir`); the crash-safe swap re-opens a fresh handle.
-        durable.graph.close_wal();
-        let restored = Graph::restore_into_durable(&dir, fresh)
+            .restore_in_place(fresh)
             .map_err(|e| format!("restore-into-durable swap failed: {e}"))?;
-        // Adopt the re-opened, directory-backed restored store; subsequent updates WAL-append to it.
         // The published snapshot is an independent in-memory image of the restored content.
-        let published = restored.snapshot().into_graph();
-        durable.graph = restored;
-        Ok(published)
+        Ok(durable.graph.snapshot().into_graph())
     }
 }
 
@@ -3575,8 +3561,10 @@ impl AppState {
     /// present (the on-disk base IS the restored image).
     ///
     /// Fail-closed: a corrupt artifact fails the import → the writer is never asked to swap, the
-    /// durable store is untouched. A swap I/O error leaves the OLD durable store intact (the swap
-    /// is rollback-safe) and the writer alive; reads keep flowing from the last published snapshot.
+    /// durable store is untouched. A swap I/O error is recovered at once: rolled back, the OLD
+    /// durable store is intact and the writer alive; if even that fails the durable graph is
+    /// frozen (every later update refused) until a restart re-opens the directory, which heals
+    /// it to old-or-new. Reads keep flowing from the last published snapshot either way.
     /// Returns the artifact's source generation (for operator correlation), as the in-memory path.
     #[cfg(feature = "backup")]
     fn restore_into_durable_through<R: std::io::Read>(&self, input: R) -> Result<u64, String> {
@@ -3597,8 +3585,10 @@ impl AppState {
                 });
                 Ok(meta.generation)
             }
-            // A durable-swap failure: the OLD store is intact, the writer is alive (fail-closed).
-            Ok(Err(e)) => Err(format!("restore-into-durable failed (store unchanged): {}", e)),
+            // A durable-swap failure: rolled back (the old store intact, the writer appending to
+            // it) or, when that failed too, the durable graph frozen until a restart re-opens
+            // the directory. The error says which; never claim more here.
+            Ok(Err(e)) => Err(format!("restore-into-durable failed: {}", e)),
             Err(e) => Err(format!("restore-into-durable: update writer unavailable: {}", e)),
         }
     }
@@ -4272,7 +4262,7 @@ fn completion_json(
         .complete(prefix, limit, None)
         .into_iter()
         .map(|candidate| {
-            let term = graph.dict.term(candidate.id);
+            let term = graph.dict().term(candidate.id);
             let iri = match &term {
                 oxrdf::Term::NamedNode(node) => node.as_str().to_string(),
                 _ => term.to_string(),

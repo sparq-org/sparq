@@ -102,7 +102,7 @@ impl TopicDigest {
         for triple in graph.iter_ids() {
             let mut hasher = DefaultHasher::new();
             for id in triple {
-                graph.dict.term(id).hash(&mut hasher);
+                graph.dict().term(id).hash(&mut hasher);
             }
             // Summing per-triple hashes is order-independent: a graph is a SET, and the
             // scan order is an implementation detail we must not treat as content.

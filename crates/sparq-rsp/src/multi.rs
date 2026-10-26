@@ -451,7 +451,8 @@ impl ContinuousMultiQuery {
                 Some(win) => sub_graph(win),
                 None => Graph::from_parts(Dict::new(), Vec::new()),
             };
-            g.named.push((Term::NamedNode(w.window.clone()), sub));
+            g.add_named(Term::NamedNode(w.window.clone()), sub)
+                .expect("a fresh in-memory graph takes in-memory named graphs");
         }
         g
     }

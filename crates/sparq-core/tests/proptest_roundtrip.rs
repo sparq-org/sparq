@@ -87,9 +87,9 @@ fn serialize_nt_graph(g: &Graph) -> String {
     let mut out = Vec::<u8>::new();
     let mut ser = oxttl::NTriplesSerializer::new().low_level();
     for ids in g.iter_ids() {
-        let s_term = g.dict.term(ids[0]);
-        let p_term = g.dict.term(ids[1]);
-        let o_term = g.dict.term(ids[2]);
+        let s_term = g.dict().term(ids[0]);
+        let p_term = g.dict().term(ids[1]);
+        let o_term = g.dict().term(ids[2]);
         // Reconstruct oxrdf::Triple — subject must be NamedOrBlankNode,
         // predicate must be NamedNode; the dict only stores valid RDF triples.
         let subject: oxrdf::NamedOrBlankNode = match s_term {
@@ -118,9 +118,9 @@ fn sorted_triple_dump(g: &Graph) -> Vec<[String; 3]> {
         .iter_ids()
         .map(|ids| {
             [
-                g.dict.term(ids[0]).to_string(),
-                g.dict.term(ids[1]).to_string(),
-                g.dict.term(ids[2]).to_string(),
+                g.dict().term(ids[0]).to_string(),
+                g.dict().term(ids[1]).to_string(),
+                g.dict().term(ids[2]).to_string(),
             ]
         })
         .collect();

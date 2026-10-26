@@ -324,7 +324,7 @@ impl VarSorter {
         #[cfg(not(feature = "parallel"))]
         self.buf.sort_unstable_by(|a, b| var_cmp(mode, a, b));
         let path = self.tmp.join(format!("{}-run{}.bin", self.tag, self.runs.len()));
-        let mut w = BufWriter::new(std::fs::File::create(&path)?);
+        let mut w = BufWriter::new(crate::create_scratch(&path)?);
         for (seq, bytes) in self.buf.drain(..) {
             w.write_all(&seq.to_le_bytes())?;
             w.write_all(&(bytes.len() as u32).to_le_bytes())?;
@@ -555,7 +555,7 @@ impl<T: PodRec + Send> PodSorter<T> {
         #[cfg(not(feature = "parallel"))]
         self.buf.sort_unstable();
         let path = self.tmp.join(format!("{}-run{}.bin", self.tag, self.runs.len()));
-        let mut w = BufWriter::new(std::fs::File::create(&path)?);
+        let mut w = BufWriter::new(crate::create_scratch(&path)?);
         for t in self.buf.drain(..) {
             t.write(&mut w)?;
         }
@@ -690,7 +690,7 @@ impl SpillInterner {
                 cache: ByteCache::default(),
                 cache_bytes: 0,
                 seq: 0,
-                rec: BufWriter::new(std::fs::File::create(&rec_path)?),
+                rec: BufWriter::new(crate::create_scratch(&rec_path)?),
                 rec_path,
                 epochs: vec![(0, 0)],
             });
@@ -698,7 +698,7 @@ impl SpillInterner {
         let staged_path = tmp.join("dsp-staged.bin");
         Ok(SpillInterner {
             shards,
-            staged: BufWriter::new(std::fs::File::create(&staged_path)?),
+            staged: BufWriter::new(crate::create_scratch(&staged_path)?),
             staged_path,
             staged_count: 0,
             // Ingest phase: the dedup caches get half the budget (the other half is
@@ -934,8 +934,12 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
         std::fs::remove_file(rec_path).ok();
         ensure_disk(tmp, cfg.disk_floor)?;
 
-        let mut distinct_w = BufWriter::new(std::fs::File::create(tmp.join(format!("dsp-distinct{s}.bin"))).map_err(io_err)?);
-        let mut pairs_w = BufWriter::new(std::fs::File::create(tmp.join(format!("dsp-pairs{s}.bin"))).map_err(io_err)?);
+        let mut distinct_w = BufWriter::new(
+            crate::create_scratch(&tmp.join(format!("dsp-distinct{s}.bin"))).map_err(io_err)?,
+        );
+        let mut pairs_w = BufWriter::new(
+            crate::create_scratch(&tmp.join(format!("dsp-pairs{s}.bin"))).map_err(io_err)?,
+        );
         let mut merge = sorter.into_merge().map_err(io_err)?;
         let mut cur: Option<(Box<[u8]>, u32)> = None;
         let mut count: u64 = 0;
@@ -977,13 +981,19 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     ensure_disk(dir, cfg.disk_floor)?;
     let mut prefixes = TableBuilder::default();
     let mut datatypes = TableBuilder::default();
-    let mut terms_w = BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin")).map_err(io_err)?);
-    let mut offs_w = BufWriter::new(std::fs::File::create(dir.join("dict-offs.bin")).map_err(io_err)?);
-    let mut numer_w = BufWriter::new(std::fs::File::create(dir.join(crate::NUMERIC_CACHE_FILE)).map_err(io_err)?);
+    let mut terms_w =
+        BufWriter::new(crate::FreshFile::create(&dir.join("dict-terms.bin")).map_err(io_err)?);
+    let mut offs_w =
+        BufWriter::new(crate::FreshFile::create(&dir.join("dict-offs.bin")).map_err(io_err)?);
+    let mut numer_w = BufWriter::new(
+        crate::FreshFile::create(&dir.join(crate::NUMERIC_CACHE_FILE)).map_err(io_err)?,
+    );
     numer_w.write_all(&crate::NUMERICS_MAGIC).map_err(io_err)?;
-    let mut tempi_w = BufWriter::new(std::fs::File::create(dir.join(crate::TEMPORAL_CACHE_FILE)).map_err(io_err)?);
+    let mut tempi_w = BufWriter::new(
+        crate::FreshFile::create(&dir.join(crate::TEMPORAL_CACHE_FILE)).map_err(io_err)?,
+    );
     let flags_path = tmp.join("dsp-tflags.bin");
-    let mut flags_w = BufWriter::new(std::fs::File::create(&flags_path).map_err(io_err)?);
+    let mut flags_w = BufWriter::new(crate::create_scratch(&flags_path).map_err(io_err)?);
     // The hash-pair sorter is alive across the WHOLE shard loop, concurrently with each
     // shard's distinct-stream sorter — partition the budget between them so their summed
     // run buffers stay within `sort_budget`.
@@ -1005,7 +1015,9 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
         }
         std::fs::remove_file(&distinct_path).ok();
 
-        let mut m2f_w = BufWriter::new(std::fs::File::create(tmp.join(format!("dsp-m2f{s}.bin"))).map_err(io_err)?);
+        let mut m2f_w = BufWriter::new(
+            crate::create_scratch(&tmp.join(format!("dsp-m2f{s}.bin"))).map_err(io_err)?,
+        );
         let mut merge = sorter.into_merge().map_err(io_err)?;
         let mut local: u64 = 0;
         while let Some((min_seq, bytes)) = merge.next().map_err(io_err)? {
@@ -1107,7 +1119,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
 
         let remap_path = tmp.join(format!("dsp-remap{s}.bin"));
         {
-            let mut w = BufWriter::new(std::fs::File::create(&remap_path).map_err(io_err)?);
+            let mut w = BufWriter::new(crate::create_scratch(&remap_path).map_err(io_err)?);
             let mut merge = by_seq.into_merge().map_err(io_err)?;
             let mut expect: u32 = 0;
             while let Some(sf) = merge.next().map_err(io_err)? {
@@ -1152,9 +1164,9 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     }
 
     // Flush the dictionary blobs (leaf records + appended triple-term records).
-    terms_w.flush().map_err(io_err)?;
-    offs_w.flush().map_err(io_err)?;
-    numer_w.flush().map_err(io_err)?;
+    crate::commit_fresh(terms_w).map_err(io_err)?;
+    crate::commit_fresh(offs_w).map_err(io_err)?;
+    crate::commit_fresh(numer_w).map_err(io_err)?;
 
     // temporals-v4.bin layout = all instants then all flags: append the spilled flags.
     flags_w.flush().map_err(io_err)?;
@@ -1162,14 +1174,15 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     {
         let mut fr = BufReader::new(std::fs::File::open(&flags_path).map_err(io_err)?);
         std::io::copy(&mut fr, &mut tempi_w).map_err(io_err)?;
-        tempi_w.flush().map_err(io_err)?;
+        crate::commit_fresh(tempi_w).map_err(io_err)?;
         std::fs::remove_file(&flags_path).ok();
     }
 
     // dict-meta.bin (version header + prefixes + datatypes + term count) — identical bytes to
     // `save_mmap`. (review 1409) The version header records the id-space partition.
     {
-        let mut meta = BufWriter::new(std::fs::File::create(dir.join("dict-meta.bin")).map_err(io_err)?);
+        let mut meta =
+            BufWriter::new(crate::FreshFile::create(&dir.join("dict-meta.bin")).map_err(io_err)?);
         meta.write_all(&dict::DICT_META_MAGIC.to_le_bytes()).map_err(io_err)?;
         meta.write_all(&dict::DICT_META_VERSION.to_le_bytes()).map_err(io_err)?;
         meta.write_all(&dict::INLINE_BASE.to_le_bytes()).map_err(io_err)?;
@@ -1182,22 +1195,24 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
             dict::write_str(&mut meta, d).map_err(io_err)?;
         }
         meta.write_all(&total.to_le_bytes()).map_err(io_err)?;
-        meta.flush().map_err(io_err)?;
+        crate::commit_fresh(meta).map_err(io_err)?;
     }
 
     // dict-hash.bin + dict-hid.bin: externally sorted by (hash, id) — the canonical order
     // `save_mmap` also produces. Triple-term `(hash, final id)` pairs were pushed into the
     // SAME sorter during finalisation, so the merged stream stays globally sorted.
     {
-        let mut hw = BufWriter::new(std::fs::File::create(dir.join("dict-hash.bin")).map_err(io_err)?);
-        let mut iw = BufWriter::new(std::fs::File::create(dir.join("dict-hid.bin")).map_err(io_err)?);
+        let mut hw =
+            BufWriter::new(crate::FreshFile::create(&dir.join("dict-hash.bin")).map_err(io_err)?);
+        let mut iw =
+            BufWriter::new(crate::FreshFile::create(&dir.join("dict-hid.bin")).map_err(io_err)?);
         let mut merge = hash_sorter.into_merge().map_err(io_err)?;
         while let Some(p) = merge.next().map_err(io_err)? {
             hw.write_all(&p.hash.to_le_bytes()).map_err(io_err)?;
             iw.write_all(&p.id.to_le_bytes()).map_err(io_err)?;
         }
-        hw.flush().map_err(io_err)?;
-        iw.flush().map_err(io_err)?;
+        crate::commit_fresh(hw).map_err(io_err)?;
+        crate::commit_fresh(iw).map_err(io_err)?;
     }
 
     Ok(RemapPlan { staged_path, staged_count, shards: shards_out, tt_finals: tt_finals.per_occurrence })
@@ -1225,10 +1240,10 @@ fn finalize_triple_terms(
     staged_triples: &[[u64; 3]],
     shards_out: &[ShardRemap],
     leaf_total: u64,
-    terms_w: &mut BufWriter<std::fs::File>,
-    offs_w: &mut BufWriter<std::fs::File>,
-    numer_w: &mut BufWriter<std::fs::File>,
-    tempi_w: &mut BufWriter<std::fs::File>,
+    terms_w: &mut BufWriter<crate::FreshFile>,
+    offs_w: &mut BufWriter<crate::FreshFile>,
+    numer_w: &mut BufWriter<crate::FreshFile>,
+    tempi_w: &mut BufWriter<crate::FreshFile>,
     flags_w: &mut BufWriter<std::fs::File>,
     hash_sorter: &mut PodSorter<HashPair>,
     pos: &mut u64,

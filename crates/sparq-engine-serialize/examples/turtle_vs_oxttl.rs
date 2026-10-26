@@ -152,18 +152,18 @@ fn main() {
     let triples: Vec<Triple> = graph
         .iter_ids()
         .map(|[s, p, o]| {
-            let subject = match graph.dict.term(s) {
+            let subject = match graph.dict().term(s) {
                 oxrdf::Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n),
                 oxrdf::Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b),
                 _ => unreachable!(),
             };
-            let oxrdf::Term::NamedNode(predicate) = graph.dict.term(p) else {
+            let oxrdf::Term::NamedNode(predicate) = graph.dict().term(p) else {
                 unreachable!()
             };
             Triple {
                 subject,
                 predicate,
-                object: graph.dict.term(o),
+                object: graph.dict().term(o),
             }
         })
         .collect();
@@ -192,18 +192,18 @@ fn main() {
         let ts: Vec<Triple> = graph
             .iter_ids()
             .map(|[s, p, o]| {
-                let subject = match graph.dict.term(s) {
+                let subject = match graph.dict().term(s) {
                     oxrdf::Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n),
                     oxrdf::Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b),
                     _ => unreachable!(),
                 };
-                let oxrdf::Term::NamedNode(predicate) = graph.dict.term(p) else {
+                let oxrdf::Term::NamedNode(predicate) = graph.dict().term(p) else {
                     unreachable!()
                 };
                 Triple {
                     subject,
                     predicate,
-                    object: graph.dict.term(o),
+                    object: graph.dict().term(o),
                 }
             })
             .collect();

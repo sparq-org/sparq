@@ -65,11 +65,16 @@ fn a_container_with_members_keeps_its_creator_when_its_own_graph_is_stored_again
     let before = store.stored_graphs();
     let own = store
         .graph()
-        .named
+        .named()
         .iter()
         .position(|(n, _)| n.to_string() == format!("<{container}>"))
         .expect("the container's own graph is stored");
-    let removed = store.graph_unchecked_mut().named.remove(own);
+    let removed = {
+        let g = store.graph_unchecked_mut();
+        let name = g.named()[own].0.clone();
+        let sub = g.remove_named(&name).unwrap().expect("present");
+        (name, sub)
+    };
     store
         .rematerialize_after_edit(&before, Some(BOB), &[], true)
         .expect("rebuilds");
@@ -81,7 +86,7 @@ fn a_container_with_members_keeps_its_creator_when_its_own_graph_is_stored_again
 
     // Store it again, as a writer holding Write on `/a/` would.
     let before = store.stored_graphs();
-    store.graph_unchecked_mut().named.push(removed);
+    store.graph_unchecked_mut().add_named(removed.0, removed.1).unwrap();
     store
         .rematerialize_after_edit(&before, Some(BOB), &[], true)
         .expect("rebuilds");
@@ -109,8 +114,8 @@ fn only_the_resources_a_caller_names_record_its_agent_as_creator() {
     let mut store = PodStore::new(Graph::load_dataset(&pod(), "nquads").expect("parses"));
     store.materialize_acp().expect("materializes");
     let before = store.stored_graphs();
-    let added = Graph::load_dataset(&nq, "nquads").expect("parses");
-    store.graph_unchecked_mut().named.extend(added.named);
+    let mut added = Graph::load_dataset(&nq, "nquads").expect("parses");
+    store.graph_unchecked_mut().extend_named(added.take_named().unwrap()).unwrap();
     store
         .rematerialize_after_edit(&before, Some(BOB), &[deep], true)
         .expect("rebuilds");
@@ -141,8 +146,8 @@ fn only_the_resources_a_caller_names_record_its_agent_as_creator() {
     let mut store = PodStore::new(Graph::load_dataset(&pod(), "nquads").expect("parses"));
     store.materialize_acp().expect("materializes");
     let before = store.stored_graphs();
-    let added = Graph::load_dataset(&nq, "nquads").expect("parses");
-    store.graph_unchecked_mut().named.extend(added.named);
+    let mut added = Graph::load_dataset(&nq, "nquads").expect("parses");
+    store.graph_unchecked_mut().extend_named(added.take_named().unwrap()).unwrap();
     store
         .rematerialize_after_edit(&before, Some(BOB), &[deep, "https://pod.ex/a/n/"], true)
         .expect("rebuilds");
