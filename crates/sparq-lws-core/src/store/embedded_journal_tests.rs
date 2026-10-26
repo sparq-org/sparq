@@ -873,19 +873,29 @@ async fn failed_saves_remove_only_empty_directories_they_created() {
 
 #[tokio::test]
 async fn history_primitives_recover_whole_transactions() {
-    use crate::store::history::{TrashFields, VersionFields, TRASH, VERSIONS};
-    for operation in ["replace", "trash", "restore"] {
+    use crate::store::history::{version_dir, TrashFields, VersionFields, TRASH};
+    for operation in ["replace", "trash", "restore", "restore-minted"] {
         for failure in [None, Some(false), Some(true)] {
             let dir = Directory::empty();
             let c = dir.open();
             let blob = InMemoryBlobStore::new();
-            for key in ["parent", "before", "after"] {
+            for key in ["parent", "older", "before", "after"] {
                 blob.put(key, bytes::Bytes::copy_from_slice(key.as_bytes()))
                     .await
                     .unwrap();
             }
             c.put_meta(PARENT, meta("parent")).await.unwrap();
-            c.create_child(PARENT, CHILD, meta("before")).await.unwrap();
+            c.create_child(
+                PARENT,
+                CHILD,
+                meta(if operation == "replace" {
+                    "before"
+                } else {
+                    "older"
+                }),
+            )
+            .await
+            .unwrap();
             let member = format!("{TRASH}0123456789abcdef0123456789abcdef");
             let fields = TrashFields {
                 original: CHILD.into(),
@@ -893,7 +903,26 @@ async fn history_primitives_recover_whole_transactions() {
                 deleted_by: Some("https://alice.example/#me".into()),
                 deleter_could_read: true,
             };
-            if operation == "restore" {
+            let version_member = format!("{}retained", version_dir(CHILD));
+            if operation != "replace" {
+                c.replace_meta_retaining(
+                    CHILD,
+                    meta("before"),
+                    &version_member,
+                    VersionFields {
+                        original: CHILD.into(),
+                        max_versions: 20,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            let target = if operation == "restore-minted" {
+                format!("{PARENT}minted")
+            } else {
+                CHILD.to_string()
+            };
+            if operation.starts_with("restore") {
                 c.move_to_trash(CHILD, Some(PARENT), &member, fields.clone())
                     .await
                     .unwrap();
@@ -914,7 +943,7 @@ async fn history_primitives_recover_whole_transactions() {
                     .replace_meta_retaining(
                         CHILD,
                         meta("after"),
-                        &format!("{VERSIONS}hash/0123456789abcdef0123456789abcdef"),
+                        &format!("{}0123456789abcdef0123456789abcdef", version_dir(CHILD)),
                         VersionFields {
                             original: CHILD.into(),
                             max_versions: 20,
@@ -923,13 +952,20 @@ async fn history_primitives_recover_whole_transactions() {
                     .await
                     .map(|_| ()),
                 "trash" => c.move_to_trash(CHILD, Some(PARENT), &member, fields).await,
-                "restore" => c.restore_from_trash(&member, CHILD, PARENT).await,
+                "restore" | "restore-minted" => {
+                    c.restore_from_trash(&member, &target, PARENT).await
+                }
                 _ => unreachable!(),
             };
             assert_eq!(result.is_ok(), failure.is_none());
             drop(c);
             let recovered = dir.open();
-            let live = recovered.exists(CHILD).await.unwrap();
+            let restored_target = if operation.starts_with("restore") {
+                &target
+            } else {
+                CHILD
+            };
+            let live = recovered.exists(restored_target).await.unwrap();
             let trash = recovered.trash_entries().await.unwrap();
             assert_eq!(
                 usize::from(live) + trash.len(),
@@ -952,14 +988,28 @@ async fn history_primitives_recover_whole_transactions() {
                     if failure.is_none() { "after" } else { "before" }
                 );
             } else {
-                let expected_live = (operation == "restore") == failure.is_none();
+                let expected_live = operation.starts_with("restore") == failure.is_none();
                 assert_eq!(live, expected_live);
+                let owner = if live { restored_target } else { &member };
+                let entries = recovered.versions(Some(owner)).await.unwrap();
+                assert_eq!(entries.len(), 1);
+                assert!(entries[0].member.starts_with(&version_dir(owner)));
+                assert_eq!(entries[0].meta.blob_key, "older");
+                assert_eq!(recovered.versions(None).await.unwrap(), entries);
+                assert_eq!(
+                    recovered
+                        .version_entry(&version_member)
+                        .await
+                        .unwrap()
+                        .is_some(),
+                    owner == CHILD
+                );
                 assert_eq!(
                     recovered
                         .list_children(PARENT)
                         .await
                         .unwrap()
-                        .contains(&CHILD.to_string()),
+                        .contains(&restored_target.to_string()),
                     expected_live
                 );
             }

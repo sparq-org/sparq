@@ -21,9 +21,9 @@ pub(crate) trait Context: Sync {
     fn base(&self) -> String;
     fn lws(&self) -> bool;
     async fn read(&self, original: &str) -> ServerResult<()>;
+    async fn move_to_trash(&self, path: &str, headers: &HeaderMap) -> ServerResult<Response>;
     async fn trash(&self, entry: &TrashEntry) -> ServerResult<bool>;
-    async fn create(&self, parent: &str) -> ServerResult<()>;
-    async fn restored(&self, target: &str, parent: &str) -> ServerResult<()>;
+    async fn restore(&self, member: &str, target: &str, parent: &str) -> ServerResult<()>;
 }
 fn prefix(lws: bool, versions: bool) -> &'static str {
     match (lws, versions) {
@@ -97,7 +97,7 @@ fn listing(
             json!({"@id":url,"@type":["http://www.w3.org/ns/ldp#Container"],"http://www.w3.org/ns/ldp#contains":items.iter().map(|i| json!({"@id":i["id"]})).collect::<Vec<_>>()}),
         ];
         for i in &items {
-            nodes.push(json!({"@id":i["id"], "https://jeswr.org/ns/solid-sd#etag":[{"@value":i["etag"]}],"http://purl.org/dc/terms/modified":[{"@value":i["modified"],"@type":sparql::XSD_DATETIME}],"http://mementoweb.org/ns#datetime":[{"@value":i["mementoDatetime"],"@type":sparql::XSD_DATETIME}],"https://jeswr.org/ns/solid-sd#original":[{"@id":i["original"]}]}));
+            nodes.push(json!({"@id":i["id"], "https://jeswr.org/ns/solid-sd#etag":[{"@value":i["etag"]}],"http://purl.org/dc/terms/modified":[{"@value":i["modified"],"@type":sparql::XSD_DATETIME}],"http://mementoweb.org/ns#datetime":[{"@value":i["mementoDatetime"],"@type":sparql::XSD_DATETIME}],"http://www.iana.org/assignments/relation/original":[{"@id":i["original"]}]}));
         }
         ("application/ld+json", Value::Array(nodes).to_string())
     } else {
@@ -112,7 +112,7 @@ fn listing(
             let original = sparql::iri(i["original"].as_str().unwrap_or_default())
                 .map_err(|e| ServerError::BadRequest(e.to_string()))?;
             text.push_str(&format!(
-                "{id} <https://jeswr.org/ns/solid-sd#original> {original} .\n"
+                "{id} <http://www.iana.org/assignments/relation/original> {original} .\n"
             ));
             for (field, pred) in [
                 ("modified", "http://purl.org/dc/terms/modified"),
@@ -264,11 +264,38 @@ pub(crate) async fn serve<C: Context>(
         return listing(&base, &url, items, lws, headers);
     }
     if tail.is_empty() && method == Method::POST {
-        let restore: Value = serde_json::from_slice(&body)
-            .map_err(|_| ServerError::BadRequest("expected a restore URL".into()))?;
-        let source = restore["restore"]
+        let operation: Value = serde_json::from_slice(&body)
+            .map_err(|_| ServerError::BadRequest("expected a resource or restore URL".into()))?;
+        let operation = operation
+            .as_object()
+            .ok_or_else(|| ServerError::BadRequest("expected a resource or restore URL".into()))?;
+        if operation.contains_key("resource") == operation.contains_key("restore") {
+            return Err(ServerError::BadRequest(
+                "provide exactly one of resource or restore".into(),
+            ));
+        }
+        if let Some(resource) = operation.get("resource") {
+            let resource = resource
+                .as_str()
+                .ok_or_else(|| ServerError::BadRequest("resource must be a URL".into()))?;
+            let path = resource
+                .strip_prefix(base.trim_end_matches('/'))
+                .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+                .filter(|_| history::data_resource(resource))
+                .ok_or(ServerError::NotFound)?;
+            let uri: axum::http::Uri = path
+                .parse()
+                .map_err(|_| ServerError::BadRequest("invalid resource URL".into()))?;
+            if uri.query().is_some() || path.contains('#') {
+                return Err(ServerError::BadRequest(
+                    "resource must name a data resource".into(),
+                ));
+            }
+            return ctx.move_to_trash(path, headers).await;
+        }
+        let source = operation["restore"]
             .as_str()
-            .ok_or_else(|| ServerError::BadRequest("restore is required".into()))?;
+            .ok_or_else(|| ServerError::BadRequest("restore must be a URL".into()))?;
         let source_prefix = format!("{}{}", base.trim_end_matches('/'), prefix(lws, false));
         let id = source
             .strip_prefix(&source_prefix)
@@ -287,16 +314,12 @@ pub(crate) async fn serve<C: Context>(
             &format!("{}/", base.trim_end_matches('/')),
         )
         .ok_or_else(|| ServerError::Conflict("original parent is absent".into()))?;
-        ctx.create(&parent).await?;
         let target = if lws {
             history::mint(&parent).map_err(|e| ServerError::Storage(e.to_string()))?
         } else {
             t.fields.original.clone()
         };
-        ctx.store()
-            .restore_trash(&t.member, &target, &parent)
-            .await?;
-        ctx.restored(&target, &parent).await?;
+        ctx.restore(&t.member, &target, &parent).await?;
         let mut r = StatusCode::CREATED.into_response();
         crate::lws::set(r.headers_mut(), header::LOCATION, &target);
         return Ok(r);
@@ -344,19 +367,21 @@ pub(crate) fn catalog(
     lws: bool,
     c: &history::HistoryConfig,
 ) {
-    use crate::describe::{entry, SSD};
+    use crate::describe::{capability, entry, SSD};
     if c.versions {
+        let endpoint = format!("{}{}", base.trim_end_matches('/'), prefix(lws, true));
         let mut service = entry(
             "versions",
             &format!("{SSD}VersioningService"),
-            format!(
-                "{}{}?resource={{resource}}",
-                base.trim_end_matches('/'),
-                prefix(lws, true)
-            ),
+            endpoint.clone(),
+        );
+        service.extras.insert(
+            format!("{SSD}listingTemplate"),
+            json!(format!("{endpoint}?resource={{resource}}")),
         );
         service.extras.insert(format!("{SSD}retention"),json!({"@value":format!("PT{}S",c.versions_retention.as_secs()),"@type":"http://www.w3.org/2001/XMLSchema#duration"}));
         catalog.service(service);
+        catalog.capability(capability(&format!("{SSD}Versioning"), json!({})));
     }
     if c.trash {
         let mut service = entry(
@@ -365,17 +390,31 @@ pub(crate) fn catalog(
             format!("{}{}", base.trim_end_matches('/'), prefix(lws, false)),
         );
         service.extras.insert(format!("{SSD}retention"),json!({"@value":format!("PT{}S",c.trash_retention.as_secs()),"@type":"http://www.w3.org/2001/XMLSchema#duration"}));
-        if lws {
-            service
-                .extras
-                .insert(format!("{SSD}recursiveDelete"), json!(false));
-        }
         catalog.service(service);
+        catalog.capability(capability(&format!("{SSD}Trash"), json!({})));
     }
 }
 
+/// Return the committed trash member only for a POST-to-trash operation.
+pub(crate) fn moved(base: &str, lws: bool, member: &str, post: bool) -> Response {
+    let mut response = if post {
+        StatusCode::CREATED
+    } else {
+        StatusCode::NO_CONTENT
+    }
+    .into_response();
+    if post {
+        crate::lws::set(
+            response.headers_mut(),
+            header::LOCATION,
+            &public_url(base, lws, member, false),
+        );
+    }
+    response
+}
+
 struct Solid<'a, S: Store> {
-    state: &'a crate::ldp::handler::LdpState<S>,
+    state: &'a std::sync::Arc<crate::ldp::handler::LdpState<S>>,
     token: &'a crate::auth::VerifiedToken,
     origin: Option<&'a str>,
 }
@@ -401,6 +440,17 @@ impl<S: Store> Context for Solid<'_, S> {
             )
             .await
     }
+    async fn move_to_trash(&self, path: &str, headers: &HeaderMap) -> ServerResult<Response> {
+        crate::ldp::handler::delete_resource(
+            self.state.clone(),
+            self.token.clone(),
+            path.parse()
+                .map_err(|_| ServerError::BadRequest("invalid resource URL".into()))?,
+            headers.clone(),
+            true,
+        )
+        .await
+    }
     async fn trash(&self, entry: &TrashEntry) -> ServerResult<bool> {
         Ok(self
             .state
@@ -416,7 +466,7 @@ impl<S: Store> Context for Solid<'_, S> {
                 && self.token.web_id.is_some()
                 && entry.fields.deleted_by == self.token.web_id))
     }
-    async fn create(&self, parent: &str) -> ServerResult<()> {
+    async fn restore(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
         self.state
             .authorize_iri(
                 parent,
@@ -424,9 +474,16 @@ impl<S: Store> Context for Solid<'_, S> {
                 self.token,
                 self.origin,
             )
-            .await
-    }
-    async fn restored(&self, target: &str, parent: &str) -> ServerResult<()> {
+            .await?;
+        self.state
+            .authorize_iri(
+                target,
+                crate::authz::AccessMode::Write,
+                self.token,
+                self.origin,
+            )
+            .await?;
+        self.store().restore_trash(member, target, parent).await?;
         self.state
             .notifications
             .notify(
@@ -475,6 +532,7 @@ pub(crate) async fn solid_handler<S: Store>(
 struct Lws<'a, S: Store> {
     state: &'a crate::lws::LwsState<S>,
     agent: &'a crate::lws::Agent,
+    req: &'a crate::lws::LwsRequest,
 }
 #[async_trait]
 impl<S: Store + 'static> Context for Lws<'_, S> {
@@ -502,6 +560,15 @@ impl<S: Store + 'static> Context for Lws<'_, S> {
             Err(ServerError::Forbidden)
         }
     }
+    async fn move_to_trash(&self, path: &str, headers: &HeaderMap) -> ServerResult<Response> {
+        let mut request = self.req.clone();
+        request.method = Method::DELETE;
+        request.path = path.to_string();
+        request.query = None;
+        request.headers = headers.clone();
+        request.body = Bytes::new();
+        Ok(crate::lws::resources::trash(self.state, &request, self.agent).await)
+    }
     async fn trash(&self, entry: &TrashEntry) -> ServerResult<bool> {
         Ok(self.state.cfg.open
             || crate::lws::access::is_owner(self.state, self.agent)
@@ -509,36 +576,11 @@ impl<S: Store + 'static> Context for Lws<'_, S> {
                 && self.agent.subject.is_some()
                 && entry.fields.deleted_by == self.agent.subject))
     }
-    async fn create(&self, parent: &str) -> ServerResult<()> {
-        if crate::lws::access::allowed(
-            self.state,
-            crate::lws::access::Action::Create,
-            parent,
-            self.agent,
+    async fn restore(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        crate::lws::resources::restore_history(
+            self.state, self.req, self.agent, member, target, parent,
         )
-        .await?
-        {
-            Ok(())
-        } else {
-            Err(ServerError::Forbidden)
-        }
-    }
-    async fn restored(&self, target: &str, parent: &str) -> ServerResult<()> {
-        let meta = crate::lws::ResourceMeta {
-            creator: self.agent.subject.clone(),
-            ..Default::default()
-        };
-        self.state.put_resource_meta(target, &meta).await?;
-        let event = crate::lws::notify::Event {
-            kind: "Create",
-            is_container: false,
-            uri: target.to_string(),
-            relation: Some(("target", parent.to_string())),
-        };
-        let prepared = self.state.notify.prepare(self.state, &event).await;
-        self.state.notify.send(self.state, prepared);
-        crate::lws::resources::touch_container(self.state, parent).await;
-        Ok(())
+        .await
     }
 }
 pub(crate) async fn lws_handler<S: Store + 'static>(
@@ -546,7 +588,7 @@ pub(crate) async fn lws_handler<S: Store + 'static>(
     req: &crate::lws::LwsRequest,
     agent: &crate::lws::Agent,
 ) -> Response {
-    let ctx = Lws { state, agent };
+    let ctx = Lws { state, agent, req };
     match serve(
         &ctx,
         &req.path,

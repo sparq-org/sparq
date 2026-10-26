@@ -23,13 +23,24 @@ SOLID_SERVER_TRASH=1
 
 Solid serves `GET /.versions/?resource=<absolute-resource-IRI>` as Turtle or expanded JSON-LD. LWS serves `GET /.lws/versions/?resource=<absolute-resource-IRI>` as `application/lws+json`. Percent-encode the query parameter. Each listing includes the retained states and the live resource as the final entry, with its ETag and modification time. Thus an initial state followed by two overwrites lists three states. LWS resources are initially created by POST, as in the existing protocol.
 
-A retained state is read-only at `/.versions/<sha>/<id>` or `/.lws/versions/<sha>/<id>`. Its response includes its retained `ETag`, `Memento-Datetime`, and a `Link` with `rel="original"`. Reads of original resources advertise a `rel="version-history"` link. The catalog advertises `ssd:VersioningService` with an endpoint template containing `{resource}`. Versions are authorized against the original resource's current read permissions.
+A retained state is read-only at `/.versions/<sha>/<id>` or `/.lws/versions/<sha>/<id>`. Its response includes its retained `ETag`, `Memento-Datetime`, and a `Link` with `rel="original"`. Reads of original resources advertise a `rel="version-history"` link. The catalog advertises `ssd:VersioningService` with an IRI endpoint (`/.versions/` or `/.lws/versions/`) and a separate literal `ssd:listingTemplate` valued `<endpoint>?resource={resource}`, alongside the `ssd:Versioning` capability. `ssd:listingTemplate` and the listing property `ssd:etag` are solid-sd draft additions. RDF listings identify the original resource with `http://www.iana.org/assignments/relation/original`. Versions are authorized against the original resource's current read permissions.
 
-To restore a version, GET it and PUT its bytes to the live resource with `If-Match` for the current live ETag. This creates another history entry. Containers, ACL documents, LWS metadata and service records are not versioned. At the index record ceiling an overwrite exchanges its oldest retained state for the newly retained state; when no retained slot exists, only the live state is kept. Blob storage admission still applies to newly written bytes.
+To restore a version, GET it and PUT its bytes to the live resource with `If-Match` for the current live ETag. This creates another history entry. Containers, access-control documents ending in `.acl` or `.acr`, LWS metadata and service records are not versioned. At the index record ceiling an overwrite exchanges its oldest retained state for the newly retained state; when no retained slot exists, only the live state is kept. Blob storage admission still applies to newly written bytes.
 
 ## Trash
 
 The Solid trash container is `/.trash/`; the LWS trash container is `/.lws/trash/`. GET lists visible entries. GET of a member returns its original bytes and `Link: <original-resource-IRI>; rel="original"`. Solid listings carry `dct:modified` equal to the trash time. LWS members expose it in their linkset's `self.modified` attribute, through `GET <member>.meta`.
+
+Move a data resource to trash with either DELETE of the resource or POST to the trash endpoint:
+
+```http
+POST /.trash/
+Content-Type: application/json
+
+{"resource":"https://pod.example/note"}
+```
+
+POST uses the same authorization, preconditions and atomic move as DELETE, and returns `201 Created` with `Location` pointing to the trashed copy. In LWS mode, use `/.lws/trash/`. The catalog advertises `ssd:TrashService` and the `ssd:Trash` capability. A POST body must contain exactly one of `resource` or `restore`, valued as a URL string; both keys or neither returns `400 Bad Request`.
 
 Restore a trash member with:
 
@@ -40,16 +51,16 @@ Content-Type: application/json
 {"restore":"https://pod.example/.trash/<id>"}
 ```
 
-The response is `201 Created` with `Location` pointing to the original resource in Solid mode, or a fresh identifier under the original parent in LWS mode. The target must be absent and its parent must already exist; otherwise restore returns `409 Conflict`. Restore also requires create permission on the parent. Parents are not created during restore.
+The response is `201 Created` with `Location` pointing to the original resource in Solid mode, or a fresh identifier under the original parent in LWS mode. The target must be absent and its parent must already exist; otherwise restore returns `409 Conflict`. Restore also requires create permission on the parent. Solid restore additionally requires Write on the target, using its inherited permissions. LWS restore takes the create path's locks. Parents are not created during restore.
 
-DELETE of a trash member purges it. Purge and permanent resource deletion also remove that resource's retained history. Moving a resource into trash keeps its history, so a Solid restore reconnects it. A move emits a live Delete notification; restore emits Create; purge emits no live notification.
+DELETE of a trash member purges it. Purge and permanent resource deletion also remove that resource's retained history. History follows the resource through trash. A move emits a live Delete notification; restore emits Create; purge emits no live notification.
 
 Trash entries are visible to a Solid caller with Control on the storage root, or the LWS owner. A deleting agent may also access its own entry when it could read the resource at deletion time. Listings apply the same permissions as member reads, restore and purge.
 
-Empty-container deletion remains permanent. Recursive LWS deletion with `Depth: infinity` also remains permanent and bypasses trash; the service description states that recursive deletion does not use trash. Subtree trash requires a separate atomic storage operation.
+Trash covers data resources only. Empty-container deletion remains permanent. Recursive LWS deletion with `Depth: infinity` is permanent until #7236; the catalog continues to advertise the independent `ssd:RecursiveDelete` capability.
 
 ## Storage API
 
-`HistoryConfig` configures `CompositeStore::with_history` before router assembly. The builder returns a result and refuses enabled history over an index that is not exclusively held, including the HTTP backend. The index trait exposes `replace_meta_retaining`, `move_to_trash` and `restore_from_trash`; their defaults return `SparqError::Unsupported`, with no sequence of ordinary writes substituted. Memory performs each operation under its index lock; embedded storage commits every effect through one journal transaction. `VersionEntry` and `TrashEntry` carry typed side fields without changing `ResourceMeta`. Private index IRIs are not HTTP resources or containment members.
+`Store::trash_resource` returns the private member IRI committed by the atomic move; protocol adapters translate it to the public `Location` without listing trash. `HistoryConfig` configures `CompositeStore::with_history` before router assembly. The builder returns a result and refuses enabled history over an index that is not exclusively held, including the HTTP backend. The index trait exposes `replace_meta_retaining`, `move_to_trash` and `restore_from_trash`; their defaults return `SparqError::Unsupported`, with no sequence of ordinary writes substituted. Memory performs each operation under its index lock; embedded storage commits every effect through one journal transaction. `replace_meta_retaining` returns `Vec<String>` containing only blob keys pruned by its committed transaction, including the superseded key when no retained slot is available. The composite store reclaims those keys. `VersionEntry` and `TrashEntry` carry typed side fields without changing `ResourceMeta`. Private index IRIs are not HTTP resources or containment members.
 
 Permanent deletion also returns its retired history keys from the same index transaction through `delete_resource_retiring`, so `CompositeStore` can reclaim them without a separate history lookup, including when the services are disabled after an earlier run. Backends without history support retain their existing delete path while both services are off.

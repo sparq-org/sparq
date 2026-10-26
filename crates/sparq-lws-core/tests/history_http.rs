@@ -183,8 +183,12 @@ impl Harness {
         }
     }
     async fn versions_list(&self, path: &str) -> Vec<(String, String)> {
+        self.versions_list_as(common::WEBID, path).await
+    }
+    async fn versions_list_as(&self, agent: &str, path: &str) -> Vec<(String, String)> {
         let (status, _, body) = self
-            .call(
+            .call_as(
+                agent,
                 "GET",
                 &self.versions(path),
                 &[("accept", self.accept())],
@@ -286,7 +290,8 @@ async fn sq8<S: SparqClient + 'static>(lws: bool, index: S) {
         )
         .await;
     assert!(status.is_success());
-    assert_eq!(h.versions_list(&resource).await.len(), 4);
+    let full_history = h.versions_list(&resource).await;
+    assert_eq!(full_history.len(), 4);
     let (status, headers, _) = h.call("GET", &resource, &[], "").await;
     assert_eq!(status, StatusCode::OK);
     assert!(headers
@@ -321,6 +326,11 @@ async fn sq8<S: SparqClient + 'static>(lws: bool, index: S) {
             .await
             .0,
         StatusCode::OK
+    );
+    let restored_history = h.versions_list(target.strip_prefix(BASE).unwrap()).await;
+    assert_eq!(
+        restored_history.iter().map(|v| &v.1).collect::<Vec<_>>(),
+        full_history.iter().map(|v| &v.1).collect::<Vec<_>>()
     );
     assert!(h.trash_list().await.is_empty());
 }
@@ -411,8 +421,11 @@ async fn disabled_routes_catalog_and_delete_match_the_baseline() {
 }
 
 async fn matrix(lws_mode: bool) -> Harness {
+    matrix_index(lws_mode, InMemorySparqClient::new()).await
+}
+async fn matrix_index<S: SparqClient + 'static>(lws_mode: bool, index: S) -> Harness {
     use sparq_lws_core::store::history::TrashFields;
-    let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new())
+    let store = CompositeStore::new(index, InMemoryBlobStore::new())
         .with_history(HistoryConfig {
             versions: true,
             trash: true,
@@ -1100,6 +1113,556 @@ async fn history_listings_honor_quality_values_and_explicit_refusal() {
                 assert_eq!(status, StatusCode::OK);
                 assert_eq!(headers["content-type"], "text/turtle");
             }
+        }
+    }
+}
+
+async fn history_through_trash<S: SparqClient + 'static>(lws: bool, index: S) {
+    let h = matrix_index(lws, index).await;
+    let create = |body: &'static str| async {
+        let (status, headers, _) = if lws {
+            h.call(
+                "POST",
+                "/",
+                &[("slug", "note"), ("content-type", "text/plain")],
+                body,
+            )
+            .await
+        } else {
+            h.call("PUT", "/note", &[("content-type", "text/plain")], body)
+                .await
+        };
+        assert_eq!(status, StatusCode::CREATED);
+        if lws {
+            assert_eq!(headers["location"], format!("{BASE}/note"));
+        }
+    };
+    create("old one").await;
+    assert!(h
+        .call("PUT", "/note", &[("content-type", "text/plain")], "old two")
+        .await
+        .0
+        .is_success());
+    let old = h.versions_list("/note").await;
+    assert_eq!(old.len(), 2);
+    assert_eq!(
+        h.call("DELETE", "/note", &[], "").await.0,
+        StatusCode::NO_CONTENT
+    );
+    create("new one").await;
+    assert!(h
+        .call("PUT", "/note", &[("content-type", "text/plain")], "new two")
+        .await
+        .0
+        .is_success());
+    let stranger = "https://stranger.example/#me";
+    if lws {
+        let grant = json!({"@context":["https://www.w3.org/ns/lws/v1"],"type":["AccessGrant"],"storage":format!("{BASE}/"),"access":[{"type":["AccessPolicy"],"action":["read"],"resource":format!("{BASE}/note"),"assignee":stranger}]});
+        assert_eq!(
+            h.call(
+                "POST",
+                "/.lws/grants/",
+                &[("content-type", "application/lws+json")],
+                &grant.to_string()
+            )
+            .await
+            .0,
+            StatusCode::CREATED
+        );
+    } else {
+        let acl = format!("@prefix acl: <http://www.w3.org/ns/auth/acl#>. <#read> a acl:Authorization; acl:agent <{stranger}>; acl:accessTo <{BASE}/note>; acl:mode acl:Read. <#owner> a acl:Authorization; acl:agent <{}>; acl:accessTo <{BASE}/note>; acl:mode acl:Read, acl:Write, acl:Control.", common::WEBID);
+        assert!(h
+            .call("PUT", "/note.acl", &[("content-type", "text/turtle")], &acl)
+            .await
+            .0
+            .is_success());
+    }
+    let new = h.versions_list_as(stranger, "/note").await;
+    assert_eq!(new.len(), 2);
+    assert!(new.iter().all(|v| old.iter().all(|o| o.1 != v.1)));
+    for (id, _) in old.iter().filter(|v| v.0 != format!("{BASE}/note")) {
+        assert_eq!(
+            h.call_as(stranger, "GET", id.strip_prefix(BASE).unwrap(), &[], "")
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    // Select the note's trash entry by its retained content.
+    let mut note_trash = None;
+    for id in h.trash_list().await {
+        if h.call("GET", id.strip_prefix(BASE).unwrap(), &[], "")
+            .await
+            .2
+            == "old two"
+        {
+            note_trash = Some(id);
+        }
+    }
+    let id = note_trash.unwrap();
+    assert_eq!(
+        h.call("DELETE", id.strip_prefix(BASE).unwrap(), &[], "")
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(h.versions_list_as(stranger, "/note").await, new);
+}
+#[tokio::test]
+async fn history_through_trash_memory() {
+    for lws in [false, true] {
+        history_through_trash(lws, InMemorySparqClient::new()).await;
+    }
+}
+#[cfg(feature = "embedded-sparq")]
+#[tokio::test]
+async fn history_through_trash_embedded() {
+    for lws in [false, true] {
+        history_through_trash(
+            lws,
+            sparq_lws_core::store::EmbeddedSparqClient::in_memory().unwrap(),
+        )
+        .await;
+    }
+}
+
+async fn solid_restore_target_write<S: SparqClient + 'static>(index: S) {
+    let h = matrix_index(false, index).await;
+    let deleter = "https://writer.example/#me";
+    let acl = |write: bool| {
+        format!("@prefix acl: <http://www.w3.org/ns/auth/acl#>. <#owner> a acl:Authorization; acl:agent <{}>; acl:accessTo <{BASE}/>; acl:default <{BASE}/>; acl:mode acl:Read, acl:Write, acl:Control. <#writer> a acl:Authorization; acl:agent <{deleter}>; acl:accessTo <{BASE}/>; acl:default <{BASE}/>; acl:mode acl:Read, acl:Append{}. ", common::WEBID, if write { ", acl:Write" } else { "" })
+    };
+    assert!(h
+        .call(
+            "PUT",
+            "/.acl",
+            &[("content-type", "text/turtle")],
+            &acl(true)
+        )
+        .await
+        .0
+        .is_success());
+    h.create("body").await;
+    assert_eq!(
+        h.call_as(deleter, "DELETE", "/note", &[], "").await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert!(h
+        .call(
+            "PUT",
+            "/.acl",
+            &[("content-type", "text/turtle")],
+            &acl(false)
+        )
+        .await
+        .0
+        .is_success());
+    let (status, _, body) = h
+        .call_as(deleter, "GET", h.trash(), &[("accept", h.accept())], "")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = trash_ids(false, &body);
+    assert_eq!(ids.len(), 1);
+    assert_eq!(
+        h.call_as(
+            deleter,
+            "POST",
+            h.trash(),
+            &[("content-type", "application/json")],
+            &json!({"restore":ids[0]}).to_string()
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        h.call("GET", "/note", &[], "").await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.call(
+            "POST",
+            h.trash(),
+            &[("content-type", "application/json")],
+            &json!({"restore":ids[0]}).to_string()
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+}
+#[tokio::test]
+async fn solid_restore_requires_target_write_memory() {
+    solid_restore_target_write(InMemorySparqClient::new()).await;
+}
+#[cfg(feature = "embedded-sparq")]
+#[tokio::test]
+async fn solid_restore_requires_target_write_embedded() {
+    solid_restore_target_write(sparq_lws_core::store::EmbeddedSparqClient::in_memory().unwrap())
+        .await;
+}
+
+async fn restore_and_recursive_delete<S: SparqClient + 'static>(index: S) {
+    let h = Harness::new(true, index, true).await;
+    for _ in 0..12 {
+        let (status, headers, _) = h
+            .call(
+                "POST",
+                "/",
+                &[(
+                    "link",
+                    "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                )],
+                "",
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let parent = headers["location"]
+            .to_str()
+            .unwrap()
+            .strip_prefix(BASE)
+            .unwrap();
+        let (status, headers, _) = h
+            .call("POST", parent, &[("content-type", "text/plain")], "body")
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let child = headers["location"]
+            .to_str()
+            .unwrap()
+            .strip_prefix(BASE)
+            .unwrap();
+        assert_eq!(
+            h.call("DELETE", child, &[], "").await.0,
+            StatusCode::NO_CONTENT
+        );
+        let trash = h.trash_list().await.pop().unwrap();
+        let body = json!({"restore":trash}).to_string();
+        let (restored, removed) = tokio::join!(
+            h.call(
+                "POST",
+                h.trash(),
+                &[("content-type", "application/json")],
+                &body
+            ),
+            h.call("DELETE", parent, &[("depth", "infinity")], "")
+        );
+        assert_eq!(removed.0, StatusCode::NO_CONTENT);
+        match restored.0 {
+            StatusCode::CONFLICT => {}
+            StatusCode::CREATED => {
+                let target = restored.1["location"]
+                    .to_str()
+                    .unwrap()
+                    .strip_prefix(BASE)
+                    .unwrap();
+                assert_eq!(
+                    h.call("GET", target, &[], "").await.0,
+                    StatusCode::NOT_FOUND
+                );
+                assert_eq!(
+                    h.call("GET", &format!("{target}.meta"), &[], "").await.0,
+                    StatusCode::NOT_FOUND
+                );
+            }
+            status => panic!("restore: {status}"),
+        }
+        assert_eq!(
+            h.call("GET", parent, &[], "").await.0,
+            StatusCode::NOT_FOUND
+        );
+        for id in h.trash_list().await {
+            assert_eq!(
+                h.call("DELETE", id.strip_prefix(BASE).unwrap(), &[], "")
+                    .await
+                    .0,
+                StatusCode::NO_CONTENT
+            );
+        }
+    }
+}
+#[tokio::test]
+async fn lws_restore_and_recursive_delete_memory() {
+    restore_and_recursive_delete(InMemorySparqClient::new()).await;
+}
+#[cfg(feature = "embedded-sparq")]
+#[tokio::test]
+async fn lws_restore_and_recursive_delete_embedded() {
+    restore_and_recursive_delete(sparq_lws_core::store::EmbeddedSparqClient::in_memory().unwrap())
+        .await;
+}
+
+async fn trash_wire_forms<S: SparqClient + 'static>(lws: bool, index: S) {
+    let h = matrix_index(lws, index).await;
+    let initial = h.trash_list().await;
+    for method in ["DELETE", "POST"] {
+        let resource = h.create("one").await;
+        assert!(h
+            .call("PUT", &resource, &[("content-type", "text/plain")], "two")
+            .await
+            .0
+            .is_success());
+        let before = h.versions_list(&resource).await;
+        let body = json!({"resource": format!("{BASE}{resource}")}).to_string();
+        let path = if method == "POST" {
+            h.trash()
+        } else {
+            &resource
+        };
+        let headers = [("content-type", "application/json")];
+        let stranger = "https://stranger.example/#me";
+        let denied_delete = h.call_as(stranger, "DELETE", &resource, &[], "").await.0;
+        let denied = h.call_as(stranger, method, path, &headers, &body).await.0;
+        assert_eq!(denied, denied_delete);
+        assert!(!denied.is_success());
+        assert_eq!(h.trash_list().await, initial);
+        assert_eq!(
+            h.call(
+                method,
+                path,
+                &[
+                    ("content-type", "application/json"),
+                    ("if-match", "\"different\"")
+                ],
+                &body
+            )
+            .await
+            .0,
+            StatusCode::PRECONDITION_FAILED
+        );
+        assert_eq!(h.call("GET", &resource, &[], "").await.2, "two");
+        assert_eq!(h.trash_list().await, initial);
+        let mut move_headers = headers.to_vec();
+        if method == "POST" {
+            move_headers.push(("depth", "infinity"));
+        }
+        let (status, response_headers, _) = h.call(method, path, &move_headers, &body).await;
+        assert_eq!(
+            status,
+            if method == "POST" {
+                StatusCode::CREATED
+            } else {
+                StatusCode::NO_CONTENT
+            }
+        );
+        let entries = h.trash_list().await;
+        let added = entries
+            .iter()
+            .filter(|id| !initial.contains(id))
+            .collect::<Vec<_>>();
+        assert_eq!(added.len(), 1);
+        let member = added[0];
+        if method == "POST" {
+            assert_eq!(response_headers["location"], member.as_str());
+        }
+        assert!(!h.call("GET", &resource, &[], "").await.0.is_success());
+        let (status, headers, bytes) = h
+            .call("GET", member.strip_prefix(BASE).unwrap(), &[], "")
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(bytes, "two");
+        assert!(headers.get_all("link").iter().any(|v| v
+            .to_str()
+            .unwrap()
+            .contains(&format!("<{BASE}{resource}>; rel=\"original\""))));
+        let (status, headers, _) = h
+            .call(
+                "POST",
+                h.trash(),
+                &[("content-type", "application/json")],
+                &json!({"restore":member}).to_string(),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let restored = headers["location"]
+            .to_str()
+            .unwrap()
+            .strip_prefix(BASE)
+            .unwrap();
+        assert_eq!(h.call("GET", restored, &[], "").await.2, "two");
+        let after = h.versions_list(restored).await;
+        assert_eq!(
+            after.iter().map(|v| &v.1).collect::<Vec<_>>(),
+            before.iter().map(|v| &v.1).collect::<Vec<_>>()
+        );
+        assert_eq!(h.trash_list().await, initial);
+        // Remove the restored resource before the next independent wire-form check.
+        assert_eq!(
+            h.call("DELETE", restored, &[], "").await.0,
+            StatusCode::NO_CONTENT
+        );
+        let entry = h
+            .trash_list()
+            .await
+            .into_iter()
+            .find(|id| !initial.contains(id))
+            .unwrap();
+        assert_eq!(
+            h.call("DELETE", entry.strip_prefix(BASE).unwrap(), &[], "")
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+    }
+}
+
+#[tokio::test]
+async fn trash_wire_forms_memory() {
+    for lws in [false, true] {
+        trash_wire_forms(lws, InMemorySparqClient::new()).await;
+    }
+}
+
+#[cfg(feature = "embedded-sparq")]
+#[tokio::test]
+async fn trash_wire_forms_embedded() {
+    for lws in [false, true] {
+        trash_wire_forms(
+            lws,
+            sparq_lws_core::store::EmbeddedSparqClient::in_memory().unwrap(),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn trash_post_requires_exactly_one_url_in_both_modes() {
+    for lws in [false, true] {
+        let h = Harness::new(lws, InMemorySparqClient::new(), true).await;
+        let resource = h.create("one").await;
+        let resource = format!("{BASE}{resource}");
+        for body in [
+            json!({}),
+            json!({"resource":resource,"restore":format!("{BASE}{}missing",h.trash())}),
+            json!({"resource":resource,"restore":null}),
+            json!({"resource":null}),
+            json!({"restore":false}),
+            json!([]),
+            json!("resource"),
+        ] {
+            assert_eq!(
+                h.call(
+                    "POST",
+                    h.trash(),
+                    &[("content-type", "application/json")],
+                    &body.to_string()
+                )
+                .await
+                .0,
+                StatusCode::BAD_REQUEST,
+                "{body}"
+            );
+            assert!(h.trash_list().await.is_empty());
+            assert_eq!(
+                h.call("GET", resource.strip_prefix(BASE).unwrap(), &[], "")
+                    .await
+                    .2,
+                "one"
+            );
+        }
+        for target in [
+            format!("{BASE}/"),
+            format!("{BASE}/.acl"),
+            format!("{BASE}/note.acr"),
+            "https://elsewhere.example/note".into(),
+        ] {
+            assert!(!h
+                .call(
+                    "POST",
+                    h.trash(),
+                    &[("content-type", "application/json")],
+                    &json!({"resource": target}).to_string()
+                )
+                .await
+                .0
+                .is_success());
+            assert!(h.trash_list().await.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn rdf_history_listings_use_the_iana_original_relation() {
+    use oxrdf::{NamedNode, Term};
+    use sparq_lws_core::ldp::content::{parse_to_triples, serialize_triples, RdfFormat};
+    let h = Harness::new(false, InMemorySparqClient::new(), true).await;
+    let resource = h.create("one").await;
+    let (status, first_headers, _) = h.call("GET", &resource, &[], "").await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, second_headers, _) = h
+        .call("PUT", &resource, &[("content-type", "text/plain")], "two")
+        .await;
+    assert!(status.is_success());
+    let expected_etags = [
+        first_headers["etag"].to_str().unwrap().to_string(),
+        second_headers["etag"].to_str().unwrap().to_string(),
+    ];
+    for trashed in [false, true] {
+        if trashed {
+            assert_eq!(
+                h.call(
+                    "POST",
+                    h.trash(),
+                    &[("content-type", "application/json")],
+                    &json!({"resource":format!("{BASE}{resource}")}).to_string()
+                )
+                .await
+                .0,
+                StatusCode::CREATED
+            );
+        }
+        let path = if trashed {
+            h.trash().to_string()
+        } else {
+            h.versions(&resource)
+        };
+        for (accept, format) in [
+            ("text/turtle", RdfFormat::Turtle),
+            ("application/ld+json", RdfFormat::JsonLd),
+        ] {
+            let (status, _, body) = h.call("GET", &path, &[("accept", accept)], "").await;
+            assert_eq!(status, StatusCode::OK);
+            let graph = parse_to_triples(format, &body, BASE).unwrap();
+            let originals = graph
+                .iter()
+                .filter(|t| {
+                    t.predicate.as_str() == "http://www.iana.org/assignments/relation/original"
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(originals.len(), if trashed { 1 } else { 2 });
+            let mut etags = graph
+                .iter()
+                .filter(|t| t.predicate.as_str() == "https://jeswr.org/ns/solid-sd#etag")
+                .map(|t| match &t.object {
+                    Term::Literal(literal) => literal.value().to_string(),
+                    other => panic!("expected an ETag literal, got {other}"),
+                })
+                .collect::<Vec<_>>();
+            let mut expected = if trashed {
+                vec![expected_etags[1].clone()]
+            } else {
+                expected_etags.to_vec()
+            };
+            etags.sort();
+            expected.sort();
+            assert_eq!(etags, expected);
+
+            for triple in originals {
+                assert_eq!(
+                    triple.object,
+                    Term::NamedNode(NamedNode::new(format!("{BASE}{resource}")).unwrap())
+                );
+            }
+            assert!(!graph
+                .iter()
+                .any(|t| t.predicate.as_str() == "https://jeswr.org/ns/solid-sd#original"));
+            let ttl = serialize_triples(RdfFormat::Turtle, &graph).unwrap();
+            let data =
+                sparq_core::Graph::load_str(std::str::from_utf8(&ttl).unwrap(), "turtle").unwrap();
+            let shapes =
+                sparq_core::Graph::load_str(include_str!("fixtures/history-shapes.ttl"), "turtle")
+                    .unwrap();
+            let report = sparq_shacl::validate(&data, &shapes);
+            assert!(report.conforms, "{}", report.to_text());
         }
     }
 }

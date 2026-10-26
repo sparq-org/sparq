@@ -164,7 +164,8 @@ pub struct ExpiredEntry {
 pub(crate) fn data_resource(iri: &str) -> bool {
     (iri.starts_with("http://") || iri.starts_with("https://"))
         && !iri.ends_with('/')
-        && !iri.ends_with(".acl")
+        && !crate::authz::mode::is_acl_resource(iri)
+        && !iri.rsplit('/').next().is_some_and(|s| s.ends_with(".acr"))
         && !iri.ends_with(".meta")
         && !iri.split('/').any(|s| {
             matches!(
@@ -175,6 +176,13 @@ pub(crate) fn data_resource(iri: &str) -> bool {
 }
 pub(crate) fn version_dir(iri: &str) -> String {
     format!("{VERSIONS}{}/", super::sha_hex(iri))
+}
+pub(crate) fn rekey_member(member: &str, target: &str) -> String {
+    format!(
+        "{}{}",
+        version_dir(target),
+        member.rsplit('/').next().unwrap_or(member)
+    )
 }
 pub(crate) fn mint(prefix: &str) -> Result<String, SparqError> {
     let mut bytes = [0u8; 16];
@@ -407,6 +415,174 @@ mod tests {
             .unwrap();
         assert!(store.versions(Some(IRI)).await.unwrap().is_empty());
     }
+    async fn trash_removal<S: SparqClient>(index: S) {
+        let mut policy = config();
+        policy.trash_retention = Duration::from_secs(10);
+        let store = CompositeStore::new(index, InMemoryBlobStore::new())
+            .with_history(policy)
+            .unwrap();
+        for expire in [false, true] {
+            store
+                .write(IRI, Bytes::from_static(b"old one"), "text/plain")
+                .await
+                .unwrap();
+            store
+                .write(IRI, Bytes::from_static(b"old two"), "text/plain")
+                .await
+                .unwrap();
+            let old = store.versions(Some(IRI)).await.unwrap().remove(0);
+            let mut f = fields();
+            let trashed_at = crate::clock::now();
+            f.trashed_at = trashed_at;
+            store.trash_resource(IRI, None, f).await.unwrap();
+            let trash = store.trash_entries().await.unwrap().remove(0);
+            assert!(store.version_entry(&old.member).await.unwrap().is_none());
+            let held = store.versions(Some(&trash.member)).await.unwrap();
+            assert_eq!(held.len(), 1);
+            assert!(held[0].member.starts_with(&version_dir(&trash.member)));
+            assert_eq!(held[0].meta, old.meta);
+            store
+                .write(IRI, Bytes::from_static(b"new one"), "text/plain")
+                .await
+                .unwrap();
+            store
+                .write(IRI, Bytes::from_static(b"new two"), "text/plain")
+                .await
+                .unwrap();
+            let new = store.versions(Some(IRI)).await.unwrap();
+            assert_eq!(new.len(), 1);
+            if expire {
+                assert_eq!(
+                    store
+                        .sweep_history(trashed_at + Duration::from_secs(10), 1)
+                        .await
+                        .unwrap(),
+                    1
+                );
+            } else {
+                store.purge_trash(&trash.member).await.unwrap();
+            }
+            assert_eq!(store.versions(Some(IRI)).await.unwrap(), new);
+            assert!(store
+                .versions(Some(&trash.member))
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(!store.blob.exists(&old.meta.blob_key).await.unwrap());
+            assert!(!store.blob.exists(&trash.meta.blob_key).await.unwrap());
+            assert!(store.blob.exists(&new[0].meta.blob_key).await.unwrap());
+            assert_eq!(store.read(IRI).await.unwrap().body, "new two");
+            store.delete(IRI, None).await.unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn trash_purge_and_expiry_preserve_live_history_memory() {
+        trash_removal(InMemorySparqClient::new()).await;
+    }
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn trash_purge_and_expiry_preserve_live_history_embedded() {
+        trash_removal(crate::store::EmbeddedSparqClient::in_memory().unwrap()).await;
+    }
+
+    async fn selection_by_container<S: SparqClient>(index: S) {
+        let store = CompositeStore::new(index, InMemoryBlobStore::new())
+            .with_history(config())
+            .unwrap();
+        store
+            .write(IRI, Bytes::from_static(b"first"), "text/plain")
+            .await
+            .unwrap();
+        let first = store.meta(IRI).await.unwrap().unwrap();
+        let member = mint(&version_dir(IRI)).unwrap();
+        let mut next = first.clone();
+        next.etag = "next".into();
+        store
+            .sparq
+            .replace_meta_retaining(
+                IRI,
+                next,
+                &member,
+                VersionFields {
+                    original: ROOT.into(),
+                    max_versions: 20,
+                },
+            )
+            .await
+            .unwrap();
+        let entries = store.versions(Some(IRI)).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].member, member);
+        assert_eq!(entries[0].meta, first);
+        assert!(store.versions(Some(ROOT)).await.unwrap().is_empty());
+        store.trash_resource(IRI, None, fields()).await.unwrap();
+        let trash = store.trash_entries().await.unwrap().remove(0);
+        assert!(store.versions(Some(IRI)).await.unwrap().is_empty());
+        assert_eq!(store.versions(Some(&trash.member)).await.unwrap().len(), 1);
+        store.purge_trash(&trash.member).await.unwrap();
+        assert!(store.versions(None).await.unwrap().is_empty());
+        assert!(!store.blob.exists(&first.blob_key).await.unwrap());
+    }
+    #[tokio::test]
+    async fn retained_records_are_selected_by_container_memory() {
+        selection_by_container(InMemorySparqClient::new()).await;
+    }
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn retained_records_are_selected_by_container_embedded() {
+        selection_by_container(crate::store::EmbeddedSparqClient::in_memory().unwrap()).await;
+    }
+
+    #[test]
+    fn data_resources_exclude_access_control_documents() {
+        for name in [".acl", "note.acl", ".acr", "note.acr"] {
+            assert!(!data_resource(&format!("{ROOT}{name}")), "{name}");
+        }
+        assert!(data_resource(IRI));
+        assert!(data_resource(&format!("{ROOT}folder.acr/note")));
+    }
+
+    async fn overwrite_reclaims_only_pruned_keys<S: SparqClient>(index: S) {
+        use crate::store::counting::{BackendCounters, CountingSparqClient};
+        let counters = std::sync::Arc::new(BackendCounters::default());
+        let store = CompositeStore::new(
+            CountingSparqClient::new(index, counters.clone()),
+            InMemoryBlobStore::new(),
+        )
+        .with_history(config())
+        .unwrap();
+        for body in ["one", "two", "three"] {
+            let before = counters.snapshot();
+            store
+                .write(IRI, Bytes::copy_from_slice(body.as_bytes()), "text/plain")
+                .await
+                .unwrap();
+            let delta = counters.snapshot().since(&before);
+            assert_eq!(
+                delta.sparql_updates, 0,
+                "no reclaim when no version was pruned"
+            );
+            assert_eq!(delta.sparql_queries, 0);
+        }
+        let versions = store.versions(Some(IRI)).await.unwrap();
+        assert_eq!(versions.len(), 2);
+        for v in versions {
+            assert!(store.blob.exists(&v.meta.blob_key).await.unwrap());
+        }
+    }
+    #[tokio::test]
+    async fn overwrite_without_pruning_makes_no_reclaim_calls_memory() {
+        overwrite_reclaims_only_pruned_keys(InMemorySparqClient::new()).await;
+    }
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn overwrite_without_pruning_makes_no_reclaim_calls_embedded() {
+        overwrite_reclaims_only_pruned_keys(
+            crate::store::EmbeddedSparqClient::in_memory().unwrap(),
+        )
+        .await;
+    }
+
     #[test]
     fn http_backend_refused_only_when_enabled() {
         assert!(HistoryConfig::default().validate_backend("http").is_ok());

@@ -302,7 +302,7 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         meta: ResourceMeta,
         member: &str,
         fields: crate::store::history::VersionFields,
-    ) -> Result<Option<crate::store::history::VersionEntry>, SparqError> {
+    ) -> Result<Vec<String>, SparqError> {
         self.inner
             .replace_meta_retaining(iri, meta, member, fields)
             .await

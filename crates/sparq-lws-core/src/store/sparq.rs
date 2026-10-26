@@ -186,14 +186,15 @@ pub trait SparqClient: Send + Sync {
         Ok(previous)
     }
 
-    /// Atomically retain the current pointer and replace the live metadata. Never emulated.
+    /// Atomically retain the current pointer and replace live metadata, returning pruned blob keys.
+    /// Never emulated; keys are returned only after the transaction commits.
     async fn replace_meta_retaining(
         &self,
         iri: &str,
         new_meta: ResourceMeta,
         version_member: &str,
         fields: VersionFields,
-    ) -> Result<Option<VersionEntry>, SparqError> {
+    ) -> Result<Vec<String>, SparqError> {
         let _ = (iri, new_meta, version_member, fields);
         Err(SparqError::Unsupported)
     }
@@ -630,6 +631,25 @@ struct Index {
 }
 
 impl Index {
+    fn rekey_versions(&mut self, from: &str, to: &str) {
+        let prefix = super::history::version_dir(from);
+        let entries: Vec<_> = self
+            .versions
+            .values()
+            .filter(|v| v.member.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for mut entry in entries {
+            self.remove_history(&entry.member);
+            entry.member = super::history::rekey_member(&entry.member, to);
+            entry.original = to.to_string();
+            if let Some(at) = entry.meta.last_modified {
+                self.version_times.insert((at, entry.member.clone()));
+            }
+            self.meta.insert(entry.member.clone(), entry.meta.clone());
+            self.versions.insert(entry.member.clone(), entry);
+        }
+    }
     fn remove_history(&mut self, member: &str) {
         if let Some(v) = self.versions.remove(member) {
             if let Some(at) = v.meta.last_modified {
@@ -749,19 +769,20 @@ impl SparqClient for InMemorySparqClient {
         new_meta: ResourceMeta,
         member: &str,
         fields: VersionFields,
-    ) -> Result<Option<VersionEntry>, SparqError> {
+    ) -> Result<Vec<String>, SparqError> {
         let mut index = self
             .inner
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         self.admit_resource(&index, iri)?;
         let previous = index.meta.get(iri).cloned();
-        let mut retained = None;
+        let mut pruned_keys = Vec::new();
         if let Some(meta) = previous {
+            let prefix = super::history::version_dir(iri);
             let mut versions: Vec<_> = index
                 .versions
                 .values()
-                .filter(|v| v.original == iri)
+                .filter(|v| v.member.starts_with(&prefix))
                 .cloned()
                 .collect();
             super::history::sort_versions(&mut versions);
@@ -775,10 +796,11 @@ impl SparqClient for InMemorySparqClient {
             // No retained slot exists to exchange at a full index: keep only the new live state.
             if drop_count > versions.len() {
                 index.meta.insert(iri.to_string(), new_meta);
-                return Ok(None);
+                return Ok(vec![meta.blob_key]);
             }
             for old in versions.into_iter().take(drop_count) {
                 index.remove_history(&old.member);
+                pruned_keys.push(old.meta.blob_key);
             }
             index.version_order += 1;
             let v = VersionEntry {
@@ -791,11 +813,10 @@ impl SparqClient for InMemorySparqClient {
                 index.version_times.insert((at, member.to_string()));
             }
             index.meta.insert(member.to_string(), v.meta.clone());
-            index.versions.insert(member.to_string(), v.clone());
-            retained = Some(v);
+            index.versions.insert(member.to_string(), v);
         }
         index.meta.insert(iri.to_string(), new_meta);
-        Ok(retained)
+        Ok(pruned_keys)
     }
     async fn move_to_trash(
         &self,
@@ -809,6 +830,7 @@ impl SparqClient for InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         let meta = index.meta.remove(iri).ok_or(SparqError::NotFound)?;
+        index.rekey_versions(iri, member);
         index.children.remove(iri);
         if let Some(children) = parent.and_then(|p| index.children.get_mut(p)) {
             children.retain(|c| c != iri);
@@ -843,6 +865,7 @@ impl SparqClient for InMemorySparqClient {
             ));
         }
         let t = index.trash.remove(member).ok_or(SparqError::NotFound)?;
+        index.rekey_versions(member, target);
         index
             .trash_times
             .remove(&(t.fields.trashed_at, member.to_string()));
@@ -859,10 +882,11 @@ impl SparqClient for InMemorySparqClient {
             .inner
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let prefix = original.map(super::history::version_dir);
         let mut v: Vec<_> = index
             .versions
             .values()
-            .filter(|v| original.is_none_or(|o| v.original == o))
+            .filter(|v| prefix.as_ref().is_none_or(|p| v.member.starts_with(p)))
             .cloned()
             .collect();
         super::history::sort_versions(&mut v);
@@ -1036,15 +1060,11 @@ impl SparqClient for InMemorySparqClient {
             .inner
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        let original = guard
-            .trash
-            .get(iri)
-            .map(|t| t.fields.original.clone())
-            .unwrap_or_else(|| iri.to_string());
+        let prefix = super::history::version_dir(iri);
         let history: Vec<_> = guard
             .versions
             .values()
-            .filter(|v| v.original == original)
+            .filter(|v| v.member.starts_with(&prefix))
             .map(|v| (v.member.clone(), v.meta.blob_key.clone()))
             .collect();
         let mut version_keys = Vec::new();

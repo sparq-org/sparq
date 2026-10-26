@@ -607,7 +607,7 @@ impl SparqClient for EmbeddedSparqClient {
         meta: ResourceMeta,
         member: &str,
         fields: super::history::VersionFields,
-    ) -> Result<Option<super::history::VersionEntry>, SparqError> {
+    ) -> Result<Vec<String>, SparqError> {
         let (iri, member) = (iri.to_string(), member.to_string());
         self.dispatch(move |g| history_ops::replace(g, &iri, meta, &member, fields))
             .await
@@ -784,15 +784,8 @@ impl SparqClient for EmbeddedSparqClient {
         let mut u = sparql::update_delete_resource_with_parent(iri, parent)?;
         let iri = iri.to_string();
         self.dispatch(move |graph| {
-            let original = if iri.starts_with(super::history::TRASH) {
-                history_ops::trash_entry(graph, &iri)?
-                    .map(|t| t.fields.original)
-                    .unwrap_or_else(|| iri.clone())
-            } else {
-                iri.clone()
-            };
             let mut version_keys = Vec::new();
-            for v in history_ops::versions(graph, Some(&original))? {
+            for v in history_ops::versions(graph, Some(&iri))? {
                 version_keys.push(v.meta.blob_key);
                 u.push_str("; ");
                 u.push_str(&sparql::update_delete_resource(&v.member)?);

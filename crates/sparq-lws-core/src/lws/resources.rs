@@ -113,6 +113,23 @@ async fn handle_now<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
+    handle_resource(state, req, agent, false).await
+}
+
+pub(crate) async fn trash<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+) -> Response {
+    handle_resource(state, req, agent, true).await
+}
+
+async fn handle_resource<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    trash_post: bool,
+) -> Response {
     let path = req.path.as_str();
     let not_there = || {
         if state.needs_auth(agent) {
@@ -183,7 +200,7 @@ async fn handle_now<S: Store + 'static>(
         ),
         Method::PUT => update(state, req, agent, &uri).await,
         Method::PATCH => patch(state, req, agent, &uri).await,
-        Method::DELETE => delete(state, req, agent, &uri).await,
+        Method::DELETE => delete(state, req, agent, &uri, trash_post).await,
         Method::OPTIONS => options(state, &uri).await,
         _ => method_not_allowed(&allow_for(&uri, is_root)),
     }
@@ -1705,6 +1722,100 @@ fn initial_linkset(uri: &str, links: &Links) -> Option<Value> {
     }
     entry.insert("anchor".into(), Value::String(uri.into()));
     Some(json!({"linkset": [Value::Object(entry)]}))
+}
+
+pub(crate) async fn restore_history<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    member: &str,
+    target: &str,
+    parent: &str,
+) -> Result<(), ServerError> {
+    let target_guard = state
+        .locks
+        .lock(target)
+        .await
+        .ok_or(ServerError::ResourceChanged)?;
+    let parent_guard = state
+        .locks
+        .read(parent)
+        .await
+        .ok_or(ServerError::ResourceChanged)?;
+    if !super::access::allowed(state, Action::Create, parent, agent).await? {
+        return Err(ServerError::Forbidden);
+    }
+    if !state.store.exists(parent).await? || state.store.exists(target).await? {
+        return Err(ServerError::Conflict("restore target or parent".into()));
+    }
+    let writes = {
+        let (state, member, target, parent) = (
+            state.detached(),
+            member.to_string(),
+            target.to_string(),
+            parent.to_string(),
+        );
+        let meta = ResourceMeta {
+            creator: agent.subject.clone(),
+            ..Default::default()
+        };
+        async move {
+            let nothing = super::Prior {
+                existed: Some(false),
+                ..Default::default()
+            };
+            state
+                .locks
+                .changing_from([(target.clone(), nothing)].into_iter().collect());
+            let in_flight = super::InFlight {
+                locks: state.locks.clone(),
+                iris: vec![target.clone()],
+            };
+            // As for create, metadata precedes content. A stop can leave metadata alone.
+            let result = async {
+                state.put_resource_meta(&target, &meta).await?;
+                state.store.restore_trash(&member, &target, &parent).await
+            }
+            .await;
+            if result.is_err() {
+                let undo = vec![super::Undo::Restore {
+                    key: meta_key(&target),
+                    prior: None,
+                }];
+                if let Some(mut left) = super::settle(&state.store, undo).await {
+                    left.1 = Some(in_flight);
+                    return (result, Some(left));
+                }
+            }
+            drop(in_flight);
+            (result, None)
+        }
+    };
+    let (container, uri) = (parent.to_string(), target.to_string());
+    let after = move |out: &Result<(), ServerError>| {
+        if out.is_ok() {
+            (
+                Some(container.clone()),
+                Some(Event {
+                    kind: "Create",
+                    is_container: false,
+                    uri,
+                    relation: Some(("target", container)),
+                }),
+            )
+        } else {
+            (None, None)
+        }
+    };
+    let (result, _) = hold_locks(
+        state,
+        (target_guard, parent_guard),
+        req.admission.clone(),
+        after,
+        writes,
+    )
+    .await?;
+    result
 }
 
 async fn create<S: Store + 'static>(
@@ -3706,6 +3817,7 @@ async fn delete<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
     uri: &str,
+    trash_post: bool,
 ) -> Response {
     let storage = state.cfg.storage();
     if let Err(r) = current(state, uri).await {
@@ -3802,9 +3914,10 @@ async fn delete<S: Store + 'static>(
     }
     if state.store.history_config().trash
         && crate::store::history::data_resource(uri)
-        && !req
-            .header("depth")
-            .is_some_and(|d| d.eq_ignore_ascii_case("infinity"))
+        && (trash_post
+            || !req
+                .header("depth")
+                .is_some_and(|d| d.eq_ignore_ascii_case("infinity")))
     {
         let could_read = super::access::allowed(state, Action::Read, uri, agent)
             .await
@@ -3838,7 +3951,7 @@ async fn delete<S: Store + 'static>(
                 ((Vec::<String>::new(), outcome), None)
             }
         };
-        let after = move |(_, outcome): &(Vec<String>, Result<(), ServerError>)| {
+        let after = move |(_, outcome): &(Vec<String>, Result<String, ServerError>)| {
             (parent.filter(|_| outcome.is_ok()), None)
         };
         return match hold_locks(
@@ -3850,7 +3963,9 @@ async fn delete<S: Store + 'static>(
         )
         .await
         {
-            Ok(((_, Ok(())), _)) => problem(StatusCode::NO_CONTENT, None),
+            Ok(((_, Ok(member)), _)) => {
+                crate::history_http::moved(&state.cfg.base_url, true, &member, trash_post)
+            }
             Ok(((_, Err(e)), _)) | Err(e) => store_error(e),
         };
     }
@@ -7167,6 +7282,81 @@ mod tests {
             );
             let body = body_of(call(&st, "GET", path_of(&location), &[], "").await).await;
             assert_eq!(body, Bytes::from(format!("body {i}")));
+        }
+    }
+
+    #[tokio::test]
+    async fn history_restore_waits_for_target_and_parent_locks() {
+        use crate::store::history::{HistoryConfig, TrashFields};
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new())
+            .with_history(HistoryConfig {
+                trash: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        let st = LwsState::new(store, cfg).await.unwrap();
+        let parent = st.cfg.storage();
+        for held_target in [true, false] {
+            let original = format!("{parent}original");
+            st.store
+                .create_in_container(
+                    &parent,
+                    &original,
+                    Bytes::from_static(b"restored"),
+                    "text/plain",
+                )
+                .await
+                .unwrap();
+            st.store
+                .trash_resource(
+                    &original,
+                    Some(&parent),
+                    TrashFields {
+                        original: original.clone(),
+                        trashed_at: crate::clock::now(),
+                        deleted_by: None,
+                        deleter_could_read: true,
+                    },
+                )
+                .await
+                .unwrap();
+            let member = st.store.trash_entries().await.unwrap().remove(0).member;
+            let target = format!("{parent}{}", if held_target { "first" } else { "second" });
+            let held = st
+                .locks
+                .lock(if held_target { &target } else { &parent })
+                .await;
+            let task = {
+                let (st, target, parent) = (st.clone(), target.clone(), parent.clone());
+                tokio::spawn(async move {
+                    restore_history(
+                        &st,
+                        &request("POST", "/.lws/trash/", &[], ""),
+                        &agent("https://creator.example/#me"),
+                        &member,
+                        &target,
+                        &parent,
+                    )
+                    .await
+                })
+            };
+            assert!(tokio::time::timeout(Duration::from_millis(50), async {
+                while !task.is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_err());
+            assert!(!st.store.exists(&target).await.unwrap());
+            drop(held);
+            task.await.unwrap().unwrap();
+            assert_eq!(st.store.read(&target).await.unwrap().body, "restored");
+            assert_eq!(
+                st.resource_meta(&target).await.unwrap().creator.as_deref(),
+                Some("https://creator.example/#me")
+            );
         }
     }
 

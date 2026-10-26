@@ -196,7 +196,7 @@ impl<S: Store> Store for Tracked<S> {
         iri: &str,
         parent: Option<&str>,
         fields: crate::store::history::TrashFields,
-    ) -> ServerResult<()> {
+    ) -> ServerResult<String> {
         let _m = self.gens.mutating(&[iri]);
         self.inner.trash_resource(iri, parent, fields).await
     }

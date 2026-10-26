@@ -49,7 +49,12 @@ fn records(
         history::VERSIONS
     };
     let filter = original
-        .map(|o| format!("FILTER (?original = {})", sparql::literal(o)))
+        .map(|o| {
+            format!(
+                "FILTER STRSTARTS(STR(?member), {})",
+                sparql::literal(&history::version_dir(o))
+            )
+        })
         .unwrap_or_default();
     let extra = if trash {
         "?s <urn:pss:index#trashedAt> ?at ; <urn:pss:index#deleterCouldRead> ?read . OPTIONAL { ?s <urn:pss:index#deletedBy> ?by }"
@@ -172,7 +177,7 @@ pub(super) fn replace(
     meta: ResourceMeta,
     member: &str,
     fields: VersionFields,
-) -> Result<Option<VersionEntry>, SparqError> {
+) -> Result<Vec<String>, SparqError> {
     let r = sparq_engine::query(graph, &sparql::select_meta(iri)?)
         .map_err(|e| engine_err("history/current", e))?;
     let old = match meta_from_result(&r) {
@@ -181,7 +186,8 @@ pub(super) fn replace(
         Err(e) => return Err(e),
     };
     let mut updates = vec![];
-    let retained = if let Some(old) = old {
+    let mut pruned_keys = Vec::new();
+    if let Some(old) = old {
         let entries = versions(graph, Some(iri))?;
         let order = entries
             .iter()
@@ -196,6 +202,7 @@ pub(super) fn replace(
                 .saturating_sub(fields.max_versions),
         ) {
             updates.push(sparql::update_delete_resource(&entry.member)?);
+            pruned_keys.push(entry.meta.blob_key.clone());
         }
         updates.push(meta_update(member, &old)?);
         updates.push(field_update(
@@ -205,18 +212,30 @@ pub(super) fn replace(
                 ("commitOrder", order.to_string()),
             ],
         )?);
-        Some(VersionEntry {
-            member: member.to_string(),
-            original: fields.original,
-            meta: old,
-            order,
-        })
-    } else {
-        None
-    };
+    }
     updates.push(meta_update(iri, &meta)?);
     commit(graph, &updates.join(";\n"), "replace_meta_retaining")?;
-    Ok(retained)
+    Ok(pruned_keys)
+}
+fn rekey_versions(
+    graph: &sparq_core::Graph,
+    from: &str,
+    to: &str,
+) -> Result<Vec<String>, SparqError> {
+    let mut updates = Vec::new();
+    for entry in versions(graph, Some(from))? {
+        let member = history::rekey_member(&entry.member, to);
+        updates.push(meta_update(&member, &entry.meta)?);
+        updates.push(field_update(
+            &member,
+            &[
+                ("original", to.to_string()),
+                ("commitOrder", entry.order.to_string()),
+            ],
+        )?);
+        updates.push(sparql::update_delete_resource(&entry.member)?);
+    }
+    Ok(updates)
 }
 pub(super) fn move_to_trash(
     graph: &mut ActorGraph,
@@ -230,7 +249,7 @@ pub(super) fn move_to_trash(
     let meta = meta_from_result(&r)?;
     let at = timestamp::to_xsd_datetime(fields.trashed_at)
         .ok_or_else(|| SparqError::Backend("invalid trash date".into()))?;
-    let updates = [
+    let mut updates = vec![
         meta_update(member, &meta)?,
         field_update(
             member,
@@ -244,6 +263,7 @@ pub(super) fn move_to_trash(
         copy_body(iri, member)?,
         sparql::update_delete_resource_with_parent(iri, parent)?,
     ];
+    updates.extend(rekey_versions(graph, iri, member)?);
     commit(graph, &updates.join(";\n"), "move_to_trash")
 }
 pub(super) fn restore(
@@ -274,15 +294,13 @@ pub(super) fn restore(
             .as_deref(),
         &next_nonce(),
     )?;
-    commit(
-        graph,
-        &format!(
-            "{create}; {}; {}",
-            copy_body(member, target)?,
-            sparql::update_delete_resource(member)?
-        ),
-        "restore_from_trash",
-    )
+    let mut updates = vec![
+        create,
+        copy_body(member, target)?,
+        sparql::update_delete_resource(member)?,
+    ];
+    updates.extend(rekey_versions(graph, member, target)?);
+    commit(graph, &updates.join(";\n"), "restore_from_trash")
 }
 
 pub(super) fn expired(

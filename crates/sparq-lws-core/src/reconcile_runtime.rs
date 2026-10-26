@@ -44,7 +44,7 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         meta: ResourceMeta,
         member: &str,
         fields: sparq_lws_core::store::history::VersionFields,
-    ) -> Result<Option<sparq_lws_core::store::history::VersionEntry>, SparqError> {
+    ) -> Result<Vec<String>, SparqError> {
         self.0
             .replace_meta_retaining(iri, meta, member, fields)
             .await

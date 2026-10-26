@@ -83,14 +83,7 @@ impl ServiceCatalog {
                 let mut entry = s.extras.clone();
                 entry.insert("id".into(), json!(format!("{storage}#{}", s.fragment)));
                 entry.insert("type".into(), json!(s.type_term));
-                entry.insert(
-                    "serviceEndpoint".into(),
-                    if s.endpoint.contains("{resource}") {
-                        json!({"@value":s.endpoint})
-                    } else {
-                        json!(s.endpoint)
-                    },
-                );
+                entry.insert("serviceEndpoint".into(), json!(s.endpoint));
                 Value::Object(entry)
             })
             .collect()
@@ -197,6 +190,9 @@ pub fn extension_context() -> Value {
         "CrdtSyncService",
         "PatchSupport",
         "VersioningService",
+        "Versioning",
+        "Trash",
+        "listingTemplate",
         "TrashService",
         "AccessControl",
         "RecursiveDelete",

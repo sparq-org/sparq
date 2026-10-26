@@ -225,12 +225,13 @@ pub trait Store: Send + Sync {
             .into_iter()
             .find(|t| t.member == member))
     }
+    /// Atomically move a data resource to trash and return its private member IRI.
     async fn trash_resource(
         &self,
         iri: &str,
         parent: Option<&str>,
         fields: history::TrashFields,
-    ) -> ServerResult<()> {
+    ) -> ServerResult<String> {
         let _ = (iri, parent, fields);
         Err(ServerError::Storage("atomic trash unsupported".into()))
     }
@@ -976,7 +977,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         iri: &str,
         parent: Option<&str>,
         fields: history::TrashFields,
-    ) -> ServerResult<()> {
+    ) -> ServerResult<String> {
         if !self.history.trash || !history::data_resource(iri) {
             return Err(ServerError::Forbidden);
         }
@@ -984,7 +985,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         self.sparq
             .move_to_trash(iri, parent, &member, fields)
             .await
-            .map_err(map_sparq)
+            .map_err(map_sparq)?;
+        Ok(member)
     }
     async fn restore_trash(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
         self.sparq
@@ -1094,8 +1096,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         if self.history.versions && history::data_resource(iri) {
             let member = history::mint(&history::version_dir(iri)).map_err(map_sparq)?;
-            let older = self.sparq.versions(Some(iri)).await.map_err(map_sparq)?;
-            self.sparq
+            let pruned_keys = self
+                .sparq
                 .replace_meta_retaining(
                     iri,
                     meta.clone(),
@@ -1107,8 +1109,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 )
                 .await
                 .map_err(map_sparq)?;
-            for old in older {
-                self.reclaim_blob(&old.meta.blob_key).await;
+            for key in pruned_keys {
+                self.reclaim_blob(&key).await;
             }
             return Ok(meta);
         }
