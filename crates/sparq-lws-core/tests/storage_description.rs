@@ -255,7 +255,11 @@ async fn lws_public_catalog_and_shape() {
         .unwrap();
     assert_eq!(
         notification["subscriptionType"],
-        json!(["WebhookSubscription"])
+        json!([
+            "WebhookSubscription",
+            "SseSubscription",
+            "WebSocketSubscription"
+        ])
     );
     for absent in ["SparqlQueryService", "CrdtSyncService"] {
         assert!(!doc["service"]

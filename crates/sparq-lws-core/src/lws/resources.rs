@@ -1449,9 +1449,14 @@ pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::Servic
             );
         }
         if ty == "NotificationService" {
-            service
-                .extras
-                .insert("subscriptionType".into(), json!(["WebhookSubscription"]));
+            service.extras.insert(
+                "subscriptionType".into(),
+                json!([
+                    "WebhookSubscription",
+                    "SseSubscription",
+                    "WebSocketSubscription"
+                ]),
+            );
         }
         catalog.service(service);
     }

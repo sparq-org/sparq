@@ -94,7 +94,9 @@
       "id": "https://pod.example/#notifications",
       "serviceEndpoint": "https://pod.example/.lws/subscriptions/",
       "subscriptionType": [
-        "WebhookSubscription"
+        "WebhookSubscription",
+        "SseSubscription",
+        "WebSocketSubscription"
       ],
       "type": "NotificationService"
     },
