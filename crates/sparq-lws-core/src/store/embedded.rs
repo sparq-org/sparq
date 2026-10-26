@@ -296,6 +296,30 @@ impl EmbeddedSparqClient {
         Self::over(graph)
     }
 
+    /// Open a directory-backed graph, atomically seeding an empty graph when absent.
+    ///
+    /// The core owns locking, interrupted-swap recovery and snapshot publication. The lock lives
+    /// until the last client clone drops and joins the actor. An already-held directory returns
+    /// [`std::io::ErrorKind::WouldBlock`], preserving the error kind for boot-time retry policies.
+    pub fn open_or_create(dir: &Path) -> std::io::Result<Self> {
+        let graph = Graph::open_or_create(dir, &Graph::new())?;
+        Self::over(graph).map_err(std::io::Error::other)
+    }
+
+    /// Compact the backing directory on the graph actor, after previously queued writes.
+    ///
+    /// Returns a backend error on compaction failure or a stopped actor. The core retains the
+    /// transaction journal on a refused compaction; dropping this client never removes that data.
+    /// This maintenance job does not increment [`Self::engine_round_trips`].
+    pub async fn compact(&self) -> Result<(), SparqError> {
+        self.actor
+            .call(|graph| {
+                refuse_frozen(graph)?;
+                graph.compact().map_err(|e| engine_err("compact", e))
+            })
+            .await
+    }
+
     /// Hand `graph` to a freshly-spawned [`GraphActor`] and wrap it as a client. The single place a
     /// `Graph` is moved onto its owning thread, shared by both constructors.
     fn over(graph: Graph) -> Result<Self, SparqError> {
