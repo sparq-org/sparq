@@ -5472,10 +5472,11 @@ fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
 
 /// REVOKED index: the holder of a REVOKED credential CANNOT produce the proof.
 /// `revoke_unset_d10` asserts the leaf bit is 0; for a set bit the witness is
-/// unsatisfiable, so `prove_in` (nargo execute) fails to produce a witness.
+/// unsatisfiable, so `nargo execute` fails to produce a witness.
 #[test]
-#[ignore = "slow: attempts a bb prove that must be unsatisfiable"]
+#[ignore = "requires pinned nargo and bb; executes honest and revoked witnesses"]
 fn hidden_revocation_revoked_index_is_unprovable() {
+    use sparq_zk_compose::driver::DriverError;
     let Some(live) = support::gate(
         "hidden_revocation_revoked_index_is_unprovable",
         &["nargo", "bb"],
@@ -5493,16 +5494,32 @@ fn hidden_revocation_revoked_index_is_unprovable() {
     assert_eq!(witness.bit, Fr::from(1u64), "revoked index has bit set");
     let blinding = fixture_blinding();
     let index_commitment = sparq_zk::sig::status_index_commitment(FIXTURE_STATUS_INDEX, &blinding);
+    let honest_snapshot = hidden_snapshot(false);
+    let honest_root = merkle_root(&honest_snapshot, HIDDEN_DEPTH).unwrap();
+    let honest_witness = merkle_witness(&honest_snapshot, HIDDEN_DEPTH, FIXTURE_STATUS_INDEX).unwrap();
+    assert_eq!(honest_witness.bit, Fr::from(0u64), "honest index has bit unset");
+    let honest_toml = revoke_prover_toml(
+        &challenge, &honest_root, &index_commitment, FIXTURE_STATUS_INDEX, &blinding, &honest_witness,
+    );
+    let honest_id = CircuitId::RevokeUnset { depth: HIDDEN_DEPTH };
+    prover.compile(&honest_id).expect("hidden-index revocation member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "hidden_revoked_control")
+        .expect("honest unrevoked hidden-index witness executes");
+    assert!(control.is_file(), "honest hidden-index assignment must produce a witness");
     let toml = revoke_prover_toml(
         &challenge, &root, &index_commitment, FIXTURE_STATUS_INDEX, &blinding, &witness,
     );
     let id = CircuitId::RevokeUnset { depth: HIDDEN_DEPTH };
-    let out = scratch("hidden_revoked");
-    let res = prover.prove_in(&id, &toml, &out, "hidden_revoked");
-    assert!(
-        res.is_err(),
-        "a REVOKED credential's hidden-index bit-unset proof must be unprovable (the in-circuit bit==0 assertion fails)"
-    );
+    assert_eq!(id, honest_id, "control and revoked index must use the same member");
+    // revoke_unset_check_committed calls the bit-unset assert before any path or opening checks.
+    match prover.gen_witness_tagged(&id, &toml, "hidden_revoked") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("credential is revoked: status bit is set"),
+            "revoked index must fail the bit-unset constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the revoked-status-bit diagnostic, got {other:?}"),
+    }
     support::complete(live);
 }
 
@@ -5834,8 +5851,9 @@ fn full_manifest_fully_hidden_revocation() {
 /// A REVOKED credential cannot even PRODUCE the proof: the in-circuit `bit == 0`
 /// assertion is unsatisfiable. The liveness fact is cryptographic, not advisory.
 #[test]
-#[ignore = "slow: full bb prove attempt of a revoked fully-hidden proof"]
+#[ignore = "requires pinned nargo and bb; executes honest and revoked fully-hidden witnesses"]
 fn fully_hidden_revocation_revoked_credential_unprovable() {
+    use sparq_zk_compose::driver::DriverError;
     let Some(live) = support::gate(
         "fully_hidden_revocation_revoked_credential_unprovable",
         &["nargo", "bb"],
@@ -5852,17 +5870,42 @@ fn fully_hidden_revocation_revoked_credential_unprovable() {
     let ic = fixture_index_commitment();
     let anchor = policy.accepted_set_root().expect("anchor");
     let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
+    let honest_policy = fully_hidden_policy(false);
+    let honest_snapshot = hidden_snapshot(false);
+    let honest_entries = honest_policy.accepted_entries().expect("honest entries");
+    let honest_witness = hidden_ref_witness(
+        &honest_entries, FH_SET_DEPTH, &honest_snapshot, HIDDEN_DEPTH, FIXTURE_STATUS_INDEX,
+    ).expect("honest witness");
+    assert_eq!(honest_witness.merkle.bit, Fr::from(0u64), "honest index has bit unset");
+    assert_eq!(witness.merkle.bit, Fr::from(1u64), "revoked index has bit set");
+    let honest_anchor = honest_policy.accepted_set_root().expect("honest anchor");
+    let honest_toml = revoke_hidden_ref_prover_toml(
+        &Fr::from(0x2au64), &rc, &ic, &honest_anchor, honest_policy.min_version(),
+        &list_id, FIXTURE_STATUS_VERSION, &fixture_ref_blinding(),
+        FIXTURE_STATUS_INDEX, &fixture_blinding(), &honest_witness,
+    );
+    let honest_id = CircuitId::RevokeHiddenRef { depth: HIDDEN_DEPTH, set_depth: FH_SET_DEPTH };
+    prover.compile(&honest_id).expect("fully-hidden revocation member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "fh_revoked_control")
+        .expect("honest unrevoked fully-hidden witness executes");
+    assert!(control.is_file(), "honest fully-hidden assignment must produce a witness");
     let toml = revoke_hidden_ref_prover_toml(
         &Fr::from(0x2au64), &rc, &ic, &anchor, policy.min_version(),
         &list_id, FIXTURE_STATUS_VERSION, &fixture_ref_blinding(),
         FIXTURE_STATUS_INDEX, &fixture_blinding(), &witness,
     );
     let id = CircuitId::RevokeHiddenRef { depth: HIDDEN_DEPTH, set_depth: FH_SET_DEPTH };
-    let out = scratch("fh_revoked");
-    assert!(
-        prover.prove_in(&id, &toml, &out, "fh_revoked").is_err(),
-        "a REVOKED credential's fully-hidden proof must be unprovable (the in-circuit bit==0 assertion fails)"
-    );
+    assert_eq!(id, honest_id, "control and revoked credential must use the same member");
+    // The revoked snapshot has matching ref opening, fresh version and accepted-set path;
+    // revoke_hidden_ref_check then fails at revoke_unset_check_committed's bit-unset assert.
+    match prover.gen_witness_tagged(&id, &toml, "fh_revoked") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("credential is revoked: status bit is set"),
+            "revoked credential must fail the bit-unset constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the revoked-status-bit diagnostic, got {other:?}"),
+    }
     support::complete(live);
 }
 
@@ -6776,8 +6819,9 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
 /// proof is UNPROVABLE (nargo produces no witness). This is the in-circuit analogue
 /// of the clear-path IssuerKeyNotInKeySet forge.
 #[test]
-#[ignore = "slow: attempts a bb prove that must be unsatisfiable (out-of-set key)"]
+#[ignore = "requires pinned nargo and bb; executes honest and out-of-set issuer witnesses"]
 fn hidden_issuer_out_of_set_key_is_unprovable() {
+    use sparq_zk_compose::driver::DriverError;
     let Some(live) = support::gate(
         "hidden_issuer_out_of_set_key_is_unprovable",
         &["nargo", "bb"],
@@ -6804,23 +6848,41 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
     let pks: Vec<_> = signers.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).unwrap();
     let siblings = key_membership_witness(&pks, HI_DEPTH, 0).unwrap();
+    // Canonical slot 0's own signer is the honest control for this same path.
+    let signer = &signers[0];
+    let honest_sig = sparq_zk::sig::signature_from_hex(
+        &signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme()),
+    ).unwrap();
+    let honest_schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &honest_sig).unwrap();
+    let honest_witness = HiddenIssuerWitness { schnorr: honest_schnorr, index: 0, siblings: siblings.clone() };
+    let honest_toml = hidden_issuer_prover_toml(&challenge, &m, &root, &honest_witness);
+    let honest_id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
+    prover.compile(&honest_id).expect("hidden-issuer member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "hi_outset_control")
+        .expect("honest in-set issuer witness executes");
+    assert!(control.is_file(), "honest in-set issuer must produce a witness");
     let witness = HiddenIssuerWitness { schnorr, index: 0, siblings };
     let toml = hidden_issuer_prover_toml(&challenge, &m, &root, &witness);
     let id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
-    let out = scratch("hi_outset");
-    let res = prover.prove_in(&id, &toml, &out, "hi_outset");
-    assert!(
-        res.is_err(),
-        "an out-of-set issuer's hidden-issuer proof must be unprovable (the in-circuit membership assertion fails)"
-    );
+    assert_eq!(id, honest_id, "control and out-of-set issuer must use the same member");
+    // The outsider's valid signature passes schnorr_verify before key_set_membership fails.
+    match prover.gen_witness_tagged(&id, &toml, "hi_outset") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("issuer key is not a member of the committed key set"),
+            "out-of-set issuer must fail the membership constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the issuer-key membership diagnostic, got {other:?}"),
+    }
     support::complete(live);
 }
 
 /// FORGED SIGNATURE: a tampered signature scalar makes the in-circuit verification
 /// equation s*G == R + e*pk unsatisfiable, so the proof is UNPROVABLE.
 #[test]
-#[ignore = "slow: attempts a bb prove that must be unsatisfiable (forged sig)"]
+#[ignore = "requires pinned nargo and bb; executes honest and forged signature witnesses"]
 fn hidden_issuer_forged_signature_is_unprovable() {
+    use sparq_zk_compose::driver::DriverError;
     let Some(live) = support::gate(
         "hidden_issuer_forged_signature_is_unprovable",
         &["nargo", "bb"],
@@ -6840,19 +6902,32 @@ fn hidden_issuer_forged_signature_is_unprovable() {
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
     let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
-    let mut schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
-    // Tamper s: now s*G != R + e*pk, the in-circuit equation is unsatisfiable.
-    schnorr.s += Fr::from(1u64);
+    let schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     let signer_index = keyset.member_index(&public_key_to_hex(&signer.public_key())).unwrap() as u64;
     let pks: Vec<_> = signers.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).unwrap();
     let siblings = key_membership_witness(&pks, HI_DEPTH, signer_index).unwrap();
-    let witness = HiddenIssuerWitness { schnorr, index: signer_index, siblings };
+    let mut witness = HiddenIssuerWitness { schnorr, index: signer_index, siblings };
+    let honest_toml = hidden_issuer_prover_toml(&challenge, &m, &root, &witness);
+    let honest_id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
+    prover.compile(&honest_id).expect("hidden-issuer member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "hi_forgesig_control")
+        .expect("honest issuer signature witness executes");
+    assert!(control.is_file(), "honest issuer signature must produce a witness");
+    // Tamper only s after the honest assignment has executed.
+    // This fixture's s + 1 is still canonical; pk, R and the challenge are unchanged.
+    witness.schnorr.s += Fr::from(1u64);
     let toml = hidden_issuer_prover_toml(&challenge, &m, &root, &witness);
     let id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
-    let out = scratch("hi_forgesig");
-    let res = prover.prove_in(&id, &toml, &out, "hi_forgesig");
-    assert!(res.is_err(), "a forged signature must be unprovable (s*G != R + e*pk)");
+    assert_eq!(id, honest_id, "control and forged signature must use the same member");
+    match prover.gen_witness_tagged(&id, &toml, "hi_forgesig") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("schnorr verification equation failed"),
+            "forged signature must fail the Schnorr equation, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the Schnorr-equation diagnostic, got {other:?}"),
+    }
     support::complete(live);
 }
 

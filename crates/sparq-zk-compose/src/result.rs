@@ -3205,7 +3205,7 @@ mod tests {
             "name".into(),
             disclosed(&Term::Literal(Literal::new_simple_literal("Mallory"))).unwrap(),
         );
-        assert!(verify_result(
+        let rejected = verify_result(
             QUERY,
             &tampered,
             &policy,
@@ -3213,8 +3213,11 @@ mod tests {
             &InMemorySeenNonces::default(),
             &driver,
             &dir
-        )
-        .is_err());
+        );
+        assert!(
+            matches!(&rejected, Err(ResultError::Rejected(reason)) if reason == "cryptographic proof rejected"),
+            "tampered released row must fail proof verification, got {rejected:?}"
+        );
         let _ = std::fs::remove_dir_all(dir);
         crate::support::complete(live);
     }
@@ -4118,9 +4121,16 @@ mod tests {
                 // 298 truncated to u8 is 42, so deleting the pre-cast guard would accept
                 // this malicious private value while the signed lexical token stays 42.
                 let malicious = alter_input(&p.toml, "filter_values", |v| v[0][0] = json!(298));
-                assert!(driver
-                    .private_package_witness(p.package, &malicious, "tiny_wrap")
-                    .is_err());
+                match driver.private_package_witness(p.package, &malicious, "tiny_wrap") {
+                    Err(DriverError::Tool { tool, stderr }) => assert!(
+                        tool == "nargo execute"
+                            && stderr.contains("integer exceeds successful-result lane"),
+                        "{package}: wrapping value must fail before its u8 cast, got {tool}: {stderr}",
+                        package = p.package,
+                    ),
+                    Err(other) => panic!("expected the tiny-integer capacity diagnostic, got {other:?}"),
+                    Ok(_) => panic!("a wrapping tiny-integer value produced a witness"),
+                }
             }
         }
         crate::support::complete(live);

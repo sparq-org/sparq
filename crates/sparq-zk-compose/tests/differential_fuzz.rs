@@ -591,10 +591,13 @@ fn sq_wto_three_digit_operand_proves_not_silently_unprovable() {
         build_filter_int(operand_enc, value, op, bound, !expected).expect("builds");
     let (lid, ltoml) = prover_toml_for(&lie_inputs, &FieldHex("0x2a".into()), &[], &[], &lie_digits, None, None).unwrap();
     let lie = prover.gen_witness_tagged(&lid, &ltoml, "wto_d3_lie");
-    assert!(
-        lie.is_err(),
-        "sq-wto: the FALSE verdict over a 3-digit operand must remain UNprovable"
-    );
+    match lie {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute" && stderr.contains("filter verdict mismatch"),
+            "sq-wto: the flipped verdict must fail its constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the FILTER-verdict diagnostic, got {other:?}"),
+    }
     support::complete(live);
 }
 
