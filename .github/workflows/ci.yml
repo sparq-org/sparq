@@ -3525,6 +3525,8 @@ jobs:
     # sites per crate (a hermetic, build-free source scan that strips comments/strings)
     # and FAILS if any crate rose above its committed snapshot in bench/unsafe-snapshot.json
     # without a corresponding compliance/memsafety/unsafe-register.md update + re-seed.
+    # The site check also rejects stale locations, missing rows and duplicates,
+    # including source moves that leave per-crate counts unchanged.
     # Unlike `geiger` this is a hard gate (no continue-on-error). No cargo
     # build / cargo-geiger needed: geiger cannot run the virtual workspace manifest and
     # is too heavy/flaky for a gating lane (hence its `|| true`); the deterministic
@@ -3533,6 +3535,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Self-test the unsafe register verifier
+        run: python3 scripts/unsafe-gate.py --self-test
+      - name: Match every register row to a live unsafe site
+        run: python3 scripts/unsafe-gate.py --verify-register
       - name: Ratchet first-party unsafe count against the snapshot
         # Fails CI if a crate's live `unsafe` count exceeds bench/unsafe-snapshot.json.
         # The fix is always: add a row to compliance/memsafety/unsafe-register.md + a
