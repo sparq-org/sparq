@@ -73,8 +73,21 @@ pub struct AuthBudget {
     /// Wall-clock allowance for one materialization, including input assembly, every
     /// stratum and replacement-view assembly. Default: five seconds; `None` disables it. Checked at coarse boundaries,
     /// never per rule row, so a running stratum can overrun before it is refused.
+    /// Rollback and post-commit rebuilds omit this deadline while retaining count/size caps.
     /// Ignored on wasm32, where no monotonic clock is available.
     pub max_materialize_time: Option<std::time::Duration>,
+}
+
+impl AuthBudget {
+    /// Copy this budget without its elapsed-time limit, preserving all count and size caps.
+    /// Rollback and post-commit rebuilds use this budget; request admission keeps the
+    /// configured deadline. The original budget is unchanged.
+    pub fn without_deadline(&self) -> Self {
+        Self {
+            max_materialize_time: None,
+            ..*self
+        }
+    }
 }
 
 /// The input and whole-decision budget every authorization materialization runs under

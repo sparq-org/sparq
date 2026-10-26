@@ -138,7 +138,9 @@ Materialize the authorization view from the access-control documents, then enfor
   IRI the enumeration walks) and the AGGREGATE of
   all the closures one materialization runs (`max_decision_join_rows` 4,000,000,
   `max_decision_facts` 512,000) and wall-clock time (`max_materialize_time`: default
-  `Some(Duration::from_secs(5))`, `None` = unbounded). Same application rules as `set_auth_limits`: from the NEXT
+  `Some(Duration::from_secs(5))`, `None` = unbounded). Rollback and post-commit rebuilds
+  omit only the deadline; all count and size caps still apply. Other application rules
+  match `set_auth_limits`: from the NEXT
   materialization, WAC and ACP alike, every self-made rebuild included; the free
   `materialize_*` functions always use `default_auth_budget()`.
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
@@ -935,8 +937,13 @@ store.set_auth_budget(budget);
 ```
 
 The deadline is cooperative: it does not interrupt a stratum or undo a successful
-materialization. A refused rebuild leaves the previous authorization view in force;
-the caller must handle the error before treating a control-document edit as applied.
+materialization. A refused request-driven build leaves the previous view in force.
+Rollback rebuilds and rebuilds after a committed edit use
+`AuthBudget::without_deadline()`, which returns a copy with `max_materialize_time = None`
+and preserves every count and size cap. The store restores the configured request budget
+after these rebuilds; candidate admission keeps its deadline. If a rollback or post-commit
+rebuild is refused by a cap, authorization is disabled and every request is denied until
+a rebuild succeeds.
 
 ### Input and whole-decision budget
 

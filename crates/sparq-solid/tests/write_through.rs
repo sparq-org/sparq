@@ -247,13 +247,13 @@ fn refused_acl_edits_restore_documents_and_disable_unrebuilt_authorization() {
                 |agent| format!("ASK {{ ?s <http://www.w3.org/ns/auth/acl#agent> <{agent}> }}");
             assert!(sparq_engine::ask(restored, &names(ALICE)).unwrap());
             assert!(!sparq_engine::ask(restored, &names(BOB)).unwrap());
-            // The rollback's rebuild encounters the same refusal, so the old view must
-            // be disabled until the restored document can be materialized again.
+            // Rollback omits the deadline but keeps the input-fact cap.
             for agent in [ALICE, BOB] {
-                assert!(
-                    !store
+                assert_eq!(
+                    store
                         .decide(&sess(agent), "https://pod.ex/notes/n1", Mode::Read)
-                        .allow
+                        .allow,
+                    kind == AuthAllowance::Deadline && agent == ALICE
                 );
             }
             store.set_auth_budget(default_auth_budget());

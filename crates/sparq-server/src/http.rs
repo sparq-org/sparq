@@ -3499,7 +3499,16 @@ impl AppState {
             self.core.store(Arc::new(ServingCore { ring, writer }));
             #[cfg(feature = "solid-authz")]
             {
-                *cache = None;
+                #[cfg(test)]
+                let clear = !self
+                    .authz_build_pool()
+                    .skip_restore_cache_clear
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                #[cfg(not(test))]
+                let clear = true;
+                if clear {
+                    *cache = None;
+                }
             }
         }
         // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached

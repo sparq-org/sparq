@@ -317,8 +317,8 @@ fn stratum_boundary(work: &DecisionWork) -> Result<(), String> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 std::thread_local! {
     static STRATA_EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static STRATUM_DELAY_AFTER: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static STRATUM_DELAY: std::cell::Cell<std::time::Duration> = const {
+    pub(crate) static STRATUM_DELAY_AFTER: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static STRATUM_DELAY: std::cell::Cell<std::time::Duration> = const {
         std::cell::Cell::new(std::time::Duration::ZERO)
     };
 }

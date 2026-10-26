@@ -1503,6 +1503,9 @@ second, with the count shed since the preceding warning.
   `auth_allowance_refusal`; HTTP responses contain no control-document details.
   Pool shedding, task join failures,
   panics and other materialization errors are transient and are retried on the next request.
+  A shed returns `503` with `"the authorization build pool is saturated; retry"`;
+  an incomplete or failed build returns the retryable materialization refusal.
+  Incomplete leader tasks evict their own slot and publish `503` to current waiters.
   Cancelling the initiating handler leaves the pool build running and its outcome still
   reaches the waiters. **An `.acl`/`.acr` write re-materialises automatically**
   (every commit publishes a new generation; an in-memory `/admin/restore` replaces the serving

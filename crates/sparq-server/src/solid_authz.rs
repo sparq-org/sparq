@@ -170,6 +170,10 @@ pub(crate) struct AuthBuildPool {
     panic_next_view: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     view_builds: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    abandon_next_view: std::sync::atomic::AtomicBool,
+    #[cfg(all(test, feature = "backup"))]
+    pub(crate) skip_restore_cache_clear: std::sync::atomic::AtomicBool,
     #[cfg(all(test, feature = "solid-authz-trust"))]
     trust_verification_calls: std::sync::atomic::AtomicUsize,
 }
@@ -225,6 +229,10 @@ impl AuthBuildPool {
             panic_next_view: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             view_builds: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            abandon_next_view: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(all(test, feature = "backup"))]
+            skip_restore_cache_clear: std::sync::atomic::AtomicBool::new(false),
             #[cfg(all(test, feature = "solid-authz-trust"))]
             trust_verification_calls: std::sync::atomic::AtomicUsize::new(0),
         }
@@ -311,6 +319,27 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    build_on_pool(state, work)
+        .await
+        .map_err(|error| match error {
+            BuildPoolError::Shed => server_view_error_response(ServerViewError::Shed),
+            BuildPoolError::Unavailable => json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "could not materialise the authorization view",
+            ),
+        })
+}
+
+enum BuildPoolError {
+    Shed,
+    Unavailable,
+}
+
+async fn build_on_pool<T, F>(state: &AppState, work: F) -> Result<T, BuildPoolError>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
     let pool = Arc::clone(state.authz_build_pool());
     let Some(permit) = pool.claim().await else {
         // At most one warning per second, with every shed since the preceding line.
@@ -322,10 +351,7 @@ where
                 "authorization build pool saturated; requests refused"
             );
         });
-        return Err(json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "the authorization build pool is saturated; retry",
-        ));
+        return Err(BuildPoolError::Shed);
     };
     let task = tokio::task::spawn_blocking(move || {
         // Held for the whole build, released when this frame ends.
@@ -339,12 +365,7 @@ where
         }
         work()
     });
-    task.await.map_err(|_| {
-        json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "could not materialise the authorization view",
-        )
-    })
+    task.await.map_err(|_| BuildPoolError::Unavailable)
 }
 
 /// One generation's independent WAC, ACP and automatically selected build slots.
@@ -364,6 +385,38 @@ struct AuthViewSlot {
 }
 
 type ServerViewResult = Result<Arc<PodStore>, ServerViewError>;
+
+/// Resolve and evict a registered build if its owning task exits before publication.
+struct AuthViewCompletion {
+    state: AppState,
+    slot: Arc<AuthViewSlot>,
+    index: usize,
+    published: bool,
+}
+
+impl Drop for AuthViewCompletion {
+    fn drop(&mut self) {
+        if self.published {
+            return;
+        }
+        let mut cache = self
+            .state
+            .authz_view_cache()
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = cache.as_mut() {
+            if cached.slots[self.index]
+                .as_ref()
+                .is_some_and(|slot| Arc::ptr_eq(slot, &self.slot))
+            {
+                cached.slots[self.index] = None;
+            }
+        }
+        self.slot
+            .outcome
+            .send_replace(Some(Err(ServerViewError::Unavailable)));
+    }
+}
 
 fn view_slot(requested: Option<AuthView>) -> usize {
     match requested {
@@ -390,8 +443,10 @@ enum ServerViewError {
     /// log; the message itself (which quotes document IRIs) is not logged and never reaches the
     /// client.
     Materialize(Option<AuthAllowance>),
-    /// Pool saturation or a failed blocking task: transient, never cached.
+    /// A failed or unpublished build: transient, never cached.
     Unavailable,
+    /// The bounded build pool could not admit the build within its wait allowance.
+    Shed,
     /// A restore replaced the serving core while this request was waiting or building.
     #[cfg(feature = "backup")]
     StaleLineage,
@@ -837,6 +892,10 @@ fn server_view_error_response(err: ServerViewError) -> Response {
     match err {
         #[cfg(feature = "backup")]
         ServerViewError::StaleLineage => server_view_error_response(ServerViewError::Unavailable),
+        ServerViewError::Shed => json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the authorization build pool is saturated; retry",
+        ),
         ServerViewError::Unavailable => json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "could not materialise the authorization view; retry",
@@ -960,6 +1019,7 @@ async fn server_store(
             let same_lineage = Arc::ptr_eq(&cached.core, &core);
             #[cfg(not(feature = "backup"))]
             let same_lineage = true;
+            // Defence in depth: restore also clears the cache under the write lock.
             if same_lineage && cached.generation == pinned.number() {
                 if let Some(slot) = &cached.slots[index] {
                     if let Some(outcome) = &*slot.outcome.borrow() {
@@ -970,6 +1030,7 @@ async fn server_store(
         }
     }
     let slot;
+    let build;
     #[cfg(feature = "backup")]
     let core;
     {
@@ -1010,70 +1071,96 @@ async fn server_store(
                 return outcome.clone().map_err(server_view_error_response);
             }
             slot = existing.clone();
+            build = None;
         } else {
             slot = Arc::new(AuthViewSlot {
                 outcome: tokio::sync::watch::channel(None).0,
             });
             cached.slots[index] = Some(slot.clone());
-            let st = state.clone();
-            let building = slot.clone();
+            build = Some(pinned);
+        }
+    }
+    if let Some(pinned) = build {
+        let st = state.clone();
+        let completion = AuthViewCompletion {
+            state: st.clone(),
+            slot: slot.clone(),
+            index,
+            published: false,
+        };
+        let building = slot.clone();
+        #[cfg(feature = "backup")]
+        let build_core = core.clone();
+        tokio::spawn(async move {
+            let mut completion = completion;
+            let builder_state = st.clone();
             #[cfg(feature = "backup")]
-            let build_core = core.clone();
-            tokio::spawn(async move {
-                let builder_state = st.clone();
-                #[cfg(feature = "backup")]
-                let pinned_core = build_core.clone();
-                let outcome = on_build_pool(&st, move || {
-                    build_server_view(
-                        &builder_state,
-                        requested_view,
-                        #[cfg(feature = "backup")]
-                        pinned_core,
-                        pinned,
-                    )
+            let pinned_core = build_core.clone();
+            let outcome = build_on_pool(&st, move || {
+                build_server_view(
+                    &builder_state,
+                    requested_view,
+                    #[cfg(feature = "backup")]
+                    pinned_core,
+                    pinned,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| {
+                Err(match error {
+                    BuildPoolError::Shed => ServerViewError::Shed,
+                    BuildPoolError::Unavailable => ServerViewError::Unavailable,
                 })
-                .await
-                .unwrap_or(Err(ServerViewError::Unavailable));
-                let mut cache = st
-                    .authz_view_cache()
-                    .write()
-                    .unwrap_or_else(|e| e.into_inner());
-                #[cfg(feature = "backup")]
-                let outcome = if !Arc::ptr_eq(&st.authz_core(), &build_core) {
-                    Err(ServerViewError::StaleLineage)
-                } else {
-                    outcome
-                };
-                // Transient failures reach current waiters but leave the key retryable.
-                let retain = matches!(
-                    outcome,
-                    Ok(_)
-                        | Err(ServerViewError::Materialize(Some(
-                            AuthAllowance::TotalJoinRows
-                                | AuthAllowance::JoinRows
-                                | AuthAllowance::RoundsOrFacts
-                                | AuthAllowance::TermBytes
-                                | AuthAllowance::InputBytes
-                                | AuthAllowance::InputFacts
-                                | AuthAllowance::InputTermBytes
-                                | AuthAllowance::ResourceIri
-                                | AuthAllowance::DecisionWork
-                        )))
-                );
-                if !retain {
-                    if let Some(cached) = cache.as_mut() {
-                        if cached.slots[index]
-                            .as_ref()
-                            .is_some_and(|s| Arc::ptr_eq(s, &building))
-                        {
-                            cached.slots[index] = None;
-                        }
+            });
+            #[cfg(test)]
+            if st
+                .authz_build_pool()
+                .abandon_next_view
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            let mut cache = st
+                .authz_view_cache()
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            // Defence in depth: restore clears the cache and waiters re-check lineage.
+            #[cfg(feature = "backup")]
+            let outcome = if !Arc::ptr_eq(&st.authz_core(), &build_core) {
+                Err(ServerViewError::StaleLineage)
+            } else {
+                outcome
+            };
+            // Transient failures reach current waiters but leave the key retryable.
+            let retain = matches!(
+                outcome,
+                Ok(_)
+                    | Err(ServerViewError::Materialize(Some(
+                        AuthAllowance::TotalJoinRows
+                            | AuthAllowance::JoinRows
+                            | AuthAllowance::RoundsOrFacts
+                            | AuthAllowance::TermBytes
+                            | AuthAllowance::InputBytes
+                            | AuthAllowance::InputFacts
+                            | AuthAllowance::InputTermBytes
+                            | AuthAllowance::ResourceIri
+                            | AuthAllowance::DecisionWork
+                    )))
+            );
+            if !retain {
+                if let Some(cached) = cache.as_mut() {
+                    if cached.slots[index]
+                        .as_ref()
+                        .is_some_and(|s| Arc::ptr_eq(s, &building))
+                    {
+                        cached.slots[index] = None;
                     }
                 }
-                // Holding the cache lock serializes publication with the restore swap.
-                building.outcome.send_replace(Some(outcome));
-            });
-        }
+            }
+            // Holding the cache lock serializes publication with the restore swap.
+            building.outcome.send_replace(Some(outcome));
+            completion.published = true;
+        });
     }
     let mut receiver = slot.outcome.subscribe();
     let outcome = receiver
@@ -4085,9 +4172,14 @@ mod build_pool_tests {
         let _release = ReleaseOnDrop(hook.clone());
         let occupied = start_build(&st);
         wait_for_running(&hook, 1).await;
+        let response = server_store(&st, None).await.err().unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(
-            server_store(&st, None).await.err().unwrap().status(),
-            StatusCode::SERVICE_UNAVAILABLE
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"],
+            "the authorization build pool is saturated; retry"
         );
         assert!(st
             .authz_view_cache()
@@ -4102,6 +4194,165 @@ mod build_pool_tests {
         server_store(&st, None).await.unwrap();
         assert_eq!(st.authz_build_pool().admitted(), 2);
         assert_eq!(st.authz_build_pool().refused(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unpublished_build_resolves_waiters_and_leaves_the_key_retryable() {
+        let st = state(1, 50);
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        *st.authz_build_pool().view_hook.lock().unwrap() = Some(hook.clone());
+        st.authz_build_pool()
+            .abandon_next_view
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let leader = start_server_view(&st, None);
+        wait_for_running(&hook, 1).await;
+        let waiter = start_server_view(&st, None);
+        wait_for_waiters(&st, None, 2).await;
+        hook.release();
+        for request in [leader, waiter] {
+            let response = tokio::time::timeout(Duration::from_secs(2), request)
+                .await
+                .expect("an incomplete task must resolve its waiters")
+                .unwrap()
+                .err()
+                .expect("incomplete build refusal");
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+        assert!(st
+            .authz_view_cache()
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .slots[2]
+            .is_none());
+        server_store(&st, None).await.unwrap();
+        assert_eq!(
+            st.authz_build_pool()
+                .view_builds
+                .load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn incomplete_build_cleanup_preserves_a_newer_generations_slot() {
+        let st = state(2, 50);
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        *st.authz_build_pool().view_hook.lock().unwrap() = Some(hook.clone());
+        let old = start_server_view(&st, None);
+        wait_for_running(&hook, 1).await;
+        st.apply_update("INSERT DATA { <urn:s> <urn:p> <urn:o> }")
+            .unwrap();
+        *st.authz_build_pool().view_hook.lock().unwrap() = None;
+        let current = server_store(&st, None).await.unwrap();
+        st.authz_build_pool()
+            .abandon_next_view
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        hook.release();
+        let response = tokio::time::timeout(Duration::from_secs(2), old)
+            .await
+            .expect("the abandoned old build must resolve")
+            .unwrap()
+            .err()
+            .expect("incomplete build refusal");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(Arc::ptr_eq(
+            &current,
+            &server_store(&st, None).await.unwrap()
+        ));
+        assert_eq!(st.authz_build_pool().admitted(), 2);
+    }
+
+    #[cfg(feature = "backup")]
+    #[tokio::test]
+    async fn a_warm_hit_checks_lineage_when_restore_retains_the_cache() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
+        let old = server_store(&st, None).await.unwrap();
+        let agent = Session {
+            agent: Some("https://alice.ex/card#me"),
+            ..Default::default()
+        };
+        assert!(old.decide(&agent, "https://pod.ex/n1", Mode::Read).allow);
+        st.authz_build_pool()
+            .skip_restore_cache_clear
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let source = state(1, 50);
+        let mut artifact = Vec::new();
+        source.export_backup(&mut artifact).unwrap();
+        st.restore_from(artifact.as_slice(), false).unwrap();
+        assert!(st.authz_view_cache().read().unwrap().is_some());
+        let current = server_store(&st, None).await.unwrap();
+        assert!(!Arc::ptr_eq(&old, &current));
+        assert!(
+            !current
+                .decide(&agent, "https://pod.ex/n1", Mode::Read)
+                .allow
+        );
+    }
+
+    #[cfg(feature = "backup")]
+    #[tokio::test]
+    async fn publication_checks_lineage_when_restore_retains_the_cache() {
+        let st = state(1, 50);
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        *st.authz_build_pool().view_hook.lock().unwrap() = Some(hook.clone());
+        let request = start_server_view(&st, None);
+        wait_for_running(&hook, 1).await;
+        let slot = st
+            .authz_view_cache()
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .slots[2]
+            .clone()
+            .unwrap();
+        st.authz_build_pool()
+            .skip_restore_cache_clear
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let source = state(1, 50);
+        let mut artifact = Vec::new();
+        source.export_backup(&mut artifact).unwrap();
+        st.restore_from(artifact.as_slice(), false).unwrap();
+        assert!(st
+            .authz_view_cache()
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .slots[2]
+            .is_some());
+        hook.release();
+        // Read the publication directly, independently of the handler's waiter check.
+        let mut outcome = slot.outcome.subscribe();
+        let published =
+            tokio::time::timeout(Duration::from_secs(2), outcome.wait_for(Option::is_some))
+                .await
+                .unwrap()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .clone();
+        assert!(matches!(published, Err(ServerViewError::StaleLineage)));
+        assert!(request.await.unwrap().is_err());
+        assert!(st
+            .authz_view_cache()
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .slots[2]
+            .is_none());
     }
 
     #[tokio::test]

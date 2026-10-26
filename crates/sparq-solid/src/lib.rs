@@ -588,7 +588,9 @@ impl PodStore {
     /// allowance cannot bound.
     ///
     /// It applies to the WAC and ACP views alike, and to every rebuild the store makes on
-    /// its own after an access-control write or an update. The view in force is not
+    /// its own after an access-control write or an update. Rollback and post-commit
+    /// rebuilds omit only the elapsed-time deadline via [`AuthBudget::without_deadline`];
+    /// candidate admission retains the configured deadline. The view in force is not
     /// rebuilt, so a lowered budget takes effect at the next materialization, not
     /// retroactively. A refusal carries the same typed [`AuthAllowance`] kind a reasoning
     /// allowance refusal does, and [`auth_allowance_refusal`] reads it the same way.
@@ -1610,7 +1612,10 @@ impl PodStore {
             self.acp_context.0 = staged;
         }
         if rebuild {
+            let budget = self.auth_budget;
+            self.auth_budget = budget.without_deadline();
             let rebuilt = self.install_model(acp, checked).map(drop);
+            self.auth_budget = budget;
             // Rules it changed materialized on the fork first, and a provenance change alone
             // names only validated principals; should this rebuild fail anyway, the view no
             // longer describes the store, and it goes.
