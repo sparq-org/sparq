@@ -199,6 +199,17 @@ pub trait SparqClient: Send + Sync {
         Ok(false)
     }
 
+    /// `Ok` when this index is this process's alone while the client lives, so nothing another
+    /// process does changes it: one held in memory, or one opened from a directory this process
+    /// holds locked. A server that keeps state of its own over the index (as the LWS service
+    /// does) starts only over such an index. The DEFAULT says it is not: an index another
+    /// process may also write (a remote endpoint) gives no such assurance.
+    fn exclusive(&self) -> Result<(), SparqError> {
+        Err(SparqError::Backend(
+            "this index may be written by other processes too".into(),
+        ))
+    }
+
     /// Stop naming `blob_key` as being reclaimed ([`begin_reclaim`](Self::begin_reclaim)).
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let _ = blob_key;
@@ -708,6 +719,11 @@ impl SparqClient for InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         Ok(guard.meta.contains_key(iri))
+    }
+
+    /// Held in this process's memory: nobody else's.
+    fn exclusive(&self) -> Result<(), SparqError> {
+        Ok(())
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {

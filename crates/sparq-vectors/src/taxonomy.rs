@@ -720,7 +720,7 @@ fn named(iri: &str) -> oxrdf::Term {
 /// Is the id a class node (a named node or blank node) — the only thing that can sit on either side
 /// of a `subClassOf` / disjointWith axiom? Literals and inline values are excluded.
 fn is_class_node(graph: &Graph, id: Id) -> bool {
-    matches!(graph.dict.term_parts(id), TermParts::Iri { .. } | TermParts::Blank(_))
+    matches!(graph.dict().term_parts(id), TermParts::Iri { .. } | TermParts::Blank(_))
 }
 
 /// Walk an RDF list `(first/rest)` from `head` to `nil`, collecting members. Guarded against an

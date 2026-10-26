@@ -206,6 +206,6 @@ pub fn named_graph_exists(graph: &Graph, name: &oxrdf::Term) -> bool {
 pub fn metadata(graph: &Graph) -> Metadata {
     Metadata {
         triples: graph.len(),
-        named_graphs: graph.named.len(),
+        named_graphs: graph.named().len(),
     }
 }

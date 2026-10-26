@@ -80,7 +80,7 @@ fn harvest_resources(graph: &Graph, text: &str, cap: usize) -> Vec<String> {
             out.push(r);
         }
     };
-    for (name, _) in &graph.named {
+    for (name, _) in graph.named() {
         if resources.len() >= cap {
             break;
         }

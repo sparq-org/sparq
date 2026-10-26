@@ -300,3 +300,7 @@ required-features = ["compiled-rules"]
 [[test]]
 name = "n3_input_fact_memory"
 required-features = ["compiled-rules"]
+
+[[test]]
+name = "n3_metered"
+required-features = ["compiled-rules"]

@@ -37,7 +37,7 @@ fn rows_sorted(r: &QueryResult) -> Vec<Vec<String>> {
 #[test]
 fn graph_query_survives_save_open_roundtrip() {
     let g = Graph::load_dataset(DATA, "nquads").unwrap();
-    assert_eq!(g.named.len(), 3, "fixture should hold 3 named graphs");
+    assert_eq!(g.named().len(), 3, "fixture should hold 3 named graphs");
 
     // Quad-level queries to pin down: enumerate (?g, ?s, ?p, ?o), and a graph-scoped one.
     let q_all = "SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }";

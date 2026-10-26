@@ -473,7 +473,7 @@ pub(super) fn directed_reach(
                     Dir::Fwd => [Some(node), Some(pid), None],
                     Dir::Rev => [None, Some(pid), Some(node)],
                 };
-                let scan = graph.store.scan(&pat);
+                let scan = graph.store().scan(&pat);
                 let col = match dir {
                     Dir::Fwd => 2,
                     Dir::Rev => 0,
@@ -606,7 +606,7 @@ pub(super) fn predicate_pairs(graph: &Graph, p: &oxrdf::NamedNode, ends: PathEnd
         None => FxHashSet::default(),
         Some(pid) => {
             let pat: IdPattern = [ends.s, Some(pid), ends.o];
-            let scan = graph.store.scan(&pat);
+            let scan = graph.store().scan(&pat);
             scan.rows
                 .iter()
                 .map(|r| {
@@ -627,7 +627,7 @@ pub(super) fn negated_property_pairs(graph: &Graph, props: &[oxrdf::NamedNode], 
     let excluded: FxHashSet<Id> = props.iter().filter_map(|p| graph.id_of(&Term::NamedNode(p.clone()))).collect();
     if ends.s.is_some() || ends.o.is_some() {
         let pat: IdPattern = [ends.s, None, ends.o];
-        let scan = graph.store.scan(&pat);
+        let scan = graph.store().scan(&pat);
         return scan
             .rows
             .iter()
@@ -640,7 +640,7 @@ pub(super) fn negated_property_pairs(graph: &Graph, props: &[oxrdf::NamedNode], 
     // Both BUILT index sets contain a P-leading permutation (PSO full / POS
     // compact), so `scan_sorted` finds one; the fallback filter-scan defends
     // against a future index set where it doesn't.
-    let scan = graph.store.scan_sorted(&[None, None, None], 1);
+    let scan = graph.store().scan_sorted(&[None, None, None], 1);
     let rows = &scan.rows[..];
     let mut out = FxHashSet::default();
     if scan.perm.order()[0] == 1 {
@@ -682,14 +682,14 @@ pub(super) fn path_nullable(path: &PropertyPathExpression) -> bool {
 
 // Dictionary membership also includes predicate-only terms.
 pub(super) fn is_graph_node(graph: &Graph, id: Id) -> bool {
-    !graph.store.scan(&[Some(id), None, None]).rows.is_empty()
-        || !graph.store.scan(&[None, None, Some(id)]).rows.is_empty()
+    !graph.store().scan(&[Some(id), None, None]).rows.is_empty()
+        || !graph.store().scan(&[None, None, Some(id)]).rows.is_empty()
 }
 
 /// Every id that appears as a subject or object (the domain of zero-length path matches).
 pub(super) fn graph_nodes(graph: &Graph) -> FxHashSet<Id> {
     let pat: IdPattern = [None, None, None];
-    let scan = graph.store.scan(&pat);
+    let scan = graph.store().scan(&pat);
     let mut s = FxHashSet::default();
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);

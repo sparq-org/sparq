@@ -29,7 +29,7 @@ pub(crate) fn prepare_bgp(graph: &Graph, patterns: &[TriplePattern]) -> Result<V
     let mut prepared: Vec<Prepared> = Vec::with_capacity(patterns.len());
     for tp in patterns {
         let (id_pat, pos_vars, unsat) = prepare_pattern(graph, tp)?;
-        let est = if unsat { 0 } else { graph.store.estimate(&id_pat) };
+        let est = if unsat { 0 } else { graph.store().estimate(&id_pat) };
         prepared.push(Prepared { id_pat, pos_vars, est, unsatisfiable: unsat });
     }
     Ok(prepared)
@@ -270,7 +270,7 @@ pub(super) fn pattern_var_ndv(graph: &Graph, id_pat: &IdPattern, pos: usize, est
     if let Some(ndv) = id_pat[1].and_then(|pid| crate::stats::predicate_ndv(pid, pos)) {
         return (ndv as f64).clamp(1.0, est);
     }
-    let stat = id_pat[1].and_then(|pid| graph.store.pred_stat(pid));
+    let stat = id_pat[1].and_then(|pid| graph.store().pred_stat(pid));
     match (pos, stat) {
         // subject var, predicate bound, object unbound -> distinct subjects of P
         (0, Some(s)) if id_pat[2].is_none() => (s.ndv_subj as f64).clamp(1.0, est),

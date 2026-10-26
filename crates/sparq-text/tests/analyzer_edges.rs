@@ -29,7 +29,7 @@ fn graph_of(literals: &[&str]) -> Graph {
 fn values(graph: &Graph, hits: &[sparq_text::Hit]) -> Vec<String> {
     let mut v: Vec<String> = hits
         .iter()
-        .map(|h| match graph.dict.term(h.id) {
+        .map(|h| match graph.dict().term(h.id) {
             Term::Literal(l) => l.value().to_string(),
             other => panic!("hit {} not a literal: {other}", h.id),
         })
@@ -95,7 +95,7 @@ fn cjk_phrase_requires_adjacency() {
     hits.sort_unstable();
     let vals: Vec<String> = hits
         .iter()
-        .map(|&id| match g.dict.term(id) {
+        .map(|&id| match g.dict().term(id) {
             Term::Literal(l) => l.value().to_string(),
             _ => unreachable!(),
         })
@@ -162,7 +162,7 @@ fn punctuation_at_phrase_boundaries() {
     let hits = idx.phrase("quick brown");
     let mut vals: Vec<String> = hits
         .iter()
-        .map(|&id| match g.dict.term(id) {
+        .map(|&id| match g.dict().term(id) {
             Term::Literal(l) => l.value().to_string(),
             _ => unreachable!(),
         })
@@ -183,7 +183,7 @@ fn punctuation_at_phrase_boundaries() {
     assert_eq!(hits2, hits_sorted);
 
     // The joined token is NOT split — "quick" alone never matches "quickbrown".
-    assert!(idx.search("quick").iter().all(|h| match g.dict.term(h.id) {
+    assert!(idx.search("quick").iter().all(|h| match g.dict().term(h.id) {
         Term::Literal(l) => l.value() != "quickbrown fox",
         _ => true,
     }));

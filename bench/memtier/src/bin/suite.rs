@@ -40,7 +40,7 @@ fn main() {
     println!("open_s\t{:.3}", t.elapsed().as_secs_f64());
     println!("triples\t{}", g.len());
     println!("heap_bytes\ttotal_after_open\t{}", g.heap_bytes());
-    println!("heap_bytes\tdict_after_open\t{}", g.dict.heap_bytes());
+    println!("heap_bytes\tdict_after_open\t{}", g.dict().heap_bytes());
     println!("rss_kb\tafter_open\t{}", rss_kb());
 
     if decompress {

@@ -239,13 +239,13 @@ pub fn evaluate(graph: &Graph, pattern: &TriplePattern, page: usize, page_size: 
     };
 
     // Cheap cardinality estimate for `hydra:totalItems` — the planner's index-range count.
-    let total_estimate = graph.store.estimate(&id_pattern);
+    let total_estimate = graph.store().estimate(&id_pattern);
 
     // Scan the pattern's sorted index range and slice out this page's window. We materialise the
     // page's ids first (the scan borrows the index), then resolve them to terms — O(page_size),
     // independent of the total cardinality.
     let offset = page.saturating_mul(page_size);
-    let scan = graph.store.scan(&id_pattern);
+    let scan = graph.store().scan(&id_pattern);
     let page_ids: Vec<[sparq_core::dict::Id; 3]> = scan
         .rows
         .iter()
@@ -532,7 +532,7 @@ pub fn evaluate_brtpf(
             // A bound term absent from the dictionary: this mapping matches nothing.
             None => continue,
         };
-        let scan = graph.store.scan(&id_pattern);
+        let scan = graph.store().scan(&id_pattern);
         for row in scan.rows.iter() {
             union.insert(scan.to_spo(row));
         }
@@ -592,18 +592,18 @@ fn spo_to_triple(
     p: sparq_core::dict::Id,
     o: sparq_core::dict::Id,
 ) -> Option<Triple> {
-    let subject = match graph.dict.term(s) {
+    let subject = match graph.dict().term(s) {
         Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n),
         Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b),
         // A literal or a triple-term subject cannot be a NamedOrBlankNode — drop the row
         // (never arises from a well-formed store; we are total rather than panic).
         Term::Literal(_) | Term::Triple(_) => return None,
     };
-    let predicate = match graph.dict.term(p) {
+    let predicate = match graph.dict().term(p) {
         Term::NamedNode(n) => n,
         _ => return None,
     };
-    let object = graph.dict.term(o);
+    let object = graph.dict().term(o);
     Some(Triple::new(subject, predicate, object))
 }
 

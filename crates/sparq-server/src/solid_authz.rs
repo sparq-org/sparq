@@ -750,7 +750,7 @@ fn infer_view(dataset: &str) -> AuthView {
 /// is the safe fallback: an ACP pod materialised as WAC finds no `.acl` grants and denies.
 /// Pure + directly unit-tested. sq-snopa.8.
 pub(crate) fn graph_view_is_acp(graph: &sparq_core::Graph) -> bool {
-    graph.named.iter().any(|(name, _)| match name {
+    graph.named().iter().any(|(name, _)| match name {
         oxrdf::Term::NamedNode(n) => n.as_str().ends_with(".acr"),
         _ => false,
     })
@@ -774,7 +774,7 @@ pub(crate) fn graph_carries_odrl(graph: &sparq_core::Graph) -> bool {
             Err(_) => false,
         })
     }
-    holds(graph) || graph.named.iter().any(|(_, g)| holds(g))
+    holds(graph) || graph.named().iter().any(|(_, g)| holds(g))
 }
 
 /// Log which authorization allowance or input budget a refused materialisation reached, on
@@ -2313,6 +2313,7 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
     // One index rebuild for the whole request, however many targets it evaluates.
     if store
         .materialize_odrl_policy_for_each(&policy, &requests)
+        .map_err(|_| json_error(StatusCode::SERVICE_UNAVAILABLE, "authorization view write failed"))?
         .iter()
         .any(|o| o.refused)
     {

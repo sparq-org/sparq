@@ -365,6 +365,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.exists(iri).await
     }
 
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.inner.exclusive()
+    }
+
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
         #[cfg(test)]
         self.counters.record_method("index.begin_reclaim");

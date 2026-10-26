@@ -72,8 +72,8 @@ fn graph_of(literals: &[String]) -> Graph {
 /// (plain `xsd:string` + language-tagged literals).
 fn corpus(graph: &Graph) -> Vec<(Id, Vec<String>)> {
     let mut out = Vec::new();
-    for id in 1..=graph.dict.len() as Id {
-        if let Term::Literal(l) = graph.dict.term(id) {
+    for id in 1..=graph.dict().len() as Id {
+        if let Term::Literal(l) = graph.dict().term(id) {
             // Mirror TextIndex's "string literal" test: plain/xsd:string or lang-tagged.
             let is_string = l.language().is_some()
                 || l.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#string";
@@ -352,7 +352,7 @@ fn bm25_ordering_is_deterministic_and_tie_breaks_by_id() {
     let hits = idx.search("fox");
     let ranked: Vec<String> = hits
         .iter()
-        .map(|h| match g.dict.term(h.id) {
+        .map(|h| match g.dict().term(h.id) {
             Term::Literal(l) => l.value().to_string(),
             _ => unreachable!(),
         })

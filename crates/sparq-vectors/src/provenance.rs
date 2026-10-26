@@ -230,7 +230,7 @@ impl ProvenanceWeights {
                 derived_from.entry(s).or_default().push(o);
             } else if Some(p) == reifies_pred {
                 // RDF 1.2: the object IS the triple term, stored structurally as its three ids.
-                if let TermParts::Triple(ids) = graph.dict.term_parts(o) {
+                if let TermParts::Triple(ids) = graph.dict().term_parts(o) {
                     reifies.push((ids, s));
                 }
             } else if Some(p) == reif_subj_pred {
@@ -511,7 +511,7 @@ impl ProvenanceWeights {
         let Some(pid) = id_of_iri(graph, predicate) else {
             return 1.0;
         };
-        let scan = graph.store.scan(&[None, Some(pid), None]);
+        let scan = graph.store().scan(&[None, Some(pid), None]);
         let subjects: Vec<Id> = scan.rows.iter().map(|row| scan.to_spo(row)[0]).collect();
         self.block_weight(subjects, mode)
     }
@@ -539,7 +539,7 @@ impl ProvenanceWeights {
         let Some(pid) = id_of_iri(graph, predicate) else {
             return 1.0;
         };
-        let scan = graph.store.scan(&[Some(node), Some(pid), None]);
+        let scan = graph.store().scan(&[Some(node), Some(pid), None]);
         let mut sum = 0.0f32;
         let mut n = 0u32;
         for row in scan.rows.iter() {
@@ -625,7 +625,7 @@ fn first_present(graph: &Graph, candidates: &[&str]) -> Option<Id> {
 /// non-literal object or an unparseable lexical form (fail-open — a malformed confidence is
 /// treated as "no confidence asserted", never a panic).
 fn literal_f32(graph: &Graph, o: Id) -> Option<f32> {
-    match graph.dict.term_parts(o) {
+    match graph.dict().term_parts(o) {
         TermParts::Lit { value, .. } => value.trim().parse::<f32>().ok().filter(|c| c.is_finite()),
         _ => None,
     }

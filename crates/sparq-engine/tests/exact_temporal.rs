@@ -47,7 +47,7 @@ fn graph_exact_temporal_keys_borrow_the_original_fraction() {
         } else {
             graph
         };
-        let scan = graph.store.scan(&[None, None, None]);
+        let scan = graph.store().scan(&[None, None, None]);
         let id = scan.to_spo(&scan.rows[0])[2];
         let exact = graph.exact_temporal_value(id).unwrap();
         let zero = sparq_core::temporal::ExactTemporal::of_lit(
