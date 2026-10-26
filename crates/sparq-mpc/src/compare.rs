@@ -1956,7 +1956,7 @@ mod tests {
         // the test-only `with_unchecked_threshold` seam (cfg(test)), which builds a
         // backend with an explicit oversized t purely to exercise this fail-closed
         // path — it is NOT a production constructor.
-        let bad = ShamirBackend::with_unchecked_threshold(3, 2); // n=3, t=2 ⇒ 2t+1=5 > 3
+        let bad = ShamirBackend::with_unchecked_threshold(3, 2).unwrap(); // n=3, t=2 ⇒ 2t+1=5 > 3
         let mut dealer = bad.dealer();
         let err = secure_greater_than(&mut dealer, Fp::new(1), Fp::new(0)).unwrap_err();
         match err {
@@ -2543,7 +2543,7 @@ mod tests {
     fn disclose_threshold_in_mpc_party_count_fails_closed() {
         // The in-MPC path is a multiplication chain too, so it must also reject
         // n < 2t+1 fail-closed (not panic in degree_reduce).
-        let bad = ShamirBackend::with_unchecked_threshold(3, 2); // n=3, t=2 ⇒ 2t+1=5 > 3
+        let bad = ShamirBackend::with_unchecked_threshold(3, 2).unwrap(); // n=3, t=2 ⇒ 2t+1=5 > 3
         let sum_shares = bad.dealer().share(Fp::new(100));
         let err = disclose_threshold_verdict(&bad, &sum_shares, 50).unwrap_err();
         match err {
@@ -2898,7 +2898,7 @@ mod tests {
         // under-provisioned (n, t) with n < 2t+1 must fail closed in the degree-2t
         // open path rather than emit a garbage bit. (Reached via the test-only
         // with_unchecked_threshold seam; the honest constructor cannot build this.)
-        let bad = ShamirBackend::with_unchecked_threshold(3, 2); // 2t+1 = 5 > 3
+        let bad = ShamirBackend::with_unchecked_threshold(3, 2).unwrap(); // 2t+1 = 5 > 3
         let mut dealer = bad.dealer();
         assert!(
             square_protocol_random_bit(&mut dealer).is_err(),
