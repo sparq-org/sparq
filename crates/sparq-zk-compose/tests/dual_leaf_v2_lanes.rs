@@ -28,11 +28,9 @@
 //!
 //! # Honest scope
 //!
-//! Nothing here is a soundness or privacy claim. The V2 value lanes inherit the
-//! dual-leaf method's documented INV-VL downgrade (value↔lexical agreement on the
-//! value-FILTER lane rests on TRUSTED-ISSUER HONESTY, not machine enforcement;
-//! #769 accepted at research grade) and the whole ZK estate is NOT externally
-//! audited (gap CR-G8 / sq-qhy4).
+//! Nothing here is an external assurance claim. V2 value lanes are research-grade
+//! and not externally audited (sq-qhy4). The INV-VL issuer-honesty assumption is
+//! a V1 legacy assumption; V1 value members remain refused.
 #![cfg(feature = "dual-leaf")]
 
 use oxrdf::{Literal, NamedNode};
@@ -691,11 +689,31 @@ fn raw_value_lane_toml(
 
 mod support;
 
+/// Require the constraint diagnostic for this assignment; process and file errors
+/// remain distinct from a refusal of the witness.
+fn assert_refused(
+    result: Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError>,
+    diagnostic: &str,
+) {
+    match result {
+        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr }) => assert!(
+            tool.starts_with("nargo") && stderr.contains(diagnostic),
+            "expected nargo constraint `{diagnostic}`, got `{tool}`:\n{stderr}"
+        ),
+        Err(other) => panic!("expected a constraint refusal, got {other}"),
+        Ok(path) => panic!(
+            "expected a constraint refusal, got witness {}",
+            path.display()
+        ),
+    }
+}
+
 /// Solve the given member's witness for the given public/private assignment,
 /// using the shared value-lane renderer (whose layout the dedicated member
 /// reuses). `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
+/// Preserve the driver error so each negative case asserts its own diagnostic.
 #[allow(clippy::too_many_arguments)]
-fn member_accepts(
+fn member_witness(
     id: &CircuitId,
     tag: &str,
     operand_enc: &FieldHex,
@@ -705,7 +723,7 @@ fn member_accepts(
     expected: bool,
     value_hook: &FieldHex,
     lexical_component: &FieldHex,
-) -> bool {
+) -> Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError> {
     let toml = raw_value_lane_toml(
         &challenge_one(),
         operand_enc,
@@ -718,36 +736,36 @@ fn member_accepts(
     );
     sparq_zk_compose::driver::CircuitProver::from_crate_root()
         .gen_witness_tagged(id, &toml, tag)
-        .is_ok()
 }
 
 /// The honest V2 boolean witness is provable on the dedicated member, and a LYING
 /// disclosed verdict is not.
 #[test]
 fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict() {
-    if !support::require_toolchain("in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Gt, false).unwrap();
     let p = unpack(&built.inputs);
     assert!(p.expected, "true > false is the honest verdict");
 
-    assert!(
-        member_accepts(
-            &CircuitId::FilterValueDlBool,
-            "dlv2_ok",
-            p.operand_enc,
-            p.op,
-            p.bound,
-            p.datatype_const,
-            p.expected,
-            &built.value_hook,
-            &built.lexical_component,
-        ),
-        "the honest V2 boolean witness must be provable on filter_value_dl_bool"
-    );
-    assert!(
-        !member_accepts(
+    member_witness(
+        &CircuitId::FilterValueDlBool,
+        "dlv2_ok",
+        p.operand_enc,
+        p.op,
+        p.bound,
+        p.datatype_const,
+        p.expected,
+        &built.value_hook,
+        &built.lexical_component,
+    )
+    .expect("the honest witness must satisfy the relation");
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDlBool,
             "dlv2_lie",
             p.operand_enc,
@@ -758,7 +776,7 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
             &built.value_hook,
             &built.lexical_component,
         ),
-        "a flipped disclosed verdict must be unprovable"
+        "filter verdict mismatch",
     );
     // The dedicated renderer's bytes are what the honest case was solved from.
     assert_eq!(
@@ -783,6 +801,7 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
             &built.lexical_component,
         ),
     );
+    support::complete(live);
 }
 
 /// THE BIT DOMAIN — the reason this member exists. A handle (and a bound) of `2`
@@ -800,8 +819,31 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
 /// binds, so only `assert_bit(bound)` can refuse.
 #[test]
 fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
-    if !support::require_toolchain("in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain",
+        &["nargo"],
+    ) else {
         return;
+    };
+    let honest = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Eq, true).unwrap();
+    let hp = unpack(&honest.inputs);
+    {
+        let id = CircuitId::FilterValueDlBool;
+        member_witness(
+            &id,
+            &format!(
+                "in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain_honest_{}",
+                id.package().unwrap()
+            ),
+            hp.operand_enc,
+            hp.op,
+            hp.bound,
+            hp.datatype_const,
+            hp.expected,
+            &honest.value_hook,
+            &honest.lexical_component,
+        )
+        .expect("the honest boolean witness must satisfy this member");
     }
     let dt = boolean_lane_const_v2();
     let lexical = hexf(&Fr::from(0xdefu64));
@@ -811,24 +853,22 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
     let hook_two = hexf(&Fr::from(2u64));
 
     // Control: the SHARED integer member accepts the very same assignment (2 > 1).
-    assert!(
-        member_accepts(
-            &CircuitId::FilterValueDl,
-            "dlv2_two_int",
-            &enc_two,
-            FilterOp::Gt,
-            1,
-            &dt,
-            true,
-            &hook_two,
-            &lexical,
-        ),
-        "control: the integer member's u64 range admits the handle 2"
-    );
+    member_witness(
+        &CircuitId::FilterValueDl,
+        "dlv2_two_int",
+        &enc_two,
+        FilterOp::Gt,
+        1,
+        &dt,
+        true,
+        &hook_two,
+        &lexical,
+    )
+    .expect("the honest witness must satisfy the relation");
     // The dedicated member refuses that assignment (by either of its two
     // constraints — see the doc comment; the isolating vector is below).
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDlBool,
             "dlv2_two_bool",
             &enc_two,
@@ -839,13 +879,13 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
             &hook_two,
             &lexical,
         ),
-        "a handle outside {{0, 1}} must be unprovable on filter_value_dl_bool"
+        "boolean operand outside the bit domain",
     );
     // ...and the public bound, independently (an honest handle, bound 2).
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Eq, true).unwrap();
     let p = unpack(&built.inputs);
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDlBool,
             "dlv2_bound_two",
             p.operand_enc,
@@ -856,8 +896,9 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
             &built.value_hook,
             &built.lexical_component,
         ),
-        "a public bound outside {{0, 1}} must be unprovable"
+        "boolean operand outside the bit domain",
     );
+    support::complete(live);
 }
 
 /// IN-CIRCUIT lane separation, over several datatype byte strings built WITHOUT
@@ -867,25 +908,26 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
 /// while the control under the real lane constant is accepted.
 #[test]
 fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_constant() {
-    if !support::require_toolchain("in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_constant", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_constant",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Eq, true).unwrap();
     let p = unpack(&built.inputs);
-    assert!(
-        member_accepts(
-            &CircuitId::FilterValueDlBool,
-            "dlv2_lane_ok",
-            p.operand_enc,
-            p.op,
-            p.bound,
-            p.datatype_const,
-            p.expected,
-            &built.value_hook,
-            &built.lexical_component,
-        ),
-        "control: the honest witness IS provable under its own lane constant"
-    );
+    member_witness(
+        &CircuitId::FilterValueDlBool,
+        "dlv2_lane_ok",
+        p.operand_enc,
+        p.op,
+        p.bound,
+        p.datatype_const,
+        p.expected,
+        &built.value_hook,
+        &built.lexical_component,
+    )
+    .expect("the honest witness must satisfy the relation");
 
     let opaque = [
         ("plain_bool", XSD_BOOLEAN),
@@ -901,8 +943,8 @@ fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_cons
         // the key-derivation-mode lane constant is separated from.
         let plain = hexf(&dual_leaf_v2::degenerate_datatype_const(datatype));
         assert_ne!(plain.0, p.datatype_const.0, "{}", datatype);
-        assert!(
-            !member_accepts(
+        assert_refused(
+            member_witness(
                 &CircuitId::FilterValueDlBool,
                 &format!("dlv2_opaque_{}", tag),
                 p.operand_enc,
@@ -913,10 +955,10 @@ fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_cons
                 &built.value_hook,
                 &built.lexical_component,
             ),
-            "the honest witness must be unprovable under the {} string-lane constant",
-            datatype
+            "dual-leaf operand encoding mismatch",
         );
     }
+    support::complete(live);
 }
 
 /// ISOLATES `assert_bit(value_hook)`. The member rebinds its leaf from the
@@ -930,9 +972,12 @@ fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_cons
 /// is what makes it a guard rather than a restatement.
 #[test]
 fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness() {
-    if !support::require_toolchain("in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
     // An honest committed `false` leaf and its honest public inputs.
     let built = build_filter_value_dl_bool(&bool_lit(false), FilterOp::Eq, false).unwrap();
     let p = unpack(&built.inputs);
@@ -940,20 +985,18 @@ fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witne
     assert_eq!(fr(&built.value_hook), Fr::from(0u64));
 
     // Control: the honest witness is provable.
-    assert!(
-        member_accepts(
-            &CircuitId::FilterValueDlBool,
-            "dlv2_bit_iso_ok",
-            p.operand_enc,
-            p.op,
-            p.bound,
-            p.datatype_const,
-            p.expected,
-            &built.value_hook,
-            &built.lexical_component,
-        ),
-        "control: the honest false witness must be provable"
-    );
+    member_witness(
+        &CircuitId::FilterValueDlBool,
+        "dlv2_bit_iso_ok",
+        p.operand_enc,
+        p.op,
+        p.bound,
+        p.datatype_const,
+        p.expected,
+        &built.value_hook,
+        &built.lexical_component,
+    )
+    .expect("the honest witness must satisfy the relation");
 
     // The ONLY change is the witnessed handle, from `0` to `2`. The member reads
     // `value = (2 == 1) = false`, rebinds the leaf from the bit `0` — which still
@@ -970,8 +1013,8 @@ fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witne
         "the leaf the member rebinds for a handle of 2 must still be operand_enc, \
          otherwise this vector is not isolating the bit constraint"
     );
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDlBool,
             "dlv2_bit_iso_two",
             p.operand_enc,
@@ -982,9 +1025,9 @@ fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witne
             &hook_two,
             &built.lexical_component,
         ),
-        "a witnessed handle of 2 must be refused even though the leaf binding and \
-         the verdict both hold"
+        "boolean operand outside the bit domain",
     );
+    support::complete(live);
 }
 
 /// What actually keeps a V2 STRING-LANE leaf off the value lanes: the handle, not
@@ -997,8 +1040,30 @@ fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witne
 /// dedicated boolean member's `{0, 1}` constraint rejects it.
 #[test]
 fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
-    if !support::require_toolchain("in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members",
+        &["nargo"],
+    ) else {
         return;
+    };
+    let honest = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Eq, true).unwrap();
+    let hp = unpack(&honest.inputs);
+    for id in [CircuitId::FilterValueDl, CircuitId::FilterValueDlBool] {
+        member_witness(
+            &id,
+            &format!(
+                "in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members_honest_{}",
+                id.package().unwrap()
+            ),
+            hp.operand_enc,
+            hp.op,
+            hp.bound,
+            hp.datatype_const,
+            hp.expected,
+            &honest.value_hook,
+            &honest.lexical_component,
+        )
+        .expect("the honest boolean witness must satisfy this member");
     }
     // A real V2 string-lane literal: an opaque datatype, so `encode_literal` takes
     // the degenerate path.
@@ -1034,8 +1099,8 @@ fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
     // The shared integer member: the leaf binding is the member's own recompute
     // over the range-decomposed handle, so the `u64` range constraint is what
     // refuses this.
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDl,
             "dlv2_strlane_int",
             &enc,
@@ -1046,11 +1111,11 @@ fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
             &hook,
             &lexical,
         ),
-        "a string-lane leaf must be unprovable on the integer value-lane member"
+        "call to assert_max_bit_size",
     );
     // The dedicated boolean member: the `{0, 1}` constraint refuses it.
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDlBool,
             "dlv2_strlane_bool",
             &enc,
@@ -1061,8 +1126,9 @@ fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
             &hook,
             &lexical,
         ),
-        "a string-lane leaf must be unprovable on the bit-domain boolean member"
+        "boolean operand outside the bit domain",
     );
+    support::complete(live);
 }
 
 /// The decimal and dateTime members cannot even be ASKED the question above: their
@@ -1268,9 +1334,10 @@ fn the_verifier_prefilter_rejects_the_crossed_lane_member_pairing() {
 /// standard control that `verify` is actually deciding something.
 #[test]
 fn full_prove_verify_filter_value_dl_bool() {
-    if !support::require_toolchain("full_prove_verify_filter_value_dl_bool", &["nargo", "bb"]) {
+    let Some(live) = support::gate("full_prove_verify_filter_value_dl_bool", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     for (value, op, bound, tag) in [
         (true, FilterOp::Gt, false, "dlv2_live_true"),
@@ -1339,8 +1406,8 @@ fn full_prove_verify_filter_value_dl_bool() {
     let dt = boolean_lane_const_v2();
     let lexical = hexf(&Fr::from(0xdefu64));
     let enc_two = hexf(&member_rebinds_leaf(Fr::from(2u64), fr(&dt), fr(&lexical)));
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDlBool,
             "dlv2_live_two",
             &enc_two,
@@ -1351,8 +1418,9 @@ fn full_prove_verify_filter_value_dl_bool() {
             &hexf(&Fr::from(2u64)),
             &lexical,
         ),
-        "a handle of 2 must be refused on the bit-domain member"
+        "boolean operand outside the bit domain",
     );
+    support::complete(live);
 }
 
 fn manifest_with(inputs: Vec<ProofInputs>) -> ProofManifest {
@@ -2376,26 +2444,15 @@ fn a_non_canonical_operand_enc_is_refused_and_names_the_field() {
     }
 }
 
-/// EVERY value-lane sub-proof is refused by the structural pre-filter — the
-/// refusal inspects no edge. It is sound to refuse them wholesale because
-/// `filter_edge_true` discharges a query FILTER only through a `filter_int` edge,
-/// so such a sub-proof would be reconstructed and verified at stage 3 while
-/// discharging nothing. Such a manifest used to be accepted.
+/// A value proof with no query-derived obligation remains refused.
 #[test]
-fn the_prefilter_rejects_every_value_lane_sub_proof() {
-    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
-        .expect("the V2 boolean builder accepts a canonical literal");
-    // The pairing itself is honest — this refusal is about the missing binding.
+fn the_prefilter_rejects_an_orphan_value_lane_sub_proof() {
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true).unwrap();
     assert_eq!(check_lane_member_pairing(&built.inputs), Ok(()));
-    let manifest = manifest_with(vec![built.inputs]);
-    match prefilter_manifest_structure(
-        &manifest,
-        &KeySet::empty(),
-        &RevocationPolicy::accept_version(1),
-    ) {
-        Err(CheckError::ValueLaneSubProofNotAccepted { proof }) => assert_eq!(proof, 0),
-        other => panic!("expected the value-lane sub-proof refusal, got {:?}", other),
-    }
+    let mut manifest = manifest_with(vec![built.inputs]);
+    manifest.query = "SELECT * WHERE { }".into();
+    assert!(matches!(prefilter_manifest_structure(&manifest, &KeySet::empty(), &RevocationPolicy::accept_version(1)),
+        Err(CheckError::ValueObligation(sparq_zk_compose::value_obligation::ObligationError::OrphanValueProof { proof: 0 }))));
 }
 
 /// `check_lane_member_pairing_for_use` is the `ProofInputs`-level form of the
@@ -2562,9 +2619,12 @@ fn hook_witness_of(
 #[test]
 fn full_prove_verify_the_numeric_build_helpers() {
     use sparq_zk_compose::build::{build_filter_value_dl_decimal, build_filter_value_dl_int};
-    if !support::require_toolchain("full_prove_verify_the_numeric_build_helpers", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "full_prove_verify_the_numeric_build_helpers",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let integer = build_filter_value_dl_int(
         &typed("18", XSD_INTEGER),
@@ -2608,6 +2668,7 @@ fn full_prove_verify_the_numeric_build_helpers() {
             tag
         );
     }
+    support::complete(live);
 }
 
 /// LIVE: a LYING disclosed verdict on the integer lane built by the helper does
@@ -2616,9 +2677,12 @@ fn full_prove_verify_the_numeric_build_helpers() {
 #[test]
 fn in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused() {
     use sparq_zk_compose::build::build_filter_value_dl_int;
-    if !support::require_toolchain("in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
     let built = build_filter_value_dl_int(
         &typed("18", XSD_INTEGER),
         FilterOp::Ge,
@@ -2638,22 +2702,20 @@ fn in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused() {
     };
     assert!(*expected, "18 >= 18 is the honest verdict");
     let (value_hook, lexical_component) = hook_witness_of(&built);
-    assert!(
-        member_accepts(
-            &CircuitId::FilterValueDl,
-            "dlv2_num_int_ok",
-            operand_enc,
-            *op,
-            *bound,
-            datatype_const,
-            *expected,
-            value_hook,
-            lexical_component,
-        ),
-        "the helper's honest integer witness must be provable"
-    );
-    assert!(
-        !member_accepts(
+    member_witness(
+        &CircuitId::FilterValueDl,
+        "dlv2_num_int_ok",
+        operand_enc,
+        *op,
+        *bound,
+        datatype_const,
+        *expected,
+        value_hook,
+        lexical_component,
+    )
+    .expect("the honest witness must satisfy the relation");
+    assert_refused(
+        member_witness(
             &CircuitId::FilterValueDl,
             "dlv2_num_int_lie",
             operand_enc,
@@ -2664,6 +2726,7 @@ fn in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused() {
             value_hook,
             lexical_component,
         ),
-        "a flipped disclosed verdict must not solve"
+        "filter verdict mismatch",
     );
+    support::complete(live);
 }

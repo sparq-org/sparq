@@ -58,9 +58,10 @@ fn gate_child_probe() {
         return;
     }
     // Reached only in the child. Panics unless the child's env declares the lane
-    // toolchain-free, in which case this returns false.
+    // toolchain-free, in which case this returns `None`. A `Some` would be dropped
+    // uncompleted, which panics too.
     assert!(
-        !support::require_toolchain("gate_child_probe", &[ABSENT_TOOL]),
+        support::gate("gate_child_probe", &[ABSENT_TOOL]).is_none(),
         "the gate cannot report a tool that does not exist as present"
     );
 }
@@ -146,8 +147,7 @@ fn an_empty_opt_out_does_not_declare_the_lane_toolchain_free() {
 /// `cargo --version` exits 0 wherever this suite can be built or run at all.
 #[test]
 fn a_tool_on_path_passes_the_gate() {
-    assert!(support::require_toolchain(
-        "a_tool_on_path_passes_the_gate",
-        &["cargo"]
-    ));
+    let token = support::gate("a_tool_on_path_passes_the_gate", &["cargo"]);
+    let token = token.expect("cargo is on PATH, so the gate must pass");
+    support::complete(token);
 }

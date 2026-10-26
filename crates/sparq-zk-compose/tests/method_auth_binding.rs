@@ -205,6 +205,7 @@ fn attestation(commitment: Fr, signature: String, sk: &SecretKey) -> CommitmentA
 fn attest_unbound(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestation {
     let mut a = attestation(
         commitment,
+        // Legacy unbound attestation fixture retained for negative tests.
         sk.sign_commitment_with_status(&commitment, &salt, &fixture_status_ref()),
         sk,
     );
@@ -278,6 +279,7 @@ fn a_forged_signature_is_still_the_invalid_signature_refusal() {
     // A signature by a DIFFERENT key, presented under `sk`'s public key: no
     // candidate message verifies.
     let mut att = attest_unbound(c, salt, &sk);
+    // Legacy unbound attestation fixture retained for negative tests.
     att.signature = other.sign_commitment_with_status(&c, &salt, &fixture_status_ref());
     m.commitment_attestations.push(att);
     match prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy()) {
@@ -789,9 +791,12 @@ fn live_verify_manifest_with_an_m5_attestation() {
         InMemorySeenNonces, VerifierNonce,
     };
 
-    if !support::require_toolchain("live_verify_manifest_with_an_m5_attestation", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "live_verify_manifest_with_an_m5_attestation",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let sk = SecretKey::from_seed(1);
     let salt = salt_from_bytes(&GRAPH_SALT);
     let commit = commit_triples(&credential_graph(), salt).unwrap();
@@ -840,6 +845,7 @@ fn live_verify_manifest_with_an_m5_attestation() {
         &InMemorySeenNonces::new(),
     )
     .expect("a manifest with an M5 attestation verifies end to end");
+    support::complete(live);
 }
 
 /// LIVE: a HIDDEN-ONLY commitment whose hidden-issuer proof is over the
@@ -867,9 +873,12 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         InMemorySeenNonces, VerifierNonce,
     };
 
-    if !support::require_toolchain("live_hidden_issuer_proof_over_the_m5_message", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "live_hidden_issuer_proof_over_the_m5_message",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     const DEPTH: u32 = 4;
     // sq-j506: the scan proved below is over a STRING-CANONICAL commitment, so
     // that is the method its attestation may name: the verifier compares the
@@ -970,6 +979,7 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         &InMemorySeenNonces::new(),
     )
     .expect("a hidden-issuer proof over the M5 message verifies end to end");
+    support::complete(live);
 }
 
 /// LIVE, ADDITIVE mode: a commitment carrying BOTH a clear `ZKSIG_M5`
@@ -1000,9 +1010,12 @@ fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() 
         InMemorySeenNonces, VerifierNonce,
     };
 
-    if !support::require_toolchain("live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     const DEPTH: u32 = 4;
     // sq-j506: the scan proved below is over a STRING-CANONICAL commitment, so
     // that is the method its attestation may name: the verifier compares the
@@ -1102,4 +1115,5 @@ fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() 
         &InMemorySeenNonces::new(),
     )
     .expect("a clear M5 attestation alongside a hidden proof over that same M5 message verifies");
+    support::complete(live);
 }
