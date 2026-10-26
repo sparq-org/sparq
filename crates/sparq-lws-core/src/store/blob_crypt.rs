@@ -566,7 +566,10 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         }
     }
     async fn decrypt(&self, scope: Option<&BlobScope>, key: &str) -> Result<Bytes, BlobError> {
-        let body = self.inner.get(key).await?;
+        let body = match scope {
+            Some(scope) => self.inner.get_scoped(scope, key).await?,
+            None => self.inner.get(key).await?,
+        };
         if !is_envelope(&body) {
             return Ok(body);
         }
@@ -611,7 +614,7 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
 
     async fn put_scoped(&self, scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
         let envelope = self.encrypt(scope, key, body).await?;
-        self.inner.put(key, envelope).await
+        self.inner.put_scoped(scope, key, envelope).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {

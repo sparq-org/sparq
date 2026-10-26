@@ -99,14 +99,36 @@ impl KeyProvider for Provider {
 struct Backend {
     bytes: Arc<InMemoryBlobStore>,
     refuse: Arc<AtomicBool>,
+    required_scope: Option<BlobScope>,
 }
 
 #[async_trait]
 impl BlobStore for Backend {
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        if self.required_scope.is_some() {
+            return Err(BlobError::Backend("scoped read required".into()));
+        }
+        self.bytes.get(key).await
+    }
+    async fn get_scoped(&self, scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        if self.required_scope.as_ref().is_some_and(|s| s != scope) {
+            return Err(BlobError::Backend("unexpected read scope".into()));
+        }
         self.bytes.get(key).await
     }
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+        if self.required_scope.is_some() {
+            return Err(BlobError::Backend("scoped write required".into()));
+        }
+        if self.refuse.swap(false, Ordering::SeqCst) {
+            return Err(BlobError::Backend("interrupted publication".into()));
+        }
+        self.bytes.put(key, body).await
+    }
+    async fn put_scoped(&self, scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
+        if self.required_scope.as_ref().is_some_and(|s| s != scope) {
+            return Err(BlobError::Backend("unexpected write scope".into()));
+        }
         if self.refuse.swap(false, Ordering::SeqCst) {
             return Err(BlobError::Backend("interrupted publication".into()));
         }
@@ -363,6 +385,70 @@ async fn pod_reads_require_the_original_pod_with_cold_and_warm_body_cache() {
 }
 
 #[tokio::test]
+async fn parsed_acl_cache_rechecks_changed_blob_pointers_with_the_same_etag() {
+    use crate::{
+        acl_cache::AclCache,
+        authz::{AccessMode, ReadDecision, WacAuthorizer},
+        error::ServerError,
+    };
+
+    for planned in [false, true] {
+        let f = Fixture::new();
+        let store = f.encrypted().await;
+        let alice_acl = format!("{ALICE}.acl");
+        let bob_acl = format!("{BOB}.acl");
+        let rules = format!(
+            "@prefix acl: <http://www.w3.org/ns/auth/acl#>. \
+             <urn:rule> a acl:Authorization; acl:agent <{}>; \
+             acl:accessTo <{ALICE}>, <{BOB}>; acl:mode acl:Read.",
+            common::WEBID
+        );
+        let alice = store
+            .write(&alice_acl, Bytes::from(rules.clone()), "text/turtle")
+            .await
+            .unwrap();
+        let bob = store
+            .write(&bob_acl, rules.into(), "text/turtle")
+            .await
+            .unwrap();
+        assert_eq!(alice.etag, bob.etag);
+        assert_ne!(alice.blob_key, bob.blob_key);
+        let cache = AclCache::new(16);
+        let auth = WacAuthorizer::with_cache(&store, common::BASE_URL, &cache);
+        for _ in 0..2 {
+            assert!(matches!(
+                auth.authorize_read(BOB, AccessMode::Read, Some(common::WEBID), None)
+                    .await
+                    .unwrap(),
+                ReadDecision::Allow(_)
+            ));
+        }
+        assert!(!cache.is_empty());
+        f.index.replace_meta(&bob_acl, alice).await.unwrap();
+        let result = if planned {
+            let candidates = auth.read_plan_candidates(BOB);
+            let iris = candidates.iter().map(|c| c.acl.clone()).collect::<Vec<_>>();
+            let plan = store.read_plan(BOB, &iris).await.unwrap();
+            auth.authorize_read_planned(
+                AccessMode::Read,
+                Some(common::WEBID),
+                None,
+                &candidates,
+                &plan.acls,
+            )
+            .await
+        } else {
+            auth.authorize_read(BOB, AccessMode::Read, Some(common::WEBID), None)
+                .await
+        };
+        assert!(
+            matches!(result, Err(ServerError::Storage(ref e)) if e.contains("data-key pod")),
+            "planned={planned}: {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn inserting_a_dek_sweeps_expired_keys_without_regenerating_them() {
     let f = Fixture::new();
     let store = f.encrypted().await;
@@ -394,6 +480,26 @@ async fn inserting_a_dek_sweeps_expired_keys_without_regenerating_them() {
         alice
     );
     assert_eq!(store.blob.records.all().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn encryption_forwards_scoped_operations_to_its_backend() {
+    let mut f = Fixture::new();
+    f.backend.required_scope = Some(BlobScope("https://pod.example/alice/".into()));
+    let store = f.encrypted().await;
+    let meta = store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert!(f
+        .backend
+        .bytes
+        .get(&meta.blob_key)
+        .await
+        .unwrap()
+        .starts_with(b"SQLB"));
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+    assert_eq!(store.read_at(ALICE, &meta).await.unwrap(), BODY);
 }
 
 #[tokio::test]
@@ -1262,6 +1368,53 @@ async fn filesystem_http_round_trip_encrypts_disk_bytes_and_reopens_every_resour
         assert_eq!(to_bytes(response.into_body(), 100000).await.unwrap(), body);
     }
     drop(http);
+}
+
+#[tokio::test]
+async fn http_reads_recheck_acl_blob_pointers_after_warming_the_parse_cache() {
+    use axum::{body::to_bytes, http::StatusCode};
+
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    store
+        .write(BOB, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let rules = format!(
+        "@prefix acl: <http://www.w3.org/ns/auth/acl#>. \
+         <urn:rule> a acl:Authorization; acl:agent <{}>; \
+         acl:accessTo <{ALICE}>, <{BOB}>; acl:mode acl:Read.",
+        common::WEBID
+    );
+    let alice = store
+        .write(
+            &format!("{ALICE}.acl"),
+            Bytes::from(rules.clone()),
+            "text/turtle",
+        )
+        .await
+        .unwrap();
+    let bob = store
+        .write(&format!("{BOB}.acl"), rules.into(), "text/turtle")
+        .await
+        .unwrap();
+    assert_eq!(alice.etag, bob.etag);
+    let http = Http::new(store).await;
+    for _ in 0..2 {
+        let response = http.call("GET", "/bob/file", "text/plain", "").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(to_bytes(response.into_body(), 10000).await.unwrap(), BODY);
+    }
+    f.index
+        .replace_meta(&format!("{BOB}.acl"), alice)
+        .await
+        .unwrap();
+    for method in ["GET", "HEAD"] {
+        let response = http.call(method, "/bob/file", "text/plain", "").await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), 10000).await.unwrap();
+        assert!(!body.windows(BODY.len()).any(|window| window == BODY));
+    }
 }
 
 #[tokio::test]

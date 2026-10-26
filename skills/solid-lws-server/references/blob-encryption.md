@@ -28,6 +28,10 @@ after opening the envelope. A mismatch returns an error without returning bytes.
 The body cache stores the pod authenticated for each entry; a lookup from another
 pod returns an error and evicts the entry. Inserting a DEK sweeps expired cached
 keys; active key flights keep their shared slots.
+Parsed ACL entries additionally track the blob pointer read for that parse. Both
+authorization paths re-read a changed pointer through the store, including when
+the ETag is unchanged. The encryption decorator forwards scoped operations to
+the wrapped byte backend.
 
 Reinstate restores a held record only to its original resource. This integrity
 rule applies with or without `crypt`: the held directory's metadata stores the

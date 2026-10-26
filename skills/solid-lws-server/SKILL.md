@@ -182,6 +182,8 @@ backends; resource reads use it to require the authenticated DEK pod to match th
 resource pod. Transparent decorators must forward scoped reads and writes.
 Body-cache entries retain that pod; a different pod refuses the read
 and evicts the entry. Each DEK-cache insert sweeps expired entries.
+Parsed ACL reuse requires the current blob pointer as well as its ETag in both
+sequential and planned authorization. A new pointer is read through the store.
 `BlobScopePolicy` selects the storage root for LWS, the first path
 segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
 seal reservations live in reserved index records, outside HTTP resources.
