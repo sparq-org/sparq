@@ -1,0 +1,19 @@
+# Declared inventory of the sparq-zk tests that reach nargo/bb.
+#
+# Checked by scripts/check-zk-toolchain-gate.py (CHECK L) against what its scanner
+# DISCOVERS, in both directions: a test declared here that the scanner does not find
+# is an error, and so is a discovered test that is not declared here.
+#
+#   live <path>::<fn>        calls the shared gate and closes it as its last
+#                            statement; the toolchain lane's ledger must hold an
+#                            `enter` AND a `complete` line for its gate call site.
+#   structural <path>::<fn>  reaches the driver route (CircuitProver, driver::,
+#                            DriverError::Spawn) WITHOUT the gate because every
+#                            outcome it accepts is decided before any subprocess
+#                            runs; it may accept only named error variants (C1).
+#
+# <path> is relative to the crate directory. Keep each section sorted.
+
+live tests/poseidon2_noir_cross.rs::nargo_live_cross_check
+live tests/toolchain_gate.rs::a_tool_on_path_passes_the_gate
+live tests/toolchain_gate.rs::gate_child_probe
