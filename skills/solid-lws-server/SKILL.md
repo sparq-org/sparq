@@ -60,8 +60,32 @@ default-off `http3` feature and `skills/helm-deploy/SKILL.md` for Kubernetes.
 
 ## Browser clients
 
-Both protocol modes reflect the request's `Origin` with credentials enabled and
-`Vary: Origin`. Browser scripts can read `Link`, `ETag`, `Location`,
+Both protocol modes reflect any request `Origin` by default, with credentials enabled
+and `Vary: Origin`. Authentication uses the `Authorization` and `DPoP` headers;
+the server sets no cookies. This default supports browser apps served from arbitrary
+origins.
+
+Set `SOLID_SERVER_CORS_ORIGINS` to a comma-separated list of exact
+`scheme://host[:port]` origins to restrict browser access, for example
+`https://app.example,http://localhost:8080`. It is unset by default. Scheme and host
+compare after ASCII lowercasing; ports compare exactly, with no default port inferred.
+Use ASCII hostnames (punycode for internationalized names) and bracket IPv6 addresses.
+Whitespace around entries is ignored. An empty entry, `*`, or a malformed origin
+(including a path, trailing slash, user information, query, or fragment) refuses startup.
+An unlisted Origin receives no `Access-Control-Allow-*` headers, including on overload
+responses; `Vary: Origin` remains. Its admitted preflight still receives an empty `204`
+without an allow-origin header. Actual requests are served normally: CORS controls
+browser reads, while authorization controls access. Public identity-document responses
+retain `Access-Control-Allow-Origin: *` for allowed origins, without
+`Access-Control-Allow-Credentials`.
+
+Embedders can parse a list with `ldp::cors::CorsPolicy::from_origins`, then set
+`AppState::cors` (Solid) or `LwsConfig::cors` (LWS). `LwsConfig::from_env` reads the
+environment policy too. When wrapping an LWS router with overload protection, pass the
+same policy to `app::with_overload_layers_and_cors(router, overload, policy)`; the
+existing `with_overload_layers` helper uses the default reflection policy.
+
+Browser scripts can read `Link`, `ETag`, `Location`,
 `WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`
 (the LWS linkset preference response), alongside the existing content and discovery
 headers. The expose list is explicit, with no wildcard. Overload responses carry
