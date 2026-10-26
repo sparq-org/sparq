@@ -1,16 +1,7 @@
-//! The value-lane PIN functions against real manifests — and the proof that the
-//! value-lane verifier GATES STAY CLOSED.
-//!
-//! `sparq_zk_compose::value_pin` answers "what would this value-lane sub-proof's
-//! public inputs have to be, for this authenticated method and this typed query
-//! FILTER?". It answers nothing else. The load-bearing test in this file is
-//! [`a_manifest_whose_pin_passes_is_still_refused`]: a manifest whose value-lane
-//! sub-proof satisfies every pinned equality is STILL refused by the verifier's
-//! pre-filter with `ValueLaneSubProofNotAccepted`. Computing a pin is not
-//! enforcing one, and nothing in this slice changes which manifests verify.
-//!
-//! Honest scope: research-grade, NOT externally audited (sq-qhy4); the value
-//! lanes carry the dual-leaf INV-VL downgrade (#769 accepted, CR-G8).
+//! Value-lane pins and standalone inputs without a source-scan obligation.
+//! Pins alone do not establish coverage or verify proof bytes. V2 acceptance is
+//! tested through the public prefilter and genuine e2e fixtures elsewhere.
+//! Research-grade, not externally audited.
 #![cfg(feature = "dual-leaf")]
 
 use oxrdf::{Literal, NamedNode};
@@ -37,8 +28,7 @@ fn typed(value: &str, datatype: &str) -> Literal {
     Literal::new_typed_literal(value, NamedNode::new_unchecked(datatype))
 }
 
-/// A minimal manifest carrying exactly `inputs` as its sub-proofs, over a query
-/// with ONE integer FILTER — enough to reach the pre-filter's stage 0.
+/// A minimal structural manifest carrying exactly these sub-proofs.
 fn manifest_with(inputs: Vec<ProofInputs>, query: &str) -> ProofManifest {
     let sub_proofs: Vec<String> = inputs
         .iter()
@@ -57,6 +47,14 @@ fn manifest_with(inputs: Vec<ProofInputs>, query: &str) -> ProofManifest {
     ProofManifest::from_json(&json).expect("the minimal manifest parses")
 }
 
+fn orphan_manifest(inputs: Vec<ProofInputs>) -> ProofManifest {
+    const EMPTY_QUERY: &str = "SELECT * WHERE { }";
+    let control = manifest_with(vec![], EMPTY_QUERY);
+    prefilter_manifest_structure(&control, &KeySet::empty(), &RevocationPolicy::accept_version(1))
+        .expect("the control without an orphan passes the public prefilter");
+    manifest_with(inputs, EMPTY_QUERY)
+}
+
 /// The integer-lane sub-proof that satisfies every pinned equality for
 /// `FILTER(?o >= 18)`.
 fn pin_passing_integer_lane() -> ProofInputs {
@@ -72,20 +70,9 @@ fn pin_passing_integer_lane() -> ProofInputs {
 
 const PIN_PASSING_QUERY: &str = "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }";
 
-// ------------------------------------------------- THE GATES ARE STILL CLOSED
-
-/// THE LOAD-BEARING TEST. A manifest whose value-lane sub-proof satisfies the
-/// FULL pin — right member, right lane constant, right op, right bound, verdict
-/// `true` — is STILL refused by the verifier's structural pre-filter, with the
-/// unconditional stage-0 `ValueLaneSubProofNotAccepted`.
-///
-/// That refusal is FIRST, before the pre-filter reads a sub-proof for anything
-/// else, so it cannot be reached past by making the pin hold. If this test ever
-/// goes green on an `Ok(())`, the gate has been opened — which is a separate
-/// change with its own obligations, not a side effect of being able to compute a
-/// pin.
+/// A correct pin without an authenticated source scan is still refused.
 #[test]
-fn a_manifest_whose_pin_passes_is_still_refused() {
+fn a_pin_without_a_source_scan_is_refused() {
     let inputs = pin_passing_integer_lane();
     // First: the pin really does hold, so the refusal below is not just the pin
     // failing by accident.
@@ -98,25 +85,24 @@ fn a_manifest_whose_pin_passes_is_still_refused() {
     );
 
     // And the verifier refuses it anyway.
-    let manifest = manifest_with(vec![inputs], PIN_PASSING_QUERY);
+    let manifest = orphan_manifest(vec![inputs]);
     match prefilter_manifest_structure(
         &manifest,
         &KeySet::empty(),
         &RevocationPolicy::accept_version(1),
     ) {
-        Err(CheckError::ValueLaneSubProofNotAccepted { proof }) => assert_eq!(proof, 0),
+        Err(CheckError::ValueObligation(sparq_zk_compose::value_obligation::ObligationError::OrphanValueProof { proof: 0 })) => {},
         other => panic!(
-            "the value-lane gate must stay CLOSED; expected ValueLaneSubProofNotAccepted, got {other:?}"
+            "a pin without a scan must be refused, got {other:?}"
         ),
     }
 }
 
-/// The stage-0 refusal does not depend on the policy either: the strictest
-/// method policy and the most permissive one both refuse a value-lane sub-proof.
+/// Method policy cannot supply a missing source scan.
 #[test]
-fn no_method_policy_opens_the_value_lane_gate() {
+fn no_method_policy_admits_a_pin_without_a_source_scan() {
     use sparq_zk_compose::MethodPolicy;
-    let manifest = manifest_with(vec![pin_passing_integer_lane()], PIN_PASSING_QUERY);
+    let manifest = orphan_manifest(vec![pin_passing_integer_lane()]);
     for policy in [
         MethodPolicy::current(),
         MethodPolicy::current().require_method_bound(),
@@ -126,9 +112,9 @@ fn no_method_policy_opens_the_value_lane_gate() {
         assert!(
             matches!(
                 prefilter_manifest_structure(&manifest, &ks, &RevocationPolicy::accept_version(1)),
-                Err(CheckError::ValueLaneSubProofNotAccepted { .. })
+                Err(CheckError::ValueObligation(sparq_zk_compose::value_obligation::ObligationError::OrphanValueProof { proof: 0 }))
             ),
-            "no policy may open the value-lane gate"
+            "no policy may supply a missing source scan"
         );
     }
 }
@@ -282,9 +268,8 @@ fn the_routing_check_admits_the_six_value_lanes() {
 // `value_pin` requires of that lane for the matching typed FILTER, and changing
 // any ONE pinned field of it is refused with that field's own `PinError`.
 //
-// They do not open a gate. `the_gates_stay_closed_for_a_helper_built_manifest`
-// below is the control: a manifest assembled from a builder's output is still
-// refused with `ValueLaneSubProofNotAccepted`.
+// A builder's output still needs query-derived coverage; the orphan controls
+// below test the structural refusal independently of the pin.
 
 const XSD_DOUBLE: &str = "http://www.w3.org/2001/XMLSchema#double";
 const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
@@ -591,21 +576,19 @@ fn every_mismatched_field_of_a_builder_output_is_refused() {
     }
 }
 
-/// THE CONTROL. A manifest whose value-lane sub-proof was assembled by one of
-/// these builders — so its pin holds by construction — is STILL refused by the
-/// verifier's pre-filter. Building correct inputs is not enforcing them.
+/// Builder-produced inputs still require a source scan and obligation.
 #[test]
-fn the_gates_stay_closed_for_a_helper_built_manifest() {
+fn helper_built_pins_without_a_source_scan_are_refused() {
     for c in &lane_cases() {
-        let manifest = manifest_with(vec![c.inputs.clone()], PIN_PASSING_QUERY);
+        let manifest = orphan_manifest(vec![c.inputs.clone()]);
         match prefilter_manifest_structure(
             &manifest,
             &KeySet::empty(),
             &RevocationPolicy::accept_version(1),
         ) {
-            Err(CheckError::ValueLaneSubProofNotAccepted { proof }) => assert_eq!(proof, 0),
+            Err(CheckError::ValueObligation(sparq_zk_compose::value_obligation::ObligationError::OrphanValueProof { proof: 0 })) => {},
             other => panic!(
-                "the value-lane gate must stay CLOSED for the {} builder; got {other:?}",
+                "the {} builder pin without a scan must be refused; got {other:?}",
                 c.lane
             ),
         }

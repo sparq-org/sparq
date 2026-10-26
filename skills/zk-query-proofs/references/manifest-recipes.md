@@ -21,9 +21,9 @@ The [query-coverage corpus](evaluator-conformance.md) separates executed host se
 
 ## 1. Commit a credential graph and attest it as an issuer
 ```rust
-use sparq_zk::commit::{commit_triples, CommitmentMethod};
+use sparq_zk::commit::commit_triples;
 use sparq_zk::encode::salt_from_bytes;
-use sparq_zk::sig::{SecretKey, status_list_id_to_field, status_ref_digest, public_key_to_hex, scheme_iri_to_field, SignatureScheme};
+use sparq_zk::sig::{SecretKey, status_list_id_to_field, status_ref_digest, public_key_to_hex, SignatureScheme};
 use sparq_zk_compose::manifest::{AttestedStatusRef, CommitmentAttestation, FieldHex};
 
 let salt = salt_from_bytes(&[7u8; 32]);                 // production: use IngestedDataset (OS-random)
@@ -37,16 +37,22 @@ let status_ref = status_ref_digest(&status_list_id_to_field(list), index, versio
 let attestation = CommitmentAttestation {
     commitment: FieldHex::from_field(&commit.commitment),
     issuer_public_key: public_key_to_hex(&issuer.public_key()),
-    signature: issuer.sign_presentation_with_status_and_scheme(
-        &commit.commitment, &salt, &status_ref,
-        &scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()),
-    ),
+    signature: issuer.attest(&commit.method_commitment(), &salt, &status_ref, None),
     cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
     salt: Some(FieldHex::from_field(&salt)),
     status: Some(AttestedStatusRef::clear(index, version)),
     holder: None,                                       // bearer; see HolderBindingPolicy
 };
 ```
+
+For non-string-canonical methods, `SecretKey::attest` is the issuance call.
+With `dual-leaf`, `dual_leaf_v2::commit_triples` and `commit_graph` return a
+`DualGraphCommitment` whose `method_commitment()` records `DualLeafV2`; the legacy
+V1 builders record `DualLeafV1`. Pass that typed value to `attest` as above.
+For the opt-in value-only research dial, pair the root with
+`CommitmentMethod::ValueOnlyV1` in `sig::MethodCommitment` before calling `attest`.
+Pass `Some(&holder_key_digest(&holder.public_key()).unwrap())` for holder issuance.
+The estate remains externally unaudited; existing method-selection limits apply.
 
 ## 2. Build a BGP scan proof for `{ ?s <http://ex/age> ?o }`
 ```rust

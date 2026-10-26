@@ -701,20 +701,29 @@ impl From<DualLeafError> for DualCommitError {
     }
 }
 
-/// A graph committed under `DualLeafV1`: canonical form, ordered leaves, and the
-/// commitment. Field-for-field the shape of `commit::GraphCommitment`, and the
-/// leaf ORDER is identical (`canonical.lines` order) — only the per-term leaf
-/// encoding differs.
+/// A graph committed under a recorded dual-leaf version.
+/// Canonical form, ordered leaves, salt and root follow `commit::GraphCommitment`,
+/// with the method recorded for issuance. Leaf order is identical
+/// (`canonical.lines` order); the per-term leaf encoding depends on the version.
 #[derive(Debug, Clone)]
 pub struct DualGraphCommitment {
+    /// The dual-leaf version used by the builder.
+    pub method: CommitmentMethod,
     /// The RDFC10 canonical form (leaf order = `canonical.lines` order).
     pub canonical: CanonicalGraph,
-    /// Per-triple DualLeafV1 leaf hashes, in canonical order.
+    /// Per-triple dual-leaf hashes, in canonical order.
     pub leaves: Vec<Fr>,
     /// `C(G)`: Poseidon2 sponge over `leaves`.
     pub commitment: Fr,
     /// The per-graph salt the leaves were encoded under (`zk:rdfc10Salt`).
     pub salt: Fr,
+}
+
+impl DualGraphCommitment {
+    /// The typed commitment for [`crate::sig::SecretKey::attest`].
+    pub fn method_commitment(&self) -> crate::sig::MethodCommitment {
+        crate::sig::MethodCommitment { method: self.method, commitment: self.commitment }
+    }
 }
 
 /// Canonicalizes and commits one named graph's content under `salt`, using the
@@ -772,7 +781,9 @@ fn commit_canonical_dual(
         leaves.push(leaf);
     }
     let commitment = poseidon2::hash(&leaves);
-    Ok(DualGraphCommitment { canonical, leaves, commitment, salt })
+    Ok(DualGraphCommitment {
+        method: CommitmentMethod::DualLeafV1, canonical, leaves, commitment, salt,
+    })
 }
 
 #[cfg(test)]
