@@ -90,8 +90,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
     `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only
-    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
+  - `sparql-endpoint` (**default-on**, sq-r1ei8) — query-only endpoints: `/sparql`
+    under WAC in Solid mode and `/.lws/sparql` under LWS Read rules; internal Store methods remain independent.
   - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
     (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
   - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve

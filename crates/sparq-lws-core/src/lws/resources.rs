@@ -1460,6 +1460,12 @@ pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::Servic
         }
         catalog.service(service);
     }
+    #[cfg(feature = "sparql-endpoint")]
+    catalog.service(entry(
+        "sparql",
+        &format!("{SSD}SparqlQueryService"),
+        cfg.absolute(super::sparql::PATH),
+    ));
     // Advertise concrete JSON types served here. The PATCH parser also accepts
     // other structured JSON suffix types on data documents.
     catalog.capability(capability(
@@ -1877,6 +1883,8 @@ async fn create<S: Store + 'static>(
             // Held to the end, announcement included: this work still counts against the
             // concurrency ceiling once the request has gone.
             let _admission = admission;
+            #[cfg(feature = "sparql-endpoint")]
+            let _snapshot_change = state.store.changing();
             let locks = (child_guards, parent_guard);
             // Until the content is created, or what the create may have written is put back, the
             // member is in flight with nothing there before it: a check made without its lock
@@ -2424,6 +2432,8 @@ where
     let state = state.detached();
     tokio::spawn(async move {
         let _admission = admission;
+        #[cfg(feature = "sparql-endpoint")]
+        let _snapshot_change = state.store.changing();
         match writes.await {
             (out, None) => match after(&out) {
                 (None, None) => (out, Some(locks)),

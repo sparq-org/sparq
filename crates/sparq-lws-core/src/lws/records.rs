@@ -257,6 +257,8 @@ where
     let register = {
         let (container, iri) = (container.to_string(), iri.to_string());
         move |state: &LwsState<S>| {
+            #[cfg(feature = "sparql-endpoint")]
+            let _snapshot_change = state.store.changing();
             register(state);
             announce_record(state, "Create", &iri, &container, author);
         }
@@ -286,6 +288,8 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
+        #[cfg(feature = "sparql-endpoint")]
+        let _snapshot_change = state.store.changing();
         let ListingLocks {
             own: own_listing,
             container: container_lock,
@@ -582,6 +586,11 @@ where
     F: std::future::Future<Output = Option<H>> + Send + 'static,
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
+    let settle = move |state: &LwsState<S>, gone, held| {
+        #[cfg(feature = "sparql-endpoint")]
+        let _snapshot_change = state.store.changing();
+        settle(state, gone, held)
+    };
     let place = match by {
         Remover::Request => state.settlements.reserve(),
         Remover::Sweeper => state.settlements.reserve_maintenance(),
@@ -603,6 +612,8 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
+        #[cfg(feature = "sparql-endpoint")]
+        let _snapshot_change = state.store.changing();
         let Some(held) = set_aside().await else {
             return Ok(Removed::Absent);
         };
