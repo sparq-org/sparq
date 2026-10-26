@@ -927,8 +927,8 @@ What the server exposes, all discoverable from the storage description
   still require Read on every method. The Read check comes before authorization waits,
   existence, metadata and format lookups. A bare `*` can avoid generating a listing.
   Service containers (grants, requests and subscriptions) retain their existence-only `*`
-  handling. A conditional `POST` to the storage root compares its public storage
-  description, which needs no Read, when `Accept` selects the description. A data `PUT`'s, or any
+  handling. When `Accept` selects the description, a conditional `POST` to the storage
+  root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
   that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
   follow from what is stored needs Read as well as Modify (or Delete): a `PUT` replacing a data
@@ -942,11 +942,12 @@ What the server exposes, all discoverable from the storage description
 - Access grant/request IDs owned by someone else answer exactly like absent IDs for every
   method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
   a borrowed record; only a match is cloned. Subscription lookups do the same.
-- `SparqClient` wrappers must forward `reset_marker` with its lifecycle guard. The trait default
-  refuses marker resets; generic `delete_resource` refuses marker operands, including the parent,
-  before any backend call.
-- Resource-linkset `OPTIONS` returns a fixed `204`; unsupported methods such as `POST` and
-  `DELETE` return `405`. Both answer before authorization, existence checks, preconditions,
+- Pass-through `SparqClient` and `Store` wrappers forward `exclusive`, `call_timeout`, and supported marker
+  operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
+  ownership and marker resets, and use the default call timeout. Generic `delete_resource`
+  refuses marker operands, including the parent, before any backend call.
+- Resource-linkset `OPTIONS` returns a fixed `204` for every caller; unsupported methods such as
+  `POST` and `DELETE` return `405`. Both answer before authorization, existence checks, preconditions,
   or set-aside checks, with fixed `Allow`, `Accept-Patch`, and anchor `Link` headers and no
   backend reads. This also changes readers' answers: an absent target previously answered
   `404`, and a set-aside target `503`, for `OPTIONS`.

@@ -1770,6 +1770,55 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for PutBackFirst {
+        fn call_timeout(&self) -> std::time::Duration {
+            self.inner.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.inner.raises_markers()
+        }
+
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.inner.raise_marker(iri, value).await
+        }
+
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> Result<(), SparqError> {
+            self.inner.reset_marker(iri, value, lease).await
+        }
+
+        async fn fence(&self, fence: &crate::store::Fence) -> Result<(), SparqError> {
+            self.inner.fence(fence).await
+        }
+
+        async fn delete_resource(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<Option<String>, SparqError> {
+            self.inner.delete_resource(iri, parent).await
+        }
+
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> Result<Option<Vec<String>>, SparqError> {
+            self.inner.list_children_within(container, max_bytes).await
+        }
+
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> Result<crate::store::ReadPlan, SparqError> {
+            self.inner.read_plan(target, acl_candidates).await
+        }
+
         fn exclusive(&self) -> Result<(), SparqError> {
             self.inner.exclusive()
         }
@@ -1895,6 +1944,38 @@ mod tests {
 
     #[async_trait]
     impl<T: SparqClient> SparqClient for Shared<T> {
+        fn call_timeout(&self) -> std::time::Duration {
+            self.0.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.0.raises_markers()
+        }
+
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.0.raise_marker(iri, value).await
+        }
+
+        async fn fence(&self, fence: &crate::store::Fence) -> Result<(), SparqError> {
+            self.0.fence(fence).await
+        }
+
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> Result<Option<Vec<String>>, SparqError> {
+            self.0.list_children_within(container, max_bytes).await
+        }
+
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> Result<crate::store::ReadPlan, SparqError> {
+            self.0.read_plan(target, acl_candidates).await
+        }
+
         async fn reset_marker(
             &self,
             iri: &str,
@@ -2041,6 +2122,68 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for FailsDetaching {
+        // Keep the default delete_resource so detach/delete fault injection is observed.
+        async fn replace_meta(
+            &self,
+            iri: &str,
+            meta: ResourceMeta,
+        ) -> Result<Option<ResourceMeta>, SparqError> {
+            self.inner.replace_meta(iri, meta).await
+        }
+
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> Result<crate::store::ReadPlan, SparqError> {
+            self.inner.read_plan(target, acl_candidates).await
+        }
+
+        fn call_timeout(&self) -> std::time::Duration {
+            self.inner.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.inner.raises_markers()
+        }
+
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.inner.raise_marker(iri, value).await
+        }
+
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> Result<(), SparqError> {
+            self.inner.reset_marker(iri, value, lease).await
+        }
+
+        async fn fence(&self, fence: &crate::store::Fence) -> Result<(), SparqError> {
+            self.inner.fence(fence).await
+        }
+
+        async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+            self.inner.begin_reclaim(blob_key).await
+        }
+
+        async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+            self.inner.end_reclaim(blob_key).await
+        }
+
+        async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+            self.inner.reclaiming().await
+        }
+
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> Result<Option<Vec<String>>, SparqError> {
+            self.inner.list_children_within(container, max_bytes).await
+        }
+
         fn exclusive(&self) -> Result<(), SparqError> {
             self.inner.exclusive()
         }

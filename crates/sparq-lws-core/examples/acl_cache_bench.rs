@@ -60,6 +60,75 @@ impl<S: Store> CountingStore<S> {
 
 #[async_trait]
 impl<S: Store> Store for CountingStore<S> {
+    // The default read_plan/read_at call the counted meta/read methods.
+    fn exclusive(&self) -> ServerResult<()> {
+        self.inner.exclusive()
+    }
+
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
+    }
+
+    fn raises_markers(&self) -> bool {
+        self.inner.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        self.inner.raise_marker(iri, value).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> ServerResult<()> {
+        self.inner.reset_marker(iri, value, lease).await
+    }
+
+    async fn restore(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        body: Bytes,
+        meta: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        self.inner.restore(iri, container, body, meta).await
+    }
+
+    async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+        self.inner.hold(iri, holder).await
+    }
+
+    async fn reinstate(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        held: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        self.inner.reinstate(iri, container, held).await
+    }
+
+    async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+        self.inner.release(held, holder).await
+    }
+
+    async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
+        self.inner.holds().await
+    }
+
+    async fn finish_reclaims(&self) -> ServerResult<()> {
+        self.inner.finish_reclaims().await
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> ServerResult<Option<Vec<sparq_lws_core::store::ValidatedChildIri>>> {
+        self.inner.list_children_within(container, max_bytes).await
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
         self.inner.lifecycle()
     }

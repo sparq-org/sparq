@@ -13432,53 +13432,72 @@ mod tests {
     }
     #[tokio::test]
     async fn linkset_options_and_unsupported_methods_have_fixed_headers_before_any_reads() {
-        let (state, store) = super::super::test_store::counting_state(100).await;
-        super::super::test_store::data(&state, "there").await;
-        for method in [Method::POST, Method::DELETE, Method::OPTIONS] {
-            let mut answers = Vec::new();
-            for path in ["/there.meta", "/gone.meta"] {
-                store.counters.take_methods();
-                *store.trace.lock().unwrap() = Some(Vec::new());
-                let response = handle(
-                    &state,
-                    &super::super::test_store::request(method.clone(), path, &[], ""),
-                    &Agent::anonymous(),
-                )
-                .await;
-                assert_eq!(
-                    response.status(),
-                    if method == Method::OPTIONS {
-                        StatusCode::NO_CONTENT
-                    } else {
-                        StatusCode::METHOD_NOT_ALLOWED
-                    }
+        use super::super::{test_store as ts, Prior};
+        let (state, store) = ts::counting_state(100).await;
+        let there = ts::data(&state, "there").await;
+        for set_aside in [false, true] {
+            if set_aside {
+                state.locks.hide(
+                    std::slice::from_ref(&there),
+                    std::collections::HashMap::from([(
+                        there.clone(),
+                        Prior { existed: Some(true), ..Default::default() },
+                    )]),
                 );
-                assert_eq!(response.headers()[header::ALLOW], LINKSET_ALLOW);
-                let status = response.status();
-                assert_eq!(response.headers()["accept-patch"], ACCEPT_PATCH);
-                let mut expected_link = HeaderMap::new();
-                let target = path.strip_suffix(".meta").unwrap();
-                add_link(
-                    &mut expected_link,
-                    &state.cfg.absolute(target),
-                    "anchor",
-                    None,
-                );
-                assert_eq!(
-                    response.headers()[header::LINK],
-                    expected_link[header::LINK]
-                );
-                let mut headers = response.headers().clone();
-                headers.remove(header::LINK);
-                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-                    .await
-                    .unwrap();
-                let calls = store.counters.take_methods();
-                assert!(calls.is_empty(), "{calls:?}");
-                assert!(store.trace.lock().unwrap().take().unwrap().is_empty());
-                answers.push((status, headers, body, calls));
             }
-            assert_eq!(answers[0], answers[1]);
+            for caller in [
+                &Agent::anonymous(),
+                &ts::agent("https://stranger.example/#me"),
+                &ts::agent(ts::OWNER),
+            ] {
+                for method in [Method::POST, Method::DELETE, Method::OPTIONS] {
+                    let mut answers = Vec::new();
+                    for path in ["/there.meta", "/gone.meta"] {
+                        store.counters.take_methods();
+                        *store.trace.lock().unwrap() = Some(Vec::new());
+                        let response = handle(
+                            &state,
+                            &super::super::test_store::request(method.clone(), path, &[], ""),
+                            caller,
+                        )
+                        .await;
+                        assert_eq!(
+                            response.status(),
+                            if method == Method::OPTIONS {
+                                StatusCode::NO_CONTENT
+                            } else {
+                                StatusCode::METHOD_NOT_ALLOWED
+                            }
+                        );
+                        assert_eq!(response.headers()[header::ALLOW], LINKSET_ALLOW);
+                        let status = response.status();
+                        assert_eq!(response.headers()["accept-patch"], ACCEPT_PATCH);
+                        let mut expected_link = HeaderMap::new();
+                        let target = path.strip_suffix(".meta").unwrap();
+                        add_link(
+                            &mut expected_link,
+                            &state.cfg.absolute(target),
+                            "anchor",
+                            None,
+                        );
+                        assert_eq!(
+                            response.headers()[header::LINK],
+                            expected_link[header::LINK]
+                        );
+                        let mut headers = response.headers().clone();
+                        headers.remove(header::LINK);
+                        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                            .await
+                            .unwrap();
+                        let calls = store.counters.take_methods();
+                        assert!(calls.is_empty(), "{calls:?}");
+                        assert!(store.trace.lock().unwrap().take().unwrap().is_empty());
+                        answers.push((status, headers, body, calls));
+                    }
+                    assert_eq!(answers[0], answers[1]);
+                }
+            }
+            state.locks.show(std::slice::from_ref(&there));
         }
     }
 
@@ -13588,6 +13607,28 @@ mod tests {
             )
             .await;
             assert_eq!(response.status(), expected, "{field} {path}");
+        }
+        // Tags and applicable dates still need Read, before even probing the container.
+        for path in ["/c/", "/missing/"] {
+            for preconditions in [
+                vec![("if-match", "\"tag\"")],
+                vec![("if-none-match", "\"tag\"")],
+                vec![("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT")],
+                vec![
+                    ("if-none-match", "*"),
+                    ("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT"),
+                ],
+            ] {
+                let mut headers = vec![("content-type", "text/plain")];
+                headers.extend(preconditions);
+                let response = handle(
+                    &state,
+                    &ts::request(Method::POST, path, &headers, "x"),
+                    &writer,
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path} {headers:?}");
+            }
         }
         assert_eq!(state.store.list_children(&container).await.unwrap().len(), 1);
     }
@@ -14008,8 +14049,16 @@ mod tests {
         let second = handle(&state, &request, &writer);
         tokio::pin!(first, second);
         // Both have passed the unlocked existence probe and wait for the same lock.
-        tokio::select! { biased; _ = &mut first => panic!("first did not wait"), () = async {} => {} }
-        tokio::select! { biased; _ = &mut second => panic!("second did not wait"), () = async {} => {} }
+        tokio::select! {
+            biased;
+            _ = &mut first => panic!("first did not wait"),
+            () = async {} => {}
+        }
+        tokio::select! {
+            biased;
+            _ = &mut second => panic!("second did not wait"),
+            () = async {} => {}
+        }
         drop(guard);
         let (first, second) = tokio::join!(first, second);
         let first = delete_answer(first).await;
@@ -14094,7 +14143,11 @@ mod tests {
         );
         let response = handle(&state, &request, &writer);
         tokio::pin!(response);
-        tokio::select! { biased; _ = &mut response => panic!("create did not wait"), () = async {} => {} }
+        tokio::select! {
+            biased;
+            _ = &mut response => panic!("create did not wait"),
+            () = async {} => {}
+        }
         state.access.remove_grant_for_test("read");
         drop(guard);
         assert_eq!(response.await.status(), StatusCode::FORBIDDEN);
@@ -14107,8 +14160,12 @@ mod tests {
         use super::super::test_store as ts;
         for constraint in [
             json!({}),
-            json!({"constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": "https://example/T"}]}),
-            json!({"constraint": [{"leftOperand": "format", "operator": "eq", "rightOperand": "text/turtle"}]}),
+            json!({"constraint": [{
+                "leftOperand": "type", "operator": "eq", "rightOperand": "https://example/T"
+            }]}),
+            json!({"constraint": [{
+                "leftOperand": "format", "operator": "eq", "rightOperand": "text/turtle"
+            }]}),
         ] {
             let (state, _store) = ts::counting_state(100).await;
             let root = state.cfg.storage();

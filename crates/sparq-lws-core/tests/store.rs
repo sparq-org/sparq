@@ -1012,6 +1012,47 @@ struct StaleOnceSparq {
 
 #[async_trait]
 impl SparqClient for StaleOnceSparq {
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
+    }
+
+    fn raises_markers(&self) -> bool {
+        self.inner.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        self.inner.raise_marker(iri, value).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.inner.reset_marker(iri, value, lease).await
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        self.inner.reclaiming().await
+    }
+
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        self.inner.delete_resource(iri, parent).await
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        self.inner.list_children_within(container, max_bytes).await
+    }
+
     fn exclusive(&self) -> Result<(), SparqError> {
         self.inner.exclusive()
     }

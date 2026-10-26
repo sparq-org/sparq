@@ -425,8 +425,8 @@ mod wasm_store {
     /// Reads are pass-through, including the `read_plan`/`read_at` overrides, so wrapping a
     /// [`CompositeStore`](sparq_lws_core::store::CompositeStore) keeps its single-round-trip read
     /// path rather than falling back to the trait's per-IRI defaults. The reported call timeout
-    /// comes from the inner store. Atomic markers are unsupported until marker mutations and
-    /// the lifecycle lease can be forwarded and preserved by the snapshot journal.
+    /// and lifecycle lease come from the inner store. Atomic markers remain unsupported because
+    /// the snapshot journal does not preserve marker mutations.
     pub struct PersistentStore<S: Store> {
         inner: S,
         journal: Arc<Journal>,
@@ -441,6 +441,14 @@ mod wasm_store {
 
     #[async_trait]
     impl<S: Store> Store for PersistentStore<S> {
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> ServerResult<Option<Vec<sparq_lws_core::store::ValidatedChildIri>>> {
+            self.inner.list_children_within(container, max_bytes).await
+        }
+
         fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
             self.inner.lifecycle()
         }
@@ -616,7 +624,13 @@ mod tests {
         let journal = Arc::new(Journal::new());
         let inner = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
         assert!(inner.raises_markers());
+        let lifecycle = inner.lifecycle();
         let store = PersistentStore::new(inner, journal.clone());
+        assert!(Arc::ptr_eq(&store.lifecycle(), &lifecycle));
+        assert_eq!(
+            store.list_children_within("urn:missing", 1024).await.unwrap(),
+            Some(Vec::new())
+        );
         let error = LwsState::new(store, LwsConfig::new("https://pod.example"))
             .await
             .err()

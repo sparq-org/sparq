@@ -379,6 +379,38 @@ impl<S: SparqClient> RawSeamCounter<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        self.inner.replace_meta(iri, meta).await
+    }
+
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
+    }
+
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        self.inner.begin_reclaim(blob_key).await
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        self.inner.end_reclaim(blob_key).await
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        self.inner.reclaiming().await
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        self.inner.list_children_within(container, max_bytes).await
+    }
+
     fn exclusive(&self) -> Result<(), SparqError> {
         self.inner.exclusive()
     }

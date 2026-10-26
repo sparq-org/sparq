@@ -834,12 +834,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A set-aside parent container returns `503` for both present and absent children.
   An absent delete changes and announces nothing. Pending metadata on a present resource and
   type- or format-constrained Delete grants remain residual differences from absence.
-  Resource-linkset OPTIONS returns fixed `204`; unsupported methods return `405`, both before
-  backend reads, with `Allow`, `Accept-Patch` and the anchor `Link`. For readers too,
+  Resource-linkset OPTIONS returns fixed `204` for every caller; unsupported methods return `405`,
+  both before backend reads, with `Allow`, `Accept-Patch` and the anchor `Link`. For readers too,
   OPTIONS now returns `204` where an absent target previously returned `404` and a set-aside
-  target `503`. Anonymous grant denials skip metadata reads. The `allowed()` fast path returns
-  false for a non-creator even when unrelated fields such as `links` are malformed;
-  malformed non-creator metadata fields no longer cause a `500`. Raw index mutations refuse service-marker operands; marker resets
+  target `503`. Anonymous grant denials skip metadata reads. For a non-creator, malformed
+  unrelated metadata fields such as `links` no longer make `allowed()` answer `500`; its fast
+  path returns false. Raw index mutations refuse service-marker operands; marker resets
   require a lifecycle guard.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
