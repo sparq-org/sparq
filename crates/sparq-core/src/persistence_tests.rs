@@ -133,6 +133,54 @@ fn saved_paths(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
+#[cfg(windows)]
+#[test]
+fn fsync_dir_is_a_noop_on_windows() {
+    let dir = TestDir::new("windows_dir_sync");
+    let file = dir.0.join("file");
+    std::fs::write(&file, b"unchanged").unwrap();
+    for path in [&dir.0, &file, &dir.0.join("missing")] {
+        fsync_dir(path).unwrap();
+    }
+    assert_eq!(std::fs::read(file).unwrap(), b"unchanged");
+}
+
+#[test]
+fn saved_graph_sync_preserves_bytes_and_reopens_durable_logs() {
+    let dir = TestDir::new("platform_sync");
+    // Opening even a default-only store must succeed; both logs sync their directory.
+    Graph::new().save(&dir.0).unwrap();
+    drop(Graph::open(&dir.0).unwrap());
+    let mut graph = Graph::open(&dir.0).unwrap();
+    graph
+        .apply_delta_nquads(
+            concat!(
+                "<http://ex/s> <http://ex/p> <http://ex/o> .\n",
+                "<http://ex/s> <http://ex/p> <http://ex/o> <http://ex/g> .\n",
+            ),
+            "",
+        )
+        .unwrap();
+    let expected = dataset(&graph);
+    let paths: Vec<_> = saved_paths(&dir.0)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .collect();
+    let bytes: Vec<_> = paths
+        .iter()
+        .map(|path| std::fs::read(path).unwrap())
+        .collect();
+    // Exercise regular-file syncing and recursive directory syncing separately from log open.
+    sync_saved_graph(&dir.0).unwrap();
+    for (path, expected) in paths.iter().zip(bytes) {
+        assert_eq!(std::fs::read(path).unwrap(), expected, "{path:?}");
+    }
+    drop(graph);
+    assert_eq!(dataset(&Graph::open(&dir.0).unwrap()), expected);
+}
+
+// Directory fsync ordering is a Unix guarantee; Windows deliberately skips directory syncing.
+#[cfg(unix)]
 #[test]
 fn new_named_base_syncs_precede_manifest_and_journal_retirement() {
     // Cover both normal materialization and journal-only crash recovery. Both paths must
@@ -193,6 +241,7 @@ fn new_named_base_syncs_precede_manifest_and_journal_retirement() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn compact_syncs_saved_tree_before_swap_and_old_base_retirement() {
     let dir = TestDir::new("compact_sync_order");
@@ -342,12 +391,17 @@ fn interrupted_delete_preserves_acknowledged_survivor_files_and_wals() {
     assert!(graph.drop_named_durable(&named("remove")).is_err());
     failure.assert_hit();
     let events = trace.take();
-    let published = position(&events, Event::ManifestPublished(dir.0.join("named.bin")));
-    let reclaim = position(&events, Event::DropPublished(dir.0.clone()));
-    assert!(
-        events[published + 1..reclaim].contains(&Event::Synced(dir.0.clone())),
-        "persist the new manifest before reclaiming the dropped slot"
-    );
+    #[cfg(unix)]
+    {
+        let published = position(&events, Event::ManifestPublished(dir.0.join("named.bin")));
+        let reclaim = position(&events, Event::DropPublished(dir.0.clone()));
+        assert!(
+            events[published + 1..reclaim].contains(&Event::Synced(dir.0.clone())),
+            "persist the new manifest before reclaiming the dropped slot"
+        );
+    }
+    #[cfg(not(unix))]
+    let _ = events;
     drop(graph);
     for (path, bytes) in paths.iter().zip(files) {
         assert_eq!(
@@ -653,6 +707,7 @@ fn compacted_log_entries_are_synced_before_the_first_acknowledged_update() {
                 })
                 .collect();
             assert!(!opens.is_empty(), "replacement log {path:?} was not synced");
+            #[cfg(unix)]
             for opened in opens {
                 assert!(
                     events[opened + 1..]

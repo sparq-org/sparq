@@ -426,12 +426,24 @@ impl EmbeddedSparqClient {
 /// Sync every regular file, then the graph directory, then the parent of each directory
 /// created by `create_dir_all`, deepest first through the first pre-existing ancestor.
 /// Bootstrap has no named-graph subtree; callers supply the missing directories recorded
-/// before creation. Propagate every open/fsync error instead of acknowledging durability.
+/// before creation. Windows skips directory syncing but still syncs every regular file.
+/// Propagate every open/fsync error instead of acknowledging durability.
 fn sync_bootstrap(dir: &Path, created_dirs: &[std::path::PathBuf]) -> std::io::Result<()> {
     let sync = |path: &Path| -> std::io::Result<()> {
-        std::fs::File::open(path)?.sync_all()?;
+        // Windows FlushFileBuffers requires a handle opened with write access.
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(cfg!(windows))
+            .open(path)?
+            .sync_all()?;
         // Observe successful sync calls in unit tests without replacing the real I/O.
         #[cfg(test)]
+        tests::BOOTSTRAP_SYNCS.with_borrow_mut(|paths| paths.push(path.to_path_buf()));
+        Ok(())
+    };
+    let sync_dir = |path: &Path| -> std::io::Result<()> {
+        fsync_dir(path)?;
+        #[cfg(all(test, not(windows)))]
         tests::BOOTSTRAP_SYNCS.with_borrow_mut(|paths| paths.push(path.to_path_buf()));
         Ok(())
     };
@@ -441,15 +453,27 @@ fn sync_bootstrap(dir: &Path, created_dirs: &[std::path::PathBuf]) -> std::io::R
             sync(&entry.path())?;
         }
     }
-    sync(dir)?;
+    sync_dir(dir)?;
     for created in created_dirs {
         let parent = created
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        sync(parent)?;
+        sync_dir(parent)?;
     }
     Ok(())
+}
+
+/// Windows directory syncing is a no-op: NTFS journals directory metadata, and std cannot
+/// open directory handles without FILE_FLAG_BACKUP_SEMANTICS. Regular files are still synced.
+#[cfg(windows)]
+fn fsync_dir(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn fsync_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -1256,6 +1280,18 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn fsync_dir_is_a_noop_on_windows() {
+        let dir = TestDir::new();
+        let file = dir.0.join("file");
+        std::fs::write(&file, b"unchanged").unwrap();
+        for path in [&dir.0, &file, &dir.0.join("missing")] {
+            fsync_dir(path).unwrap();
+        }
+        assert_eq!(std::fs::read(file).unwrap(), b"unchanged");
+    }
+
     #[test]
     fn open_or_create_bootstraps_empty_missing_and_lock_only_directories() {
         let root = TestDir::new();
@@ -1297,8 +1333,12 @@ mod tests {
                 expected_files.insert("LOCK".into());
             }
             assert_eq!(synced_files, expected_files, "sync every saved base file first");
-            let mut expected_dirs = vec![dir.clone()];
-            if dir.ends_with("graph") {
+            let mut expected_dirs = if cfg!(windows) {
+                vec![]
+            } else {
+                vec![dir.clone()]
+            };
+            if !cfg!(windows) && dir.ends_with("graph") {
                 expected_dirs.extend([root.0.join("missing"), root.0.clone()]);
             }
             assert_eq!(

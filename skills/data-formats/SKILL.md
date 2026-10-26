@@ -340,8 +340,10 @@ the manifest before reclaiming the subtree. Reopen accepts legacy dense manifest
 and sparse tombstone manifests. `Graph::compact` rewrites any manifest containing
 tombstones and packs live slots densely, even without a default-graph overlay.
 After reopen, the next named graph allocates immediately after the dense live slots.
-Opening a graph syncs each WAL/journal and its containing directory before exposing
-an append handle, including replacement logs after compaction and in named graphs.
+Opening a graph syncs each WAL/journal before exposing an append handle, including
+replacement logs after compaction and in named graphs. Unix also syncs containing
+directories. Directory syncing is a no-op on Windows (NTFS journals directory
+metadata); regular-file sync handles are opened with write access there.
 
 **4. Out-of-core build for a dataset larger than RAM** (requires `sparq-core` `mmap` feature):
 

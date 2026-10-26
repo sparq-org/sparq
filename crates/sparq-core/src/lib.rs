@@ -3804,6 +3804,7 @@ impl Default for Graph {
 /// flushes its writers: every regular base file still needs fsync, followed by its containing
 /// directory. Recurse through named graphs before syncing their parents. The caller must also
 /// sync the parent of a newly created root directory before publishing a manifest or swap.
+/// Directory syncs are skipped on Windows; regular files are still synced there.
 #[cfg(feature = "mmap")]
 fn sync_saved_graph(dir: &std::path::Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
@@ -3812,21 +3813,26 @@ fn sync_saved_graph(dir: &std::path::Path) -> std::io::Result<()> {
         if kind.is_dir() {
             sync_saved_graph(&entry.path())?;
         } else if kind.is_file() {
-            std::fs::File::open(entry.path())?.sync_all()?;
+            // Windows FlushFileBuffers requires a handle opened with write access.
+            std::fs::OpenOptions::new().read(true).write(cfg!(windows))
+                .open(entry.path())?.sync_all()?;
             #[cfg(test)]
             persistence_tests::record(persistence_tests::Event::Synced(entry.path()));
         }
     }
-    std::fs::File::open(dir)?.sync_all()?;
-    #[cfg(test)]
-    persistence_tests::record(persistence_tests::Event::Synced(dir.to_path_buf()));
+    fsync_dir(dir)
+}
+
+/// Windows directory syncing is a no-op: NTFS journals directory metadata, and std cannot
+/// open directory handles without FILE_FLAG_BACKUP_SEMANTICS. Regular files are still synced.
+#[cfg(all(feature = "mmap", windows))]
+fn fsync_dir(_dir: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. On
-/// failure (e.g. a platform/filesystem that rejects opening a dir) it is a best-effort no-op,
-/// matching the durability the rest of the persistence path assumes.
-#[cfg(feature = "mmap")]
+/// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. Ignore missing
+/// directories and filesystems rejecting directory fsync with EINVAL; propagate other errors.
+#[cfg(all(feature = "mmap", not(windows)))]
 fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     match std::fs::File::open(dir) {
         Ok(f) => match f.sync_all() {
