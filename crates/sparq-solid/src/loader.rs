@@ -442,9 +442,9 @@ pub(crate) fn install_named_view(graph: &mut Graph, name: Term, view: Graph) -> 
     }
 }
 
-/// Empties every in-memory graph in the reserved IRI space in place (positions unchanged): what
-/// [`strip_reserved_graphs`] falls back to when a named graph of a directory-backed dataset
-/// follows one. A reserved graph of the store itself is left (it cannot change here).
+/// Empties writable in-memory reserved slots when removal did not complete, preserving their
+/// positions. Durable slots stay in place; the caller disables the authorization view until
+/// materialization succeeds.
 pub(crate) fn empty_reserved_graphs(graph: &mut Graph) {
     let reserved: Vec<Term> = graph
         .named()

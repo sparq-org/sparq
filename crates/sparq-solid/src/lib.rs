@@ -626,7 +626,8 @@ impl PodStore {
     /// # Errors
     ///
     /// Returns `Err` if reasoning or durable view installation fails. Input and reasoning
-    /// refusals leave the previous auth view (if any) in place. A document stating a triple it may not (one about a node outside it, a
+    /// refusals leave the previous auth view (if any) in place. A document stating a triple
+    /// it may not (one about a node outside it, a
     /// minted name, a reserved principal such as a `urn:sparq:` IRI or one containing
     /// `&client=`, or view vocabulary) is not an error: the loader rejects it whole and the
     /// resources it governs get no grant from any source.
@@ -2322,9 +2323,9 @@ impl PodStore {
     /// to rules that changed without a view rebuilt from them: the previous view would keep
     /// granting what the change revoked.
     pub(crate) fn drop_auth_view(&mut self) {
-        // Dropping fails only when a named graph of a directory-backed dataset follows the
-        // view (named graphs of a store are never moved): the view is then emptied in place,
-        // so it grants nothing.
+        // Remove reserved slots durably when backed by a directory. If removal cannot
+        // complete, empty in-memory views; view_dropped below gates decisions and derived
+        // view installation until materialization succeeds.
         if loader::strip_reserved_graphs(&mut self.graph).is_err() {
             loader::empty_reserved_graphs(&mut self.graph);
         }
