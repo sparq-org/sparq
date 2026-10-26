@@ -1969,12 +1969,10 @@ impl<'a> SlotPlan<'a> {
         }
     }
 
-    /// Decide the plan from PUBLIC numbers only, in this order: the resolved
-    /// widths' own shape (arity cap, per-term cap, uniform limb cap), the party
-    /// cap, and the aggregate work budget — none of which reads a candidate. The
-    /// run's terms were already measured when the widths were resolved, which is
-    /// what fixed them (derived mode) or enforced them (declared mode), and that
-    /// happens before any sharing or draw.
+    /// Decide the plan from resolved values: bound, arity and party caps first,
+    /// then packed width and aggregate work. Only declared widths are independent
+    /// of the data; derived widths were measured over the candidates. This step
+    /// reads no candidate, and precedes the output stage's first sharing or draw.
     ///
     /// `bound` and the per-candidate arity agreement are the caller's checks and
     /// have already run.

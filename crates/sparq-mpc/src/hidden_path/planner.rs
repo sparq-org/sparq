@@ -322,6 +322,10 @@ impl BoundedPathPlan {
     /// MODEL cost as much as the protocol it models. Every fold is checked, so an
     /// overflowing total is a refusal and never a wrapped count that would
     /// understate the cost.
+    ///
+    /// This API receives neither the backend threshold nor the payload width.
+    /// Aggregate slot work is checked at the output stage using their actual
+    /// values; the largest possible threshold cannot serve as a lower bound.
     pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
         crate::oblivious_join::check_output_bound_cap(bound)?;
         // The same PARTY cap the stage applies, so a plan whose party count the
@@ -329,14 +333,10 @@ impl BoundedPathPlan {
         // that cannot happen is not a cost model.
         //
         crate::oblivious_join::check_output_parties_cap(parties)?;
-        // And the same aggregate slot-work budget, at the width this counter models
-        // — the TAG column only (`limbs = 0`, because the payload bytes are what
-        // this planner does not see), at the largest threshold honest majority
-        // allows for `parties`. It is a LOWER bound on the stage's real work, so a
-        // plan refused here could not have run; a plan admitted here may still be
-        // refused at the stage, once the payload width is known.
-        let threshold = parties.saturating_sub(1) / 2;
-        crate::oblivious_join::check_slot_work_budget(bound, 0, parties, threshold)?;
+        // The aggregate slot-work budget also needs the actual threshold and
+        // payload width, neither of which this API receives. It is checked at
+        // the output stage. Assuming the largest threshold here would refuse
+        // plans that fit with a smaller threshold.
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).

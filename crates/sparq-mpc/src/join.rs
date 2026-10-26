@@ -897,6 +897,12 @@ impl HiddenValueJoin {
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Preflight before a dealer exists: minting one is cheap, but it is still
         // keystream state created for a run that is about to be refused.
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         // Mint ONE fresh dealer for this protocol run (production: a fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across joins
@@ -1059,6 +1065,12 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Preflight before a dealer exists, as in `batched_join`.
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         // ONE fresh dealer for this protocol run (production: fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across
@@ -3479,9 +3491,9 @@ mod randomness_seam_tests {
         }
     }
 
-    /// BOTH batched entries run the output stage's public-shape checks and its
-    /// term-width pass at their OWN entry, before a key is dealt or an equality bit
-    /// drawn — so a run the output stage would refuse costs no draws here.
+    /// BOTH batched entries run the output stage's public-shape checks at their
+    /// OWN entry, before a key is dealt or an equality bit drawn. Derived widths
+    /// are resolved at the output stage, after these operators' own draws.
     ///
     /// The shape that refuses is a party count past
     /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`], a public number, so neither
@@ -3520,6 +3532,27 @@ mod randomness_seam_tests {
             rec.log.is_empty(),
             "fully_oblivious_batched_join drew before refusing"
         );
+    }
+
+    #[test]
+    fn public_batched_entries_check_party_caps_before_input_shape() {
+        let parties = crate::oblivious_join::MAX_OUTPUT_PARTIES + 2;
+        let join = HiddenValueJoin::new(ShamirBackend::new_seeded(parties, 0xBA7D2).unwrap());
+        let (mut left, right) = positional_pair();
+        // Public fields may be changed after construction. The party cap must
+        // precede even this malformed input's shape and candidate checks.
+        left.rows[0].1.clear();
+        for result in [
+            join.batched_join(&left, &right, 3),
+            join.fully_oblivious_batched_join(&left, &right, 3),
+        ] {
+            let err = result.expect_err("the public party cap must run first");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+                "{:?}",
+                err
+            );
+        }
     }
 
     /// A source whose `(n, t)` differs from the backend's is refused before any

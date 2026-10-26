@@ -249,8 +249,8 @@ fn bounded_path_correctness_gate_passes() {
     assert_eq!(pairs, expected);
 }
 
-/// The cost model's own output bound is capped. `comm_counter` iterates `B` times
-/// and builds a real Waksman network over `B` slots, so an unchecked `B` would do
+/// The cost model's own output bound is capped. `comm_counter` builds a real
+/// Waksman network over `B` slots, so an unchecked `B` would do
 /// work and allocate in proportion to a caller-chosen number — and it would be
 /// modelling a run the output stage itself refuses.
 #[test]
@@ -282,11 +282,11 @@ fn comm_counter_refuses_an_over_cap_bound() {
 ///
 /// A cost model for a run that cannot happen is not a cost model: the bound cap
 /// alone let `comm_counter` report a figure for a party count the stage refuses
-/// outright. The aggregate slot-work budget is deliberately not applied here —
-/// see `comm_counter`'s own docs for why it cannot fire at the tag-only width.
+/// outright. Aggregate slot work requires a threshold and payload width that
+/// this API does not receive; it is checked at the output stage.
 #[test]
 fn comm_counter_applies_the_output_party_cap() {
-    use crate::oblivious_join::{MAX_OUTPUT_BOUND, MAX_OUTPUT_PARTIES, MAX_SLOT_WORK};
+    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
     let req = HiddenPathRequest::range("p", 1, 3);
     let plan = plan_hidden_bounded_path(&req, 3).unwrap();
 
@@ -302,25 +302,19 @@ fn comm_counter_applies_the_output_party_cap() {
         plan.comm_counter(MAX_OUTPUT_PARTIES, 4).is_ok(),
         "the cap itself is still modelled"
     );
+}
 
-    // And the aggregate slot-work budget, at the tag-only width this counter
-    // models: the WIDEST legal combination of `B` and `n` multiplies past
-    // `MAX_SLOT_WORK`, so the budget really does decide something here, and the
-    // counter refuses that combination instead of costing a run that cannot happen.
-    let worst_t = (MAX_OUTPUT_PARTIES - 1) / 2;
-    let widest = (MAX_OUTPUT_BOUND as u64) * (MAX_OUTPUT_PARTIES as u64) * (2 * worst_t as u64 + 1);
-    assert!(
-        widest > MAX_SLOT_WORK,
-        "the fixture must really exceed the slot-work budget: {} vs {}",
-        widest,
-        MAX_SLOT_WORK
-    );
-    let err = plan
-        .comm_counter(MAX_OUTPUT_PARTIES, MAX_OUTPUT_BOUND)
-        .expect_err("the widest legal B and n must be refused on the product");
-    assert!(
-        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
-        "{:?}",
-        err
-    );
+#[test]
+fn comm_counter_does_not_assume_an_unstated_threshold() {
+    use crate::oblivious_join::{check_slot_work_budget, MAX_OUTPUT_PARTIES};
+    let bound = 4096;
+    let parties = MAX_OUTPUT_PARTIES;
+    assert!(check_slot_work_budget(bound, 0, parties, (parties - 1) / 2).is_err());
+    assert!(check_slot_work_budget(bound, 0, parties, 0).is_ok());
+    let plan = plan_hidden_bounded_path(&HiddenPathRequest::range("p", 1, 3), 3).unwrap();
+    let counter = plan
+        .comm_counter(parties, bound)
+        .expect("a threshold-free cost must admit a plan that fits at threshold zero");
+    assert_eq!(counter.parties, parties);
+    assert!(counter.multiplications >= bound as u64);
 }

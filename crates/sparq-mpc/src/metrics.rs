@@ -72,9 +72,8 @@
 //! saturate, pinning each counter it touches at the `u64` ceiling, which was
 //! argued to be safe because a ceiling is not a smaller number. It is not safe as
 //! a cost model: a pinned counter is indistinguishable from a real total at the
-//! ceiling, and every later checked recorder and derived total on the same
-//! `CommCounter` then refuses, so one absurd `k` turns the whole instrument into
-//! refusals with no record of which call did it. It returns a `Result` like the
+//! ceiling, and later checked arithmetic may refuse without identifying the
+//! batch that first reached that ceiling. It returns a `Result` like the
 //! rest.
 //!
 //! ## Every recorder commits ALL its fields or NONE
@@ -265,9 +264,9 @@ impl CommCounter {
     /// computes all six new values before committing any of them. It used to
     /// saturate, pinning each counter at the ceiling, on the argument that a
     /// ceiling over-states rather than under-states the cost. A pinned counter is
-    /// not distinguishable from a real total at the ceiling, and it makes every
-    /// later checked recorder and derived total on the same counter refuse, so the
-    /// refusal now names the batch instead.
+    /// not distinguishable from a real total at the ceiling. Later checked
+    /// arithmetic on the same counter may refuse, so the refusal now names the
+    /// batch instead.
     pub fn record_independent_equalities(&mut self, k: u64) -> Result<(), MpcError> {
         // Per equality: 3 deals (key_L, key_R, mask r) + 1 mult + 1 open. Each
         // deal sends `parties` shares; opens/mults are 1 logical op each. Fold the
@@ -433,8 +432,7 @@ mod tests {
     /// candidate count the caller supplies, and `3 * k * parties` can exceed
     /// `u64`. A wrapped counter would report a smaller cost than the real one;
     /// a saturated one would report the ceiling as if it were a real total and
-    /// make every later checked recorder on the same counter refuse. The refusal
-    /// names the batch instead.
+    /// make later checked arithmetic refuse. The refusal names the batch instead.
     #[test]
     fn an_enormous_equality_batch_is_refused_instead_of_pinned() {
         use super::*;

@@ -2149,7 +2149,7 @@ fn the_repetition_union_is_deduped_as_it_grows() {
 /// Both form-shape caps are pinned BY VALUE.
 #[test]
 fn the_form_shape_caps_are_pinned_by_value() {
-    assert_eq!(MAX_PATH_FORM_DEPTH, 2251);
+    assert_eq!(MAX_PATH_FORM_DEPTH, 1 << 14);
     assert_eq!(MAX_PATH_FORM_WORK, 1 << 32);
     assert_eq!(MAX_PATH_FORM_JOIN_WORK, 1 << 31);
 }
@@ -2175,33 +2175,49 @@ fn nested_form(depth: usize) -> PathForm {
 #[test]
 fn the_form_depth_cap_refuses_just_over_and_runs_at_the_cap() {
     std::thread::Builder::new()
-        .stack_size(32 * 1024 * 1024)
+        .stack_size(2 * 1024 * 1024)
         .spawn(|| {
-            let edges = disclosed_edges(&[("ex:a ex:p ex:b .", &["http://ex/p"])]);
+            let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
+            // Dismantle the fixture iteratively: recursive destruction belongs
+            // to the caller and is independent of the evaluation stack.
+            let dispose = |form| {
+                let mut pending = vec![form];
+                while let Some(form) = pending.pop() {
+                    if let PathForm::Sequence(parts) = form {
+                        pending.extend(parts);
+                    }
+                }
+            };
+            for depth in [MAX_PATH_FORM_DEPTH + 1, MAX_PATH_FORM_DEPTH + 16] {
+                let form = nested_form(depth);
+                let err = eval_bounded_path_disclosed(&edges, &form)
+                    .expect_err("one level past the depth cap must be refused");
+                dispose(form);
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_DEPTH")),
+                    "{:?}",
+                    err
+                );
+            }
 
-            // One past the cap: refused, naming the cap.
-            let err = eval_bounded_path_disclosed(&edges, &nested_form(MAX_PATH_FORM_DEPTH + 1))
-                .expect_err("one level past the depth cap must be refused");
-            assert!(
-                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_DEPTH")),
-                "{:?}",
-                err
-            );
-            // Still refused well past the cap, and the ITERATIVE walk is what refuses it:
-            // the check descends no further than the first over-deep level, so its own
-            // stack use does not grow with the form.
-            assert!(
-                eval_bounded_path_disclosed(&edges, &nested_form(MAX_PATH_FORM_DEPTH + 16))
-                    .is_err()
-            );
-
-            // Exactly AT the cap: evaluates, and to the same answer the un-nested form
-            // gives — a nested Sequence of one part denotes exactly that part.
-            let got = eval_bounded_path_disclosed(&edges, &nested_form(MAX_PATH_FORM_DEPTH))
-                .expect("the deepest legal form evaluates");
             let flat = eval_bounded_path_disclosed(&edges, &nested_form(1)).unwrap();
-            assert_eq!(got.rows, flat.rows);
-            assert_eq!(got.rows.len(), 1);
+            // Exercise both single-part sequences and the right-nested p/(...)
+            // shape from a caller with the standard small thread stack.
+            for two_parts in [false, true] {
+                let mut form = PathForm::exact(nn("http://ex/p"), 1);
+                for _ in 1..(1 << 14) {
+                    form = if two_parts {
+                        PathForm::Sequence(vec![PathForm::exact(nn("http://ex/p"), 1), form])
+                    } else {
+                        PathForm::Sequence(vec![form])
+                    };
+                }
+                let got = eval_bounded_path_disclosed(&edges, &form);
+                dispose(form);
+                let got = got.expect("the deepest legal form evaluates");
+                assert_eq!(got.rows, flat.rows);
+                assert_eq!(got.rows.len(), 1);
+            }
         })
         .unwrap()
         .join()

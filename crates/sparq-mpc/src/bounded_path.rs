@@ -77,7 +77,7 @@
 //! temporary `project_endpoints` copy taken under its charge and the dedup key
 //! set can be alive together. Those temporary projection copies and dedup keys
 //! are uncharged separately, so the true peak is a small multiple of the charged
-//! row count. Final endpoint projections receive their own charge.
+//! row count. Final endpoint projections reuse the accumulator's charge.
 //!
 //! The cumulative work counter is checked as work is charged, so a single charge
 //! is refused before its rows are built, but CPU already spent on earlier charges
@@ -312,8 +312,8 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 ///   each composition step of a `Sequence` — from `projected_join_rows`, the
 ///   closed-form `Σ_k deg_L(k)·deg_R(k)` over the join keys, computed in
 ///   `O(|L| + |R|)` from the inputs;
-/// - every projection of an accumulator onto its endpoint columns, from the
-///   accumulator's own row count, which is exactly the projection's;
+/// - endpoint projections under the accumulator's existing charge, or their
+///   first charge for a single-hop result;
 /// - the reflexive diagonal, from the declared domain's size; and
 /// - the rows the repetition union KEEPS, as it keeps them.
 ///
@@ -391,18 +391,26 @@ pub const MAX_PATH_FORM_JOIN_WORK: u64 = 1 << 31; // 2_147_483_648 row-steps
 /// The cap is checked ITERATIVELY, by `check_form_shape`, over an explicit
 /// worklist: a recursive depth check would overflow on exactly the forms the cap
 /// exists to refuse. This is a stack bound, not a work bound. The ceiling is
-/// immediately below the first failing right-nested sequence depth measured on
-/// the reference release evaluator with a 2 MiB thread stack; an 8 MiB main
-/// stack admits deeper forms. Stack use depends on the build and platform.
+/// above the reference release evaluator's first failing right-nested sequence
+/// depth on both standard thread and main stacks. Evaluation uses a scoped
+/// worker with an explicit stack sized to complete the accepted depth with
+/// margin, independently of the caller's stack. Worker creation failure returns
+/// [`MpcError::Protocol`]. Stack use depends on the build and platform.
 ///
 /// What this cap does NOT cover: a [`PathForm`] is a recursive type with DERIVED
 /// `Clone`, `Debug` and `Drop`, and those walk it recursively whatever this cap
-/// says. A form nested deeply enough can therefore overflow the stack while being
-/// cloned, printed or dropped, before any evaluator sees it. Nothing in tree
+/// says. The caller retains responsibility for recursive destruction, just as
+/// for cloning and printing: the evaluator borrows the form and never drops it.
+/// A form nested deeply enough can overflow the caller's stack during those
+/// operations, before or after evaluation. Nothing in tree
 /// builds such a form — no parser constructs a `PathForm`, and the planner's own
 /// forms are shallow — so this is stated rather than guarded here; a guard would
 /// have to live in the type's own constructors.
-pub const MAX_PATH_FORM_DEPTH: usize = 2251;
+pub const MAX_PATH_FORM_DEPTH: usize = 1 << 14;
+
+// Includes margin for debug builds at the full accepted nesting depth. Only the
+// pages touched by evaluation need to be resident.
+const PATH_FORM_STACK_BYTES: usize = 256 * 1024 * 1024;
 
 /// Largest STATIC unroll work the whole [`PathForm`] may project to before
 /// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
@@ -1153,13 +1161,32 @@ impl DisclosedEdges {
 /// midpoint may additionally be a literal or blank node contributed by a
 /// zero-length arm over the declared node domain. The HIDDEN-intermediate regime
 /// is sq-py8h.2 and is NOT handled here.
+///
+/// The recursive walk runs on a scoped worker with its own explicit stack,
+/// independent of the caller's stack. Failure to create the worker is reported
+/// as [`MpcError::Protocol`]. The form remains borrowed; its recursive `Drop`,
+/// `Clone` and `Debug` operations remain the caller's responsibility.
 pub fn eval_bounded_path_disclosed(
     edges: &DisclosedEdges,
     form: &PathForm,
 ) -> Result<PartialResult, MpcError> {
     // ONE budget for the whole form, so what its parts materialise between them is
     // bounded and not only what each part's own shape caps allow.
-    eval_with_budget(edges, form, &mut PathFormBudget::new())
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .stack_size(PATH_FORM_STACK_BYTES)
+            .spawn_scoped(scope, || {
+                eval_with_budget(edges, form, &mut PathFormBudget::new())
+            })
+            .map_err(|error| {
+                MpcError::Protocol(format!(
+                    "bounded path evaluation worker creation failed: {error}"
+                ))
+            })?;
+        worker
+            .join()
+            .map_err(|_| MpcError::Protocol("bounded path evaluation worker panicked".into()))?
+    })
 }
 
 /// [`eval_bounded_path_disclosed`] with the whole-form row budget supplied by the
