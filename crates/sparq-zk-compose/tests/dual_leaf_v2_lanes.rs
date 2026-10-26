@@ -28,11 +28,9 @@
 //!
 //! # Honest scope
 //!
-//! Nothing here is a soundness or privacy claim. The V2 value lanes inherit the
-//! dual-leaf method's documented INV-VL downgrade (value↔lexical agreement on the
-//! value-FILTER lane rests on TRUSTED-ISSUER HONESTY, not machine enforcement;
-//! #769 accepted at research grade) and the whole ZK estate is NOT externally
-//! audited (gap CR-G8 / sq-qhy4).
+//! Nothing here is an external assurance claim. V2 value lanes are research-grade
+//! and not externally audited (sq-qhy4). The INV-VL issuer-honesty assumption is
+//! a V1 legacy assumption; V1 value members remain refused.
 #![cfg(feature = "dual-leaf")]
 
 use oxrdf::{Literal, NamedNode};
@@ -2376,26 +2374,15 @@ fn a_non_canonical_operand_enc_is_refused_and_names_the_field() {
     }
 }
 
-/// EVERY value-lane sub-proof is refused by the structural pre-filter — the
-/// refusal inspects no edge. It is sound to refuse them wholesale because
-/// `filter_edge_true` discharges a query FILTER only through a `filter_int` edge,
-/// so such a sub-proof would be reconstructed and verified at stage 3 while
-/// discharging nothing. Such a manifest used to be accepted.
+/// A value proof with no query-derived obligation remains refused.
 #[test]
-fn the_prefilter_rejects_every_value_lane_sub_proof() {
-    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
-        .expect("the V2 boolean builder accepts a canonical literal");
-    // The pairing itself is honest — this refusal is about the missing binding.
+fn the_prefilter_rejects_an_orphan_value_lane_sub_proof() {
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true).unwrap();
     assert_eq!(check_lane_member_pairing(&built.inputs), Ok(()));
-    let manifest = manifest_with(vec![built.inputs]);
-    match prefilter_manifest_structure(
-        &manifest,
-        &KeySet::empty(),
-        &RevocationPolicy::accept_version(1),
-    ) {
-        Err(CheckError::ValueLaneSubProofNotAccepted { proof }) => assert_eq!(proof, 0),
-        other => panic!("expected the value-lane sub-proof refusal, got {:?}", other),
-    }
+    let mut manifest = manifest_with(vec![built.inputs]);
+    manifest.query = "SELECT * WHERE { }".into();
+    assert!(matches!(prefilter_manifest_structure(&manifest, &KeySet::empty(), &RevocationPolicy::accept_version(1)),
+        Err(CheckError::ValueObligation(sparq_zk_compose::value_obligation::ObligationError::OrphanValueProof { proof: 0 }))));
 }
 
 /// `check_lane_member_pairing_for_use` is the `ProofInputs`-level form of the

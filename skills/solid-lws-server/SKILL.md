@@ -29,6 +29,7 @@ cargo run -p sparq-lws-core
 It listens on `127.0.0.1:3000` and uses `http://localhost:3000` as its public
 base URL unless configured otherwise. The default Cargo features are:
 
+- `blob-fs`, the native filesystem `BlobStore` adapter (excluded on wasm32).
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
 - `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
@@ -60,8 +61,35 @@ default-off `http3` feature and `skills/helm-deploy/SKILL.md` for Kubernetes.
 
 ## Browser clients
 
-Both protocol modes reflect the request's `Origin` with credentials enabled and
-`Vary: Origin`. Browser scripts can read `Link`, `ETag`, `Location`,
+Both protocol modes reflect any request `Origin` by default, with credentials enabled
+and `Vary: Origin`. Authentication uses the `Authorization` and `DPoP` headers;
+the server sets no cookies. This default supports browser apps served from arbitrary
+origins.
+
+Set `SOLID_SERVER_CORS_ORIGINS` to a comma-separated list of exact
+`scheme://host[:port]` origins to restrict browser access, for example
+`https://app.example,http://localhost:8080`. It is unset by default. Scheme and host
+compare after ASCII lowercasing; ports compare exactly, with no default port inferred.
+Use ASCII hostnames (punycode for internationalized names) and bracket IPv6 addresses.
+Whitespace around entries is ignored. An empty entry, `*`, or a malformed origin
+(including a path, trailing slash, user information, query, or fragment) refuses startup.
+An unlisted Origin receives no `Access-Control-Allow-*` headers, including on overload
+responses; `Vary: Origin` remains. Its admitted preflight still receives an empty `204`
+without an allow-origin header. Actual requests are served normally: CORS controls
+browser reads, while authorization controls access. Public identity-document responses
+retain `Access-Control-Allow-Origin: *` for allowed origins, without
+`Access-Control-Allow-Credentials`.
+
+Embedders can parse a list with `ldp::cors::CorsPolicy::from_origins`, then set
+`AppState::cors` (Solid) or `LwsConfig::cors` (LWS). `LwsConfig::from_env` reads the
+environment policy too. Both overload helpers preserve completed inner CORS decisions,
+including responses without CORS grants. `app::with_overload_layers(router, overload)`
+uses default reflection only for responses that did not reach an inner CORS layer
+(such as rate-limit, timeout, or body-limit rejections). Pass the router's policy to
+`app::with_overload_layers_and_cors(router, overload, policy)` to apply it to those
+responses too.
+
+Browser scripts can read `Link`, `ETag`, `Location`,
 `WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`
 (the LWS linkset preference response), alongside the existing content and discovery
 headers. The expose list is explicit, with no wildcard. Overload responses carry
@@ -106,6 +134,31 @@ Set `PSS_SPARQ_BACKEND` to one of:
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
 present the native image as a durable production data service.
+
+### Filesystem blobs in library integrations
+
+The default-on native `blob-fs` feature implements `BlobStore` for
+`store::blob_fs::FsBlobStore`, re-exported from the std-only
+[`sparq-lws-blob-fs`](../../crates/sparq-lws-blob-fs/README.md) crate. It is absent
+on wasm32 and with `--no-default-features`. Acquire the exclusive data-directory
+lock before `FsBlobStore::open(root)` and retain it through all handles and pending
+operations: open sweeps `tmp/`. The caller must control this directory.
+
+Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
+is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
+use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
+rewritten or reused, even after deletion; composite writes mint opaque keys with
+no resource IRI embedded. Existing keys fail. The filesystem must support hard
+links and directory sync. Fan-out initialization is synced on first use per open
+store and shared across clones; reopening clears that record. The standalone
+`list()` returns `Listing { blobs, foreign }`, excluding `tmp/`. Invalid names,
+misplaced keys and non-files are reported as foreign entries. The async adapter
+warns once per listing and returns the valid blobs, so foreign entries do not
+stop reconciliation. Filesystem I/O errors still propagate. Blobs report
+`Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
+under the unique-key contract. `delete_if_unchanged` returns an error without a generation
+witness. See the crate README for layout and sync semantics. The native binary
+still selects in-memory blobs; this adapter alone does not enable durable boot.
 
 The seed variables are test-only:
 
