@@ -1285,7 +1285,7 @@ fn the_exact_k_entry_refuses_public_caps_before_any_draw() {
 }
 
 /// The DECLARED-width entries of this module are reachable, and a declaration
-/// really is enforced at the entry: a term that does not fit is refused, and one
+/// enforces term fit at the output stage: a term that does not fit is refused, and one
 /// that fits runs and returns the same answer the derived default returns.
 #[test]
 fn the_declared_width_entries_refuse_an_over_width_term_and_otherwise_agree() {

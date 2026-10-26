@@ -64,8 +64,9 @@
 //! operator and never releases any, which is the half a live bound cannot cover.
 //!
 //! **What is charged** is what the unroll MATERIALISES: every join's output
-//! (from its closed form, before the join is built), every projection of an
-//! accumulator, the reflexive diagonal, and the rows the repetition union keeps.
+//! (from its closed form, before the join is built), single-hop results, the
+//! reflexive diagonal, and the rows the repetition union keeps. Endpoint
+//! projections transfer the accumulator's charge rather than charging twice.
 //! **What is not charged** is a copy of the disclosed edge relation itself: those
 //! rows are already in the caller's memory before this module is entered, so
 //! charging a hop's edge list made the budget refuse forms whose own working set
@@ -337,7 +338,8 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// Temporary `project_endpoints` copies taken under a join's charge and dedup
 /// keys are uncharged separately. They may coexist with the join output, so the
 /// true peak is a small multiple of the charged rows. Final endpoint projections
-/// receive their own charge; this is a LIVE row bound, not an allocation tally.
+/// reuse the accumulator and its charge; a single-hop result receives its first
+/// charge there. This is a LIVE row bound, not an allocation tally.
 ///
 /// Because charges are released, this budget says nothing about how much WORK a
 /// form may schedule — a million chains that each fit in it would each be
@@ -348,7 +350,7 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// here charges for the `PartialResult` clones a caller makes, a federation's own
 /// buffers, or anything downstream of the returned relation. Whole-operator
 /// resource planning is follow-up work and is named in the module docs.
-pub const MAX_PATH_FORM_ROWS: usize = 1 << 24; // 16_777_216
+pub const MAX_PATH_FORM_ROWS: usize = 1 << 26; // 67_108_864
 
 /// Largest CUMULATIVE number of endpoint row-steps one whole [`PathForm`]
 /// evaluation may charge before [`eval_bounded_path_disclosed`] refuses with an
@@ -361,7 +363,7 @@ pub const MAX_PATH_FORM_ROWS: usize = 1 << 24; // 16_777_216
 /// an unbounded amount of CPU: this module's unroll is crypto-free, so what the
 /// counter bounds is join and projection work, not protocol rounds.
 /// This budget is the one that bounds that. It sums every row charge the
-/// evaluation makes — join outputs, final endpoint projections and the reflexive
+/// evaluation makes — join outputs, single-hop results and the reflexive
 /// diagonal — and never releases any of them. Hop edge relations are uncharged.
 /// Substantial CPU can run before the cumulative ceiling refuses a later charge;
 /// it does not pre-empt work already done.
@@ -388,8 +390,10 @@ pub const MAX_PATH_FORM_JOIN_WORK: u64 = 1 << 31; // 2_147_483_648 row-steps
 ///
 /// The cap is checked ITERATIVELY, by `check_form_shape`, over an explicit
 /// worklist: a recursive depth check would overflow on exactly the forms the cap
-/// exists to refuse. A plain SPARQL property path nests a handful of levels at
-/// most; a form deeper than this is malformed for this regime, not merely unusual.
+/// exists to refuse. This is a stack bound, not a work bound. The ceiling is
+/// immediately below the first failing right-nested sequence depth measured on
+/// the reference release evaluator with a 2 MiB thread stack; an 8 MiB main
+/// stack admits deeper forms. Stack use depends on the build and platform.
 ///
 /// What this cap does NOT cover: a [`PathForm`] is a recursive type with DERIVED
 /// `Clone`, `Debug` and `Drop`, and those walk it recursively whatever this cap
@@ -398,7 +402,7 @@ pub const MAX_PATH_FORM_JOIN_WORK: u64 = 1 << 31; // 2_147_483_648 row-steps
 /// builds such a form — no parser constructs a `PathForm`, and the planner's own
 /// forms are shallow — so this is stated rather than guarded here; a guard would
 /// have to live in the type's own constructors.
-pub const MAX_PATH_FORM_DEPTH: usize = 32;
+pub const MAX_PATH_FORM_DEPTH: usize = 2251;
 
 /// Largest STATIC unroll work the whole [`PathForm`] may project to before
 /// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
@@ -423,20 +427,12 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// [`crate::oblivious_join::MAX_SLOT_WORK`], which counts modelled field
 /// elements.
 ///
-/// ## Why the value is exactly `MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS`
-///
-/// The budget is set to the most static unroll work the two per-repetition shape
-/// caps admit for ONE part. That is deliberate and load-bearing: every single
-/// repetition those two caps accept is accepted here too, so this budget refuses
-/// no form that a single-part path could run before it existed. What it binds is
-/// COMPOSITION — a `Sequence` of two parts that each sit at the per-part ceiling,
-/// or of many smaller ones, sums past it.
-///
-/// A near-cap alternation such as `(p|q){1,19}` therefore stays admitted: it
-/// projects `Σ_{ℓ=1..19} 2^ℓ = 2^20 − 2` chains of up to 19 hops, which charges
-/// `1 + (2^20 − 2) × 19` steps — inside this budget, and inside both shape caps as
-/// it was before. `(p|q){1,20}` is refused by [`MAX_UNROLL_CHAINS`], as it was
-/// before.
+/// The ceiling admits long compositions with sparse or absent predicates. A form
+/// immediately beyond it schedules an impractical amount of chain enumeration in
+/// the reference evaluator even with no disclosed predicates. The live row and
+/// cumulative join-work checks still decide forms that materialise rows earlier.
+/// `(p|q){1,19}` repeated four times is within this static budget; its actual join
+/// work depends on the disclosed relations.
 ///
 /// ## What this projection does NOT cover
 ///
@@ -446,7 +442,7 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// edge set or the domain. Those rows are charged to [`MAX_PATH_FORM_ROWS`] as
 /// they are produced, which is what bounds a `{0,k}` over a large declared
 /// domain.
-pub const MAX_PATH_FORM_WORK: u64 = MAX_UNROLL_CHAINS * (MAX_UNROLL_HOPS as u64); // 2^26 steps
+pub const MAX_PATH_FORM_WORK: u64 = 1 << 32; // 4_294_967_296 static steps
 
 // The longest the shape walk's worklist ever got, and a reset for it. Charging a
 // `Sequence`'s declared part count BEFORE its parts are pushed is only observable
@@ -1597,19 +1593,14 @@ fn eval_fixed_chain(
         acc = reduced;
     }
 
-    // Project onto `(subject, object)`, dropping any intermediate column. After the
-    // fold the accumulator is `(subject, ?__pp_edge_s)`; the single-hop case, which
-    // never entered the loop, is the same shape. The projection is one row per
-    // accumulator row, so its size is known from the accumulator and is charged
-    // BEFORE it is built. It is charged in its own right rather than from the
-    // accumulator's release, because a single-hop chain's accumulator is the
-    // uncharged edge-relation copy and this projection is the first thing that
-    // chain materialises.
+    // The accumulator already has exactly the two endpoint columns. Rename its
+    // schema in place and carry its charge to the result. Only the single-hop
+    // case needs a new charge: its accumulator is the uncharged edge copy.
     let out_charge = acc.rows.len();
-    budget.charge(out_charge)?;
-    let out = rename_far_endpoint(project_endpoints(&acc, subject, &edge_s)?, object);
-    drop(acc);
-    budget.release(acc_charge);
+    if n == 1 {
+        budget.charge(out_charge)?;
+    }
+    let out = rename_far_endpoint(acc, object);
     Ok((out, out_charge))
 }
 
@@ -1716,14 +1707,9 @@ fn eval_sequence(
         prev_end = this_end;
     }
 
-    // One output row per accumulator row, so the projection's size is known before
-    // it is built and is charged then.
-    let out_charge = acc.rows.len();
-    budget.charge(out_charge)?;
-    let out = project_endpoints(&acc, subject, object)?;
-    drop(acc);
-    budget.release(acc_charge);
-    Ok((out, out_charge))
+    // Every fold projects onto `(subject, this_end)` and the last `this_end` is
+    // `object`, so the accumulator is already the result and owns its charge.
+    Ok((acc, acc_charge))
 }
 
 /// Project a partial onto exactly `[subject, object]`, dropping every other

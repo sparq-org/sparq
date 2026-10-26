@@ -184,9 +184,9 @@
 //!
 //! - **Payload arity** — [`MAX_PAYLOAD_ARITY`]. Closed form on a public number,
 //!   ahead of everything, including the all-unbound dummy row of that arity.
-//! - **Per-term serialized byte length** — [`MAX_PAYLOAD_TERM_BYTES`], on the
-//!   width the run resolves to, whether the caller declared it or it was derived
-//!   from the run's own terms.
+//! - **Declared per-term serialized byte length** — [`MAX_PAYLOAD_TERM_BYTES`], on the
+//!   caller's declaration. Derived terms have no separate per-term ceiling;
+//!   the packed-row and aggregate-work budgets decide.
 //! - **Uniform packed limb width** — [`MAX_SLOT_LIMBS`], on the width that every
 //!   slot pays a sharing, a select, a degree reduction and an open per limb for.
 //! - **Aggregate slot work `B × (1 + limbs) × n × (2t + 1)`** —
@@ -369,24 +369,17 @@ pub const MAX_OUTPUT_BOUND: usize = 1 << 18; // 262_144
 /// `usize::MAX` a controlled refusal instead of a `vec![None; usize::MAX]` the
 /// allocator cannot satisfy.
 ///
-/// A protocol guard, not a tuning knob: the in-tree producers of candidates for
-/// this stage emit two payload columns (the endpoint pair), and a result row
-/// dozens of columns wide is already past what this stage is built to run.
-pub const MAX_PAYLOAD_ARITY: usize = 1 << 10; // 1_024
+/// The ceiling leaves ordinary schemas to the packed-width and aggregate-work
+/// checks. Materialising a schema beyond it requires an impractical working set
+/// in the reference implementation.
+pub const MAX_PAYLOAD_ARITY: usize = 1 << 30; // 1_073_741_824
 
-/// Largest per-term byte width one run may be padded to, whether a caller
-/// DECLARED it or it was DERIVED from the run's own terms.
+/// Largest per-term byte width a caller may DECLARE for one run.
 ///
-/// A payload term is carried through the shuffle as its canonical N-Triples form
-/// (see `encode_payload_row`), and every slot is padded to the run's uniform
-/// width, so the per-term width is what fixes the packed limb width of every slot.
-/// Each limb of each slot pays a sharing, a select multiplication, a degree
-/// reduction and an open, so the width is a cost commitment and is bounded here.
-///
-/// The ceiling is 16 MiB of serialized bytes per term. A term above 1 MiB is
-/// accepted when its row fits this ceiling and the limb and work budgets.
-/// [`MAX_SLOT_LIMBS`] and [`MAX_SLOT_WORK`] independently bound the packed row
-/// and its product with the padded bound and party count.
+/// Derived mode has no separate per-term ceiling: it uses the longest serialized
+/// ROW, with [`MAX_SLOT_LIMBS`] and [`MAX_SLOT_WORK`] bounding its packed width
+/// and aggregate cost. The transport independently limits each frame to 64 MiB.
+/// A declared run also refuses a term exceeding its own declaration at output.
 pub const MAX_PAYLOAD_TERM_BYTES: usize = 1 << 24; // 16 MiB per term
 
 /// Maximum uniform packed limb width (limbs per slot) the oblivious output stage
@@ -399,7 +392,7 @@ pub const MAX_PAYLOAD_TERM_BYTES: usize = 1 << 24; // 16 MiB per term
 /// position in the shuffle network's entry width and one degree-`t` open — so the
 /// width is the per-slot work multiplier and is bounded on its own, not only
 /// through the arity and per-term widths it follows from.
-pub const MAX_SLOT_LIMBS: usize = 1 << 24; // 16_777_216
+pub const MAX_SLOT_LIMBS: usize = 1 << 29; // 536_870_912
 
 /// Maximum compute-party count the output stage's work budget accepts.
 ///
@@ -408,7 +401,7 @@ pub const MAX_SLOT_LIMBS: usize = 1 << 24; // 16_777_216
 /// count multiplies the work twice over. It is a public plan parameter of the
 /// backend, checked in closed form. This bounds THIS stage's budget; it is not a
 /// crate-wide limit on how many parties a `ShamirBackend` may have.
-pub const MAX_OUTPUT_PARTIES: usize = 1 << 10; // 1_024
+pub const MAX_OUTPUT_PARTIES: usize = 1 << 12; // 4_096
 
 /// Maximum aggregate slot work the oblivious output stage accepts before refusing
 /// with an [`MpcError::Protocol`] error, counted in MODELLED FIELD ELEMENTS.
@@ -479,8 +472,8 @@ pub const MAX_SLOT_WORK: u64 = 1 << 32; // 4_294_967_296 modelled field elements
 ///
 ///   Because the width is data-derived, it is resolved at the STAGE, over the rows
 ///   the stage packs — not at the upstream operator's entry, which has no rows yet.
-///   So in the default mode the width's own caps (the per-term ceiling, the uniform
-///   limb count and the aggregate slot work) fire at the stage, AFTER the upstream
+///   So in the default mode the uniform limb count and aggregate slot-work caps
+///   fire at the stage, AFTER the upstream
 ///   operator has drawn its own randomness. That is the draw schedule this crate
 ///   has always had. An operator entry runs the PUBLIC caps only
 ///   (`check_output_entry_caps`); guessing a data-dependent width from the inputs'
@@ -494,8 +487,8 @@ pub const MAX_SLOT_WORK: u64 = 1 << 32; // 4_294_967_296 modelled field elements
 /// So the default keeps this crate's behaviour and its residual; the declared path
 /// is the stronger option and is opt-in.
 ///
-/// Both modes are checked against the same caps ([`MAX_PAYLOAD_ARITY`],
-/// [`MAX_PAYLOAD_TERM_BYTES`], [`MAX_SLOT_LIMBS`]) and the same aggregate work
+/// Both modes check [`MAX_PAYLOAD_ARITY`] and [`MAX_SLOT_LIMBS`]; declared mode
+/// also checks [`MAX_PAYLOAD_TERM_BYTES`]. Both use the same aggregate work
 /// budget ([`MAX_SLOT_WORK`]) once the width is known: at the output stage in
 /// derived mode, or at the operator entry in declared mode. Only the declared
 /// width is a closed form of public plan numbers alone.
@@ -689,11 +682,10 @@ impl SlotWidths {
         self.row_bytes.map(limb_count_for)
     }
 
-    /// Check the resolved widths against [`MAX_PAYLOAD_ARITY`],
-    /// [`MAX_PAYLOAD_TERM_BYTES`] and [`MAX_SLOT_LIMBS`].
+    /// Check arity and packed width, and the per-term ceiling in declared mode.
     pub(crate) fn check_shape(&self) -> Result<(), MpcError> {
         check_payload_arity_cap(self.arity)?;
-        if self.term_bytes > MAX_PAYLOAD_TERM_BYTES {
+        if self.declared && self.term_bytes > MAX_PAYLOAD_TERM_BYTES {
             return Err(MpcError::Protocol(format!(
                 "oblivious output stage: per-term payload width {} bytes exceeds the \
                  MAX_PAYLOAD_TERM_BYTES cap of {} — refusing before any sharing (the \
@@ -4385,10 +4377,10 @@ mod tests {
     #[test]
     fn the_width_caps_are_pinned_by_value() {
         assert_eq!(MAX_OUTPUT_BOUND, 1 << 18);
-        assert_eq!(MAX_PAYLOAD_ARITY, 1 << 10);
+        assert_eq!(MAX_PAYLOAD_ARITY, 1 << 30);
         assert_eq!(MAX_PAYLOAD_TERM_BYTES, 1 << 24);
-        assert_eq!(MAX_SLOT_LIMBS, 1 << 24);
-        assert_eq!(MAX_OUTPUT_PARTIES, 1 << 10);
+        assert_eq!(MAX_SLOT_LIMBS, 1 << 29);
+        assert_eq!(MAX_OUTPUT_PARTIES, 1 << 12);
         assert_eq!(MAX_SLOT_WORK, 1 << 32);
     }
 
@@ -4474,11 +4466,12 @@ mod tests {
             assert!(oblivious_set_output(&backend, &[], arity, 1).is_err());
         }
 
-        // AT the cap the stage still runs: one all-unbound row of the widest legal
-        // arity, revealed at B = 1.
-        let cands = public_candidates(&[(true, vec![None; MAX_PAYLOAD_ARITY])]);
-        let (slots, cost) = oblivious_set_output(&backend, &cands, MAX_PAYLOAD_ARITY, 1)
-            .expect("the widest legal arity runs");
+        // A wide ordinary schema still runs; the cap boundary is checked above
+        // without materialising a cap-sized row.
+        let arity = 1025;
+        let cands = public_candidates(&[(true, vec![None; arity])]);
+        let (slots, cost) =
+            oblivious_set_output(&backend, &cands, arity, 1).expect("an ordinary wide schema runs");
         assert_eq!(slots.len(), 1);
         assert!(cost.payload_select_mults > 0);
     }
@@ -4823,7 +4816,8 @@ mod tests {
         // Arity: at the cap the declaration is legal only if its limb width also
         // fits, so pair the ceiling arity with a narrow term; one past it is
         // refused on the arity, whatever the term width.
-        assert!(shape(MAX_PAYLOAD_ARITY, 16).is_ok());
+        assert!(check_payload_arity_cap(MAX_PAYLOAD_ARITY).is_ok());
+        names(shape(MAX_PAYLOAD_ARITY, 16), "MAX_SLOT_LIMBS");
         names(shape(MAX_PAYLOAD_ARITY + 1, 16), "MAX_PAYLOAD_ARITY");
         names(shape(usize::MAX, 1), "MAX_PAYLOAD_ARITY");
 
@@ -4837,7 +4831,7 @@ mod tests {
         // Uniform limb width: both factors inside their own caps, their row past
         // MAX_SLOT_LIMBS.
         let widest_fitting = PayloadWidths {
-            arity: 8,
+            arity: 256,
             term_bytes: Some(MAX_PAYLOAD_TERM_BYTES),
         };
         assert!(
@@ -4852,7 +4846,7 @@ mod tests {
                 > MAX_SLOT_LIMBS,
             "the fixture must really exceed the limb cap"
         );
-        names(shape(8, MAX_PAYLOAD_TERM_BYTES), "MAX_SLOT_LIMBS");
+        names(shape(256, MAX_PAYLOAD_TERM_BYTES), "MAX_SLOT_LIMBS");
 
         // And an overflowing row width refuses rather than wrapping under a cap.
         names(
@@ -4870,6 +4864,27 @@ mod tests {
             "the row width must overflow rather than wrap"
         );
         names(over.check_shape(), "MAX_PAYLOAD_TERM_BYTES");
+    }
+
+    /// Derived widths leave term size to the packed-row and work budgets.
+    #[test]
+    fn derived_terms_above_the_declaration_ceiling_fit_the_row_budget() {
+        let width = MAX_PAYLOAD_TERM_BYTES * 2;
+        let derived = SlotWidths {
+            arity: 1,
+            term_bytes: width,
+            row_bytes: Some(width + 2),
+            declared: false,
+        };
+        derived.check_shape().expect("the derived row fits");
+        check_slot_work_budget(1, derived.limb_capacity().unwrap(), 3, 1)
+            .expect("the derived work fits");
+        assert!(SlotWidths {
+            declared: true,
+            ..derived
+        }
+        .check_shape()
+        .is_err());
     }
 
     /// The declaration's own per-term ceiling: a width past
