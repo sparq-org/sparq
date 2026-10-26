@@ -3639,9 +3639,12 @@ async fn patch<S: Store + 'static>(
     // A patch reads what it patches: whether it applies, and what it makes, depend on the content
     // (a member there or not, the document's shape, format and size). So it needs Read as well as
     // Modify, checked before anything about the resource answers it.
-    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
-        return r;
-    }
+    let authorization_meta = match access::allowed_with_meta(state, Action::Read, uri, agent).await
+    {
+        Ok((true, meta)) => meta,
+        Ok((false, _)) => return state.deny(agent),
+        Err(e) => return store_error(e),
+    };
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -3698,10 +3701,19 @@ async fn patch<S: Store + 'static>(
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
-    let rmeta = state.resource_meta(uri).await.unwrap_or(ResourceMeta {
-        pending: true,
-        ..ResourceMeta::default()
-    });
+    let rmeta = match authorization_meta {
+        Some(meta) => meta,
+        // Open mode permits every reader without consulting metadata. Preserve the unknown
+        // sentinel in the snapshot rather than issue a lookup that cannot affect access.
+        None if state.cfg.open => ResourceMeta {
+            pending: true,
+            ..ResourceMeta::default()
+        },
+        None => state.resource_meta(uri).await.unwrap_or(ResourceMeta {
+            pending: true,
+            ..ResourceMeta::default()
+        }),
+    };
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.

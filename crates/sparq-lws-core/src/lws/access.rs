@@ -658,11 +658,25 @@ pub async fn allowed<S: Store + 'static>(
     uri: &str,
     agent: &Agent,
 ) -> Result<bool, ServerError> {
+    allowed_with_meta(state, action, uri, agent)
+        .await
+        .map(|(allowed, _)| allowed)
+}
+
+/// The same decision, retaining the metadata already read for authorization. Owner/open-mode
+/// decisions need no metadata and return `None`; the caller must not invent resource metadata.
+pub(crate) async fn allowed_with_meta<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<(bool, Option<ResourceMeta>), ServerError> {
     if state.cfg.open || is_owner(state, agent) {
-        return Ok(true);
+        return Ok((true, None));
     }
     let meta = state.resource_meta(uri).await?;
-    decide(state, action, uri, agent, &meta, None).await
+    let allowed = decide(state, action, uri, agent, &meta, None).await?;
+    Ok((allowed, Some(meta)))
 }
 
 /// Whether `agent` may learn that the set-aside resource at `uri` is set aside: never whether it

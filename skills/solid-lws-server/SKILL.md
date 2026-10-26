@@ -809,6 +809,11 @@ What the server exposes, all discoverable from the storage description
   admission and delivery run on the notification task (`Notifier::send`). A recursive delete
   passes its committed changes to one task with one shared delivery bound. The response never
   awaits that task. Scheduling may still run it before the response reaches the client.
+  Pending notifications retain their order within one batch. Separate commits use independent
+  tasks and have no cross-commit delivery-order guarantee; stream cursors follow publication
+  order. Content-only PATCH reuses the metadata read by its locked Read authorization check;
+  open mode needs no LWS metadata lookup because every subscriber may read. A closed-mode owner
+  check supplies no metadata and retains one snapshot read before writing for other readers.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`

@@ -420,3 +420,114 @@ async fn quarantined_deletions_use_the_requesting_principal_s_places() {
     store.fail_fence.store(false, Ordering::SeqCst);
     gate.add_permits(crate::lws::records::MAX_SETTLING_PER_PRINCIPAL);
 }
+
+#[tokio::test]
+async fn content_only_patch_reuses_authorization_metadata() {
+    async fn work(
+        n: usize,
+        denied: bool,
+        mode: &str,
+    ) -> (crate::store::counting::CounterSnapshot, Vec<String>) {
+        use tower::ServiceExt;
+        let store = test_store::FlakyStore::new();
+        let mut cfg = crate::lws::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some(test_store::OWNER.into());
+        cfg.allow_insecure_fetch = true;
+        cfg.open = mode == "open";
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
+        let topic = test_store::data(&state, "r").await;
+        let writer = if mode == "owner" {
+            test_store::OWNER
+        } else {
+            "https://writer.example/"
+        };
+        state
+            .store
+            .write(
+                &topic,
+                Bytes::from_static(br#"{"value":0}"#),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        state
+            .put_resource_meta(
+                &topic,
+                &crate::lws::ResourceMeta {
+                    creator: Some(writer.into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        test_store::grant_read(&state, "https://reader.example/", &[&topic]).await;
+        run_ready().await;
+        for i in 0..n {
+            let mut sub = sub_until(i64::MAX);
+            sub.id = format!("s{i:04}");
+            sub.subscriber = Some(if denied {
+                format!("https://p{i}.example/")
+            } else {
+                "https://reader.example/".into()
+            });
+            sub.topics = vec![topic.clone()];
+            state
+                .notify
+                .subs
+                .write()
+                .unwrap()
+                .insert(sub.id.clone(), sub);
+        }
+        *state.notify.selection_gate.lock().unwrap() =
+            Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        let token = crate::lws::tokens::mint(
+            &state.cfg,
+            writer,
+            "https://app.example/",
+            &state.cfg.realm(),
+        );
+        let request = axum::http::Request::builder()
+            .method("PATCH")
+            .uri("/r")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", crate::lws::JSON_PATCH)
+            .body(axum::body::Body::from(
+                r#"[{"op":"replace","path":"/value","value":1}]"#,
+            ))
+            .unwrap();
+        *store.trace.lock().unwrap() = Some(Vec::new());
+        let scope = store.counters.measure();
+        let response = axum::Router::new()
+            .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+            .with_state(state.clone())
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let counts = scope.delta();
+        let trace = store.trace.lock().unwrap().take().unwrap();
+        let meta_reads = trace
+            .iter()
+            .filter(|line| **line == format!("read {topic}.meta"))
+            .count();
+        assert_eq!(
+            meta_reads,
+            match mode {
+                "open" => 0,
+                "owner" => 1,
+                _ => 4,
+            },
+            "PATCH must not duplicate its authorization metadata read: {trace:?}"
+        );
+        assert_eq!(
+            store.read(&topic).await.unwrap().body,
+            Bytes::from_static(br#"{"value":1}"#)
+        );
+        (counts, trace)
+    }
+    for mode in ["creator", "owner", "open"] {
+        let empty = work(0, false, mode).await;
+        assert_eq!(empty, work(500, false, mode).await);
+        assert_eq!(empty, work(500, true, mode).await);
+    }
+}

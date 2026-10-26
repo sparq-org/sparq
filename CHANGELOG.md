@@ -820,6 +820,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- LWS content-only PATCH retains metadata from its Read authorization check for
+  notification capture and skips unnecessary LWS metadata lookups in open mode.
+
 - LWS quarantined access requests no longer take places from live requests; held-back and
   quarantined subscriptions count only against the owner's total. Record settlements reserve
   places per principal as well as against the shared bound.
