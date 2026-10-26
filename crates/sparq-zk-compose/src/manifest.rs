@@ -2709,11 +2709,14 @@ impl ProofManifest {
     /// deterministic in edge order WITHOUT mutating `self`: two manifests that
     /// differ only in edge order produce byte-identical JSON (and thus the same
     /// hash over those bytes).
+    ///
+    /// # Errors
+    /// Returns an error if a public field contains an uncompiled V2 circuit id.
     // sq-y2wy: canonicalise edge order before serialisation.
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
         let mut canonical = self.clone();
         canonical.canonicalize();
-        serde_json::to_string_pretty(&canonical).expect("manifest is serializable")
+        serde_json::to_string_pretty(&canonical)
     }
 
     pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
@@ -2778,12 +2781,15 @@ impl FragmentManifest {
 
     /// Serialise to pretty JSON (the embedded manifest is canonicalised via
     /// [`ProofManifest::to_json`]'s edge-ordering discipline on serialise).
-    pub fn to_json(&self) -> String {
+    ///
+    /// # Errors
+    /// Returns an error if the embedded manifest contains an uncompiled V2 circuit id.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
         // Canonicalise the embedded manifest's edge vectors, mirroring
         // `ProofManifest::to_json`, without mutating `self`.
         let mut canonical = self.clone();
         canonical.manifest.canonicalize();
-        serde_json::to_string_pretty(&canonical).expect("fragment manifest is serializable")
+        serde_json::to_string_pretty(&canonical)
     }
 
     pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
@@ -2946,7 +2952,7 @@ mod holder_binding_tests {
             fully_hidden_revocation: None,
         };
 
-        let json = manifest.to_json();
+        let json = manifest.to_json().unwrap();
         let back = ProofManifest::from_json(&json).expect("manifest round-trips");
         assert_eq!(back, manifest, "manifest with holder binding round-trips");
 
@@ -3330,8 +3336,8 @@ mod canonical_edge_tests {
         let m_x = manifest_with_edges(binding_x, joins_x);
         let m_y = manifest_with_edges(binding_y, joins_y);
 
-        let json_x = m_x.to_json();
-        let json_y = m_y.to_json();
+        let json_x = m_x.to_json().unwrap();
+        let json_y = m_y.to_json().unwrap();
         assert_eq!(json_x, json_y, "edge-order-only difference => identical canonical JSON");
 
         // to_json does NOT mutate self (canonicalises a clone): the in-memory
@@ -3523,7 +3529,7 @@ mod path_schema_tests {
             }],
         );
         assert_eq!(fm.r#type, "urn:sparq:zk:FragmentManifest");
-        let json = fm.to_json();
+        let json = fm.to_json().unwrap();
         let back = FragmentManifest::from_json(&json).expect("fragment manifest round-trips");
         assert_eq!(back, fm);
         assert_eq!(back.manifest, manifest);

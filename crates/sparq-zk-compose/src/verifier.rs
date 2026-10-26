@@ -5812,10 +5812,8 @@ enum MethodStage {
 #[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubProofMethod {
-    /// ONE authenticated method, agreed by every commitment the sub-proof binds.
+    /// One agreed method, or string-canonical for explicitly all-Unbound attestations.
     One(sparq_zk::commit::CommitmentMethod),
-    /// Every bound commitment authenticated NO method (all `Unbound`).
-    NoneAttested,
     /// At least one bound commitment is hidden-only, so its method is still a
     /// candidate at this stage.
     Deferred,
@@ -6063,13 +6061,14 @@ fn fold_bound_methods(
     }
     match seen.expect("a non-empty bound set always sets `seen`") {
         AuthenticatedMethod::Bound(m) => Ok(SubProofMethod::One(m)),
-        AuthenticatedMethod::Unbound => Ok(SubProofMethod::NoneAttested),
+        AuthenticatedMethod::Unbound => Ok(SubProofMethod::One(
+            sparq_zk::commit::CommitmentMethod::StringCanonicalV1,
+        )),
     }
 }
 
 /// The member to select when the dispatch matrix has NO method input — a
-/// sub-proof bound to no committed graph, or one whose bound commitments all
-/// authenticated no method.
+/// sub-proof bound to no committed graph.
 ///
 /// `id` is admitted only where the matrix's answer does not DEPEND on the method:
 /// it must be legal under every method some [`MethodPolicy`] admits
@@ -6124,24 +6123,14 @@ fn method_independent_member(
 /// declared one, so a resolver that rewrote an id would be refused there, and
 /// making rewriting work would mean revisiting both sites.
 ///
-/// # The rule when no method was attested
-/// [`SubProofMethod::NoneAttested`] — every bound commitment carried an explicit
-/// `AuthenticatedMethod::Unbound` entry — has no method to resolve against: the
-/// matrix takes a [`sparq_zk::commit::CommitmentMethod`] and `Unbound` is the
-/// explicit ABSENCE of one. In particular the member is NOT resolved against
-/// `StringCanonicalV1`, which would be substituting a method no issuer attested.
-///
-/// It does not echo the declared member either. Hardening: it is held to the SAME
-/// method-independence rule as an orphan (below), so the only member admitted is
-/// one whose legality no admissible method could have changed. Echoing let a
-/// sub-proof over method-unattested commitments pick any member the id named.
-/// A MIXED set — some bound, some not — is refused by [`fold_bound_methods`]
-/// rather than resolved either way, and a commitment with NO map entry is refused
-/// outright as [`CheckError::SubProofCommitmentNotAuthenticated`].
-///
-/// Under the default [`MethodPolicy`] an unbound attestation is already refused at
-/// stage 2d, so this arm is reachable only under the written-down
-/// [`MethodPolicy::admit_unbound`] downgrade.
+/// # Explicitly method-unbound attestations
+/// When every bound commitment authenticated as `AuthenticatedMethod::Unbound`,
+/// resolve as `StringCanonicalV1`, matching the pattern encoder's legacy reading.
+/// This is reachable only under the explicit [`MethodPolicy::admit_unbound`]
+/// downgrade: opaque scan/join members remain legal, while V2 members are refused.
+/// A mixture of bound and unbound attestations is refused by [`fold_bound_methods`];
+/// a commitment with no map entry is refused as
+/// [`CheckError::SubProofCommitmentNotAuthenticated`].
 ///
 /// # The rule for an ORPHAN sub-proof
 /// A sub-proof bound to NO committed graph has no method to resolve against. It
@@ -6191,18 +6180,11 @@ fn resolve_member_for_sub_proof(
     let bound = bound_commitments(manifest, proof, joins);
     match fold_bound_methods(&label, &bound, methods, hidden_only, stage)? {
         SubProofMethod::Deferred => Ok(None),
-        // No method was attested, and no commitment was bound: NEITHER gives the
-        // matrix an input, so both are held to the same method-independence rule.
+        // An orphan supplies no method input to the matrix.
         SubProofMethod::NoCommitment => {
             method_independent_member(&label, id, "it is bound to no committed graph")
                 .map(Some)
         }
-        SubProofMethod::NoneAttested => method_independent_member(
-            &label,
-            id,
-            "every commitment it is bound to authenticated no commitment method",
-        )
-        .map(Some),
         SubProofMethod::One(method) => {
             let resolved = crate::dispatch::resolve_circuit(method, id).map_err(|_| {
                 CheckError::MemberNotLegalForMethod {
@@ -16664,20 +16646,10 @@ mod member_from_authenticated_method_tests {
         );
     }
 
-    /// Every bound commitment explicitly `Unbound`: the declared member is NOT
-    /// echoed back. It is held to the METHOD-INDEPENDENCE rule, exactly as an
-    /// edge-less sub-proof is — a member legal under every admissible method is
-    /// the only one a relying party can select without knowing the method.
-    ///
-    /// Both arms are pinned on the same manifest shape. The VALUE-LANE member is
-    /// the probe that tells the readings apart: echoing it back would admit it,
-    /// and the rule refuses it. The STRING-LANE member shows the rule is not a
-    /// blanket refusal.
-    ///
-    /// A commitment ABSENT from the map is a different case again: nothing was
-    /// authenticated for it, so it is refused by name before any fold.
+    /// Explicitly unbound attestations use the string-canonical downgrade;
+    /// missing attestations remain a separate refusal.
     #[test]
-    fn an_unattested_sub_proof_is_held_to_the_method_independence_rule() {
+    fn an_unbound_sub_proof_resolves_as_string_canonical() {
         let c = fhx("0x64");
         let edge = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         let mut value = manifest_of(vec![scan_over(vec![c.clone()]), filter_value_dl()]);
@@ -16696,17 +16668,29 @@ mod member_from_authenticated_method_tests {
         assert!(
             matches!(
                 resolve(&value, 1, &map_of(&[(&c, Some(UNBOUND))])),
-                Err(CheckError::SubProofMethodUnresolved { .. })
+                Err(CheckError::MemberNotLegalForMethod { .. })
             ),
-            "an all-Unbound value-lane member is not method-independent, so it \
-             must be refused rather than echoed back"
+            "an all-Unbound value-lane member is refused under string-canonical"
         );
         assert_eq!(
             resolve(&string_lane, 1, &map_of(&[(&c, Some(UNBOUND))]))
                 .expect("a method-independent member resolves"),
             Some(CircuitId::FilterInt { d: 1 }),
-            "an all-Unbound member legal under every admissible method resolves"
+            "an all-Unbound string-lane member resolves"
         );
+        let methods = map_of(&[(&c, Some(UNBOUND))]);
+        assert_eq!(resolve(&string_lane, 0, &methods).unwrap(),
+            Some(CircuitId::Scan { k: 1, n: 16, r: 4 }));
+        let joined = join_manifest_of(&c, &c, (&c, &c));
+        assert_eq!(resolve(&joined, 2, &methods).unwrap(),
+            Some(CircuitId::JoinEq { n_a: 16, n_b: 16 }));
+        let mut v2 = scan_over(vec![c.clone()]);
+        if let ProofInputs::Scan { id, .. } = &mut v2 {
+            *id = CircuitId::scan_v2_dl(1, 16, 4).unwrap();
+        }
+        assert!(matches!(resolve(&manifest_of(vec![v2]), 0, &methods),
+            Err(CheckError::MemberNotLegalForMethod { .. })),
+            "Unbound attestations cannot select V2 members");
         assert!(
             matches!(
                 resolve(&value, 1, &map_of(&[(&c, None)])),
@@ -16863,6 +16847,16 @@ mod member_from_authenticated_method_tests {
             *id = CircuitId::ScanV2Dl { k: 2, n: 16, r: 4 };
         }
         assert_eq!(derive_id(&invalid), None, "uncompiled V2 scan must not derive an id");
+        let mut too_many_rows = scan.clone();
+        if let ProofInputs::Scan { rows, .. } = &mut too_many_rows {
+            rows.resize(5, [fhx("0x0"), fhx("0x0"), fhx("0x0")]);
+        }
+        assert_eq!(derive_id(&too_many_rows), None, "five public rows exceed V2 capacity");
+        let mut too_large_count = scan.clone();
+        if let ProofInputs::Scan { row_count, .. } = &mut too_large_count {
+            *row_count = 5;
+        }
+        assert_eq!(derive_id(&too_large_count), None, "row_count five exceeds V2 capacity");
         if let ProofInputs::Scan { commitments, .. } = &mut scan {
             commitments.push(fhx("0xc8"));
         }

@@ -59,6 +59,9 @@ fn exactly_the_two_v2_variants_name_the_v2_members() {
         let json = serde_json::to_string(id).unwrap();
         assert_eq!(serde_json::from_str::<CircuitId>(&json).unwrap(), *id);
     }
+    for alias in ["scan_v2dl_k01_n16_r4", "scan_v2dl_k1_x16_r4", "join_eq_v2dl_na016_nb16"] {
+        assert!(alias.parse::<CircuitId>().is_err(), "noncanonical alias {alias} must be refused");
+    }
     let mut names = Vec::new();
     for k in 0..6 {
         for n in [0, 8, 16, 32, 64] {

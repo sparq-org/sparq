@@ -1458,9 +1458,9 @@ fn hidden_only_endpoint_manifest() -> (ProofManifest, KeySet) {
 /// is a mixture, and the loop would refuse it on the spot
 /// (`SubProofMethodUnresolved` on `sub_proofs[0]`) — reporting a method refusal
 /// BEFORE the hidden-issuer gate has byte-bound any proof to that candidate. With
-/// the deferral in place that join has no method verdict yet. The structural
-/// pass instead refuses graph B's separate, method-unbound opaque scan at
-/// `sub_proofs[2]`: its member is no longer legal under every admissible method.
+/// the deferral in place the loop reports no method verdict at all and the
+/// manifest proceeds, failing instead on the toolchain this fixture does not
+/// have.
 ///
 /// That the deferred verdict DOES arrive, after the hidden-issuer gate, needs a
 /// real `scan_k2` proof and a real hidden-issuer proof, so it is pinned by the
@@ -1470,11 +1470,11 @@ fn hidden_only_endpoint_manifest() -> (ProofManifest, KeySet) {
 fn a_hidden_only_commitments_candidate_method_is_not_read_in_the_loop() {
     let (m, k) = hidden_only_endpoint_manifest();
     match run_verify(&m, &k) {
-        Err(CheckError::SubProofMethodUnresolved { proof, .. }) => assert_eq!(
-            proof, "sub_proofs[2]",
-            "the hidden-only join at sub_proofs[0] must defer; only the separate \
-             method-unbound opaque scan may be refused in this pass"
+        Err(CheckError::Driver(_)) => {}
+        Err(CheckError::SubProofMethodUnresolved { proof, .. }) => panic!(
+            "the loop must DEFER a hidden-only commitment's candidate method, not \
+             refuse {proof} on it before the hidden-issuer gate has run"
         ),
-        other => panic!("expected the join to defer and the unbound scan to refuse, got {other:?}"),
+        other => panic!("expected the loop to defer and proceed, got {other:?}"),
     }
 }

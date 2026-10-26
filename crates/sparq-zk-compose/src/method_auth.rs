@@ -91,7 +91,8 @@ pub enum AuthenticatedMethod {
 
 impl AuthenticatedMethod {
     /// The attested method, or `None` for [`Self::Unbound`]. The `None` means
-    /// "no method was attested" — a caller must not substitute a default.
+    /// "no method was attested"; only the explicit [`MethodPolicy::admit_unbound`]
+    /// downgrade permits the verifier's string-canonical legacy reading.
     pub fn method(self) -> Option<CommitmentMethod> {
         match self {
             AuthenticatedMethod::Bound(m) => Some(m),
@@ -185,8 +186,11 @@ impl MethodPolicy {
     /// It is a DOWNGRADE, and the weaker of the two settings: an unbound
     /// attestation covers the commitment, the salt and the status reference but
     /// attests NO commitment method, so nothing authenticates which leaf shape
-    /// the graph was committed under. `Unbound` is still never read AS a method;
-    /// this only decides whether its explicit absence is tolerated.
+    /// the graph was committed under. Under this downgrade, an unbound-signed
+    /// commitment is read as string-canonical for pattern encoding and member
+    /// resolution. A V2 commitment signed with an unbound message therefore
+    /// cannot use V2 members and is refused. Mixed Unbound + Bound sub-proofs
+    /// remain refused.
     #[must_use]
     pub fn admit_unbound(mut self) -> Self {
         self.accept_unbound = true;

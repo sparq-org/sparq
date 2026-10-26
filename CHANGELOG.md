@@ -11,9 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **sparq-zk-compose (`dual-leaf`):** complete dispatch coverage for the V2 component-witnessed
   scan `(1,16,4)` and join `(16,16)` members with dedicated `CircuitId` variants.
-  V2 ids are legal only under `DualLeafV2`; opaque scan/join ids are refused under V2.
-  Checked constructors, serde, package-name parsing and the fallible `CircuitId::package()`
-  refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
+  V2 ids are legal only under `DualLeafV2`. Checked constructors, serde and package-name
+  parsing refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
   Extended-fragment and value-FILTER refusals remain closed. Experimental and unaudited.
 
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
@@ -163,6 +162,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking — sparq-zk-compose:** `CircuitId::package()` now returns
+  `Result<String, CircuitIdError>`. `ProofManifest::to_json()` and
+  `FragmentManifest::to_json()` now return `Result<String, serde_json::Error>`;
+  hand-built uncompiled V2 ids return an error instead of panicking.
+  With `dual-leaf`, opaque scan/join ids are refused under `DualLeafV2`;
+  use the dedicated V2 component-witnessed ids instead.
+- **sparq-zk-compose (`dual-leaf`):** restore the explicit `admit_unbound()` downgrade:
+  all-Unbound sub-proofs resolve as `StringCanonicalV1`, matching pattern encoding.
+  Opaque scans/joins remain legal; mixed Unbound + Bound sub-proofs remain refused.
+  Residual: a V2 commitment signed with an unbound message is read as string-canonical
+  and cannot use V2 members (fail-closed). Orphan sub-proofs still require
+  method-independent members.
+
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
   that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
@@ -182,14 +194,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ABSENT from the authenticated map, so nothing was authenticated for it at all),
   `CheckError::AuxiliaryMemberIdInSubProof` (a manifest sub-proof declares an id that belongs to
   one of the auxiliary bb roles below) and `CheckError::MemberNotForFixedRole`. Absence from the
-  authenticated map is NOT read as `Unbound`: it is refused by name. A sub-proof all of whose
-  bound commitments authenticated no method has no method to resolve against, so its declared
-  member is NOT echoed back either — it is held to the same method-independence rule as a
-  sub-proof bound to no commitment at all (legal under every admissible method, where
-  `MethodPolicy::widest_admissible()` names that set), which refuses a value-lane member and
-  admits a string-lane one. Under the default `MethodPolicy` an unbound attestation is refused
-  upstream, so that case is reachable only under the written-down `admit_unbound()` downgrade. A
-  sub-proof bound to a commitment covered only by a hidden-issuer
+  authenticated map is NOT read as `Unbound`: it is refused by name. Under the explicit
+  `admit_unbound()` downgrade, a sub-proof all of whose
+  bound commitments authenticate as Unbound resolves as `StringCanonicalV1`:
+  opaque scan/join members remain legal and V2 members are refused. A V2 commitment
+  signed with an unbound message cannot use V2 members. Under the default policy,
+  unbound attestations are refused upstream. Orphan sub-proofs alone require
+  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —

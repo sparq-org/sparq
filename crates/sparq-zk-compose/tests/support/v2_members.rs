@@ -183,11 +183,18 @@ fn uncompiled_v2_shapes_are_refused_through_verify_manifest() {
     for join in [false, true] {
         let (mut m, _) = fixture(true, join);
         assert!(matches!(check(&m, "v2_shape_control"), Err(CheckError::MissingProof { .. })));
+        assert!(m.to_json().is_ok(), "compiled V2 manifest serializes");
         let index = if join { 2 } else { 0 };
         match &mut m.sub_proofs[index].inputs {
             ProofInputs::Scan { id, .. } => *id = CircuitId::ScanV2Dl { k: 2, n: 16, r: 4 },
             ProofInputs::JoinEq { id, .. } => *id = CircuitId::JoinEqV2Dl { n_a: 8, n_b: 16 },
             _ => unreachable!(),
+        }
+        assert!(m.to_json().unwrap_err().to_string().contains("UncompiledV2Member"));
+        #[cfg(feature = "extended-fragment")]
+        {
+            let fragment = sparq_zk_compose::manifest::FragmentManifest::new(m.clone(), vec![]);
+            assert!(fragment.to_json().unwrap_err().to_string().contains("UncompiledV2Member"));
         }
         assert!(matches!(check(&m, "v2_shape"), Err(CheckError::CircuitIdMismatch { .. })),
             "uncompiled V2 declaration must fail derivation");

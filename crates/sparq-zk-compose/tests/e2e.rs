@@ -452,7 +452,7 @@ fn sample_manifest() -> ProofManifest {
 #[test]
 fn manifest_serde_round_trip() {
     let m = sample_manifest();
-    let json = m.to_json();
+    let json = m.to_json().unwrap();
     let back = ProofManifest::from_json(&json).expect("round-trips");
     assert_eq!(m, back);
     // Spot-check the public shape is present.
@@ -3396,7 +3396,7 @@ fn pattern_scans_reject_an_arity_mismatch() {
 #[test]
 fn pattern_scans_absent_in_json_means_no_declaration() {
     let m = same_layout_manifest();
-    let json = m.to_json();
+    let json = m.to_json().unwrap();
     assert!(json.contains("\"pattern_scans\""), "the field serialises");
     let stripped: serde_json::Value = {
         let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -3841,7 +3841,7 @@ fn issuer_attestation_serde_round_trip() {
     // on a scan-covering path (codex 2221 HIGH).
     m.commitment_attestations.push(attest(c, &sk));
     m.key_set.push(public_key_to_hex(&sk.public_key()));
-    let json = m.to_json();
+    let json = m.to_json().unwrap();
     assert!(json.contains("commitment_attestations"));
     assert!(json.contains("key_set"));
     assert!(json.contains("poseidon2-schnorr-v1"));
@@ -5197,7 +5197,7 @@ fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
     // The clear index is withheld from the manifest entirely (committed-index mode):
     // `RevocationStatus.index` is None and (with skip_serializing_if) absent from JSON.
     assert!(manifest.revocation.as_ref().unwrap().index.is_none(), "clear index withheld");
-    let json = manifest.to_json();
+    let json = manifest.to_json().unwrap();
     assert!(!json.contains("\"index\""), "no clear `index` field in the committed-index manifest JSON");
 
     manifest.hidden_revocation = Some(hidden);
@@ -5536,7 +5536,7 @@ fn full_manifest_fully_hidden_revocation() {
 
     // DISCLOSURE FLOOR: the serialized manifest must not name the list, the
     // version, or the index anywhere.
-    let json = manifest.to_json();
+    let json = manifest.to_json().unwrap();
     assert!(
         !json.contains(FIXTURE_STATUS_LIST),
         "a fully-hidden presentation must not disclose the status-list IRI:\n{json}"
@@ -6407,7 +6407,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
     // The clear issuer key never appears in any disclosed field — the
     // deanonymisation leak is suppressed (not merely hidden in-circuit).
     let signer_hex_norm = signer_hex.strip_prefix("0x").unwrap_or(&signer_hex).to_ascii_lowercase();
-    let json = manifest.to_json();
+    let json = manifest.to_json().unwrap();
     assert!(
         !json.to_ascii_lowercase().contains(&signer_hex_norm),
         "the clear issuer key must not appear anywhere in the hidden-only manifest"
@@ -6419,9 +6419,9 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
 /// the commitment method the hidden-issuer gate is then required to bind.
 ///
 /// Over the same valid hidden-only proof as the happy path above:
-/// - the honest method-UNBOUND message verifies under the default policy, and is
-///   refused with `MethodNotAuthenticated` once the relying party requires an
-///   authenticated method (the credential attests none);
+/// - the honest method-UNBOUND message verifies under `admit_unbound`, and is
+///   refused with `MethodNotAuthenticated` under the default policy
+///   (the credential attests none);
 /// - that same message replaced by a value matching NO candidate is refused with
 ///   `HiddenIssuerMessageMismatch` under BOTH policies, so a declared message
 ///   outside the candidate set cannot carry a presentation past the policy.
@@ -6471,7 +6471,7 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
     mutated.hidden_issuer_attestations[0].message = FieldHex::from_field(&Fr::from(1u64));
     // It is wire-expressible: it survives a JSON round-trip unchanged.
     let round_tripped =
-        ProofManifest::from_json(&mutated.to_json()).expect("the mutated manifest parses");
+        ProofManifest::from_json(&mutated.to_json().unwrap()).expect("the mutated manifest parses");
     assert_eq!(
         round_tripped.hidden_issuer_attestations[0].message,
         mutated.hidden_issuer_attestations[0].message

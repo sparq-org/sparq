@@ -594,7 +594,7 @@ fn proof_manifest_json_round_trips_and_defaults_type() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    let json = manifest.to_json();
+    let json = manifest.to_json().unwrap();
     let back = ProofManifest::from_json(&json).expect("round-trips");
     assert_eq!(back, manifest);
     // The default type-marker is applied when the field is absent from the JSON.

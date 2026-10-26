@@ -86,6 +86,8 @@
 //!
 //! Dedicated `CircuitId` variants now select those two compiled members only
 //! for `DualLeafV2` commitments. Opaque scan/join ids are refused for that method.
+//! Value-lane FILTER members have no explicit band assertion: out-of-band values
+//! are refused only through u64 decomposition (plus `{0, 1}` for boolean).
 //! Value-lane FILTER verification remains refused at stage 0; no value gate opens.
 //!
 //! The §14.1 **`LANG_NONE` separation** is enforced on the HOST side, not by
