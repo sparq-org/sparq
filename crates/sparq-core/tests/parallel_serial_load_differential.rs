@@ -39,9 +39,9 @@ fn dump(g: &Graph) -> Vec<[String; 3]> {
         .iter_ids()
         .map(|t| {
             [
-                g.dict.term(t[0]).to_string(),
-                g.dict.term(t[1]).to_string(),
-                g.dict.term(t[2]).to_string(),
+                g.dict().term(t[0]).to_string(),
+                g.dict().term(t[1]).to_string(),
+                g.dict().term(t[2]).to_string(),
             ]
         })
         .collect();
@@ -76,7 +76,7 @@ fn assert_loaded_matches_reference(loaded: &Graph, reference: &[[Term; 3]], ctx:
 
     // (1) Counts + full dump.
     assert_eq!(loaded.len(), expected.len(), "{ctx}: triple count != deduped reference");
-    assert_eq!(loaded.dict.len(), reference_g.dict.len(), "{ctx}: distinct-term count diverges");
+    assert_eq!(loaded.dict().len(), reference_g.dict().len(), "{ctx}: distinct-term count diverges");
     assert_eq!(dump(loaded), expected, "{ctx}: loaded dump != expected triple set");
     assert_eq!(dump(loaded), dump(&reference_g), "{ctx}: loaded dump != reference-graph dump");
 
@@ -86,7 +86,7 @@ fn assert_loaded_matches_reference(loaded: &Graph, reference: &[[Term; 3]], ctx:
     for [s, p, o] in &expected {
         let resolve = |g: &Graph, t: &str| probe_term(t).and_then(|term| g.id_of(&term));
         if let (Some(ls), Some(lp), Some(lo)) = (resolve(loaded, s), resolve(loaded, p), resolve(loaded, o)) {
-            assert!(loaded.store.contains([ls, lp, lo]), "{ctx}: loaded missing triple {s} {p} {o}");
+            assert!(loaded.store().contains([ls, lp, lo]), "{ctx}: loaded missing triple {s} {p} {o}");
         }
         if let Some(term) = probe_term(s) {
             assert_eq!(
@@ -120,9 +120,9 @@ fn assert_loaded_matches_reference(loaded: &Graph, reference: &[[Term; 3]], ctx:
             .map(|r| {
                 let t = sc.to_spo(r);
                 [
-                    g.dict.term(t[0]).to_string(),
-                    g.dict.term(t[1]).to_string(),
-                    g.dict.term(t[2]).to_string(),
+                    g.dict().term(t[0]).to_string(),
+                    g.dict().term(t[1]).to_string(),
+                    g.dict().term(t[2]).to_string(),
                 ]
             })
             .collect();
@@ -148,8 +148,8 @@ fn assert_loaded_matches_reference(loaded: &Graph, reference: &[[Term; 3]], ctx:
                 };
                 let lpat: Pattern = [ls, lp, lo];
                 let rpat: Pattern = [rs, rp, ro];
-                let lscan = loaded.store.scan(&lpat);
-                let rscan = reference_g.store.scan(&rpat);
+                let lscan = loaded.store().scan(&lpat);
+                let rscan = reference_g.store().scan(&rpat);
                 assert_eq!(
                     lscan.rows.len(),
                     rscan.rows.len(),
@@ -161,8 +161,8 @@ fn assert_loaded_matches_reference(loaded: &Graph, reference: &[[Term; 3]], ctx:
                     "{ctx}: scan result set diverges for shape {lpat:?}"
                 );
                 assert_eq!(
-                    loaded.store.estimate(&lpat),
-                    reference_g.store.estimate(&rpat),
+                    loaded.store().estimate(&lpat),
+                    reference_g.store().estimate(&rpat),
                     "{ctx}: estimate diverges for {lpat:?}"
                 );
             }
@@ -303,7 +303,7 @@ fn ntriples_edge_documents_match_reference() {
     // Empty.
     let g = Graph::load_str("", "ntriples").expect("empty loads");
     assert_eq!(g.len(), 0, "empty document has no triples");
-    assert_eq!(g.dict.len(), 0, "empty document interns no terms");
+    assert_eq!(g.dict().len(), 0, "empty document interns no terms");
 
     // No trailing newline on the final statement.
     let doc = "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/c> <http://ex/p> <http://ex/d> .";

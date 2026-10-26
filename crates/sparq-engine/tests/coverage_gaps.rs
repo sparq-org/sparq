@@ -2055,10 +2055,10 @@ fn update_clear_named_empties_named_graphs() {
         "INSERT DATA { GRAPH <http://ex/g1> { <http://ex/s> <http://ex/p> <http://ex/o> } }",
     )
     .unwrap();
-    assert!(!g.named.is_empty(), "setup: named graph should exist");
+    assert!(!g.named().is_empty(), "setup: named graph should exist");
     // CLEAR NAMED clears all named graphs (keeps them but empties their triple sets).
     sparq_engine::update_in_place(&mut g, "CLEAR NAMED").unwrap();
-    for (_, store) in &g.named {
+    for (_, store) in g.named() {
         assert_eq!(store.len(), 0, "CLEAR NAMED must empty every named graph");
     }
 }
@@ -2074,8 +2074,8 @@ fn update_clear_all_empties_all_graphs() {
     )
     .unwrap();
     sparq_engine::update_in_place(&mut g, "CLEAR ALL").unwrap();
-    assert_eq!(g.store.len(), 0, "CLEAR ALL must empty the default graph");
-    for (_, store) in &g.named {
+    assert_eq!(g.store().len(), 0, "CLEAR ALL must empty the default graph");
+    for (_, store) in g.named() {
         assert_eq!(store.len(), 0, "CLEAR ALL must empty every named graph");
     }
 }
@@ -2085,9 +2085,9 @@ fn update_clear_all_empties_all_graphs() {
 fn update_drop_default_clears_default_graph() {
     let ttl = "<http://ex/s> <http://ex/p> <http://ex/o> .";
     let mut g = Graph::load_str(ttl, "turtle").unwrap();
-    assert!(!g.store.is_empty(), "setup: default graph must have triples");
+    assert!(!g.store().is_empty(), "setup: default graph must have triples");
     sparq_engine::update_in_place(&mut g, "DROP DEFAULT").unwrap();
-    assert_eq!(g.store.len(), 0, "DROP DEFAULT must clear the default graph");
+    assert_eq!(g.store().len(), 0, "DROP DEFAULT must clear the default graph");
 }
 
 /// DROP NAMED removes all named-graph entries (update.rs line 460).
@@ -2100,9 +2100,9 @@ fn update_drop_named_removes_named_graphs() {
         "INSERT DATA { GRAPH <http://ex/g1> { <http://ex/s> <http://ex/p> <http://ex/o> } }",
     )
     .unwrap();
-    assert!(!g.named.is_empty(), "setup: named graph should exist");
+    assert!(!g.named().is_empty(), "setup: named graph should exist");
     sparq_engine::update_in_place(&mut g, "DROP NAMED").unwrap();
-    assert!(g.named.is_empty(), "DROP NAMED must remove all named-graph entries");
+    assert!(g.named().is_empty(), "DROP NAMED must remove all named-graph entries");
 }
 
 // ─── exec.rs trace_label arms via explain_analyze ────────────────────────────

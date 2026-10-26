@@ -241,6 +241,10 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.finish_reclaims().await
     }
 
+    fn exclusive(&self) -> ServerResult<()> {
+        self.inner.exclusive()
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);
@@ -272,6 +276,10 @@ impl<S: Store> Store for Tracked<S> {
 
     fn raises_markers(&self) -> bool {
         self.inner.raises_markers()
+    }
+
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
     }
 
     /// A marker shows in no listing, so it moves no snapshot.

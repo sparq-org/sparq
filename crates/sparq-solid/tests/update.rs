@@ -32,12 +32,12 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
         .graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| *n == term)
         .map(|(_, g)| {
             let pat: sparq_core::store::Pattern = [None, None, None];
-            g.store.scan(&pat).rows.len()
+            g.store().scan(&pat).rows.len()
         })
         .unwrap_or(0)
 }
@@ -428,16 +428,16 @@ type StoreSnapshot = Vec<(String, Vec<TripleStr>)>;
 fn store_snapshot(store: &PodStore) -> StoreSnapshot {
     fn dump_graph(g: &sparq_core::Graph) -> Vec<TripleStr> {
         let pat: sparq_core::store::Pattern = [None, None, None];
-        let scan = g.store.scan(&pat);
+        let scan = g.store().scan(&pat);
         let mut v: Vec<TripleStr> = scan
             .rows
             .iter()
             .map(|r| {
                 let spo = scan.to_spo(r);
                 (
-                    g.dict.term(spo[0]).to_string(),
-                    g.dict.term(spo[1]).to_string(),
-                    g.dict.term(spo[2]).to_string(),
+                    g.dict().term(spo[0]).to_string(),
+                    g.dict().term(spo[1]).to_string(),
+                    g.dict().term(spo[2]).to_string(),
                 )
             })
             .collect();
@@ -447,7 +447,7 @@ fn store_snapshot(store: &PodStore) -> StoreSnapshot {
         v
     }
     let mut out: StoreSnapshot = vec![(String::new(), dump_graph(store.graph()))];
-    for (name, sub) in &store.graph().named {
+    for (name, sub) in store.graph().named() {
         out.push((name.to_string(), dump_graph(sub)));
     }
     // Snapshot is only compared for equality; an unstable sort is faster.

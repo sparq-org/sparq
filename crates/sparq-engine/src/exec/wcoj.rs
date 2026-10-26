@@ -41,7 +41,7 @@ pub(super) fn build_trie(
     var_positions.sort_by_key(|(v, _)| var_levels[v]);
     let levels: Vec<usize> = var_positions.iter().map(|(v, _)| var_levels[v]).collect();
 
-    let scan = graph.store.scan(id_pat);
+    let scan = graph.store().scan(id_pat);
     let mut tuples: Vec<Vec<Id>> = Vec::with_capacity(scan.rows.len());
     // zk-trace hook: the WCOJ path's per-pattern input set is the trie's
     // source scan (the consistency-passing rows), recorded pre-projection.
@@ -108,7 +108,7 @@ pub(super) fn eval_bgp_wcoj(graph: &Graph, patterns: &[TriplePattern]) -> Result
     let mut trie_levels: Vec<Vec<usize>> = Vec::new();
     for (id_pat, pos_vars) in &prepared {
         if pos_vars.iter().all(|v| v.is_none()) {
-            if graph.store.estimate(id_pat) == 0 {
+            if graph.store().estimate(id_pat) == 0 {
                 return Ok(Bindings::unsorted(order_vars, vec![]));
             }
             continue;
@@ -160,7 +160,7 @@ pub(crate) fn wcoj_global_order(
         prepared
             .iter()
             .filter(|(_, pv)| pv.iter().flatten().any(|x| x == v))
-            .map(|(ip, _)| graph.store.estimate(ip))
+            .map(|(ip, _)| graph.store().estimate(ip))
             .min()
             .unwrap_or(usize::MAX)
     };
@@ -297,8 +297,8 @@ pub(super) fn scan_to_bindings(
         }
     }
     let scan = match sort_col {
-        Some(c) => graph.store.scan_sorted(id_pat, c),
-        None => graph.store.scan(id_pat),
+        Some(c) => graph.store().scan_sorted(id_pat, c),
+        None => graph.store().scan(id_pat),
     };
     // The TRUE sort column is the first unbound canonical column in the chosen
     // permutation's order — NOT necessarily the requested `sort_col`: with fewer than
@@ -612,7 +612,7 @@ pub(super) fn bind_join(
         bound[pp] = Some(val);
         #[cfg(test)]
         bind_join_run_grouping::observe_scan();
-        let scan = graph.store.scan(&bound);
+        let scan = graph.store().scan(&bound);
         for prow in scan.rows.iter() {
             let pspo = scan.to_spo(prow);
             if let Some((fpos, cmp)) = filt {

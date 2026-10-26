@@ -237,7 +237,7 @@ fn request_time_decisions_match_decide_for_every_session() {
                             frozen.materialize_odrl_prohibition_conditional(
                                 &pol,
                                 &request("read", N1, Some(ALICE), None),
-                            );
+                            ).unwrap();
                         }
                         for agent in SESSIONS {
                             for now in CLOCKS {
@@ -848,12 +848,12 @@ fn grants_need_a_current_covered_graph() {
     let fresh = "https://pod.ex/notes/n9";
     assert!(!s.decide(&bob, fresh, Mode::Read).allow, "does not exist");
     // A graph added to the dataset without re-materializing.
-    let added = Graph::load_dataset(
+    let mut added = Graph::load_dataset(
         &format!("<urn:x> <urn:y> \"1\" <{fresh}> ."),
         "nquads",
     )
     .expect("loads");
-    s.graph_unchecked_mut().named.extend(added.named);
+    s.graph_unchecked_mut().extend_named(added.take_named().unwrap()).unwrap();
     assert!(!s.decide(&bob, fresh, Mode::Read).allow, "created since the materialization");
     assert!(!reads(&s, &bob, fresh));
     s.materialize_wac().expect("wac");
@@ -1276,7 +1276,7 @@ fn a_rejected_access_control_document_withholds_every_grant_source() {
         s.attach_odrl_policy(pol.clone()).expect("attach");
         assert!(!reads(&s, &dave, N2), "{label}: no attached grant");
         let bridged = Request::new(format!("{ODRL}read")).on(N2).by(UNSEEN);
-        assert!(s.materialize_odrl_permission(&pol, &bridged).granted, "{label}: bridged");
+        assert!(s.materialize_odrl_permission(&pol, &bridged).unwrap().granted, "{label}: bridged");
         assert!(!reads(&s, &dave, N2), "{label}: no bridged grant");
     }
 }
@@ -1316,7 +1316,7 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
         }
         s.detach_odrl_policies();
         let bridged = Request::new(format!("{ODRL}read")).on(N2).by(UNSEEN);
-        assert!(s.materialize_odrl_permission(&pol, &bridged).granted, "{label}: bridged");
+        assert!(s.materialize_odrl_permission(&pol, &bridged).unwrap().granted, "{label}: bridged");
         assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant");
         s.materialize_wac().expect("wac again");
         assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant, replayed");
@@ -1325,7 +1325,7 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
         let pol_new = policy("permission", "read", "", Some(UNSEEN), Some(&fresh)).expect("policy");
         let bridged_new = Request::new(format!("{ODRL}read")).on(&fresh).by(UNSEEN);
         assert!(
-            s.materialize_odrl_permission(&pol_new, &bridged_new)
+            s.materialize_odrl_permission(&pol_new, &bridged_new).unwrap()
                 .granted,
             "{label}: bridged"
         );
@@ -1340,7 +1340,7 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
             policy("permission", "read", "", Some(UNSEEN), Some(&n2_acl)).expect("policy");
         let bridged_acl = Request::new(format!("{ODRL}read")).on(&n2_acl).by(UNSEEN);
         assert!(
-            s.materialize_odrl_permission(&pol_acl, &bridged_acl).granted,
+            s.materialize_odrl_permission(&pol_acl, &bridged_acl).unwrap().granted,
             "{label}: the bridge installs the grant"
         );
         assert_eq!(
@@ -1356,7 +1356,7 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
                 policy("permission", "read", "", Some(UNSEEN), Some(target)).expect("policy");
             let bridged_t = Request::new(format!("{ODRL}read")).on(target).by(UNSEEN);
             assert!(
-                s.materialize_odrl_permission(&pol_t, &bridged_t).granted,
+                s.materialize_odrl_permission(&pol_t, &bridged_t).unwrap().granted,
                 "{label}: bridged"
             );
             assert!(
@@ -1397,7 +1397,7 @@ fn a_rejected_acr_of_an_acr_withholds_bridged_grants_on_it() {
         s.materialize_acp().expect("acp");
         let bridged = Request::new(format!("{ODRL}read")).on(&acr).by(UNSEEN);
         assert!(
-            s.materialize_odrl_permission(&pol, &bridged).granted,
+            s.materialize_odrl_permission(&pol, &bridged).unwrap().granted,
             "{label}: bridged"
         );
         assert_eq!(

@@ -341,16 +341,16 @@ fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
 #[cfg(feature = "deterministic-blank-nodes")]
 fn template_namespace(graph: &Graph, solutions: &QueryResult) -> String {
     let mut labels = FxHashSet::default();
-    for (name, _) in &graph.named {
+    for (name, _) in graph.named() {
         if let Term::BlankNode(node) = name {
             labels.insert(node.as_str().to_owned());
         }
     }
-    for graph in std::iter::once(graph).chain(graph.named.iter().map(|(_, graph)| graph)) {
-        let scan = graph.store.scan(&[None, None, None]);
+    for graph in std::iter::once(graph).chain(graph.named().iter().map(|(_, graph)| graph)) {
+        let scan = graph.store().scan(&[None, None, None]);
         for row in scan.rows.iter() {
             let [subject, _, object] = scan.to_spo(row);
-            blank_labels(vec![graph.dict.term(subject), graph.dict.term(object)], &mut labels);
+            blank_labels(vec![graph.dict().term(subject), graph.dict().term(object)], &mut labels);
         }
     }
     for row in &solutions.rows {
@@ -420,14 +420,14 @@ fn cbd(graph: &Graph, solutions: &QueryResult) -> Result<Vec<Triple>, String> {
             Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b.clone()),
             _ => unreachable!("only IRIs/bnodes are queued"),
         };
-        let scan = graph.store.scan(&[Some(id), None, None]);
+        let scan = graph.store().scan(&[Some(id), None, None]);
         for r in scan.rows.iter() {
             let [_, p, o] = scan.to_spo(r);
-            let predicate = match graph.dict.term(p) {
+            let predicate = match graph.dict().term(p) {
                 Term::NamedNode(n) => n,
                 other => return Err(format!("corrupt store: non-IRI predicate {other}")),
             };
-            let object = graph.dict.term(o);
+            let object = graph.dict().term(o);
             // Recurse through anonymous structure (CBD).
             if matches!(object, Term::BlankNode(_)) && visited.insert(object.clone()) {
                 queue.push(object.clone());

@@ -27,7 +27,7 @@ fn graph_of(literals: &[&str]) -> Graph {
 /// The lexical values of the phrase-hit ids, in the returned (ascending-id) order.
 fn values(graph: &Graph, ids: &[sparq_core::dict::Id]) -> Vec<String> {
     ids.iter()
-        .map(|&id| match graph.dict.term(id) {
+        .map(|&id| match graph.dict().term(id) {
             Term::Literal(l) => l.value().to_string(),
             other => panic!("hit {id} is not a literal: {other}"),
         })

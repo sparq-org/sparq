@@ -61,6 +61,9 @@ pub mod method_auth;
 // CLOSED (see the module docs).
 #[cfg(feature = "dual-leaf")]
 pub mod value_pin;
+/// Diagnostic value-lane obligations; no accepting verifier calls this module.
+#[cfg(feature = "dual-leaf")]
+pub mod value_obligation;
 // Research-grade disclosure obligations and PRIVATE successful-row witnesses.
 pub mod planner;
 // sq-rsd3v.3: witnessed-rule-shape N3 derivation — the host mirror of

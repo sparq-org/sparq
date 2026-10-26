@@ -590,7 +590,7 @@ pub(super) fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>>
     // Capacity checks remain input-based even for malformed/out-of-cache values.
     // Native unbounded evaluation avoids dictionary/year parsing on the hot path.
     if budget::temporal_capacity_active() {
-        if let dict::TermParts::Lit { value, datatype, .. } = graph.dict.term_parts(id) {
+        if let dict::TermParts::Lit { value, datatype, .. } = graph.dict().term_parts(id) {
             budget::check_temporal(value, datatype).ok()?;
         }
     }
@@ -1137,7 +1137,7 @@ pub(super) fn id_is_nan_literal(graph: &Graph, local: &LocalVocab, id: Id) -> bo
     } else if is_local(id) {
         term_is_nan_literal(local.term(id))
     } else {
-        matches!(graph.dict.term_parts(id), dict::TermParts::Lit { value, datatype, lang: None } if is_nan_lexical(value, datatype))
+        matches!(graph.dict().term_parts(id), dict::TermParts::Lit { value, datatype, lang: None } if is_nan_lexical(value, datatype))
     }
 }
 
@@ -2908,7 +2908,7 @@ pub(super) fn num_to_id(graph: &Graph, n: Num) -> Result<Id, String> {
         }
     }
     let lex = n.lexical();
-    match graph.dict.lookup_lit(&lex, n.datatype().as_str(), None) {
+    match graph.dict().lookup_lit(&lex, n.datatype().as_str(), None) {
         NO_ID => Err(lex),
         id => Ok(id),
     }
@@ -2928,7 +2928,7 @@ pub(super) fn value_to_id(graph: &Graph, local: &mut LocalVocab, v: &Value) -> I
         },
         Value::Bool(b) => {
             let lex = if *b { "true" } else { "false" };
-            match graph.dict.lookup_lit(lex, xsd::BOOLEAN.as_str(), None) {
+            match graph.dict().lookup_lit(lex, xsd::BOOLEAN.as_str(), None) {
                 NO_ID => Term::Literal(Literal::new_typed_literal(lex, xsd::BOOLEAN)),
                 id => return id,
             }
@@ -2985,7 +2985,7 @@ pub(super) fn value_to_id_readonly(graph: &Graph, local: &LocalVocab, v: &Value)
         },
         Value::Bool(b) => {
             let lex = if *b { "true" } else { "false" };
-            match graph.dict.lookup_lit(lex, xsd::BOOLEAN.as_str(), None) {
+            match graph.dict().lookup_lit(lex, xsd::BOOLEAN.as_str(), None) {
                 NO_ID => Term::Literal(Literal::new_typed_literal(lex, xsd::BOOLEAN)),
                 id => return Ok(id),
             }

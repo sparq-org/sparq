@@ -1,0 +1,25 @@
+{
+  "@context": {
+    "id": "@id",
+    "type": "@type",
+    "service": "https://www.w3.org/ns/did#service",
+    "serviceEndpoint": {
+      "@id": "https://www.w3.org/ns/did#serviceEndpoint",
+      "@type": "@id"
+    },
+    "verificationMethod": "https://w3id.org/security#verificationMethod",
+    "authentication": {
+      "@id": "https://w3id.org/security#authenticationMethod",
+      "@type": "@id"
+    },
+    "controller": {
+      "@id": "https://w3id.org/security#controller",
+      "@type": "@id"
+    },
+    "publicKeyJwk": {
+      "@id": "https://w3id.org/security#publicKeyJwk",
+      "@type": "@json"
+    },
+    "JsonWebKey": "https://w3id.org/security#JsonWebKey"
+  }
+}

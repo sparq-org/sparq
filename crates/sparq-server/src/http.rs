@@ -812,6 +812,57 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
+    /// Maximum potential rule/credential pairs in a trust block.
+    ///
+    /// Default: 4096. Depth-one certifications each count as one potential rule.
+    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits no pairs.
+    /// Exceeding it refuses the whole block with 403 before signature verification.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_pairs: usize,
+    /// Maximum certifications parsed from one trust block.
+    ///
+    /// Default: 2048. `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` overrides it;
+    /// zero permits no certifications. Exceeding it refuses the block with 403.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_certifications: usize,
+    /// Maximum potential rule/triple validations in a trust block.
+    ///
+    /// Default: 65536. The sum of credential triple counts is multiplied by the
+    /// direct-rule count plus certification count, before derivation or admission.
+    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK` overrides it; zero permits no work.
+    /// Exceeding it refuses the block with 403 before signature verification.
+    #[cfg(feature = "solid-authz-trust")]
+    pub solid_authz_trust_max_validation_work: usize,
+    /// How many authorization-view builds may run AT ONCE on the blocking pool, across
+    /// every `/authz/*` lane (the stateless per-request build, the stateful
+    /// cache misses, the ODRL store and policy builds under one claim, and the trust
+    /// lane's whole parse-through-decision pipeline).
+    ///
+    /// Materialising an authorization view is CPU-bound and its cost is set by the request
+    /// (the body dataset) or by the store, so it runs on `spawn_blocking` rather than an
+    /// async worker. That alone bounds nothing: without a cap, N concurrent requests put N
+    /// materialisations on the blocking pool at once and the pool's own queue grows without
+    /// limit. This is that cap; a request that finds every slot taken waits at most
+    /// [`ServerConfig::solid_authz_build_wait`] and is then refused with a retryable `503`
+    /// (fail-closed — no decision is produced from an un-built view).
+    ///
+    /// Default: the machine's available parallelism (CPU count), clamped to at least 1 —
+    /// the authorization build is CPU-bound, so more concurrent builds than cores buys
+    /// queueing rather than throughput. Set by `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY`. A
+    /// value of 0 is read as 1.
+    #[cfg(feature = "solid-authz")]
+    pub solid_authz_build_concurrency: usize,
+    /// How long an `/authz/*` request waits for a free
+    /// [`solid_authz_build_concurrency`](Self::solid_authz_build_concurrency) slot before it
+    /// is refused with a retryable `503`.
+    ///
+    /// The point of the bound is that saturation is SHED rather than queued: a client gets a
+    /// prompt, retryable refusal instead of a request that waits behind an unbounded queue
+    /// of other builds. Default: 2 seconds. Set by
+    /// `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` (milliseconds; 0 means "do not wait at all", so a
+    /// saturated pool refuses immediately).
+    #[cfg(feature = "solid-authz")]
+    pub solid_authz_build_wait: Duration,
 }
 
 impl Default for ServerConfig {
@@ -971,6 +1022,23 @@ impl Default for ServerConfig {
             // SPARQ_SOLID_AUTHZ_TRUST=1. Fail-closed: trust block is ignored until set.
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust: false,
+            // Calibrated against the main trust lane; bound verification and SHACL work
+            // independently because a small pair count can still carry a large graph.
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_pairs: 4096,
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_certifications: 2048,
+            #[cfg(feature = "solid-authz-trust")]
+            solid_authz_trust_max_validation_work: 65536,
+            // The authorization build is CPU-bound, so the default cap is the CPU count:
+            // more concurrent builds than cores adds queueing, not throughput. Clamped to
+            // at least 1 on a box that reports no parallelism.
+            #[cfg(feature = "solid-authz")]
+            solid_authz_build_concurrency: std::thread::available_parallelism()
+                .map_or(1, std::num::NonZeroUsize::get),
+            // Shed rather than queue: a saturated pool refuses after this, retryably.
+            #[cfg(feature = "solid-authz")]
+            solid_authz_build_wait: Duration::from_secs(2),
         }
     }
 }
@@ -1293,6 +1361,44 @@ impl ServerConfig {
         #[cfg(feature = "solid-authz-trust")]
         if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_TRUST") {
             cfg.solid_authz_trust = env_truthy(&v);
+        }
+        #[cfg(feature = "solid-authz-trust")]
+        for (name, limit) in [
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+                &mut cfg.solid_authz_trust_max_pairs,
+            ),
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
+                &mut cfg.solid_authz_trust_max_certifications,
+            ),
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK",
+                &mut cfg.solid_authz_trust_max_validation_work,
+            ),
+        ] {
+            if let Ok(value) = std::env::var(name) {
+                if let Ok(n) = value.trim().parse::<usize>() {
+                    *limit = n;
+                }
+            }
+        }
+        // SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY caps how many authorization-view builds run at
+        // once on the blocking pool (default: the CPU count); 0 is read as 1. An unparseable
+        // value leaves the default in place, as for the other numeric knobs here.
+        #[cfg(feature = "solid-authz")]
+        if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY") {
+            if let Ok(n) = v.trim().parse::<usize>() {
+                cfg.solid_authz_build_concurrency = n.clamp(1, tokio::sync::Semaphore::MAX_PERMITS);
+            }
+        }
+        // SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS is how long a request waits for a free build slot
+        // before the fail-closed 503 (default 2000 ms; 0 refuses immediately when saturated).
+        #[cfg(feature = "solid-authz")]
+        if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS") {
+            if let Ok(ms) = v.trim().parse::<u64>() {
+                cfg.solid_authz_build_wait = Duration::from_millis(ms);
+            }
         }
         Ok(cfg)
     }
@@ -1906,24 +2012,13 @@ impl TouchedPods {
 /// only an unrelated file) is treated as fresh — we create the store from `seed`. A directory
 /// that holds a store but fails to open (corruption) surfaces the open error rather than
 /// silently clobbering it.
+///
+/// The check, the seed's save and the open happen under one hold of the directory's lock
+/// ([`Graph::open_or_create`]), kept while the returned graph lives: a second server (or any
+/// other writer) over the same directory is refused.
 fn open_or_create_durable(dir: &std::path::Path, seed: Graph) -> Result<Graph, String> {
-    let has_store = dir.join("dict-meta.bin").exists() || dir.join("dict.bin").exists();
-    if has_store {
-        // Existing durable store IS the source of truth: open + WAL-replay, no rebuild.
-        return Graph::open(dir).map_err(|e| format!("opening persist dir {}: {e}", dir.display()));
-    }
-    // Fresh: persist the seed, then open it so the returned graph is directory-backed
-    // (carries its own WAL) and ready for WAL-durable updates.
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("creating persist dir {}: {e}", dir.display()))?;
-    seed.save(dir)
-        .map_err(|e| format!("initialising persist dir {}: {e}", dir.display()))?;
-    Graph::open(dir).map_err(|e| {
-        format!(
-            "opening freshly-initialised persist dir {}: {e}",
-            dir.display()
-        )
-    })
+    Graph::open_or_create(dir, &seed)
+        .map_err(|e| format!("opening persist dir {}: {e}", dir.display()))
 }
 
 /// (sq-vpx4) Internal marker prefixed onto the error string of a
@@ -2234,37 +2329,34 @@ impl ApplyUpdates for ServerApplier {
     /// snapshot the ring should publish so reads serve the restored data. Runs on the WRITER THREAD
     /// (the only thread that mutates the durable store), so the on-disk swap never races a commit.
     ///
-    /// Sequence: release the OLD durable graph's WAL handle (close its log), then
-    /// [`Graph::restore_into_durable`] writes `fresh`'s image to a sibling, two-rename-swaps it over
-    /// `dir` (parent fsync'd between the renames), re-opens the new base memory-mapped with a fresh
-    /// WAL, and drops the old base — the EXACT crash-safe protocol the in-process compaction uses,
-    /// healed by `recover_compaction` on the next open if a crash interrupts it. We adopt the
-    /// re-opened directory-backed graph as the new durable store (so subsequent updates WAL-append
-    /// to it), and return an independent in-memory snapshot of it for the ring to publish.
+    /// Sequence: [`Graph::restore_in_place`] on the durable graph, under the lock it holds,
+    /// writes `fresh`'s image to a staging sibling, releases the graph's files, two-rename-swaps
+    /// the staging directory over `dir` (parent fsync'd between the renames) and re-opens the
+    /// durable graph from the new base with a fresh WAL, dropping the old base — the EXACT
+    /// crash-safe protocol the in-process compaction uses, healed by `recover_compaction` on the
+    /// next open if a crash interrupts it. Subsequent updates WAL-append to the restored store;
+    /// an independent in-memory snapshot of it is returned for the ring to publish.
     ///
-    /// FAIL-CLOSED: `fresh` is fully built before this runs; if the swap fails before the first
-    /// rename the OLD durable store is untouched, and a crash mid-swap heals to old-or-new. An
-    /// in-memory applier (no durable store) is a clean `Err` — there is no durable dir to write
-    /// through, so the in-memory restore path (the ring/writer swap) is used instead.
+    /// FAIL-CLOSED: `fresh` is fully built before this runs. A failure part-way through the swap
+    /// is recovered at once: completed (the restore succeeded) or rolled back (an error; the old
+    /// store is intact and the durable graph keeps writing to it). When neither works the
+    /// durable graph is frozen and refuses every later update until the server re-opens the
+    /// directory; a crash mid-swap heals to old-or-new on the next open. An in-memory applier
+    /// (no durable store) is a clean `Err` — there is no durable dir to write through, so the
+    /// in-memory restore path (the ring/writer swap) is used instead.
     fn restore_durable(&mut self, fresh: Graph) -> Result<Graph, String> {
         let durable = self.durable.as_mut().ok_or_else(|| {
             "restore-into-durable requested on an applier with no --persist store".to_string()
         })?;
-        // The directory the OLD durable graph is backed by; the swap targets it.
-        let dir = durable
+        // The swap targets the directory the durable graph is backed by, under the lock it holds:
+        // its WAL handle is released first (its `wal.log` is renamed away with the directory),
+        // and the graph becomes the restored one, so subsequent updates WAL-append to it.
+        durable
             .graph
-            .persist_dir()
-            .ok_or_else(|| "durable graph is not directory-backed".to_string())?;
-        // Release the OLD durable graph's WAL handle before the directory swap (its `wal.log` is
-        // about to be renamed away with `dir`); the crash-safe swap re-opens a fresh handle.
-        durable.graph.close_wal();
-        let restored = Graph::restore_into_durable(&dir, fresh)
+            .restore_in_place(fresh)
             .map_err(|e| format!("restore-into-durable swap failed: {e}"))?;
-        // Adopt the re-opened, directory-backed restored store; subsequent updates WAL-append to it.
         // The published snapshot is an independent in-memory image of the restored content.
-        let published = restored.snapshot().into_graph();
-        durable.graph = restored;
-        Ok(published)
+        Ok(durable.graph.snapshot().into_graph())
     }
 }
 
@@ -2297,9 +2389,9 @@ impl ApplyUpdates for ServerApplier {
 /// byte-identical to `main` and never loads an `ArcSwap` in `AppState` (sq-0g6g resolved in the
 /// lean direction — the cost is paid only when you opt into `backup`).
 #[cfg(feature = "backup")]
-struct ServingCore {
+pub(crate) struct ServingCore {
     /// The generation ring (Wave A1): lock-free `current()`, bounded retention.
-    ring: Arc<GenerationRing<Graph>>,
+    pub(crate) ring: Arc<GenerationRing<Graph>>,
     /// The single sequenced writer (Wave A2): the sole publisher of generations.
     /// `submit` blocks for the group-commit window + batch application, so update
     /// handlers call it on the blocking pool.
@@ -2466,7 +2558,7 @@ pub struct AppState {
     /// pre-#941. Under the `backup` feature the ring (and the writer below) move behind the
     /// swappable [`ServingCore`] so an online restore can atomically install a rehydrated pair.
     #[cfg(not(feature = "backup"))]
-    ring: Arc<GenerationRing<Graph>>,
+    pub(crate) ring: Arc<GenerationRing<Graph>>,
     /// The single sequenced writer (Wave A2): the sole publisher of generations.
     /// `submit` blocks for the group-commit window + batch application, so update
     /// handlers call it on the blocking pool.
@@ -2527,13 +2619,13 @@ pub struct AppState {
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
     /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
-    /// the server's OWN loaded store, cached per generation. `None` until the first
+    /// the server's OWN loaded store, cached per serving lineage and generation. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
     /// WHERE THE AUTH VIEW LIVES relative to the ring's immutable generations (the design
     /// question sq-snopa.8 exists to settle): the materialised
     /// [`PodStore`](sparq_solid::PodStore) is a PURE FUNCTION of one published generation, so it
-    /// is cached BESIDE the ring and KEYED BY THE GENERATION NUMBER rather than threaded through
+    /// is cached BESIDE the ring and KEYED BY THE SERVING LINEAGE AND GENERATION NUMBER rather than threaded through
     /// the writer. Every commit — including an `.acl`/`.acr` write — publishes a new generation,
     /// which makes the cached entry stale by construction and forces a re-materialise on the next
     /// request. That is the "re-materialise on ACL change" contract, obtained without any writer
@@ -2541,6 +2633,11 @@ pub struct AppState {
     /// request never decides from an auth view staler than the data it would read.
     #[cfg(feature = "solid-authz")]
     authz_view: Arc<std::sync::RwLock<Option<crate::solid_authz::CachedAuthView>>>,
+    /// The BOUNDED blocking pool every `/authz/*` authorization-view build runs on (see
+    /// [`ServerConfig::solid_authz_build_concurrency`]). Shared by all four build lanes, so
+    /// the cap is on authorization builds in flight rather than per lane.
+    #[cfg(feature = "solid-authz")]
+    authz_build_pool: Arc<crate::solid_authz::AuthBuildPool>,
     /// Admission control for streamed read bodies (SELECT JSON, CONSTRUCT / DESCRIBE). The
     /// `concurrency_limit` layer releases its slot as soon as the handler returns the
     /// `Response`, but a streamed body's worker keeps running on the blocking pool while the
@@ -2932,6 +3029,11 @@ impl AppState {
             config.templates_file.as_deref(),
         )?));
         let stream_worker_cap = config.max_concurrent.max(1);
+        // Read before `config` is moved into the state.
+        #[cfg(feature = "solid-authz")]
+        let authz_build_concurrency = config.solid_authz_build_concurrency.max(1);
+        #[cfg(feature = "solid-authz")]
+        let authz_build_wait = config.solid_authz_build_wait;
         Ok(Self {
             #[cfg(feature = "templates")]
             templates,
@@ -2963,6 +3065,11 @@ impl AppState {
             // the first `"source":"server"` request and re-built whenever the generation moves.
             #[cfg(feature = "solid-authz")]
             authz_view: Arc::new(std::sync::RwLock::new(None)),
+            #[cfg(feature = "solid-authz")]
+            authz_build_pool: Arc::new(crate::solid_authz::AuthBuildPool::new(
+                authz_build_concurrency,
+                authz_build_wait,
+            )),
             stream_workers: Arc::new(tokio::sync::Semaphore::new(stream_worker_cap)),
         })
     }
@@ -3083,6 +3190,12 @@ impl AppState {
     /// being produced; `gen.snapshot()` is the immutable [`Graph`] to evaluate against.
     pub fn current(&self) -> PinnedGen {
         self.ring().current()
+    }
+
+    /// Pins the serving lineage and its generation together for authorization caching.
+    #[cfg(all(feature = "solid-authz", feature = "backup"))]
+    pub(crate) fn authz_core(&self) -> Arc<ServingCore> {
+        self.core.load_full()
     }
 
     /// (sq-o5bi) Pins the current generation for an ONLINE backup export: a
@@ -3377,7 +3490,13 @@ impl AppState {
         );
         // Atomic swap: subsequent loads see the new ring+writer; the old core's writer thread
         // joins once its last in-flight reader/Arc drops (Writer's Drop drains + joins).
-        self.core.store(Arc::new(ServingCore { ring, writer }));
+        {
+            // Serialize the lineage swap with auth-view installation. A pre-restore build
+            // holding this lock either installs before the swap or observes the new core.
+            #[cfg(feature = "solid-authz")]
+            let _cache = self.authz_view.write().ok();
+            self.core.store(Arc::new(ServingCore { ring, writer }));
+        }
         // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
         // generation-zero index from the prior lineage so equality on the numeric generation
         // cannot reuse completion data from the replaced graph.
@@ -3442,8 +3561,10 @@ impl AppState {
     /// present (the on-disk base IS the restored image).
     ///
     /// Fail-closed: a corrupt artifact fails the import → the writer is never asked to swap, the
-    /// durable store is untouched. A swap I/O error leaves the OLD durable store intact (the swap
-    /// is rollback-safe) and the writer alive; reads keep flowing from the last published snapshot.
+    /// durable store is untouched. A swap I/O error is recovered at once: rolled back, the OLD
+    /// durable store is intact and the writer alive; if even that fails the durable graph is
+    /// frozen (every later update refused) until a restart re-opens the directory, which heals
+    /// it to old-or-new. Reads keep flowing from the last published snapshot either way.
     /// Returns the artifact's source generation (for operator correlation), as the in-memory path.
     #[cfg(feature = "backup")]
     fn restore_into_durable_through<R: std::io::Read>(&self, input: R) -> Result<u64, String> {
@@ -3464,8 +3585,10 @@ impl AppState {
                 });
                 Ok(meta.generation)
             }
-            // A durable-swap failure: the OLD store is intact, the writer is alive (fail-closed).
-            Ok(Err(e)) => Err(format!("restore-into-durable failed (store unchanged): {}", e)),
+            // A durable-swap failure: rolled back (the old store intact, the writer appending to
+            // it) or, when that failed too, the durable graph frozen until a restart re-opens
+            // the directory. The error says which; never claim more here.
+            Ok(Err(e)) => Err(format!("restore-into-durable failed: {}", e)),
             Err(e) => Err(format!("restore-into-durable: update writer unavailable: {}", e)),
         }
     }
@@ -3488,6 +3611,13 @@ impl AppState {
         &self,
     ) -> &std::sync::RwLock<Option<crate::solid_authz::CachedAuthView>> {
         &self.authz_view
+    }
+
+    /// The bounded blocking pool every authorization-view build runs on (see the
+    /// `authz_build_pool` field).
+    #[cfg(feature = "solid-authz")]
+    pub(crate) fn authz_build_pool(&self) -> &Arc<crate::solid_authz::AuthBuildPool> {
+        &self.authz_build_pool
     }
 
     /// (sq-gos8) The installed structured access-audit sink, if any. `None` short-
@@ -4132,7 +4262,7 @@ fn completion_json(
         .complete(prefix, limit, None)
         .into_iter()
         .map(|candidate| {
-            let term = graph.dict.term(candidate.id);
+            let term = graph.dict().term(candidate.id);
             let iri = match &term {
                 oxrdf::Term::NamedNode(node) => node.as_str().to_string(),
                 _ => term.to_string(),
@@ -12497,6 +12627,36 @@ mod from_env_tests {
         // Recover from a poisoned lock: a panicking test still leaves the env serialized
         // for the next test, so the poison flag carries no unsound state here.
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn trust_work_limit_environment_overrides_are_counts() {
+        let _env = env_guard();
+        for name in [
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK",
+        ] {
+            let limit = |cfg: &ServerConfig| match name {
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS" => cfg.solid_authz_trust_max_pairs,
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS" => {
+                    cfg.solid_authz_trust_max_certifications
+                }
+                _ => cfg.solid_authz_trust_max_validation_work,
+            };
+            for (value, expected) in [
+                (" 17 ", 17),
+                ("0", 0),
+                ("invalid", limit(&ServerConfig::default())),
+                ("-1", limit(&ServerConfig::default())),
+            ] {
+                std::env::set_var(name, value);
+                let result = ServerConfig::from_env();
+                std::env::remove_var(name);
+                assert_eq!(limit(&result.unwrap()), expected, "{name}={value}");
+            }
+        }
     }
 
     #[test]

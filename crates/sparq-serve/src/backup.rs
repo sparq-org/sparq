@@ -115,7 +115,7 @@ impl From<io::Error> for BackupError {
 /// count the same way.
 pub(crate) fn total_quads(graph: &Graph) -> u64 {
     let mut n = graph.len() as u64;
-    for (_name, g) in &graph.named {
+    for (_name, g) in graph.named() {
         n += g.len() as u64;
     }
     n
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(meta.triples, 2);
         // Total quads = 1 default-graph + 1 named-graph (Graph::len counts default only).
         assert_eq!(total_quads(&restored), 2);
-        assert_eq!(restored.named.len(), 1, "named graph restored");
+        assert_eq!(restored.named().len(), 1, "named graph restored");
         // Equivalent queryable content: same triple set serialises identically.
         let mut a = graph_to_nquads(&restored)
             .lines()

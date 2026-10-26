@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
+  open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
+  `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
+  build or compaction of the same store fails at once (`WouldBlock`) instead of corrupting it;
+  `Graph::open_read_only` opens share the lock with each other. A store whose parent directory
+  is not writable (a mount root, say) still opens, writable or read-only, held by its inside
+  lock alone; a compaction, vacuum or restore there (they rename the directory) is refused with
+  an error naming the parent. Compaction and restore swaps stage the new base under a recorded
+  staging name, recover an interrupted swap at once, and roll back on a failure; a swap that
+  can neither complete nor roll back freezes the graph: `Graph::is_frozen` reports it, every
+  write is refused, and the embedded LWS store and the Python `Graph` (`frozen` property) report
+  it as an error instead of serving it. New: `Graph::open_read_only`, `Graph::restore_in_place`,
+  `Graph::is_backed_by`, `Graph::check_writable`, `Graph::is_frozen`, `Graph::into_dict`, and
+  `dir_lock::{store_root, is_inside_store, is_reserved_store_path}`.
+- **sparq-cli:** output files (`--out`, `reason`, tabular conversions) are written under a fresh
+  name beside the target and renamed into place; an output path that names a store, a path
+  inside one or a reserved name (lock files, in any letter case) is refused (exit 2), and a
+  symbolic link is followed to the file it names, which is the file replaced.
+- **sparq-zk-compose (`dual-leaf`):** complete dispatch coverage for the V2 component-witnessed
+  scan `(1,16,4)` and join `(16,16)` members with dedicated `CircuitId` variants.
+  V2 ids are legal only under `DualLeafV2`. Checked constructors, serde and package-name
+  parsing refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
+  Extended-fragment and value-FILTER refusals remain closed. Experimental and unaudited.
+
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
   `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
@@ -156,6 +180,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-core (BREAKING API):** `Graph::dict` and `Graph::store` are no longer public fields;
+  read them with `Graph::dict()` / `Graph::store()`, and take the dictionary out with
+  `Graph::into_dict()` (rebuild with `Graph::from_parts`). These openers and writers of a
+  store's files became crate-internal, so a store's files are reachable only through the
+  locked `Graph`: `Dict::{save, save_mmap, open_mmap, fork}`, `TripleStore::{open, save,
+  save_compressed, save_pred_stats, fork}`, `compress::CompressedPermWriter::{create, create_with,
+  finish}`, and `extsort::{spill_run, kway_merge, kway_merge_compressed, external_sort,
+  external_sort_compressed, map_perm}`. Migration: open, save and build through `Graph`
+  (`Graph::open`, `Graph::save`, `Graph::build_external*`), fork through `Graph::fork`, and restore an
+  open store with `Graph::restore_in_place` (`Graph::restore_into_durable` refuses a directory a
+  graph is open from).
+- **Breaking — sparq-zk-compose:** `CircuitId::package()` now returns
+  `Result<String, CircuitIdError>`. `ProofManifest::to_json()` and
+  `FragmentManifest::to_json()` now return `Result<String, serde_json::Error>`;
+  hand-built uncompiled V2 ids return an error instead of panicking.
+  With `dual-leaf`, opaque scan/join ids are refused under `DualLeafV2`;
+  use the dedicated V2 component-witnessed ids instead.
+- **sparq-zk-compose (`dual-leaf`):** restore the explicit `admit_unbound()` downgrade:
+  all-Unbound sub-proofs resolve as `StringCanonicalV1`, matching pattern encoding.
+  Opaque scans/joins remain legal; mixed Unbound + Bound sub-proofs remain refused.
+  Under `admit_unbound` the commitment is ASSUMED string-canonical; nothing checks it.
+  The downgrade is sound only if the issuer signed unbound messages over
+  string-canonical commitments alone. A dual-leaf commitment signed unbound cannot
+  use the V2 members, and its opaque presentations are not sound.
+  Orphan sub-proofs still require method-independent members.
+
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
   that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
@@ -175,14 +225,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ABSENT from the authenticated map, so nothing was authenticated for it at all),
   `CheckError::AuxiliaryMemberIdInSubProof` (a manifest sub-proof declares an id that belongs to
   one of the auxiliary bb roles below) and `CheckError::MemberNotForFixedRole`. Absence from the
-  authenticated map is NOT read as `Unbound`: it is refused by name. A sub-proof all of whose
-  bound commitments authenticated no method has no method to resolve against, so its declared
-  member is NOT echoed back either — it is held to the same method-independence rule as a
-  sub-proof bound to no commitment at all (legal under every admissible method, where
-  `MethodPolicy::widest_admissible()` names that set), which refuses a value-lane member and
-  admits a string-lane one. Under the default `MethodPolicy` an unbound attestation is refused
-  upstream, so that case is reachable only under the written-down `admit_unbound()` downgrade. A
-  sub-proof bound to a commitment covered only by a hidden-issuer
+  authenticated map is NOT read as `Unbound`: it is refused by name. Under the explicit
+  `admit_unbound()` downgrade, a sub-proof all of whose
+  bound commitments authenticate as Unbound resolves as `StringCanonicalV1`:
+  opaque scan/join members remain legal. Under `admit_unbound` the commitment is
+  ASSUMED string-canonical; nothing checks it. The downgrade is sound only if the
+  issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
+  commitment signed unbound cannot use the V2 members, and its opaque presentations
+  are not sound. Under the default policy,
+  unbound attestations are refused upstream. Orphan sub-proofs alone require
+  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
@@ -332,11 +384,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
   which, while the state is built, removes every subscription with an `expires` and then stores
   the clock.
-  An `LwsState` now holds a lease per store handle (shared by every clone of its store and by
-  any `Tracked` wrapper of one) while it lives: a second `LwsState` built over a clone or a
-  wrapper of a running one's store is refused, so a state that replaces another must be built
-  after the old one is dropped. A store opened again separately over the same backend has a lease
-  of its own. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
+  An `LwsState` now holds a lease per store handle (shared by every clone of its store,
+  `LwsState::store`, and by any `Tracked` wrapper of one) while it lives: a second `LwsState`
+  built over a clone or a wrapper of a running state's store is refused, so a state that replaces
+  another must be built after the old one is dropped. A store that keeps no lease of its own
+  (`Store::lifecycle` is `None`, as for a plain `CompositeStore`) gets a new one in each
+  `LwsState::new`, so two states built over clones of one such store each get their own lease;
+  a store opened again separately over the same backend has a lease of its own too. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
   store's lease and no longer accepts one from the caller, and the store's generic mutators refuse
   an IRI shaped like the stored time, which changes only through `raise_marker` and
   `reset_marker`.
@@ -761,11 +815,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
+  while a request waits on it tries each step up to three times, each attempt waiting for a
+  fence two seconds at most (counted from the store's answer); a step whose write failed
+  unsettled and whose fence has not succeeded is set aside, its fence first, and never tried
+  again before that fence succeeds, in the request or in the background (the background
+  put-back and the start-up settling still wait as long as the store takes). A removal whose
+  fence lands with the record still stored is answered at once from the listing; one whose
+  outcome cannot be read after its fence stays out of force and is settled in the background.
+  A journal's commit fences an unsettled clearing of its intent before reading the intent. A service-container
+  create whose precondition compares no state (a bare `If-Match: *`) takes the container shared,
+  as an unconditional create does, so it no longer waits on a removal being settled or holds up
+  other creates. A background fence's attempts are capped at the store's own call timeout
+  (`Store::call_timeout`, new, defaulting to `STORE_CALL_TIMEOUT`; the `http` index reports the
+  timeout it was built with), clamped to between two seconds and one hour per attempt.
+  Forward removals and intent creates keep their unsettled fences through rollback and commit.
+  A settled removal whose outcome cannot be read stays out of force until the listing answers.
+  A WebSocket socket closes `1011` for the client to reconcile at the
+  next point where the subscriber may read the topic after any notification was dropped
+  (whether it could not be read or its check could not be made), instead of delivering later
+  ones; a receive token has at most one socket open at a time (a second connect gets `401`); pings
+  are answered while an access check runs. A due tick takes priority over inbound frames and
+  queued notifications, pre-empts a running notification or lag check and notes it as missed:
+  a reader gets `RECONCILE` for either dropped check, rather than `OVERFLOW` for a dropped lag
+  check. Within two periods of losing Read the socket closes: `1008` for a confirmed denial,
+  or `1011` if the timer check is undecided. Each check has at most one period; a slower check
+  counts as undecided and the client must resubscribe. An LDP write also refuses a dot segment around a
+  %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is,
+  whatever metadata the change kept.
+
 - **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
   subscriber's current access. A WebSocket notification the subscriber may no longer read is
   not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the
   socket (1008) once read access is gone; a check that cannot be made closes it `1011` (on the
-  timer) or holds the notification back and asks a subscriber that may read to reconcile
+  timer) or drops the notification and asks a subscriber that may read to reconcile
   (`1011`) at the next tick. The receive token gates connecting only: an open socket is not
   closed when it expires, and an expired token never connects again in the process. A webhook
   subscription decides access before asking whether its topic exists, and a topic being created

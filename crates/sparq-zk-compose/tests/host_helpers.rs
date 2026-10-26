@@ -446,20 +446,20 @@ fn filter_op_codes_are_the_circuit_globals() {
 
 #[test]
 fn circuit_id_package_names_every_member_family() {
-    assert_eq!(CircuitId::Scan { k: 2, n: 4, r: 1 }.package(), "scan_k2_n4_r1");
-    assert_eq!(CircuitId::FilterInt { d: 1 }.package(), "filter_int_d1");
-    assert_eq!(CircuitId::FilterF64 { d: 3 }.package(), "filter_f64_d3");
+    assert_eq!(CircuitId::Scan { k: 2, n: 4, r: 1 }.package().unwrap(), "scan_k2_n4_r1");
+    assert_eq!(CircuitId::FilterInt { d: 1 }.package().unwrap(), "filter_int_d1");
+    assert_eq!(CircuitId::FilterF64 { d: 3 }.package().unwrap(), "filter_f64_d3");
     // sq-7lrq: signed-int / decimal package names.
     assert_eq!(
-        CircuitId::FilterSignedInt { md: 2 }.package(),
+        CircuitId::FilterSignedInt { md: 2 }.package().unwrap(),
         "filter_signed_int_d2"
     );
     assert_eq!(
-        CircuitId::FilterDecimal { id: 3, fd: 2 }.package(),
+        CircuitId::FilterDecimal { id: 3, fd: 2 }.package().unwrap(),
         "filter_decimal_i3_f2"
     );
-    assert_eq!(CircuitId::RevokeUnset { depth: 10 }.package(), "revoke_unset_d10");
-    assert_eq!(CircuitId::HiddenIssuer { depth: 4 }.package(), "hidden_issuer_d4");
+    assert_eq!(CircuitId::RevokeUnset { depth: 10 }.package().unwrap(), "revoke_unset_d10");
+    assert_eq!(CircuitId::HiddenIssuer { depth: 4 }.package().unwrap(), "hidden_issuer_d4");
 }
 
 #[test]
@@ -587,14 +587,14 @@ fn proof_manifest_json_round_trips_and_defaults_type() {
             },
             proof_hex: String::new(),
         }],
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    let json = manifest.to_json();
+    let json = manifest.to_json().unwrap();
     let back = ProofManifest::from_json(&json).expect("round-trips");
     assert_eq!(back, manifest);
     // The default type-marker is applied when the field is absent from the JSON.

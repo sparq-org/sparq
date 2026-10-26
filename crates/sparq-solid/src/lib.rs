@@ -483,7 +483,7 @@ enum ReindexScope {
 /// The stored facts a failed commit judges (see [`PodStore::touched_with_facts`]).
 enum TouchedFacts {
     /// Every resource, judged against the resources before the commit.
-    All(loader::ResourceGraphs),
+    All(StoredGraphs),
     /// These resources, and whether each existed before the commit.
     Some { resources: Vec<String>, held: Vec<bool> },
 }
@@ -511,8 +511,19 @@ impl PodStore {
     /// assert!(store.accessible(&mallory, Mode::Read).is_empty());
     /// # Ok::<(), String>(())
     /// ```
+    ///
+    /// A graph that refuses writes (opened read-only, or frozen) is replaced by an in-memory
+    /// [`fork`](Graph::fork) of it. A directory-backed input removes reserved slots through
+    /// durable drops, retaining its root; if that cannot complete, it uses a fork instead.
+    /// Only views materialized by this store are served.
     pub fn new(mut graph: Graph) -> PodStore {
-        loader::strip_reserved_graphs(&mut graph);
+        if graph.check_writable().is_err() {
+            graph = graph.fork();
+        }
+        if loader::strip_reserved_graphs(&mut graph).is_err() {
+            graph = graph.fork();
+            loader::strip_reserved_graphs(&mut graph).expect("a fork is in memory");
+        }
         PodStore {
             graph,
             auth: Arc::new(AuthIndex::default()),
@@ -610,8 +621,9 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if the N3 reasoner fails. On error the previous auth view (if any) is
-    /// left in place. A document stating a triple it may not (one about a node outside it, a
+    /// Returns `Err` if reasoning or durable view installation fails. Input and reasoning
+    /// refusals leave the previous auth view (if any) in place. A document stating a triple
+    /// it may not (one about a node outside it, a
     /// minted name, a reserved principal such as a `urn:sparq:` IRI or one containing
     /// `&client=`, or view vocabulary) is not an error: the loader rejects it whole and the
     /// resources it governs get no grant from any source.
@@ -625,6 +637,11 @@ impl PodStore {
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
+        // The provenance pruning below enumerates this store's resources, which BUILDS their
+        // container chains — so it is charged against the store's budget, and before the
+        // materialization installs anything: a stored name past the enumeration caps refuses
+        // the whole rebuild, fail-closed, with the view in force untouched.
+        let resources = self.enumerate_resources()?;
         let stats = materialize::materialize_wac_limited(
             &mut self.graph,
             self.auth_limits,
@@ -633,12 +650,12 @@ impl PodStore {
         // Stored creator and owner facts of resources gone with their access control resource
         // go at any rebuild, so an ACP view built later never revives them.
         let provenance = std::mem::take(&mut self.acp_context.0);
-        self.acp_context.0 = self.existing_provenance(&provenance, false);
+        self.acp_context.0 = self.existing_provenance(&provenance, false, &resources);
         self.record_static_coverage();
         self.view_dropped = false;
         self.acp_uses_provenance = false;
         self.installed_acp = Some(false);
-        self.reconcile_bridged_after_static();
+        self.reconcile_bridged_after_static()?;
         self.reindex_with(scope);
         Ok(stats)
     }
@@ -652,17 +669,18 @@ impl PodStore {
     /// (the baseline is the static view verbatim). No-op without the `odrl-bridge`
     /// feature, or when no grants were ever bridged.
     #[cfg(feature = "odrl-bridge")]
-    fn reconcile_bridged_after_static(&mut self) {
+    fn reconcile_bridged_after_static(&mut self) -> Result<(), String> {
         self.bridge_ledger.capture_static_baseline(&self.graph);
         // refresh() rebuilds from the just-captured baseline and replays the ledger. A static
         // materialization clears the drop first, so this always runs.
-        let _ = self.refresh_bridged();
+        self.refresh_bridged()?;
+        Ok(())
     }
 
     /// No-op stub when the bridge is compiled out — the core build has no bridged state.
     #[cfg(not(feature = "odrl-bridge"))]
     #[inline]
-    fn reconcile_bridged_after_static(&mut self) {}
+    fn reconcile_bridged_after_static(&mut self) -> Result<(), String> { Ok(()) }
 
     /// (Re-)materialize the ACP auth view from the `.acr` graphs.
     ///
@@ -772,7 +790,7 @@ impl PodStore {
     pub fn stored_graphs(&self) -> StoredGraphs {
         StoredGraphs(
             self.graph
-                .named
+                .named()
                 .iter()
                 .filter_map(|(n, _)| match n {
                     Term::NamedNode(n) => Some(n.as_str().to_owned()),
@@ -821,16 +839,18 @@ impl PodStore {
         // The staged rebuild below installs the model `acp` names: checked before it runs.
         let _checked = self.matching_model(acp)?;
         let events = lifecycle::edit_events(&before.0, &self.graph);
-        let staged =
-            lifecycle::provenance_after_names(
-                &before.0,
-                &events,
-                &self.acp_context.0,
-                creator,
-                Some(created),
-                &self.acr_controlled,
-            )
-                .unwrap_or_else(|| self.acp_context.0.clone());
+        // Replay borrows names and container prefixes. Only additions face per-name caps;
+        // removing a name remains possible after the budget has been lowered.
+        let staged = lifecycle::provenance_after_names(
+            &before.0,
+            &events,
+            &self.acp_context.0,
+            creator,
+            Some(created),
+            &self.acr_controlled,
+            self.auth_budget,
+        )?
+        .unwrap_or_else(|| self.acp_context.0.clone());
         if acp {
             self.usable_acp_context()?;
             let credentials = self.acp_context.1.clone();
@@ -861,7 +881,7 @@ impl PodStore {
                 UpdateEffect::Clear(t) | UpdateEffect::Drop(t) => match t {
                     GraphTarget::NamedNode(n) => names.push(n.as_str()),
                     GraphTarget::DefaultGraph => {}
-                    _ => return Some(TouchedFacts::All(loader::ResourceGraphs::of(&self.graph))),
+                    _ => return Some(TouchedFacts::All(self.stored_graphs())),
                 },
                 _ => {}
             }
@@ -890,6 +910,8 @@ impl PodStore {
         match touched {
             None => {}
             Some(TouchedFacts::All(before)) => {
+                let before =
+                    loader::ResourceGraphs::from_names(before.0.iter().map(String::as_str));
                 let after = loader::ResourceGraphs::of(&self.graph);
                 self.acp_context.0.retain(|r| before.holds(r) && after.holds(r));
             }
@@ -910,12 +932,27 @@ impl PodStore {
     /// caller supplies (`supplied`) that differ from the stored ones, is stored now (see
     /// [`lifecycle`]); stored facts passed back are judged as stored. Records which resources
     /// have their `.acr` stored, for the next install.
+    /// This store's resources, with their containers ([`loader::resources`]), charged
+    /// against the store's [`AuthBudget`].
+    ///
+    /// The names are the store's own, but their container chains are BUILT by the walk, so
+    /// the cost is set by the names (one owned prefix string per container) rather than by
+    /// what is already held. A name past [`AuthBudget::max_resource_iri_bytes`] /
+    /// [`AuthBudget::max_resource_path_depth`], or an enumeration past the aggregate
+    /// [`AuthBudget::max_input_bytes`], is `Err` — the typed [`AuthAllowance`] refusal the
+    /// materialization path gives for the same name — and the caller refuses the rebuild
+    /// before anything is installed, so an already-stored name past the caps makes the
+    /// authorization view refuse rather than letting the walk run unbounded.
+    fn enumerate_resources(&self) -> Result<FxHashSet<String>, String> {
+        loader::resources(&self.graph, &mut budget::InputMeter::new(self.auth_budget))
+    }
+
     fn existing_provenance(
         &mut self,
         provenance: &AccessProvenance,
         supplied: bool,
+        resources: &FxHashSet<String>,
     ) -> AccessProvenance {
-        let resources = loader::resources(&self.graph);
         let controlled: FxHashSet<String> = loader::controlled_resources(&self.graph)
             .into_iter()
             .map(str::to_owned)
@@ -1068,6 +1105,8 @@ impl PodStore {
         scope: ReindexScope,
         supplied: bool,
     ) -> Result<MaterializeStats, String> {
+        // Metered, and before anything is installed — see [`PodStore::materialize_wac_scoped`].
+        let resources = self.enumerate_resources()?;
         let stats = materialize::materialize_acp_limited(
             &mut self.graph,
             provenance,
@@ -1076,13 +1115,16 @@ impl PodStore {
             self.auth_budget,
         )?;
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
-        self.acp_context = (self.existing_provenance(provenance, supplied), credentials.clone());
+        self.acp_context = (
+            self.existing_provenance(provenance, supplied, &resources),
+            credentials.clone(),
+        );
         self.acp_uses_provenance = loader::control_documents_name_provenance(&self.graph);
         self.acp_context_stale = false;
         self.installed_acp = Some(true);
         self.record_static_coverage();
         self.view_dropped = false;
-        self.reconcile_bridged_after_static();
+        self.reconcile_bridged_after_static()?;
         self.reindex_with(scope);
         Ok(stats)
     }
@@ -1110,7 +1152,11 @@ impl PodStore {
     /// by the next decision and no stale ACL discovery survives.
     fn reindex_with(&mut self, scope: ReindexScope) {
         let old_auth = Arc::clone(&self.auth);
-        let new_auth = Arc::new(AuthIndex::from_graph(&self.graph));
+        let new_auth = Arc::new(if self.view_dropped {
+            AuthIndex::default()
+        } else {
+            AuthIndex::from_graph(&self.graph)
+        });
         self.auth = Arc::clone(&new_auth);
         self.epoch += 1;
         match scope {
@@ -1166,7 +1212,13 @@ impl PodStore {
     /// [`PodStore::resolve_acl`] so a decision is a point lookup, not a per-call whole-store
     /// scan. `reindex` empties the cell, so this can never outlive an ACL change.
     fn acl_index(&self) -> &decide::AclIndex {
-        self.acl_index.get_or_init(|| decide::AclIndex::build(&self.graph))
+        self.acl_index.get_or_init(|| {
+            let mut index = decide::AclIndex::build(&self.graph);
+            if self.view_dropped {
+                index.mark_unmaterialized();
+            }
+            index
+        })
     }
 
     /// The sorted named-graph set this session may access in `mode`
@@ -1418,7 +1470,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
         self.odrl_grants_present(session, mode, target)
-            && self.graph.named.iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
+            && self.graph.named().iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
     }
 
     /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
@@ -1447,7 +1499,7 @@ impl PodStore {
     fn staged_provenance(
         &self,
         effects: &[sparq_engine::UpdateEffect],
-    ) -> Option<AccessProvenance> {
+    ) -> Result<Option<AccessProvenance>, String> {
         let events = lifecycle::update_events(&self.graph, effects);
         // An update that only creates graphs changes nothing when nothing is known of any
         // resource (it records no creator); otherwise it may bring one with known facts back.
@@ -1456,14 +1508,17 @@ impl PodStore {
                 .iter()
                 .any(|e| !matches!(e, lifecycle::GraphEvent::Added(_)))
         {
-            return None;
+            return Ok(None);
         }
+        // Added names face the per-name caps before commit. Removals borrow their
+        // chains without refusing, even if the budget has since been lowered.
         lifecycle::provenance_after(
             &self.graph,
             &events,
             &self.acp_context.0,
             None,
             &self.acr_controlled,
+            self.auth_budget,
         )
     }
 
@@ -1591,7 +1646,7 @@ impl PodStore {
     fn record_static_coverage(&mut self) {
         let covered = self
             .graph
-            .named
+            .named()
             .iter()
             .filter_map(|(n, _)| match n {
                 Term::NamedNode(g) if !g.as_str().starts_with(loader::RESERVED_PREFIX) => {
@@ -1820,7 +1875,7 @@ impl PodStore {
             if mode != Mode::Control && self.odrl.has_permissions() {
                 let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
                 // Each graph here exists, so the existence half of `odrl_grants` holds.
-                for (name, _) in self.graph.named.iter() {
+                for (name, _) in self.graph.named().iter() {
                     let Term::NamedNode(g) = name else { continue };
                     let g_str = g.as_str();
                     if !have.contains(g_str)
@@ -2145,7 +2200,7 @@ impl PodStore {
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                let staged = self.staged_provenance(&effects);
+                let staged = self.staged_provenance(&effects)?;
                 let rebuild = self.provenance_rebuilds(&staged);
                 return self.commit_update(&effects, staged, acp, rebuild);
             }
@@ -2169,7 +2224,7 @@ impl PodStore {
                     &odrl,
                 )?;
                 if !wrote_rules {
-                    let staged = self.staged_provenance(&effects);
+                    let staged = self.staged_provenance(&effects)?;
                     let rebuild = self.provenance_rebuilds(&staged);
                     return self.commit_update(&effects, staged, acp, rebuild);
                 }
@@ -2260,7 +2315,7 @@ impl PodStore {
         // The ACP view is built from trusted provenance too: an update that ends or begins a
         // resource's life stages the provenance that follows, and rebuilds the view with it
         // when the view depends on it.
-        let staged = self.staged_provenance(&effects);
+        let staged = self.staged_provenance(&effects)?;
         let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
         // update, and nothing is changed, so no writer of one access-control document can take
@@ -2307,7 +2362,12 @@ impl PodStore {
     /// to rules that changed without a view rebuilt from them: the previous view would keep
     /// granting what the change revoked.
     pub(crate) fn drop_auth_view(&mut self) {
-        loader::strip_reserved_graphs(&mut self.graph);
+        // Remove reserved slots durably when backed by a directory. If removal cannot
+        // complete, empty in-memory views; view_dropped below gates decisions and derived
+        // view installation until materialization succeeds.
+        if loader::strip_reserved_graphs(&mut self.graph).is_err() {
+            loader::empty_reserved_graphs(&mut self.graph);
+        }
         // No other grant source (the ODRL bridge, the trust graph) rebuilds it either, until a
         // static materialization succeeds (see [`PodStore::may_install_grants`]).
         self.view_dropped = true;
@@ -2347,9 +2407,21 @@ impl PodStore {
     /// Rebuild the bridged grants from the ledger's baseline, as [`PodStore::grant_view`]
     /// allows: `None` (nothing touched) while the view is dropped, else the number retracted.
     #[cfg(feature = "odrl-bridge")]
-    fn refresh_bridged(&mut self) -> Option<usize> {
-        let Self { graph, bridge_ledger, view_dropped, .. } = self;
-        (!*view_dropped).then(|| bridge_ledger.refresh(graph))
+    fn refresh_bridged(&mut self) -> Result<Option<usize>, String> {
+        if !self.may_install_grants() {
+            return Ok(None);
+        }
+        let result = self.bridge_ledger.refresh(&mut self.graph);
+        self.grant_write_result(result).map(Some)
+    }
+
+    /// A failed derived-view write can leave a partial view; disable it before returning.
+    #[cfg(any(feature = "odrl-bridge", feature = "trust-graph"))]
+    pub(crate) fn grant_write_result<T>(&mut self, result: Result<T, String>) -> Result<T, String> {
+        if result.is_err() {
+            self.drop_auth_view();
+        }
+        result
     }
 
     /// sq-h3uk — evaluate an ODRL `policy` against `request` and, on a
@@ -2379,22 +2451,26 @@ impl PodStore {
     /// from the embedding application: the store never reads them from pod content, so pass
     /// only a policy the application itself vetted.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_permission(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::materialize_permission(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted {
             // Track for refresh/retraction (sq-dpk4), then rebuild index + drop cache.
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Permission);
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-w693 — evaluate an ODRL `policy`'s prohibitions against `request`
@@ -2412,21 +2488,25 @@ impl PodStore {
     /// without a concrete party/target materializes NOTHING and leaves the auth view
     /// (and session index) untouched.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_prohibition(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::materialize_prohibition(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Prohibition);
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-w693 — materialize **both** sides of an ODRL `policy` for
@@ -2439,37 +2519,45 @@ impl PodStore {
     /// enforcement time (deny-overrides — the session layer subtracts `∪ deny` from
     /// `∪ allow`). Each side is independently fail-closed.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_policy(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::materialize_policy(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted || outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Policy);
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// [`PodStore::materialize_odrl_policy`] for every request in `requests`, writing the
     /// auth view and rebuilding the session index once for the whole batch instead of
     /// once per request. Outcomes are parallel to `requests`.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_policy_for_each(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         requests: &[sparq_policy::Request],
-    ) -> Vec<odrl_bridge::BridgeOutcome> {
+    ) -> Result<Vec<odrl_bridge::BridgeOutcome>, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return vec![odrl_bridge::BridgeOutcome::default(); requests.len()];
+            return Ok(vec![odrl_bridge::BridgeOutcome::default(); requests.len()]);
         };
         let outcomes = odrl_bridge::materialize_policy_for_each(view, policy, requests);
+        let outcomes = self.grant_write_result(outcomes)?;
         let materialized: Vec<&sparq_policy::Request> = requests
             .iter()
             .zip(&outcomes)
@@ -2481,7 +2569,7 @@ impl PodStore {
                 .record_each(policy, materialized, odrl_bridge::BridgeKind::Policy);
             self.reindex_with(ReindexScope::Full);
         }
-        outcomes
+        Ok(outcomes)
     }
 
     /// How many times the authorization index has been rebuilt since this store was
@@ -2496,17 +2584,21 @@ impl PodStore {
     /// recipient/assignee/dateTime constraints as re-checked condition heads; see
     /// [`odrl_bridge::materialize_permission_conditional`].
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_permission_conditional(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome =
             odrl_bridge::materialize_permission_conditional(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted {
             self.bridge_ledger.record(
                 policy,
@@ -2515,7 +2607,7 @@ impl PodStore {
             );
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-4r70 — the deny dual of
@@ -2527,17 +2619,21 @@ impl PodStore {
     /// **overrides** any allow for the same target and mode (deny-overrides). See
     /// [`odrl_bridge::materialize_prohibition_conditional`] for the full rationale.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_prohibition_conditional(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome =
             odrl_bridge::materialize_prohibition_conditional(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.prohibited {
             self.bridge_ledger.record(
                 policy,
@@ -2546,7 +2642,7 @@ impl PodStore {
             );
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// Bridge a permission through the count-aware decision: evaluate `policy` against
@@ -2574,15 +2670,18 @@ impl PodStore {
     /// or a request without a concrete party/target materializes NOTHING. Only present
     /// under the `count-enforcement` feature.
     #[cfg(feature = "count-enforcement")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_permission_counted(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::count::materialize_permission_counted(
             view,
@@ -2590,6 +2689,7 @@ impl PodStore {
             request,
             store.as_ref(),
         );
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted {
             // Remember the store so refresh can re-check the budget (read-only), then
             // track the counted grant for refresh/retraction, then rebuild the index.
@@ -2602,7 +2702,7 @@ impl PodStore {
             );
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-dpk4 — re-evaluate **every bridged ODRL grant** this store is
@@ -2640,13 +2740,16 @@ impl PodStore {
     ///   replays the policy AS TRACKED — to refresh against a mutated policy, call the
     ///   bridge entry point again with the new policy first.
     #[cfg(feature = "odrl-bridge")]
-    pub fn refresh_odrl_grants(&mut self) -> usize {
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
+    pub fn refresh_odrl_grants(&mut self) -> Result<usize, String> {
         // A dropped view is not rebuilt from the baseline captured before the drop.
-        let Some(retracted) = self.refresh_bridged() else {
-            return 0;
+        let Some(retracted) = self.refresh_bridged()? else {
+            return Ok(0);
         };
         self.reindex_with(ReindexScope::Full);
-        retracted
+        Ok(retracted)
     }
 
     /// sq-dpk4 — refresh the bridged grant for one slot against an **updated**
@@ -2668,18 +2771,21 @@ impl PodStore {
     /// Fail-closed exactly as [`PodStore::refresh_odrl_grants`]: a now-Deny / lapsed /
     /// withdrawn / now-prohibited re-evaluation loses access, static grants are untouched.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn refresh_odrl_grant(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         kind: odrl_bridge::BridgeKind,
-    ) -> (bool, usize) {
+    ) -> Result<(bool, usize), String> {
         let matched = self.bridge_ledger.update(policy, request, kind);
-        let Some(retracted) = self.refresh_bridged() else {
-            return (matched, 0);
+        let Some(retracted) = self.refresh_bridged()? else {
+            return Ok((matched, 0));
         };
         self.reindex_with(ReindexScope::Full);
-        (matched, retracted)
+        Ok((matched, retracted))
     }
 
     /// Attach an ODRL `policy` that is evaluated per request for the accessing session
@@ -2744,6 +2850,9 @@ mod dropped_view_tests;
 mod update_path_tests;
 
 #[cfg(test)]
+mod storage_view_tests;
+
+#[cfg(test)]
 mod scoped_cache_tests {
     //! sq-b7k7u (issue #1571) — WHITE-BOX proof that a scoped ACL write invalidates
     //! ONLY the written pod's session-cache slice, keeping every other pod's slice warm, and
@@ -2787,7 +2896,7 @@ mod scoped_cache_tests {
         assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
         store.drop_auth_view();
         assert!(store.accessible(&alice, Mode::Read).is_empty());
-        assert_eq!(store.refresh_odrl_grants(), 0);
+        assert_eq!(store.refresh_odrl_grants().unwrap(), 0);
         assert!(store.accessible(&alice, Mode::Read).is_empty(), "the refresh resurrected the view");
         assert!(!store.may_install_grants());
         // A static materialization rebuilds the view, and grant sources resume.

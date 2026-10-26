@@ -305,6 +305,14 @@ pub trait Store: Send + Sync {
         Ok(())
     }
 
+    /// `Ok` when this store's index is this process's alone while the store lives (see
+    /// [`SparqClient::exclusive`]). The default says it is not.
+    fn exclusive(&self) -> ServerResult<()> {
+        Err(ServerError::Storage(
+            "this store's index may be written by other processes too".into(),
+        ))
+    }
+
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -380,6 +388,16 @@ pub trait Store: Send + Sync {
     /// Whether [`raise_marker`](Store::raise_marker) is atomic here. The default is `false`.
     fn raises_markers(&self) -> bool {
         false
+    }
+
+    /// How long one call to this store may take before the store itself gives it up: what a
+    /// caller that retries a call in the background (a removal's [`fence`](Store::fence)) lets an
+    /// attempt run for at most. The default is [`STORE_CALL_TIMEOUT`]; a store whose calls are
+    /// bounded otherwise says so (a [`CompositeStore`] says its index's,
+    /// [`SparqClient::call_timeout`], which for the HTTP index is the per-request timeout it was
+    /// built with, `HttpSparqClient::with_timeout`).
+    fn call_timeout(&self) -> std::time::Duration {
+        STORE_CALL_TIMEOUT
     }
 
     /// The lease every handle to this backend shares, when it keeps one: a service built over
@@ -1169,6 +1187,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         Ok(held)
     }
 
+    fn exclusive(&self) -> ServerResult<()> {
+        self.sparq.exclusive().map_err(map_sparq)
+    }
+
     async fn finish_reclaims(&self) -> ServerResult<()> {
         for key in self.sparq.reclaiming().await.map_err(map_sparq)? {
             match self.blob.delete(&key).await {
@@ -1183,28 +1205,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         refuse_marker(&[Some(iri), parent])?;
-        // Look up the byte-pointer from the authoritative index so we delete the right blob.
-        let blob_key = match self.sparq.get_meta(iri).await {
-            Ok(m) => Some(m.blob_key),
-            Err(SparqError::NotFound) => None,
-            Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
-            Err(SparqError::Unsettled { detail, fence }) => {
-                return Err(ServerError::Unsettled { detail, fence })
-            }
-        };
-        // Detach from the parent's containment first, then drop the index record, then the bytes.
+        // Let the index return the pointer it removed; embedded and in-memory clients also
+        // detach containment in that same job, so a concurrent overwrite cannot change the key.
         // Index-before-bytes keeps the invariant "if it's indexed, its bytes exist" — a crash after
         // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
         // pointing at missing bytes. The byte delete is best effort: the resource is already gone
         // from the index, so a failed blob delete must not fail the request; it stays an orphan.
-        // Either step's failure is reported as what it was (`map_sparq`), as the metadata
-        // read above is: a refused admission and a write that failed unsettled (which the caller
-        // settles through the fence it carries) are not flattened into a backend fault.
-        if let Some(p) = parent {
-            self.sparq.remove_child(p, iri).await.map_err(map_sparq)?;
-        }
-        self.sparq.delete_meta(iri).await.map_err(map_sparq)?;
+        let blob_key = self.sparq.delete_resource(iri, parent).await.map_err(map_sparq)?;
         if let Some(key) = blob_key {
             self.reclaim_blob(&key).await;
         }
@@ -1275,6 +1282,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 
     fn raises_markers(&self) -> bool {
         self.sparq.raises_markers()
+    }
+
+    /// The index's: a fence, the call retried in the background, is the index's.
+    fn call_timeout(&self) -> std::time::Duration {
+        self.sparq.call_timeout()
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
@@ -1853,6 +1865,9 @@ mod tests {
         async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
             self.0.exists(iri).await
         }
+        fn exclusive(&self) -> Result<(), SparqError> {
+            self.0.exclusive()
+        }
         async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
             self.0.begin_reclaim(blob_key).await
         }
@@ -1864,6 +1879,13 @@ mod tests {
         }
         async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
             self.0.delete_meta(iri).await
+        }
+        async fn delete_resource(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<Option<String>, SparqError> {
+            self.0.delete_resource(iri, parent).await
         }
         async fn delete_meta_if_empty(
             &self,

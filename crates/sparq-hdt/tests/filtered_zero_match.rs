@@ -37,7 +37,7 @@ fn fully_bound_zero_match_returns_empty_graph_and_archive_wide_stats() {
         graph.is_empty(),
         "the fully-bound pattern must match no triples"
     );
-    assert_eq!(graph.dict.len(), 0, "an empty result interns no terms");
+    assert_eq!(graph.dict().len(), 0, "an empty result interns no terms");
     assert_eq!(
         stats,
         HdtStats {

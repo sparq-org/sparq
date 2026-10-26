@@ -168,14 +168,29 @@ fn expect_legal(method_key: &str, member: &str) -> bool {
         // The additive result relation authenticates whole string-canonical
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
+    } else if member.starts_with("scan_k") || member.starts_with("join_eq_na") {
+        matches!(method_key, "string-canonical" | "dual-leaf")
     } else if is_value_lane(member) {
-        // BOTH dual-leaf versions commit a value handle, so both admit the value
-        // lane — legality is the leaf SHAPE, not which version new issuance may
-        // select.
-        matches!(method_key, "dual-leaf" | "dual-leaf-v2" | "value-only")
+        // The V1 string-lane compatibility policy never admits value members.
+        matches!(method_key, "dual-leaf-v2" | "value-only")
     } else {
         matches!(method_key, "string-canonical" | "dual-leaf" | "dual-leaf-v2")
     }
+}
+
+#[test]
+fn every_v1_value_cell_has_the_named_refusal_and_a_v2_control() {
+    let (_, matrix) = load();
+    let mut checked = 0;
+    for (member, row) in &matrix.matrix {
+        if !is_value_lane(member) { continue; }
+        let v1 = &row.configs["dual-leaf"];
+        assert!(!v1.legal, "V1 value member {member} must be refused");
+        assert_eq!(v1.reason.as_deref(), Some("LegacyV1ValueMember"));
+        assert!(row.configs["dual-leaf-v2"].legal, "V2 control for {member}");
+        checked += 1;
+    }
+    assert_eq!(checked, 5, "check every typed value member");
 }
 
 /// Every matrix circuit MUST exist in the snapshot with the SAME `circuit_size`
@@ -287,7 +302,8 @@ fn illegal_cells_carry_a_reason_not_a_cost() {
                 }
             } else {
                 match cell.reason.as_deref() {
-                    Some("IllegalPair") | Some("IdentityOpAtValueLane") | Some("UnknownMethod") => {}
+                    Some("IllegalPair") | Some("IdentityOpAtValueLane") | Some("UnknownMethod")
+                    | Some("LegacyV1ValueMember") => {}
                     other => errors.push(format!(
                         "{member} × {key}: ILLEGAL cell must carry a fail-closed reason \
                          (a DispatchError variant), found {other:?}"
@@ -522,6 +538,8 @@ fn committed_legality_matches_resolve_circuit() {
             "filter_f64_d2" => Some(CircuitId::FilterF64 { d: 2 }),
             "scan_k1_n16_r4" => Some(CircuitId::Scan { k: 1, n: 16, r: 4 }),
             "join_eq_na16_nb16" => Some(CircuitId::JoinEq { n_a: 16, n_b: 16 }),
+            "scan_v2dl_k1_n16_r4" => Some(CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }),
+            "join_eq_v2dl_na16_nb16" => Some(CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 }),
             "holder_pok" => Some(CircuitId::HolderPok),
             _ => None,
         }

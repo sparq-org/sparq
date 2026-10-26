@@ -98,13 +98,13 @@ fn object_id(graph: &Graph, nt: &str) -> Option<Id> {
     let object = parsed
         .iter_ids()
         .next()
-        .map(|row| parsed.dict.term(row[2]))?;
+        .map(|row| parsed.dict().term(row[2]))?;
     graph.id_of(&object)
 }
 
 fn matching_subjects(graph: &Graph, predicate: Id, object: Id) -> Vec<Id> {
     let pattern = [None, Some(predicate), Some(object)];
-    let Some(scan) = graph.store.scan_perm(&pattern, Perm::Pos) else {
+    let Some(scan) = graph.store().scan_perm(&pattern, Perm::Pos) else {
         return Vec::new();
     };
     scan.rows.iter().map(|row| scan.to_spo(row)[0]).collect()
@@ -245,17 +245,17 @@ pub fn facets(graph: &Graph, req: &FacetRequest) -> FacetResponse {
     let mut numeric_values: BTreeMap<String, Vec<f64>> = BTreeMap::new();
 
     for subject in &candidates {
-        let scan = graph.store.scan(&[Some(*subject), None, None]);
+        let scan = graph.store().scan(&[Some(*subject), None, None]);
         for row in scan.rows.iter() {
             let [_, predicate, object] = scan.to_spo(row);
-            let predicate_term = graph.dict.term(predicate);
+            let predicate_term = graph.dict().term(predicate);
             let Term::NamedNode(predicate_node) = predicate_term else {
                 continue;
             };
             let predicate_iri = predicate_node.as_str().to_owned();
             *predicate_counts.entry(predicate_iri.clone()).or_insert(0) += 1;
             if Some(predicate) == rdf_type {
-                let term = graph.dict.term(object);
+                let term = graph.dict().term(object);
                 let value = match term {
                     Term::NamedNode(node) => node.as_str().to_owned(),
                     other => other.to_string(),
@@ -268,7 +268,7 @@ pub fn facets(graph: &Graph, req: &FacetRequest) -> FacetResponse {
             {
                 #[cfg(feature = "numeric-facets")]
                 let numeric_predicate_iri = predicate_iri.clone();
-                let value = graph.dict.term(object).to_string();
+                let value = graph.dict().term(object).to_string();
                 *value_counts
                     .entry(predicate_iri)
                     .or_default()

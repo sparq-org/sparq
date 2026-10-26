@@ -170,12 +170,12 @@ impl<'g> Dataset<'g> {
         let Some(predicate) = self.graph.id_of(&Term::NamedNode(predicate.clone())) else {
             return NodeSet::empty(self.graph);
         };
-        let scan = self.graph.store.scan(&[None, Some(predicate), None]);
+        let scan = self.graph.store().scan(&[None, Some(predicate), None]);
         let mut seen = std::collections::HashSet::new();
         let mut terms = Vec::new();
         for row in scan.rows.iter() {
             let id = scan.to_spo(row)[position];
-            let term = self.graph.dict.term(id);
+            let term = self.graph.dict().term(id);
             if seen.insert(term.clone()) {
                 terms.push(term);
             }
@@ -360,11 +360,11 @@ impl<'g> Node<'g> {
             Direction::Out => 2,
             Direction::In => 0,
         };
-        let scan = self.graph.store.scan(&pattern);
+        let scan = self.graph.store().scan(&pattern);
         let terms = scan
             .rows
             .iter()
-            .map(|row| self.graph.dict.term(scan.to_spo(row)[position]))
+            .map(|row| self.graph.dict().term(scan.to_spo(row)[position]))
             .collect();
         NodeSet::new(self.graph, terms)
     }

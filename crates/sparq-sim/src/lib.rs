@@ -237,7 +237,11 @@ impl<'g> Sim<'g> {
         if !self.idf {
             return 1.0;
         }
-        let freq = self.graph.store.pred_stat(p).map_or(1, |s| s.count.max(1));
+        let freq = self
+            .graph
+            .store()
+            .pred_stat(p)
+            .map_or(1, |s| s.count.max(1));
         1.0 + (self.n_triples / freq as f64).ln().max(0.0)
     }
 
@@ -279,7 +283,7 @@ impl<'g> Sim<'g> {
     fn one_hop_signature_of_id_mode(&self, id: Id, keep_neighbor: bool) -> Signature {
         let mut elems: Vec<(u8, Id, Id)> = Vec::new();
         // Outgoing: (id, p, o) — one contiguous SPO range.
-        let scan = self.graph.store.scan(&[Some(id), None, None]);
+        let scan = self.graph.store().scan(&[Some(id), None, None]);
         for row in scan.rows.iter() {
             let [_, p, o] = scan.to_spo(row);
             if !self.is_excluded(p) {
@@ -287,7 +291,7 @@ impl<'g> Sim<'g> {
             }
         }
         // Incoming: (s, p, id) — one contiguous OSP/OPS range.
-        let scan = self.graph.store.scan(&[None, None, Some(id)]);
+        let scan = self.graph.store().scan(&[None, None, Some(id)]);
         for row in scan.rows.iter() {
             let [s, p, _] = scan.to_spo(row);
             if !self.is_excluded(p) {
@@ -315,7 +319,7 @@ impl<'g> Sim<'g> {
         for hop in 1..=self.depth {
             let mut next_frontier = Vec::new();
             for center in frontier {
-                let outgoing = self.graph.store.scan(&[Some(center), None, None]);
+                let outgoing = self.graph.store().scan(&[Some(center), None, None]);
                 for row in outgoing.rows.iter() {
                     let [_, p, neighbor] = outgoing.to_spo(row);
                     if !self.is_excluded(p) && (hop == 1 || !visited.contains(&neighbor)) {
@@ -331,7 +335,7 @@ impl<'g> Sim<'g> {
                     }
                 }
 
-                let incoming = self.graph.store.scan(&[None, None, Some(center)]);
+                let incoming = self.graph.store().scan(&[None, None, Some(center)]);
                 for row in incoming.rows.iter() {
                     let [neighbor, p, _] = incoming.to_spo(row);
                     if !self.is_excluded(p) && (hop == 1 || !visited.contains(&neighbor)) {
@@ -478,10 +482,10 @@ impl<'g> Sim<'g> {
                     for &cp in std::iter::once(&p).chain(sub_preds) {
                         for &cn in std::iter::once(&n).chain(sub_classes) {
                             let (pattern, sorted_by) = pattern_for(cp, cn);
-                            if self.graph.store.estimate(&pattern) > self.max_pair_frequency {
+                            if self.graph.store().estimate(&pattern) > self.max_pair_frequency {
                                 continue; // hub pattern: skipped (documented approximation)
                             }
-                            let scan = self.graph.store.scan_sorted(&pattern, sorted_by);
+                            let scan = self.graph.store().scan_sorted(&pattern, sorted_by);
                             for row in scan.rows.iter() {
                                 let cand = scan.to_spo(row)[sorted_by];
                                 if Some(cand) == exclude || !self.is_entity(cand) {
@@ -496,13 +500,13 @@ impl<'g> Sim<'g> {
                     continue;
                 }
             }
-            if self.graph.store.estimate(&pattern) > self.max_pair_frequency {
+            if self.graph.store().estimate(&pattern) > self.max_pair_frequency {
                 continue; // hub element: skipped (documented approximation)
             }
             // `scan_sorted` orders rows by the candidate column, so duplicates (one
             // subject with many objects under p, etc.) are consecutive — dedup as we go
             // so each candidate receives this element's weight exactly once.
-            let scan = self.graph.store.scan_sorted(&pattern, sorted_by);
+            let scan = self.graph.store().scan_sorted(&pattern, sorted_by);
             let mut last: Option<Id> = None;
             for row in scan.rows.iter() {
                 let cand = scan.to_spo(row)[sorted_by];
@@ -544,7 +548,7 @@ impl<'g> Sim<'g> {
         if self.lexical_idx.is_some() && exclude.is_some() && scored.len() < k {
             self.fill_lexical_fallback(k, exclude, &mut scored);
         }
-        scored.into_iter().map(|(c, s)| (self.graph.dict.term(c), s)).collect()
+        scored.into_iter().map(|(c, s)| (self.graph.dict().term(c), s)).collect()
     }
 
     /// The neighbor-sparse fallback of [`most_similar`](Self::most_similar):
@@ -577,7 +581,7 @@ impl<'g> Sim<'g> {
         let mut roles: Vec<(u8, Id, usize)> = Vec::new();
         for &(dir, p, _) in sig.elems.iter() {
             if roles.iter().all(|&(d, q, _)| (d, q) != (dir, p)) {
-                let est = self.graph.store.estimate(&[None, Some(p), None]);
+                let est = self.graph.store().estimate(&[None, Some(p), None]);
                 roles.push((dir, p, est));
             }
         }
@@ -588,7 +592,7 @@ impl<'g> Sim<'g> {
             // Who else plays this role? Every subject (OUT) / object (IN) of
             // the predicate's block.
             let sorted_by = if dir == OUT { 0 } else { 2 };
-            let scan = self.graph.store.scan_sorted(&[None, Some(p), None], sorted_by);
+            let scan = self.graph.store().scan_sorted(&[None, Some(p), None], sorted_by);
             let mut last: Option<Id> = None;
             for row in scan.rows.iter() {
                 let cand = scan.to_spo(row)[sorted_by];
@@ -662,7 +666,7 @@ impl<'g> Sim<'g> {
             return false;
         }
         matches!(
-            self.graph.dict.term_parts(id),
+            self.graph.dict().term_parts(id),
             dict::TermParts::Iri { .. } | dict::TermParts::Blank(_)
         )
     }
@@ -685,7 +689,7 @@ impl<'g> Sim<'g> {
         let Some(query_id) = exclude else { return };
 
         let query_key: Option<String> = {
-            let parts = self.graph.dict.term_parts(query_id);
+            let parts = self.graph.dict().term_parts(query_id);
             lexical_key_of(&parts)
         };
         let Some(query_key) = query_key else { return };
@@ -807,7 +811,7 @@ fn build_tbox_expander(graph: &Graph) -> TboxExpander {
     if let Some(sc_id) =
         graph.id_of(&Term::NamedNode(NamedNode::new_unchecked(RDFS_SUBCLASS_OF_IRI)))
     {
-        let scan = graph.store.scan(&[None, Some(sc_id), None]);
+        let scan = graph.store().scan(&[None, Some(sc_id), None]);
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
             sc_direct.entry(s).or_default().push(o);
@@ -818,7 +822,7 @@ fn build_tbox_expander(graph: &Graph) -> TboxExpander {
     if let Some(sp_id) =
         graph.id_of(&Term::NamedNode(NamedNode::new_unchecked(RDFS_SUBPROPERTY_OF_IRI)))
     {
-        let scan = graph.store.scan(&[None, Some(sp_id), None]);
+        let scan = graph.store().scan(&[None, Some(sp_id), None]);
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
             sp_direct.entry(s).or_default().push(o);
@@ -878,7 +882,7 @@ fn tbox_transitive_closure(
 #[cfg(feature = "lexical")]
 fn build_lexical_index(graph: &Graph) -> LexicalIndex {
     let mut entries: Vec<(Box<str>, Id)> = graph
-        .dict
+        .dict()
         .iter()
         .filter_map(|(id, parts)| {
             if dict::is_inline(id) {
@@ -1065,8 +1069,8 @@ impl Sim<'_> {
             .into_iter()
             .map(|((dir, p, n), w)| SharedElement {
                 direction: if dir == OUT { Direction::Out } else { Direction::In },
-                predicate: self.graph.dict.term(p),
-                neighbor: (n != NO_ID).then(|| self.graph.dict.term(n)),
+                predicate: self.graph.dict().term(p),
+                neighbor: (n != NO_ID).then(|| self.graph.dict().term(n)),
                 weight: w,
             })
             .collect()
@@ -1175,7 +1179,7 @@ impl<'g> Sim<'g> {
 
         // The entity universe: every subject + entity object, one full scan,
         // ascending-id order (slot order therefore equals id order).
-        let scan = self.graph.store.scan(&[None, None, None]);
+        let scan = self.graph.store().scan(&[None, None, None]);
         let mut ids: Vec<Id> = Vec::with_capacity(2 * scan.rows.len());
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
@@ -1317,7 +1321,7 @@ impl SketchIndex<'_, '_> {
             .collect();
         scored.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         scored.truncate(k);
-        scored.into_iter().map(|(c, v)| (self.sim.graph.dict.term(c), v)).collect()
+        scored.into_iter().map(|(c, v)| (self.sim.graph.dict().term(c), v)).collect()
     }
 }
 

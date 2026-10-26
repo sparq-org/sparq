@@ -164,7 +164,7 @@ fn schema_predicate_ids(graph: &Graph) -> FxHashSet<Id> {
     let mut s = FxHashSet::default();
     for iri in SCHEMA_PREDICATES {
         let t = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(*iri));
-        let id = graph.dict.lookup(&t);
+        let id = graph.dict().lookup(&t);
         if id != sparq_core::dict::NO_ID {
             s.insert(id);
         }
@@ -1408,7 +1408,7 @@ fn restrict_to_train(graph: &Graph, splits: &Splits) -> Graph {
         }
     }
     // Reuse the same dictionary (ids are stable); rebuild the store from the kept triples.
-    Graph::from_parts(graph.dict.clone(), kept)
+    Graph::from_parts(graph.dict().clone(), kept)
 }
 
 // ---- Synthetic gUFO slice ---------------------------------------------------------------------
@@ -2360,7 +2360,7 @@ ex:c ex:rel ex:y .
     use sparq_core::dict::TermParts;
 
     fn is_quoted(g: &Graph, id: Id) -> bool {
-        matches!(g.dict.term_parts(id), TermParts::Triple(_))
+        matches!(g.dict().term_parts(id), TermParts::Triple(_))
     }
 
     fn assert_metrics_bit_equal(a: &Metrics, b: &Metrics, what: &str) {

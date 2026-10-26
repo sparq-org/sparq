@@ -893,9 +893,9 @@ fn bench_hdt(path: &str) {
     let direct = sparq_hdt::graph_from_reader(std::io::Cursor::new(&bytes[..])).expect("direct decode");
     let upstream_hdt = hdt::Hdt::read(std::io::BufReader::new(std::io::Cursor::new(&bytes[..]))).expect("Hdt::read");
     let upstream = sparq_hdt::graph_from_hdt(&upstream_hdt).expect("graph_from_hdt");
-    let triples = direct.store.len();
-    assert_eq!(triples, upstream.store.len(), "A/B triple count mismatch — refusing to report perf");
-    assert_eq!(direct.dict.len(), upstream.dict.len(), "A/B distinct-term mismatch — refusing to report perf");
+    let triples = direct.store().len();
+    assert_eq!(triples, upstream.store().len(), "A/B triple count mismatch — refusing to report perf");
+    assert_eq!(direct.dict().len(), upstream.dict().len(), "A/B distinct-term mismatch — refusing to report perf");
     drop((direct, upstream, upstream_hdt));
 
     eprintln!("{name}: {} HDT bytes, {triples} triples", bytes.len());
@@ -905,7 +905,7 @@ fn bench_hdt(path: &str) {
     // --- DIRECT decoder (the new default path): one end-to-end stage. ---
     let secs_direct = median(|| {
         let g = sparq_hdt::graph_from_reader(std::io::Cursor::new(&bytes[..])).unwrap();
-        black_box(g.store.len());
+        black_box(g.store().len());
     });
     row(name, "DIRECT decoder (graph_from_reader)", 1, secs_direct, bytes.len(), triples);
 
@@ -925,7 +925,7 @@ fn bench_hdt(path: &str) {
     for _ in 0..ITERS {
         let mut st = sparq_hdt::StageTimings::default();
         let g = sparq_hdt::graph_from_reader_timed(std::io::Cursor::new(&bytes[..]), &mut st).unwrap();
-        black_box(g.store.len());
+        black_box(g.store().len());
         // Coarse three (back-compat) + the finer sub-stages.
         cols.entry("dict").or_default().push(st.dict.as_secs_f64());
         cols.entry("scan").or_default().push(st.scan.as_secs_f64());
@@ -972,7 +972,7 @@ fn bench_hdt(path: &str) {
     let read_once = hdt::Hdt::read(std::io::BufReader::new(std::io::Cursor::new(&bytes[..]))).unwrap();
     let secs_up_translate = median(|| {
         let g = sparq_hdt::graph_from_hdt(&read_once).unwrap();
-        black_box(g.store.len());
+        black_box(g.store().len());
     });
     drop(read_once);
     row(name, "  upstream stage graph_from_hdt (translate+build)", 1, secs_up_translate, bytes.len(), triples);
@@ -981,7 +981,7 @@ fn bench_hdt(path: &str) {
     let secs_upstream = median(|| {
         let h = hdt::Hdt::read(std::io::BufReader::new(std::io::Cursor::new(&bytes[..]))).unwrap();
         let g = sparq_hdt::graph_from_hdt(&h).unwrap();
-        black_box(g.store.len());
+        black_box(g.store().len());
     });
     row(name, "UPSTREAM total (Hdt::read + graph_from_hdt)", 1, secs_upstream, bytes.len(), triples);
 
@@ -1028,10 +1028,10 @@ fn bench_hdt(path: &str) {
             )
             .expect("NT parallel load");
             assert_eq!(
-                nt_g.store.len(),
+                nt_g.store().len(),
                 triples,
                 "NT-vs-HDT A/B triple-count mismatch ({} NT vs {} HDT) — refusing to report perf",
-                nt_g.store.len(),
+                nt_g.store().len(),
                 triples
             );
             drop(nt_g);
@@ -1046,7 +1046,7 @@ fn bench_hdt(path: &str) {
                     "ntriples",
                 )
                 .unwrap();
-                black_box(g.store.len());
+                black_box(g.store().len());
             });
             let ncpu = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
             row(name, "NT load_reader_parallel (fast NT path)", ncpu, secs_nt, nt_bytes.len(), triples);
@@ -1078,12 +1078,12 @@ fn hdt_rss(path: &str, which: &str) {
     match which {
         "direct" => {
             let g = sparq_hdt::graph_from_reader(std::io::Cursor::new(&bytes[..])).unwrap();
-            black_box(g.store.len());
+            black_box(g.store().len());
         }
         _ => {
             let h = hdt::Hdt::read(std::io::BufReader::new(std::io::Cursor::new(&bytes[..]))).unwrap();
             let g = sparq_hdt::graph_from_hdt(&h).unwrap();
-            black_box(g.store.len());
+            black_box(g.store().len());
         }
     }
     println!("{}", peak_rss_bytes());
@@ -1097,7 +1097,7 @@ fn bench_hdt_zip(path: &str) {
     let name = dataset_name(path);
     let triples = sparq_hdt::graph_from_reader(std::io::Cursor::new(&plain[..]))
         .expect("plain decode")
-        .store
+        .store()
         .len();
 
     println!("| dataset | task | s | MB/s (decompressed .hdt) | Mtriples/s |");
@@ -1114,7 +1114,7 @@ fn bench_hdt_zip(path: &str) {
             // load_reader sniffs the container by magic bytes and streams the
             // decode through the direct decoder — exactly the production path.
             let g = sparq_hdt::load_reader(std::io::Cursor::new(&comp[..])).unwrap();
-            black_box(g.store.len());
+            black_box(g.store().len());
         });
         row(name, &format!("{ext} decode+parse (direct, {ratio:.2}x compressed)"), 1, secs, plain.len(), triples);
     }

@@ -448,7 +448,7 @@ fn finding_05_filter_bound_substitution_rejected() {
     // forged bound is 17 (not the query's 18). 25 >= 17 = true, but bound != 18.
     let filter = filter_int_inputs(25, FilterOp::Ge, 17, true);
     // Edge points at the age object slot (slot 2) of scan row 0 → filter.
-    let edge = BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 };
+    let edge = BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 };
     let m = scan_plus_filter_manifest(query, filter, Some(edge));
     match verify_full(&m, "f05_bound_sub") {
         Err(CheckError::UnboundFilter { variable }) => {
@@ -524,7 +524,7 @@ fn finding_07_operand_substitution_host_rejected() {
     // The filter declares operand_enc for value 99 — NOT the scanned age (25).
     let filter = filter_int_inputs(99, FilterOp::Ge, 18, true);
     // Edge claims the scanned age column (slot 2) feeds this filter.
-    let edge = BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 };
+    let edge = BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 };
     let m = scan_plus_filter_manifest(query, filter, Some(edge));
     match verify_full(&m, "f07_operand_sub") {
         Err(CheckError::BindingInconsistent { edge: 0 }) => {}

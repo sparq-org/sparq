@@ -83,20 +83,20 @@ fn session(agent: &str) -> Session<'_> {
 /// refused update must leave both exactly as they were.
 fn snapshot(graph: &Graph) -> (Vec<String>, usize) {
     fn dump(g: &Graph, name: &str, out: &mut Vec<String>) {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {
             let [s, p, o] = scan.to_spo(r);
             out.push(format!(
                 "{name} {} {} {}",
-                g.dict.term(s),
-                g.dict.term(p),
-                g.dict.term(o)
+                g.dict().term(s),
+                g.dict().term(p),
+                g.dict().term(o)
             ));
         }
     }
     let mut out = Vec::new();
     dump(graph, "", &mut out);
-    for (name, g) in &graph.named {
+    for (name, g) in graph.named() {
         out.push(format!("graph {name}"));
         dump(g, &name.to_string(), &mut out);
     }
@@ -422,9 +422,9 @@ fn an_update_never_takes_over_a_resource() {
 fn a_failed_drop_of_every_graph_keeps_the_facts_of_a_resource_there_throughout() {
     let n2 = "https://pod.ex/notes/n2";
     let mut store = pod();
-    store.graph_unchecked_mut().named.extend(
-        Graph::load_dataset(&format!("<{n2}#x> <{TITLE}> \"y\" <{n2}> .\n"), "nquads").expect("nq").named,
-    );
+    store.graph_unchecked_mut().extend_named(
+        Graph::load_dataset(&format!("<{n2}#x> <{TITLE}> \"y\" <{n2}> .\n"), "nquads").expect("nq").take_named().unwrap(),
+    ).unwrap();
     let mut prov = AccessProvenance::new();
     for r in [N1, n2, "https://pod.ex/"] {
         prov.set_creator(r, BOB);
@@ -500,7 +500,7 @@ fn a_failed_update_leaves_no_acr_kept_for_provenance_passed_back() {
     let back = store.acp_provenance().clone();
     store.materialize_acp_with(&back).expect("passed back");
     let names = store.stored_graphs();
-    store.graph_unchecked_mut().named.extend(Graph::load_dataset(&format!("<{D0}#x> <{TITLE}> \"y\" <{D0}> .\n"), "nquads").expect("nq").named);
+    store.graph_unchecked_mut().extend_named(Graph::load_dataset(&format!("<{D0}#x> <{TITLE}> \"y\" <{D0}> .\n"), "nquads").expect("nq").take_named().unwrap()).unwrap();
     store.rematerialize_after_edit(&names, None, &[], true).expect("d0 again");
     assert_eq!(store.acp_provenance().creator(D0), None);
     assert!(!reads_d0(&store, ALICE), "no creator grant");

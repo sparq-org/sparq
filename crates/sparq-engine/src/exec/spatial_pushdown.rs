@@ -190,7 +190,7 @@ pub(super) fn apply_spatial_pushdown(graph: &Graph, b: &mut Bindings, pd: &Spati
     // `FxHashSet<Id>` lookup — ZERO per-row `Term` materialisation. `indexed.contains(&id)`
     // equals `is_indexed(&graph.dict.term(id))` by the provider's contract, so the verdict
     // is unchanged.
-    let dict_ptr = std::ptr::from_ref(&graph.dict) as usize;
+    let dict_ptr = std::ptr::from_ref(graph.dict()) as usize;
     if let Some(indexed) = idx.indexed_ids(dict_ptr) {
         b.rows.retain(|row| {
             let id = row[col];
@@ -285,7 +285,7 @@ pub(super) fn apply_spatial_pushdown_exact(graph: &Graph, b: &mut Bindings, pd: 
     // Same two retain branches as `apply_spatial_pushdown` (id-level fast path when the
     // provider vouches its id universe is fresh for THIS dict, per-row fallback
     // otherwise), same keep verdict in both: certified (a) or not-indexed (b).
-    let dict_ptr = std::ptr::from_ref(&graph.dict) as usize;
+    let dict_ptr = std::ptr::from_ref(graph.dict()) as usize;
     if let Some(indexed) = idx.indexed_ids(dict_ptr) {
         b.rows.retain(|row| {
             let id = row[col];
@@ -318,5 +318,5 @@ pub(super) fn apply_spatial_pushdown_exact(graph: &Graph, b: &mut Bindings, pd: 
 /// pushdown can resolve a binding without a `LocalVocab`; bindings reaching a pushable
 /// scan-bound geometry FILTER are graph-dict ids.)
 pub(super) fn term_of_id(graph: &Graph, id: Id) -> Option<Term> {
-    (id != NO_ID && !dict::is_inline(id)).then(|| graph.dict.term(id))
+    (id != NO_ID && !dict::is_inline(id)).then(|| graph.dict().term(id))
 }

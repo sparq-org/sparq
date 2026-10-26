@@ -78,11 +78,11 @@ fn a_count_limited_grant_is_never_stored() {
     let permit = base.permit.expect("the count-free decision grants");
     assert!(!permit.lasting(), "a budget can run out, so the grant is not lasting");
 
-    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter);
+    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter).unwrap();
     assert!(!out.granted, "a count-limited grant is not stored: {out:?}");
     assert_eq!(out.consumed, None, "refused before any budget is spent");
     assert!(!reads_n1(&mut pod, ALICE), "no stored allow for alice");
-    assert_eq!(pod.refresh_odrl_grants(), 0, "nothing tracked to retract");
+    assert_eq!(pod.refresh_odrl_grants().unwrap(), 0, "nothing tracked to retract");
     assert!(!reads_n1(&mut pod, ALICE));
 
     for n in 1..=2 {
@@ -136,7 +136,7 @@ fn base_deny_consumes_nothing_and_grants_nothing() {
     // A WRITE request against a READ-only counted permission → base DENY.
     let write_req = Request::new(odrl("modify")).on(N1).by(ALICE);
     let out =
-        pod.materialize_odrl_permission_counted(&count_read_policy(), &write_req, &store_counter);
+        pod.materialize_odrl_permission_counted(&count_read_policy(), &write_req, &store_counter).unwrap();
     assert!(!out.granted, "base deny: nothing granted");
     assert_eq!(out.consumed, None, "base deny consumes no count budget");
     // The READ budget is untouched — the first READ exercise still spends unit 1.
@@ -171,14 +171,14 @@ fn uncounted_permission_through_counted_path() {
     )
     .expect("policy parses");
 
-    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter);
+    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter).unwrap();
     assert!(out.granted);
     assert_eq!(out.consumed, None, "no count constraint → no unit consumed");
     assert!(reads_n1(&mut pod, ALICE));
     // Re-bridging many times never exhausts (no count limit).
     for _ in 0..5 {
         assert!(
-            pod.materialize_odrl_permission_counted(&pol, &req, &store_counter)
+            pod.materialize_odrl_permission_counted(&pol, &req, &store_counter).unwrap()
                 .granted
         );
     }
@@ -214,7 +214,7 @@ fn a_refused_counted_grant_spends_no_budget() {
         .by(ALICE)
         .at("2026-06-01T00:00:00Z");
     let mut pod = PodStore::new(pod());
-    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter);
+    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter).unwrap();
     assert!(!out.granted, "the grant is not lasting: {out:?}");
     assert_eq!(out.consumed, None);
     assert!(!reads_n1(&mut pod, ALICE));

@@ -133,7 +133,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 fn graph_len(store: &PodStore, name: &str) -> usize {
     store
         .graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| matches!(n, oxrdf::Term::NamedNode(n) if n.as_str() == name))
         .map_or(0, |(_, g)| g.len())
@@ -215,4 +215,89 @@ fn every_wac_entry_point_rebuilds_the_view_it_changes() {
         );
         assert!(reads(&store, ADMIN, NOTE), "{name}");
     }
+}
+
+/// Rebuilding the authorization view preserves the root and every durable named slot.
+#[test]
+fn authorization_materialization_uses_logged_named_slots() {
+    for acp in [false, true] {
+        let dir = tmp(if acp { "auth-acp" } else { "auth-wac" });
+        Graph::load_dataset(&fixture(), "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut store = PodStore::new(Graph::open(&dir).unwrap());
+        for _ in 0..2 {
+            if acp {
+                store.materialize_acp().unwrap();
+            } else {
+                store.materialize_wac().unwrap();
+            }
+            assert!(store.graph().is_directory_backed());
+            assert!(store
+                .graph()
+                .named()
+                .iter()
+                .all(|(_, sub)| sub.is_directory_backed()));
+            assert!(reads(&store, ALICE, NOTE));
+        }
+        let expected = graph_len(&store, sparq_solid::AUTH_GRAPH);
+        assert!(expected > 0);
+        let fresh = oxrdf::NamedNode::new("https://pod.ex/fresh")
+            .unwrap()
+            .into();
+        store.graph_unchecked_mut().ensure_named(&fresh).unwrap();
+        store.graph_unchecked_mut().compact().unwrap();
+        drop(store);
+        let graph = Graph::open(&dir).unwrap();
+        let auth = oxrdf::NamedNode::new(sparq_solid::AUTH_GRAPH)
+            .unwrap()
+            .into();
+        assert_eq!(graph.named_graph(&auth).unwrap().len(), expected);
+        assert!(graph.named_graph(&fresh).is_some());
+        assert!(graph
+            .named_graph(&oxrdf::NamedNode::new(NOTE).unwrap().into())
+            .is_some());
+        let mut store = PodStore::new(graph);
+        assert!(store.graph().is_directory_backed());
+        if acp {
+            store.materialize_acp().unwrap();
+        } else {
+            store.materialize_wac().unwrap();
+        }
+        assert!(reads(&store, ALICE, NOTE));
+        assert!(reads(&store, ALICE, "https://pod.ex/fresh"));
+        let graph = store.graph();
+        assert!(graph
+            .named()
+            .iter()
+            .all(|(_, sub)| sub.is_directory_backed()));
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+/// Slot-based ACL replacement returns a refusal on durable input without adding a view.
+#[test]
+fn durable_acl_slot_replacement_returns_an_error() {
+    let dir = tmp("acl-slot-refusal");
+    Graph::load_dataset(&fixture(), "nquads")
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+    let mut store = PodStore::new(Graph::open(&dir).unwrap());
+    store.materialize_wac().unwrap();
+    let error = store
+        .put_acl("https://pod.ex/new/.acl", "", "turtle")
+        .unwrap_err();
+    assert!(error.contains("ensure_named"), "{error}");
+    assert!(store.graph().is_directory_backed());
+    drop(store);
+    let graph = Graph::open(&dir).unwrap();
+    let name = oxrdf::NamedNode::new("https://pod.ex/new/.acl")
+        .unwrap()
+        .into();
+    assert!(graph.named_graph(&name).is_none());
+    drop(graph);
+    std::fs::remove_dir_all(dir).unwrap();
 }

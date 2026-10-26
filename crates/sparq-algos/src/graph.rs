@@ -120,7 +120,7 @@ impl NodeGraph {
         // index; `dict_ids` is reordered to match.
         let keys: Vec<String> = dict_ids
             .iter()
-            .map(|&id| graph.dict.term(id).to_string())
+            .map(|&id| graph.dict().term(id).to_string())
             .collect();
         let mut order: Vec<u32> = (0..n as u32).collect();
         order.sort_unstable_by(|&p, &q| keys[p as usize].cmp(&keys[q as usize]));
@@ -184,7 +184,7 @@ impl NodeGraph {
     /// `graph` must be the same graph the view was built from (the ids are its dict ids).
     #[inline]
     pub fn term(&self, graph: &Graph, i: usize) -> Term {
-        graph.dict.term(self.dict_ids[i])
+        graph.dict().term(self.dict_ids[i])
     }
 
     /// Out-neighbours (targets of out-edges) of node `i`.
@@ -222,7 +222,7 @@ fn is_literal(graph: &Graph, o: Id) -> bool {
     if dict::is_inline(o) {
         return true;
     }
-    matches!(graph.dict.term(o), Term::Literal(_))
+    matches!(graph.dict().term(o), Term::Literal(_))
 }
 
 /// Groups a `(key, value)` edge list (already sorted by `key`) into CSR

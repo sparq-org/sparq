@@ -1178,7 +1178,7 @@ impl<'a> Validator<'a> {
                         }
                         if let TermParts::Lit {
                             lang: Some(slot), ..
-                        } = g.graph().dict.term_parts(v)
+                        } = g.graph().dict().term_parts(v)
                         {
                             let (tag, dir) = split_lang_dir(slot);
                             let key = match dir {
@@ -2741,7 +2741,7 @@ fn datatype_ok_id(g: &GraphView, id: Id, dts: &[String]) -> bool {
     if is_inline(id) {
         return dts.iter().any(|dt| dt == XSD_INTEGER);
     }
-    match g.graph().dict.term_parts(id) {
+    match g.graph().dict().term_parts(id) {
         TermParts::Lit {
             value,
             datatype,
@@ -2758,7 +2758,7 @@ fn node_kind_matches_id(g: &GraphView, id: Id, kind: &str) -> bool {
         // Inline ids are xsd:integer literals.
         return matches!(local, "Literal" | "BlankNodeOrLiteral" | "IRIOrLiteral");
     }
-    match g.graph().dict.term_parts(id) {
+    match g.graph().dict().term_parts(id) {
         TermParts::Iri { .. } => matches!(local, "IRI" | "BlankNodeOrIRI" | "IRIOrLiteral"),
         TermParts::Lit { .. } => {
             matches!(local, "Literal" | "BlankNodeOrLiteral" | "IRIOrLiteral")
@@ -2784,7 +2784,7 @@ fn string_repr_id<'g>(g: &GraphView<'g>, id: Id) -> Option<Cow<'g, str>> {
             _ => None,
         };
     }
-    match g.graph().dict.term_parts(id) {
+    match g.graph().dict().term_parts(id) {
         TermParts::Iri { prefix, suffix } => Some(if prefix.is_empty() {
             Cow::Borrowed(suffix)
         } else {
