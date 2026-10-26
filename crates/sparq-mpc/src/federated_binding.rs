@@ -683,7 +683,9 @@ impl FederatedStatement {
         if holders.is_empty() {
             return Err(BindingError::EmptyFederation);
         }
-        holders.sort_by(|a, b| a.holder.cmp(&b.holder));
+        // Canonicalise without allocating scratch before the size check. Equal
+        // holder ids are refused below, so sort stability has no effect.
+        holders.sort_unstable_by(|a, b| a.holder.cmp(&b.holder));
         if let Some(dup) = holders.windows(2).find(|w| w[0].holder == w[1].holder) {
             return Err(BindingError::DuplicateHolder {
                 holder: dup[0].holder.clone(),

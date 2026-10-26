@@ -141,7 +141,45 @@ fn capacity_and_length_refusals_do_not_allocate_public_input_buffers() {
     assert!(peak >= expected, "allocator must observe reconstruction");
     statement.bind_public_inputs(&bytes).unwrap();
 
+    statement_size_refusal_does_not_allocate_sort_scratch();
     maximum_commitment_statement_stays_within_buffer_bound();
+}
+
+fn statement_size_refusal_does_not_allocate_sort_scratch() {
+    // Prepare enough holders to require heap scratch with a stable sort. The
+    // permutation prevents an already-sorted input from hiding the allocation.
+    let holders = (0..1024)
+        .map(|i| {
+            HolderSegment::new(
+                HolderId::new(format!("holder-{:04}", (i * 37) % 1024)),
+                vec![FieldWord::ZERO],
+                vec![],
+                MAX_HOLDER_ROW_CAPACITY,
+                vec![true],
+            )
+            .unwrap()
+        })
+        .collect();
+    let window = ValidityWindow::new(0, 1).unwrap();
+    let (refused, peak) = with_peak(|| {
+        FederatedStatement::new(
+            VerifierChallenge::from_word(FieldWord::ZERO),
+            FieldWord::ZERO,
+            FieldWord::ZERO,
+            window,
+            holders,
+        )
+    });
+    assert_eq!(
+        refused,
+        Err(BindingError::PublicInputsTooLarge {
+            max_bytes: MAX_PUBLIC_INPUT_BYTES,
+        }),
+    );
+    assert!(
+        peak < ALLOCATION_SLACK_BYTES,
+        "statement size refusal allocated {peak} bytes of sorting scratch",
+    );
 }
 
 fn maximum_commitment_statement_stays_within_buffer_bound() {
