@@ -658,7 +658,7 @@ What the server exposes, all discoverable from the storage description
   holds the locks) fences it before putting the step back, so a write that arrives late can no
   longer undo what was put back since. The background put-back of a set-aside change, and the
   settling of intents at start-up, differ in their waits: start-up waits as the store's call
-  allows; every background call uses a capped per-attempt budget, including the first call.
+  allows; every background fence call uses a capped per-attempt budget, including the first call.
   Both fence a step's unsettled write before
   trying the step again. Forward removals and intent creates retain their fences in the
   journal: rollback fences before recreation or Forget, and commit fences before changing

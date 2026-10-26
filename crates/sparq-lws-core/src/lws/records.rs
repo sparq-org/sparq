@@ -1219,8 +1219,9 @@ mod tests {
             *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
             let mut undo = Vec::new();
             if kind < 2 {
-                let Err(crate::error::ServerError::Unsettled { fence, .. }) =
-                    store.delete_container_if_empty(&iri, Some(&container)).await
+                let Err(crate::error::ServerError::Unsettled { fence, .. }) = store
+                    .delete_container_if_empty(&iri, Some(&container))
+                    .await
                 else {
                     panic!("expected an unsettled delete");
                 };
@@ -1369,7 +1370,10 @@ mod tests {
             .await
             .expect("the request was held by a stalled fence")
             .expect("the step and remaining undo are left");
-        assert!(matches!(left.0.as_slice(), [Undo::Fence { .. }, Undo::Remove { .. }]));
+        assert!(matches!(
+            left.0.as_slice(),
+            [Undo::Fence { .. }, Undo::Remove { .. }]
+        ));
         // At start-up the fence is waited for as long as the store takes.
         *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
         assert!(tokio::time::timeout(
