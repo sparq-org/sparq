@@ -1,75 +1,11 @@
 //! Exercise native boot decisions through the real executable and literal environment names.
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::PathBuf;
-use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
-
-struct Directory(PathBuf);
-
-impl Directory {
-    fn new() -> Self {
-        let mut random = [0u8; 16];
-        getrandom::getrandom(&mut random).unwrap();
-        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-        let dir = Self(std::env::temp_dir().join(format!("lws-boot-{suffix}")));
-        std::fs::create_dir(&dir.0).unwrap();
-        dir
-    }
-}
-
-impl Drop for Directory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-struct Process(Option<Child>);
-
-impl Process {
-    fn start(values: &[(&str, &str)]) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_sparq-lws-core"));
-        command
-            .env_clear()
-            .env("SOLID_SERVER_BIND", "127.0.0.1:0")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        for (key, value) in values {
-            command.env(key, value);
-        }
-        Self(Some(command.spawn().unwrap()))
-    }
-
-    fn finish(mut self) -> Output {
-        let started = Instant::now();
-        let child = self.0.as_mut().unwrap();
-        while child.try_wait().unwrap().is_none() {
-            if started.elapsed() > Duration::from_secs(10) {
-                child.kill().unwrap();
-                let output = self.0.take().unwrap().wait_with_output().unwrap();
-                panic!(
-                    "boot did not exit: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        self.0.take().unwrap().wait_with_output().unwrap()
-    }
-}
-
-impl Drop for Process {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.0.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
+mod common;
+use common::process::{Directory, Process};
 
 fn refuses(values: &[(&str, &str)], expected: &str) {
-    let output = Process::start(values).finish();
+    let output = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), values).finish();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !output.status.success(),
@@ -129,7 +65,7 @@ fn native_boot_refuses_invalid_lock_wait_values() {
     }
 }
 
-#[cfg(feature = "embedded-sparq")]
+#[cfg(all(feature = "embedded-sparq", not(feature = "blob-fs")))]
 #[test]
 fn data_directory_boot_refuses_the_missing_filesystem_adapter() {
     let dir = Directory::new();
@@ -157,52 +93,10 @@ fn data_directory_boot_requires_the_embedded_feature() {
 #[cfg(target_os = "linux")]
 #[test]
 fn native_server_drains_on_terminate_and_interrupt() {
-    use std::io::{BufRead, BufReader};
     for signal in ["-TERM", "-INT"] {
-        let mut process = Process::start(&[]);
-        let stderr = process.0.as_mut().unwrap().stderr.take().unwrap();
-        let (ready, received) = std::sync::mpsc::channel();
-        let reader = std::thread::spawn(move || {
-            let mut ready = Some(ready);
-            for line in BufReader::new(stderr).lines() {
-                let line = line.unwrap();
-                if line.contains("WARNING: experimental parallel track") {
-                    if let Some(ready) = ready.take() {
-                        let _ = ready.send(());
-                    }
-                }
-            }
-        });
-        received.recv_timeout(Duration::from_secs(10)).unwrap();
-        // Observe registration, rather than racing the listener's first poll.
-        let registered = Instant::now();
-        loop {
-            let status = std::fs::read_to_string(format!(
-                "/proc/{}/status",
-                process.0.as_ref().unwrap().id()
-            ))
-            .unwrap();
-            let caught = status
-                .lines()
-                .find_map(|line| line.strip_prefix("SigCgt:\t"))
-                .unwrap();
-            let caught = u64::from_str_radix(caught.trim(), 16).unwrap();
-            if caught & ((1 << 1) | (1 << 14)) == ((1 << 1) | (1 << 14)) {
-                break;
-            }
-            assert!(
-                registered.elapsed() < Duration::from_secs(10),
-                "signal handlers were not registered"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let status = Command::new("kill")
-            .arg(signal)
-            .arg(process.0.as_ref().unwrap().id().to_string())
-            .status()
-            .unwrap();
-        assert!(status.success());
-        assert!(process.finish().status.success());
-        reader.join().unwrap();
+        let mut process = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), &[]);
+        process.wait_signal_handlers();
+        process.signal(signal);
+        assert_eq!(process.finish().status.code(), Some(0));
     }
 }
