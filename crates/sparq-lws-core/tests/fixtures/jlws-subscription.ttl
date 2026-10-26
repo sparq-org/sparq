@@ -1,0 +1,106 @@
+# Source: https://github.com/jeswr/lws-spec/blob/main/shapes/jlws-subscription.ttl
+# Normative SHACL shapes for the JLWS **subscription** document conformance class
+# (index.html #subscription-api; statement JLWSC-SUB-3 in index.statements.ttl) and
+# its three binding subtypes (#webhook-binding, #sse-binding, #websocket-binding;
+# classes per #vocabulary: jlws:WebhookSubscription / jlws:SseSubscription /
+# jlws:WebSocketSubscription). Covers both the client-created subscription body and
+# the server-returned subscription resource (the binding-specific connection members
+# source / receiveFrom appear only on the response, so they are shape-checked when
+# present, never required).
+#
+# TERM IRIs: the normative context (#jsonld-context) names external reuse explicitly
+# (totalItems/items/mediaType/AS2, size/schema, modified+conformsTo/dcterms, CID,
+# ODRL) and maps the remaining subscription terms into the jlws: namespace — hence
+# jlws:topic, jlws:expires, jlws:inbox, jlws:source, jlws:receiveFrom below. The full
+# context document is not yet committed (it "ships in this repository once the w3id
+# redirect exists"); when it lands, these IRIs must be reconciled against it (README
+# follow-up).
+#
+# NOT graph-checkable (checked by the test-vector suite, notifications/*):
+#   - JLWSC-SUB-1/2 (reject on missing read access to every topic; delivery ceases on
+#     revocation): authorization behaviour (vector
+#     subscription-requires-read-on-all-topics).
+#   - "type — one of the ADVERTISED subscription types": the advertised set is
+#     per-server (the storage description's NotificationService entry); the shape
+#     requires a type and the binding shapes constrain the three registered ones.
+#   - Capability-URL entropy/expiry/revocation (JLWSC-SSE-*): token-issuance
+#     behaviour, not document structure.
+
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix jlws:    <https://w3id.org/jeswr/lws#> .
+@prefix jlwssh:  <https://jeswr.org/ns/jlws/shapes#> .
+
+jlwssh:SubscriptionShape
+    a sh:NodeShape ;
+    rdfs:label "JLWS subscription"@en ;
+    rdfs:comment "Document conformance class: the subscription document (index.html #subscription-api: 'Subscriptions are created by authenticated POST to the NotificationService endpoint with a JSON-LD body: type — one of the advertised subscription types; topic — REQUIRED array of resource URIs; expires — OPTIONAL datetime; plus binding-specific members'). Each constraint names its statement id or defining clause."@en ;
+    rdfs:seeAlso <https://jeswr.github.io/lws-spec/index.statements.ttl#JLWSC-SUB-3> ;
+    sh:targetClass jlws:WebhookSubscription, jlws:SseSubscription, jlws:WebSocketSubscription ;
+    sh:targetSubjectsOf jlws:topic ;
+
+    # #subscription-api: "type — one of the advertised subscription types"
+    # (definitional; advertised-set membership is checked at subscription time against
+    # the server's storage description, not here).
+    sh:property [
+        sh:path rdf:type ;
+        sh:minCount 1 ;
+        sh:message "A subscription carries type — one of the advertised subscription types — #subscription-api." ;
+    ] ;
+
+    # JLWSC-SUB-3: "topic — REQUIRED array of resource URIs".
+    sh:property [
+        sh:path jlws:topic ;
+        sh:minCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "topic — REQUIRED array of resource URIs — JLWSC-SUB-3 (#subscription-api)." ;
+    ] ;
+
+    # #subscription-api: "expires — OPTIONAL datetime".
+    sh:property [
+        sh:path jlws:expires ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:message "expires, when present, is a single datetime — #subscription-api." ;
+    ] .
+
+jlwssh:WebhookSubscriptionShape
+    a sh:NodeShape ;
+    rdfs:label "JLWS webhook subscription"@en ;
+    rdfs:comment "Binding subtype (index.html #webhook-binding, adopted verbatim from LWS-NOTIFICATIONS-ED): 'The subscription carries inbox — the HTTPS endpoint to deliver to.' Definitional prose (no BCP 14 keyword — the errata-candidate class the statement companion catalogues); encoded as a violation because a webhook subscription without a deliverable HTTPS inbox is unusable as its class."@en ;
+    sh:targetClass jlws:WebhookSubscription ;
+    sh:property [
+        sh:path jlws:inbox ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:pattern "^https://" ;
+        sh:message "A webhook subscription carries inbox — the HTTPS endpoint to deliver to — #webhook-binding." ;
+    ] .
+
+jlwssh:SseSubscriptionShape
+    a sh:NodeShape ;
+    rdfs:label "JLWS SSE subscription"@en ;
+    rdfs:comment "Binding subtype (index.html #sse-binding): 'The subscription response includes source: the event-stream URL.' source appears on the server-returned subscription resource, not the creation body, so it is shape-checked when present (single URL) rather than required."@en ;
+    sh:targetClass jlws:SseSubscription ;
+    sh:property [
+        sh:path jlws:source ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "source, when present, is the single event-stream URL — #sse-binding. Vectored: notifications/sse-subscription-returns-source." ;
+    ] .
+
+jlwssh:WebSocketSubscriptionShape
+    a sh:NodeShape ;
+    rdfs:label "JLWS WebSocket subscription"@en ;
+    rdfs:comment "Binding subtype (index.html #websocket-binding): 'The subscription response includes receiveFrom: a wss: URL — a capability URL …' (mirrors WEBSOCKETCHANNEL2023). receiveFrom appears on the server-returned subscription resource, so it is shape-checked when present; the wss: scheme is structural and enforced."@en ;
+    sh:targetClass jlws:WebSocketSubscription ;
+    sh:property [
+        sh:path jlws:receiveFrom ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:pattern "^wss://" ;
+        sh:message "receiveFrom, when present, is a single wss: URL — #websocket-binding. Vectored: notifications/websocket-subscription-returns-receivefrom." ;
+    ] .

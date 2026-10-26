@@ -765,10 +765,45 @@ pub(crate) async fn touch_container<S: Store + 'static>(state: &LwsState<S>, con
         }
         return;
     }
-    for record in owed {
-        // A failure leaves the intent, and the next start touches the container again.
-        let _ = super::intents::clear(&state.store, &record, Some(super::records::LOCK_WAIT)).await;
+    if owed.is_empty() {
+        return;
     }
+    let deadline = super::records::deadline_after(super::records::LOCK_WAIT);
+    // Clearing needs only the store: retries must not retain the state or its lease.
+    let store = state.store.clone();
+    let clearing = tokio::spawn(async move {
+        let mut left = Vec::new();
+        for record in owed {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                left.push((record, None));
+                continue;
+            }
+            // Bound the fence wait, never the delete itself: cancelling a delete can lose
+            // its unsettled answer. Start no more deletes past the shared deadline.
+            match super::intents::clear(&store, &record, Some(remaining)).await {
+                Ok(()) => {}
+                Err(ServerError::Unsettled { fence, .. }) => left.push((record, Some(fence))),
+                Err(_) => left.push((record, None)),
+            }
+        }
+        for (record, fence) in left {
+            if let Some(fence) = fence {
+                super::records::fence_in_background(&store, &fence).await;
+            }
+            super::put_back_until_done(
+                &super::Undo::Forget {
+                    record,
+                    iris: Vec::new(),
+                },
+                &store,
+            )
+            .await;
+        }
+    });
+    // Dropping a JoinHandle detaches its task: a delete in flight finishes and its
+    // unsettled answer is handled, even when the request's shared budget has expired.
+    let _ = tokio::time::timeout_at(deadline, clearing).await;
 }
 
 /// Release `locks`, held through a change to the container's listing, and touch the container
@@ -818,7 +853,7 @@ fn parse_accept(accept: &str) -> Vec<crate::accept::MediaRange<'_>> {
 
 /// The best of `offered` for `accept` (earlier offers win ties); the first offer when Accept is
 /// absent; `None` when nothing offered is acceptable.
-pub(super) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String> {
+pub(crate) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String> {
     let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
         return offered.first().map(|s| s.to_string());
     };
@@ -995,6 +1030,8 @@ async fn read<S: Store + 'static>(
     if let Some(m) = modified {
         set(h, header::LAST_MODIFIED, &http_date(m));
     }
+    // JLWS web-platform integration: serve stored data without MIME sniffing.
+    set(h, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
     set(h, header::ACCEPT_RANGES, "bytes");
     resource_links(state, h, uri, &types);
     resp
@@ -1365,44 +1402,88 @@ async fn listing<S: Store + 'static>(
     resp
 }
 
-/// The storage description: a controlled identifier document extended with the LWS vocabulary,
-/// naming the storage and its services, and publishing the key notifications are signed with.
+/// Register the services enabled together by the LWS dispatcher.
+pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::ServiceCatalog {
+    use crate::describe::{capability, entry, ServiceCatalog, SSD};
+    let storage = cfg.storage();
+    let mut catalog = ServiceCatalog::default();
+    for (fragment, ty, endpoint) in [
+        ("storage-root", "StorageRoot", storage.clone()),
+        ("storage-description", "StorageDescription", storage),
+        (
+            "authorization-server",
+            "AuthorizationServer",
+            cfg.issuer().to_string(),
+        ),
+        (
+            "access-grants",
+            "AccessGrantService",
+            cfg.absolute(GRANTS_PATH),
+        ),
+        (
+            "access-requests",
+            "AccessRequestService",
+            cfg.absolute(REQUESTS_PATH),
+        ),
+        (
+            "notifications",
+            "NotificationService",
+            cfg.absolute(SUBSCRIPTIONS_PATH),
+        ),
+        (
+            "type-index",
+            "TypeIndexService",
+            cfg.absolute(TYPE_INDEX_PATH),
+        ),
+        (
+            "type-search",
+            "TypeSearchService",
+            cfg.absolute(TYPE_SEARCH_PATH),
+        ),
+    ] {
+        let mut service = entry(fragment, ty, endpoint);
+        if matches!(ty, "AccessGrantService" | "AccessRequestService") {
+            service.extras.insert(
+                "conformsTo".into(),
+                json!([format!("{LWS_NS}AccessProfile")]),
+            );
+        }
+        if ty == "NotificationService" {
+            service.extras.insert(
+                "subscriptionType".into(),
+                json!([
+                    "WebhookSubscription",
+                    "SseSubscription",
+                    "WebSocketSubscription"
+                ]),
+            );
+        }
+        catalog.service(service);
+    }
+    // Advertise concrete JSON types served here. The PATCH parser also accepts
+    // other structured JSON suffix types on data documents.
+    catalog.capability(capability(
+        &format!("{SSD}PatchSupport"),
+        json!({"mediaType": {
+            JSON: [ACCEPT_PATCH], LD_JSON: [ACCEPT_PATCH], LINKSET_JSON: [ACCEPT_PATCH]
+        }}),
+    ));
+    catalog.capability(capability(&format!("{SSD}RecursiveDelete"), json!({})));
+    catalog
+}
+
+/// Describe the mounted services and capabilities, including the webhook verification key.
 pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
     let storage = cfg.storage();
-    let service = |frag: &str, ty: &str, endpoint: String| json!({"id": format!("{storage}#{frag}"), "type": ty, "serviceEndpoint": endpoint});
-    let mut grants = service(
-        "access-grants",
-        "AccessGrantService",
-        cfg.absolute(GRANTS_PATH),
-    );
-    grants["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
-    let mut requests = service(
-        "access-requests",
-        "AccessRequestService",
-        cfg.absolute(REQUESTS_PATH),
-    );
-    requests["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
-    let mut notifications = service(
-        "notifications",
-        "NotificationService",
-        cfg.absolute(SUBSCRIPTIONS_PATH),
-    );
-    notifications["subscriptionType"] = json!(["WebhookSubscription"]);
     let key_id = format!("{storage}#{}", cfg.notify_key.kid());
     json!({
-        "@context": [CID_CONTEXT, LWS_CONTEXT],
+        "@context": [CID_CONTEXT, LWS_CONTEXT, crate::describe::extension_context()],
         "id": storage,
         "type": "Storage",
-        "service": [
-            service("storage-root", "StorageRoot", storage.clone()),
-            service("authorization-server", "AuthorizationServer", cfg.issuer().to_string()),
-            grants,
-            requests,
-            notifications,
-            service("type-index", "TypeIndexService", cfg.absolute(TYPE_INDEX_PATH)),
-            service("type-search", "TypeSearchService", cfg.absolute(TYPE_SEARCH_PATH)),
-        ],
+        "conformsTo": [crate::describe::LWS_CORE_SPEC],
+        "service": state.catalog.services_json(&storage),
+        "capability": state.catalog.capabilities_json(),
         "verificationMethod": [{
             "id": key_id,
             "type": "JsonWebKey",
@@ -9885,6 +9966,98 @@ mod tests {
             }
             (etag, doc) = (now_etag, now_doc);
         }
+    }
+
+    /// A touch with no owed intents lands without spawning a clearing task.
+    #[tokio::test]
+    async fn a_touch_without_owed_intents_needs_no_task() {
+        use futures_util::FutureExt;
+        let (st, _store) = super::super::test_store::state(100).await;
+        let container = st.cfg.storage();
+        let before = st.resource_meta(&container).await.unwrap().version;
+        assert!(
+            tokio::task::unconstrained(touch_container(&st, &container))
+                .now_or_never()
+                .is_some(),
+            "an ordinary touch yielded to a clearing task"
+        );
+        assert_ne!(st.resource_meta(&container).await.unwrap().version, before);
+    }
+
+    /// Refused intent cleanup must not keep a dropped state's lifecycle lease alive.
+    #[tokio::test(start_paused = true)]
+    async fn a_retrying_touch_cleanup_does_not_prevent_restart() {
+        use super::super::{intents, records::LOCK_WAIT, test_store::state};
+        let (st, store) = state(100).await;
+        let cfg = st.cfg.clone();
+        let container = cfg.storage();
+        let record = intents::mint(&container);
+        intents::store(&st, &record, false, &[], std::slice::from_ref(&container))
+            .await
+            .unwrap();
+        st.owe_touch(&container, record.clone());
+        *store.refuse_delete_of.lock().unwrap() = Some(record.clone());
+        let began = tokio::time::Instant::now();
+        touch_container(&st, &container).await;
+        assert!(began.elapsed() >= LOCK_WAIT, "cleanup did not keep retrying");
+        assert!(store.exists(&record).await.unwrap());
+        // Reuse the tracked backend: the faulting store itself has no shared lease.
+        let backend = st.store.clone();
+        assert!(LwsState::new(backend.clone(), cfg.clone()).await.is_err());
+        drop(st);
+
+        // The old cleanup is asleep between retries. Startup must clear the leftover
+        // intent before that retry wakes, rather than relying on the old task to do it.
+        *store.refuse_delete_of.lock().unwrap() = None;
+        let restarting = tokio::time::Instant::now();
+        let restarted = LwsState::new(backend, cfg)
+            .await
+            .expect("a retrying cleanup must not retain the lifecycle lease");
+        assert_eq!(tokio::time::Instant::now(), restarting);
+        assert!(
+            !store.exists(&record).await.unwrap(),
+            "startup left the intent"
+        );
+        assert!(restarted.notify.lease().is_some());
+    }
+
+    /// Clearing several owed intents shares one deadline after the touch lands.
+    #[tokio::test(start_paused = true)]
+    async fn a_touch_shares_one_deadline_for_owed_intents() {
+        use super::super::{records::LOCK_WAIT, test_store::state};
+        use std::sync::{atomic::Ordering, Arc};
+        let (st, store) = state(100).await;
+        let container = st.cfg.storage();
+        let records = [format!("{container}intent1"), format!("{container}intent2")];
+        for record in &records {
+            store
+                .create_in_container(&container, record, Bytes::from_static(b"{}"), LWS_JSON)
+                .await
+                .unwrap();
+            st.owe_touch(&container, record.clone());
+        }
+        let gate = || Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((records[0].clone(), gate()));
+        store
+            .slow_fence_ms
+            .store((LOCK_WAIT * 3 / 4).as_millis() as u64, Ordering::SeqCst);
+        let arm_second = async {
+            while store.fences_tried.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            *store.unsettle_next_delete_of.lock().unwrap() = Some((records[1].clone(), gate()));
+        };
+        let began = tokio::time::Instant::now();
+        tokio::join!(touch_container(&st, &container), arm_second);
+        assert!(
+            began.elapsed() <= LOCK_WAIT + std::time::Duration::from_millis(1),
+            "each intent received a fresh deadline"
+        );
+        assert!(store.fences_tried.load(Ordering::SeqCst) >= 2);
+        assert!(
+            store.exists(&records[1]).await.unwrap(),
+            "unfinished intent was lost before background clearing"
+        );
     }
 
     /// Review finding: a touch of a member container changes the date its parent's listing

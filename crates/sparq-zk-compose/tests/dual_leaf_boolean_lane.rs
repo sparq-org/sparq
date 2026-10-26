@@ -411,13 +411,14 @@ fn non_canonical_and_non_boolean_literals_are_fail_closed_at_the_builder() {
 }
 
 /// The boolean lane inherits the value lane's fail-closed `(method × circuit)`
-/// legality unchanged — it IS the same member, so a `string-canonical` graph
-/// (which committed no value handle) still refuses it.
+/// refusal for V1, while a `string-canonical` graph has no value handle.
 #[test]
 fn boolean_lane_inherits_the_value_lane_dispatch_legality() {
     let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Eq, true).unwrap();
     let id = unpack(&built.inputs).id.clone();
-    assert_eq!(resolve_circuit(CommitmentMethod::DualLeafV1, &id), Ok(id.clone()));
+    assert!(matches!(resolve_circuit(CommitmentMethod::DualLeafV1, &id),
+        Err(DispatchError::LegacyV1ValueMember { .. })));
+    assert_eq!(resolve_circuit(CommitmentMethod::DualLeafV2, &id), Ok(id.clone()));
     assert!(matches!(
         resolve_circuit(CommitmentMethod::StringCanonicalV1, &id),
         Err(DispatchError::IllegalPair { .. }),

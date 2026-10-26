@@ -1333,13 +1333,13 @@ fn filter_two_edge_manifest(graph_a2_unbound: bool) -> ProofManifest {
         ],
         binding_edges: vec![
             sparq_zk_compose::manifest::BindingEdge {
-                from_proof: 1,
+                filter: None, from_proof: 1,
                 from_row: 0,
                 from_slot: 2,
                 to_proof: 0,
             },
             sparq_zk_compose::manifest::BindingEdge {
-                from_proof: 2,
+                filter: None, from_proof: 2,
                 from_row: 0,
                 from_slot: 2,
                 to_proof: 0,

@@ -101,6 +101,8 @@ pub enum DispatchError {
     /// (the `value-only` IRI when its feature is OFF, or a bogus IRI). Rejected,
     /// never defaulted (the closed-enum, fail-closed discipline).
     UnknownMethod { method_iri: String },
+    /// V1 value members are refused even under the legacy-method policy.
+    LegacyV1ValueMember { circuit: String },
     /// A NEW proof was being routed under a method that is not selectable for new
     /// issuance (a superseded version or a research-only dial). Re-verifying an
     /// ALREADY-ISSUED proof is a different use and passes
@@ -163,6 +165,9 @@ pub enum DispatchError {
 impl std::fmt::Display for DispatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DispatchError::LegacyV1ValueMember { circuit } => write!(
+                f, "legacy V1 value member {circuit} is not accepted"
+            ),
             DispatchError::UncompiledCircuit(e) => write!(f, "{e}"),
             DispatchError::IllegalPair { method_iri, circuit } => write!(
                 f,
@@ -292,19 +297,11 @@ fn string_lane_legal(method: CommitmentMethod) -> bool {
     }
 }
 
-/// Whether a VALUE-LANE member is legal against `method`. Value-lane members
-/// need a committed value handle, so they are legal for BOTH `dual-leaf` versions
-/// and (the research dial) `value-only`, but NEVER for `string-canonical` (no value
-/// handle exists — the member is unprovable against it).
+/// Whether the method's leaf shape carries a value handle.
+/// V1 also has a handle, but `resolve_circuit` explicitly refuses V1 value members.
 fn value_lane_legal(method: CommitmentMethod) -> bool {
     match method {
         CommitmentMethod::StringCanonicalV1 => false,
-        // BOTH dual-leaf versions commit a value handle, so the value lane is
-        // STRUCTURALLY legal against either. Legality here is about the leaf
-        // SHAPE, not about which version a new issuance may select — that is
-        // `CommitmentMethod::is_production_selectable`, a separate axis. A V1
-        // graph stays verifiable, so refusing its value lane here would make
-        // already-issued credentials unprovable.
         CommitmentMethod::DualLeafV1 | CommitmentMethod::DualLeafV2 => true,
         #[cfg(feature = "commitment-value-only")]
         CommitmentMethod::ValueOnlyV1 => true,
@@ -328,9 +325,9 @@ fn value_lane_legal(method: CommitmentMethod) -> bool {
 /// It NEVER returns a circuit for an illegal pair and NEVER defaults — an
 /// unsupported combination is an error, not a silent mis-dispatch.
 ///
-/// This entry is the VERIFICATION / legacy view: it asks only whether the leaf
-/// shape admits the member, so an already-issued graph under a superseded method
-/// keeps resolving. A path building a NEW proof calls
+/// V1 value members return [`DispatchError::LegacyV1ValueMember`] even for
+/// already-issued use. V1 string-lane scans remain available under the legacy
+/// method policy. A path building a NEW proof calls
 /// [`resolve_circuit_for_use`] with [`MethodUse::NewIssuance`] instead, which
 /// adds the method-selectability refusal.
 pub fn resolve_circuit(
@@ -338,6 +335,9 @@ pub fn resolve_circuit(
     id: &CircuitId,
 ) -> Result<CircuitId, DispatchError> {
     id.validate().map_err(DispatchError::UncompiledCircuit)?;
+    if method == CommitmentMethod::DualLeafV1 && is_value_lane_member(id) {
+        return Err(DispatchError::LegacyV1ValueMember { circuit: id.label() });
+    }
     // (3) reject-list (v): an identity op must never be a value-lane member.
     if is_value_lane_member(id) && is_identity_op_member(id) {
         return Err(DispatchError::IdentityOpAtValueLane { circuit: id.label() });
@@ -437,7 +437,10 @@ fn lane_table() -> &'static [LaneRow] {
     TABLE
         .get_or_init(|| {
             let mut rows = vec![
-                // --- DualLeafV1 (superseded: legacy use only) ---------------
+                // V1 rows are retained for pairing/rendering legacy fixtures.
+                // Every one is refused by refuse_legacy_value_member at stage 0:
+                // integer, shared integer/boolean, double, dateTime, date, and
+                // every decimal scale below. Legacy policy admits string lanes only.
                 LaneRow {
                     constant: dual_leaf::datatype_const(dual_leaf::XSD_INTEGER),
                     lane: "dual-leaf v1 xsd:integer".to_string(),
@@ -525,6 +528,18 @@ fn lane_table() -> &'static [LaneRow] {
             rows
         })
         .as_slice()
+}
+
+/// Refuse every V1 value lane, independently of the relying party's policy.
+/// Integer, double, decimal (every scale), dateTime, date and the V1 boolean
+/// lane all remain in the pairing inventory for legacy rendering, not acceptance.
+pub(crate) fn refuse_legacy_value_member(inputs: &ProofInputs) -> Result<(), DispatchError> {
+    if let Some((id, constant)) = value_lane_fields(inputs) {
+        if lane_row(id, constant)?.legacy_v1 {
+            return Err(DispatchError::LegacyV1ValueMember { circuit: id.label() });
+        }
+    }
+    Ok(())
 }
 
 /// The `(circuit, datatype_const)` fields of a VALUE-LANE `ProofInputs`, or
@@ -841,40 +856,12 @@ mod tests {
     // --- the LEGAL matrix (design §3.1) -----------------------------------
 
     #[test]
-    fn dual_leaf_admits_the_value_lane_member() {
-        // The #769 method: dual-leaf is the ONE method the value-FILTER member is
-        // legal against AND that keeps term identity (via lexical_component).
-        let r = resolve_circuit(CommitmentMethod::DualLeafV1, &CircuitId::FilterValueDl);
-        assert_eq!(r, Ok(CircuitId::FilterValueDl));
-    }
-
-    #[test]
-    fn dual_leaf_admits_the_double_and_decimal_value_lane_siblings() {
-        // sq-2ezsx: the double + decimal datatype-class value-lane
-        // members are legal against dual-leaf, exactly like the integer member.
-        assert_eq!(
-            resolve_circuit(CommitmentMethod::DualLeafV1, &CircuitId::FilterValueDlF64),
-            Ok(CircuitId::FilterValueDlF64)
-        );
-        assert_eq!(
-            resolve_circuit(CommitmentMethod::DualLeafV1, &CircuitId::FilterValueDlDecimal),
-            Ok(CircuitId::FilterValueDlDecimal)
-        );
-        // sq-wz99x: the dateTime/date member (ONE member, BOTH lanes).
-        assert_eq!(
-            resolve_circuit(
-                CommitmentMethod::DualLeafV1,
-                &CircuitId::FilterValueDlDateTime
-            ),
-            Ok(CircuitId::FilterValueDlDateTime)
-        );
-    }
-
-    #[test]
-    fn dual_leaf_v2_admits_every_value_lane_member_exactly_as_v1_does() {
-        // The versioned method commits the same leaf SHAPE, so the legality matrix
-        // is V1's — including the dedicated bit-domain boolean member, which only
-        // V2's boolean lane targets.
+    fn dual_leaf_v2_admits_value_members_and_v1_refuses_them() {
+        use crate::manifest::FieldHex;
+        use sparq_zk::{dual_leaf, dual_leaf_v2};
+        use sparq_zk::field::{field_to_hex, Fr};
+        // V2 keeps every typed value member; the legacy policy preserves only
+        // V1's string-lane members.
         for id in [
             CircuitId::FilterValueDl,
             CircuitId::FilterValueDlF64,
@@ -888,10 +875,9 @@ mod tests {
                 "{} must be legal against dual-leaf v2",
                 id.label()
             );
-            assert!(
-                resolve_circuit(CommitmentMethod::DualLeafV1, &id).is_ok(),
-                "{} must stay legal against dual-leaf v1 (already-issued graphs)",
-                id.label()
+            assert_eq!(
+                resolve_circuit(CommitmentMethod::DualLeafV1, &id),
+                Err(DispatchError::LegacyV1ValueMember { circuit: id.label() })
             );
             // And neither version's value lane is legal against string-canonical.
             assert!(matches!(
@@ -899,6 +885,19 @@ mod tests {
                 Err(DispatchError::IllegalPair { .. })
             ));
         }
+        let inputs = |constant| ProofInputs::FilterValueDl {
+            id: CircuitId::FilterValueDl,
+            operand_enc: FieldHex(field_to_hex(&Fr::from(1u64))),
+            op: crate::manifest::FilterOp::Eq,
+            bound: 1,
+            datatype_const: FieldHex(field_to_hex(&constant)),
+            expected: true,
+        };
+        assert_eq!(refuse_legacy_value_member(&inputs(dual_leaf_v2::integer_lane_const())), Ok(()));
+        assert!(matches!(
+            refuse_legacy_value_member(&inputs(dual_leaf::datatype_const(dual_leaf::XSD_INTEGER))),
+            Err(DispatchError::LegacyV1ValueMember { .. })
+        ));
         // Token FILTER legality is unchanged; V2 scans use the dedicated member.
         assert!(resolve_circuit(CommitmentMethod::DualLeafV2, &CircuitId::FilterInt { d: 2 }).is_ok());
         assert!(resolve_circuit(
@@ -984,9 +983,9 @@ mod tests {
 
     #[test]
     fn known_scheme_iri_round_trips_through_the_resolver() {
-        // dual-leaf's recorded zk:scheme IRI resolves to the legal value-lane pair.
+        // V2's recorded zk:scheme IRI resolves to the legal value-lane pair.
         let r = resolve_circuit_for_scheme(
-            CommitmentMethod::DualLeafV1.scheme_iri(),
+            CommitmentMethod::DualLeafV2.scheme_iri(),
             &CircuitId::FilterValueDl,
         );
         assert_eq!(r, Ok(CircuitId::FilterValueDl));
@@ -1068,7 +1067,7 @@ mod tests {
                         *m == CommitmentMethod::DualLeafV2,
                     CircuitId::Scan { .. } | CircuitId::JoinEq { .. } =>
                         matches!(m, CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1),
-                    _ => value_lane_legal(*m),
+                    _ => value_lane_legal(*m) && *m != CommitmentMethod::DualLeafV1,
                 };
                 let expected = if matches!(c, CircuitId::FilterInt { .. }) {
                     string_lane_legal(*m)
