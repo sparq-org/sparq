@@ -24,6 +24,14 @@ The binary is configured entirely by `SOLID_SERVER_*` / `PSS_*` env variables (b
 
 **`SOLID_SERVER_SEED_DEMO`** (default OFF, `1|true|TRUE|True` only) opt-in-seeds the `research/lws-demo-architecture.md` §3.2 public demo: `/playground/` writable by any *authenticated* agent, anonymous read-only, `acl:Control` granted to nobody — so visitors are not isolated and can overwrite/delete each other's resources (disclosed in the seeded `/README`). It normally requires `PSS_SPARQ_BACKEND=memory`; the escape hatch `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` permits it on **any** non-memory backend, intended for an *ephemeral* embedded test instance — the server does **not** verify ephemerality, so it is not memory-only in the enforced sense. API break: `seed::DEMO_USER` + `DemoFixtures::{pod, welcome_doc, owner}` removed, `DemoFixtures::playground` moved `/demo/playground/` → `/playground/`, `DemoFixtures::readme` added.
 
+## Native storage lifecycle
+
+`SOLID_SERVER_DATA_DIR` (default unset) implies `PSS_SPARQ_BACKEND=embedded`, opens a durable index at `<data>/index` and `FsBlobStore` at `<data>/blobs`, and conflicts with `SOLID_SERVER_SPARQ_DIR` or another explicit backend. Both `embedded-sparq` and `blob-fs` are required (default-on); builds missing either refuse boot. The legacy directory setting keeps existing-snapshot behavior and its durability guard; a directory-backed index opened through that path also compacts on graceful shutdown.
+
+Boot atomically publishes and syncs `format.json` (`schema=1`, `index.major=1`, `blobs.major=1`) before creating either plane; content without a marker or an incompatible marker refuses boot. The index opens before blob construction; its `index.lock` + `index/sparq.lock` guard the data root. `SOLID_SERVER_WAIT_FOR_LOCK_SECS` (default `0`, non-negative integer seconds) retries index contention with backoff, then names the lock path; other errors fail immediately.
+
+Durable blobs with an ephemeral index refuse boot unless `SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY=1` (default unset); a durable index with ephemeral bytes always refuses. SIGTERM/Ctrl-C drains listeners and stops the reconciler before actor compaction; failure logs and exits non-zero with recovery data retained. Final client drop joins the actor and releases the lock. See [native storage](../../skills/solid-lws-server/references/native-storage.md) for the complete boot and library contract.
+
 ## 📦 Native container image
 
 <!-- sq-lmz40: native image contract; distinct from the wasm/npm development host. -->
@@ -47,7 +55,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 
 ### Running durably in a container
 
-Use an image containing the #7188 P0-A/P0-B durable storage wiring:
+Mount a named volume and enable the data-directory contract. When building behind a trusted proxy, pass `--secret id=build_ca,src=/path/to/ca-bundle.crt`; the CA bundle stays outside image layers.
 
 ```sh
 docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
@@ -57,7 +65,7 @@ docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   "ghcr.io/sparq-org/sparq-lws-core:${VERSION}"
 ```
 
-`SOLID_SERVER_DATA_DIR` is unset by default. Setting it selects the embedded backend and places the index at `/data/index`, blobs at `/data/blobs`, and format metadata at `/data/format.json`. The image ships an empty `/data` owned by `65532:65532`; a fresh named Docker volume inherits that ownership.
+The image ships an empty `/data` owned by `65532:65532`; a fresh named Docker volume inherits that ownership. `SOLID_SERVER_DATA_DIR=/data` enables the storage lifecycle above, keeping `index/`, `blobs/`, and `format.json` together. Mounting the volume alone does not enable persistence.
 
 For Helm, use `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and `persistence.accessMode=ReadWriteOnce`; optionally set `persistence.storageClass` or `persistence.existingClaim`. These shared top-level values mount `/data`, set the environment variable, and select `Recreate` for upgrades.
 
@@ -65,46 +73,24 @@ Use a filesystem on a **block volume** (EBS, PD, Azure Disk). Network filesystem
 
 ## ✨ Features
 
-- **LDP surface** — containers + RDF/non-RDF resources, conditional requests,
-  `Content-Range` reads, Turtle / JSON-LD conneg (oxrdf/oxttl/oxjsonld) honouring the
-  JSON-LD `profile` parameter (expanded / compacted forms echoed in `Content-Type`;
-  compaction is local and context-free — nothing fetched).
-- **Access control** — WAC (`acl:`) evaluated against the SPARQ-authoritative
-  store, with an ACL decision cache; public-read fast path.
-- **WAC-scoped query endpoint** — default-on, query-only
-  `GET`/`POST /sparql` for SELECT, ASK, and CONSTRUCT. Each request rebuilds a
-  named-graph-per-readable-resource dataset; the default graph is empty and
-  unreadable or uncertain resources never reach the query engine.
-- **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
-  tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
-- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the in-process
-  engine (compiled by default; select it with `PSS_SPARQ_BACKEND=embedded` or
-  `SOLID_SERVER_DATA_DIR` — the boot default stays in-memory), opt-in live SPARQ HTTP client, `object_store`.
-- **Notification observability** — process-wide backlog-overflow totals
-  are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and
-  receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
-- **Transport hardening** — HTTP/2 rapid-reset and HTTP/1 slowloris guards (explicit
-  header-count, aggregate-byte, and slow-header timeout bounds); request timeouts, body
-  limits, per-connection max-requests, rate limiting, and overload shedding.
+- **LDP surface** — containers + RDF/non-RDF resources, conditional requests, `Content-Range` reads, Turtle / JSON-LD conneg (oxrdf/oxttl/oxjsonld) honouring the JSON-LD `profile` parameter (expanded / compacted forms echoed in `Content-Type`; compaction is local and context-free — nothing fetched).
+- **Access control** — WAC (`acl:`) evaluated against the SPARQ-authoritative store, with an ACL decision cache; public-read fast path.
+- **WAC-scoped query endpoint** — default-on, query-only `GET`/`POST /sparql` for SELECT, ASK, and CONSTRUCT. Each request rebuilds a named-graph-per-readable-resource dataset; the default graph is empty and unreadable or uncertain resources never reach the query engine.
+- **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache, tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
+- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the default-enabled in-process engine (`PSS_SPARQ_BACKEND=embedded` or `SOLID_SERVER_DATA_DIR`), opt-in live SPARQ HTTP client, and filesystem blobs with immutable opaque keys. An unconfigured boot uses the in-memory double.
+- **Notification observability** — process-wide backlog-overflow totals are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
+- **Transport hardening** — HTTP/2 rapid-reset and HTTP/1 slowloris guards (explicit header-count, aggregate-byte, and slow-header timeout bounds); request timeouts, body limits, per-connection max-requests, rate limiting, and overload shedding.
 - **LWS 1.0 mode** — `SOLID_SERVER_PROTOCOL=lws` serves W3C Linked Web Storage (`src/lws/`, skill § *Run the LWS 1.0 protocol*, [`conformance/lws/`](./conformance/lws)).
 - Cargo features:
-  - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
-    SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
-    `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only
-    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
-  - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
-    (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
-  - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve
-    the same hardened LDP router over HTTP/3 on UDP at the resolved `SOLID_SERVER_BIND`
-    address+port; TCP stays HTTP/2 + HTTP/1.1 (and WS).
+  - `blob-fs` (**default-on**, native only) — async adapter for [`sparq-lws-blob-fs`](../sparq-lws-blob-fs); hold the data-directory lock before open and until drop.
+  - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`); `--no-default-features` builds the engine-free profile.
+  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
+  - `http-sparq` (off) — the remote SPARQL-over-HTTP backend (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
+  - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve the same hardened LDP router over HTTP/3 on UDP at the resolved `SOLID_SERVER_BIND` address+port; TCP stays HTTP/2 + HTTP/1.1 (and WS).
   - `redis-replay` (off) — a shared Redis-backed DPoP `jti` replay store for horizontally-scaled deployments.
   - `authn-ssi` + `authn-openid` (**default-on**) and `authn-saml` (off) — the LWS 1.0 authorization server's authentication suites, each its own `sparq-lws-authn-*` crate implementing `sparq_lws_authn::Suite`; `SOLID_SERVER_LWS_AUTHN` picks among those compiled in.
-  - `odrl-authz` (off, sq-elg47) — the native ODRL policy gate seam on the
-    read/query path (`authz::odrl`, via `LdpState::set_odrl_gate`; deny-overrides /
-    permit-extends over the WAC decision, fail-closed).
-  - `trust-graph` (off, sq-hed3q) — the LIBRARY-only trust-graph admission
-    seam (`authz::trust_admit`); NOT handler-wired. Research prototype (sq-qhy4).
+  - `odrl-authz` (off, sq-elg47) — the native ODRL policy gate seam on the read/query path (`authz::odrl`, via `LdpState::set_odrl_gate`; deny-overrides / permit-extends over the WAC decision, fail-closed).
+  - `trust-graph` (off, sq-hed3q) — the LIBRARY-only trust-graph admission seam (`authz::trust_admit`); NOT handler-wired. Research prototype (sq-qhy4).
 
 ## 📚 Learn more
 

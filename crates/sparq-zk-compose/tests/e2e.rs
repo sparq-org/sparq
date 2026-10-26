@@ -179,6 +179,7 @@ fn attest(commitment: Fr, sk: &SecretKey) -> CommitmentAttestation {
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
+        // Legacy unbound attestation fixture retained for negative tests.
         signature: sk.sign_commitment(&commitment), // codex #4: deterministic nonce
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: None, // audit #9: salt-unbound legacy attestation
@@ -477,7 +478,7 @@ fn structure_rejects_binding_edge_filter_index_zero() {
     m.binding_edges[0].filter = Some(0);
     assert!(matches!(
         prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()),
-        Err(CheckError::EdgeFilterIndexNotAccepted { edge: 0 })
+        Err(CheckError::EdgeFilterIndexOnNonValueProof { edge: 0 })
     ));
 }
 
@@ -487,7 +488,7 @@ fn structure_rejects_binding_edge_filter_index_out_of_range() {
     m.binding_edges[0].filter = Some(99);
     assert!(matches!(
         prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()),
-        Err(CheckError::EdgeFilterIndexNotAccepted { edge: 0 })
+        Err(CheckError::EdgeFilterIndexOnNonValueProof { edge: 0 })
     ));
 }
 
@@ -2561,9 +2562,7 @@ fn filter_reject_false_verdict_row() {
     }
 }
 
-/// Audit #10 (unbindable FILTER fails closed): a FILTER outside the bindable
-/// integer fragment (here a string-literal comparison) must be REJECTED, never
-/// silently disclosed unproven. The recheck/fragment_filters parse rejects it.
+/// A typed literal comparison without a matching lane proof stays unbound.
 #[test]
 fn filter_reject_unbindable_filter_fragment() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
@@ -2592,8 +2591,8 @@ fn filter_reject_unbindable_filter_fragment() {
     };
     let k = attested_forge_key_set(&mut m);
     match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
-        Err(CheckError::Sparqzk(_)) => {}
-        other => panic!("expected Sparqzk(UnsupportedFragment), got {other:?}"),
+        Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
+        other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
 }
 
@@ -4544,6 +4543,7 @@ fn revocation_status_unbound_attestation_rejected() {
     // Re-sign salt-only so the (now status-unbound) attestation is otherwise
     // internally valid — proving the REJECT is the missing status binding, not a
     // bad signature.
+    // Legacy unbound attestation fixture retained for negative tests.
     att.signature = sk.sign_commitment_with_salt(&c, &salt);
     m.commitment_attestations.push(att);
     m.key_set.push(public_key_to_hex(&sk.public_key()));
@@ -6236,6 +6236,7 @@ fn prove_hidden_issuer(
     } else {
         (
             hi_message_unbound(commitment, salt),
+            // Legacy unbound attestation fixture retained for negative tests.
             signer_sk.sign_commitment_with_status(commitment, salt, &status_ref),
         )
     };
@@ -7361,6 +7362,7 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
     );
     let mut clear = attest_with_salt(c_clear.commitment, salt_clear, &signer);
     clear.signature =
+        // Legacy unbound attestation fixture retained for negative tests.
         signer.sign_commitment_with_status(&c_clear.commitment, &salt_clear, &status_ref);
 
     let mut manifest = ProofManifest {
@@ -7496,5 +7498,124 @@ mod v2_members_live {
             &scratch("opaque_v2_wrong_vk")).unwrap();
         assert!(!p.verify_with(&art.proof, &art.public_inputs, &wrong_vk,
             &scratch("opaque_v2_wrong")).unwrap(), "bb must refuse the V2 VK for an opaque proof");
+    }
+}
+
+#[cfg(feature = "dual-leaf")]
+#[path = "support/value_filters.rs"]
+mod value_filters;
+
+#[cfg(feature = "dual-leaf")]
+mod value_filters_live {
+    use super::*;
+    use super::value_filters::{built, fixture, honest, literal, prove};
+    use super::v2_members::check;
+
+    #[test]
+    #[ignore = "real V2 credential scan and value FILTER proofs"]
+    fn live_v2_integer_filter_verifies_end_to_end() {
+        let Some(gate) = support::gate("live_v2_integer_filter_verifies_end_to_end", &["nargo", "bb"]) else { return };
+        honest("integer", "25", "18", "live_v2_integer_filter_verifies_end_to_end");
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real V2 credential scan and value FILTER proofs"]
+    fn live_v2_decimal_filter_verifies_end_to_end() {
+        let Some(gate) = support::gate("live_v2_decimal_filter_verifies_end_to_end", &["nargo", "bb"]) else { return };
+        honest("decimal", "2.50", "1.5", "live_v2_decimal_filter_verifies_end_to_end");
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real V2 credential scan and value FILTER proofs"]
+    fn live_v2_datetime_filter_verifies_end_to_end() {
+        let Some(gate) = support::gate("live_v2_datetime_filter_verifies_end_to_end", &["nargo", "bb"]) else { return };
+        honest("dateTime", "2024-01-02T03:04:05Z", "2024-01-01T00:00:00Z", "live_v2_datetime_filter_verifies_end_to_end");
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real V2 credential scan and value FILTER proofs"]
+    fn live_v2_double_filter_verifies_end_to_end() {
+        let Some(gate) = support::gate("live_v2_double_filter_verifies_end_to_end", &["nargo", "bb"]) else { return };
+        honest("double", "2.5E0", "1.5E0", "live_v2_double_filter_verifies_end_to_end");
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real V2 credential scan and value FILTER proofs"]
+    fn live_v2_boolean_filter_verifies_end_to_end() {
+        let Some(gate) = support::gate("live_v2_boolean_filter_verifies_end_to_end", &["nargo", "bb"]) else { return };
+        honest("boolean", "true", "true", "live_v2_boolean_filter_verifies_end_to_end");
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real value proof anchored to a different active row"]
+    fn live_v2_value_filter_wrong_row_is_refused() {
+        let Some(gate) = support::gate("live_v2_value_filter_wrong_row_is_refused", &["nargo", "bb"]) else { return };
+        let (mut m, scan, proofs) = fixture(&[literal("25", "integer"), literal("26", "integer")], &literal("18", "integer"));
+        prove(&mut m, &scan, &proofs, "value_wrong_row");
+        check(&m, "value_wrong_row_control").unwrap();
+        m.binding_edges[0].from_row = 1;
+        assert!(matches!(check(&m, "value_wrong_row_bad"), Err(CheckError::BindingInconsistent { edge: 0 })));
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real value proof of a false comparison"]
+    fn live_v2_value_filter_false_verdict_is_refused() {
+        let Some(gate) = support::gate("live_v2_value_filter_false_verdict_is_refused", &["nargo", "bb"]) else { return };
+        let value = literal("25", "integer");
+        let (mut m, scan, proofs) = fixture(std::slice::from_ref(&value), &literal("18", "integer"));
+        prove(&mut m, &scan, &proofs, "value_false_control");
+        check(&m, "value_false_control_verify").unwrap();
+        let (inputs, proof) = built(&value, &literal("99", "integer"));
+        assert!(matches!(inputs, ProofInputs::FilterValueDl { expected: false, .. }));
+        m.sub_proofs[1].inputs = inputs;
+        prove(&mut m, &scan, &[proof], "value_false_bad");
+        m.query = "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o >= 99) }".into();
+        assert!(matches!(check(&m, "value_false_bad_verify"), Err(CheckError::ValueObligation(
+            sparq_zk_compose::value_obligation::ObligationError::PinMismatch { .. }))));
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "real value proof generated for another query constant"]
+    fn live_v2_value_filter_different_constant_is_refused() {
+        let Some(gate) = support::gate("live_v2_value_filter_different_constant_is_refused", &["nargo", "bb"]) else { return };
+        let value = literal("25", "integer");
+        let (mut m, scan, proofs) = fixture(std::slice::from_ref(&value), &literal("18", "integer"));
+        prove(&mut m, &scan, &proofs, "value_constant_control");
+        check(&m, "value_constant_control_verify").unwrap();
+        let (inputs, proof) = built(&value, &literal("17", "integer"));
+        m.sub_proofs[1].inputs = inputs;
+        prove(&mut m, &scan, &[proof], "value_constant_bad");
+        assert!(matches!(check(&m, "value_constant_bad_verify"), Err(CheckError::ValueObligation(
+            sparq_zk_compose::value_obligation::ObligationError::PinMismatch { .. }))));
+        support::complete(gate);
+    }
+
+    #[test]
+    #[ignore = "bb must verify every challenge-bound value proof"]
+    fn live_v2_value_filter_crypto_is_reached() {
+        let Some(gate) = support::gate("live_v2_value_filter_crypto_is_reached", &["nargo", "bb"]) else { return };
+        let (mut m, scan, proofs) = fixture(&[literal("25", "integer")], &literal("18", "integer"));
+        let mut artifacts = prove(&mut m, &scan, &proofs, "value_crypto");
+        check(&m, "value_crypto_control").unwrap();
+        let art = &mut artifacts[0];
+        let mid = art.proof.len() / 2; art.proof[mid] ^= 0xff;
+        m.sub_proofs[1].proof_hex = encode_artifacts(art);
+        assert!(matches!(check(&m, "value_crypto_bad"), Err(CheckError::ProofRejected { proof: 1 })),
+            "bb must reject changed value proof bytes after public input equality passes");
+        // Re-prove the same statement under another challenge. Its genuine proof
+        // must fail public-input binding under the verifier's original nonce.
+        let art = CircuitProver::from_crate_root().prove_value_lane(
+            sparq_zk::commit::CommitmentMethod::DualLeafV2, sparq_zk::commit::MethodUse::NewIssuance,
+            &FieldHex::from_field(&Fr::from(43u64)), &proofs[0], &scratch("value_crypto_nonce"), "value_crypto_nonce").unwrap();
+        m.sub_proofs[1].proof_hex = encode_artifacts(&art);
+        assert!(matches!(check(&m, "value_crypto_nonce_bad"), Err(CheckError::PublicInputMismatch { proof: 1 })));
+        support::complete(gate);
     }
 }

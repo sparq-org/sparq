@@ -49,7 +49,8 @@ jobs:
           platforms: linux/amd64
           tags: sparq-lws-core:smoke
           cache-from: type=gha,scope=sparq-lws-core
-          cache-to: type=gha,mode=max,scope=sparq-lws-core
+          # PR builds may read the shared cache but must not export source layers.
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=sparq-lws-core' || '' }}
           provenance: false
           sbom: false
 

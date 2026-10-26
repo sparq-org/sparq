@@ -129,7 +129,7 @@ pub struct Graph {
     /// of this Vec.
     ///
     /// Private: read it with [`named`](Self::named) / [`named_graph`](Self::named_graph). A
-    /// directory-backed graph's named graphs are its store's (positional, logged, under its
+    /// directory-backed graph's named graphs are its store's (declared slots, logged, under its
     /// lock), so they change only through the durable methods
     /// ([`ensure_named`](Self::ensure_named), [`apply_delta_to_named`](Self::apply_delta_to_named),
     /// [`clear_named_durable`](Self::clear_named_durable),
@@ -147,12 +147,9 @@ pub struct Graph {
     /// length), so a stale cache is detected and rebuilt. Interior-mutable so a shared `&Graph`
     /// can populate it; never observable in results (pure acceleration).
     graph_prefix_index: std::sync::Mutex<Option<(usize, Vec<u32>)>>,
-    /// The write-ahead log for a DIRECTORY-BACKED graph (opened via [`open`](Self::open)):
-    /// every [`apply_delta`](Self::apply_delta) batch is appended + fsync'd here BEFORE it
-    /// is applied, and replayed into the delta-overlay on the next `open` — durability for
-    /// incremental updates. `None` for in-memory graphs (updates are overlay-only).
+    /// Durable backing and write-ahead-log state.
     #[cfg(feature = "mmap")]
-    wal: Option<Wal>,
+    wal: WriteState,
     /// (sq-ycle) The parent-level REDO JOURNAL (`dir/txn.log`) for a DIRECTORY-BACKED
     /// graph — the SINGLE atomic commit point for a whole multi-operation SPARQL UPDATE body. The
     /// resolved per-slot quad-delta of one `apply_effects` call is recorded here as ONE fsync'd
@@ -162,6 +159,15 @@ pub struct Graph {
     /// in-memory graphs (the per-`apply_effects` commit/clear are then no-ops). See [`TxnJournal`].
     #[cfg(feature = "mmap")]
     txn: Option<TxnJournal>,
+    /// Shared durable-write and layout state for this graph tree.
+    #[cfg(feature = "mmap")]
+    tree: std::sync::Arc<TreeState>,
+    /// Layout generation associated with this handle.
+    #[cfg(feature = "mmap")]
+    generation: u64,
+    /// Next named-graph slot id to reserve.
+    #[cfg(feature = "mmap")]
+    next_slot: u32,
     /// The exclusive lock on the directory this graph was opened from ([`dir_lock`]), held
     /// while the graph lives: `None` for an in-memory graph. A named sub-graph of a
     /// directory-backed graph holds its root's lock (the same `Arc`), so a sub-graph taken out
@@ -1675,8 +1681,8 @@ impl Graph {
     }
 
     /// `Err` unless the named graphs from position `from` on may be removed or moved: none of
-    /// them is directory-backed. A store's named graphs are positional (`named/<i>`, the
-    /// manifest) and logged: they change only through the durable methods, such as
+    /// them is directory-backed. A store's named graphs have manifest-recorded slots and
+    /// are logged: they change only through the durable methods, such as
     /// [`ensure_named`](Self::ensure_named) and [`drop_named_durable`](Self::drop_named_durable),
     /// and are never taken out or shifted. In-memory named graphs (a view a caller added) may
     /// be removed as long as no store's named graph comes after them.
@@ -2047,10 +2053,16 @@ impl Graph {
             named: Vec::new(),
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
-            wal: None,
+            wal: WriteState::Ephemeral,
             // (sq-ycle) In-memory graph: no parent-level redo journal.
             #[cfg(feature = "mmap")]
             txn: None,
+            #[cfg(feature = "mmap")]
+            tree: TreeState::detached(),
+            #[cfg(feature = "mmap")]
+            generation: 0,
+            #[cfg(feature = "mmap")]
+            next_slot: 0,
             #[cfg(feature = "mmap")]
             lock: None,
             #[cfg(feature = "mmap")]
@@ -2095,6 +2107,13 @@ impl Graph {
             // journal handle with the WAL, so a compressed graph stays atomically durable.
             #[cfg(feature = "mmap")]
             txn: self.txn,
+            // Re-encoding keeps the tree association: the same poison flag still governs it.
+            #[cfg(feature = "mmap")]
+            tree: self.tree,
+            #[cfg(feature = "mmap")]
+            generation: self.generation,
+            #[cfg(feature = "mmap")]
+            next_slot: self.next_slot,
             #[cfg(feature = "mmap")]
             lock: self.lock,
             #[cfg(feature = "mmap")]
@@ -2210,7 +2229,7 @@ impl Graph {
     }
 
     /// (sq-3ui0, gh-45) Persists every named graph under `dir/named/<i>/` and
-    /// writes the manifest `dir/named.bin` (the ordered list of graph-name terms). Each
+    /// writes the manifest `dir/named.bin` (slot ids and graph-name terms). Each
     /// sub-graph goes through the SAME [`save`](Self::save) / [`save_compressed`] machinery
     /// (so it round-trips losslessly, recursively, and carries its own per-graph WAL on
     /// `open`). No `named/` subtree and no `named.bin` are written when there are no named
@@ -2228,7 +2247,8 @@ impl Graph {
             // Default-graph-only: ensure no stale named state lingers, then write nothing.
             std::fs::remove_dir_all(&named_dir).ok();
             std::fs::remove_file(&manifest).ok();
-            return Ok(());
+            // Sync default-only output without publishing a named manifest.
+            return fsync_files_in(dir);
         }
         // Rewrite the subtree from scratch so removed/renamed graphs cannot survive a re-save.
         std::fs::remove_dir_all(&named_dir).ok();
@@ -2241,79 +2261,76 @@ impl Graph {
                 sub.save_unlocked(&sub_dir, Role::Child)?;
             }
         }
-        // Write the manifest LAST (after every sub-graph is durable) so a crash mid-save
-        // never leaves a manifest pointing at a missing/partial sub-graph. The presence of
-        // a complete `named.bin` is the commit point for the named-graph set.
-        let names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
-        write_named_manifest(dir, &names)
+        // Publish the manifest after syncing the complete fresh image. Fresh slot ids use
+        // the saved graph order, with the next id following the last slot.
+        let entries: Vec<(u32, Term)> = self
+            .named
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _))| (i as u32, n.clone()))
+            .collect();
+        let next_slot = u32::try_from(self.named.len()).map_err(|_| {
+            std::io::Error::other("more named graphs than a slot id can hold".to_string())
+        })?;
+        publish_named_manifest(dir, &[&named_dir], &entries, next_slot)
     }
 
-    /// (sq-3ui0, gh-45) Loads the named graphs persisted by
-    /// [`save_named`](Self::save_named) back into [`named`](Self::named), each opened via
-    /// [`open`](Self::open) (so every sub-graph is memory-mapped and carries its OWN
-    /// per-graph WAL). Returns an empty vec — backward compatible — when `dir` carries no
-    /// `named.bin` (a default-graph-only directory, or one saved before this format). A
-    /// present-but-malformed manifest (wrong magic / unknown version) is a hard error
-    /// rather than a silent misread, so an incompatible on-disk format is never opened as
-    /// if it were valid.
+    /// Opens manifest-declared named slots with their per-graph WALs and returns the next
+    /// allocation id. A missing manifest denotes a default-only store. Malformed or
+    /// unsupported manifests are refused.
     #[cfg(feature = "mmap")]
     fn open_named(
         dir: &std::path::Path,
         lock: &Option<std::sync::Arc<dir_lock::DirLock>>,
         writable: bool,
-    ) -> std::io::Result<Vec<(Term, Graph)>> {
-        let manifest = dir.join(NAMED_MANIFEST);
-        let bytes = match std::fs::read(&manifest) {
-            Ok(b) => b,
-            // No manifest: default-graph-only or a pre-named-graph directory.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e),
-        };
-        let bad = |msg: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("named.bin: {msg}"));
-        if bytes.len() < 12 {
-            return Err(bad("manifest too short for header"));
-        }
-        let magic = u32::from_le_bytes(bytes[0..4].try_into().expect("4 bytes"));
-        if magic != NAMED_MANIFEST_MAGIC {
-            return Err(bad("bad magic (not a named-graph manifest)"));
-        }
-        let version = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
-        if version != NAMED_FORMAT_VERSION {
-            return Err(bad(&format!("unsupported format version {version} (this build writes/reads {NAMED_FORMAT_VERSION})")));
-        }
-        let count = u32::from_le_bytes(bytes[8..12].try_into().expect("4 bytes")) as usize;
-        // (Copilot review #69, finding 3) `count` is attacker-controlled: a corrupt
-        // or hostile manifest can declare a huge count behind a tiny file, and the old
-        // `Vec::with_capacity(count)` would attempt a multi-GB reservation (OOM/abort) BEFORE
-        // any per-entry bounds check ran. Each entry costs >= MIN_MANIFEST_ENTRY_BYTES on disk
-        // (kind byte + u32 length prefix, zero-length value), so the post-header byte count is
-        // a hard upper bound on how many entries can possibly follow — clamp the reservation to
-        // it. The decode loop below still errors cleanly via `decode_graph_name`'s bounds checks
-        // if the file actually ends early, so a count the file can't back is a clean
-        // `InvalidData` (truncated manifest), never an OOM. Same defensive idiom as
-        // `Dict::open_mmap` (dict.rs) and the rest of the corruption-hardened `open` path.
-        let remaining = bytes.len() - 12;
-        let cap = count.min(remaining / MIN_MANIFEST_ENTRY_BYTES);
+    ) -> std::io::Result<(Vec<(Term, Graph)>, u32)> {
         let named_dir = dir.join(NAMED_SUBDIR);
-        let mut out = Vec::with_capacity(cap);
-        let mut pos = 12usize;
-        for i in 0..count {
-            let (name, next) = decode_graph_name(&bytes, pos).map_err(|m| bad(&m))?;
-            pos = next;
-            let sub_dir = named_dir.join(i.to_string());
-            if read_store_marker(&sub_dir)? == Some(Role::Root) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "{} is another graph store, not a named graph of this one",
-                        sub_dir.display()
-                    ),
-                ));
+        check_named_container(&named_dir)?;
+        let manifest = read_named_manifest(dir)?.unwrap_or(NamedManifest {
+            entries: Vec::new(),
+            next_slot: 0,
+        });
+        // Check every declared slot before recovering recorded child swaps or sweeping.
+        for (slot, _) in &manifest.entries {
+            let sub_dir = named_dir.join(slot.to_string());
+            match check_named_slot(&sub_dir) {
+                Ok(()) => {}
+                Err(e) if writable && e.kind() == std::io::ErrorKind::NotFound => {
+                    let mut recorded_child = false;
+                    for kind in ["compact-new", "compact-old"] {
+                        let staged = staging_path(&sub_dir, kind);
+                        if let Ok(Some(marker)) = read_marker(&staged) {
+                            if marker.role == Role::Child && marker.id.is_some() {
+                                if let Some((record_kind, owner)) = read_staging_record(&staged)? {
+                                    recorded_child |=
+                                        record_kind == kind && marker.id.as_ref() == Some(&owner);
+                                }
+                            }
+                        }
+                    }
+                    if !recorded_child {
+                        return Err(e);
+                    }
+                }
+                Err(e) => return Err(e),
             }
-            let sub = Graph::open_dir(&sub_dir, lock.clone(), writable, Role::Child)?;
+        }
+        if writable {
+            for (slot, _) in &manifest.entries {
+                let sub_dir = named_dir.join(slot.to_string());
+                recover_compaction(&sub_dir)?;
+                check_named_slot(&sub_dir)?;
+            }
+        }
+        let mut out = Vec::new();
+        out.try_reserve(manifest.entries.len())
+            .map_err(std::io::Error::other)?;
+        for (slot, name) in manifest.entries {
+            let sub_dir = named_dir.join(slot.to_string());
+            let sub = Graph::open_dir_unswept(&sub_dir, lock.clone(), writable, Role::Child)?;
             out.push((name, sub));
         }
-        Ok(out)
+        Ok((out, manifest.next_slot))
     }
 
     /// Decodes any block-compressed permutation indexes into raw RAM (the load-time
@@ -2416,6 +2433,37 @@ impl Graph {
         writable: bool,
         role: Role,
     ) -> std::io::Result<Graph> {
+        validate_declared_named_layout(dir)?;
+        let graph = Self::open_dir_unswept(dir, lock, writable, role)?;
+        if writable {
+            graph.sweep_undeclared_named(dir)?;
+        }
+        Ok(graph)
+    }
+
+    /// Cleans residue only after every declared descendant has opened successfully.
+    #[cfg(feature = "mmap")]
+    fn sweep_undeclared_named(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        debug_assert!(self.lock.is_some());
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let entries = read_named_manifest(dir)?
+            .map(|m| m.entries)
+            .unwrap_or_default();
+        sweep_named_slots(&named_dir, &entries)?;
+        for ((_, child), (slot, _)) in self.named.iter().zip(entries) {
+            child.sweep_undeclared_named(&named_dir.join(slot.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Opens and replays the complete declared tree before the caller starts its sweep.
+    #[cfg(feature = "mmap")]
+    fn open_dir_unswept(
+        dir: &std::path::Path,
+        lock: Option<std::sync::Arc<dir_lock::DirLock>>,
+        writable: bool,
+        role: Role,
+    ) -> std::io::Result<Graph> {
         // The internals are checked before recovery touches anything (no link is followed),
         // and again on what recovery put back.
         check_store_internals(dir)?;
@@ -2483,7 +2531,7 @@ impl Graph {
         // (sq-3ui0, gh-45) Restore the named graphs (each opened memory-mapped
         // with its own per-graph WAL) so a save→open round-trip is lossless for the whole
         // dataset. Empty for a default-graph-only / pre-named-graph directory.
-        let named = Self::open_named(dir, &lock, writable)?;
+        let (named, next_slot) = Self::open_named(dir, &lock, writable)?;
         let mut g = Graph {
             dict,
             store,
@@ -2494,8 +2542,15 @@ impl Graph {
             float_literal: std::sync::atomic::AtomicU8::new(0),
             named,
             graph_prefix_index: std::sync::Mutex::new(None),
-            wal: None,
+            // Not writable yet: the log is attached below, after the replay.
+            wal: WriteState::Ephemeral,
             txn: None,
+            tree: TreeState::detached(),
+            #[cfg(feature = "mmap")]
+            generation: 0,
+            // Restore the allocation cursor from the manifest.
+            #[cfg(feature = "mmap")]
+            next_slot,
             lock,
             detached: None,
         };
@@ -2516,7 +2571,7 @@ impl Graph {
                 g.apply_delta_mem(&[], &[t]);
             }
         }
-        g.wal = Some(Wal::open(dir)?);
+        g.wal = WriteState::Durable(Wal::open(dir)?);
         // (sq-ycle) AFTER the per-graph WALs are replayed (above + per named graph in
         // `open_named`), redo any committed parent-level transaction frame, idempotently. A
         // multi-op UPDATE body's resolved per-slot quad-delta is one atomic `txn.log` frame; if a
@@ -2535,15 +2590,17 @@ impl Graph {
         // survive the NEXT restart. Re-logging into the WAL first (then truncate) makes the recovered
         // state durable across any number of restarts; a re-crash between WAL-redo and truncation
         // simply redoes the (idempotent) frame again on the next open.
-        let txn_records = TxnJournal::replay(dir)?;
-        for (insert, slot, t) in txn_records {
-            g.redo_txn_record(insert, slot, t).map_err(std::io::Error::other)?;
+        let txn_ops = TxnJournal::replay(dir)?;
+        for op in txn_ops {
+            g.redo_txn_op(op).map_err(std::io::Error::other)?;
         }
         // Every committed record is now durably in a per-graph WAL (fsync'd by `apply_delta`); only
         // NOW is it safe to truncate the journal that was the sole durable home of those records.
         let mut journal = TxnJournal::open(dir)?;
         journal.truncate()?;
         g.txn = Some(journal);
+        // Share the recovered tree state with every named child.
+        g.share_tree();
         Ok(g)
     }
 
@@ -2563,7 +2620,22 @@ impl Graph {
     /// replays with set semantics (re-inserting a present triple / deleting an absent one is a
     /// no-op), so a re-crash mid-redo simply redoes the (idempotent) frame again.
     #[cfg(feature = "mmap")]
-    fn redo_txn_record(&mut self, insert: bool, slot: Option<Term>, t: [Term; 3]) -> Result<(), String> {
+    ///
+    /// Replays [`TxnOp::Create`] and [`TxnOp::Drop`] through the idempotent durable helpers.
+    #[cfg(feature = "mmap")]
+    fn redo_txn_op(&mut self, op: TxnOp) -> Result<(), String> {
+        let (insert, slot, t) = match op {
+            TxnOp::Insert { slot, triple } => (true, slot, triple),
+            TxnOp::Delete { slot, triple } => (false, slot, triple),
+            TxnOp::Create(name) => {
+                self.ensure_named(&name)?;
+                return Ok(());
+            }
+            TxnOp::Drop(name) => {
+                self.drop_named_durable(&name)?;
+                return Ok(());
+            }
+        };
         match slot {
             None => {
                 if insert {
@@ -2888,7 +2960,9 @@ impl Graph {
         // query-open never re-scans those indexes — keeping out-of-core open fast + small.
         let store = TripleStore::open(dir, None).map_err(|e| e.to_string())?;
         store.save_pred_stats(dir).map_err(|e| e.to_string())?;
-        drop(scratch);
+        std::fs::remove_dir_all(&tmp).ok();
+        // Sync the completed root, including the final statistics cache.
+        fsync_files_in(dir).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -3144,7 +3218,16 @@ impl Graph {
                 write_store_marker(&sub_dir, Role::Child).map_err(|e| e.to_string())?;
                 Self::build_external_in(f, "ntriples", &sub_dir, chunk)?;
             }
-            write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
+            // Publish the fresh slot set through the shared durability barrier.
+            let entries: Vec<(u32, Term)> = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (i as u32, n.clone()))
+                .collect();
+            let next_slot = u32::try_from(names.len())
+                .map_err(|_| "more named graphs than a slot id can hold".to_string())?;
+            publish_named_manifest(dir, &[&named_dir], &entries, next_slot)
+                .map_err(|e| e.to_string())?;
         }
 
         drop(spill);
@@ -3281,7 +3364,9 @@ impl Graph {
         }
         let store = TripleStore::open(dir, None).map_err(|e| e.to_string())?;
         store.save_pred_stats(dir).map_err(|e| e.to_string())?;
-        drop(scratch);
+        std::fs::remove_dir_all(&tmp).ok();
+        // Sync the completed default-only image, including its statistics cache.
+        fsync_files_in(dir).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -3562,11 +3647,16 @@ impl Graph {
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
-            wal: None,
-            // (sq-ycle) A fork/snapshot is a logically-independent in-memory copy with
-            // NO directory association — no WAL and no redo journal (like `wal: None`).
+            wal: WriteState::Ephemeral,
+            // Forks and snapshots have independent in-memory write state.
             #[cfg(feature = "mmap")]
             txn: None,
+            #[cfg(feature = "mmap")]
+            tree: TreeState::detached(),
+            #[cfg(feature = "mmap")]
+            generation: 0,
+            #[cfg(feature = "mmap")]
+            next_slot: 0,
             // The fork shares the base's memory-mapped files, so it holds the directory's lock
             // (the same `Arc`, shared or exclusive as held) for as long as it lives: the
             // mappings never outlive the lock, and a save over that directory is refused.
@@ -3623,10 +3713,28 @@ impl Graph {
         if inserts.is_empty() && deletes.is_empty() {
             return Ok(());
         }
+        // Hold the reentrant tree permit through validation, logging and materialization.
         self.refuse_if_detached()?;
         #[cfg(feature = "mmap")]
-        if let Some(w) = &mut self.wal {
-            w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
+        // Validate the shared write state before appending or applying the batch.
+        #[cfg(feature = "mmap")]
+        self.begin_durable_write()?;
+        #[cfg(feature = "mmap")]
+        {
+            let appended = match &mut self.wal {
+                WriteState::Durable(w) => {
+                    w.append_batch(inserts, deletes).map_err(|e| e.to_string())
+                }
+                // No log because this graph never had one: the write is overlay-only by design.
+                WriteState::Ephemeral => Ok(()),
+                WriteState::Poisoned => {
+                    return self.wal.refuse_if_poisoned("a delta");
+                }
+            };
+            self.freeze_on_err(appended, "a WAL append")?;
         }
         self.apply_delta_mem(inserts, deletes);
         Ok(())
@@ -3673,17 +3781,17 @@ impl Graph {
         self.apply_delta(&[], &[triple])
     }
 
-    /// (sq-ycle) Commit a whole multi-operation UPDATE body's resolved per-slot
-    /// quad-delta as ONE atomic, all-or-nothing durable frame — the SINGLE commit point for
-    /// `sparq_engine::apply_effects`. `records` is `(is_insert, slot, triple)` quads computed
-    /// against the CURRENT graph state (so CLEAR/DROP have already been expanded to concrete
-    /// retraction records by the caller). One `write_all` + one `sync_data()` makes the body
-    /// durable as a unit BEFORE it is materialised across the per-graph WALs; if a crash interrupts
-    /// materialisation, `open` redoes this frame idempotently. A NO-OP (returns `Ok`)
-    /// for an IN-MEMORY graph (no journal) and for an empty record set, so the in-memory live
-    /// update path is byte-for-byte unchanged. Once the journal is poisoned
-    /// ([`Graph::poison_txn`]) every commit, an empty one included, is refused unwritten.
-    pub fn commit_txn(&mut self, records: &[(bool, Option<Term>, [Term; 3])]) -> Result<(), String> {
+    /// Commits a resolved triple delta as one durable journal frame.
+    ///
+    /// Records are `(is_insert, slot, triple)` tuples. Materialize the committed records
+    /// through the durable methods, then call [`clear_txn`](Self::clear_txn). Recovery
+    /// replays committed frames idempotently. In-memory graphs and empty batches require
+    /// no frame, but still respect write refusal. Use [`commit_txn_ops`](Self::commit_txn_ops)
+    /// for named-graph creation and removal.
+    pub fn commit_txn(
+        &mut self,
+        records: &[(bool, Option<Term>, [Term; 3])],
+    ) -> Result<(), String> {
         self.commit_txn_checked(records).map_err(|(_, e)| e)
     }
 
@@ -3695,27 +3803,94 @@ impl Graph {
     ) -> Result<(), (bool, String)> {
         self.refuse_if_detached().map_err(|e| (false, e))?;
         #[cfg(feature = "mmap")]
-        if let Some(j) = &mut self.txn {
-            let refused = j.poisoned();
-            return j
-                .append(records)
-                .map_err(|e| (!refused, format!("txn journal commit failed: {e}")));
+        {
+            let ops: Vec<TxnOp> = records
+                .iter()
+                .map(|(insert, slot, triple)| {
+                    if *insert {
+                        TxnOp::Insert {
+                            slot: slot.clone(),
+                            triple: triple.clone(),
+                        }
+                    } else {
+                        TxnOp::Delete {
+                            slot: slot.clone(),
+                            triple: triple.clone(),
+                        }
+                    }
+                })
+                .collect();
+            self.commit_txn_ops_checked(&ops)
         }
         #[cfg(not(feature = "mmap"))]
-        let _ = records;
+        {
+            let _ = records;
+            Ok(())
+        }
+    }
+
+    /// Commits ordered triple and named-graph operations in one journal frame.
+    pub fn commit_txn_ops(&mut self, ops: &[TxnOp]) -> Result<(), String> {
+        self.commit_txn_ops_checked(ops).map_err(|(_, e)| e)
+    }
+
+    /// Commits operations, reporting on failure whether any frame bytes may have been written.
+    /// A `false` error flag means the commit was refused before appending.
+    pub fn commit_txn_ops_checked(&mut self, ops: &[TxnOp]) -> Result<(), (bool, String)> {
+        // Hold the reentrant tree permit through validation, logging and materialization.
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
+        #[cfg(feature = "mmap")]
+        if self.txn.is_some() {
+            // Check the common durable-write gate before handling the batch.
+            if let Err(e) = self.begin_durable_write() {
+                return Err((false, format!("txn journal commit failed: {}", e)));
+            }
+            // An empty batch needs no journal frame.
+            if ops.is_empty() {
+                return Ok(());
+            }
+            // Append errors freeze the shared tree until recovery.
+            let appended = match &mut self.txn {
+                Some(j) => j.append(ops),
+                None => Ok(()),
+            };
+            if let Err(e) = appended {
+                self.poison_txn();
+                return Err((true, format!("txn journal commit failed: {}", e)));
+            }
+            return Ok(());
+        }
+        #[cfg(not(feature = "mmap"))]
+        let _ = ops;
         Ok(())
     }
 
-    /// (sq-ycle) Clear the redo journal after its frame has been fully materialised into
-    /// the per-graph state (the second half of `sparq_engine::apply_effects`'s journal-first
-    /// protocol), so the next body starts from an empty journal and a clean reopen is a no-op. A
-    /// NO-OP for an in-memory graph (no journal). Refused (`Err`) once the journal is poisoned
-    /// ([`Graph::poison_txn`]): its frame is kept for the reopen.
+    /// Clears the redo journal after its committed frame has been durably materialized.
+    /// In-memory graphs have no journal. The common durable-write gate applies.
     pub fn clear_txn(&mut self) -> Result<(), String> {
+        // Hold the reentrant tree permit through validation, logging and materialization.
         #[cfg(feature = "mmap")]
-        if let Some(j) = &mut self.txn {
-            return j.truncate().map_err(|e| format!("txn journal clear failed: {e}"));
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
+        #[cfg(feature = "mmap")]
+        {
+            if self.txn.is_some() {
+                // Check the common durable-write gate before truncating the journal.
+                self.begin_durable_write()?;
+            }
+            let cleared = match &mut self.txn {
+                Some(j) => j.truncate().map_err(|e| e.to_string()),
+                // In-memory graphs have no journal.
+                None => Ok(()),
+            };
+            // A truncation error freezes the shared tree until recovery.
+            self.freeze_on_err(cleared, "a txn journal clear")
         }
+        #[cfg(not(feature = "mmap"))]
         Ok(())
     }
 
@@ -3725,7 +3900,7 @@ impl Graph {
     fn refuse_while_txn_poisoned(&self) -> Result<(), String> {
         self.refuse_if_detached()?;
         #[cfg(feature = "mmap")]
-        if self.txn.as_ref().is_some_and(TxnJournal::poisoned) {
+        if self.txn_poisoned() {
             return Err("the txn journal keeps a failed commit; reopen the graph first".to_owned());
         }
         self.named
@@ -3733,13 +3908,72 @@ impl Graph {
             .try_for_each(|(_, g)| g.refuse_while_txn_poisoned())
     }
 
-    /// Keep the journal's frame for the next reopen to replay, and refuse every later
-    /// commit until then: for a caller whose materialisation failed after the commit point
-    /// (`sparq_engine::apply_effects`). A NO-OP for an in-memory graph.
+    /// Whether the shared tree or this journal currently refuses durable writes.
+    #[cfg(feature = "mmap")]
+    fn txn_poisoned(&self) -> bool {
+        self.tree.poisoned() || self.txn.as_ref().is_some_and(TxnJournal::poisoned)
+    }
+
+    /// Checks the shared write state and this handle's layout generation.
+    #[cfg(feature = "mmap")]
+    fn begin_durable_write(&self) -> Result<(), String> {
+        self.refuse_if_detached()?;
+        if self.txn_poisoned() {
+            return Err(
+                "durable write refused: the txn journal keeps a failed commit; reopen the graph first"
+                    .to_owned(),
+            );
+        }
+        if let Some(dir) = self.wal.dir() {
+            if let Some((replaced, at)) = self.tree.replaced_since(&dir, self.generation) {
+                return Err(format!(
+                    "durable write refused: this handle's directory {} is stale at layout generation {} (the handle was opened at {}) because {} was replaced or removed; this handle no longer refers to the current layout.",
+                    dir.display(),
+                    at,
+                    self.generation,
+                    replaced.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Refuses further tree writes after a durable operation returns an error.
+    #[cfg(feature = "mmap")]
+    fn freeze_on_err<T>(&self, result: Result<T, String>, what: &str) -> Result<T, String> {
+        match result {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.tree.poison();
+                Err(format!(
+                    "{} failed; the store is frozen until it is reopened: {}",
+                    what, e
+                ))
+            }
+        }
+    }
+
+    /// Shares this tree state with every named graph recursively.
+    #[cfg(feature = "mmap")]
+    fn share_tree(&mut self) {
+        let tree = std::sync::Arc::clone(&self.tree);
+        let generation = tree.generation();
+        self.generation = generation;
+        for (_, sub) in &mut self.named {
+            sub.tree = std::sync::Arc::clone(&tree);
+            sub.generation = generation;
+            sub.share_tree();
+        }
+    }
+
+    /// Retains a committed frame for recovery and refuses subsequent durable writes
+    /// throughout the shared tree. In-memory graphs have no journal.
     pub fn poison_txn(&mut self) {
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
             j.poisoned = true;
+            // All children share this write-refusal flag.
+            self.tree.poison();
         }
     }
 
@@ -3753,7 +3987,9 @@ impl Graph {
     pub fn clear_default_durable(&mut self) -> Result<(), String> {
         self.refuse_if_detached()?;
         #[cfg(feature = "mmap")]
-        if self.wal.is_some() {
+        self.wal.refuse_if_poisoned("a durable clear")?;
+        #[cfg(feature = "mmap")]
+        if self.wal.is_durable() {
             // Retract every current default-graph triple as a WAL-logged delete batch.
             let triples: Vec<[Term; 3]> = {
                 let scan = self.store.scan(&[None, None, None]);
@@ -3790,6 +4026,11 @@ impl Graph {
     /// every build — the durability only kicks in for a directory-backed sub-graph (the in-memory
     /// path of [`clear_default_durable`](Self::clear_default_durable) is a plain store clear).
     pub fn clear_named_durable(&mut self, name: &Term) -> Result<bool, String> {
+        // Hold the reentrant tree permit through validation, logging and materialization.
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
         match self.named.iter().position(|(n, _)| n == name) {
             Some(i) => {
                 self.refuse_while_txn_poisoned()?;
@@ -3800,31 +4041,20 @@ impl Graph {
         }
     }
 
-    /// (sq-glw2) DURABLY removes an EXISTING named sub-graph (DROP GRAPH `<g>`): the
-    /// sub-graph ceases to exist — its on-disk directory AND its manifest entry are removed so
-    /// the removal survives a reopen IMMEDIATELY, not just at the next compaction. The old
-    /// `self.named.retain(...)` dropped the entry in memory only, leaving the on-disk
-    /// `named/<i>/` + manifest entry behind, so a reopen RESTORED the dropped graph.
+    /// Durably removes the named graph and its manifest entry.
     ///
-    /// The named sub-tree is positional (`named/<i>/` ↔ `self.named[i]`) and the manifest's
-    /// presence is the commit point, so a drop must RENUMBER the surviving sub-graphs to stay
-    /// contiguous. To make that crash-safe we mirror [`compact`](Self::compact)'s rollback-safe
-    /// directory swap, scoped to the `named/` sub-tree: the renumbered survivors are built in a
-    /// staging `named.drop-new/`, fsync'd, then swapped in (`named` → `named.drop-old`,
-    /// `named.drop-new` → `named`), and only THEN is the shrunk manifest written (the manifest
-    /// rewrite is itself atomic+dir-fsync'd via `write_named_manifest`). An interrupted swap
-    /// is completed/rolled back deterministically by `recover_named_drop` on the next
-    /// `open`. Surviving sub-graphs are re-opened from their new directories so
-    /// each re-acquires a correctly-indexed per-graph WAL.
-    ///
-    /// Returns `true` if a matching named graph existed (and was removed), `false` if absent —
-    /// the caller keeps the SPARQL DROP no-op-on-absent semantics. An in-memory parent (or any
-    /// build without the `mmap` feature) simply drops the entry — there is no directory/manifest
-    /// to update, matching the old `self.named.retain(...)` behaviour.
+    /// Survivors keep their slots. Detached entries remain declared until explicitly dropped.
+    /// Writable opens clean undeclared residue after validating the complete declared layout.
+    /// Returns false when no attached graph matches. A stale handle is detached from memory only.
     pub fn drop_named_durable(&mut self, name: &Term) -> Result<bool, String> {
         let Some(idx) = self.named.iter().position(|(n, _)| n == name) else {
             return Ok(false);
         };
+        // Hold the reentrant tree permit through validation, logging and materialization.
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
         // Refused while this graph, or any named graph under it, refuses writes (a frozen named
         // graph would be re-saved from its view) or keeps a journal frame for the reopen.
         self.refuse_while_txn_poisoned()?;
@@ -3832,198 +4062,141 @@ impl Graph {
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
-        if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
+        self.wal.refuse_if_poisoned("a named-graph drop")?;
+        #[cfg(feature = "mmap")]
+        if let Some(dir) = self.wal.dir() {
             return self.drop_named_durable_dir(idx, &dir);
         }
         self.named.remove(idx);
         Ok(true)
     }
 
-    /// (sq-glw2) The directory-backed half of [`drop_named_durable`](Self::drop_named_durable):
-    /// remove the in-memory entry then durably renumber/persist the surviving named sub-tree
-    /// (see that method's docs for the crash-safe swap protocol). Split out so the public method
-    /// stays free of `mmap`-only fields.
+    /// Validates and commits a durable named-graph drop.
+    ///
+    /// A stale child is removed from memory only; the current layout stays intact.
     #[cfg(feature = "mmap")]
-    fn drop_named_durable_dir(&mut self, idx: usize, dir: &std::path::Path) -> Result<bool, String> {
-        // (Copilot #123, Issue 1) Drop the entry in memory first; `self.named` is now
-        // the SURVIVING set in final order. RELEASE the removed sub-graph's mmap/WAL handles
-        // IMMEDIATELY (it is gone) so no live map points into `named/<idx>/` before the directory
-        // is removed/renamed below — required on Windows (a mapped file blocks dir removal), cheap
-        // and correct everywhere else.
-        let removed = self.named.remove(idx);
+    fn drop_named_durable_dir(
+        &mut self,
+        idx: usize,
+        dir: &std::path::Path,
+    ) -> Result<bool, String> {
+        self.begin_durable_write()?;
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let child = &self.named[idx].1;
+        if child
+            .wal
+            .dir()
+            .is_some_and(|path| child.tree.replaced_since(&path, child.generation).is_some())
+        {
+            self.named.remove(idx);
+            return Ok(true);
+        }
+        let slot = match self.named[idx].1.wal.dir() {
+            None => None,
+            Some(_) => Some(self.named[idx].1.named_slot_in(&named_dir).ok_or_else(|| {
+                format!(
+                    "the named graph {} does not live in a slot of its own under {}, so this store cannot drop it",
+                    self.named[idx].0,
+                    named_dir.display()
+                )
+            })?),
+        };
+        let entries = self.named_slot_entries_skipping(&named_dir, Some(idx))?;
+        let (_, removed) = self.named.remove(idx);
         drop(removed);
-        // Re-persist the renumbered survivor set in ONE staging swap (or tear the whole sub-tree
-        // down when none survive). Shared with the batch drop-all path.
-        self.persist_named_after_drop(dir)?;
+        let persisted = self.commit_named_drop(dir, slot, &entries);
+        self.freeze_on_err(persisted, "dropping a named graph")?;
         Ok(true)
     }
 
-    /// (sq-glw2, Copilot #123) DURABLY removes EVERY named graph in ONE manifest
-    /// rewrite + one staging swap — the batch DROP NAMED / named-part-of DROP ALL. Replaces the
-    /// engine's old loop that called [`drop_named_durable`](Self::drop_named_durable) once per
-    /// graph: each of those rebuilt the ENTIRE surviving named set (renumber + manifest rewrite),
-    /// making DROP ALL O(n²) in the number of named graphs. Clearing the whole set is O(n) — one
-    /// pass to release every sub-graph's handles, one manifest removal, one sub-tree removal — so
-    /// this routes straight through the no-survivors arm of `persist_named_after_drop`.
-    ///
-    /// In-memory parent (or a non-`mmap` build): just clears the entries, matching the old
-    /// `self.named.clear()`. Idempotent — a no-op when there are no named graphs.
+    #[cfg(feature = "mmap")]
+    fn commit_named_drop(
+        &mut self,
+        dir: &std::path::Path,
+        slot: Option<u32>,
+        entries: &[(u32, Term)],
+    ) -> Result<(), String> {
+        let named_dir = dir.join(NAMED_SUBDIR);
+        if let Some(slot) = slot {
+            check_named_container(&named_dir).map_err(|e| e.to_string())?;
+            // Validate everything the drop will remove before committing the manifest.
+            let removed = if entries.is_empty() {
+                named_dir.clone()
+            } else {
+                named_dir.join(slot.to_string())
+            };
+            check_dir_tree_removable(&removed).map_err(|e| e.to_string())?;
+        }
+        self.publish_named_set(dir, &[], entries)
+            .map_err(|e| e.to_string())?;
+        let Some(slot) = slot else {
+            return Ok(());
+        };
+        self.tree
+            .record_replacement(&named_dir.join(slot.to_string()));
+        remove_named_slot(&named_dir, slot).map_err(|e| e.to_string())?;
+        if entries.is_empty() {
+            self.tree.record_replacement(&named_dir);
+            remove_dir_tree_checked(&named_dir).map_err(|e| e.to_string())?;
+            fsync_dir(dir).map_err(|e| e.to_string())?;
+        } else {
+            fsync_dir(&named_dir).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     pub fn drop_all_named_durable(&mut self) -> Result<(), String> {
         if self.named.is_empty() {
             return Ok(());
         }
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
+        #[cfg(feature = "mmap")]
+        {
+            self.wal.refuse_if_poisoned("a batch named-graph drop")?;
+            self.begin_durable_write()?;
+        }
         self.refuse_while_txn_poisoned()?;
         self.named_changed();
-        // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
-        // no live map may point into `named/<i>/` across the removal — correct on every platform,
-        // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
         self.named.clear();
         #[cfg(feature = "mmap")]
-        if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
-            return self.persist_named_after_drop(&dir);
+        if let Some(dir) = self.wal.dir() {
+            let persisted = self.commit_drop_all_named(&dir);
+            return self.freeze_on_err(persisted, "dropping every named graph");
         }
         Ok(())
     }
 
-    /// After a named-graph drop failed with `self.named` already cleared (part of it released
-    /// for the swap): recover the `named/` sub-tree under the lock this graph holds and re-open
-    /// the named graphs from what the directory now holds (the drop happened, or did not); when
-    /// that fails too, freeze this graph, which would otherwise go on with no named graphs and
-    /// lose them all at its next compaction.
     #[cfg(feature = "mmap")]
-    fn reload_named_after_failed_drop(&mut self, dir: &std::path::Path, error: String) -> String {
-        let reloaded = recover_named_drop(dir).and_then(|_| Graph::open_named(dir, &self.lock, true));
-        match reloaded {
-            Ok(named) => self.named = named,
-            Err(e) => self.detach(&format!(
-                "a named-graph drop failed ({error}) and its named graphs could not be re-opened \
-                 ({e}): drop this graph and re-open the directory"
-            )),
-        }
-        error
-    }
-
-    /// (sq-glw2, Copilot #123) Crash-safe persistence of `self.named` AFTER a drop has
-    /// shrunk it (one entry, or all of them). `self.named` is already the SURVIVING set in final
-    /// order; the dropped sub-graphs' handles must already be released by the caller so no live
-    /// mmap/WAL points into the `named/` sub-tree being removed/renamed (cross-platform-safe;
-    /// required on Windows). Two cases:
-    ///
-    /// - NO survivors: the whole sub-tree + manifest go away (a default-only dir). The manifest is
-    ///   removed FIRST as the commit point, then the sub-tree — a crash after it leaves an orphan
-    ///   `named/` that `open_named` ignores (no manifest ⇒ no named graphs); `recover_named_drop`
-    ///   cleans up any staging siblings on the next open.
-    /// - SOME survivors: the renumbered survivors are written into a staging `named.drop-new/`,
-    ///   fsync'd, then swapped in (`named` → `drop-old`, `drop-new` → `named`) and the shrunk
-    ///   manifest rewritten — the same rollback-safe protocol as [`compact`](Self::compact),
-    ///   recovered by [`recover_named_drop`]. The survivors' OWN handles are released before the
-    ///   rename and re-acquired by re-`open`ing each from its new directory afterwards, so a live
-    ///   map never points into the directory being renamed (Issue 2; Windows-safe).
-    #[cfg(feature = "mmap")]
-    fn persist_named_after_drop(&mut self, dir: &std::path::Path) -> Result<(), String> {
-        let result = self.persist_named_after_drop_inner(dir);
-        result.map_err(|e| self.reload_named_after_failed_drop(dir, e))
-    }
-
-    #[cfg(feature = "mmap")]
-    fn persist_named_after_drop_inner(&mut self, dir: &std::path::Path) -> Result<(), String> {
+    fn commit_drop_all_named(&mut self, dir: &std::path::Path) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
-        let new_dir = staging_path(&named_dir, "drop-new");
-        let old_dir = staging_path(&named_dir, "drop-old");
-
-        // This store's identity: the provenance its staging directories record.
-        let id = store_id(dir, Role::Root).map_err(|e| e.to_string())?;
-        let clear_staging = || -> Result<(), String> {
-            remove_staging(&new_dir, "drop-new", Some(&id), &named_dir).map_err(|e| e.to_string())?;
-            remove_staging(&old_dir, "drop-old", Some(&id), &named_dir).map_err(|e| e.to_string())
-        };
-
-        if self.named.is_empty() {
-            remove_named_manifest(dir).map_err(|e| e.to_string())?;
-            std::fs::remove_dir_all(&named_dir).ok();
-            clear_staging()?;
-            return Ok(());
+        let removed = [
+            named_dir.clone(),
+            staging_sibling(&named_dir, "drop-new"),
+            staging_sibling(&named_dir, "drop-old"),
+        ];
+        for path in &removed {
+            check_dir_tree_removable(path).map_err(|e| e.to_string())?;
         }
-
-        // Build the renumbered survivor sub-tree in a fresh staging dir (carrying its record
-        // from the start), fsync it, then swap.
-        clear_staging()?;
-        create_staging(&new_dir, "drop-new", &id).map_err(|e| e.to_string())?;
-        // Close every survivor's WAL before copying its directory so no open append handle is
-        // mid-flight across the swap. Then persist each survivor — folding any overlay — into its
-        // NEW positional slot, capturing its name for the rebuilt manifest.
-        let mut names: Vec<Term> = Vec::with_capacity(self.named.len());
-        for (i, (name, sub)) in self.named.iter_mut().enumerate() {
-            sub.wal = None;
-            sub.save_unlocked(&new_dir.join(i.to_string()), Role::Child)
-                .map_err(|e| e.to_string())?;
-            names.push(name.clone());
-        }
-        // Persist the names with their new positional directories. Recovery publishes this
-        // copy if a stop separates the tree rename from the root manifest publication.
-        write_named_manifest_file(&new_dir.join(PENDING_NAMED_MANIFEST), &names)
-            .map_err(|e| e.to_string())?;
-        fsync_dir(&new_dir).map_err(|e| e.to_string())?;
-        // (Copilot #123, Issue 2) RELEASE every survivor's live mmap/WAL handles
-        // BEFORE the rename: each is now fully persisted under `new_dir`, so drop the in-memory
-        // `Graph`s (mmaps into the OLD `named/<i>/` included) and re-open from the new directories
-        // after the swap. Renaming/removing a directory with mapped files into it fails on
-        // Windows; releasing first makes the swap safe on every platform (mirrors `compact`, which
-        // likewise drops its handles via `*self = Graph::open(..)` after its swap).
-        self.named.clear();
-        // Rollback-safe swap (mirrors `compact`): old aside, new in, parent fsync each rename.
-        // As in a compaction swap, `named/` itself never carries a staging record: the old
-        // sub-tree is marked once aside, the new one unmarked just before it goes in.
-        publish_rename(&named_dir, &old_dir).map_err(|e| e.to_string())?;
-        fsync_dir(dir).map_err(|e| e.to_string())?;
-        mark_staging(&old_dir, "drop-old", &id).map_err(|e| e.to_string())?;
-        clear_staging_mark(&new_dir).map_err(|e| e.to_string())?;
-        if let Err(e) = publish_rename(&new_dir, &named_dir) {
-            // Put the old sub-tree back, as a compaction swap's rollback does: the new half gets
-            // its record back first, the old one loses its record once it is back in place.
-            let rolled_back = mark_staging(&new_dir, "drop-new", &id).is_ok()
-                && publish_rename(&old_dir, &named_dir).is_ok()
-                && fsync_dir(dir).is_ok()
-                && clear_staging_mark(&named_dir).is_ok();
-            if rolled_back {
-                remove_staging_dir(&new_dir).ok();
-            }
-            return Err(e.to_string());
+        publish_named_manifest(dir, &[], &[], self.next_slot).map_err(|e| e.to_string())?;
+        self.tree.record_replacement(&named_dir);
+        for path in &removed {
+            remove_dir_tree_checked(path).map_err(|e| e.to_string())?;
         }
         fsync_dir(dir).map_err(|e| e.to_string())?;
-        // The sub-tree is now the renumbered survivors. Commit the new set by rewriting the
-        // manifest (atomic temp+rename, fsyncs the parent dir) — the commit point for the set.
-        complete_named_manifest(dir).map_err(|e| e.to_string())?;
-        remove_staging_dir(&old_dir).ok();
-        // Re-open survivors from their NEW directories so each carries a correctly-indexed WAL
-        // (and a fresh, correctly-targeted mmap into the swapped-in `named/`).
-        for (i, name) in names.into_iter().enumerate() {
-            let sub = Graph::open_dir(
-                &named_dir.join(i.to_string()),
-                self.lock.clone(),
-                true,
-                Role::Child,
-            )
-            .map_err(|e| e.to_string())?;
-            self.named.push((name, sub));
-        }
         Ok(())
     }
 
-    /// [`apply_delta`](Self::apply_delta) over the whole DATASET, parsing the batch
-    /// from two N-Quads documents (N-Triples is the default-graph subset): `deletes`
-    /// first, then `inserts`, grouped and applied PER GRAPH — default-graph statements
-    /// to this graph, named-graph statements to the matching [`named`](Self::named)
-    /// sub-graph (auto-created on first insert; deleting from an absent graph is a
-    /// no-op). O(batch) through each graph's delta overlay, no index rebuild. Blank
-    /// nodes denote concrete nodes BY LABEL (unlike SPARQL `DELETE DATA`, which cannot
-    /// name a bnode), which is what makes quad-level retraction of bnode triples
-    /// possible. The string-parsing entry point for bindings (wasm/python) callers.
     pub fn apply_delta_nquads(&mut self, inserts: &str, deletes: &str) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
         use oxrdf::GraphName;
         self.refuse_if_detached()?;
         type Slot = Option<Term>;
-        // Per-graph delta: `(slot, inserts, deletes)` — one entry per distinct graph.
         type SlotDelta = (Slot, Vec<[Term; 3]>, Vec<[Term; 3]>);
         fn parse(text: &str) -> Result<Vec<(Slot, [Term; 3])>, String> {
             let mut out = Vec::new();
@@ -4038,9 +4211,6 @@ impl Graph {
             }
             Ok(out)
         }
-        // Group per slot preserving first-seen order (datasets hold few graphs, so a
-        // linear scan beats hashing Terms), keeping each slot's deletes and inserts
-        // together so they go through ONE apply_delta call (deletes applied first).
         let mut slots: Vec<SlotDelta> = Vec::new();
         for (is_insert, items) in [(false, parse(deletes)?), (true, parse(inserts)?)] {
             for (slot, t) in items {
@@ -4058,13 +4228,6 @@ impl Graph {
                 }
             }
         }
-        // (sq-3ui0, gh-45) For a DIRECTORY-BACKED parent, a NEW named graph is
-        // created with its own on-disk directory + per-graph WAL under `dir/named/<i>/` so
-        // its very first mutation is WAL-logged + fsync'd (durable before this call
-        // returns) and the manifest is kept in sync — not deferred to the next save. An
-        // in-memory parent keeps the overlay-only path (no directory, no WAL).
-        #[cfg(feature = "mmap")]
-        let parent_dir = self.wal.as_ref().map(|w| w.dir.clone());
         for (slot, ins, del) in slots {
             match slot {
                 None => self.apply_delta(&ins, &del)?,
@@ -4072,17 +4235,8 @@ impl Graph {
                     if let Some(i) = self.named.iter().position(|(n, _)| *n == name) {
                         self.named[i].1.apply_delta(&ins, &del)?;
                     } else if !ins.is_empty() {
-                        self.named_changed();
-                        #[cfg(feature = "mmap")]
-                        if let Some(dir) = &parent_dir {
-                            let mut g = self.create_durable_named(dir, &name)?;
-                            g.apply_delta(&ins, &[])?;
-                            self.named.push((name, g));
-                            continue;
-                        }
-                        let mut g = Graph::from_parts(Dict::new(), Vec::new());
-                        g.apply_delta(&ins, &[])?;
-                        self.named.push((name, g));
+                        let i = self.ensure_named(&name)?;
+                        self.named[i].1.apply_delta(&ins, &[])?;
                     } // deletes against an absent graph: no-op
                 }
             }
@@ -4090,52 +4244,134 @@ impl Graph {
         Ok(())
     }
 
-    /// (sq-3ui0, gh-45) Creates a fresh, EMPTY named sub-graph that is
-    /// directory-backed (its own `dir/named/<i>/` + per-graph WAL) and appends/updates the
-    /// parent's `named.bin` manifest so the new graph is recoverable on the next
-    /// [`open`](Self::open) even before a full [`save`](Self::save)/[`compact`]. The index
-    /// `i` is the parent's current `named.len()` (the slot this graph will occupy). Saving
-    /// an empty graph then re-opening it yields a graph with its own WAL, so the caller can
-    /// immediately [`apply_delta`](Self::apply_delta) durably.
     #[cfg(feature = "mmap")]
-    fn create_durable_named(&self, dir: &std::path::Path, name: &Term) -> Result<Graph, String> {
-        let i = self.named.len();
+    fn create_durable_named(
+        &mut self,
+        dir: &std::path::Path,
+        mut entries: Vec<(u32, Term)>,
+        name: &Term,
+    ) -> Result<Graph, String> {
         let named_dir = dir.join(NAMED_SUBDIR);
-        let sub_dir = named_dir.join(i.to_string());
         std::fs::create_dir_all(&named_dir).map_err(|e| e.to_string())?;
-        // Persist an empty sub-graph, then open it so it carries its own WAL.
+        let slot = self.claim_named_slot(&named_dir)?;
+        let sub_dir = named_dir.join(slot.to_string());
         let empty = Graph::from_parts(Dict::new(), Vec::new());
         empty
             .save_unlocked(&sub_dir, Role::Child)
             .map_err(|e| e.to_string())?;
-        // fsync `dir/named/` so the new sub-graph DIRECTORY's existence is durable before the
-        // manifest names it (otherwise a crash could leave the manifest pointing at a dir whose
-        // creation never reached disk).
-        fsync_dir(&named_dir).map_err(|e| e.to_string())?;
-        // Rewrite the manifest with the new entry appended (index order == named order).
-        // (Copilot review #69, finding 2) `named.bin` lives in the PARENT `dir`, not
-        // in `dir/named/`. The old code only fsync'd `dir/named/`, so a crash could lose the
-        // manifest entry even though the sub-graph was on disk. `write_named_manifest` now does
-        // an atomic temp+rename AND fsyncs the parent `dir` (the dir that holds `named.bin`), so
-        // the manifest entry — the recovery commit point — is itself durable.
-        let mut names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
-        names.push(name.clone());
-        write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
+        entries.push((slot, name.clone()));
+        self.publish_named_set(dir, &[&sub_dir], &entries)
+            .map_err(|e| e.to_string())?;
         Graph::open_dir(&sub_dir, self.lock.clone(), true, Role::Child).map_err(|e| e.to_string())
     }
 
-    /// (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
-    /// CREATING it if absent. The created sub-graph is DURABLE (its own `dir/named/<i>/` +
-    /// per-graph WAL + manifest entry) whenever this parent graph is itself directory-backed
-    /// (opened via `open`); for an in-memory parent it is a plain in-memory
-    /// sub-graph (`wal: None`), byte-identical to the previous `named.push((name, empty()))`
-    /// behaviour. This is the durability seam the SPARQL-Update path needs: a `GRAPH <g> { … }`
-    /// INSERT that first touches a brand-new named graph on a persisted server must give that
-    /// graph its own WAL so its triples survive a restart, exactly as a default-graph or
-    /// already-existing-named-graph mutation does. An in-memory parent is unaffected.
-    ///
-    /// Without the `mmap` feature there is no directory/WAL machinery at all, so this always
-    /// creates an in-memory sub-graph (the parent can never be directory-backed).
+    #[cfg(feature = "mmap")]
+    fn named_slot_entries(&self, named_dir: &std::path::Path) -> Result<Vec<(u32, Term)>, String> {
+        self.named_slot_entries_skipping(named_dir, None)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn named_slot_entries_skipping(
+        &self,
+        named_dir: &std::path::Path,
+        skip: Option<usize>,
+    ) -> Result<Vec<(u32, Term)>, String> {
+        let dir = named_dir.parent().ok_or("named directory has no parent")?;
+        let mut entries = read_named_manifest(dir)
+            .map_err(|e| e.to_string())?
+            .map(|m| m.entries)
+            .unwrap_or_default();
+        let declared: std::collections::HashMap<u32, &Term> =
+            entries.iter().map(|(slot, name)| (*slot, name)).collect();
+        #[cfg(not(test))]
+        let mut seen: std::collections::HashMap<u32, &Term> =
+            std::collections::HashMap::with_capacity(self.named.len());
+        #[cfg(test)]
+        let mut seen: std::collections::HashMap<u32, &Term, _> =
+            std::collections::HashMap::with_capacity_and_hasher(
+                self.named.len(),
+                layout_cost::CountHashes,
+            );
+        let mut removed_slot = None;
+        for (i, (name, sub)) in self.named.iter().enumerate() {
+            let slot = sub.named_slot_in(named_dir).ok_or_else(|| {
+                format!(
+                    "the named graph {name} does not live in a slot of its own under {}",
+                    named_dir.display()
+                )
+            })?;
+            let path = named_dir.join(slot.to_string());
+            if sub.tree.replaced_since(&path, sub.generation).is_some() {
+                return Err(format!(
+                    "the named graph {name} refers to a replaced directory {}",
+                    path.display()
+                ));
+            }
+            if let Some(other) = seen.insert(slot, name) {
+                return Err(format!(
+                    "two named graphs claim slot {slot} of {}: {other} and {name}",
+                    named_dir.display()
+                ));
+            }
+            if declared.get(&slot).copied() != Some(name) {
+                return Err(format!(
+                    "the named graph {name} is not declared at {}",
+                    path.display()
+                ));
+            }
+            if Some(i) == skip {
+                removed_slot = Some(slot);
+            }
+        }
+        if let Some(slot) = removed_slot {
+            entries.retain(|(id, _)| *id != slot);
+        }
+        Ok(entries)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn named_slot_in(&self, named_dir: &std::path::Path) -> Option<u32> {
+        let dir = self.wal.dir()?;
+        if dir.parent() != Some(named_dir) {
+            return None;
+        }
+        parse_slot_name(dir.file_name()?.to_str()?)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn publish_named_set(
+        &self,
+        dir: &std::path::Path,
+        trees: &[&std::path::Path],
+        entries: &[(u32, Term)],
+    ) -> std::io::Result<()> {
+        publish_named_manifest(dir, trees, entries, self.next_slot)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn claim_named_slot(&mut self, named_dir: &std::path::Path) -> Result<u32, String> {
+        loop {
+            let slot = self.next_slot;
+            self.next_slot = slot.checked_add(1).ok_or_else(|| {
+                "no named-graph slot id is left in this store; re-save it with save() to renumber"
+                    .to_string()
+            })?;
+            let path = named_dir.join(slot.to_string());
+            match fault_point("reserve-slot", &path).and_then(|()| std::fs::create_dir(&path)) {
+                Ok(()) => return Ok(slot),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(format!(
+                        "could not reserve named-graph slot {} under {}: {}",
+                        slot,
+                        named_dir.display(),
+                        e
+                    ))
+                }
+            }
+        }
+    }
+
     pub fn ensure_named(&mut self, name: &Term) -> Result<usize, String> {
         if let Some(i) = self.named.iter().position(|(n, _)| n == name) {
             return Ok(i);
@@ -4143,8 +4379,24 @@ impl Graph {
         self.refuse_if_detached()?;
         self.named_changed();
         #[cfg(feature = "mmap")]
-        if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
-            let g = self.create_durable_named(&dir, name)?;
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
+        #[cfg(feature = "mmap")]
+        self.wal.refuse_if_poisoned("a named-graph create")?;
+        #[cfg(feature = "mmap")]
+        if let Some(dir) = self.wal.dir() {
+            self.begin_durable_write()?;
+            let entries = self.named_slot_entries(&dir.join(NAMED_SUBDIR))?;
+            if entries.iter().any(|(_, declared)| declared == name) {
+                return Err(format!(
+                    "the named graph {name} is already declared but is not attached"
+                ));
+            }
+            let created = self.create_durable_named(&dir, entries, name);
+            let mut g = self.freeze_on_err(created, "creating a named graph")?;
+            g.tree = std::sync::Arc::clone(&self.tree);
+            g.share_tree();
             self.named.push((name.clone(), g));
             return Ok(self.named.len() - 1);
         }
@@ -4212,9 +4464,22 @@ impl Graph {
     /// Refused while the txn journal is poisoned
     /// ([`Graph::poison_txn`]), as the new base would start a journal without its frame.
     pub fn compact(&mut self) -> Result<(), String> {
+        // Hold the reentrant tree permit through validation, logging and materialization.
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
         self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
-        let dir = self.wal.as_ref().map(|w| w.dir.clone());
+        self.wal.refuse_if_poisoned("a compaction")?;
+        #[cfg(feature = "mmap")]
+        self.begin_durable_write()?;
+        // A directory-backed graph compacts its complete tree in one image swap.
+        #[cfg(feature = "mmap")]
+        if self.wal.is_durable() {
+            self.fold_forked_layers();
+            return self.compact_tree_in_one_swap();
+        }
         // Fold the structural-fork layers first (ids unchanged throughout): named
         // graphs recursively, then this graph's dictionary extension into a fresh
         // frozen base (so the NEXT fork is O(1) again) and the forked caches flat.
@@ -4261,7 +4526,7 @@ impl Graph {
         // succeeds, so another attempt still has the complete pending state.
         #[cfg(feature = "mmap")]
         if self.store.has_overlay() {
-            if let Some(dir) = dir {
+            if let Some(dir) = self.persist_dir() {
                 return self.persist_swap(&dir);
             }
         }
@@ -4274,12 +4539,68 @@ impl Graph {
         } else {
             // Nothing pending: for a directory-backed graph just discard the (no-op) log.
             #[cfg(feature = "mmap")]
-            if let Some(w) = &mut self.wal {
-                w.truncate().map_err(|e| e.to_string())?;
+            if let Some(w) = self.wal.log_mut() {
+                let result = w.truncate().map_err(|e| e.to_string());
+                self.freeze_on_err(result, "a WAL truncate")?;
             }
             return Ok(());
         }
+        let triples: Vec<[Id; 3]> = {
+            let scan = self.store.scan(&[None, None, None]);
+            scan.rows.iter().map(|r| scan.to_spo(r)).collect()
+        };
+        self.store = TripleStore::from_triples(triples);
         Ok(())
+    }
+
+    /// Compacts a directory-backed graph tree with one base-image swap.
+    #[cfg(feature = "mmap")]
+    fn compact_tree_in_one_swap(&mut self) -> Result<(), String> {
+        if !self.tree_has_overlay() {
+            if let Some(w) = self.wal.log_mut() {
+                let result = w.truncate().map_err(|e| e.to_string());
+                self.freeze_on_err(result, "a WAL truncate")?;
+            }
+            for (_, sub) in &mut self.named {
+                if let Some(w) = sub.wal.log_mut() {
+                    let result = w.truncate().map_err(|e| e.to_string());
+                    if let Err(e) = result {
+                        self.tree.poison();
+                        return Err(format!("a WAL truncate failed; the store is frozen: {e}"));
+                    }
+                }
+            }
+            return Ok(());
+        }
+        self.persist_swap(&self.persist_dir().expect("durable graph"))
+    }
+
+    /// Fold this graph's structural-fork layers — the dictionary extension into a fresh frozen
+    /// base (so the NEXT fork is O(1) again) and the forked caches flat, ids unchanged
+    /// throughout. A no-op on a never-forked graph.
+    #[cfg(feature = "mmap")]
+    fn fold_forked_layers(&mut self) {
+        if self.dict.is_forked() {
+            self.dict = self.dict.compacted();
+            let n = self.dict.len();
+            let numerics = std::mem::replace(
+                &mut self.numerics,
+                NumData::Sparse(rustc_hash::FxHashMap::default()),
+            );
+            self.numerics = numerics.fold(n);
+            let temporals = std::mem::replace(
+                &mut self.temporals,
+                TempData::Sparse(rustc_hash::FxHashMap::default()),
+            );
+            self.temporals = temporals.fold(n);
+        }
+    }
+
+    /// (sq-ycle) Whether THIS graph or any named graph beneath it holds a pending delta
+    /// overlay — i.e. whether a compaction of the tree has anything to fold.
+    #[cfg(feature = "mmap")]
+    fn tree_has_overlay(&self) -> bool {
+        self.store.has_overlay() || self.named.iter().any(|(_, sub)| sub.tree_has_overlay())
     }
 
     /// (sq-x32t) ROLLBACK-SAFE on-disk swap shared by [`compact`](Self::compact) and
@@ -4339,6 +4660,9 @@ impl Graph {
     /// graph that is open, use [`restore_in_place`](Self::restore_in_place).
     #[cfg(feature = "mmap")]
     pub fn restore_into_durable(dir: &std::path::Path, fresh: Graph) -> std::io::Result<Graph> {
+        fresh
+            .refuse_while_txn_poisoned()
+            .map_err(std::io::Error::other)?;
         let owned = claim_store(dir, Claim::Write, |_, _| Ok(()))?;
         swap_dir_to_new_base(&owned.dir, Some(owned.lock), |new_dir, role| {
             fresh.save_unlocked(new_dir, role)
@@ -4358,7 +4682,11 @@ impl Graph {
     /// dropped update); drop it and re-open the directory.
     #[cfg(feature = "mmap")]
     pub fn restore_in_place(&mut self, fresh: Graph) -> std::io::Result<()> {
-        self.refuse_if_detached().map_err(std::io::Error::other)?;
+        self.refuse_while_txn_poisoned()
+            .map_err(std::io::Error::other)?;
+        fresh
+            .refuse_while_txn_poisoned()
+            .map_err(std::io::Error::other)?;
         self.publish_staged_base_or_freeze(|_, new_dir, role| fresh.save_unlocked(new_dir, role))
     }
 
@@ -4398,6 +4726,8 @@ impl Graph {
             Err(failure) => return Err(failure.error),
         };
         let role = staged.role;
+        let tree = std::sync::Arc::clone(&self.tree);
+        tree.record_tree_replacement(&dir);
         // Release every file this graph has in the directory; the placeholder keeps the lock.
         *self = Graph::frozen_placeholder(
             lock.clone(),
@@ -4406,15 +4736,30 @@ impl Graph {
                 dir.display()
             ),
         );
-        let failure = match staged.publish(lock.clone()) {
-            Ok(reopened) => {
+        self.tree = std::sync::Arc::clone(&tree);
+        let published = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            staged.publish(lock.clone())
+        }));
+        let published = match published {
+            Ok(result) => result,
+            Err(panic) => {
+                tree.poison();
+                std::panic::resume_unwind(panic);
+            }
+        };
+        let failure = match published {
+            Ok(mut reopened) => {
+                reopened.tree = std::sync::Arc::clone(&tree);
+                reopened.share_tree();
                 *self = reopened;
                 return Ok(());
             }
             Err(failure) => failure,
         };
         match Graph::reopen_after_failed_swap(&dir, &lock, role) {
-            Ok((reopened, recovered)) => {
+            Ok((mut reopened, recovered)) => {
+                reopened.tree = std::sync::Arc::clone(&tree);
+                reopened.share_tree();
                 *self = reopened;
                 if recovered == Recovered::Completed {
                     Ok(())
@@ -4432,6 +4777,8 @@ impl Graph {
                     dir.display(),
                     failure.error
                 ));
+                frozen.tree = tree;
+                frozen.tree.poison();
                 *self = frozen;
                 Err(failure.error)
             }
@@ -4463,6 +4810,7 @@ impl Graph {
     fn frozen_placeholder(lock: Option<std::sync::Arc<dir_lock::DirLock>>, why: String) -> Graph {
         let mut g = Graph::new();
         g.lock = lock;
+        g.wal = WriteState::Poisoned;
         g.detached = Some(Detached { why, frozen: true });
         g
     }
@@ -4473,31 +4821,40 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn replay_logs_in_memory(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
         self.replay_wal_in_memory(dir)?;
-        let named_dir = dir.join(NAMED_SUBDIR);
-        for (i, (_, sub)) in self.named.iter_mut().enumerate() {
-            sub.replay_logs_in_memory(&named_dir.join(i.to_string()))?;
+        if let Some(manifest) = read_named_manifest(dir)? {
+            for ((_, sub), (slot, _)) in self.named.iter_mut().zip(manifest.entries) {
+                sub.replay_logs_in_memory(&dir.join(NAMED_SUBDIR).join(slot.to_string()))?;
+            }
         }
-        for (insert, slot, t) in TxnJournal::read(dir, false)? {
+        for op in TxnJournal::read(dir, false)? {
+            let (insert, slot, triple) = match op {
+                TxnOp::Insert { slot, triple } => (true, slot, Some(triple)),
+                TxnOp::Delete { slot, triple } => (false, slot, Some(triple)),
+                TxnOp::Create(name) => (true, Some(name), None),
+                TxnOp::Drop(name) => {
+                    self.named.retain(|(n, _)| *n != name);
+                    continue;
+                }
+            };
             let target = match slot {
                 None => &mut *self,
                 Some(name) => match self.named.iter().position(|(n, _)| *n == name) {
                     Some(i) => &mut self.named[i].1,
                     None if insert => {
                         let mut sub = Graph::new();
-                        sub.detached = Some(Detached {
-                            why: "it was opened read-only".to_owned(),
-                            frozen: false,
-                        });
+                        sub.detached = self.detached.clone();
                         self.named.push((name, sub));
                         &mut self.named.last_mut().expect("just pushed").1
                     }
                     None => continue,
                 },
             };
-            if insert {
-                target.apply_delta_mem(&[t], &[]);
-            } else {
-                target.apply_delta_mem(&[], &[t]);
+            if let Some(t) = triple {
+                if insert {
+                    target.apply_delta_mem(&[t], &[]);
+                } else {
+                    target.apply_delta_mem(&[], &[t]);
+                }
             }
         }
         Ok(())
@@ -4539,8 +4896,13 @@ impl Graph {
     /// without the `mmap` feature.
     pub fn is_frozen(&self) -> bool {
         #[cfg(feature = "mmap")]
-        if let Some(d) = &self.detached {
-            return d.frozen;
+        {
+            if self.tree.poisoned() || matches!(self.wal, WriteState::Poisoned) {
+                return true;
+            }
+            if let Some(d) = &self.detached {
+                return d.frozen;
+            }
         }
         false
     }
@@ -4565,8 +4927,13 @@ impl Graph {
 
     fn refuse_if_detached(&self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
-        if let Some(d) = &self.detached {
-            return Err(format!("the graph refuses writes: {}", d.why));
+        {
+            if let Some(d) = &self.detached {
+                return Err(format!("the graph refuses writes: {}", d.why));
+            }
+            if self.tree.poisoned() {
+                return Err("durable write refused: the txn journal keeps a failed commit or the durable tree is frozen; reopen the graph first".to_owned());
+            }
         }
         Ok(())
     }
@@ -4576,7 +4943,7 @@ impl Graph {
     /// without the `mmap` feature.
     pub fn is_directory_backed(&self) -> bool {
         #[cfg(feature = "mmap")]
-        if self.wal.is_some() || self.txn.is_some() {
+        if self.wal.is_durable() || self.txn.is_some() {
             return true;
         }
         self.named.iter().any(|(_, sub)| sub.is_directory_backed())
@@ -4588,18 +4955,49 @@ impl Graph {
     /// this graph holds and releases the graph's files itself.
     #[cfg(feature = "mmap")]
     pub fn persist_dir(&self) -> Option<std::path::PathBuf> {
-        self.wal.as_ref().map(|w| w.dir.clone())
+        self.wal.dir()
     }
 
-    /// (sq-ft7u) Close (drop) this graph's write-ahead-log handle, if any: the graph keeps
-    /// serving reads from its image, and later updates apply in memory only, unlogged. A no-op
-    /// for an in-memory graph. It does not release the directory's lock (the graph's mapped
-    /// files keep it), so it does not make the directory free for
-    /// [`restore_into_durable`](Self::restore_into_durable); to replace the directory of an open
-    /// graph use [`restore_in_place`](Self::restore_in_place).
+    /// Adopts legacy staging for an absent store directory and recovers its recorded swap.
+    ///
+    /// Call only after confirming that the legacy staging belongs to this store. The staging
+    /// marker is updated and its directory renamed before recovery runs.
+    ///
+    /// # Errors
+    /// Returns an error if the destination exists, legacy staging is absent or unreadable,
+    /// or recording, renaming or recovering the staging fails.
     #[cfg(feature = "mmap")]
-    pub fn close_wal(&mut self) {
-        self.wal = None;
+    pub fn adopt_legacy_staging(dir: &std::path::Path) -> std::io::Result<()> {
+        if dir.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "{} exists, so there is no interrupted swap to adopt a legacy staging sibling into",
+                    dir.display()
+                ),
+            ));
+        }
+        let Some(legacy) = legacy_staging_sibling(dir) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no legacy staging sibling of {} is present", dir.display()),
+            ));
+        };
+        // Which kind it is decides which recovery branch it feeds, so keep the suffix.
+        let suffix = STAGING_SUFFIXES
+            .into_iter()
+            .find(|s| dir.with_extension(s) == legacy)
+            .ok_or_else(|| {
+                std::io::Error::other(format!("{} is not a staging sibling", legacy.display()))
+            })?;
+        let marker = read_marker(&legacy)?
+            .ok_or_else(|| std::io::Error::other("legacy staging has no store marker"))?;
+        let id = marker.id.unwrap_or_else(random_id);
+        write_marker(&legacy, marker.role, &id)?;
+        mark_staging(&legacy, suffix, &id)?;
+        std::fs::rename(&legacy, staging_sibling(dir, suffix))?;
+        fsync_dir(dir.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
+        recover_compaction(dir).map(|_| ())
     }
 
     /// (sq-x32t, epic sq-toze.33) ERASURE-GRADE VACUUM. Like [`compact`](Self::compact)
@@ -4626,14 +5024,23 @@ impl Graph {
     /// external backups), which the storage/backup tier must handle per the retention-erasure
     /// runbook. Refused while the txn journal is poisoned, as [`Graph::compact`] is.
     pub fn vacuum(&mut self) -> Result<(), String> {
+        // Hold the reentrant tree permit through validation, logging and materialization.
+        #[cfg(feature = "mmap")]
+        let tree = std::sync::Arc::clone(&self.tree);
+        #[cfg(feature = "mmap")]
+        let _permit = tree.write_permit();
         self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
-        let dir = self.wal.as_ref().map(|w| w.dir.clone());
+        self.wal.refuse_if_poisoned("a vacuum")?;
+        #[cfg(feature = "mmap")]
+        self.begin_durable_write()?;
         // Re-intern the whole live dataset into a fresh graph with an EMPTY dictionary, so any
         // term orphaned by a prior delete/drop is dropped (it is never re-interned).
         let mut fresh = self.reintern_live()?;
+        // Durable: the SAME publish-or-freeze half the compaction uses, writing `fresh`'s image
+        // as the new base. The staging step runs while this graph still holds its log.
         #[cfg(feature = "mmap")]
-        if dir.is_some() {
+        if self.wal.is_durable() {
             // `fresh`'s image becomes the new base through the crash-safe swap: `self` releases
             // its files in the directory before the renames, keeps its lock (the same `Arc`)
             // throughout, and adopts the graph re-opened from the new base with a fresh WAL, so
@@ -4835,9 +5242,21 @@ pub(crate) fn commit_fresh(w: std::io::BufWriter<FreshFile>) -> std::io::Result<
         .commit()
 }
 
-/// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. A filesystem that
-/// does not support fsync on a directory handle (`InvalidInput`) counts as done; any other error
-/// is returned.
+/// Syncs an existing regular file without creating or truncating it.
+#[cfg(feature = "mmap")]
+fn fsync_file(path: &std::path::Path) -> std::io::Result<()> {
+    // FlushFileBuffers requires write access. Keep the standard sharing flags so files
+    // already open as logs or read-only memory maps can still be synced.
+    #[cfg(windows)]
+    let file = std::fs::OpenOptions::new().write(true).open(path)?;
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path)?;
+    file.sync_all()
+}
+
+/// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. An absent
+/// directory is accepted; all other open errors and every sync error are returned,
+/// including `InvalidInput` from a filesystem that cannot sync a directory.
 ///
 /// On Windows there is nothing to do: a directory cannot be synced through a plain handle
 /// (opening one needs `FILE_FLAG_BACKUP_SEMANTICS`), and the renames that need it are made
@@ -4851,13 +5270,18 @@ fn fsync_dir(_dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(all(feature = "mmap", not(windows)))]
 fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     match std::fs::File::open(dir) {
-        Ok(f) => match f.sync_all() {
-            Ok(()) => Ok(()),
-            // Some filesystems return EINVAL/unsupported for fsync on a directory handle;
-            // that is not a data-loss condition, so treat it as success.
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::InvalidInput) => Ok(()),
-            Err(e) => Err(e),
-        },
+        Ok(f) => f.sync_all(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Removes a directory tree and propagates cleanup errors.
+#[cfg(feature = "mmap")]
+fn remove_tree(dir: &std::path::Path) -> std::io::Result<()> {
+    fault_point("remove-tree", dir)?;
+    match std::fs::remove_dir_all(dir) {
+        Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
@@ -5267,6 +5691,287 @@ fn clear_staging_mark(dir: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+/// Validates the directory and role of one declared named slot.
+#[cfg(feature = "mmap")]
+fn check_named_slot(path: &std::path::Path) -> std::io::Result<()> {
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+    if !meta.is_dir() || read_store_marker(path)? == Some(Role::Root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a named graph directory", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+/// Checks the named container without following symbolic links.
+#[cfg(feature = "mmap")]
+fn check_named_container(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if !meta.is_dir() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a real named-graph directory", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Checks the effective declared layout without recovering or removing any directory.
+#[cfg(feature = "mmap")]
+fn validate_declared_named_layout(dir: &std::path::Path) -> std::io::Result<()> {
+    check_store_internals(dir)?;
+    if let Some(plan) = plan_named_drop(dir)? {
+        return validate_declared_named_slots(&plan.agreeing, &plan.entries);
+    }
+    let entries = read_named_manifest(dir)?
+        .map(|m| m.entries)
+        .unwrap_or_default();
+    validate_declared_named_slots(&dir.join(NAMED_SUBDIR), &entries)
+}
+
+#[cfg(feature = "mmap")]
+fn validate_declared_named_slots(
+    named: &std::path::Path,
+    entries: &[(u32, Term)],
+) -> std::io::Result<()> {
+    check_named_container(named)?;
+    for (slot, _) in entries {
+        let path = named.join(slot.to_string());
+        let source = named_slot_source(&path)?;
+        validate_declared_named_layout(&source)?;
+    }
+    Ok(())
+}
+
+/// The live child, or the recorded image that a missing child's swap would recover.
+#[cfg(feature = "mmap")]
+fn named_slot_source(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let missing = match check_named_slot(path) {
+        Ok(()) => return Ok(path.to_path_buf()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => e,
+        Err(e) => return Err(e),
+    };
+    let mut source = None;
+    let mut owner = None;
+    let mut identities = Vec::new();
+    for kind in ["compact-new", "compact-old"] {
+        let staged = staging_path(path, kind);
+        if !something_at(&staged)? {
+            continue;
+        }
+        check_named_slot(&staged)?;
+        let marker = read_marker(&staged)?.and_then(|m| m.id);
+        if let Some(recorded) = staging_mark(&staged, kind, path)? {
+            if owner.as_ref().is_some_and(|id| *id != recorded) {
+                return Err(not_own_staging(
+                    &staged,
+                    kind,
+                    "names another store",
+                    Some(path),
+                ));
+            }
+            owner = Some(recorded);
+        }
+        identities.push(marker);
+        if source.is_none() {
+            source = Some(staged);
+        }
+    }
+    let Some(owner) = owner else {
+        return Err(missing);
+    };
+    if identities.iter().any(|id| id.as_ref() != Some(&owner)) {
+        return Err(not_own_staging(
+            path,
+            "compact",
+            "has inconsistent store identities",
+            Some(path),
+        ));
+    }
+    source.ok_or(missing)
+}
+
+/// Cleans undeclared slots after the complete declared layout has been validated.
+#[cfg(feature = "mmap")]
+fn sweep_named_slots(named: &std::path::Path, entries: &[(u32, Term)]) -> std::io::Result<()> {
+    let declared: std::collections::HashSet<u32> = entries.iter().map(|(s, _)| *s).collect();
+    let listing = match std::fs::read_dir(named) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in listing {
+        let entry = entry?;
+        let Some(slot) = entry.file_name().to_str().and_then(parse_slot_name) else {
+            continue;
+        };
+        if !declared.contains(&slot) {
+            let path = entry.path();
+            if let Err(e) = remove_dir_tree_checked(&path) {
+                eprintln!(
+                    "warning: could not clean undeclared named-graph slot {}: {e}",
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(test, feature = "mmap"))]
+mod layout_cost {
+    use std::cell::Cell;
+    thread_local! {
+        static DUPLICATES: Cell<usize> = const { Cell::new(0) };
+        static REPLACEMENTS: Cell<usize> = const { Cell::new(0) };
+        static PRUNED: Cell<usize> = const { Cell::new(0) };
+    }
+    #[derive(Default)]
+    pub(super) struct CountHashes;
+    impl std::hash::BuildHasher for CountHashes {
+        type Hasher = CountHash;
+        fn build_hasher(&self) -> Self::Hasher {
+            CountHash::default()
+        }
+    }
+    #[derive(Default)]
+    pub(super) struct CountHash(rustc_hash::FxHasher);
+    impl std::hash::Hasher for CountHash {
+        fn finish(&self) -> u64 {
+            std::hash::Hasher::finish(&self.0)
+        }
+        fn write(&mut self, bytes: &[u8]) {
+            duplicate_probe();
+            std::hash::Hasher::write(&mut self.0, bytes);
+        }
+    }
+    pub(super) fn duplicate_probe() {
+        DUPLICATES.with(|c| c.set(c.get() + 1));
+    }
+    pub(super) fn replacement() {
+        REPLACEMENTS.with(|c| c.set(c.get() + 1));
+    }
+    pub(super) fn prune_visit() {
+        PRUNED.with(|c| c.set(c.get() + 1));
+    }
+    pub(super) fn reset() {
+        DUPLICATES.with(|c| c.set(0));
+        REPLACEMENTS.with(|c| c.set(0));
+        PRUNED.with(|c| c.set(0));
+    }
+    pub(super) fn counts() -> (usize, usize, usize) {
+        (
+            DUPLICATES.with(Cell::get),
+            REPLACEMENTS.with(Cell::get),
+            PRUNED.with(Cell::get),
+        )
+    }
+}
+
+/// Removes one canonical slot beneath a checked named container.
+#[cfg(feature = "mmap")]
+fn remove_named_slot(named_dir: &std::path::Path, slot: u32) -> std::io::Result<()> {
+    remove_dir_tree_checked(&named_dir.join(slot.to_string()))
+}
+
+/// Removes a real directory, treating an absent directory as success.
+///
+/// The final component must be a directory, never a symlink or file. Separate stores,
+/// unmarked store images and held descendant locks are refused. Callers validate the named
+/// container before operating on slots; filesystem changes by outside actors while the
+/// exclusive store lock is held are unsupported.
+#[cfg(feature = "mmap")]
+fn remove_dir_tree_checked(target: &std::path::Path) -> std::io::Result<()> {
+    if check_dir_tree_removable(target)? {
+        remove_tree(target)?;
+    }
+    Ok(())
+}
+
+/// Checks removal safety without changing disk; returns false when the tree is absent.
+#[cfg(feature = "mmap")]
+fn check_dir_tree_removable(target: &std::path::Path) -> std::io::Result<bool> {
+    let meta = match std::fs::symlink_metadata(target) {
+        Ok(meta) => meta,
+        // Removal is idempotent when the directory is already absent.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if !meta.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{} is not a directory ({:?}), so this store will not remove it",
+                target.display(),
+                meta.file_type()
+            ),
+        ));
+    }
+    let role = read_store_marker(target)?;
+    if role == Some(Role::Root) || (role.is_none() && holds_store_files(target)) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{} is a root or unmarked store, so it will not be removed",
+                target.display()
+            ),
+        ));
+    }
+    refuse_foreign_below(target, false)?;
+    Ok(true)
+}
+
+/// Syncs the changed trees and root files before publishing the named manifest.
+#[cfg(feature = "mmap")]
+fn publish_named_manifest(
+    dir: &std::path::Path,
+    trees: &[&std::path::Path],
+    entries: &[(u32, Term)],
+    next_slot: u32,
+) -> std::io::Result<()> {
+    durability_barrier(dir, trees)?;
+    write_named_manifest(dir, entries, next_slot)
+}
+
+/// Syncs child trees, the named container, and regular root files in order.
+#[cfg(feature = "mmap")]
+fn durability_barrier(root: &std::path::Path, trees: &[&std::path::Path]) -> std::io::Result<()> {
+    for tree in trees {
+        fsync_tree(tree)?;
+    }
+    let named = root.join(NAMED_SUBDIR);
+    if path_exists(&named)? {
+        fsync_dir(&named)?;
+    }
+    // Complete the barrier with regular files directly inside the root.
+    fsync_files_in(root)
+}
+
+/// Syncs every regular file directly inside the directory, then the directory.
+#[cfg(feature = "mmap")]
+fn fsync_files_in(dir: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        // Test-only, path-scoped file-sync failure.
+        #[cfg(test)]
+        if io_fault::sync_fails(&path) {
+            return Err(std::io::Error::other(format!(
+                "injected fsync fault for {}",
+                path.display()
+            )));
+        }
+        fsync_file(&path)?;
+    }
+    fsync_dir(dir)
+}
+
 /// Removes the staging directory `staging` (checked by the caller) so that it keeps its record
 /// to the end: every other entry first (directories whole, links as links), then the record,
 /// then the directory. Final record removal happens under the scratch name, where recovery
@@ -5603,6 +6308,12 @@ fn claim_store(
         if recovered {
             check_store_internals(&resolved)?;
             refuse_foreign_descendants(&resolved)?;
+        }
+        if let Some(held) = retained_journal_under(&resolved)? {
+            return Err(std::io::Error::other(format!(
+                "{} keeps an unreplayed journal",
+                held.display()
+            )));
         }
         remove_stale_scratch(&resolved)?;
         write_store_marker(&resolved, Role::Root)?;
@@ -6174,6 +6885,73 @@ enum Recovered {
     RolledBack,
 }
 
+/// Finds a recorded legacy stem-based staging sibling when the whole-name sibling
+/// is absent. Names without a distinct stem form need no legacy lookup.
+#[cfg(feature = "mmap")]
+fn legacy_staging_sibling(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    STAGING_SUFFIXES.into_iter().find_map(|suffix| {
+        let legacy = dir.with_extension(suffix);
+        (legacy != staging_sibling(dir, suffix) && legacy.exists()).then_some(legacy)
+    })
+}
+
+/// Supported suffixes for store and recorded legacy named-container staging.
+#[cfg(feature = "mmap")]
+const STAGING_SUFFIXES: [&str; 4] = ["compact-new", "compact-old", "drop-new", "drop-old"];
+
+/// (sq-ycle) `dir` plus `.<suffix>` appended to its full file name: the staging sibling
+/// of `data.a` is `data.a.compact-new`, not `data.compact-new`. See [`STAGING_SUFFIXES`].
+#[cfg(feature = "mmap")]
+fn staging_sibling(dir: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let name = dir.file_name().map(|n| n.to_owned()).unwrap_or_default();
+    let mut name = name;
+    name.push(".");
+    name.push(suffix);
+    dir.with_file_name(name)
+}
+
+/// Finds an unreplayed transaction journal in this graph tree.
+#[cfg(feature = "mmap")]
+fn retained_journal_under(dir: &std::path::Path) -> std::io::Result<Option<std::path::PathBuf>> {
+    let journal = TxnJournal::path(dir);
+    match std::fs::metadata(&journal) {
+        Ok(m) if m.len() > 0 => return Ok(Some(journal)),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let named_dir = dir.join(NAMED_SUBDIR);
+    let entries = match std::fs::read_dir(&named_dir) {
+        Ok(it) => it,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            if let Some(found) = retained_journal_under(&entry.path())? {
+                return Ok(Some(found));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Syncs regular files and directories from leaves to root.
+#[cfg(feature = "mmap")]
+fn fsync_tree(dir: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            fsync_tree(&path)?;
+        } else if entry.file_type()?.is_file() {
+            fsync_file(&path)?;
+        }
+    }
+    fsync_dir(dir)
+}
+
 /// (review 1593) Recover an INTERRUPTED [`compact`](Graph::compact) directory swap
 /// so the canonical `dir` always ends up present after any crash. Deterministic from the
 /// surviving siblings ([`staging_path`]: `<dir>.compact-old` / `<dir>.compact-new`):
@@ -6285,50 +7063,26 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<Recovered> {
     }
 }
 
-/// (sq-glw2) Recover an INTERRUPTED [`drop_named_durable`](Graph::drop_named_durable)
-/// named-sub-tree swap so `named/` always ends up consistent with the manifest after any crash.
-/// Mirrors [`recover_compaction`] but scoped to the `named/` sub-tree (`named.drop-old` /
-/// `named.drop-new` siblings):
-///
-/// - `named/` present: the swap completed (or never started) — drop any stale siblings (and a
-///   record left over in `named/` from putting it back). The manifest is then reconciled by
-///   [`open_named`](Graph::open_named) (it trusts the manifest's count; extra leftover sub-dirs
-///   beyond it are ignored, a missing one surfaces as a clean error).
-/// - `named/` MISSING, `named.drop-new` present: a crash between the two renames — the new
-///   (renumbered survivor) sub-tree was fully written + fsync'd, so COMPLETE the swap by
-///   promoting it.
-/// - `named/` MISSING, only `named.drop-old` present: a crash before the new sub-tree was
-///   durable — ROLL BACK by restoring the old sub-tree (the manifest still matches it).
-///
-/// Run BEFORE [`open_named`](Graph::open_named) on every open. Idempotent.
-///
-/// As in [`recover_compaction`], what is removed or promoted is decided by staging records
-/// naming the identity in `dir`'s marker: with `named/` present a sibling goes only on such a
-/// record; with it missing at least one sibling must carry one and every record must name this
-/// store. `named/` and its siblings are inside the store, so no other claim reaches them.
-/// Anything else is refused and left alone. Returns whether `named/` was put back.
+/// The candidate selected for a recorded named-container recovery, without changing disk.
 #[cfg(feature = "mmap")]
-fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
+struct NamedDropPlan {
+    agreeing: std::path::PathBuf,
+    entries: Vec<(u32, Term)>,
+    owner: String,
+    has_pending: bool,
+}
+
+#[cfg(feature = "mmap")]
+fn plan_named_drop(dir: &std::path::Path) -> std::io::Result<Option<NamedDropPlan>> {
     let named_dir = dir.join(NAMED_SUBDIR);
+    check_named_container(&named_dir)?;
     let new_dir = staging_path(&named_dir, "drop-new");
     let old_dir = staging_path(&named_dir, "drop-old");
     let id = read_marker(dir)?.and_then(|m| m.id);
-    if something_at(&named_dir)? && leftover_record(&named_dir, "drop-old", id.as_deref())? {
-        clear_staging_mark(&named_dir)?;
-    }
-    remove_staging_scratch(&new_dir, "drop-new")?;
-    remove_staging_scratch(&old_dir, "drop-old")?;
-    let (has_new, has_old) = (something_at(&new_dir)?, something_at(&old_dir)?);
+    let has_new = something_at(&new_dir)?;
+    let has_old = something_at(&old_dir)?;
     if !has_new && !has_old {
-        return Ok(false);
-    }
-    if something_at(&named_dir)? {
-        if has_old && staging_mark(&old_dir, "drop-old", &named_dir)?.as_deref() == id.as_deref() {
-            complete_named_manifest(dir)?;
-        }
-        remove_staging(&new_dir, "drop-new", id.as_deref(), &named_dir)?;
-        remove_staging(&old_dir, "drop-old", id.as_deref(), &named_dir)?;
-        return Ok(false);
+        return Ok(None);
     }
     let new_mark = if has_new {
         staging_mark(&new_dir, "drop-new", &named_dir)?
@@ -6340,49 +7094,180 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
     } else {
         None
     };
-    for (staging, kind, mark) in [
+    for (path, kind, mark) in [
         (&new_dir, "drop-new", &new_mark),
         (&old_dir, "drop-old", &old_mark),
     ] {
         if mark.is_some() && mark.as_deref() != id.as_deref() {
             return Err(not_own_staging(
-                staging,
+                path,
                 kind,
                 "is staging of another store",
                 Some(&named_dir),
             ));
         }
+        if something_at(&named_dir)? && something_at(path)? && mark.is_none() {
+            return Err(not_own_staging(
+                path,
+                kind,
+                "records no staging provenance",
+                Some(&named_dir),
+            ));
+        }
     }
     if new_mark.is_none() && old_mark.is_none() {
-        let staging = if has_new { &new_dir } else { &old_dir };
         return Err(not_own_staging(
-            staging,
+            if has_new { &new_dir } else { &old_dir },
             "drop",
             "records no staging provenance",
             Some(&named_dir),
         ));
     }
-    let id = id.expect("a record matched it");
-    if has_new {
-        // The new survivor sub-tree was fully written + fsync'd before the swap began.
-        if has_old && old_mark.is_none() {
-            mark_staging(&old_dir, "drop-old", &id)?;
+    let owner = id.ok_or_else(|| std::io::Error::other("named staging has no store identity"))?;
+    let manifest = read_named_manifest(dir)?;
+    let declared: std::collections::BTreeSet<u32> = manifest
+        .as_ref()
+        .map(|m| m.entries.iter().map(|(slot, _)| *slot).collect())
+        .unwrap_or_default();
+    let mut agreeing = None;
+    let mut has_pending = false;
+    for candidate in [&named_dir, &new_dir] {
+        if !something_at(candidate)? {
+            continue;
         }
-        clear_staging_mark(&new_dir)?;
-        publish_rename(&new_dir, &named_dir)?;
-        fsync_dir(dir)?;
-        complete_named_manifest(dir)?;
-        if has_old {
-            remove_staging_dir(&old_dir)?;
+        if let Some(pending) = read_named_manifest_path(&candidate.join(PENDING_NAMED_MANIFEST))? {
+            let slots = pending.entries.iter().map(|(slot, _)| *slot).collect();
+            if present_named_slots(candidate)? == slots {
+                agreeing = Some(candidate);
+                has_pending = true;
+                break;
+            }
         }
+    }
+    if agreeing.is_none() {
+        for candidate in [&named_dir, &new_dir, &old_dir] {
+            if present_named_slots(candidate)? == declared
+                && (something_at(candidate)? || candidate == &named_dir)
+            {
+                agreeing = Some(candidate);
+                break;
+            }
+        }
+    }
+    let agreeing = agreeing.ok_or_else(|| std::io::Error::other(format!(
+        "{} cannot be reconciled automatically with {} and its recorded staging; all directories are left in place",
+        dir.join(NAMED_MANIFEST).display(), named_dir.display())))?;
+    let entries = if has_pending {
+        read_named_manifest_path(&agreeing.join(PENDING_NAMED_MANIFEST))?
+            .expect("pending manifest was read")
+            .entries
     } else {
-        // The new sub-tree never reached durability: restore the previous one, renamed back
-        // first, its record removed after.
-        publish_rename(&old_dir, &named_dir)?;
-        fsync_dir(dir)?;
+        manifest.map(|m| m.entries).unwrap_or_default()
+    };
+    Ok(Some(NamedDropPlan {
+        agreeing: agreeing.clone(),
+        entries,
+        owner,
+        has_pending,
+    }))
+}
+
+/// Recovers recorded named-container staging after validating its declared descendants.
+#[cfg(feature = "mmap")]
+fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
+    let plan = plan_named_drop(dir)?;
+    let named_dir = dir.join(NAMED_SUBDIR);
+    let new_dir = staging_path(&named_dir, "drop-new");
+    let old_dir = staging_path(&named_dir, "drop-old");
+    if let Some(plan) = &plan {
+        validate_declared_named_slots(&plan.agreeing, &plan.entries)?;
+    }
+    let id = read_marker(dir)?.and_then(|m| m.id);
+    if something_at(&named_dir)? && leftover_record(&named_dir, "drop-old", id.as_deref())? {
         clear_staging_mark(&named_dir)?;
     }
-    Ok(true)
+    let Some(NamedDropPlan {
+        agreeing,
+        entries: _,
+        owner,
+        has_pending,
+    }) = plan
+    else {
+        remove_staging_scratch(&new_dir, "drop-new")?;
+        remove_staging_scratch(&old_dir, "drop-old")?;
+        return Ok(false);
+    };
+    let replaced = agreeing != named_dir;
+    if replaced {
+        remove_dir_tree_checked(&named_dir)?;
+        if agreeing == new_dir {
+            clear_staging_mark(&agreeing)?;
+        }
+        publish_rename(&agreeing, &named_dir)?;
+        fsync_dir(dir)?;
+        if agreeing == old_dir {
+            clear_staging_mark(&named_dir)?;
+        }
+    }
+    if has_pending {
+        complete_named_manifest(dir)?;
+    }
+    for (path, kind) in [(&new_dir, "drop-new"), (&old_dir, "drop-old")] {
+        if something_at(path)? {
+            if read_staging_record(path)?.is_none() {
+                mark_staging(path, kind, &owner)?;
+            }
+            remove_staging(path, kind, Some(&owner), &named_dir)?;
+        }
+    }
+    remove_staging_scratch(&new_dir, "drop-new")?;
+    remove_staging_scratch(&old_dir, "drop-old")?;
+    fsync_dir(dir)?;
+    Ok(replaced)
+}
+
+/// Parses a slot id only in its canonical decimal spelling.
+#[cfg(feature = "mmap")]
+fn parse_slot_name(name: &str) -> Option<u32> {
+    let slot = name.parse::<u32>().ok()?;
+    (slot.to_string() == name).then_some(slot)
+}
+
+/// Checks whether a filesystem name is present without following links.
+/// Propagates inspection errors other than absence.
+#[cfg(feature = "mmap")]
+fn path_exists(path: &std::path::Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Collects canonical slot ids in a directory. Absence yields an empty set; other
+/// inspection errors are propagated. Unrelated entry names are ignored.
+#[cfg(feature = "mmap")]
+fn present_named_slots(
+    named_dir: &std::path::Path,
+) -> std::io::Result<std::collections::BTreeSet<u32>> {
+    let entries = match std::fs::read_dir(named_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(std::collections::BTreeSet::new())
+        }
+        Err(e) => return Err(e),
+    };
+    let mut slots = std::collections::BTreeSet::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        if let Some(slot) = entry.file_name().to_str().and_then(parse_slot_name) {
+            slots.insert(slot);
+        }
+    }
+    Ok(slots)
 }
 
 /// (sq-3ui0, gh-45) The subdirectory holding the persisted named graphs (one
@@ -6398,16 +7283,23 @@ const PENDING_NAMED_MANIFEST: &str = ".sparq-named-manifest";
 /// stray/legacy file be rejected rather than misread.
 #[cfg(feature = "mmap")]
 const NAMED_MANIFEST_MAGIC: u32 = 0x31_47_4D_4E;
-/// On-disk named-graph format version. Bumped if the named-graph LAYOUT changes
-/// incompatibly; `open_named` refuses an unknown version rather than silently misreading.
+/// Current named-graph manifest version. Version 2 stores explicit slot ids and the
+/// next allocation id. Version 1 remains readable using positional slot ids.
 #[cfg(feature = "mmap")]
-const NAMED_FORMAT_VERSION: u32 = 1;
+const NAMED_FORMAT_VERSION: u32 = 2;
+/// The version-1 manifest layout, still READ: a 12-byte header and entries with no slot id.
+#[cfg(feature = "mmap")]
+const NAMED_FORMAT_VERSION_V1: u32 = 1;
 /// (Copilot review #69, finding 3) Smallest possible on-disk size of one manifest
 /// entry: `[kind u8][len u32]` (1 + 4) with a zero-length value. The post-header byte count
 /// divided by this is a hard upper bound on the entry count, so `open_named` clamps its
 /// pre-allocation to it — a hostile `count` field can never drive an unbounded reservation.
 #[cfg(feature = "mmap")]
 const MIN_MANIFEST_ENTRY_BYTES: usize = 5;
+/// Smallest possible on-disk size of one VERSION-2 entry: the `[slot u32]` id ahead of the
+/// version-1 `[kind u8][len u32]`.
+#[cfg(feature = "mmap")]
+const MIN_MANIFEST_ENTRY_BYTES_V2: usize = MIN_MANIFEST_ENTRY_BYTES + 4;
 
 /// Publishes the manifest saved with a renamed survivor tree before discarding the old tree.
 /// Its absence means it was already published, or this tree predates staged manifests.
@@ -6440,43 +7332,142 @@ fn complete_named_manifest(dir: &std::path::Path) -> std::io::Result<()> {
 /// the whole named-graph set — survives a crash. This is the same temp-file + fsync + rename +
 /// dir-fsync discipline the compaction directory-swap uses (`Graph::compact`).
 #[cfg(feature = "mmap")]
-fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
-    write_named_manifest_file(&dir.join(NAMED_MANIFEST), names)
-}
-
-/// Writes a manifest image at its live or pending publication path.
-#[cfg(feature = "mmap")]
-fn write_named_manifest_file(path: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
+fn write_named_manifest(
+    dir: &std::path::Path,
+    entries: &[(u32, Term)],
+    next_slot: u32,
+) -> std::io::Result<()> {
     use std::io::Write;
-    let mut buf = Vec::with_capacity(12 + names.len() * 32);
+    // Require unique slots in the manifest.
+    let mut seen = std::collections::HashSet::new();
+    for (slot, _) in entries {
+        if !seen.insert(*slot) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "two named graphs claim slot {} in the manifest for {}",
+                    slot,
+                    dir.display()
+                ),
+            ));
+        }
+    }
+    let count = u32::try_from(entries.len())
+        .map_err(|_| std::io::Error::other("more named graphs than a slot id can hold"))?;
+    let mut buf = Vec::with_capacity(16 + entries.len() * 36);
     buf.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
     buf.extend_from_slice(&NAMED_FORMAT_VERSION.to_le_bytes());
-    buf.extend_from_slice(&(names.len() as u32).to_le_bytes());
-    for name in names {
-        encode_graph_name(&mut buf, name);
+    buf.extend_from_slice(&count.to_le_bytes());
+    // Persist the allocation cursor even when the declared set is empty.
+    buf.extend_from_slice(&next_slot.to_le_bytes());
+    for (slot, name) in entries {
+        buf.extend_from_slice(&slot.to_le_bytes());
+        encode_graph_name(&mut buf, name)?;
     }
     // Write the full image to the sibling `named.bin.tmp` (afresh, never through an existing
     // file or link) and fsync its CONTENTS before the rename, so the bytes the rename publishes
     // are already durable (a crash can't surface a zero-length/partial file under the canonical
     // name); then fsync `dir`, so the rename (the commit) is itself durable.
-    let mut f = FreshFile::create(path)?;
+    let mut f = FreshFile::create(&dir.join(NAMED_MANIFEST))?;
     f.write_all(&buf)?;
     f.commit()
 }
 
-/// (sq-glw2) Durably REMOVES the named-graph manifest `dir/named.bin` (the commit
-/// point when a [`drop_named_durable`](Graph::drop_named_durable) leaves NO named graphs): once
-/// the manifest is gone, [`open_named`](Graph::open_named) reports zero named graphs regardless
-/// of any leftover `named/` sub-tree (a crash after this leaves only an orphan sub-tree, cleaned
-/// up by [`recover_named_drop`]). The parent `dir` is fsync'd so the removal survives a crash.
-/// A no-op (success) when there is no manifest.
+/// Manifest entries in declared order and the next allocation id.
 #[cfg(feature = "mmap")]
-fn remove_named_manifest(dir: &std::path::Path) -> std::io::Result<()> {
-    match std::fs::remove_file(dir.join(NAMED_MANIFEST)) {
-        Ok(()) => fsync_dir(dir),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+struct NamedManifest {
+    entries: Vec<(u32, Term)>,
+    next_slot: u32,
+}
+
+/// Reads `dir/named.bin`, returning `None` when no manifest is present.
+#[cfg(feature = "mmap")]
+fn read_named_manifest(dir: &std::path::Path) -> std::io::Result<Option<NamedManifest>> {
+    read_named_manifest_path(&dir.join(NAMED_MANIFEST))
+}
+
+#[cfg(feature = "mmap")]
+fn read_named_manifest_path(path: &std::path::Path) -> std::io::Result<Option<NamedManifest>> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let bad = |msg: &str| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{}: {}", path.display(), msg),
+        )
+    };
+    if bytes.len() < 12 {
+        return Err(bad("manifest too short for header"));
     }
+    if u32::from_le_bytes(bytes[0..4].try_into().expect("4 bytes")) != NAMED_MANIFEST_MAGIC {
+        return Err(bad("bad magic (not a named-graph manifest)"));
+    }
+    let version = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
+    let count = u32::from_le_bytes(bytes[8..12].try_into().expect("4 bytes")) as usize;
+    let (header_len, entry_bytes, versioned) = match version {
+        NAMED_FORMAT_VERSION => (16usize, MIN_MANIFEST_ENTRY_BYTES_V2, true),
+        NAMED_FORMAT_VERSION_V1 => (12usize, MIN_MANIFEST_ENTRY_BYTES, false),
+        other => {
+            return Err(bad(&format!(
+                "unsupported format version {} (this build writes {} and reads {} and {})",
+                other, NAMED_FORMAT_VERSION, NAMED_FORMAT_VERSION_V1, NAMED_FORMAT_VERSION
+            )))
+        }
+    };
+    if bytes.len() < header_len {
+        return Err(bad("manifest too short for header"));
+    }
+    let remaining = bytes.len() - header_len;
+    let mut entries: Vec<(u32, Term)> = Vec::new();
+    entries
+        .try_reserve(count.min(remaining / entry_bytes))
+        .map_err(|e| bad(&e.to_string()))?;
+    let mut seen_slots = std::collections::HashSet::new();
+    let mut pos = header_len;
+    for i in 0..count {
+        let slot = if versioned {
+            if pos + 4 > bytes.len() {
+                return Err(bad("an entry's slot id runs past the manifest"));
+            }
+            let slot = u32::from_le_bytes(bytes[pos..pos + 4].try_into().expect("4 bytes"));
+            pos += 4;
+            slot
+        } else {
+            // Version 1: the slot IS the position, which its contiguous layout guarantees.
+            u32::try_from(i).map_err(|_| bad("more entries than a slot id can hold"))?
+        };
+        let (name, next) = decode_graph_name(&bytes, pos).map_err(|m| bad(&m))?;
+        pos = next;
+        // Require unique slots in the decoded manifest.
+        if !seen_slots.insert(slot) {
+            return Err(bad(&format!("two entries claim slot {}", slot)));
+        }
+        entries.push((slot, name));
+    }
+    // The manifest must end at the last declared entry.
+    if pos != bytes.len() {
+        return Err(bad(&format!(
+            "{} bytes follow the last of the {} declared entries",
+            bytes.len() - pos,
+            count
+        )));
+    }
+    let next_slot = if versioned {
+        u32::from_le_bytes(bytes[12..16].try_into().expect("4 bytes"))
+    } else {
+        // Version 1 handed out positions, so the count is the first id it had not used.
+        u32::try_from(count).map_err(|_| bad("more entries than a slot id can hold"))?
+    };
+    // The allocation cursor must follow every declared slot.
+    let highest_used = entries.iter().map(|(s, _)| *s).max();
+    let next_slot = match highest_used {
+        Some(highest) if next_slot <= highest => highest.saturating_add(1),
+        _ => next_slot,
+    };
+    Ok(Some(NamedManifest { entries, next_slot }))
 }
 
 /// (sq-3ui0) Serialise a graph-name term into the manifest buffer as
@@ -6486,19 +7477,34 @@ fn remove_named_manifest(dir: &std::path::Path) -> std::io::Result<()> {
 /// are only ever NamedNode or BlankNode (never a literal/triple — see
 /// [`load_dataset`](Graph::load_dataset) / [`apply_delta_nquads`](Graph::apply_delta_nquads)).
 #[cfg(feature = "mmap")]
-fn encode_graph_name(buf: &mut Vec<u8>, name: &Term) {
-    // Graph names are constrained to NamedNode | BlankNode by every public loader; encode
-    // each with its raw value. A literal/triple graph name cannot occur, so map it to its
-    // lexical form as a NamedNode rather than panicking (keeps the encoding total).
-    let (kind, val): (u8, String) = match name {
-        Term::NamedNode(n) => (0, n.as_str().to_string()),
-        Term::BlankNode(b) => (1, b.as_str().to_string()),
-        other => (0, other.to_string()),
+fn encode_graph_name(buf: &mut Vec<u8>, name: &Term) -> std::io::Result<()> {
+    let (kind, val): (u8, &str) = match name {
+        Term::NamedNode(n) => (0, n.as_str()),
+        Term::BlankNode(b) => (1, b.as_str()),
+        other => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "graph name refused: {} is neither an IRI nor a blank node, so it cannot name a graph",
+                    other
+                ),
+            ))
+        }
     };
-    buf.push(kind);
     let bytes = val.as_bytes();
-    buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    let len = u32::try_from(bytes.len()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "graph name refused: its {} bytes do not fit the on-disk u32 length field",
+                bytes.len()
+            ),
+        )
+    })?;
+    buf.push(kind);
+    buf.extend_from_slice(&len.to_le_bytes());
     buf.extend_from_slice(bytes);
+    Ok(())
 }
 
 /// (sq-3ui0) Inverse of [`encode_graph_name`]: decode the term starting at
@@ -6571,6 +7577,71 @@ struct Wal {
     dir: std::path::PathBuf,
 }
 
+/// Test-only thread-local append faults and path-scoped file-sync faults.
+#[cfg(all(test, feature = "mmap"))]
+mod io_fault {
+    use std::cell::Cell;
+    use std::thread::LocalKey;
+
+    /// Nothing is injected.
+    pub(crate) const DISARMED: usize = usize::MAX;
+
+    thread_local! {
+        pub(crate) static WAL_DROP_TAIL: Cell<usize> = const { Cell::new(DISARMED) };
+        pub(crate) static JOURNAL_DROP_TAIL: Cell<usize> = const { Cell::new(DISARMED) };
+    }
+
+    /// The EXACT store file whose `fsync` the durability barrier should report as FAILING.
+    /// A whole path, not a file name, so an arming is confined to the arming test's own store
+    /// and cannot reach a test running beside it.
+    pub(crate) static SYNC_FAILS_FOR: std::sync::Mutex<Option<std::path::PathBuf>> =
+        std::sync::Mutex::new(None);
+
+    /// Arm the file-sync failure for the duration of the returned guard, so a test that panics
+    /// while it is armed cannot leave it armed for the next one.
+    pub(crate) fn fail_sync_for(path: &std::path::Path) -> SyncFault {
+        *SYNC_FAILS_FOR.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
+        SyncFault
+    }
+
+    /// Disarms the file-sync failure when dropped.
+    pub(crate) struct SyncFault;
+
+    impl Drop for SyncFault {
+        fn drop(&mut self) {
+            *SYNC_FAILS_FOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+
+    /// Whether `path`'s `fsync` is currently armed to fail.
+    pub(crate) fn sync_fails(path: &std::path::Path) -> bool {
+        SYNC_FAILS_FOR
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            == Some(path)
+    }
+
+    /// Serialises the tests that arm an injection point against each other.
+    pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Arm one injection point for exactly ONE append.
+    pub(crate) fn arm(point: &'static LocalKey<Cell<usize>>, drop_tail: usize) {
+        point.with(|p| p.set(drop_tail));
+    }
+
+    /// Disarm and report, so one arming injects one failure and the next append is normal.
+    pub(crate) fn take(point: &'static LocalKey<Cell<usize>>) -> Option<usize> {
+        match point.with(|p| p.replace(DISARMED)) {
+            DISARMED => None,
+            drop_tail => Some(drop_tail.max(1)),
+        }
+    }
+}
+
 #[cfg(feature = "mmap")]
 impl Wal {
     const INSERT: u8 = 0;
@@ -6603,45 +7674,75 @@ impl Wal {
     /// `apply_delta` applies them) — framed with a header + checksum + commit marker, and
     /// fsyncs, so the WHOLE batch is durable as a unit BEFORE it is applied in memory. A
     /// crash mid-append leaves an uncommitted tail that `replay` discards entirely.
-    fn append_batch(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) -> std::io::Result<()> {
+    fn append_batch(
+        &mut self,
+        inserts: &[[Term; 3]],
+        deletes: &[[Term; 3]],
+    ) -> std::io::Result<()> {
         use std::io::Write;
+        let n_records = u32::try_from(inserts.len() + deletes.len())
+            .map_err(|_| Self::too_big("the record count", inserts.len() + deletes.len()))?;
         let mut body = Vec::new();
-        let mut n_records = 0u32;
         for t in deletes {
-            Self::push_record(&mut body, Self::DELETE, t);
-            n_records += 1;
+            Self::push_record(&mut body, Self::DELETE, t)?;
         }
         for t in inserts {
-            Self::push_record(&mut body, Self::INSERT, t);
-            n_records += 1;
+            Self::push_record(&mut body, Self::INSERT, t)?;
         }
+        let body_len =
+            u32::try_from(body.len()).map_err(|_| Self::too_big("the batch body", body.len()))?;
         let mut buf = Vec::with_capacity(body.len() + 24);
         buf.extend_from_slice(&Self::BATCH_MAGIC.to_le_bytes());
         buf.extend_from_slice(&n_records.to_le_bytes());
-        buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&body_len.to_le_bytes());
         buf.extend_from_slice(&body);
         // Checksum covers everything written so far (header + body); the commit marker is
         // appended AFTER the checksum so a torn write can't produce a valid-looking trailer.
         let crc = Self::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Self::COMMIT_MARKER.to_le_bytes());
-        // Another handle on this log (in this process) may have appended since this one did:
-        // write at the end, never over it.
+        // Test-only partial-frame append failure.
+        #[cfg(test)]
+        if let Some(drop_tail) = io_fault::take(&io_fault::WAL_DROP_TAIL) {
+            let keep = buf.len().saturating_sub(drop_tail);
+            self.file.write_all(&buf[..keep])?;
+            self.file.sync_data()?;
+            return Err(std::io::Error::other(
+                "injected WAL append fault: a partial frame is on disk",
+            ));
+        } // Another handle on this log (in this process) may have appended since this one did:
+          // write at the end, never over it.
         std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))?;
         self.file.write_all(&buf)?;
         self.file.sync_data()
     }
 
-    fn push_record(buf: &mut Vec<u8>, op: u8, t: &[Term; 3]) {
+    fn push_record(buf: &mut Vec<u8>, op: u8, t: &[Term; 3]) -> std::io::Result<()> {
+        validate_triple_positions(t)?;
         // oxrdf's Display is the canonical N-Triples serialisation of each term.
         let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
+        let len =
+            u32::try_from(line.len()).map_err(|_| Self::too_big("a triple record", line.len()))?;
         buf.push(op);
-        buf.extend_from_slice(&(line.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&len.to_le_bytes());
         buf.extend_from_slice(line.as_bytes());
+        Ok(())
+    }
+
+    /// The error a frame field too large for its `u32` on-disk slot is refused with, UNWRITTEN.
+    fn too_big(what: &str, n: usize) -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "WAL batch refused: {} is {}, which does not fit the on-disk u32 field",
+                what, n
+            ),
+        )
     }
 
     /// Empties the log (after a compaction persisted the folded base).
     fn truncate(&mut self) -> std::io::Result<()> {
+        fault_point("wal-truncate", &self.dir)?;
         truncate_log(&mut self.file)
     }
 
@@ -6663,84 +7764,425 @@ impl Wal {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(e),
         };
-        let mut ops = Vec::new();
-        let mut good = 0usize; // end of the last fully-committed batch
-        'batches: while good < bytes.len() {
-            let bstart = good;
-            // Header: magic + n_records + body_len (12 bytes).
-            if bstart + 12 > bytes.len() {
-                break; // torn header
-            }
-            let rd = |o: usize| u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
-            if rd(bstart) != Self::BATCH_MAGIC {
-                break; // not a batch frame (corruption / torn tail)
-            }
-            let n_records = rd(bstart + 4) as usize;
-            let body_len = rd(bstart + 8) as usize;
-            let body_start = bstart + 12;
-            let Some(body_end) = body_start.checked_add(body_len).filter(|&e| e <= bytes.len()) else {
-                break; // torn body
-            };
-            // Commit trailer: checksum (8) + marker (4).
-            let Some(trailer_end) = body_end.checked_add(12).filter(|&e| e <= bytes.len()) else {
-                break; // trailer not yet written — uncommitted batch
-            };
-            let stored_crc = u64::from_le_bytes(bytes[body_end..body_end + 8].try_into().expect("8 bytes"));
-            let marker = rd(body_end + 8);
-            if marker != Self::COMMIT_MARKER || Self::checksum(&bytes[bstart..body_end]) != stored_crc {
-                break; // uncommitted / corrupt batch — discard the tail
-            }
-            // The batch is committed: parse its records. (A parse failure here would mean a
-            // committed-but-corrupt body — treat it as a torn tail and stop, conservatively.)
-            let mut pos = body_start;
-            let mut batch_ops = Vec::with_capacity(n_records);
-            for _ in 0..n_records {
-                if pos + 5 > body_end {
-                    break 'batches;
+        // One record: `[op u8][len u32][N-Triples line]` — at least five bytes, which is what
+        // bounds the untrusted header count in the shared scanner.
+        let (ops, good) = scan_committed_frames(
+            &path,
+            &bytes,
+            5,
+            |magic| Ok(magic == Self::BATCH_MAGIC),
+            |_, body, pos| {
+                if *pos + 5 > body.len() {
+                    return Err(committed_body_error(
+                        &path,
+                        "a record header runs past the body",
+                    ));
                 }
-                let op = bytes[pos];
-                let len = rd(pos + 1) as usize;
-                let start = pos + 5;
-                let Some(end) = start.checked_add(len).filter(|&e| e <= body_end) else {
-                    break 'batches;
+                let op = body[*pos];
+                let len = u32::from_le_bytes(body[*pos + 1..*pos + 5].try_into().expect("4 bytes"))
+                    as usize;
+                let start = *pos + 5;
+                let Some(end) = start.checked_add(len).filter(|&e| e <= body.len()) else {
+                    return Err(committed_body_error(&path, "a record runs past the body"));
                 };
-                let Some(t) = parse_nt_record(&bytes[start..end]) else {
-                    break 'batches;
+                // Accept only the defined WAL opcodes.
+                let insert = match op {
+                    Self::INSERT => true,
+                    Self::DELETE => false,
+                    other => {
+                        return Err(committed_body_error(
+                            &path,
+                            &format!("record opcode {} is not insert or delete", other),
+                        ));
+                    }
                 };
-                batch_ops.push((op == Self::INSERT, t));
-                pos = end;
-            }
-            if batch_ops.len() != n_records {
-                break; // body record count disagreed with the header — corrupt
-            }
-            ops.extend(batch_ops);
-            good = trailer_end;
-        }
-        if truncate && good < bytes.len() {
-            let f = std::fs::OpenOptions::new().write(true).open(&path)?;
-            f.set_len(good as u64)?;
-            f.sync_data()?;
+                let Some(t) = parse_nt_record(&body[start..end]) else {
+                    return Err(committed_body_error(
+                        &path,
+                        "a record is not one readable N-Triples statement",
+                    ));
+                };
+                *pos = end;
+                Ok((insert, t))
+            },
+        )?;
+        if truncate {
+            truncate_torn_tail(&path, bytes.len(), good)?;
         }
         Ok(ops)
     }
 }
 
-/// (sq-ycle) One resolved redo-journal record: `(is_insert, slot, triple)` — an
-/// insert/delete flag, the graph slot (`None` = default graph, `Some` = that named graph) and the
-/// term-triple. The unit the parent-level [`TxnJournal`] commits and [`Graph::commit_txn`] takes.
+/// Decodes committed frames shared by both durable log formats.
 #[cfg(feature = "mmap")]
-type TxnRecord = (bool, Option<Term>, [Term; 3]);
+fn scan_committed_frames<T>(
+    path: &std::path::Path,
+    bytes: &[u8],
+    min_record_bytes: usize,
+    accept_magic: impl Fn(u32) -> std::io::Result<bool>,
+    mut decode_record: impl FnMut(u32, &[u8], &mut usize) -> std::io::Result<T>,
+) -> std::io::Result<(Vec<T>, usize)> {
+    let mut out: Vec<T> = Vec::new();
+    let mut good = 0usize; // end of the last fully-committed frame
+    while good < bytes.len() {
+        let bstart = good;
+        if bstart + 12 > bytes.len() {
+            break; // torn header
+        }
+        let rd =
+            |o: usize| u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+        let magic = rd(bstart);
+        if !accept_magic(magic)? {
+            break; // not a frame of this reader's format (corruption / torn tail)
+        }
+        let n_records = rd(bstart + 4) as usize;
+        let body_len = rd(bstart + 8) as usize;
+        let body_start = bstart + 12;
+        let Some(body_end) = body_start
+            .checked_add(body_len)
+            .filter(|&e| e <= bytes.len())
+        else {
+            break; // torn body
+        };
+        // Commit trailer: checksum (8) + marker (4).
+        let Some(trailer_end) = body_end.checked_add(12).filter(|&e| e <= bytes.len()) else {
+            break; // trailer not yet written — uncommitted frame
+        };
+        let stored_crc =
+            u64::from_le_bytes(bytes[body_end..body_end + 8].try_into().expect("8 bytes"));
+        if rd(body_end + 8) != Wal::COMMIT_MARKER
+            || Wal::checksum(&bytes[bstart..body_end]) != stored_crc
+        {
+            break; // uncommitted / corrupt frame — discard the tail
+        }
+        let body = &bytes[body_start..body_end];
+        let max_records = body.len() / min_record_bytes;
+        if n_records > max_records {
+            return Err(committed_body_error(
+                path,
+                &format!(
+                    "it declares {} records, more than its {}-byte body can hold",
+                    n_records,
+                    body.len()
+                ),
+            ));
+        }
+        let mut frame: Vec<T> = Vec::new();
+        frame
+            .try_reserve(n_records)
+            .map_err(|e| std::io::Error::other(format!("{}: {}", path.display(), e)))?;
+        let mut pos = 0usize;
+        for _ in 0..n_records {
+            frame.push(decode_record(magic, body, &mut pos)?);
+        }
+        if pos != body.len() {
+            return Err(committed_body_error(
+                path,
+                &format!("{} byte(s) follow the last record", body.len() - pos),
+            ));
+        }
+        // Reserve the aggregate output before extending it with this frame.
+        reserve_replay_output(&mut out, frame.len(), path)?;
+        out.extend(frame);
+        good = trailer_end;
+    }
+    Ok((out, good))
+}
+
+#[cfg(feature = "mmap")]
+fn reserve_replay_output<T>(
+    out: &mut Vec<T>,
+    additional: usize,
+    path: &std::path::Path,
+) -> std::io::Result<()> {
+    fault_point("reserve-output", path)?;
+    out.try_reserve(additional)
+        .map_err(|e| std::io::Error::other(format!("{}: {e}", path.display())))
+}
+
+/// Reports a committed frame that cannot be decoded.
+#[cfg(feature = "mmap")]
+fn committed_body_error(path: &std::path::Path, why: &str) -> std::io::Error {
+    std::io::Error::other(format!(
+        "{}: a committed frame cannot be read back ({}); it was written by a different build and is not replayed",
+        path.display(),
+        why
+    ))
+}
+
+/// (sq-ycle) Truncate a log at the end of its last fully-committed frame, discarding the
+/// torn tail of an interrupted append so the next append starts at a frame boundary. A no-op
+/// when nothing follows the last commit.
+#[cfg(feature = "mmap")]
+fn truncate_torn_tail(path: &std::path::Path, len: usize, good: usize) -> std::io::Result<()> {
+    if good >= len {
+        return Ok(());
+    }
+    let f = std::fs::OpenOptions::new().write(true).open(path)?;
+    f.set_len(good as u64)?;
+    f.sync_data()
+}
+
+/// Durable, refused, or ephemeral write state of a graph.
+#[cfg(feature = "mmap")]
+enum WriteState {
+    /// Directory-backed and writable: every batch is appended and fsynced to this log before it
+    /// is applied in memory.
+    Durable(Wal),
+    /// Previously durable write state, now refused until recovery.
+    Poisoned,
+    /// Independent in-memory state with overlay-only writes.
+    Ephemeral,
+}
+
+#[cfg(feature = "mmap")]
+impl WriteState {
+    /// This graph's log, when it is durable and writable.
+    fn log(&self) -> Option<&Wal> {
+        match self {
+            WriteState::Durable(w) => Some(w),
+            WriteState::Poisoned | WriteState::Ephemeral => None,
+        }
+    }
+
+    /// This graph's log for appending, when it is durable and writable.
+    fn log_mut(&mut self) -> Option<&mut Wal> {
+        match self {
+            WriteState::Durable(w) => Some(w),
+            WriteState::Poisoned | WriteState::Ephemeral => None,
+        }
+    }
+
+    /// The directory this graph is durably backed by, when it is durable and writable.
+    fn dir(&self) -> Option<std::path::PathBuf> {
+        self.log().map(|w| w.dir.clone())
+    }
+
+    /// Whether this graph is durable and writable (it holds a log).
+    fn is_durable(&self) -> bool {
+        matches!(self, WriteState::Durable(_))
+    }
+
+    /// The error a write gets in the `Poisoned` state, or `Ok(())` in the other two.
+    fn refuse_if_poisoned(&self, what: &str) -> Result<(), String> {
+        match self {
+            WriteState::Poisoned => Err(format!(
+                "{} refused: this graph lost its write-ahead log to a failed durable write; the store is frozen until it is reopened",
+                what
+            )),
+            WriteState::Durable(_) | WriteState::Ephemeral => Ok(()),
+        }
+    }
+}
+
+/// Shared durable-write and layout state for this graph tree.
+#[cfg(feature = "mmap")]
+struct TreeState {
+    /// Set by [`Graph::poison_txn`] and durable I/O failures; cleared only by reopening.
+    /// Atomic so a `&Graph` shared across threads can read it.
+    poisoned: std::sync::atomic::AtomicBool,
+    /// Replacement generations indexed by directory path.
+    layout: std::sync::Mutex<LayoutLog>,
+    /// Reentrant exclusion for durable operations throughout a graph tree.
+    writer: WriterPermit,
+}
+
+/// Tracks replacement generations by directory.
+///
+/// Recording one directory inserts one hash-map entry. Staleness checks inspect only
+/// a handle path and its ancestors. Whole-subtree swaps prune subsumed entries; ordinary
+/// slot removals do not scan the accumulated log.
+#[cfg(feature = "mmap")]
+#[derive(Default)]
+struct LayoutLog {
+    generation: u64,
+    replaced: std::collections::HashMap<std::path::PathBuf, u64>,
+}
+
+#[cfg(feature = "mmap")]
+impl LayoutLog {
+    fn prune_descendants(&mut self, dir: &std::path::Path) {
+        self.replaced.retain(|path, _| {
+            #[cfg(test)]
+            layout_cost::prune_visit();
+            path == dir || !path.starts_with(dir)
+        });
+    }
+}
+
+#[cfg(feature = "mmap")]
+impl TreeState {
+    /// Fresh tree state, poisoned by nothing. Used for an in-memory graph, for a
+    /// [`fork`](Graph::fork)/[`snapshot`](Graph::snapshot), and for the root of a newly-opened
+    /// durable tree (whose named graphs are then given the same `Arc` by
+    /// `Graph::share_tree`).
+    fn detached() -> std::sync::Arc<TreeState> {
+        std::sync::Arc::new(TreeState {
+            poisoned: std::sync::atomic::AtomicBool::new(false),
+            layout: std::sync::Mutex::new(LayoutLog::default()),
+            writer: WriterPermit::new(),
+        })
+    }
+
+    /// The tree's current layout generation — the stamp a handle opened now carries.
+    fn generation(&self) -> u64 {
+        self.layout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .generation
+    }
+
+    fn record_replacement(&self, dir: &std::path::Path) -> u64 {
+        let mut log = self.layout.lock().unwrap_or_else(|e| e.into_inner());
+        log.generation += 1;
+        let generation = log.generation;
+        #[cfg(test)]
+        layout_cost::replacement();
+        log.replaced.insert(dir.to_path_buf(), generation);
+        generation
+    }
+
+    fn record_tree_replacement(&self, dir: &std::path::Path) -> u64 {
+        let generation = self.record_replacement(dir);
+        let mut log = self.layout.lock().unwrap_or_else(|e| e.into_inner());
+        log.prune_descendants(dir);
+        generation
+    }
+
+    /// Returns the replaced directory at or above `dir` recorded after `since`.
+    /// Ancestor lookups depend on path depth rather than the accumulated log size.
+    fn replaced_since(
+        &self,
+        dir: &std::path::Path,
+        since: u64,
+    ) -> Option<(std::path::PathBuf, u64)> {
+        let log = self.layout.lock().unwrap_or_else(|e| e.into_inner());
+        if log.replaced.is_empty() {
+            return None;
+        }
+        dir.ancestors().find_map(|ancestor| {
+            log.replaced
+                .get(ancestor)
+                .filter(|at| **at > since)
+                .map(|at| (ancestor.to_path_buf(), *at))
+        })
+    }
+
+    /// Take the tree's writer permit, blocking while another THREAD holds it and admitting a
+    /// nested take by the thread that already holds it.
+    fn write_permit(&self) -> WriterGuard<'_> {
+        self.writer.take()
+    }
+
+    fn poisoned(&self) -> bool {
+        self.poisoned.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn poison(&self) {
+        self.poisoned
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Allows one writer thread per graph tree, with reentrant access for that thread.
+#[cfg(feature = "mmap")]
+struct WriterPermit {
+    /// The thread holding the permit and how many times it has taken it, or `None` when free.
+    held: std::sync::Mutex<Option<(std::thread::ThreadId, u32)>>,
+    /// Signalled when the permit is released, so a waiting thread can take it.
+    freed: std::sync::Condvar,
+}
+
+#[cfg(feature = "mmap")]
+impl WriterPermit {
+    fn new() -> WriterPermit {
+        WriterPermit {
+            held: std::sync::Mutex::new(None),
+            freed: std::sync::Condvar::new(),
+        }
+    }
+
+    fn take(&self) -> WriterGuard<'_> {
+        let me = std::thread::current().id();
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match *held {
+                None => {
+                    *held = Some((me, 1));
+                    return WriterGuard { permit: self };
+                }
+                Some((owner, depth)) if owner == me => {
+                    *held = Some((owner, depth + 1));
+                    return WriterGuard { permit: self };
+                }
+                Some(_) => {
+                    held = self.freed.wait(held).unwrap_or_else(|e| e.into_inner());
+                }
+            }
+        }
+    }
+
+    fn release(&self) {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        match *held {
+            Some((owner, depth)) if depth > 1 => *held = Some((owner, depth - 1)),
+            _ => {
+                *held = None;
+                self.freed.notify_one();
+            }
+        }
+    }
+}
+
+/// Holds the tree's writer permit until it is dropped.
+#[cfg(feature = "mmap")]
+struct WriterGuard<'a> {
+    permit: &'a WriterPermit,
+}
+
+#[cfg(feature = "mmap")]
+impl Drop for WriterGuard<'_> {
+    fn drop(&mut self) {
+        self.permit.release();
+    }
+}
+
+/// (sq-ycle) One record of a redo-journal frame — the unit the parent-level redo
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TxnOp {
+    /// Add `triple` to the graph `slot` names.
+    Insert {
+        /// `None` = the default graph; `Some(name)` = that named graph.
+        slot: Option<Term>,
+        /// The triple to add.
+        triple: [Term; 3],
+    },
+    /// Remove `triple` from the graph `slot` names (a no-op if absent — set semantics).
+    Delete {
+        /// `None` = the default graph; `Some(name)` = that named graph.
+        slot: Option<Term>,
+        /// The triple to remove.
+        triple: [Term; 3],
+    },
+    /// The named graph exists after this frame (find-or-create on replay).
+    Create(Term),
+    /// The named graph does not exist after this frame (no-op-on-absent on replay).
+    Drop(Term),
+}
 
 /// (sq-ycle) Serialise a journal SLOT — the graph a record targets — into `buf`.
 /// A named slot reuses the manifest's [`encode_graph_name`] (kind 0 NamedNode / 1 BlankNode);
 /// the DEFAULT graph (`None`) gets a distinct marker byte (kind 2, no payload) so [`decode_slot`]
 /// can tell "default graph" apart from "named graph" unambiguously on replay.
 #[cfg(feature = "mmap")]
-fn encode_slot(buf: &mut Vec<u8>, slot: &Option<Term>) {
+fn encode_slot(buf: &mut Vec<u8>, slot: &Option<Term>) -> std::io::Result<()> {
     match slot {
         Some(name) => encode_graph_name(buf, name),
         // Default-graph marker: kind 2, no length/value (kinds 0/1 are NamedNode/BlankNode).
-        None => buf.push(2),
+        None => {
+            buf.push(2);
+            Ok(())
+        }
     }
 }
 
@@ -6787,9 +8229,15 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 ///
 /// ```text
 /// [TXN_MAGIC u32][n_records u32][body_len u32]   <- header
-/// <body_len bytes of records>                     <- each: [op u8][slot ...][nt_len u32][N-Triples]
+/// <body_len bytes of records>                     <- data:      [op u8][slot ...][nt_len u32][N-Triples]
+///                                                 <- existence: [op u8][slot ...]
 /// [checksum u64][COMMIT_MARKER u32]               <- commit trailer (written last)
 /// ```
+///
+/// (sq-ycle) A record is a DATA change (`INSERT`/`DELETE`, carrying a triple) or a
+/// GRAPH-EXISTENCE change (`CREATE`/`DROP`, carrying only its named slot) — see [`TxnOp`]. The
+/// existence records are why the frame magic is `WTX2`; a `WTX1` frame written by an older build
+/// is still replayed, with data records only.
 ///
 /// where a record's SLOT is [`encode_slot`]'s `[kind u8]( [len u32][value] )?` and the triple is
 /// the N-Triples line + `u32` length, exactly as [`Wal::push_record`] frames it (so the same
@@ -6800,19 +8248,31 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    /// The store directory this journal belongs to — needed to announce the journal's format to
+    /// older binaries (see [`TxnJournal::mark_store_format`]).
+    dir: std::path::PathBuf,
     /// Set when an append, or the materialisation after one, failed: the journal may then
     /// hold a frame reported as failed, so it takes no further frame, and keeps what it holds,
     /// until reopened.
     poisoned: bool,
+    /// Whether this handle has already confirmed the store's format marker covers `WTX2`
+    /// frames, so the check costs one read per handle rather than one per commit.
+    format_marked: bool,
 }
 
 #[cfg(feature = "mmap")]
 impl TxnJournal {
     const INSERT: u8 = 0;
     const DELETE: u8 = 1;
-    /// Frame magic ("WTX1" little-endian) — distinct from `Wal::BATCH_MAGIC` so a `txn.log` frame
-    /// can never be mistaken for a `wal.log` batch (and vice versa) on a misdirected read.
-    const TXN_MAGIC: u32 = 0x31_58_54_57;
+    /// Named-graph existence opcodes carry a named slot and no triple payload.
+    const CREATE: u8 = 2;
+    const DROP: u8 = 3;
+    /// Current transaction-frame magic (`WTX2`), distinct from per-graph WAL frames.
+    const TXN_MAGIC: u32 = 0x32_58_54_57;
+    /// Previous transaction-frame magic (`WTX1`), retained for reading existing journals.
+    const TXN_MAGIC_V1: u32 = 0x31_58_54_57;
+    /// Shared transaction-frame magic prefix (`WTX`) used to recognize format versions.
+    const TXN_MAGIC_FAMILY: u32 = 0x00_58_54_57;
 
     fn path(dir: &std::path::Path) -> std::path::PathBuf {
         dir.join("txn.log")
@@ -6822,15 +8282,53 @@ impl TxnJournal {
         let file = open_log(&Self::path(dir))?;
         Ok(TxnJournal {
             file,
+            dir: dir.to_path_buf(),
             poisoned: false,
+            format_marked: false,
         })
+    }
+
+    /// Updates store metadata before this handle writes its first current-format frame.
+    fn mark_store_format(&mut self) -> std::io::Result<()> {
+        if self.format_marked {
+            return Ok(());
+        }
+        let meta = self.dir.join("dict-meta.bin");
+        let mut bytes = match std::fs::read(&meta) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(std::io::Error::other(format!(
+                    "atomic UPDATE refused: {} is on the legacy single-file dict.bin layout, which carries no format version an older build would refuse, so a journal frame written here could be truncated by one; re-save the store with this build to migrate it",
+                    self.dir.display()
+                )));
+            }
+            // Propagate metadata inspection errors.
+            Err(e) => return Err(e),
+        };
+        if bytes.len() < 8
+            || u32::from_le_bytes(bytes[0..4].try_into().expect("4 bytes")) != dict::DICT_META_MAGIC
+        {
+            return Err(std::io::Error::other(format!(
+                "atomic UPDATE refused: {} is not a readable dictionary header, so the store's format version cannot be marked",
+                meta.display()
+            )));
+        }
+        let version = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
+        if version == dict::DICT_META_VERSION {
+            self.format_marked = true;
+            return Ok(());
+        }
+        bytes[4..8].copy_from_slice(&dict::DICT_META_VERSION.to_le_bytes());
+        write_fresh(&meta, &bytes)?;
+        self.format_marked = true;
+        Ok(())
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
     /// THE single commit point for one `apply_effects` body. A crash mid-append leaves an
     /// uncommitted tail that [`replay`](Self::replay) discards entirely. An empty record set is a
     /// no-op (an UPDATE that resolves to no data change carries no atomicity obligation).
-    fn append(&mut self, records: &[TxnRecord]) -> std::io::Result<()> {
+    fn append(&mut self, records: &[TxnOp]) -> std::io::Result<()> {
         use std::io::Write;
         // A failed append may have left any part of its frame behind, a complete one included,
         // for a later replay to apply: the journal takes no further frame, not even an empty
@@ -6843,28 +8341,69 @@ impl TxnJournal {
         if records.is_empty() {
             return Ok(());
         }
+        let too_big = |what: &str, n: usize| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "txn journal frame refused: {} is {}, which does not fit the on-disk u32 field",
+                    what, n
+                ),
+            )
+        };
+        let n_records =
+            u32::try_from(records.len()).map_err(|_| too_big("the record count", records.len()))?;
+        // The store's format marker must say `WTX2` before the first such frame is on disk.
+        self.mark_store_format()?;
         let mut body = Vec::new();
-        for (insert, slot, t) in records {
-            let op = if *insert { Self::INSERT } else { Self::DELETE };
+        for record in records {
+            // A graph-existence record is `[op][slot]` and stops there; a data record adds the
+            // triple as N-Triples + u32 length — byte-identical to `Wal::push_record`'s line form
+            // (minus the op byte, written before the slot), so the same `parse_nt_record` decodes
+            // it on replay.
+            let (op, slot, triple) = match record {
+                TxnOp::Insert { slot, triple } => (Self::INSERT, slot.clone(), Some(triple)),
+                TxnOp::Delete { slot, triple } => (Self::DELETE, slot.clone(), Some(triple)),
+                TxnOp::Create(name) => (Self::CREATE, Some(name.clone()), None),
+                TxnOp::Drop(name) => (Self::DROP, Some(name.clone()), None),
+            };
             body.push(op);
-            encode_slot(&mut body, slot);
-            // The triple as N-Triples + u32 length — byte-identical to `Wal::push_record`'s line
-            // form (minus the op byte, which we wrote before the slot above), so the same
-            // `parse_nt_record` decodes it on replay.
-            let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
-            body.extend_from_slice(&(line.len() as u32).to_le_bytes());
-            body.extend_from_slice(line.as_bytes());
+            encode_slot(&mut body, &slot)?;
+            if let Some(t) = triple {
+                // Validate triple positions before writing the frame.
+                validate_triple_positions(t)?;
+                let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
+                let len = u32::try_from(line.len())
+                    .map_err(|_| too_big("a triple record", line.len()))?;
+                body.extend_from_slice(&len.to_le_bytes());
+                body.extend_from_slice(line.as_bytes());
+            }
         }
+        let body_len =
+            u32::try_from(body.len()).map_err(|_| too_big("the frame body", body.len()))?;
         let mut buf = Vec::with_capacity(body.len() + 24);
         buf.extend_from_slice(&Self::TXN_MAGIC.to_le_bytes());
-        buf.extend_from_slice(&(records.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&n_records.to_le_bytes());
+        buf.extend_from_slice(&body_len.to_le_bytes());
         buf.extend_from_slice(&body);
         // Checksum covers header + body; the commit marker is appended AFTER it so a torn write
         // can't produce a valid-looking trailer (identical discipline to `Wal::append_batch`).
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
+        // Test-only partial-frame append failure.
+        #[cfg(test)]
+        if let Some(drop_tail) = io_fault::take(&io_fault::JOURNAL_DROP_TAIL) {
+            let keep = buf.len().saturating_sub(drop_tail);
+            let partial = self
+                .file
+                .write_all(&buf[..keep])
+                .and_then(|()| self.file.sync_data());
+            self.poisoned = true;
+            partial?;
+            return Err(std::io::Error::other(
+                "injected txn journal append fault: a partial frame is on disk",
+            ));
+        }
         let written = std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))
             .and_then(|_| self.file.write_all(&buf))
             .and_then(|()| self.file.sync_data());
@@ -6895,86 +8434,131 @@ impl TxnJournal {
     /// marker) are returned; the file is TRUNCATED at the start of the first incomplete/corrupt
     /// frame — the torn tail of an interrupted append — so a partial frame is NEVER partially
     /// applied. EXACT clone of [`Wal::replay`]'s torn-tail logic, extended with the per-record slot.
-    fn replay(dir: &std::path::Path) -> std::io::Result<Vec<TxnRecord>> {
+    fn replay(dir: &std::path::Path) -> std::io::Result<Vec<TxnOp>> {
         Self::read(dir, true)
     }
 
     /// [`replay`](Self::replay), truncating the torn tail only when `truncate`.
-    fn read(dir: &std::path::Path, truncate: bool) -> std::io::Result<Vec<TxnRecord>> {
+    fn read(dir: &std::path::Path, truncate: bool) -> std::io::Result<Vec<TxnOp>> {
         let path = Self::path(dir);
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(e),
         };
-        let mut ops = Vec::new();
-        let mut good = 0usize; // end of the last fully-committed frame
-        'frames: while good < bytes.len() {
-            let bstart = good;
-            // Header: magic + n_records + body_len (12 bytes).
-            if bstart + 12 > bytes.len() {
-                break; // torn header
-            }
-            let rd = |o: usize| u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
-            if rd(bstart) != Self::TXN_MAGIC {
-                break; // not a txn frame (corruption / torn tail)
-            }
-            let n_records = rd(bstart + 4) as usize;
-            let body_len = rd(bstart + 8) as usize;
-            let body_start = bstart + 12;
-            let Some(body_end) = body_start.checked_add(body_len).filter(|&e| e <= bytes.len()) else {
-                break; // torn body
-            };
-            // Commit trailer: checksum (8) + marker (4).
-            let Some(trailer_end) = body_end.checked_add(12).filter(|&e| e <= bytes.len()) else {
-                break; // trailer not yet written — uncommitted frame
-            };
-            let stored_crc = u64::from_le_bytes(bytes[body_end..body_end + 8].try_into().expect("8 bytes"));
-            let marker = rd(body_end + 8);
-            if marker != Wal::COMMIT_MARKER || Wal::checksum(&bytes[bstart..body_end]) != stored_crc {
-                break; // uncommitted / corrupt frame — discard the tail
-            }
-            // The frame is committed: parse its records. A parse failure here means a
-            // committed-but-corrupt body — treat it as a torn tail and stop, conservatively.
-            let mut pos = body_start;
-            let mut frame_ops = Vec::with_capacity(n_records);
-            for _ in 0..n_records {
-                if pos >= body_end {
-                    break 'frames;
+        let (ops, good) = scan_committed_frames(
+            &path,
+            &bytes,
+            2,
+            |magic| {
+                if magic == Self::TXN_MAGIC || magic == Self::TXN_MAGIC_V1 {
+                    return Ok(true);
                 }
-                let op = bytes[pos];
-                pos += 1;
-                let Ok((slot, after_slot)) = decode_slot(&bytes[..body_end], pos) else {
-                    break 'frames;
-                };
-                pos = after_slot;
-                if pos + 4 > body_end {
-                    break 'frames;
+                if magic & 0x00FF_FFFF == Self::TXN_MAGIC_FAMILY {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: redo-journal frame format {:?} was written by a newer build and cannot be replayed; nothing was changed",
+                            path.display(),
+                            String::from_utf8_lossy(&magic.to_le_bytes())
+                        ),
+                    ));
                 }
-                let len = rd(pos) as usize;
-                let start = pos + 4;
-                let Some(end) = start.checked_add(len).filter(|&e| e <= body_end) else {
-                    break 'frames;
+                Ok(false)
+            },
+            |magic, body, pos| {
+                let existence_ops_allowed = magic == Self::TXN_MAGIC;
+                if *pos >= body.len() {
+                    return Err(committed_body_error(
+                        &path,
+                        "a record header runs past the body",
+                    ));
+                }
+                let op = body[*pos];
+                let (slot, after_slot) =
+                    decode_slot(body, *pos + 1).map_err(|m| committed_body_error(&path, &m))?;
+                *pos = after_slot;
+                // Existence records require a named slot and the current frame format.
+                if op == Self::CREATE || op == Self::DROP {
+                    let Some(name) = slot.filter(|_| existence_ops_allowed) else {
+                        return Err(committed_body_error(
+                            &path,
+                            "a graph-existence record has no named graph, or appears in a frame format without existence records",
+                        ));
+                    };
+                    return Ok(if op == Self::CREATE {
+                        TxnOp::Create(name)
+                    } else {
+                        TxnOp::Drop(name)
+                    });
+                }
+                let insert = match op {
+                    Self::INSERT => true,
+                    Self::DELETE => false,
+                    other => {
+                        return Err(committed_body_error(
+                            &path,
+                            &format!(
+                                "record opcode {} is not insert, delete, create or drop",
+                                other
+                            ),
+                        ));
+                    }
                 };
-                let Some(t) = parse_nt_record(&bytes[start..end]) else {
-                    break 'frames;
+                if *pos + 4 > body.len() {
+                    return Err(committed_body_error(
+                        &path,
+                        "a record length runs past the body",
+                    ));
+                }
+                let len =
+                    u32::from_le_bytes(body[*pos..*pos + 4].try_into().expect("4 bytes")) as usize;
+                let start = *pos + 4;
+                let Some(end) = start.checked_add(len).filter(|&e| e <= body.len()) else {
+                    return Err(committed_body_error(&path, "a record runs past the body"));
                 };
-                frame_ops.push((op == Self::INSERT, slot, t));
-                pos = end;
-            }
-            if frame_ops.len() != n_records {
-                break; // body record count disagreed with the header — corrupt
-            }
-            ops.extend(frame_ops);
-            good = trailer_end;
-        }
-        if truncate && good < bytes.len() {
-            let f = std::fs::OpenOptions::new().write(true).open(&path)?;
-            f.set_len(good as u64)?;
-            f.sync_data()?;
+                let Some(triple) = parse_nt_record(&body[start..end]) else {
+                    return Err(committed_body_error(
+                        &path,
+                        "a record is not one readable N-Triples statement",
+                    ));
+                };
+                *pos = end;
+                Ok(if insert {
+                    TxnOp::Insert { slot, triple }
+                } else {
+                    TxnOp::Delete { slot, triple }
+                })
+            },
+        )?;
+        if truncate {
+            truncate_torn_tail(&path, bytes.len(), good)?;
         }
         Ok(ops)
     }
+}
+
+/// Validates RDF triple positions before writing a durable record.
+#[cfg(feature = "mmap")]
+fn validate_triple_positions(t: &[Term; 3]) -> std::io::Result<()> {
+    let refuse = |position: &str, term: &Term, allowed: &str| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "durable write refused: {} is not a valid RDF {} ({} are allowed), so the record could not be read back from the log",
+                term, position, allowed
+            ),
+        )
+    };
+    match &t[0] {
+        Term::NamedNode(_) | Term::BlankNode(_) => {}
+        other => return Err(refuse("subject", other, "IRIs and blank nodes")),
+    }
+    match &t[1] {
+        Term::NamedNode(_) => {}
+        other => return Err(refuse("predicate", other, "IRIs")),
+    }
+    Ok(())
 }
 
 /// Parses one WAL record body (a single N-Triples statement) into its term triple.
@@ -6982,7 +8566,15 @@ impl TxnJournal {
 fn parse_nt_record(bytes: &[u8]) -> Option<[Term; 3]> {
     let mut it = NTriplesParser::new().for_slice(bytes);
     let t = it.next()?.ok()?;
-    Some([subject_term(&t.subject), Term::NamedNode(t.predicate), t.object])
+    // A triple record must contain exactly one complete statement.
+    if it.next().is_some() {
+        return None;
+    }
+    Some([
+        subject_term(&t.subject),
+        Term::NamedNode(t.predicate),
+        t.object,
+    ])
 }
 
 /// The numeric-value cache for a dictionary: `numerics[id-1]` is the f64 value of term
@@ -10804,7 +12396,10 @@ mod tests {
 
         // Every reopened named graph must carry its OWN per-graph WAL (durable updates).
         for (_, sub) in &g2.named {
-            assert!(sub.wal.is_some(), "reopened named graph lacks its own WAL");
+            assert!(
+                sub.wal.is_durable(),
+                "reopened named graph lacks its own WAL"
+            );
         }
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -12984,7 +14579,22 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CTR: AtomicU64 = AtomicU64::new(0);
         let n = CTR.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("sparq_txn_{tag}_{}_{n}", std::process::id()))
+        std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("sparq_txn_{tag}_{}_{n}", std::process::id()))
+    }
+
+    /// (sq-ycle) The slot ids a store's manifest declares, in manifest order — what an
+    /// `open` will try to open, and what recovery reconciles a candidate sub-tree against.
+    #[cfg(feature = "mmap")]
+    fn declared_manifest_slots(dir: &std::path::Path) -> Vec<u32> {
+        read_named_manifest(dir)
+            .expect("the manifest reads")
+            .expect("the store has a manifest")
+            .entries
+            .iter()
+            .map(|(slot, _)| *slot)
+            .collect()
     }
 
     /// A graph is directory-backed when it, or any named graph under it, was opened from a
@@ -13006,6 +14616,1000 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_interrupted_named_drop_is_resolved_by_the_manifest_not_by_which_sibling_survived() {
+        let dir = txn_tmp_dir("drop-reconcile");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        // Build the post-drop (one-survivor) sub-tree as `named.drop-new` and move `named/`
+        // aside as `named.drop-old`: the exact on-disk state of a crash between the two renames,
+        // with the manifest still naming the PRE-drop set of two.
+        let one = staging_sibling(&named_dir, "drop-new");
+        let scratch = dir.with_file_name("drop-scratch");
+        std::fs::remove_dir_all(&scratch).ok();
+        std::fs::create_dir_all(&one).unwrap();
+        Graph::load_dataset("<http://ex/n1> <http://ex/p> <http://ex/o1> .", "nquads")
+            .unwrap()
+            .save(&scratch)
+            .unwrap();
+        write_store_marker(&scratch, Role::Child).unwrap();
+        std::fs::rename(&scratch, one.join("0")).unwrap();
+        mark_staging(
+            &one,
+            "drop-new",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        std::fs::rename(&named_dir, staging_sibling(&named_dir, "drop-old")).unwrap();
+        mark_staging(
+            &staging_sibling(&named_dir, "drop-old"),
+            "drop-old",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            declared_manifest_slots(&dir),
+            vec![0, 1],
+            "the manifest is the pre-drop one"
+        );
+
+        // The manifest names two graphs, so the two-slot `drop-old` is the sub-tree it describes.
+        let g = Graph::open(&dir).expect("the store opens: the drop is rolled back, not completed");
+        let mut names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["<http://ex/g0>".to_string(), "<http://ex/g1>".to_string()],
+            "both pre-drop graphs are back"
+        );
+        drop(g);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_unreconcilable_named_drop_refuses_the_open_and_keeps_both_siblings() {
+        let dir = txn_tmp_dir("drop-stuck");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let old = staging_sibling(&named_dir, "drop-old");
+        let new = staging_sibling(&named_dir, "drop-new");
+        // The manifest names one graph; `drop-old` has none and `drop-new` has two.
+        std::fs::rename(&named_dir, &old).unwrap();
+        std::fs::remove_dir_all(old.join("0")).unwrap();
+        std::fs::create_dir_all(new.join("0")).unwrap();
+        std::fs::create_dir_all(new.join("1")).unwrap();
+        mark_staging(
+            &old,
+            "drop-old",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        mark_staging(
+            &new,
+            "drop-new",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        match Graph::open(&dir) {
+            Ok(_) => panic!("an unreconcilable interrupted drop must refuse the open"),
+            Err(e) => assert!(
+                e.to_string().contains("cannot be reconciled"),
+                "unexpected error: {}",
+                e
+            ),
+        }
+        assert!(
+            old.exists() && new.exists(),
+            "both candidates are kept for a manual recovery"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&old).ok();
+        std::fs::remove_dir_all(&new).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_journal_frame_is_refused_on_a_store_with_no_format_marker() {
+        let dir = txn_tmp_dir("legacy-dict");
+        std::fs::remove_dir_all(&dir).ok();
+        let seed = Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap();
+        seed.save(&dir).unwrap();
+        // Construct a legacy single-file dictionary fixture.
+        seed.dict.save(&dir.join("dict.bin")).unwrap();
+        std::fs::remove_file(dir.join("dict-meta.bin")).unwrap();
+        let mut g = Graph::open(&dir).expect("such a store still OPENS: reads are unaffected");
+        let err = g
+            .commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            }])
+            .expect_err("an atomic UPDATE on an unmarkable store is refused");
+        assert!(
+            err.contains("legacy single-file dict.bin"),
+            "unexpected error: {}",
+            err
+        );
+        assert!(
+            std::fs::metadata(TxnJournal::path(&dir))
+                .map(|m| m.len())
+                .unwrap_or(0)
+                == 0,
+            "the refused frame wrote no bytes"
+        );
+        drop(g);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_graph_that_lost_its_log_refuses_creates_and_batch_drops() {
+        let dir = txn_tmp_dir("logless");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Inject a failed swap rename after the log is released.
+        let blocker = staging_sibling(&dir, "compact-old");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let t = [term_iri(3, "s"), term_iri(3, "p"), term_iri(3, "o")];
+        g.apply_delta(std::slice::from_ref(&t), &[]).unwrap();
+        g.compact()
+            .expect_err("the swap fails after the log is released");
+        assert!(g.wal.is_durable());
+        assert!(!g.is_frozen());
+        g.wal = WriteState::Poisoned;
+
+        let create = g.ensure_named(&named("g-new"));
+        assert!(
+            create.is_err(),
+            "a named-graph create is refused, not served in memory"
+        );
+        assert_eq!(
+            g.named.iter().filter(|(n, _)| *n == named("g-new")).count(),
+            0,
+            "no in-memory child was attached"
+        );
+        assert!(
+            g.drop_all_named_durable().is_err(),
+            "a batch drop is refused rather than clearing the set in memory"
+        );
+        assert_eq!(
+            g.named.len(),
+            1,
+            "the named set is untouched by the refusal"
+        );
+        assert!(
+            g.apply_delta(
+                &[[term_iri(4, "s"), term_iri(4, "p"), term_iri(4, "o")]],
+                &[]
+            )
+            .is_err(),
+            "a plain delta is refused too"
+        );
+        drop(g);
+        std::fs::remove_file(&blocker).ok();
+
+        // Check refused write state independently of shared poison and generations.
+        let mut lone = Graph::open(&dir).unwrap();
+        lone.wal = WriteState::Poisoned;
+        assert!(
+            !lone.txn_poisoned(),
+            "the tree is NOT poisoned: only the write state is"
+        );
+        assert_eq!(
+            lone.generation,
+            lone.tree.generation(),
+            "and the generation still matches"
+        );
+        assert!(
+            lone.ensure_named(&named("g-lone")).is_err(),
+            "a create is refused by the state alone"
+        );
+        assert!(
+            lone.drop_all_named_durable().is_err(),
+            "a batch drop is refused by the state alone"
+        );
+        assert!(
+            lone.clear_default_durable().is_err(),
+            "a durable clear is refused by the state alone"
+        );
+        assert!(
+            lone.apply_delta(
+                &[[term_iri(5, "s"), term_iri(5, "p"), term_iri(5, "o")]],
+                &[]
+            )
+            .is_err(),
+            "a delta is refused by the state alone"
+        );
+        assert!(
+            lone.compact().is_err(),
+            "a compaction is refused by the state alone"
+        );
+        assert!(
+            lone.vacuum().is_err(),
+            "a vacuum is refused by the state alone"
+        );
+        drop(lone);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_compaction_that_fails_to_stage_can_be_retried_without_losing_the_batch() {
+        let dir = txn_tmp_dir("compact-retry");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        let t = [term_iri(5, "s"), term_iri(5, "p"), term_iri(5, "o")];
+        g.apply_delta(std::slice::from_ref(&t), &[]).unwrap();
+        let blocker = staging_sibling(&dir, "compact-new");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        g.compact().expect_err("staging fails");
+        std::fs::remove_file(&blocker).unwrap();
+        // The retry must do the work, not skip it.
+        g.compact().expect("the retry compacts");
+        drop(g);
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.len(),
+            2,
+            "the acknowledged insert survived the failed compaction and its retry"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_external_build_replaces_an_inactive_checkpointed_store_under_its_lock() {
+        let dir = txn_tmp_dir("ext-dest");
+        Graph::new().save(&dir).unwrap();
+        let held = Graph::open(&dir).unwrap();
+        let data = b"<http://ex/new> <http://ex/p> <http://ex/o> .\n";
+        assert!(Graph::build_external(&data[..], "ntriples", &dir, 64).is_err());
+        drop(held);
+        Graph::build_external(&data[..], "ntriples", &dir, 64).unwrap();
+        assert_eq!(Graph::open(&dir).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_triple_that_could_not_be_replayed_is_refused_before_it_is_logged() {
+        let dir = txn_tmp_dir("bad-position");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        let literal_predicate = [
+            term_iri(6, "s"),
+            Term::Literal(oxrdf::Literal::new_simple_literal("not a predicate")),
+            term_iri(6, "o"),
+        ];
+        let err = g
+            .apply_delta(std::slice::from_ref(&literal_predicate), &[])
+            .expect_err("a literal predicate is refused");
+        assert!(
+            err.contains("not a valid RDF predicate"),
+            "unexpected error: {}",
+            err
+        );
+        assert_eq!(
+            g.len(),
+            1,
+            "the refused triple did not reach the in-memory image either"
+        );
+        assert_eq!(
+            std::fs::metadata(dir.join("wal.log")).unwrap().len(),
+            0,
+            "nothing was written to the log"
+        );
+        drop(g);
+        assert_eq!(
+            Graph::open(&dir).unwrap().len(),
+            1,
+            "and nothing is replayed"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_wal_batch_that_cannot_be_read_back_is_an_error_not_a_truncation() {
+        let dir = txn_tmp_dir("wal-hostile");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let record = {
+            let mut body = Vec::new();
+            Wal::push_record(
+                &mut body,
+                Wal::INSERT,
+                &[term_iri(7, "s"), term_iri(7, "p"), term_iri(7, "o")],
+            )
+            .unwrap();
+            body
+        };
+        let frame = |n_records: u32, body: &[u8]| -> Vec<u8> {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&Wal::BATCH_MAGIC.to_le_bytes());
+            buf.extend_from_slice(&n_records.to_le_bytes());
+            buf.extend_from_slice(&u32::try_from(body.len()).unwrap().to_le_bytes());
+            buf.extend_from_slice(body);
+            let crc = Wal::checksum(&buf);
+            buf.extend_from_slice(&crc.to_le_bytes());
+            buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
+            buf
+        };
+        let mut unknown_opcode = record.clone();
+        unknown_opcode[0] = 9;
+        let mut trailing = record.clone();
+        trailing.extend_from_slice(b"junk!");
+        for (what, bytes, expect) in [
+            (
+                "an oversized record count",
+                frame(u32::MAX, &record),
+                "more than its",
+            ),
+            ("an unknown opcode", frame(1, &unknown_opcode), "opcode 9"),
+            (
+                "trailing body bytes",
+                frame(1, &trailing),
+                "byte(s) follow the last record",
+            ),
+        ] {
+            std::fs::write(dir.join("wal.log"), &bytes).unwrap();
+            match Graph::open(&dir) {
+                Ok(_) => panic!("{} must not open", what),
+                Err(e) => assert!(
+                    e.to_string().contains(expect),
+                    "{}: unexpected error: {}",
+                    what,
+                    e
+                ),
+            }
+            assert_eq!(
+                std::fs::read(dir.join("wal.log")).unwrap(),
+                bytes,
+                "{}: the committed batch was truncated instead of reported",
+                what
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Staging provenance distinguishes stores even when their names are not UTF-8.
+    #[cfg(all(feature = "mmap", unix))]
+    #[test]
+    fn non_utf8_store_names_use_recorded_staging_provenance() {
+        use std::os::unix::ffi::OsStrExt;
+        let base = txn_tmp_dir("nonutf8");
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::create_dir_all(&base).unwrap();
+        let name = std::ffi::OsStr::from_bytes(b"bad\xff.compact-old");
+        let dir = base.join(name);
+        Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        assert_eq!(Graph::open(&dir).unwrap().len(), 1);
+        let id = read_marker(&dir).unwrap().unwrap().id.unwrap();
+        mark_staging(&dir, "compact-old", &id).unwrap();
+        let before = std::fs::read(dir.join("dict-meta.bin")).unwrap();
+        let err = Graph::open(&dir)
+            .err()
+            .expect("recorded staging is refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(dir.join(STAGING_MARKER).is_file());
+        assert_eq!(std::fs::read(dir.join("dict-meta.bin")).unwrap(), before);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// Legacy stem-based staging requires explicit owner-confirmed adoption.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_legacy_stem_named_staging_sibling_is_never_adopted_without_being_asked() {
+        let base = txn_tmp_dir("legacy-stem");
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = base.join("data.a");
+        let scratch = base.join("scratch");
+        Graph::load_dataset("<http://ex/kept> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&scratch)
+            .unwrap();
+        // Construct a missing root with a recorded legacy staging sibling.
+        let legacy = dir.with_extension("compact-new");
+        std::fs::rename(&scratch, &legacy).unwrap();
+        assert!(!dir.exists());
+        match Graph::open(&dir) {
+            Ok(_) => panic!("a stem-named sibling must not be adopted silently"),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("data.compact-new"),
+                    "the error names the sibling: {}",
+                    msg
+                );
+                assert!(msg.contains("no staging record"), "{msg}");
+            }
+        }
+        assert!(legacy.exists(), "the sibling is left where it is");
+        Graph::adopt_legacy_staging(&dir).expect("the explicit call finishes the swap");
+        assert_eq!(
+            Graph::open(&dir).unwrap().len(),
+            1,
+            "the store is recovered"
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    // Windows refuses to rename a directory while files inside it are open, so this base swap
+    // cannot happen there.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_child_detached_from_its_parent_refuses_writes_once_the_parent_swaps_its_base() {
+        let dir = txn_tmp_dir("detached-child");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut parent = Graph::open(&dir).unwrap();
+        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
+        child
+            .apply_delta(std::slice::from_ref(&t), &[])
+            .expect("the detached child is writable until the parent moves the ground");
+        parent
+            .vacuum()
+            .expect("the parent rewrites its whole directory");
+        let t2 = [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")];
+        let err = child
+            .apply_delta(std::slice::from_ref(&t2), &[])
+            .expect_err("the child's directory is gone: the write is refused, not acknowledged");
+        assert!(
+            err.contains("is stale at layout generation"),
+            "unexpected error: {}",
+            err
+        );
+        drop(child);
+        drop(parent);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_child_detached_from_its_parent_keeps_acknowledged_writes_when_a_base_swap_fails() {
+        let dir = txn_tmp_dir("detached-child-failed-swap");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut parent = Graph::open(&dir).unwrap();
+        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
+        child
+            .apply_delta(std::slice::from_ref(&t), &[])
+            .expect("the detached child's write is acknowledged");
+        assert!(
+            parent.vacuum().is_err(),
+            "the detached child's open files prevent the directory rename on Windows"
+        );
+        drop(child);
+        drop(parent);
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            dump_terms(&reopened),
+            vec![(
+                "<http://ex/base>".into(),
+                "<http://ex/p>".into(),
+                "<http://ex/o>".into(),
+            )]
+        );
+        assert_eq!(
+            dump_terms(
+                reopened
+                    .named_graph(&named("g0"))
+                    .expect("the named graph survives")
+            ),
+            vec![
+                (
+                    "<http://ex/n0>".into(),
+                    "<http://ex/p>".into(),
+                    "<http://ex/o0>".into(),
+                ),
+                (
+                    "<http://ex/s8>".into(),
+                    "<http://ex/p8>".into(),
+                    "<http://ex/o8>".into(),
+                ),
+            ]
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Restore recovers an interrupted swap before replacing the store.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_restore_after_an_interrupted_swap_recovers_the_store_instead_of_deleting_it() {
+        let dir = txn_tmp_dir("restore-heal");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/kept> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // The state of a crash between the two renames: `dir` gone, the old base aside.
+        let old = staging_sibling(&dir, "compact-old");
+        std::fs::rename(&dir, &old).unwrap();
+        let id = read_marker(&old).unwrap().unwrap().id.unwrap();
+        mark_staging(&old, "compact-old", &id).unwrap();
+        let fresh =
+            Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads").unwrap();
+        let restored = Graph::restore_into_durable(&dir, fresh)
+            .expect("the restore heals the interrupted swap and then replaces the store");
+        assert_eq!(
+            restored.len(),
+            1,
+            "the restored image is the one that was asked for"
+        );
+        drop(restored);
+        assert!(
+            !old.exists(),
+            "the recovered sibling is consumed, not left behind"
+        );
+        assert_eq!(
+            Graph::open(&dir).unwrap().len(),
+            1,
+            "and the store at the canonical path is readable"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_directory_inside_a_store_cannot_be_claimed_as_a_store_of_its_own() {
+        let dir = txn_tmp_dir("inside-store");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        assert_eq!(
+            read_store_marker(&dir).unwrap(),
+            Some(Role::Root),
+            "the store is marked as a root"
+        );
+        assert_eq!(
+            read_store_marker(&dir.join(NAMED_SUBDIR).join("0")).unwrap(),
+            Some(Role::Child),
+            "its named graph is marked as a child"
+        );
+        // An existing named slot, a path that does not exist yet, and the `named/` container
+        // itself are all inside the store.
+        for inside in [
+            dir.join(NAMED_SUBDIR).join("0"),
+            dir.join(NAMED_SUBDIR).join("7"),
+            dir.join("scratch"),
+        ] {
+            match Graph::open(&inside) {
+                Ok(_) => panic!("{} must not open as a store of its own", inside.display()),
+                Err(e) => assert!(
+                    e.to_string().contains("is inside the graph store at"),
+                    "{}",
+                    e
+                ),
+            }
+            let err = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "ntriples")
+                .unwrap()
+                .save(&inside)
+                .expect_err("and must not be saved to as a store of its own");
+            assert!(
+                err.to_string().contains("is inside the graph store at"),
+                "{}",
+                err
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_root_marked_store_in_a_named_slot_is_refused_rather_than_adopted() {
+        let dir = txn_tmp_dir("nested-root");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let slot = dir.join(NAMED_SUBDIR).join("0");
+        write_store_marker(&slot, Role::Root).unwrap();
+        match Graph::open(&dir) {
+            Ok(_) => panic!("a root-marked slot must not be adopted as a named graph"),
+            Err(e) => assert!(
+                e.to_string().contains("not a named graph directory"),
+                "unexpected error: {}",
+                e
+            ),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_destination_holding_another_store_says_so() {
+        let base = txn_tmp_dir("foreign-store");
+        std::fs::remove_dir_all(&base).ok();
+        let inner = base.join("inner");
+        Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&inner)
+            .unwrap();
+        let err = Graph::load_dataset("<http://ex/a> <http://ex/b> <http://ex/c> .", "nquads")
+            .unwrap()
+            .save(&base)
+            .expect_err("a destination holding another store is refused");
+        assert!(
+            err.to_string().contains("holds another graph store"),
+            "unexpected error: {}",
+            err
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_interrupted_named_drop_removes_no_candidate_until_one_agrees() {
+        let dir = txn_tmp_dir("drop-no-removal");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        assert_eq!(
+            declared_manifest_slots(&dir),
+            vec![0, 1],
+            "the manifest names two slots"
+        );
+        // Neither candidate contains the complete declared slot set.
+        let old_dir = staging_sibling(&named_dir, "drop-old");
+        copy_tree(&named_dir, &old_dir).unwrap();
+        mark_staging(
+            &old_dir,
+            "drop-old",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(old_dir.join("2")).unwrap();
+        std::fs::remove_dir_all(named_dir.join("1")).unwrap();
+
+        let e = match Graph::open(&dir) {
+            Ok(_) => panic!("neither candidate matches the manifest: the open must be refused"),
+            Err(e) => e,
+        };
+        assert!(
+            e.to_string().contains("cannot be reconciled automatically"),
+            "unexpected error: {}",
+            e
+        );
+        // EVERY candidate is still on disk: nothing was removed on the way to the refusal.
+        assert!(named_dir.join("0").is_dir(), "named/ must not be removed");
+        assert!(
+            old_dir.join("0").is_dir() && old_dir.join("2").is_dir(),
+            "drop-old must not be removed"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&old_dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_manifest_is_not_published_when_what_it_names_cannot_be_made_durable() {
+        let dir = txn_tmp_dir("barrier");
+        std::fs::remove_dir_all(&dir).ok();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let slot = named_dir.join("0");
+        std::fs::create_dir_all(&named_dir).unwrap();
+        let entries = vec![(0u32, named("g0"))];
+        // Publication requires every declared child to be present.
+        let e = publish_named_manifest(&dir, &[&slot], &entries, 1)
+            .expect_err("the barrier fails, so the publish must not happen");
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::NotFound,
+            "unexpected error: {}",
+            e
+        );
+        assert!(
+            !dir.join(NAMED_MANIFEST).exists(),
+            "no manifest may be published once the barrier has failed"
+        );
+        // Publication succeeds after the declared child is available.
+        std::fs::create_dir_all(&slot).unwrap();
+        publish_named_manifest(&dir, &[&slot], &entries, 1).expect("a syncable tree publishes");
+        assert_eq!(declared_manifest_slots(&dir), vec![0]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn dropped_named_data_never_returns_under_a_graph_created_afterwards() {
+        let dir = txn_tmp_dir("slot-reuse");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/secret> <http://ex/p> <http://ex/o> <http://ex/gone> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let keep = dir.with_file_name("slot-residue");
+        std::fs::remove_dir_all(&keep).ok();
+        copy_tree(&named_dir.join("0"), &keep).unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.drop_all_named_durable().unwrap();
+        }
+        // The residue a failed/interrupted cleanup leaves: slot 0 back on disk, triples and all.
+        copy_tree(&keep, &named_dir.join("0")).unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert!(
+                g.named.is_empty(),
+                "the manifest names nothing, so the orphan is not opened"
+            );
+            let i = g.ensure_named(&named("fresh")).unwrap();
+            assert_eq!(g.named[i].1.len(), 0, "the new graph starts empty");
+            assert!(
+                g.named[i].1.wal.dir().unwrap() != named_dir.join("0"),
+                "the new graph must not be put in the dropped graph's slot"
+            );
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.named.len(),
+            1,
+            "one named graph: the one just created"
+        );
+        assert_eq!(reopened.named[0].0, named("fresh"));
+        assert_eq!(
+            reopened.named[0].1.len(),
+            0,
+            "and the dropped graph's triples do not come back under its name"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&keep).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_named_drop_that_cannot_remove_its_directories_is_an_error_not_a_success() {
+        let dir = txn_tmp_dir("drop-cleanup-fails");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Construct an in-memory attachment and an invalid named container.
+        g.named
+            .push((named("mem"), Graph::from_parts(Dict::new(), Vec::new())));
+        std::fs::write(dir.join(NAMED_SUBDIR), b"not a directory").unwrap();
+        let e = g
+            .drop_all_named_durable()
+            .expect_err("the sub-tree is still on disk, so the drop must not report success");
+        assert!(
+            e.contains("frozen until it is reopened"),
+            "unexpected error: {}",
+            e
+        );
+        let t = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "a write after a drop that failed part-way must be refused"
+        );
+        drop(g);
+        std::fs::remove_file(dir.join(NAMED_SUBDIR)).ok();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_root_with_children_compacts_in_one_swap_and_stays_writable() {
+        for children in 1..=2u32 {
+            let dir = txn_tmp_dir(&format!("compact-tree-{children}"));
+            std::fs::remove_dir_all(&dir).ok();
+            let mut dataset = String::from("<http://ex/base> <http://ex/p> <http://ex/o> .\n");
+            for c in 0..children {
+                dataset.push_str(&format!(
+                    "<http://ex/n{c}> <http://ex/p> <http://ex/o{c}> <http://ex/g{c}> .\n"
+                ));
+            }
+            Graph::load_dataset(&dataset, "nquads")
+                .unwrap()
+                .save(&dir)
+                .unwrap();
+            let mut g = Graph::open(&dir).unwrap();
+            // Pending work in the root AND in every child, so the compaction has something to
+            // fold everywhere.
+            let t = [term_iri(7, "s"), term_iri(7, "p"), term_iri(7, "o")];
+            g.apply_delta(std::slice::from_ref(&t), &[]).unwrap();
+            for c in 0..children {
+                g.apply_delta_nquads(
+                    &format!(
+                        "<http://ex/extra{c}> <http://ex/p> <http://ex/o> <http://ex/g{c}> .\n"
+                    ),
+                    "",
+                )
+                .unwrap();
+            }
+            g.compact().expect("the whole tree compacts in one swap");
+            // And the writer carries on: the root and every child are still writable.
+            let t2 = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
+            g.apply_delta(std::slice::from_ref(&t2), &[])
+                .expect("the root is writable after compacting its own tree");
+            for c in 0..children {
+                g.apply_delta_nquads(
+                    &format!(
+                        "<http://ex/after{c}> <http://ex/p> <http://ex/o> <http://ex/g{c}> .\n"
+                    ),
+                    "",
+                )
+                .unwrap_or_else(|e| panic!("child g{c} is writable after the compaction: {e}"));
+            }
+            assert_eq!(
+                g.len(),
+                3,
+                "the root holds its base triple and both later ones"
+            );
+            for c in 0..children {
+                assert_eq!(
+                    g.named_graph(&named(&format!("g{c}"))).map(|s| s.len()),
+                    Some(3),
+                    "child g{c} holds its base triple and both later ones"
+                );
+            }
+            drop(g);
+            // All of it survives the reopen.
+            let reopened = Graph::open(&dir).unwrap();
+            assert_eq!(reopened.len(), 3);
+            for c in 0..children {
+                assert_eq!(
+                    reopened
+                        .named_graph(&named(&format!("g{c}")))
+                        .map(|s| s.len()),
+                    Some(3)
+                );
+            }
+            drop(reopened);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    // Windows refuses to rename a directory while files inside it are open, so this base swap
+    // cannot happen there.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_write_cannot_overtake_a_base_swap_that_holds_the_writer_permit() {
+        let dir = txn_tmp_dir("permit");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut parent = Graph::open(&dir).unwrap();
+        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let tree = std::sync::Arc::clone(&parent.tree);
+        // Hold the permit, then start the writer: it blocks before its first check.
+        let permit = tree.write_permit();
+        let started = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer_started = std::sync::Arc::clone(&started);
+        let writer = std::thread::spawn(move || {
+            let t = [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")];
+            writer_started.wait();
+            child.apply_delta(std::slice::from_ref(&t), &[])
+        });
+        started.wait();
+        // The vacuum replaces the whole store directory, including the child's log, while the
+        // writer is held outside the permit. (The permit is reentrant, so the vacuum's own take
+        // succeeds on this thread.)
+        parent
+            .vacuum()
+            .expect("the parent rewrites its whole directory");
+        drop(permit);
+        let refused = writer.join().expect("the writer thread does not panic");
+        let e = refused.expect_err("a write that lands after the swap must be refused");
+        assert!(
+            e.contains("is stale at layout generation"),
+            "unexpected error: {}",
+            e
+        );
+        drop(parent);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Copies a directory tree for recovery fixtures.
+    #[cfg(feature = "mmap")]
+    fn copy_tree(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let target = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy_tree(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), &target)?;
+            }
+        }
+        Ok(())
+    }
+
     /// (sq-ycle) The named-graph term used by the journal tests.
     #[cfg(feature = "mmap")]
     fn named(n: &str) -> Term {
@@ -13015,7 +15619,513 @@ mod tests {
     /// (sq-ycle) The single named-graph triple the torn-tail test starts with.
     #[cfg(feature = "mmap")]
     fn base_named() -> Vec<(String, String, String)> {
-        vec![("<http://ex/n0>".into(), "<http://ex/p>".into(), "<http://ex/o0>".into())]
+        vec![(
+            "<http://ex/n0>".into(),
+            "<http://ex/p>".into(),
+            "<http://ex/o0>".into(),
+        )]
+    }
+
+    /// (sq-ycle) Build one well-formed journal frame: `magic`, a record count, a body,
+    /// and the checksum + commit marker trailer the reader requires. Used by the format and
+    /// malformed-frame tests, which need bytes a correct reader would otherwise accept.
+    #[cfg(feature = "mmap")]
+    fn txn_frame(magic: u32, n_records: u32, body: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&magic.to_le_bytes());
+        buf.extend_from_slice(&n_records.to_le_bytes());
+        buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        buf.extend_from_slice(body);
+        let crc = Wal::checksum(&buf);
+        buf.extend_from_slice(&crc.to_le_bytes());
+        buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
+        buf
+    }
+
+    /// One journal record body: `[op][slot]` plus, for a data op, the triple as a
+    /// length-prefixed N-Triples line.
+    #[cfg(feature = "mmap")]
+    fn txn_record(op: u8, line: Option<&str>) -> Vec<u8> {
+        let mut body = vec![op, 2u8]; // slot kind 2 = the default graph
+        if let Some(l) = line {
+            body.extend_from_slice(&(l.len() as u32).to_le_bytes());
+            body.extend_from_slice(l.as_bytes());
+        }
+        body
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_future_journal_format_is_an_error_and_is_never_truncated() {
+        let dir = txn_tmp_dir("future-fmt");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // "WTX9": this journal's own family, a version this build does not know.
+        let future = u32::from_le_bytes(*b"WTX9");
+        let frame = txn_frame(
+            future,
+            1,
+            &txn_record(0, Some("<http://ex/s1> <http://ex/p> <http://ex/o1> .\n")),
+        );
+        let journal = TxnJournal::path(&dir);
+        std::fs::write(&journal, &frame).unwrap();
+        match Graph::open(&dir) {
+            Ok(_) => panic!("a future journal format must not open"),
+            Err(e) => assert!(
+                e.to_string().contains("newer build"),
+                "unexpected error: {}",
+                e
+            ),
+        }
+        assert_eq!(
+            std::fs::read(&journal).unwrap(),
+            frame,
+            "the frame must still be on disk, byte for byte"
+        );
+        std::fs::write(
+            &journal,
+            txn_frame(
+                0x4A_4E_55_4A,
+                1,
+                &txn_record(0, Some("<http://ex/s2> <http://ex/p> <http://ex/o2> .\n")),
+            ),
+        )
+        .unwrap();
+        let g = Graph::open(&dir).expect("foreign bytes are a torn tail, as before");
+        assert!(!dump_terms(&g).iter().any(|(s, _, _)| s.contains("s2")));
+        assert!(
+            std::fs::read(&journal).unwrap().is_empty(),
+            "and are truncated"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_frame_marks_the_store_format_for_older_builds() {
+        let dir = txn_tmp_dir("fmt-marker");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // Rewind the marker to the version an older build wrote, so this store looks like one.
+        let meta = dir.join("dict-meta.bin");
+        let mut bytes = std::fs::read(&meta).unwrap();
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        std::fs::write(&meta, &bytes).unwrap();
+        let version_on_disk = |path: &std::path::Path| {
+            let b = std::fs::read(path).unwrap();
+            u32::from_le_bytes(b[4..8].try_into().unwrap())
+        };
+        assert_eq!(
+            version_on_disk(&meta),
+            1,
+            "the store starts on the older marker"
+        );
+        {
+            let mut g = Graph::open(&dir).expect("a store on the older marker still opens");
+            g.commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            }])
+            .unwrap();
+        }
+        assert_eq!(
+            version_on_disk(&meta),
+            dict::DICT_META_VERSION,
+            "a committed frame must leave the marker an older build refuses"
+        );
+        // And the store this build wrote is still readable by this build, frame included.
+        let g = Graph::open(&dir).unwrap();
+        assert!(
+            dump_terms(&g).iter().any(|(s, _, _)| s.contains("s1")),
+            "the frame replayed"
+        );
+        drop(g);
+        // Unsupported metadata versions are refused without consuming journal bytes.
+        let mut unknown = std::fs::read(&meta).unwrap();
+        unknown[4..8].copy_from_slice(&7u32.to_le_bytes());
+        std::fs::write(&meta, &unknown).unwrap();
+        match Graph::open(&dir) {
+            Ok(_) => panic!("a store whose format version this build does not know must not open"),
+            Err(e) => assert!(
+                e.to_string().contains("not supported"),
+                "unexpected error: {}",
+                e
+            ),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn malformed_journal_frames_apply_nothing_and_never_over_reserve() {
+        let line = "<http://ex/s1> <http://ex/p> <http://ex/o1> .\n";
+        let cases: Vec<(&str, &str, Vec<u8>)> = vec![
+            // A record count exceeding the available body.
+            (
+                "huge record count",
+                "more than its",
+                txn_frame(TxnJournal::TXN_MAGIC, u32::MAX, &txn_record(0, Some(line))),
+            ),
+            // Trailing bytes after the declared records, inside a frame that checksums.
+            ("trailing body bytes", "byte(s) follow the last record", {
+                let mut body = txn_record(0, Some(line));
+                body.extend_from_slice(b"junk");
+                txn_frame(TxnJournal::TXN_MAGIC, 1, &body)
+            }),
+            // A triple record containing two statements.
+            (
+                "two statements in one record",
+                "not one readable N-Triples statement",
+                {
+                    let both = format!(
+                        "{}{}",
+                        line, "<http://ex/s2> <http://ex/p> <http://ex/o2> .\n"
+                    );
+                    txn_frame(TxnJournal::TXN_MAGIC, 1, &txn_record(0, Some(&both)))
+                },
+            ),
+            // An existence record (CREATE) whose slot says "default graph": the default graph
+            // can be cleared but neither created nor dropped.
+            (
+                "CREATE of the default graph",
+                "graph-existence record has no named graph",
+                txn_frame(TxnJournal::TXN_MAGIC, 1, &txn_record(2, None)),
+            ),
+            // A record count the body cannot reach (one record declared, none present).
+            (
+                "count exceeds the body",
+                "more than its",
+                txn_frame(TxnJournal::TXN_MAGIC, 1, &[]),
+            ),
+            // An unsupported operation code.
+            (
+                "unknown record opcode",
+                "is not insert, delete, create or drop",
+                {
+                    let mut body = txn_record(0, Some(line));
+                    body[0] = 9;
+                    txn_frame(TxnJournal::TXN_MAGIC, 1, &body)
+                },
+            ),
+        ];
+        for (what, expect, frame) in cases {
+            let dir = txn_tmp_dir("malformed");
+            std::fs::remove_dir_all(&dir).ok();
+            Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+                .unwrap()
+                .save(&dir)
+                .unwrap();
+            std::fs::write(TxnJournal::path(&dir), &frame).unwrap();
+            match Graph::open(&dir) {
+                Ok(_) => panic!(
+                    "{}: a committed frame this build cannot decode must not open",
+                    what
+                ),
+                Err(e) => assert!(
+                    e.to_string().contains(expect),
+                    "{}: unexpected error: {}",
+                    what,
+                    e
+                ),
+            }
+            assert_eq!(
+                std::fs::read(TxnJournal::path(&dir)).unwrap(),
+                frame,
+                "{}: the committed frame must be left on disk, not truncated",
+                what
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    /// Dotted store names retain independent whole-name staging siblings.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn two_stores_whose_names_differ_after_a_dot_do_not_share_staging_directories() {
+        let root = txn_tmp_dir("staging-collide");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        let a = root.join("data.a");
+        let b = root.join("data.b");
+        Graph::load_str("<http://ex/sa> <http://ex/p> <http://ex/oa> .", "ntriples")
+            .unwrap()
+            .save(&a)
+            .unwrap();
+        Graph::load_str("<http://ex/sb> <http://ex/p> <http://ex/ob> .", "ntriples")
+            .unwrap()
+            .save(&b)
+            .unwrap();
+        // Stage the state a crash between `data.a`'s two renames leaves: `data.a` is gone and its
+        // base is held in ITS OWN retained sibling.
+        let a_old = staging_sibling(&a, "compact-old");
+        std::fs::rename(&a, &a_old).unwrap();
+        let id = read_marker(&a_old).unwrap().unwrap().id.unwrap();
+        mark_staging(&a_old, "compact-old", &id).unwrap();
+        assert!(!a.exists(), "data.a is mid-swap");
+
+        // Opening the second store preserves the first store staging.
+        let gb = Graph::open(&b).expect("the other store opens");
+        assert!(dump_terms(&gb).iter().any(|(s, _, _)| s.contains("sb")));
+        assert!(
+            a_old.exists(),
+            "the neighbour's retained staging directory survived"
+        );
+        drop(gb);
+
+        // And `data.a` recovers from its own sibling.
+        let ga = Graph::open(&a).expect("data.a is recovered from its own retained sibling");
+        assert!(
+            dump_terms(&ga).iter().any(|(s, _, _)| s.contains("sa")),
+            "the rolled-back store is data.a's, not data.b's"
+        );
+        assert!(!a_old.exists(), "and the sibling is consumed");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Staging provenance distinguishes ordinary stores from recorded staging directories.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn staging_provenance_distinguishes_stores_from_recorded_staging() {
+        let root = txn_tmp_dir("staging-name");
+        std::fs::create_dir_all(&root).unwrap();
+        for suffix in STAGING_SUFFIXES {
+            let path = root.join(format!("data.{suffix}"));
+            Graph::new().save(&path).unwrap();
+            assert!(Graph::open(&path).is_ok());
+            let id = read_marker(&path).unwrap().unwrap().id.unwrap();
+            mark_staging(&path, suffix, &id).unwrap();
+            assert!(Graph::open(&path).is_err());
+            assert!(path.join("dict-meta.bin").is_file());
+        }
+        std::fs::remove_dir_all(root).ok();
+    }
+    /// Recorded legacy named-container staging is reconciled with the declared set.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_crash_between_the_drop_swap_and_its_manifest_rewrite_rolls_back() {
+        let dir = txn_tmp_dir("drop-window");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let old_dir = named_dir.with_extension("drop-old");
+        // Construct a recorded pre-publication container swap.
+        let survivor = {
+            let root = Graph::open(&dir).unwrap();
+            // Copy slot 1 (the survivor of dropping g0) into a fresh single-slot sub-tree.
+            let staging = named_dir.with_extension("drop-new");
+            std::fs::remove_dir_all(&staging).ok();
+            std::fs::create_dir_all(&staging).unwrap();
+            // A named slot is reached through the root's claim, not by claiming it (it is
+            // inside a store), and written as a CHILD.
+            Graph::open_dir(&named_dir.join("1"), root.lock.clone(), true, Role::Child)
+                .unwrap()
+                .save_unlocked(&staging.join("0"), Role::Child)
+                .unwrap();
+            staging
+        };
+        std::fs::rename(&named_dir, &old_dir).unwrap();
+        std::fs::rename(&survivor, &named_dir).unwrap();
+        mark_staging(
+            &old_dir,
+            "drop-old",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        mark_staging(
+            &named_dir,
+            "drop-new",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            declared_manifest_slots(&dir),
+            vec![0, 1],
+            "the pre-drop manifest is still in place"
+        );
+        assert_eq!(
+            present_named_slots(&named_dir).unwrap().len(),
+            1,
+            "but the sub-tree holds one slot"
+        );
+
+        // The store must OPEN, and must open as the pre-drop dataset: the drop's commit point
+        // (the manifest rewrite) never ran, so the drop did not happen.
+        let g = Graph::open(&dir).expect("the store must open after a crash in the drop window");
+        let mut names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["<http://ex/g0>".to_string(), "<http://ex/g1>".to_string()],
+            "an uncommitted drop rolls back to the set the manifest names"
+        );
+        assert!(!old_dir.exists(), "and the retained sub-tree is consumed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_drop_is_not_rolled_back_by_a_retained_sub_tree() {
+        let dir = txn_tmp_dir("drop-committed");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let old_dir = named_dir.with_extension("drop-old");
+        {
+            // A real, completed drop: the manifest now names one graph.
+            let mut g = Graph::open(&dir).unwrap();
+            g.drop_named_durable(&named("g0")).unwrap();
+        }
+        assert_eq!(declared_manifest_slots(&dir).len(), 1, "the drop committed");
+        // Re-create the retained sub-tree a crash after the manifest rewrite would leave behind.
+        std::fs::create_dir_all(old_dir.join("0")).unwrap();
+        // A staging sibling lives inside the store, so it is written as the root's own child,
+        // not claimed on its own.
+        Graph::load_str("<http://ex/n0> <http://ex/p> <http://ex/o0> .", "ntriples")
+            .unwrap()
+            .save_unlocked(&old_dir.join("0"), Role::Child)
+            .unwrap();
+
+        mark_staging(
+            &old_dir,
+            "drop-old",
+            &read_marker(&dir).unwrap().unwrap().id.unwrap(),
+        )
+        .unwrap();
+        let g = Graph::open(&dir).expect("the store opens");
+        let names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        assert_eq!(
+            names,
+            vec!["<http://ex/g1>".to_string()],
+            "the committed drop stands"
+        );
+        // The reopened survivor retains its own contents.
+        let survivor = dump_terms(&g.named[0].1);
+        assert!(
+            survivor.iter().any(|(s, _, _)| s.contains("n1")),
+            "the surviving graph keeps its own triples: {:?}",
+            survivor
+        );
+        assert!(
+            !survivor.iter().any(|(s, _, _)| s.contains("n0")),
+            "and not the dropped graph's: {:?}",
+            survivor
+        );
+        assert!(!old_dir.exists(), "and the leftover sub-tree is removed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Unsupported graph-name kinds are refused before manifest publication.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_graph_name_that_cannot_be_decoded_is_refused_before_it_is_written() {
+        let dir = txn_tmp_dir("bad-name");
+        std::fs::remove_dir_all(&dir).ok();
+        let mut g = Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap();
+        g.named.push((
+            Term::Literal(oxrdf::Literal::new_simple_literal("not a graph name")),
+            Graph::load_str("<http://ex/a> <http://ex/b> <http://ex/c> .", "ntriples").unwrap(),
+        ));
+        let e = g
+            .save(&dir)
+            .expect_err("a literal graph name must be refused");
+        assert!(
+            e.to_string().contains("neither an IRI nor a blank node"),
+            "unexpected error: {}",
+            e
+        );
+        assert!(
+            !dir.join(NAMED_MANIFEST).exists(),
+            "and no manifest may be published naming it"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Failed durable create and drop operations refuse subsequent tree writes.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_durable_path_that_fails_part_way_freezes_the_tree() {
+        // (a) A create that cannot build its sub-tree.
+        let dir = txn_tmp_dir("freeze-create");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            std::fs::write(dir.join(NAMED_SUBDIR), b"not a directory").unwrap();
+            let e = g
+                .ensure_named(&named("fresh"))
+                .expect_err("the create cannot succeed");
+            assert!(
+                e.contains("frozen until it is reopened"),
+                "unexpected error: {}",
+                e
+            );
+            let t = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+            assert!(
+                g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+                "a write after a half-done create must be refused"
+            );
+        }
+        std::fs::remove_file(dir.join(NAMED_SUBDIR)).ok();
+        std::fs::remove_dir_all(&dir).ok();
+
+        // Refuse a drop whose manifest cannot be published.
+        let dir = txn_tmp_dir("freeze-drop");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            // A directory at the temporary manifest path refuses publication.
+            std::fs::create_dir_all(dir.join("named.bin.tmp")).unwrap();
+            let e = g
+                .drop_named_durable(&named("g0"))
+                .expect_err("the drop cannot commit its manifest");
+            assert!(
+                e.contains("frozen until it is reopened"),
+                "unexpected error: {}",
+                e
+            );
+            let t = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+            assert!(
+                g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+                "a write after a half-done drop must be refused"
+            );
+            std::fs::remove_dir_all(dir.join("named.bin.tmp")).ok();
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A journal whose frame failed to materialise keeps it for the reopen to redo, and
@@ -13074,6 +16184,595 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_graph_creation_is_redone_on_reopen() {
+        let dir = txn_tmp_dir("create-redo");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert!(g.named.is_empty(), "no named graph to start with");
+            g.commit_txn_ops(&[TxnOp::Create(named("fresh"))]).unwrap();
+            // Crash right after the commit fsync: no materialisation, no clear_txn.
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened
+                .named
+                .iter()
+                .map(|(n, _)| n.clone())
+                .collect::<Vec<_>>(),
+            vec![named("fresh")],
+            "the acknowledged empty graph exists after the crash"
+        );
+        assert!(reopened.named[0]
+            .1
+            .store
+            .scan(&[None, None, None])
+            .rows
+            .is_empty());
+        // The journal was truncated once its frame was materialised by the redo.
+        assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap().len(), 0);
+        // And the redo is idempotent: a second reopen neither duplicates nor drops the slot.
+        drop(reopened);
+        assert_eq!(Graph::open(&dir).unwrap().named.len(), 1, "idempotent redo");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Empty-graph existence and ordered create/drop records survive recovery.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_graph_drop_is_redone_on_reopen_in_commit_order() {
+        let dir = txn_tmp_dir("drop-redo");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // Give the store an EMPTY named graph (no triples at all), durably.
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.ensure_named(&named("empty")).unwrap();
+        }
+        assert_eq!(
+            Graph::open(&dir).unwrap().named.len(),
+            1,
+            "the empty graph is on disk"
+        );
+
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Drop(named("empty"))]).unwrap();
+            // Crash before materialisation.
+        }
+        assert!(
+            Graph::open(&dir).unwrap().named.is_empty(),
+            "the acknowledged drop of an empty graph survives the crash"
+        );
+
+        // COMMIT ORDER: drop-then-create and create-then-drop of one name differ only in order.
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Drop(named("z")), TxnOp::Create(named("z"))])
+                .unwrap();
+        }
+        assert_eq!(
+            Graph::open(&dir).unwrap().named.len(),
+            1,
+            "drop-then-create leaves the graph existing"
+        );
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Create(named("z")), TxnOp::Drop(named("z"))])
+                .unwrap();
+        }
+        assert!(
+            Graph::open(&dir).unwrap().named.is_empty(),
+            "create-then-drop leaves it absent — the frame replays in commit order"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) A `WTX1` journal written by a build predating the graph-existence
+    /// records is still replayed (its data records apply), rather than discarded as a torn tail.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_previous_version_journal_frame_still_replays() {
+        let dir = txn_tmp_dir("v1-frame");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut j = TxnJournal::open(&dir).unwrap();
+            j.append(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(7, "s"), term_iri(7, "p"), term_iri(7, "o")],
+            }])
+            .unwrap();
+        }
+        // Rewrite the frame's magic as the PREVIOUS version's and re-checksum it, exactly as an
+        // older build would have written the same data records.
+        let path = TxnJournal::path(&dir);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let body_end = bytes.len() - 12;
+        bytes[0..4].copy_from_slice(&TxnJournal::TXN_MAGIC_V1.to_le_bytes());
+        let crc = Wal::checksum(&bytes[..body_end]);
+        bytes[body_end..body_end + 8].copy_from_slice(&crc.to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+
+        let reopened = Graph::open(&dir).unwrap();
+        let nt = format!("{:?}", dump_terms(&reopened));
+        assert!(
+            nt.contains("http://ex/s7"),
+            "a WTX1 frame still replays: {}",
+            nt
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Retained committed frames refuse durable mutations throughout the tree.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn every_durable_mutator_in_the_tree_is_refused_while_a_frame_is_retained() {
+        let dir = txn_tmp_dir("gate-tree");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/h> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        assert_eq!(g.named.len(), 2, "two named graphs");
+        let t = [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")];
+        // Before the frame is retained every one of these is accepted.
+        g.apply_delta(std::slice::from_ref(&t), &[])
+            .expect("the root writes");
+        g.named[0]
+            .1
+            .apply_delta(std::slice::from_ref(&t), &[])
+            .expect("a child writes");
+
+        g.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: t.clone(),
+        }])
+        .unwrap();
+        g.poison_txn(); // materialisation failed: the frame is kept for the reopen
+
+        assert!(
+            g.apply_delta(&[], std::slice::from_ref(&t)).is_err(),
+            "the root's delta"
+        );
+        assert!(
+            g.named[0]
+                .1
+                .apply_delta(&[], std::slice::from_ref(&t))
+                .is_err(),
+            "the POISONED journal's own named graph — through the shared flag, not its own journal"
+        );
+        assert!(
+            g.named[1]
+                .1
+                .apply_delta(std::slice::from_ref(&t), &[])
+                .is_err(),
+            "a SIBLING named graph, which has no frame of its own"
+        );
+        assert!(
+            g.clear_txn().is_err(),
+            "the journal clear, which would erase the frame"
+        );
+        // The checked commit says the frame was refused UNWRITTEN, not half-appended.
+        assert!(
+            !g.commit_txn_ops_checked(&[TxnOp::Create(named("nope"))])
+                .unwrap_err()
+                .0,
+            "a commit on a poisoned tree is refused unwritten"
+        );
+        assert!(g.ensure_named(&named("new")).is_err(), "a graph creation");
+        assert!(g.drop_named_durable(&named("h")).is_err(), "a graph drop");
+        assert!(g.compact().is_err(), "a base rewrite");
+        assert!(g.vacuum().is_err());
+        // The kept frame is still on disk, byte-for-byte: nothing truncated it.
+        assert!(
+            !std::fs::read(TxnJournal::path(&dir)).unwrap().is_empty(),
+            "the frame stays for the reopen"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A retained child journal frame also refuses root mutations.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_frame_retained_by_a_child_refuses_the_roots_durable_writes() {
+        let dir = txn_tmp_dir("gate-upward");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        let t = [term_iri(5, "s"), term_iri(5, "p"), term_iri(5, "o")];
+        // The CHILD's journal keeps a frame; the ROOT's journal is untouched and unpoisoned.
+        g.named[0]
+            .1
+            .commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: t.clone(),
+            }])
+            .unwrap();
+        g.named[0].1.poison_txn();
+        assert!(
+            g.clear_txn().is_err(),
+            "the ROOT's journal clear is refused while a CHILD keeps a frame"
+        );
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "and the root's delta"
+        );
+        assert!(
+            !std::fs::read(TxnJournal::path(&dir.join(NAMED_SUBDIR).join("0")))
+                .unwrap()
+                .is_empty(),
+            "the child's frame is still on disk for the reopen"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Refused batch drops preserve both the attached and persisted named sets.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_all_named_durable_is_refused_while_a_frame_is_retained() {
+        let dir = txn_tmp_dir("gate-dropall");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        g.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+        }])
+        .unwrap();
+        g.poison_txn();
+        assert!(
+            g.drop_all_named_durable().is_err(),
+            "the batch drop is refused while a frame is retained"
+        );
+        assert_eq!(
+            g.named.len(),
+            1,
+            "a refused drop leaves the in-memory named set intact"
+        );
+        assert!(
+            dir.join(NAMED_MANIFEST).exists(),
+            "and the manifest on disk"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// N-Quads graph creation respects and shares the tree write state.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_named_graph_created_from_nquads_is_gated_and_joins_the_tree() {
+        let dir = txn_tmp_dir("nquads-create");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // (a) The creating insert SUCCEEDS on a clean store, and the new child shares the flag:
+        //     poisoning the CHILD refuses the ROOT's durable writes.
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta_nquads(
+            "<http://ex/s1> <http://ex/p> <http://ex/o1> <http://ex/fresh> .",
+            "",
+        )
+        .unwrap();
+        assert_eq!(g.named.len(), 1, "the named graph was created");
+        g.named[0].1.poison_txn();
+        let t = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "the child created from N-Quads shares the tree's poison flag"
+        );
+        drop(g);
+        // (b) On an ALREADY-frozen store the creating insert is refused, and no graph appears.
+        let mut g2 = Graph::open(&dir).unwrap();
+        g2.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: t.clone(),
+        }])
+        .unwrap();
+        g2.poison_txn();
+        let before = g2.named.len();
+        assert!(
+            g2.apply_delta_nquads(
+                "<http://ex/s3> <http://ex/p> <http://ex/o3> <http://ex/frozen> .",
+                "",
+            )
+            .is_err(),
+            "creating a named graph on a frozen store is refused"
+        );
+        assert_eq!(g2.named.len(), before, "and no graph is attached");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_survivors_keep_the_trees_shared_poison_flag() {
+        let dir = txn_tmp_dir("drop-survivors");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        assert_eq!(g.named.len(), 2, "two named graphs to start");
+        g.drop_named_durable(&named("g0")).unwrap();
+        assert_eq!(
+            g.named.len(),
+            1,
+            "one survivor, re-opened from its new slot"
+        );
+        g.named[0].1.poison_txn();
+        let t = [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "a surviving child's retained frame still refuses the root's writes after a drop"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_compaction_keeps_the_tree_sharing_one_poison_flag() {
+        let dir = txn_tmp_dir("compact-tree");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Child compaction preserves the shared tree state.
+        let t = [term_iri(7, "s"), term_iri(7, "p"), term_iri(7, "o")];
+        g.named[0]
+            .1
+            .apply_delta(std::slice::from_ref(&t), &[])
+            .unwrap();
+        g.named[0].1.compact().unwrap();
+        assert_eq!(g.named.len(), 1, "the named graph survived the compaction");
+        // The post-compaction tree must still be ONE tree.
+        g.named[0].1.poison_txn();
+        let t2 = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t2), &[]).is_err(),
+            "after a compaction a child's retained frame still refuses the root's writes"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_failed_base_swap_refuses_further_writes_and_loses_nothing() {
+        let dir = txn_tmp_dir("swap-fail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let blocker = dir.with_extension("compact-old");
+        std::fs::remove_dir_all(&blocker).ok();
+        let acked = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            let old = blocker.clone();
+            fault::fail_every(move |step, path| step == "mark" && path == old);
+            g.apply_delta(std::slice::from_ref(&acked), &[]).unwrap();
+            assert!(g.compact().is_err());
+            assert!(fault::disarm() > 0);
+            assert!(g.is_frozen());
+            let after = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+            assert!(
+                g.apply_delta(std::slice::from_ref(&after), &[]).is_err(),
+                "a write after a failed swap must be refused, not acknowledged into a closed log"
+            );
+        }
+        std::fs::remove_file(&blocker).ok();
+        let reopened = Graph::open(&dir).unwrap();
+        let got = dump_terms(&reopened);
+        assert!(
+            got.iter().any(|(s, _, _)| s.contains("s1")),
+            "the write acknowledged before the failed swap survives the reopen: {:?}",
+            got
+        );
+        assert!(
+            !got.iter().any(|(s, _, _)| s.contains("s2")),
+            "and the refused one is absent: {:?}",
+            got
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_failed_base_staging_keeps_the_store_writable_and_durable() {
+        let dir = txn_tmp_dir("stage-fail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let blocker = dir.with_extension("compact-new");
+        std::fs::remove_dir_all(&blocker).ok();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            std::fs::write(&blocker, b"not a directory").unwrap();
+            let first = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+            g.apply_delta(std::slice::from_ref(&first), &[]).unwrap();
+            assert!(
+                g.compact().is_err(),
+                "the new base cannot be staged over a file"
+            );
+            let after = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+            g.apply_delta(std::slice::from_ref(&after), &[]).expect(
+                "staging failed before anything was given up, so the store is still writable",
+            );
+        }
+        std::fs::remove_file(&blocker).ok();
+        let got = dump_terms(&Graph::open(&dir).unwrap());
+        for tag in ["s1", "s2"] {
+            assert!(
+                got.iter().any(|(s, _, _)| s.contains(tag)),
+                "{} must survive a staging failure: {:?}",
+                tag,
+                got
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_save_destination_that_would_destroy_durable_state_is_refused() {
+        let dir = txn_tmp_dir("save-dest");
+        let other = txn_tmp_dir("save-dest-other");
+        for d in [&dir, &other] {
+            std::fs::remove_dir_all(d).ok();
+        }
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Saving over a live backing directory is refused.
+        let e = g
+            .save(&dir)
+            .expect_err("a save over the live backing directory is refused");
+        assert!(
+            e.to_string()
+                .contains("is the directory this graph is open from"),
+            "unexpected error: {}",
+            e
+        );
+        // (b) A store that keeps a committed frame is not a destination either — for a save
+        //     from another graph, or for a durable restore.
+        g.named[0]
+            .1
+            .commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            }])
+            .unwrap();
+        drop(g);
+        let fresh =
+            Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads").unwrap();
+        // The exclusive claim also refuses an unrelated image writer.
+        let e = fresh
+            .save(&dir)
+            .expect_err("a save over a store keeping a frame is refused");
+        assert!(
+            e.to_string().contains("unreplayed journal"),
+            "unexpected error: {}",
+            e
+        );
+        // Restore refuses an unreplayed journal before replacing an inactive store.
+        let e = match Graph::restore_into_durable(&dir, fresh) {
+            Ok(_) => panic!("a restore over a store keeping a frame must be refused"),
+            Err(e) => e,
+        };
+        assert!(
+            e.to_string().contains("unreplayed journal"),
+            "unexpected error: {}",
+            e
+        );
+        // The frame is still on disk for the reopen to replay.
+        assert!(
+            !std::fs::read(TxnJournal::path(&dir.join(NAMED_SUBDIR).join("0")))
+                .unwrap()
+                .is_empty(),
+            "the retained frame was not destroyed"
+        );
+        // A fresh destination is unaffected.
+        Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&other)
+            .expect("a fresh destination still saves");
+        for d in [&dir, &other] {
+            std::fs::remove_dir_all(d).ok();
+        }
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_acknowledged_write_after_a_poisoned_commit_survives_the_reopen() {
+        let dir = txn_tmp_dir("poisoned-ack");
+        std::fs::remove_dir_all(&dir).ok();
+        // Retain a committed retraction before attempting a direct insertion.
+        Graph::load_dataset(
+            "<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let iri = |u: &str| Term::NamedNode(NamedNode::new_unchecked(u));
+        let retracted = [iri("http://ex/n0"), iri("http://ex/p"), iri("http://ex/o0")];
+        let wrote = {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Delete {
+                slot: Some(named("g")),
+                triple: retracted.clone(),
+            }])
+            .unwrap();
+            g.poison_txn();
+            // The write the server would acknowledge next: put the triple back.
+            g.named[0]
+                .1
+                .apply_delta(std::slice::from_ref(&retracted), &[])
+                .is_ok()
+        };
+        let reopened = Graph::open(&dir).unwrap();
+        let present = dump_terms(&reopened.named[0].1) == base_named();
+        assert_eq!(
+            present, wrote,
+            "a durable write is either refused (and absent after the reopen) or accepted (and \
+             still present after it) — never acknowledged and then undone by the kept frame's redo"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// (sq-ycle) TORN-TAIL guarantee: a multi-slot redo frame (a default-graph record
     /// PLUS a named-graph record) whose commit trailer + part of the last record were severed by a
     /// crash must apply NOTHING on `open`, and the torn `txn.log` must be truncated to empty.
@@ -13096,9 +16795,15 @@ mod tests {
         let base = dump_terms(&Graph::open(&dir).unwrap());
 
         // Write ONE valid frame with a default-slot insert AND a named-slot insert.
-        let records: Vec<(bool, Option<Term>, [Term; 3])> = vec![
-            (true, None, [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]),
-            (true, Some(named("g")), [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]),
+        let records: Vec<TxnOp> = vec![
+            TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            },
+            TxnOp::Insert {
+                slot: Some(named("g")),
+                triple: [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")],
+            },
         ];
         {
             let mut j = TxnJournal::open(&dir).unwrap();
@@ -13303,8 +17008,10 @@ mod tests {
 
         // A valid frame, then strip JUST the commit trailer (the last 12 bytes) — header + body
         // present, no commit marker → an uncommitted frame.
-        let records: Vec<(bool, Option<Term>, [Term; 3])> =
-            vec![(true, None, [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")])];
+        let records: Vec<TxnOp> = vec![TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")],
+        }];
         {
             let mut j = TxnJournal::open(&dir).unwrap();
             j.append(&records).unwrap();
@@ -13374,7 +17081,7 @@ mod tests {
     fn logs_append_after_reopen_and_restart_after_truncate() {
         let dir = std::env::temp_dir().join(format!("sparq_log_cursor_{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
+        Graph::new().save(&dir).unwrap();
         let t = |s: &str| {
             let iri = |x: &str| {
                 Term::NamedNode(oxrdf::NamedNode::new_unchecked(format!("http://ex/{x}")))
@@ -13403,16 +17110,33 @@ mod tests {
         // Journal: the same.
         TxnJournal::open(&dir)
             .unwrap()
-            .append(&[(true, None, t("a"))])
+            .append(&[TxnOp::Insert {
+                slot: None,
+                triple: t("a"),
+            }])
             .unwrap();
         let mut j = TxnJournal::open(&dir).unwrap();
-        j.append(&[(true, None, t("b"))]).unwrap();
+        j.append(&[TxnOp::Insert {
+            slot: None,
+            triple: t("b"),
+        }])
+        .unwrap();
         assert_eq!(TxnJournal::replay(&dir).unwrap().len(), 2);
         j.truncate().unwrap();
-        j.append(&[(true, None, t("c"))]).unwrap();
+        j.append(&[TxnOp::Insert {
+            slot: None,
+            triple: t("c"),
+        }])
+        .unwrap();
         let left = TxnJournal::replay(&dir).unwrap();
         assert_eq!(left.len(), 1);
-        assert_eq!(left[0].2[0].to_string(), "<http://ex/c>");
+        assert_eq!(
+            left[0],
+            TxnOp::Insert {
+                slot: None,
+                triple: t("c")
+            }
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -13434,12 +17158,24 @@ mod tests {
         let base = std::env::temp_dir().join(format!("sparq_compact_recover_{}", std::process::id()));
         let dir = base.join("g");
         // Helper: build a graph dir with one triple naming `tag`.
+        // A staging sibling is built by saving to a scratch name and renaming it into place:
+        // `save` refuses a reserved staging name as a STORE destination (sq-ycle), which is
+        // exactly the protection this fixture is working around to stage a crash state.
         let build = |d: &std::path::Path, tag: &str| {
             std::fs::remove_dir_all(d).ok();
-            Graph::load_str(&format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> ."), "ntriples")
-                .unwrap()
-                .save(d)
-                .unwrap();
+            let scratch = d.with_file_name(format!(
+                "{}-scratch",
+                d.file_name().and_then(|n| n.to_str()).unwrap_or("x")
+            ));
+            std::fs::remove_dir_all(&scratch).ok();
+            Graph::load_str(
+                &format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> ."),
+                "ntriples",
+            )
+            .unwrap()
+            .save(&scratch)
+            .unwrap();
+            std::fs::rename(&scratch, d).unwrap();
         };
 
         // (a) Crash BETWEEN the two renames: dir missing, both siblings present. Recovery must
@@ -13548,7 +17284,7 @@ mod tests {
             assert_eq!(dump_terms(&g).len(), 20);
             g.clear_default_durable().unwrap();
             assert_eq!(dump_terms(&g).len(), 0, "clear empties the graph in memory");
-            assert!(g.wal.is_some(), "the WAL/dir association is preserved");
+            assert!(g.wal.is_durable(), "the WAL/dir association is preserved");
         }
         // Reopen: the WAL-logged retractions replay, so the graph stays empty.
         let g2 = Graph::open(&dir).unwrap();
@@ -13592,16 +17328,12 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// (sq-glw2) `drop_named_durable` removes a named sub-graph's directory AND its
-    /// manifest entry durably (so a reopen does NOT resurrect it), renumbers the surviving
-    /// sub-tree to stay positional, and re-opens survivors with correctly-indexed WALs (a
-    /// post-drop mutation of a survivor persists). The pre-fix engine path did
-    /// `graph.named.retain(...)`, leaving `named/<i>/` + the manifest entry so a reopen brought
-    /// the dropped graph back.
+    /// Durable drops preserve survivor slots and acknowledged writes across restart.
     #[cfg(feature = "mmap")]
     #[test]
-    fn drop_named_durable_removes_subdir_and_manifest_and_renumbers() {
-        let dir = std::env::temp_dir().join(format!("sparq_drop_named_durable_{}", std::process::id()));
+    fn drop_named_durable_removes_subdir_and_keeps_survivor_slots() {
+        let dir =
+            std::env::temp_dir().join(format!("sparq_drop_named_durable_{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         Graph::load_dataset(
             "<http://ex/a1> <http://ex/p> <http://ex/o> <http://ex/g1> .\n\
@@ -13621,34 +17353,837 @@ mod tests {
             assert_eq!(g.named.len(), 3);
             // The on-disk sub-tree has 3 positional sub-dirs before the drop.
             assert!(dir.join("named").join("0").exists() && dir.join("named").join("2").exists());
-            // Drop the MIDDLE graph; g3 must renumber down a slot.
-            assert!(g.drop_named_durable(&nn("http://ex/g2")).unwrap(), "existing graph reports dropped = true");
+            // Drop the MIDDLE graph; g3 keeps slot 2.
+            assert!(
+                g.drop_named_durable(&nn("http://ex/g2")).unwrap(),
+                "existing graph reports dropped = true"
+            );
             assert_eq!(g.named.len(), 2);
             assert_eq!(count(&g, "g2"), None);
-            // The highest old sub-dir is gone (3 -> 2 sub-dirs after renumber).
-            assert!(!dir.join("named").join("2").exists(), "drop renumbered the sub-tree to 2 contiguous slots");
+            // The DROPPED graph's slot is gone and the survivors' slots are untouched.
+            assert!(
+                !dir.join("named").join("1").exists(),
+                "the dropped graph's slot is removed"
+            );
+            assert!(
+                dir.join("named").join("0").exists() && dir.join("named").join("2").exists(),
+                "the survivors keep the slots they were in"
+            );
+            assert_eq!(
+                declared_manifest_slots(&dir),
+                vec![0, 2],
+                "and the manifest names those slots"
+            );
             // A post-drop mutation of a survivor proves its WAL was re-indexed correctly.
             g.apply_delta_nquads("<http://ex/extra> <http://ex/p> <http://ex/o> <http://ex/g3> .", "").unwrap();
             assert_eq!(count(&g, "g3"), Some(2));
             // Dropping an ABSENT graph is a no-op reporting false (DROP no-op-on-absent).
             assert!(!g.drop_named_durable(&nn("http://ex/absent")).unwrap());
         }
-        // Reopen: dropped graph stays gone; survivors keep their (renumbered) contents.
+        // Reopen: dropped graph stays gone; survivors keep their contents.
         let g2 = Graph::open(&dir).unwrap();
         assert_eq!(g2.named.len(), 2, "exactly the two survivors after reopen");
-        assert_eq!(count(&g2, "g2"), None, "dropped graph is NOT resurrected on reopen");
+        assert_eq!(
+            count(&g2, "g2"),
+            None,
+            "dropped graph is NOT resurrected on reopen"
+        );
         assert_eq!(count(&g2, "g1"), Some(1));
-        assert_eq!(count(&g2, "g3"), Some(2), "renumbered survivor keeps its original + post-drop triple");
+        assert_eq!(
+            count(&g2, "g3"),
+            Some(2),
+            "the survivor keeps its original + post-drop triple"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// (sq-glw2) Dropping the LAST named graph removes the whole `named/` sub-tree
-    /// and the `named.bin` manifest, so the directory persists as a clean default-graph-only
-    /// store across a reopen.
+    /// (sq-ycle) A three-named-graph store at slots 0, 1 and 2, one triple in each.
+    #[cfg(feature = "mmap")]
+    fn save_named_store(dir: &std::path::Path, graphs: &[&str]) {
+        std::fs::remove_dir_all(dir).ok();
+        let mut doc = String::from("<http://ex/d> <http://ex/p> <http://ex/o> .\n");
+        for g in graphs {
+            doc.push_str(&format!(
+                "<http://ex/s-{g}> <http://ex/p> <http://ex/o> <http://ex/{g}> .\n"
+            ));
+        }
+        Graph::load_dataset(&doc, "nquads")
+            .unwrap()
+            .save(dir)
+            .unwrap();
+    }
+
+    #[cfg(feature = "mmap")]
+    fn one_triple() -> [Term; 3] {
+        [named("probe-s"), named("probe-p"), named("probe-o")]
+    }
+
+    /// (sq-ycle) A FORMAT-1 manifest for `names`, as a build before the slot ids wrote it:
+    /// a 12-byte header and no per-entry slot, so the ids ARE the positions.
+    #[cfg(feature = "mmap")]
+    fn write_v1_manifest(dir: &std::path::Path, names: &[Term]) {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&NAMED_FORMAT_VERSION_V1.to_le_bytes());
+        buf.extend_from_slice(&(names.len() as u32).to_le_bytes());
+        for name in names {
+            encode_graph_name(&mut buf, name).unwrap();
+        }
+        std::fs::write(dir.join(NAMED_MANIFEST), &buf).unwrap();
+    }
+
     #[cfg(feature = "mmap")]
     #[test]
-    fn drop_last_named_graph_clears_manifest_and_subtree() {
-        let dir = std::env::temp_dir().join(format!("sparq_drop_last_named_{}", std::process::id()));
+    fn a_create_never_adopts_an_orphan_slot_directory() {
+        let dir = txn_tmp_dir("orphan-slot-create");
+        save_named_store(&dir, &["g0"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let orphan = named_dir.join("1");
+        assert_eq!(declared_manifest_slots(&dir), vec![0]);
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            copy_tree(&named_dir.join("0"), &orphan).unwrap();
+            assert_eq!(
+                present_named_slots(&named_dir).unwrap(),
+                [0, 1].into_iter().collect(),
+                "the reserved slot is occupied"
+            );
+            let i = g.ensure_named(&named("fresh")).unwrap();
+            assert_eq!(
+                g.named[i].1.named_slot_in(&named_dir),
+                Some(2),
+                "the create moves PAST the occupied id instead of adopting it"
+            );
+            assert_eq!(g.named[i].1.len(), 0, "and the new graph starts empty");
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        let fresh = reopened
+            .named_graph(&named("fresh"))
+            .expect("the created graph is there");
+        assert_eq!(
+            fresh.len(),
+            0,
+            "the orphan's records never replay under the new graph's name"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_create_never_adopts_an_orphan_slot_on_the_format_1_upgrade_path() {
+        let dir = txn_tmp_dir("orphan-slot-v1");
+        save_named_store(&dir, &["g0"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        write_v1_manifest(&dir, &[named("g0")]);
+        let orphan = named_dir.join("1");
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            copy_tree(&named_dir.join("0"), &orphan).unwrap();
+            let i = g.ensure_named(&named("fresh")).unwrap();
+            assert_eq!(
+                g.named[i].1.named_slot_in(&named_dir),
+                Some(2),
+                "a v1 store's next id is its count, and an occupied one is skipped"
+            );
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.named_graph(&named("fresh")).map(Graph::len),
+            Some(0),
+            "the upgraded store's new graph is empty, not the orphan's contents"
+        );
+        assert_eq!(
+            reopened.named_graph(&named("g0")).map(Graph::len),
+            Some(1),
+            "and the v1 graph keeps its own triple"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_root_file_that_cannot_be_synced_refuses_the_manifest_publish() {
+        let _serialised = io_fault::lock();
+        let dir = txn_tmp_dir("root-sync-refuses");
+        save_named_store(&dir, &["g0"]);
+        {
+            let _fault = io_fault::fail_sync_for(&dir.join(NUMERIC_CACHE_FILE));
+            let mut g = Graph::open(&dir).unwrap();
+            let err = g
+                .ensure_named(&named("fresh"))
+                .expect_err("the publish cannot make the root's numeric cache durable");
+            assert!(
+                err.contains("injected fsync fault"),
+                "the publish is refused with the reason: {}",
+                err
+            );
+            assert_eq!(
+                declared_manifest_slots(&dir),
+                vec![0],
+                "and the manifest never named the new graph"
+            );
+        }
+        let plain = txn_tmp_dir("root-sync-default-only");
+        std::fs::remove_dir_all(&plain).ok();
+        {
+            let _fault = io_fault::fail_sync_for(&plain.join(NUMERIC_CACHE_FILE));
+            let err = Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nt")
+                .unwrap()
+                .save(&plain)
+                .expect_err("a default-graph-only save syncs its files too");
+            assert!(err.to_string().contains("injected fsync fault"), "{}", err);
+        }
+        let plain2 = txn_tmp_dir("root-sync-default-only-ok");
+        std::fs::remove_dir_all(&plain2).ok();
+        Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nt")
+            .unwrap()
+            .save(&plain2)
+            .unwrap();
+        assert_eq!(Graph::open(&plain2).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&plain).ok();
+        std::fs::remove_dir_all(&plain2).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_torn_wal_append_freezes_the_tree_and_keeps_every_acknowledged_batch() {
+        let _serialised = io_fault::lock();
+        let dir = txn_tmp_dir("torn-wal-append");
+        save_named_store(&dir, &[]);
+        let tr = |s: &str| [named(s), named("p"), named("o")];
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta(&[tr("acked-a")], &[]).unwrap();
+        g.apply_delta(&[tr("acked-b")], &[]).unwrap();
+
+        io_fault::arm(&io_fault::WAL_DROP_TAIL, 1);
+        let failed = g
+            .apply_delta(&[tr("torn-c")], &[])
+            .expect_err("the injected append reports its failure");
+        assert!(
+            failed.contains("a WAL append failed; the store is frozen"),
+            "the failure freezes the tree and says so: {}",
+            failed
+        );
+        let refused = g
+            .apply_delta(&[tr("after-d")], &[])
+            .expect_err("the frozen tree refuses");
+        assert!(
+            refused.contains("durable write refused"),
+            "and later writes are refused rather than acknowledged: {}",
+            refused
+        );
+        drop(g);
+
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.len(),
+            3,
+            "the seed plus both acknowledged batches survive the reopen"
+        );
+        assert!(reopened.id_of(&named("acked-a")).is_some());
+        assert!(reopened.id_of(&named("acked-b")).is_some());
+        assert!(
+            reopened.id_of(&named("torn-c")).is_none(),
+            "the torn batch was never acknowledged, so it is not there"
+        );
+        assert!(
+            reopened.id_of(&named("after-d")).is_none(),
+            "and the refused batch reached no log"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_torn_journal_append_poisons_the_tree_and_keeps_every_acknowledged_batch() {
+        let _serialised = io_fault::lock();
+        let dir = txn_tmp_dir("torn-journal-append");
+        save_named_store(&dir, &["g0"]);
+        let tr = |s: &str| [named(s), named("p"), named("o")];
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta(&[tr("acked-a")], &[]).unwrap();
+
+        io_fault::arm(&io_fault::JOURNAL_DROP_TAIL, 1);
+        let (applied, failed) = g
+            .commit_txn_ops_checked(&[TxnOp::Insert {
+                slot: None,
+                triple: tr("torn-c"),
+            }])
+            .expect_err("the injected frame append reports its failure");
+        assert!(
+            applied,
+            "part of the frame may be on disk, so the commit is reported as possibly applied"
+        );
+        assert!(
+            failed.contains("txn journal commit failed"),
+            "and it says the journal commit failed: {}",
+            failed
+        );
+        let refused = g
+            .apply_delta(&[tr("after-d")], &[])
+            .expect_err("the poisoned tree refuses this graph's own write");
+        assert!(refused.contains("durable write refused"), "{}", refused);
+        let refused_child = g.named[0]
+            .1
+            .apply_delta(&[tr("after-child")], &[])
+            .expect_err("and a named graph's write in the same tree");
+        assert!(
+            refused_child.contains("durable write refused"),
+            "the whole TREE stops taking durable writes, not just the graph that failed: {}",
+            refused_child
+        );
+        let refused_frame = g
+            .commit_txn_ops_checked(&[TxnOp::Insert {
+                slot: None,
+                triple: tr("after-e"),
+            }])
+            .expect_err("and so is a second frame");
+        assert!(!refused_frame.0, "refused unwritten");
+        drop(g);
+
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened.len(),
+            2,
+            "the seed plus the acknowledged batch survive the reopen"
+        );
+        assert!(reopened.id_of(&named("acked-a")).is_some());
+        assert_eq!(
+            reopened.named.len(),
+            1,
+            "and the named graph is still there"
+        );
+        assert_eq!(
+            reopened.named[0].1.len(),
+            1,
+            "with exactly the triple it was saved with"
+        );
+        for never_acked in ["torn-c", "after-d", "after-e", "after-child"] {
+            assert!(
+                reopened.id_of(&named(never_acked)).is_none(),
+                "{} was never acknowledged",
+                never_acked
+            );
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_detached_named_handle_keeps_its_manifest_entry_after_a_sibling_drop() {
+        let dir = txn_tmp_dir("detached-sibling-drop");
+        save_named_store(&dir, &["g0", "g1", "g2"]);
+        let mut root = Graph::open(&dir).unwrap();
+        let (name, mut detached) = root.named.pop().unwrap();
+        root.drop_named_durable(&named("g0")).unwrap();
+        detached.apply_delta(&[one_triple()], &[]).unwrap();
+        drop(detached);
+        drop(root);
+        let reopened = Graph::open(&dir).unwrap();
+        assert!(reopened
+            .named_graph(&name)
+            .unwrap()
+            .id_of(&named("probe-s"))
+            .is_some());
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_detached_named_handle_keeps_the_container_after_the_last_attached_drop() {
+        let dir = txn_tmp_dir("detached-last-drop");
+        save_named_store(&dir, &["g0", "g1"]);
+        let mut root = Graph::open(&dir).unwrap();
+        let (name, mut detached) = root.named.pop().unwrap();
+        root.drop_named_durable(&named("g0")).unwrap();
+        assert_eq!(declared_manifest_slots(&dir), vec![1]);
+        assert!(dir.join(NAMED_SUBDIR).join("1").is_dir());
+        detached.apply_delta(&[one_triple()], &[]).unwrap();
+        drop(detached);
+        drop(root);
+        let reopened = Graph::open(&dir).unwrap();
+        assert!(reopened
+            .named_graph(&name)
+            .unwrap()
+            .id_of(&named("probe-s"))
+            .is_some());
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_detached_named_handle_keeps_its_manifest_entry_after_a_create() {
+        let dir = txn_tmp_dir("detached-create");
+        save_named_store(&dir, &["g0", "g1"]);
+        let mut root = Graph::open(&dir).unwrap();
+        let (name, mut detached) = root.named.pop().unwrap();
+        root.ensure_named(&named("fresh")).unwrap();
+        detached.apply_delta(&[one_triple()], &[]).unwrap();
+        drop(detached);
+        drop(root);
+        let reopened = Graph::open(&dir).unwrap();
+        assert!(reopened
+            .named_graph(&name)
+            .unwrap()
+            .id_of(&named("probe-s"))
+            .is_some());
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn no_drop_path_removes_a_path_outside_the_stores_named_root() {
+        let dir = txn_tmp_dir("drop-stays-inside");
+        let other = txn_tmp_dir("drop-stays-inside-other");
+        let outside = txn_tmp_dir("drop-stays-inside-outside");
+        save_named_store(&dir, &["g0"]);
+        save_named_store(&other, &["x0"]);
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), b"keep me").unwrap();
+
+        {
+            let mut root = Graph::open(&dir).unwrap();
+            let mut foreign = Graph::open(&other).unwrap();
+            let (_, foreign_child) = foreign.named.pop().expect("the other store's named graph");
+            root.named.push((named("foreign"), foreign_child));
+            let err = root
+                .drop_named_durable(&named("foreign"))
+                .expect_err("a graph that is not in a slot of this store cannot be dropped by it");
+            assert!(
+                err.contains("does not live in a slot of its own under"),
+                "{}",
+                err
+            );
+            assert_eq!(declared_manifest_slots(&dir), vec![0]);
+            assert!(other.join(NAMED_SUBDIR).join("0").exists());
+
+            root.drop_all_named_durable().unwrap();
+            assert!(!dir.join(NAMED_SUBDIR).exists());
+            assert!(
+                other.join(NAMED_SUBDIR).join("0").exists(),
+                "a batch drop removes this store's container, never a foreign child's directory"
+            );
+        }
+        assert_eq!(
+            Graph::open(&other).unwrap().named.len(),
+            1,
+            "the other store still has its named graph"
+        );
+
+        #[cfg(unix)]
+        {
+            let named_dir = dir.join(NAMED_SUBDIR);
+            std::fs::create_dir_all(&named_dir).unwrap();
+            std::os::unix::fs::symlink(&outside, named_dir.join("7")).unwrap();
+            let err = remove_named_slot(&named_dir, 7).expect_err("a symlink is not a slot");
+            assert!(err.to_string().contains("is not a directory"), "{}", err);
+            assert!(
+                outside.join("sentinel").exists(),
+                "the link target is untouched"
+            );
+            std::fs::remove_file(named_dir.join("7")).unwrap();
+        }
+
+        #[cfg(unix)]
+        {
+            let staged = staging_sibling(&dir.join(NAMED_SUBDIR), "drop-old");
+            std::os::unix::fs::symlink(&outside, &staged).unwrap();
+            let err = recover_named_drop(&dir).expect_err("a symlinked staging sibling");
+            assert!(err.to_string().contains("is not a directory"), "{}", err);
+            assert!(
+                outside.join("sentinel").exists(),
+                "recovery does not follow the link out of the store"
+            );
+            std::fs::remove_file(&staged).unwrap();
+        }
+
+        assert_eq!(parse_slot_name(".."), None);
+        {
+            let escaped = dir
+                .join(NAMED_SUBDIR)
+                .join("..")
+                .join("..")
+                .join(format!("sparq_escaped_{}", std::process::id()));
+            std::fs::remove_dir_all(&escaped).ok();
+            Graph::default().save(&escaped).unwrap();
+            let mut root = Graph::open(&dir).unwrap();
+            let child = Graph::open(&escaped).unwrap();
+            assert_eq!(
+                child.named_slot_in(&dir.join(NAMED_SUBDIR)),
+                None,
+                "a directory reached through `..` is not a slot of this store"
+            );
+            root.named.push((named("escaped"), child));
+            assert!(root
+                .drop_named_durable(&named("escaped"))
+                .expect_err("refused")
+                .contains("does not live in a slot of its own under"));
+            assert!(
+                escaped.join("dict-meta.bin").exists(),
+                "and it is still there"
+            );
+            drop(root);
+            std::fs::remove_dir_all(&escaped).ok();
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&other).ok();
+        std::fs::remove_dir_all(&outside).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_in_memory_child_of_a_durable_parent_refuses_manifest_changes() {
+        let dir = txn_tmp_dir("drop-in-memory-child");
+        save_named_store(&dir, &["g0"]);
+        let mut root = Graph::open(&dir).unwrap();
+        assert!(root.set_named(named("ram"), Graph::default()).is_err());
+        root.named.push((named("ram"), Graph::default()));
+        assert!(root.drop_named_durable(&named("ram")).is_err());
+        assert_eq!(declared_manifest_slots(&dir), vec![0]);
+        assert!(dir.join(NAMED_SUBDIR).join("0").is_dir());
+        drop(root);
+        assert_eq!(Graph::open(&dir).unwrap().named.len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_foreign_named_child_is_never_recorded_in_this_stores_manifest() {
+        let dir = txn_tmp_dir("foreign-slot");
+        let other = txn_tmp_dir("foreign-slot-other");
+        save_named_store(&dir, &["g0", "g1"]);
+        save_named_store(&other, &["x0", "x1"]);
+        {
+            let mut root = Graph::open(&dir).unwrap();
+            let mut foreign = Graph::open(&other).unwrap();
+            let (_, foreign_child) = foreign.named.pop().expect("the other store's slot 1");
+            assert_eq!(
+                foreign_child.named_slot_in(&other.join(NAMED_SUBDIR)),
+                Some(1),
+                "it is slot 1 of the store it belongs to"
+            );
+            assert_eq!(
+                foreign_child.named_slot_in(&dir.join(NAMED_SUBDIR)),
+                None,
+                "and no slot at all of this one"
+            );
+            root.named.push((named("foreign"), foreign_child));
+            let err = root
+                .ensure_named(&named("fresh"))
+                .expect_err("the set cannot be recorded in this store's manifest");
+            assert!(
+                err.contains("does not live in a slot of its own under"),
+                "{}",
+                err
+            );
+            assert_eq!(declared_manifest_slots(&dir), vec![0, 1]);
+            assert_eq!(
+                present_named_slots(&dir.join(NAMED_SUBDIR)).unwrap(),
+                [0, 1].into_iter().collect(),
+                "and no half-created slot was left behind"
+            );
+        }
+        let dup = vec![(0u32, named("a")), (0u32, named("b"))];
+        let err = write_named_manifest(&dir, &dup, 2).expect_err("duplicate slots");
+        assert!(err.to_string().contains("claim slot 0"), "{}", err);
+        let path = dir.join(NAMED_MANIFEST);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let name_len = u32::from_le_bytes(bytes[21..25].try_into().unwrap()) as usize;
+        let second_slot = 16 + 4 + 1 + 4 + name_len;
+        assert_eq!(
+            u32::from_le_bytes(bytes[second_slot..second_slot + 4].try_into().unwrap()),
+            1,
+            "the second entry is slot 1 before it is corrupted"
+        );
+        bytes[second_slot..second_slot + 4].copy_from_slice(&0u32.to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+        match read_named_manifest(&dir) {
+            Err(e) => assert!(e.to_string().contains("two entries claim slot 0"), "{}", e),
+            Ok(_) => panic!("a manifest naming one slot twice must not be read"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&other).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn the_layout_log_collapses_when_an_ancestor_is_replaced() {
+        let tree = TreeState::detached();
+        let root = std::path::Path::new("/store");
+        let slot = |i: u32| root.join(NAMED_SUBDIR).join(i.to_string());
+        for i in 0..64 {
+            tree.record_replacement(&slot(i));
+        }
+        let entries = |t: &TreeState| {
+            t.layout
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .replaced
+                .len()
+        };
+        assert_eq!(
+            entries(&tree),
+            64,
+            "sibling slots do not subsume one another"
+        );
+        assert!(
+            tree.replaced_since(&slot(7), 0).is_some(),
+            "a handle in a replaced slot is stale"
+        );
+        assert!(
+            tree.replaced_since(root, 0).is_none(),
+            "and the root, which was not replaced, is not"
+        );
+        let generation = tree.record_tree_replacement(root);
+        assert_eq!(
+            entries(&tree),
+            1,
+            "the root's replacement subsumes every entry beneath it"
+        );
+        assert_eq!(tree.replaced_since(&slot(7), 0).unwrap().1, generation);
+        assert_eq!(tree.replaced_since(root, 0).unwrap().1, generation);
+        assert!(
+            tree.replaced_since(&slot(7), generation).is_none(),
+            "a handle stamped at the swap is not stale"
+        );
+        assert!(
+            tree.replaced_since(std::path::Path::new("/other/named/7"), 0)
+                .is_none(),
+            "and another tree's directory is not this tree's business"
+        );
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_compaction_collapses_the_layout_entries_left_by_dropped_named_graphs() {
+        let dir = txn_tmp_dir("layout-collapse");
+        save_named_store(&dir, &["g0"]);
+        let mut g = Graph::open(&dir).unwrap();
+        let entries = |g: &Graph| {
+            g.tree
+                .layout
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .replaced
+                .len()
+        };
+        assert_eq!(
+            entries(&g),
+            0,
+            "a freshly opened store has replaced nothing"
+        );
+        for i in 0..8 {
+            let name = named(&format!("cycle-{i}"));
+            g.ensure_named(&name).unwrap();
+            assert!(g.drop_named_durable(&name).unwrap());
+        }
+        assert_eq!(
+            entries(&g),
+            8,
+            "one entry per dropped slot, each a distinct directory"
+        );
+        g.apply_delta(&[one_triple()], &[]).unwrap();
+        g.compact().unwrap();
+        assert_eq!(entries(&g), 1, "the whole-tree swap subsumes them all");
+        drop(g);
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(reopened.named.len(), 1, "g0 survives");
+        assert!(
+            reopened.id_of(&named("probe-s")).is_some(),
+            "and the write made after the compaction is there"
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_drop_records_the_removed_slot_with_detached_handles() {
+        let dir = txn_tmp_dir("drop-records-removed-slot");
+        save_named_store(&dir, &["g0", "g1"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let mut root = Graph::open(&dir).unwrap();
+        let mut detached =
+            Graph::open_dir(&named_dir.join("1"), root.lock.clone(), true, Role::Child).unwrap();
+        detached.tree = root.tree.clone();
+        detached.generation = root.tree.generation();
+        root.drop_named_durable(&named("g1")).unwrap();
+        assert_eq!(declared_manifest_slots(&dir), vec![0]);
+        assert!(!named_dir.join("1").exists());
+        assert!(detached.apply_delta(&[one_triple()], &[]).is_err());
+        drop(detached);
+        drop(root);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn two_attached_children_on_one_slot_are_refused_before_anything_is_published() {
+        let dir = txn_tmp_dir("duplicate-attached-slot");
+        save_named_store(&dir, &["g0", "g1"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        {
+            let mut root = Graph::open(&dir).unwrap();
+            let mut alias =
+                Graph::open_dir(&named_dir.join("1"), root.lock.clone(), true, Role::Child)
+                    .unwrap();
+            alias.tree = std::sync::Arc::clone(&root.tree);
+            alias.generation = root.tree.generation();
+            root.named.push((named("alias"), alias));
+            let err = root
+                .ensure_named(&named("fresh"))
+                .expect_err("a set that names one slot twice is not published");
+            assert!(err.contains("claim slot 1 of"), "{}", err);
+            assert_eq!(declared_manifest_slots(&dir), vec![0, 1]);
+            assert_eq!(
+                present_named_slots(&named_dir).unwrap(),
+                [0, 1].into_iter().collect(),
+                "and no slot was reserved for the graph that was not created"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_all_named_records_the_container_once_whatever_the_store_holds() {
+        let dir = txn_tmp_dir("drop-all-one-record");
+        save_named_store(&dir, &["g0", "g1", "g2", "g3", "g4", "g5"]);
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert_eq!(g.named.len(), 6);
+            let entries = |g: &Graph| {
+                g.tree
+                    .layout
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .replaced
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            assert!(entries(&g).is_empty(), "nothing replaced yet");
+            g.drop_all_named_durable().unwrap();
+            assert_eq!(
+                entries(&g),
+                vec![dir.join(NAMED_SUBDIR)],
+                "one entry, the container, however many graphs were dropped"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_manifest_with_bytes_after_its_last_entry_is_refused() {
+        let dir = txn_tmp_dir("manifest-trailing-bytes");
+        save_named_store(&dir, &["g0", "g1"]);
+        let path = dir.join(NAMED_MANIFEST);
+        let good = std::fs::read(&path).unwrap();
+        assert_eq!(declared_manifest_slots(&dir), vec![0, 1]);
+
+        let mut trailing = good.clone();
+        trailing.extend_from_slice(b"an older, longer manifest's tail");
+        std::fs::write(&path, &trailing).unwrap();
+        match read_named_manifest(&dir) {
+            Err(e) => assert!(
+                e.to_string().contains("bytes follow the last of the"),
+                "{}",
+                e
+            ),
+            Ok(_) => panic!("a manifest with trailing bytes must not be read"),
+        }
+        assert!(Graph::open(&dir).is_err(), "the open is refused too");
+        std::fs::write(&path, &good).unwrap();
+        assert_eq!(
+            Graph::open(&dir).unwrap().named.len(),
+            2,
+            "the intact manifest still opens"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_writable_open_cleans_undeclared_slots_and_keeps_declared_children() {
+        let dir = txn_tmp_dir("undeclared-slot-cleanup");
+        save_named_store(&dir, &["g0", "g1"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        copy_tree(&named_dir.join("1"), &named_dir.join("9")).unwrap();
+        let before = tree_image(&named_dir.join("1"));
+        let g = Graph::open(&dir).unwrap();
+        assert_eq!(g.named.len(), 2);
+        assert!(!named_dir.join("9").exists());
+        // A writable open may create empty log files in a declared child.
+        assert!(before
+            .iter()
+            .all(|entry| tree_image(&named_dir.join("1")).contains(entry)));
+        drop(g);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    fn tree_image(dir: &std::path::Path) -> Vec<(std::path::PathBuf, u64)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(at) = stack.pop() {
+            for entry in std::fs::read_dir(&at).expect("the sub-tree is readable") {
+                let entry = entry.unwrap();
+                let meta = entry.metadata().unwrap();
+                if meta.is_dir() {
+                    stack.push(entry.path());
+                } else {
+                    let rel = entry.path().strip_prefix(dir).unwrap().to_path_buf();
+                    out.push((rel, meta.len()));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn only_a_canonical_slot_name_is_a_slot_id() {
+        assert_eq!(parse_slot_name("5"), Some(5));
+        assert_eq!(parse_slot_name("0"), Some(0));
+        assert_eq!(parse_slot_name("4294967295"), Some(u32::MAX));
+        for not_a_slot in ["05", "+5", " 5", "5 ", "", "5x", "-1", "4294967296"] {
+            assert_eq!(parse_slot_name(not_a_slot), None, "{}", not_a_slot);
+        }
+        let dir = txn_tmp_dir("non-canonical-slot");
+        save_named_store(&dir, &["g0"]);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        std::fs::create_dir_all(named_dir.join("05")).unwrap();
+        assert_eq!(
+            present_named_slots(&named_dir).unwrap(),
+            [0].into_iter().collect(),
+            "`05` is not slot 5, and not a slot at all"
+        );
+        let g = Graph::open(&dir).unwrap();
+        assert_eq!(g.named.len(), 1, "the store opens with its one named graph");
+        assert!(
+            named_dir.join("05").exists(),
+            "and an open removes nothing it did not open"
+        );
+        drop(g);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_last_named_graph_leaves_an_empty_manifest_and_no_subtree() {
+        let dir =
+            std::env::temp_dir().join(format!("sparq_drop_last_named_{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         Graph::load_dataset(
             "<http://ex/d> <http://ex/p> <http://ex/e> .\n\
@@ -13666,20 +18201,17 @@ mod tests {
                 .unwrap());
             assert_eq!(g.named.len(), 0);
         }
-        assert!(!dir.join("named.bin").exists(), "manifest removed when the last named graph is dropped");
+        assert!(
+            declared_manifest_slots(&dir).is_empty(),
+            "the manifest names no graphs once the last one is dropped"
+        );
+        assert!(!dir.join("named").exists(), "and its sub-tree is gone");
         let g2 = Graph::open(&dir).unwrap();
         assert_eq!(g2.named.len(), 0, "no named graphs resurrected; default graph intact");
         assert_eq!(g2.len(), 1, "the default-graph triple survives");
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// (sq-glw2, Copilot #123) The BATCH `drop_all_named_durable` (DROP NAMED / the
-    /// named part of DROP ALL) removes EVERY named sub-graph and the manifest durably in ONE
-    /// pass — no survivor renumbering — and leaves the directory as a clean default-only store
-    /// across a reopen. Exercises the O(n) batch path on a directory-backed dataset with several
-    /// named graphs: all gone after restart, default graph intact. (The old engine loop dropped
-    /// them one at a time, O(n²); this asserts the single-rewrite batch path produces the same
-    /// durable end-state.)
     #[cfg(feature = "mmap")]
     #[test]
     fn drop_all_named_durable_batch_survives_restart() {
@@ -13696,7 +18228,6 @@ mod tests {
         .unwrap()
         .save(&dir)
         .unwrap();
-        // Four positional sub-dirs + manifest before the batch drop.
         assert!(dir.join("named.bin").exists());
         for i in 0..4 {
             assert!(dir.join("named").join(i.to_string()).exists(), "sub-dir {i} present before DROP ALL");
@@ -13704,27 +18235,30 @@ mod tests {
         {
             let mut g = Graph::open(&dir).unwrap();
             assert_eq!(g.named.len(), 4);
-            // ONE batch call drops all four (no per-graph renumber/manifest-rewrite loop).
             g.drop_all_named_durable().unwrap();
-            assert_eq!(g.named.len(), 0, "every named graph gone in memory after the batch drop");
-            // A second batch drop is an idempotent no-op (nothing left to remove).
+            assert_eq!(
+                g.named.len(),
+                0,
+                "every named graph gone in memory after the batch drop"
+            );
             g.drop_all_named_durable().unwrap();
             assert_eq!(g.named.len(), 0);
         }
-        // The whole named sub-tree + manifest are gone on disk (no staging siblings left behind).
-        assert!(!dir.join("named.bin").exists(), "manifest removed by the batch drop");
-        assert!(!dir.join("named").exists(), "named/ sub-tree removed by the batch drop");
+        assert!(
+            declared_manifest_slots(&dir).is_empty(),
+            "the manifest names no graphs after the batch drop"
+        );
+        assert!(
+            !dir.join("named").exists(),
+            "named/ sub-tree removed by the batch drop"
+        );
         assert!(!dir.join("named.drop-new").exists() && !dir.join("named.drop-old").exists());
-        // Restart: all named graphs stay gone; the default graph survives.
         let g2 = Graph::open(&dir).unwrap();
         assert_eq!(g2.named.len(), 0, "no named graph resurrected after restart");
         assert_eq!(g2.len(), 1, "the default-graph triple survives the batch DROP ALL");
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// `load_str_with_base`: relative IRIs (subjects, predicates, objects, @prefix-free
-    /// docs) resolve against the supplied base, in Turtle and TriG; an invalid base is
-    /// a clean error; line-based formats ignore the base.
     #[test]
     fn load_str_with_base_resolves_relative_iris() {
         let g = Graph::load_str_with_base("<a> <p> <../up/o> .", "turtle", "http://ex/dir/").unwrap();
@@ -14398,14 +18932,27 @@ mod tests {
     #[cfg(feature = "mmap")]
     #[test]
     fn vacuum_swap_crash_recovery() {
-        let base = std::env::temp_dir().join(format!("sparq_vacuum_recover_{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("sparq_vacuum_recover_{}", std::process::id()));
         let dir = base.join("g");
+        // A staging sibling is built by saving to a scratch name and renaming it into place:
+        // `save` refuses a reserved staging name as a STORE destination (sq-ycle), which is
+        // exactly the protection this fixture is working around to stage a crash state.
         let build = |d: &std::path::Path, tag: &str| {
             std::fs::remove_dir_all(d).ok();
-            Graph::load_str(&format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> ."), "ntriples")
-                .unwrap()
-                .save(d)
-                .unwrap();
+            let scratch = d.with_file_name(format!(
+                "{}-scratch",
+                d.file_name().and_then(|n| n.to_str()).unwrap_or("x")
+            ));
+            std::fs::remove_dir_all(&scratch).ok();
+            Graph::load_str(
+                &format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> ."),
+                "ntriples",
+            )
+            .unwrap()
+            .save(&scratch)
+            .unwrap();
+            std::fs::rename(&scratch, d).unwrap();
         };
         // (a) Crash BETWEEN the two renames (dir missing, both siblings present): the open must
         //     COMPLETE the swap by promoting the fully-synced new base.
@@ -14799,3 +19346,6 @@ mod exact_temporal_cache_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[cfg(all(test, feature = "mmap"))]
+mod layout_tests;
