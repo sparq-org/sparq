@@ -125,7 +125,9 @@ use crate::method_auth::{
     MethodPolicy,
 };
 use sparq_zk::encode::encode_term;
-use sparq_zk::field::{field_from_hex_str, field_to_be_bytes_32, field_to_hex, Fr};
+use sparq_zk::field::{
+    field_from_hex_str, field_from_hex_str_strict, field_to_be_bytes_32, field_to_hex, Fr,
+};
 // codex 2221 HIGH: only the SALT-BOUND `commitment_message_with_salt`
 // is used on the scan-verify path; the bare salt-less `commitment_message` is no
 // longer reachable here (a scan-covering attestation must be salt-bound).
@@ -231,7 +233,7 @@ impl KeySet {
     {
         let keys = keys
             .into_iter()
-            .filter_map(|h| public_key_from_hex(h.as_ref()).map(|_| normalize_hex(h.as_ref())))
+            .filter_map(|h| public_key_from_hex(h.as_ref()).map(|_| normalize_key_hex(h.as_ref())))
             .collect();
         KeySet { keys, hidden_issuer_depth: None, method_policy: None }
     }
@@ -297,7 +299,7 @@ impl KeySet {
 
     /// Whether `pk_hex` (any case, optional `0x`) is a member of the trusted set.
     fn contains_hex(&self, pk_hex: &str) -> bool {
-        self.keys.contains(&normalize_hex(pk_hex))
+        self.keys.contains(&normalize_key_hex(pk_hex))
     }
 
     /// The trusted set is empty (trusts no issuer).
@@ -387,7 +389,7 @@ impl KeySet {
     /// the verifier never needs the index, which stays private.)
     // sq-z9l.
     pub fn member_index(&self, pk_hex: &str) -> Option<usize> {
-        let target = normalize_hex(pk_hex);
+        let target = normalize_key_hex(pk_hex);
         self.keys.iter().position(|k| *k == target)
     }
 }
@@ -450,7 +452,7 @@ impl HolderRegistry {
     {
         let holders = keys
             .into_iter()
-            .filter_map(|h| public_key_from_hex(h.as_ref()).map(|_| normalize_hex(h.as_ref())))
+            .filter_map(|h| public_key_from_hex(h.as_ref()).map(|_| normalize_key_hex(h.as_ref())))
             .collect();
         HolderRegistry { holders, hidden_holder_set_depth: None }
     }
@@ -506,7 +508,7 @@ impl HolderRegistry {
     /// [`KeySet::member_index`].
     // sq-3c00.
     pub fn member_index(&self, holder_hex: &str) -> Option<usize> {
-        let target = normalize_hex(holder_hex);
+        let target = normalize_key_hex(holder_hex);
         self.holders.iter().position(|h| *h == target)
     }
 
@@ -517,7 +519,7 @@ impl HolderRegistry {
 
     /// Whether `holder_hex` (any case, optional `0x`) is an authorised holder.
     fn contains_hex(&self, holder_hex: &str) -> bool {
-        self.holders.contains(&normalize_hex(holder_hex))
+        self.holders.contains(&normalize_key_hex(holder_hex))
     }
 }
 
@@ -3772,7 +3774,7 @@ fn bind_issuer_attestations(
                 && !manifest
                     .key_set
                     .iter()
-                    .any(|k| normalize_hex(k) == normalize_hex(&att.issuer_public_key))
+                    .any(|k| normalize_key_hex(k) == normalize_key_hex(&att.issuer_public_key))
             {
                 return Err(CheckError::AttestationKeyNotInDeclaredSet {
                     commitment: c.0.clone(),
@@ -5507,13 +5509,15 @@ fn status_ref_from_revocation(rev: &crate::manifest::RevocationStatus) -> Option
     }
 }
 
-/// Normalize a hex key for set membership: strip an optional `0x` prefix and
-/// lowercase, so K-membership is representation-insensitive.
-// sq-rsd3v.6: `pub(crate)` so `sameas`'s canon-table re-check
-// normalizes encodings through the SAME function `bind_entailment` grounds
-// derivation antecedents with (one source of truth, no drift).
-pub(crate) fn normalize_hex(h: &str) -> String {
+/// Normalize compressed-key bytes without interpreting them as a field integer.
+fn normalize_key_hex(h: &str) -> String {
     h.strip_prefix("0x").unwrap_or(h).to_ascii_lowercase()
+}
+
+/// Normalize field hex by value, retaining case normalization for invalid text.
+pub(crate) fn normalize_hex(h: &str) -> String {
+    field_from_hex_str_strict(h).map(|f| field_to_hex(&f))
+        .unwrap_or_else(|| h.to_ascii_lowercase())
 }
 
 /// Encode a query pattern's constant term to its `pattern_const_enc` field-hex
@@ -6291,7 +6295,7 @@ pub(crate) fn scan_matches_pattern(
         }
         // For a constant slot, the bound encoding must equal the query
         // constant's encoding; for a variable slot both carry the `0x0` filler
-        // (still checked, so a non-`0x0` variable slot mismatches).
+        // (still checked by field value, so a nonzero variable slot mismatches).
         match encode_pattern_slot(&consts[slot], method) {
             Some(enc) if enc == const_enc[slot] => {}
             _ => return false,
@@ -7783,9 +7787,9 @@ fn bind_entailment(
         if let ProofInputs::Scan { rows, row_count, .. } = &sp.inputs {
             for row in rows.iter().take(*row_count as usize) {
                 disclosed.insert([
-                    normalize_hex(&row[0].0),
-                    normalize_hex(&row[1].0),
-                    normalize_hex(&row[2].0),
+                    row[0].canonical(),
+                    row[1].canonical(),
+                    row[2].canonical(),
                 ]);
             }
         }
@@ -7840,9 +7844,9 @@ fn bind_entailment(
         // 4b. Every antecedent grounded (disclosed base OR an earlier derived).
         for (ai, ant) in step.antecedents.iter().enumerate() {
             let key = [
-                normalize_hex(&ant[0].0),
-                normalize_hex(&ant[1].0),
-                normalize_hex(&ant[2].0),
+                ant[0].canonical(),
+                ant[1].canonical(),
+                ant[2].canonical(),
             ];
             if !disclosed.contains(&key) && !derived_so_far.contains(&key) {
                 return Err(CheckError::UngroundedDerivationAntecedent {
@@ -7853,9 +7857,9 @@ fn bind_entailment(
         }
         // This step's derived triple is now available to ground later steps.
         derived_so_far.insert([
-            normalize_hex(&step.derived[0].0),
-            normalize_hex(&step.derived[1].0),
-            normalize_hex(&step.derived[2].0),
+            step.derived[0].canonical(),
+            step.derived[1].canonical(),
+            step.derived[2].canonical(),
         ]);
     }
     Ok(())
@@ -17721,5 +17725,65 @@ printf '%s\n' "$1" >> "$SPARQ_METHOD_FOLD_TEST_ROOT/calls"
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod field_grounding_tests {
+    use super::*;
+    use crate::derivation::{DerivationStep, EntailmentRule};
+
+    #[test]
+    fn derivation_field_spellings_share_grounding_keys() {
+        let t = encode_iri_hex("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
+        let sc = encode_iri_hex("http://www.w3.org/2000/01/rdf-schema#subClassOf").unwrap();
+        let number = |n| FieldHex::from_field(&Fr::from(n));
+        let text = |s: &str| FieldHex(s.into());
+        let mut m: ProofManifest = serde_json::from_value(serde_json::json!({
+            "query": "SELECT * WHERE { ?s ?p ?o }",
+            "entailment_regime": "rdfs",
+            "attributions": [],
+            "binding": { "mode": "challenge", "challenge": "0x2a" },
+            "sub_proofs": []
+        })).unwrap();
+        m.sub_proofs.push(crate::manifest::SubProof {
+            inputs: ProofInputs::Scan {
+                id: CircuitId::Scan { k: 1, n: 16, r: 4 },
+                commitments: vec![number(9u64)],
+                pattern_is_const: [false; 3],
+                pattern_const_enc: std::array::from_fn(|_| text("0")),
+                rows: vec![
+                    [text("0x0001"), t.clone(), number(2)],
+                    [number(2), sc.clone(), number(3)],
+                    [number(3), sc.clone(), number(4)],
+                ],
+                row_count: 3,
+                attribution: vec![true],
+            },
+            proof_hex: String::new(),
+        });
+        m.derivation_steps = vec![
+            DerivationStep {
+                rule: EntailmentRule::Rdfs9SubClassType,
+                antecedents: vec![
+                    [text("01"), t.clone(), text("0x2")],
+                    [text("0002"), sc.clone(), text("3")],
+                ],
+                derived: [text("0x1"), t.clone(), text("03")],
+            },
+            DerivationStep {
+                rule: EntailmentRule::Rdfs9SubClassType,
+                antecedents: vec![
+                    [text("0001"), t.clone(), text("0x0003")],
+                    [text("0x03"), sc, text("4")],
+                ],
+                derived: [number(1), t, number(4)],
+            },
+        ];
+        let policy = EntailmentPolicy::simple_only().with_rdfs();
+        bind_entailment(&m, &policy).expect("base rows and the earlier step ground the chain");
+        m.sub_proofs.clear();
+        assert!(matches!(bind_entailment(&m, &policy),
+            Err(CheckError::UngroundedDerivationAntecedent { step: 0, .. })));
     }
 }

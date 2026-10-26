@@ -10,7 +10,7 @@
 //!
 //! Each entry here admits V1 constants ONLY: a V2 constant is
 //! [`DispatchError::NotALegacyV1LaneConst`]. Every `FieldHex` a renderer writes
-//! must be canonical, as for the ordinary renderers. Using these names is the
+//! must parse strictly, as for the ordinary renderers. Using these names is the
 //! caller's statement that the graph was issued under V1; nothing here reads
 //! issuance history. The checked prove entry
 //! (`crate::driver::CircuitProver::prove_value_lane`) accepts a V1 lane only with
@@ -203,7 +203,7 @@ pub fn build_filter_value_dl_date(
 /// Render the `Prover.toml` body for a `DualLeafV1` value-lane FILTER on the
 /// integer member — the V1 integer lane or the V1 boolean lane (both ride
 /// `filter_value_dl_int`). Layout as [`crate::toml::filter_value_dl_prover_toml`];
-/// admits V1 constants only, and every `FieldHex` must be canonical.
+/// admits V1 constants only, and every `FieldHex` must parse strictly.
 #[allow(clippy::too_many_arguments)]
 pub fn filter_value_dl_prover_toml(
     challenge: &FieldHex,

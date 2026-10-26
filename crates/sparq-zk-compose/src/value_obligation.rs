@@ -375,6 +375,20 @@ mod tests {
     }
 
     #[test]
+    fn field_spellings_preserve_value_obligations_and_edges() {
+        let (mut m, methods) = fixture("?o >= 18", 1);
+        let obligations = derive(&m, &methods).unwrap();
+        let covered = discharge(&m, &methods, &obligations).unwrap();
+        if let ProofInputs::Scan { pattern_const_enc, .. } = &mut m.sub_proofs[0].inputs {
+            pattern_const_enc[0] = FieldHex("0x00".into());
+        }
+        change_input(&mut m, 1, "operand_enc", serde_json::json!("0X001E"));
+        assert_eq!(derive(&m, &methods).unwrap(), obligations);
+        assert_eq!(discharge(&m, &methods, &obligations).unwrap(), covered);
+        accepting(&m, &methods).expect("equivalent fields preserve the value edge");
+    }
+
+    #[test]
     fn shared_check_value_edge_requires_the_exact_active_cell() {
         let (mut m, methods) = fixture("?o >= 18", 2);
         accepting(&m, &methods).expect("honest control passes the accepting prefilter");

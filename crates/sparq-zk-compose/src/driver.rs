@@ -42,7 +42,7 @@ pub enum DriverError {
     /// The checked value-lane prove entry [`CircuitProver::prove_value_lane`]
     /// refused its inputs before any subprocess ran — e.g. a FRESH proof under a
     /// method that is not selectable for new issuance, a lane constant on the
-    /// wrong member, or a non-canonical `FieldHex`.
+    /// wrong member, or malformed/out-of-range field hex.
     #[cfg(feature = "dual-leaf")]
     Dispatch(crate::dispatch::DispatchError),
 }
@@ -588,7 +588,7 @@ impl CircuitProver {
     /// derivation also reads), and the `Prover.toml` is rendered here by
     /// [`crate::value_lane::ValueLaneProof::checked_prover_toml`] from the
     /// validated fields, after the `(method, member, use_)` dispatch, the
-    /// canonical-`FieldHex` check over every written field, the lane↔member
+    /// strict field parsing over every written field, the lane↔member
     /// allow-list and the method/constant version agreement. A refusal is
     /// [`DriverError::Dispatch`] and precedes any `nargo`/`bb` subprocess and any
     /// scratch directory.
