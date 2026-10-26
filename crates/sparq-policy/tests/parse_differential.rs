@@ -15,17 +15,17 @@ fn normalize(mut p: Policy) -> Policy {
         if matches!(
             c.operator,
             Operator::IsAnyOf | Operator::IsPartOf | Operator::IsNoneOf
-        ) {
-            if let Value::Str(s) = &mut c.right {
-                let parts: std::collections::BTreeSet<_> = s.split('|').collect();
-                *s = parts.into_iter().collect::<Vec<_>>().join("|");
-            }
+        ) && matches!(c.right, Value::Str(_) | Value::SharedStr(_))
+        {
+            let parts: std::collections::BTreeSet<_> = c.right.as_str().split('|').collect();
+            c.right = Value::Str(parts.into_iter().collect::<Vec<_>>().join("|"));
         }
     }
     fn compound(c: &mut LogicalConstraint) {
         for n in &mut c.operands {
             match n {
                 ConstraintNode::Atomic(c) => atom(c),
+                ConstraintNode::SharedAtomic(c) => atom(std::sync::Arc::make_mut(c)),
                 ConstraintNode::Compound(c) => compound(c),
             }
         }
@@ -46,12 +46,23 @@ fn normalize(mut p: Policy) -> Policy {
     p
 }
 
+fn refusal_signature(err: &str) -> (Option<ConstraintBudget>, Option<&str>) {
+    let tag = err
+        .split_once("[budget=")
+        .and_then(|(_, tail)| tail.split_once(']').map(|(tag, _)| tag));
+    (current::constraint_budget_refusal(err), tag)
+}
+
 pub fn parse_policy(graph: &sparq_core::Graph) -> Result<ValidatedPolicy, String> {
     let actual = current::parse_policy(graph);
     let expected = main_parse::parse_policy(graph);
     match (&actual, &expected) {
         (Ok(a), Ok(b)) => assert_eq!(normalize(a.policy().clone()), normalize(b.policy().clone())),
-        (Err(_), Err(_)) => {}
+        (Err(a), Err(b)) => assert_eq!(
+            refusal_signature(a),
+            refusal_signature(b),
+            "refusal kinds differ: current={a}; main={b}"
+        ),
         _ => panic!("parse parity differs: current={actual:?}; main={expected:?}"),
     }
     actual
@@ -216,10 +227,185 @@ fn shared_folded_set_atoms_retain_main_results() {
     }
     let graph = sparq_core::Graph::load_str(&rdf, "turtle").unwrap();
     let expected = main_parse::parse_policy(&graph).expect("main accepts this shared folded atom");
-    let actual = current::parse_policy(&graph).expect("defaults cover folded atom copies");
+    let actual = current::parse_policy(&graph).expect("defaults cover shared folded atoms");
     assert_eq!(
         normalize(actual.into_inner()),
         normalize(expected.into_inner())
     );
     assert!(current::parse_policy_str(&rdf, "turtle").is_ok());
+}
+
+#[test]
+fn repository_odrl_fixtures_match_main() {
+    fn visit(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                visit(&path, found);
+            } else if path.extension().is_some_and(|s| s == "ttl") {
+                found.push(path);
+            }
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = Vec::new();
+    for dir in ["crates", "bench"] {
+        visit(&root.join(dir), &mut files);
+    }
+    assert!(
+        files.len() >= 114,
+        "fixture discovery missed policies: {}",
+        files.len()
+    );
+    for path in files {
+        let rdf = std::fs::read_to_string(&path).unwrap();
+        match sparq_core::Graph::load_str(&rdf, "turtle") {
+            Ok(graph) => {
+                let _ = parse_policy(&graph);
+            }
+            Err(_) => assert_eq!(
+                current::parse_policy_str(&rdf, "turtle"),
+                main_parse::parse_policy_str(&rdf, "turtle"),
+                "{}",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// Re-run in release mode with `--ignored --nocapture` on an otherwise idle host.
+/// The scalar shape and timed RDF load match the original ceiling probe. The
+/// folded shape checks sensitivity to atom size. Bisect the median parse time
+/// inside a verified bracket, then multiply its upper rule count by expanded
+/// operands per compound. This calibrates operand count, not elapsed work.
+#[test]
+#[ignore = "manual operand-count calibration against frozen main"]
+fn calibrate_operand_ceiling() {
+    fn document(rules: usize, width: usize, list: bool) -> String {
+        let mut rdf =
+            String::from("@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> a o:Set .\n");
+        for i in 0..rules {
+            rdf.push_str(&format!(
+                "<urn:p> o:permission <urn:r{i}> . <urn:r{i}> o:constraint <urn:lc> .\n"
+            ));
+        }
+        if list {
+            rdf.push_str("<urn:a> o:leftOperand o:purpose; o:operator o:isAnyOf; o:rightOperand (");
+            for i in 0..2000 {
+                rdf.push_str(&format!(" <urn:value{i}>"));
+            }
+            rdf.push_str(") .\n");
+            for i in 0..width {
+                rdf.push_str(&format!(
+                    "<urn:lc> o:and <urn:sub{i}> . <urn:sub{i}> o:and <urn:a> .\n"
+                ));
+            }
+        } else {
+            for i in 0..width {
+                rdf.push_str(&format!(
+                    "<urn:lc> o:and <urn:a{i}> . <urn:a{i}> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand <urn:v> .\n"
+                ));
+            }
+        }
+        rdf
+    }
+    fn median(rules: usize, width: usize, list: bool) -> std::time::Duration {
+        let rdf = document(rules, width, list);
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let policy = main_parse::parse_policy_str(&rdf, "turtle").unwrap();
+            samples.push(start.elapsed());
+            std::hint::black_box(&policy);
+        }
+        samples.sort();
+        println!("folded={list} rules={rules} median={:?}", samples[1]);
+        samples[1]
+    }
+    let envelope = std::time::Duration::from_secs(2);
+    for (width, list, mut high) in [(1000, false, 4096), (500, true, 64)] {
+        let mut low = 0;
+        // Report an insufficient bracket instead of calling its endpoint a ceiling.
+        if median(high, width, list) <= envelope {
+            println!("folded={list} increase the upper rule bracket and rerun");
+            continue;
+        }
+        while high - low > 1 {
+            let rules = (low + high) / 2;
+            if median(rules, width, list) <= envelope {
+                low = rules;
+            } else {
+                high = rules;
+            }
+        }
+        let operands = width * if list { 2 } else { 1 };
+        println!(
+            "folded={list} operand_bracket=[{}, {}] candidate_operand_ceiling={}",
+            low * operands,
+            high * operands,
+            high * operands
+        );
+    }
+}
+
+#[test]
+fn compound_operands_without_left_fields_keep_the_guard_reading() {
+    for fields in [
+        "o:operator o:eq, o:neq; o:rightOperand <urn:value>",
+        r#"o:operator o:eq; o:rightOperand "invalid"^^<http://www.w3.org/2001/XMLSchema#dateTimeStamp>"#,
+    ] {
+        let rdf = format!("@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:constraint <urn:lc> . <urn:lc> o:and <urn:c> . <urn:c> {fields} .");
+        parse_policy_str(&rdf, "turtle").unwrap();
+    }
+}
+
+#[test]
+fn padded_compound_retains_main_expansion_refusal() {
+    let mut rdf = String::from("@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:constraint <urn:lc> .\n");
+    for i in 0..2000 {
+        rdf.push_str(&format!("<urn:lc> o:and <urn:a{i}> . <urn:a{i}> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand <urn:value> .\n"));
+    }
+    for i in 0..10 {
+        rdf.push_str(&format!("<urn:p> o:permission <urn:pad{i}> .\n"));
+    }
+    let err = parse_policy_str(&rdf, "turtle").unwrap_err();
+    assert_eq!(
+        constraint_budget_refusal(&err),
+        Some(ConstraintBudget::Expansion)
+    );
+}
+
+#[test]
+fn folded_cache_retains_typed_operand_identity() {
+    for value in ["1", "true", "2000-01-01T00:00:00Z"] {
+        for datatype in ["integer", "string", "boolean", "dateTime"] {
+            let rdf = format!(
+                r#"@prefix o: <http://www.w3.org/ns/odrl/2/> . @prefix x: <http://www.w3.org/2001/XMLSchema#> .
+                <urn:p> o:permission <urn:r0>, <urn:r1> .
+                <urn:r0> o:constraint <urn:c0> . <urn:r1> o:constraint <urn:c1> .
+                <urn:c0> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand "{value}"^^x:{datatype} .
+                <urn:c1> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand "{value}" ."#
+            );
+            parse_policy_str(&rdf, "turtle").unwrap();
+        }
+    }
+}
+
+#[test]
+fn repeated_atomic_rights_retain_main_operand_allowance() {
+    for list in [false, true] {
+        let mut rdf = String::from("@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:constraint <urn:root> .\n");
+        if list {
+            rdf.push_str("<urn:list> <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> <urn:value>; <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n");
+        }
+        let right = if list { "<urn:list>" } else { "<urn:value>" };
+        for i in 0..1000 {
+            rdf.push_str(&format!("<urn:root> o:and <urn:c{i}> . <urn:c{i}> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand {right} .\n"));
+        }
+        parse_policy_str(&rdf, "turtle").unwrap();
+    }
 }

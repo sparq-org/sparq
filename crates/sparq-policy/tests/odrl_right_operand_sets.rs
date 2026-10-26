@@ -82,10 +82,8 @@ fn multi_object_right_operand_folds_to_set_encoding() {
         "several objects of one rightOperand are ONE constraint, not several"
     );
     let c = &p.permissions[0].constraints[0];
-    let Value::Str(s) = &c.right else {
-        panic!("multi-object rightOperand must fold to Value::Str, got {:?}", c.right);
-    };
-    let mut members: Vec<&str> = s.split('|').collect();
+    assert!(matches!(c.right, Value::Str(_) | Value::SharedStr(_)));
+    let mut members: Vec<&str> = c.right.as_str().split('|').collect();
     members.sort_unstable();
     assert_eq!(members, ["urn:purpose/education", "urn:purpose/research"]);
 }
@@ -201,7 +199,7 @@ fn single_element_list_keeps_typed_comparison() {
     let p = parse_policy_str(ttl, "turtle").unwrap();
     let c = &p.permissions[0].constraints[0];
     assert!(
-        matches!(c.right, Value::DateTime(_)),
+        matches!(c.right, Value::DateTime(_) | Value::SharedDateTime(_)),
         "one-element list must keep the typed dateTime value, got {:?}",
         c.right
     );

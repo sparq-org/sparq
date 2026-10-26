@@ -121,7 +121,7 @@ fn a_shared_subgraph_inside_the_budget_still_assembles_every_path() {
     let lc = &p.permissions[0].logical_constraints[0];
     fn leaves(n: &ConstraintNode) -> usize {
         match n {
-            ConstraintNode::Atomic(_) => 1,
+            ConstraintNode::Atomic(_) | ConstraintNode::SharedAtomic(_) => 1,
             ConstraintNode::Compound(lc) => lc.operands.iter().map(leaves).sum(),
         }
     }
@@ -161,7 +161,10 @@ fn a_chain_inside_the_depth_budget_keeps_its_authored_nesting() {
         node = &lc.operands[0];
         depth += 1;
     }
-    assert!(matches!(node, ConstraintNode::Atomic(_)));
+    assert!(matches!(
+        node,
+        ConstraintNode::Atomic(_) | ConstraintNode::SharedAtomic(_)
+    ));
     assert_eq!(depth, levels, "the authored nesting is preserved exactly");
 }
 
@@ -193,8 +196,10 @@ fn a_normal_nested_policy_parses_identically() {
     };
     assert_eq!(left.operator, LogicalOperator::And);
     assert_eq!(left.operands.len(), 2);
-    let ConstraintNode::Atomic(c1) = &left.operands[0] else {
-        panic!("expected an atomic constraint, got {:?}", left.operands[0]);
+    let c1 = match &left.operands[0] {
+        ConstraintNode::Atomic(c) => c,
+        ConstraintNode::SharedAtomic(c) => c,
+        other => panic!("expected an atomic constraint, got {other:?}"),
     };
     assert_eq!(c1.operator, Operator::Eq);
     assert_eq!(c1.right, Value::Iri("https://ex.dev/research".to_owned()));

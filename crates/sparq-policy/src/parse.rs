@@ -26,7 +26,7 @@ use sparq_core::temporal::Temporal;
 use sparq_core::Graph;
 use sparq_engine::{PreparedQuery, QueryBudget, QueryFailure, QueryResult};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
@@ -44,7 +44,7 @@ const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 /// (which then denies everything — fail-closed).
 pub fn parse_policy_str(rdf: &str, format: &str) -> Result<ValidatedPolicy, String> {
     let graph = Graph::load_str(rdf, format)?;
-    let mut ledger = Ledger::new(policy_limits(&graph, Some(rdf.len())));
+    let mut ledger = default_ledger(&graph, Some(rdf.len()));
     parse_policy_metered(&graph, &mut ledger)
 }
 
@@ -59,29 +59,14 @@ pub fn parse_policy_str_with_memberships(
     format: &str,
 ) -> Result<(ValidatedPolicy, BTreeSet<(String, String)>), String> {
     let graph = Graph::load_str(rdf, format)?;
-    let mut ledger = Ledger::new(policy_limits(&graph, Some(rdf.len())));
+    let mut ledger = default_ledger(&graph, Some(rdf.len()));
     let policy = parse_policy_metered(&graph, &mut ledger)?;
     let members = target_memberships_metered(&policy, &graph, &mut ledger)?;
     Ok((policy, members))
 }
 
-/// Default ceilings for policy parsing, before input-specific sizing.
-///
-/// Depth retains the corpus-compatible compound descent bound. Nodes retain the
-/// former per-compound allowance, up to a policy-wide ceiling derived by probing
-/// the main parser's repeated-compound workload. Bytes cover retained terms and
-/// expanded atom copies: wrappers use a source-sized base (or graph fallback)
-/// plus an input-sized retention allowance and a node-bounded copy allowance.
-/// Query rows cover twice the extraction-pass count times the graph's triple count
-/// (at least one). Corpus parity is checked against the frozen main
-/// parser in `tests/parse_differential.rs`. That corpus needs shallow nesting
-/// and small compounds; defaults retain the legacy margins. Shared compounds
-/// additionally require an allowance for their expanded copies.
-///
-/// This graph-independent template uses the node ceiling as its row-sizing
-/// reference. The ordinary wrappers size nodes, bytes and rows to the input. Set
-/// `nodes`, `bytes`, `depth` or `query_rows` higher before constructing a
-/// [`Ledger`] to parse a larger policy with [`parse_policy_metered`].
+/// Graph-independent template for callers choosing explicit limits.
+/// Prefer [`default_policy_limits_for`] to retain the input-sized wrapper defaults.
 pub fn default_policy_limits() -> Limits {
     let mut limits = Limits::default();
     limits.depth = MAX_CONSTRAINT_DEPTH;
@@ -93,64 +78,78 @@ pub fn default_policy_limits() -> Limits {
     limits
 }
 
-// Count rule nodes through the two indexed incident-edge scans. This does not
-// materialize a query result or inspect constraint values.
-fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> Limits {
+/// Input-sized limits used by the ordinary parsing wrappers.
+/// `source_bytes` is the original source length when known. Otherwise bytes are
+/// four times the summed term bytes of all graph triples. Nodes cover rule and
+/// constraint references plus first-walk list cells, up to an operand ceiling.
+/// Each individual compound also retains its independent operand cap.
+pub fn default_policy_limits_for(graph: &Graph, source_bytes: Option<usize>) -> Limits {
+    policy_limits(graph, source_bytes).0
+}
+
+// One charged sizing scan counts references and, for graph inputs, term bytes.
+fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) {
     let mut limits = default_policy_limits();
-    let mut rules = BTreeSet::new();
-    for kind in ["permission", "prohibition"] {
-        let p = graph
+    let mut sizing = Ledger::new(Limits::default());
+    let pattern = [None, None, None];
+    let rows = graph.store().estimate(&pattern);
+    sizing
+        .charge(Dim::QueryRows, rows)
+        .expect("unlimited sizing rows");
+    let id = |local: &str| {
+        graph
             .dict()
-            .lookup(&oxrdf::NamedNode::new_unchecked(format!("{ODRL_NS}{kind}")).into());
-        let scan = graph.store().scan(&[None, Some(p), None]);
-        for row in scan.rows.iter() {
-            rules.insert(scan.to_spo(row)[2]);
+            .lookup(&oxrdf::NamedNode::new_unchecked(format!("{ODRL_NS}{local}")).into())
+    };
+    let permission = id("permission");
+    let prohibition = id("prohibition");
+    let constraint = id("constraint");
+    let first = graph
+        .dict()
+        .lookup(&oxrdf::NamedNode::new_unchecked(format!("{RDF_NS}first")).into());
+    let mut rules = BTreeSet::new();
+    let mut constraints = 0usize;
+    let mut cells = 0usize;
+    let scan = graph.store().scan(&pattern);
+    for row in scan.rows.iter() {
+        let triple = scan.to_spo(row);
+        if triple[1] == permission || triple[1] == prohibition {
+            rules.insert(triple[2]);
+        }
+        constraints += usize::from(triple[1] == constraint);
+        cells += usize::from(triple[1] == first);
+        if source_bytes.is_none() {
+            for term in triple {
+                let _ = sizing.stored_term(graph.dict(), term);
+            }
         }
     }
-    let count = |property: &str| {
-        let p = graph
-            .dict()
-            .lookup(&oxrdf::NamedNode::new_unchecked(property.to_owned()).into());
-        graph.store().scan(&[None, Some(p), None]).rows.len()
-    };
-    // The old allowance resets per attached compound, including several on one
-    // rule. List cells are additional accounted work, rather than operand copies.
-    let constraints = count(&format!("{ODRL_NS}constraint"));
-    let list_cells = count(&format!("{RDF_NS}first"));
     limits.nodes = MAX_CONSTRAINT_NODES
         .saturating_mul(rules.len().max(constraints))
-        .saturating_add(list_cells)
+        .saturating_add(cells)
         .min(POLICY_NODE_CEILING);
-    if let Some(size) = source_bytes {
-        limits.bytes = size.saturating_mul(4);
-    }
-    // Source bytes bound retained input terms; expanded model atoms also own
-    // strings. Include their policy-wide allowance so compact shared compounds
-    // accepted by the legacy parser retain their result. Explicit ledgers keep
-    // exactly the caller's byte cap.
-    let mut sizing = Ledger::new(Limits::default());
-    let mut largest_term = 0usize;
-    for (id, _) in graph.dict().iter() {
-        if let Ok(size) = sizing.stored_term(graph.dict(), id) {
-            largest_term = largest_term.max(size);
-        }
-    }
-    let retained = graph.len().saturating_mul(largest_term).saturating_mul(3);
-    // A folded set can contain the whole term vocabulary, so one stored term
-    // is not an upper bound on an atom's owned right-hand value.
-    let expanded = limits
-        .nodes
-        .saturating_mul(sizing.spent(Dim::Bytes))
-        .saturating_mul(3);
-    limits.bytes = limits.bytes.max(retained).saturating_add(expanded);
+    limits.bytes = source_bytes
+        .unwrap_or_else(|| sizing.spent(Dim::Bytes))
+        .saturating_mul(4);
     limits.query_rows = POLICY_QUERY_COUNT
         .saturating_mul(graph.len().max(1))
         .saturating_mul(2);
-    limits
+    (limits, rows)
+}
+
+fn default_ledger(graph: &Graph, source_bytes: Option<usize>) -> Ledger {
+    let (limits, rows) = policy_limits(graph, source_bytes);
+    let mut ledger = Ledger::new(limits);
+    ledger
+        .charge(Dim::QueryRows, rows)
+        .expect("sizing pass fits the default row allowance");
+    ledger
 }
 
 // Upper bound on the fixed bulk queries and predicate scans, including memberships.
 const POLICY_QUERY_COUNT: usize = 64;
+// Operand-count ceiling; reproduce its calibration with the ignored
+// `calibrate_operand_ceiling` test. It bounds operands, not elapsed work.
 const POLICY_NODE_CEILING: usize = 1_906_000;
 
 /// Parse RDF using the caller's ledger for all policy extraction and assembly.
@@ -198,8 +197,13 @@ fn query_metered(graph: &Graph, sparql: &str, ledger: &mut Ledger) -> Result<Que
     Ok(result)
 }
 
-// Predicate-bound scans are contiguous index slices. Charge every scanned
-// triple, including rows a consumer filters out, before decoding any terms.
+// Charge the exact range count before opening a scan that may materialize rows.
+// This includes candidates a consumer later filters out.
+#[cfg(test)]
+std::thread_local! {
+    static PROPERTY_SCANS_OPENED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn scan_property(
     graph: &Graph,
     iri: &str,
@@ -209,10 +213,13 @@ fn scan_property(
     let predicate = graph
         .dict()
         .lookup(&oxrdf::NamedNode::new_unchecked(iri).into());
-    let scan = graph.store().scan(&[None, Some(predicate), None]);
+    let pattern = [None, Some(predicate), None];
     ledger
-        .charge(Dim::QueryRows, scan.rows.len())
+        .charge(Dim::QueryRows, graph.store().estimate(&pattern))
         .map_err(|e| ledger_error(e, ConstraintBudget::Rows))?;
+    #[cfg(test)]
+    PROPERTY_SCANS_OPENED.with(|n| n.set(n.get() + 1));
+    let scan = graph.store().scan(&pattern);
     for row in scan.rows.iter() {
         let [subject, _, object] = scan.to_spo(row);
         visit(subject, object);
@@ -237,7 +244,7 @@ pub fn target_memberships(
     policy: &Policy,
     graph: &Graph,
 ) -> Result<BTreeSet<(String, String)>, String> {
-    let mut ledger = Ledger::new(policy_limits(graph, None));
+    let mut ledger = default_ledger(graph, None);
     target_memberships_metered(policy, graph, &mut ledger)
 }
 
@@ -295,7 +302,7 @@ fn target_memberships_metered(
 /// [`constraint_budget_refusal`] tells that refusal from any other parse error).
 /// The result is validated ([`Policy::validate`]).
 pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
-    let mut ledger = Ledger::new(policy_limits(graph, None));
+    let mut ledger = default_ledger(graph, None);
     parse_policy_metered(graph, &mut ledger)
 }
 
@@ -579,6 +586,8 @@ struct ListCell {
     ambiguous: bool,
 }
 
+type FoldedRights = HashMap<(bool, Vec<Term>), Option<Value>>;
+
 /// The graph's pre-loaded RDF-collection shape table (see [`rdf_list_table`]):
 /// every well-keyed cons cell, PLUS the member-less HEAD-position nodes that are
 /// collection-*shaped* but carry no `rdf:first`. Both are needed by every
@@ -597,7 +606,9 @@ struct ListTable {
     resolved: RefCell<BTreeMap<String, Option<Rc<[Term]>>>>,
     // Both rule kinds and logical atoms reuse the same property scans.
     raw: RefCell<Option<BTreeMap<String, RawConstraint>>>,
-    atoms: RefCell<Option<BTreeMap<String, Constraint>>>,
+    atoms: RefCell<BTreeMap<String, Rc<Atom>>>,
+    folded: RefCell<FoldedRights>,
+    defs: RefCell<Option<BTreeMap<String, LcDef>>>,
     expansion_checked: std::cell::Cell<bool>,
     roots: RefCell<Option<ConstraintRoots>>,
     charged_cells: RefCell<BTreeSet<String>>,
@@ -671,7 +682,9 @@ fn rdf_list_table(graph: &Graph, ledger: &mut Ledger) -> Result<ListTable, Strin
         cells,
         rest_only,
         raw: RefCell::new(None),
-        atoms: RefCell::new(None),
+        atoms: RefCell::new(BTreeMap::new()),
+        folded: RefCell::new(HashMap::new()),
+        defs: RefCell::new(None),
         expansion_checked: std::cell::Cell::new(false),
         roots: RefCell::new(None),
         resolved: RefCell::new(BTreeMap::new()),
@@ -701,7 +714,21 @@ fn well_formed_list(
     lists: &ListTable,
     ledger: &mut Ledger,
 ) -> Result<Option<Rc<[Term]>>, String> {
+    resolve_list(head_key, lists, ledger, false)
+}
+
+fn resolve_list(
+    head_key: &str,
+    lists: &ListTable,
+    ledger: &mut Ledger,
+    reference_counted: bool,
+) -> Result<Option<Rc<[Term]>>, String> {
     if let Some(cached) = lists.resolved.borrow().get(head_key) {
+        if !reference_counted {
+            ledger
+                .charge(Dim::Nodes, 1)
+                .map_err(|e| ledger_error(e, ConstraintBudget::Nodes))?;
+        }
         return Ok(cached.clone());
     }
     #[cfg(test)]
@@ -729,9 +756,7 @@ fn well_formed_list(
             out.try_reserve(1)
                 .map_err(|_| budget_error(ConstraintBudget::Nodes))?;
         }
-        ledger
-            .term(TermRef::from(&cell.first))
-            .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
+        charge_list_term(&cell.first, ledger)?;
         out.push(cell.first.clone());
         let Some(rest) = &cell.rest else { break None };
         cur.clone_from(rest);
@@ -741,6 +766,38 @@ fn well_formed_list(
         .borrow_mut()
         .insert(head_key.to_owned(), result.clone());
     Ok(result)
+}
+
+// List cells consume Nodes for their fixed-size term slots. Charge their lexical
+// storage separately so compact collections do not pay that fixed storage twice.
+fn charge_list_term(term: &Term, ledger: &mut Ledger) -> Result<(), String> {
+    let view = TermRef::from(term);
+    let lexical = match view {
+        TermRef::Iri(s) | TermRef::Blank(s) => s.len(),
+        TermRef::Literal {
+            value,
+            datatype,
+            lang,
+        } => value
+            .len()
+            .saturating_add(datatype.len())
+            .saturating_add(lang.map_or(0, str::len)),
+        _ => {
+            return ledger
+                .term(view)
+                .map(|_| ())
+                .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))
+        }
+    };
+    let mut term_limits = *ledger.limits();
+    term_limits.bytes = usize::MAX;
+    term_limits.document_bytes = usize::MAX;
+    Ledger::new(term_limits)
+        .term(view)
+        .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
+    ledger
+        .charge(Dim::Bytes, lexical)
+        .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))
 }
 
 /// Is `op` one of the ODRL set-relation operators (`isPartOf`/`isAnyOf`/`isNoneOf`)
@@ -805,6 +862,42 @@ fn fold_rights(
     op: Option<&Term>,
     rights: &[Term],
     lists: &ListTable,
+    reference_counted: bool,
+    ledger: &mut Ledger,
+) -> Result<Option<Value>, String> {
+    let key = (is_set_operator(op), rights.to_vec());
+    if let Some(value) = lists.folded.borrow().get(&key) {
+        if !reference_counted {
+            ledger
+                .charge(Dim::Nodes, 1)
+                .map_err(|e| ledger_error(e, ConstraintBudget::Nodes))?;
+        }
+        return Ok(value.clone());
+    }
+    let value = fold_rights_uncached(op, rights, lists, reference_counted, ledger)?;
+    // Singleton collections also retain their lexical allocation across references.
+    let collection = rights
+        .iter()
+        .any(|right| lists.is_collection_shaped(&node_key(right)));
+    let value = if collection {
+        value.map(|value| match value {
+            Value::Iri(s) => Value::SharedIri(s.into()),
+            Value::Str(s) => Value::SharedStr(s.into()),
+            Value::DateTime(s) => Value::SharedDateTime(s.into()),
+            other => other,
+        })
+    } else {
+        value
+    };
+    lists.folded.borrow_mut().insert(key, value.clone());
+    Ok(value)
+}
+
+fn fold_rights_uncached(
+    op: Option<&Term>,
+    rights: &[Term],
+    lists: &ListTable,
+    reference_counted: bool,
     ledger: &mut Ledger,
 ) -> Result<Option<Value>, String> {
     let mut members: Vec<Term> = Vec::new();
@@ -815,7 +908,7 @@ fn fold_rights(
         // validate as a collection; a rest-only head is invisible to the cell table,
         // so testing only `cells` would read it as an ordinary value. sq-srjuc.
         let expanded = if lists.is_collection_shaped(&key) {
-            well_formed_list(&key, lists, ledger)?.ok_or_else(|| {
+            resolve_list(&key, lists, ledger, reference_counted)?.ok_or_else(|| {
                 format!(
                     "a constraint has a MALFORMED collection rightOperand ({key}: \
                      broken/dangling tail, cycle, forked cell, or a member-less cell \
@@ -850,9 +943,6 @@ fn fold_rights(
                 return Err(err);
             }
             if seen.insert(node_key(m), ()).is_none() {
-                ledger
-                    .term(TermRef::from(m))
-                    .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
                 members.push(m.clone());
             }
         }
@@ -876,7 +966,7 @@ fn fold_rights(
             }) {
                 return Ok(None); // un-encodable member would corrupt the set encoding
             }
-            Some(Value::Str(strs.join("|")))
+            Some(Value::SharedStr(strs.join("|").into()))
         }
     })
 }
@@ -1009,12 +1099,53 @@ impl RawConstraint {
                 .term(TermRef::from(term))
                 .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
         }
-        let right = fold_rights(self.op.as_ref(), &self.rights, lists, ledger)?;
+        let right = fold_rights(self.op.as_ref(), &self.rights, lists, true, ledger)?;
         if self.unsupported {
-            return Ok(unsatisfiable_constraint());
+            return unsatisfiable_constraint(ledger);
         }
-        Ok(build_constraint(self.left.clone(), self.op.clone(), right))
+        build_constraint(self.left.clone(), self.op.clone(), right, ledger)
     }
+}
+
+struct Atom {
+    value: std::sync::Arc<Constraint>,
+    _terms: Rc<[Term]>,
+}
+
+fn atom_for(key: &str, lists: &ListTable, ledger: &mut Ledger) -> Result<Rc<Atom>, String> {
+    let missing_key = !lists
+        .raw
+        .borrow()
+        .as_ref()
+        .is_some_and(|raw| raw.contains_key(key));
+    let key = if missing_key { MALFORMED } else { key };
+    if let Some(atom) = lists.atoms.borrow().get(key) {
+        return Ok(Rc::clone(atom));
+    }
+    let raw = lists.raw.borrow();
+    let missing = RawConstraint::default();
+    let raw = raw
+        .as_ref()
+        .and_then(|raw| raw.get(key))
+        .unwrap_or(&missing);
+    let value = raw.build(lists, ledger)?;
+    let terms = raw
+        .left
+        .iter()
+        .chain(raw.op.iter())
+        .chain(raw.rights.iter())
+        .cloned()
+        .collect::<Vec<_>>()
+        .into();
+    let atom = Rc::new(Atom {
+        value: std::sync::Arc::new(value),
+        _terms: terms,
+    });
+    lists
+        .atoms
+        .borrow_mut()
+        .insert(key.to_owned(), Rc::clone(&atom));
+    Ok(atom)
 }
 
 #[derive(Default)]
@@ -1123,12 +1254,14 @@ fn constraints_for(
     for (rkey, ckey) in order {
         let raw = acc.get(ckey).unwrap_or(&missing);
         if !raw.is_logical {
+            // The direct reference, like an assembled operand, is charged before construction.
             ledger
                 .charge(Dim::Nodes, 1)
                 .map_err(|e| ledger_error(e, ConstraintBudget::Nodes))?;
+            let atom = atom_for(ckey, lists, ledger)?;
             out.entry(rkey.clone())
                 .or_default()
-                .push(raw.build(lists, ledger)?);
+                .push((*atom.value).clone());
         }
     }
     Ok(out)
@@ -1226,69 +1359,57 @@ fn logical_constraints_for(
     lists: &ListTable,
     ledger: &mut Ledger,
 ) -> Result<BTreeMap<String, Vec<LogicalConstraint>>, String> {
-    // (1) Every combinator edge in the graph: (lc-node, combinator, operand-node), in
-    // graph order. A node appearing as a subject here is a LogicalConstraint.
-    let edges_q = format!(
-        "SELECT ?lc ?logop ?operand WHERE {{ \
+    if lists.defs.borrow().is_none() {
+        // (1) Every combinator edge in the graph: (lc-node, combinator, operand-node), in
+        // graph order. A node appearing as a subject here is a LogicalConstraint.
+        let edges_q = format!(
+            "SELECT ?lc ?logop ?operand WHERE {{ \
            ?lc ?logop ?operand . \
            VALUES ?logop {{ <{ODRL_NS}and> <{ODRL_NS}or> <{ODRL_NS}xone> }} \
          }}"
-    );
-    let edges_res = query_metered(graph, &edges_q, ledger)?;
-    let mut lc_defs: BTreeMap<String, LcDef> = BTreeMap::new();
-    for row in edges_res.rows {
-        let mut it = row.into_iter();
-        let (Some(Some(lc_t)), Some(Some(logop_t)), Some(Some(operand_t))) =
-            (it.next(), it.next(), it.next())
-        else {
-            continue;
-        };
-        let Some(operator) = LogicalOperator::from_iri(&term_str(&logop_t)) else {
-            continue;
-        };
-        let lckey = node_key(&lc_t);
-        let okey = node_key(&operand_t);
-        let def = lc_defs.entry(lckey).or_insert_with(|| LcDef {
-            operator,
-            operands: Vec::new(),
-            seen: BTreeMap::new(),
-        });
-        if def.seen.insert(okey.clone(), ()).is_none() {
-            def.operands.push(okey);
+        );
+        let edges_res = query_metered(graph, &edges_q, ledger)?;
+        let mut lc_defs: BTreeMap<String, LcDef> = BTreeMap::new();
+        for row in edges_res.rows {
+            let mut it = row.into_iter();
+            let (Some(Some(lc_t)), Some(Some(logop_t)), Some(Some(operand_t))) =
+                (it.next(), it.next(), it.next())
+            else {
+                continue;
+            };
+            let Some(operator) = LogicalOperator::from_iri(&term_str(&logop_t)) else {
+                continue;
+            };
+            let lckey = node_key(&lc_t);
+            let okey = node_key(&operand_t);
+            let def = lc_defs.entry(lckey).or_insert_with(|| LcDef {
+                operator,
+                operands: Vec::new(),
+                seen: BTreeMap::new(),
+            });
+            if def.seen.insert(okey.clone(), ()).is_none() {
+                def.operands.push(okey);
+            }
         }
-    }
 
-    // (2) Every atomic constraint node's fields, keyed by node. A node with no
-    // combinator edge but with these fields is an atomic operand.
-    if lists.atoms.borrow().is_none() {
         ensure_raw_constraints(graph, lists, ledger)?;
-        let raw_ref = lists.raw.borrow();
-        let atoms = raw_ref
-            .as_ref()
-            .expect("loaded above")
-            .iter()
-            // The old atom query required a leftOperand. Other subjects retain
-            // their direct-constraint reading or become a missing-atom guard.
-            .filter(|(_, raw)| raw.left.is_some())
-            .map(|(key, raw)| raw.build(lists, ledger).map(|c| (key.clone(), c)))
-            .collect::<Result<_, String>>()?;
-        *lists.atoms.borrow_mut() = Some(atoms);
+        let raw = lists.raw.borrow();
+        fold_list_operands(
+            &mut lc_defs,
+            raw.as_ref().expect("loaded above"),
+            lists,
+            ledger,
+        )?;
+        *lists.defs.borrow_mut() = Some(lc_defs);
     }
-    let atoms_ref = lists.atoms.borrow();
-    let atoms = atoms_ref.as_ref().expect("loaded above");
-
-    // (2b) Fold LIST-valued combinator operands (`odrl:or ( <c1> <c2> )`) into their
-    // member node keys before assembly; a malformed/degenerate collection REFUSES the
-    // whole parse (fail-closed on both rule kinds). HEAD-position rest-only cells come
-    // from the pre-loaded `lists.rest_only` set. sq-dkuff.
-    fold_list_operands(&mut lc_defs, atoms, lists, ledger)?;
-
+    let defs = lists.defs.borrow();
+    let lc_defs = defs.as_ref().expect("loaded above");
     // (3) Atomic and compound attachments use the same first-seen roots.
     ensure_constraint_roots(graph, lists, ledger)?;
     let roots_ref = lists.roots.borrow();
     let roots = roots_ref.as_ref().expect("loaded above");
     if !lists.expansion_checked.get() {
-        preflight_expansions(roots, &lc_defs, ledger)?;
+        preflight_expansions(roots, lc_defs, ledger)?;
         lists.expansion_checked.set(true);
     }
     let mut out: BTreeMap<String, Vec<LogicalConstraint>> = BTreeMap::new();
@@ -1298,7 +1419,7 @@ fn logical_constraints_for(
         if lc_defs.contains_key(ckey) {
             let mut stack = BTreeMap::new();
             // Every rule and compound consumes the same policy-wide ledger.
-            let lc = assemble_logical(ckey, &lc_defs, atoms, &mut stack, ledger)?;
+            let lc = assemble_logical(ckey, lc_defs, lists, &mut stack, ledger)?;
             out.entry(rkey.clone()).or_default().push(lc);
         }
     }
@@ -1326,14 +1447,14 @@ fn preflight_expansions(
         let def = &defs[key];
         let mut n = def.operands.len();
         if n > MAX_CONSTRAINT_NODES {
-            return None;
+            return Some(MAX_CONSTRAINT_NODES + 1);
         }
         for operand in &def.operands {
             if defs.contains_key(operand) {
                 n = n.saturating_add(size(operand, defs, memo, active)?);
             }
             if n > MAX_CONSTRAINT_NODES {
-                return None;
+                return Some(MAX_CONSTRAINT_NODES + 1);
             }
         }
         active.remove(key);
@@ -1346,6 +1467,9 @@ fn preflight_expansions(
     for (rule, key) in roots.permission.iter().chain(&roots.prohibition) {
         if defs.contains_key(key) && seen.insert((rule.clone(), key.clone())) {
             if let Some(n) = size(key, defs, &mut memo, &mut BTreeSet::new()) {
+                if n > MAX_CONSTRAINT_NODES {
+                    return Err(budget_error(ConstraintBudget::Expansion));
+                }
                 total = total.saturating_add(n);
             }
         }
@@ -1390,7 +1514,7 @@ fn preflight_expansions(
 /// `rdf:nil` or a cons-cell node), so no previously-working parse is refused.
 fn fold_list_operands(
     lc_defs: &mut BTreeMap<String, LcDef>,
-    atoms: &BTreeMap<String, Constraint>,
+    atoms: &BTreeMap<String, RawConstraint>,
     lists: &ListTable,
     ledger: &mut Ledger,
 ) -> Result<(), String> {
@@ -1400,7 +1524,8 @@ fn fold_list_operands(
     let lc_keys: BTreeMap<String, ()> = lc_defs.keys().map(|k| (k.clone(), ())).collect();
     // A node with NO constraint reading (neither compound nor atomic) — only such
     // nodes are folded/refused; a real constraint keeps its reading.
-    let no_reading = |k: &str| !lc_keys.contains_key(k) && !atoms.contains_key(k);
+    let no_reading =
+        |k: &str| !lc_keys.contains_key(k) && !atoms.get(k).is_some_and(|raw| raw.left.is_some());
     let expandable = |k: &str| lists.cells.contains_key(k) && no_reading(k);
     let empty_op = |k: &str| *k == nil && no_reading(k);
     let rest_only_op = |k: &str| lists.rest_only.contains_key(k) && no_reading(k);
@@ -1440,9 +1565,6 @@ fn fold_list_operands(
                     ));
                 };
                 for member in members.iter() {
-                    ledger
-                        .term(TermRef::from(member))
-                        .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
                     let mkey = node_key(member);
                     if (mkey == nil || lists.is_collection_shaped(&mkey)) && no_reading(&mkey) {
                         return Err(format!(
@@ -1479,13 +1601,29 @@ fn fold_list_operands(
 fn assemble_logical(
     lc_key: &str,
     lc_defs: &BTreeMap<String, LcDef>,
-    atoms: &BTreeMap<String, Constraint>,
+    lists: &ListTable,
     active: &mut BTreeMap<String, ()>,
     ledger: &mut Ledger,
+) -> Result<LogicalConstraint, String> {
+    let mut remaining = MAX_CONSTRAINT_NODES;
+    assemble_logical_inner(lc_key, lc_defs, lists, active, ledger, &mut remaining)
+}
+
+fn assemble_logical_inner(
+    lc_key: &str,
+    lc_defs: &BTreeMap<String, LcDef>,
+    lists: &ListTable,
+    active: &mut BTreeMap<String, ()>,
+    ledger: &mut Ledger,
+    remaining: &mut usize,
 ) -> Result<LogicalConstraint, String> {
     let def = lc_defs
         .get(lc_key)
         .expect("assemble_logical called on a non-LC node");
+    if def.operands.len() > *remaining {
+        return Err(budget_error(ConstraintBudget::Expansion));
+    }
+    *remaining -= def.operands.len();
     active.insert(lc_key.to_owned(), ());
     let mut operands = Vec::new();
     ledger
@@ -1495,22 +1633,26 @@ fn assemble_logical(
         let node = if lc_defs.contains_key(okey) {
             if active.contains_key(okey) {
                 // A cycle in the LogicalConstraint graph — fail closed rather than loop.
-                ConstraintNode::Atomic(unsatisfiable_constraint())
+                ConstraintNode::SharedAtomic(std::sync::Arc::clone(
+                    &atom_for(MALFORMED, lists, ledger)?.value,
+                ))
             } else {
                 ledger
                     .enter()
                     .map_err(|e| ledger_error(e, ConstraintBudget::Depth))?;
-                let sub = assemble_logical(okey, lc_defs, atoms, active, ledger);
+                let sub = assemble_logical_inner(okey, lc_defs, lists, active, ledger, remaining);
                 ledger.leave();
                 ConstraintNode::Compound(sub?)
             }
-        } else if let Some(c) = atoms.get(okey) {
-            charge_constraint(c, ledger)?;
-            ConstraintNode::Atomic(c.clone())
         } else {
-            // An operand that is neither a recognised compound nor a well-formed atomic
-            // constraint → unsatisfiable guard (fail-closed).
-            ConstraintNode::Atomic(unsatisfiable_constraint())
+            // Compound leaves retain the original atom query's required left field.
+            let has_left = lists
+                .raw
+                .borrow()
+                .as_ref()
+                .is_some_and(|raw| raw.get(okey).is_some_and(|raw| raw.left.is_some()));
+            let atom = atom_for(if has_left { okey } else { MALFORMED }, lists, ledger)?;
+            ConstraintNode::SharedAtomic(std::sync::Arc::clone(&atom.value))
         };
         operands.push(node);
     }
@@ -1534,19 +1676,8 @@ fn assemble_logical(
 /// combinators deeply) and far below any depth that could exhaust a stack.
 const MAX_CONSTRAINT_DEPTH: usize = 32;
 
-/// Legacy per-compound operand allowance used to size the policy-wide limit.
-///
-/// `active` tracks only the ancestor chain, so a node reachable by several paths through
-/// an ACYCLIC combinator graph is assembled once per path: a "diamond" document whose
-/// every level has two operands pointing at the same next level describes 2^n operand
-/// nodes in O(n) triples, and the assembled tree is that size. Bounding the total number
-/// of nodes expanded caps that at a size independent of how the document is shaped.
-///
-/// Measured, not guessed: bisected the same way as [`MAX_CONSTRAINT_DEPTH`], the smallest
-/// value that still parses every policy in the `sparq-policy` and `sparq-solid` test
-/// corpora is **6** nodes. The value here is far above that so no plausibly-authored
-/// policy meets it. Assembly now charges the policy-wide ledger, and this value
-/// supplies its compatibility sizing and the expansion preflight's legacy threshold.
+/// Per attached compound operand cap, retained alongside the policy-wide ledger.
+/// Shared subgraphs count once per expanded path, including nested compounds.
 const MAX_CONSTRAINT_NODES: usize = 1_024;
 
 fn budget_error(kind: ConstraintBudget) -> String {
@@ -1577,22 +1708,6 @@ fn expansion_error(e: Exceeded) -> String {
     } else {
         ledger_error(e, ConstraintBudget::Expansion)
     }
-}
-
-fn charge_constraint(c: &Constraint, ledger: &mut Ledger) -> Result<(), String> {
-    // Size the owned model strings before cloning the atom into an expanded tree.
-    ledger
-        .term(TermRef::Iri(&c.left))
-        .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
-    match &c.right {
-        Value::Iri(v) | Value::Str(v) | Value::DateTime(v) => {
-            ledger
-                .term(TermRef::Iri(v))
-                .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
-        }
-        Value::Num(_) => {}
-    }
-    Ok(())
 }
 
 /// Which assembly budget a policy parse was refused by ([`constraint_budget_refusal`]).
@@ -1682,12 +1797,17 @@ fn typed_member(t: &Term) -> bool {
 /// The unsatisfiable-guard atomic constraint used for a malformed/unknown operand
 /// (a constraint that can never be satisfied — fail-closed). Shared by [`build_constraint`]
 /// and the compound-operand assembler. sq-a0zef.
-fn unsatisfiable_constraint() -> Constraint {
-    Constraint {
+fn unsatisfiable_constraint(ledger: &mut Ledger) -> Result<Constraint, String> {
+    for _ in 0..2 {
+        ledger
+            .term(TermRef::Iri(MALFORMED))
+            .map_err(|e| ledger_error(e, ConstraintBudget::Bytes))?;
+    }
+    Ok(Constraint {
         left: MALFORMED.to_owned(),
         operator: Operator::Neq,
         right: Value::Iri(MALFORMED.to_owned()),
-    }
+    })
 }
 
 pub(crate) const MALFORMED: &str = "urn:sparq-policy:malformed";
@@ -1699,6 +1819,7 @@ pub(crate) fn is_unsatisfiable_guard(c: &Constraint) -> bool {
 pub(crate) fn node_has_guard(n: &ConstraintNode) -> bool {
     match n {
         ConstraintNode::Atomic(c) => is_unsatisfiable_guard(c),
+        ConstraintNode::SharedAtomic(c) => is_unsatisfiable_guard(c),
         ConstraintNode::Compound(lc) => lc.operands.iter().any(node_has_guard),
     }
 }
@@ -1762,19 +1883,24 @@ fn refuse_unsupported_rule_heads(
 /// unsatisfiable guard (fail-closed): the enclosing rule can then never match.
 /// `right` is the already-folded value (see [`fold_rights`]): `None` covers both
 /// a missing right operand and an unfoldable multi-value. sq-ueydm.
-fn build_constraint(left: Option<Term>, op: Option<Term>, right: Option<Value>) -> Constraint {
+fn build_constraint(
+    left: Option<Term>,
+    op: Option<Term>,
+    right: Option<Value>,
+    ledger: &mut Ledger,
+) -> Result<Constraint, String> {
     let (Some(left), Some(op), Some(right)) = (left, op, right) else {
-        return unsatisfiable_constraint();
+        return unsatisfiable_constraint(ledger);
     };
     let operator = match Operator::from_iri(&term_str(&op)) {
         Some(o) => o,
-        None => return unsatisfiable_constraint(),
+        None => return unsatisfiable_constraint(ledger),
     };
-    Constraint {
+    Ok(Constraint {
         left: term_str(&left),
         operator,
         right,
-    }
+    })
 }
 
 /// Parse duties (and their actions/constraints) per rule node.
@@ -1818,7 +1944,7 @@ fn duties_for(
             id: term_str(&d_t),
             action,
             constraints: if constrained.contains_key(&key) {
-                vec![unsatisfiable_constraint()]
+                vec![unsatisfiable_constraint(ledger)?]
             } else {
                 Vec::new()
             },
@@ -1886,11 +2012,23 @@ mod metered_tests {
 
     #[test]
     fn indexed_scan_charges_candidates_before_visiting() {
-        let graph = Graph::load_str(
-            "<urn:a> <urn:p> <urn:x> . <urn:b> <urn:p> <urn:y> . <urn:c> <urn:other> <urn:z> .",
+        let mut graph = Graph::load_str(
+            "<urn:a> <urn:p> <urn:x> . <urn:b> <urn:p> <urn:y> . <urn:c> <urn:p> <urn:old> .",
             "turtle",
         )
         .unwrap();
+        let iri = |s| oxrdf::NamedNode::new_unchecked(s);
+        graph
+            .remove_triple(iri("urn:b"), iri("urn:p"), iri("urn:y"))
+            .unwrap();
+        graph
+            .remove_triple(iri("urn:c"), iri("urn:p"), iri("urn:old"))
+            .unwrap();
+        graph
+            .insert_triple(iri("urn:c"), iri("urn:p"), iri("urn:z"))
+            .unwrap();
+        assert!(graph.store().has_overlay());
+        let opened = PROPERTY_SCANS_OPENED.with(std::cell::Cell::get);
         let mut limits = Limits::default();
         limits.query_rows = 1;
         let mut ledger = Ledger::new(limits);
@@ -1901,6 +2039,11 @@ mod metered_tests {
             constraint_budget_refusal(&err),
             Some(ConstraintBudget::Rows)
         );
+        assert_eq!(
+            PROPERTY_SCANS_OPENED.with(std::cell::Cell::get),
+            opened,
+            "charge before opening the range"
+        );
         assert!(visited.is_empty(), "charge before processing any candidate");
         assert_eq!(ledger.spent(Dim::QueryRows), 0);
 
@@ -1909,6 +2052,23 @@ mod metered_tests {
         scan_property(&graph, "urn:p", &mut ledger, |s, o| visited.push((s, o))).unwrap();
         assert_eq!(ledger.spent(Dim::QueryRows), 2);
         assert_eq!(visited.len(), 2);
+        assert_eq!(PROPERTY_SCANS_OPENED.with(std::cell::Cell::get), opened + 1);
+        let terms: BTreeSet<_> = visited
+            .into_iter()
+            .map(|(s, o)| {
+                (
+                    graph.dict().term(s).to_string(),
+                    graph.dict().term(o).to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            terms,
+            BTreeSet::from([
+                ("<urn:a>".into(), "<urn:x>".into()),
+                ("<urn:c>".into(), "<urn:z>".into())
+            ])
+        );
     }
 
     #[test]
@@ -2032,16 +2192,46 @@ mod metered_tests {
         let head: Term = oxrdf::NamedNode::new_unchecked("urn:list").into();
         let op: Term = oxrdf::NamedNode::new_unchecked(format!("{ODRL_NS}isAnyOf")).into();
         for _ in 0..100 {
-            let value =
-                fold_rights(Some(&op), std::slice::from_ref(&head), &lists, &mut l).unwrap();
+            let value = fold_rights(
+                Some(&op),
+                std::slice::from_ref(&head),
+                &lists,
+                false,
+                &mut l,
+            )
+            .unwrap();
             assert_eq!(value, Some(Value::Iri("urn:v".into())));
         }
         assert_eq!(lists.walks.get(), 1);
-        assert_eq!(l.spent(Dim::Nodes), 1);
+        assert_eq!(l.spent(Dim::Nodes), 100);
     }
 
     #[test]
-    fn cached_list_members_still_consume_copy_bytes() {
+    fn memoized_lists_share_member_storage() {
+        let graph = Graph::load_str(
+            &format!("<urn:list> <{RDF_NS}first> <urn:v>; <{RDF_NS}rest> <{RDF_NS}nil> ."),
+            "turtle",
+        )
+        .unwrap();
+        let mut ledger = Ledger::new(Limits::default());
+        let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+        let first = well_formed_list("<urn:list>", &lists, &mut ledger)
+            .unwrap()
+            .unwrap();
+        let bytes = ledger.spent(Dim::Bytes);
+        for _ in 0..4000 {
+            let value = well_formed_list("<urn:list>", &lists, &mut ledger)
+                .unwrap()
+                .unwrap();
+            assert!(Rc::ptr_eq(&first, &value));
+        }
+        assert_eq!(ledger.spent(Dim::Nodes), 4001);
+        assert_eq!(ledger.spent(Dim::Bytes), bytes);
+        assert_eq!(lists.walks.get(), 1);
+    }
+
+    #[test]
+    fn cached_list_members_reuse_bytes_and_charge_a_reference() {
         let graph = Graph::load_str(
             &format!("<urn:list> <{RDF_NS}first> <urn:v> ; <{RDF_NS}rest> <{RDF_NS}nil> ."),
             "turtle",
@@ -2052,18 +2242,17 @@ mod metered_tests {
         let head = oxrdf::NamedNode::new_unchecked("urn:list").into();
         let rights = std::slice::from_ref(&head);
         assert_eq!(
-            fold_rights(None, rights, &lists, &mut l).unwrap(),
+            fold_rights(None, rights, &lists, false, &mut l).unwrap(),
             Some(Value::Iri("urn:v".into()))
         );
         let mut limits = Limits::default();
         limits.bytes = l.spent(Dim::Bytes);
         let mut capped = Ledger::new(limits);
         capped.charge(Dim::Bytes, l.spent(Dim::Bytes)).unwrap();
-        let err = fold_rights(None, rights, &lists, &mut capped).unwrap_err();
-        assert_eq!(
-            constraint_budget_refusal(&err),
-            Some(ConstraintBudget::Bytes)
-        );
+        let value = fold_rights(None, rights, &lists, false, &mut capped).unwrap();
+        assert_eq!(value, Some(Value::Iri("urn:v".into())));
+        assert_eq!(capped.spent(Dim::Bytes), limits.bytes);
+        assert_eq!(capped.spent(Dim::Nodes), 1);
         assert_eq!(lists.walks.get(), 1);
     }
 
@@ -2084,7 +2273,7 @@ mod metered_tests {
         let err = assemble_logical(
             "root",
             &defs,
-            &BTreeMap::new(),
+            &rdf_list_table(&Graph::new(), &mut Ledger::new(Limits::default())).unwrap(),
             &mut BTreeMap::new(),
             &mut l,
         )
@@ -2116,14 +2305,9 @@ mod metered_tests {
                 },
             ),
         ]);
-        let atoms = BTreeMap::from([(
-            "atom".into(),
-            Constraint {
-                left: "urn:left".into(),
-                operator: Operator::Eq,
-                right: Value::Iri("urn:right".into()),
-            },
-        )]);
+        let graph = Graph::load_str(&format!("@prefix o: <{ODRL_NS}> . <urn:atom> o:leftOperand <urn:left>; o:operator o:eq; o:rightOperand <urn:right> ."), "turtle").unwrap();
+        let lists = rdf_list_table(&graph, &mut Ledger::new(Limits::default())).unwrap();
+        ensure_raw_constraints(&graph, &lists, &mut Ledger::new(Limits::default())).unwrap();
         for (depth, bytes, expected) in [
             (32, 0, ConstraintBudget::Bytes),
             (0, usize::MAX, ConstraintBudget::Depth),
@@ -2133,7 +2317,7 @@ mod metered_tests {
             limits.bytes = bytes;
             let mut l = Ledger::new(limits);
             let err =
-                assemble_logical("root", &defs, &atoms, &mut BTreeMap::new(), &mut l).unwrap_err();
+                assemble_logical("root", &defs, &lists, &mut BTreeMap::new(), &mut l).unwrap_err();
             assert_eq!(constraint_budget_refusal(&err), Some(expected));
             assert_eq!(l.spent(Dim::Depth), 0);
         }

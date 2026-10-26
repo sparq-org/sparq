@@ -1282,6 +1282,7 @@ fn constraint_status(c: &Constraint, request: &Request) -> ConstraintStatus {
 fn constraint_node_status(node: &ConstraintNode, request: &Request) -> ConstraintStatus {
     match node {
         ConstraintNode::Atomic(c) => constraint_status(c, request),
+        ConstraintNode::SharedAtomic(c) => constraint_status(c, request),
         ConstraintNode::Compound(lc) => logical_constraint_status(lc, request),
     }
 }
@@ -1677,10 +1678,12 @@ fn value_eq(a: &Value, b: &Value) -> bool {
         // mixed-offset pair like `12:00:00Z` and `14:00:00+02:00` is equal even
         // though the lexical forms differ (sq-qj2q). Fall back to lexical only
         // when an operand is not a parseable instant.
-        (Value::DateTime(x), Value::DateTime(y)) => match (parse_instant(x), parse_instant(y)) {
-            (Some(ix), Some(iy)) => ix == iy,
-            _ => x == y,
-        },
+        _ if a.is_datetime() && b.is_datetime() => {
+            match (parse_instant(a.as_str()), parse_instant(b.as_str())) {
+                (Some(ix), Some(iy)) => ix == iy,
+                _ => a.as_str() == b.as_str(),
+            }
+        }
         // Cross-type: compare by canonical string (an IRI right-operand vs an IRI
         // actual, a string code vs a string code).
         _ => a.as_str() == b.as_str(),
@@ -1724,7 +1727,13 @@ fn is_none_of(actual: &Value, bound: &Value) -> bool {
 /// faithful: both operands must be IRI/string values (the space the
 /// `|`/space/comma set encoding covers). See [`is_none_of`]. sq-uaz85.
 fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
-    matches!(actual, Value::Iri(_) | Value::Str(_)) && matches!(bound, Value::Iri(_) | Value::Str(_))
+    matches!(
+        actual,
+        Value::Iri(_) | Value::SharedIri(_) | Value::Str(_) | Value::SharedStr(_)
+    ) && matches!(
+        bound,
+        Value::Iri(_) | Value::SharedIri(_) | Value::Str(_) | Value::SharedStr(_)
+    )
 }
 
 /// Whether `actual op bound` has a defined answer. Equality needs operands of one
@@ -1732,17 +1741,26 @@ fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
 /// operator needs [`order`] to succeed; set membership compares IRI/string values
 /// only. Anything else is Unknown to the evaluator, not false.
 pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
-    let textual = |v: &Value| matches!(v, Value::Iri(_) | Value::Str(_));
+    let textual = |v: &Value| {
+        matches!(
+            v,
+            Value::Iri(_) | Value::SharedIri(_) | Value::Str(_) | Value::SharedStr(_)
+        )
+    };
     match op {
         Operator::Eq | Operator::IsA | Operator::Neq => match (actual, bound) {
             (Value::Num(_), Value::Num(_)) => true,
-            (Value::DateTime(x), Value::DateTime(y)) => {
-                parse_instant(x).is_some() && parse_instant(y).is_some()
+            _ if actual.is_datetime() && bound.is_datetime() => {
+                parse_instant(actual.as_str()).is_some() && parse_instant(bound.as_str()).is_some()
             }
             _ => textual(actual) && textual(bound),
         },
-        Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq => order(actual, bound).is_some(),
-        Operator::IsPartOf | Operator::IsAnyOf | Operator::IsNoneOf => textual(actual) && textual(bound),
+        Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq => {
+            order(actual, bound).is_some()
+        }
+        Operator::IsPartOf | Operator::IsAnyOf | Operator::IsNoneOf => {
+            textual(actual) && textual(bound)
+        }
     }
 }
 
@@ -1753,7 +1771,7 @@ pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
 pub(crate) fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
     match (a, b) {
         (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
-        (Value::DateTime(x), Value::DateTime(y)) => cmp_datetime(x, y),
+        _ if a.is_datetime() && b.is_datetime() => cmp_datetime(a.as_str(), b.as_str()),
         // A numeric actual against a numeric-looking string bound, or vice versa.
         _ => {
             let (Ok(x), Ok(y)) = (

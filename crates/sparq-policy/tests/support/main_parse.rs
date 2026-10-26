@@ -1295,6 +1295,7 @@ pub(crate) fn is_unsatisfiable_guard(c: &Constraint) -> bool {
 pub(crate) fn node_has_guard(n: &ConstraintNode) -> bool {
     match n {
         ConstraintNode::Atomic(c) => is_unsatisfiable_guard(c),
+        ConstraintNode::SharedAtomic(c) => is_unsatisfiable_guard(c),
         ConstraintNode::Compound(lc) => lc.operands.iter().any(node_has_guard),
     }
 }

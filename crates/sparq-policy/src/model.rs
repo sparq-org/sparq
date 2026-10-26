@@ -267,15 +267,32 @@ pub struct LogicalConstraint {
 /// compound [`LogicalConstraint`]. sq-a0zef.
 ///
 /// This makes compound constraints arbitrarily nestable (an `odrl:or` of `odrl:and`s,
-/// etc.) while keeping the *atomic* [`Constraint`] type — used pervasively by the
-/// evaluator, the static analyser, and count enforcement — unchanged.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// etc.). Parsed leaves may share an allocation. The atomic [`Constraint`] type
+/// used by the evaluator, static analyser and count enforcement retains its fields.
+#[derive(Debug, Clone)]
 pub enum ConstraintNode {
     /// A leaf atomic constraint (`leftOperand`/`operator`/`rightOperand`).
     Atomic(Constraint),
+    /// A parsed leaf shared across operand references. It evaluates identically to `Atomic`.
+    SharedAtomic(std::sync::Arc<Constraint>),
     /// A nested compound `odrl:LogicalConstraint`.
     Compound(LogicalConstraint),
 }
+
+impl PartialEq for ConstraintNode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Atomic(a), Self::Atomic(b)) => a == b,
+            (Self::SharedAtomic(a), Self::SharedAtomic(b)) => a == b,
+            (Self::Atomic(a), Self::SharedAtomic(b)) | (Self::SharedAtomic(b), Self::Atomic(a)) => {
+                a == b.as_ref()
+            }
+            (Self::Compound(a), Self::Compound(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+impl Eq for ConstraintNode {}
 
 /// The logical combinator of an [`odrl:LogicalConstraint`](LogicalConstraint).
 /// sq-a0zef.
@@ -371,35 +388,64 @@ impl Operator {
 /// A constraint right-operand or request value, kept as a typed scalar so the
 /// evaluator can compare numerically / temporally where appropriate and fall
 /// back to string equality otherwise.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     /// An IRI (an `odrl:rightOperandReference` or a named resource/party/purpose).
     Iri(String),
+    /// An IRI retained by a shared singleton collection.
+    SharedIri(std::sync::Arc<str>),
     /// A plain or typed string literal (purpose codes, recipient ids, regions).
     Str(String),
+    /// A folded or singleton string retained by shared constraints.
+    SharedStr(std::sync::Arc<str>),
     /// An `xsd:decimal`/`integer`/`double` numeric literal (for `odrl:count`, …).
     Num(f64),
     /// An `xsd:dateTime`/`xsd:date` literal, normalized to a comparable key.
     DateTime(String),
+    /// A temporal value retained by a shared singleton collection.
+    SharedDateTime(std::sync::Arc<str>),
 }
 
 impl Value {
+    pub(crate) fn is_datetime(&self) -> bool {
+        matches!(self, Self::DateTime(_) | Self::SharedDateTime(_))
+    }
+
     /// The value as a string for equality / membership comparison.
     pub fn as_str(&self) -> &str {
         match self {
             Value::Iri(s) | Value::Str(s) | Value::DateTime(s) => s,
+            Value::SharedIri(s) | Value::SharedStr(s) | Value::SharedDateTime(s) => s,
             Value::Num(_) => "",
         }
     }
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Str(_) | Self::SharedStr(_), Self::Str(_) | Self::SharedStr(_)) => {
+                self.as_str() == other.as_str()
+            }
+            (Self::Iri(_) | Self::SharedIri(_), Self::Iri(_) | Self::SharedIri(_))
+            | (
+                Self::DateTime(_) | Self::SharedDateTime(_),
+                Self::DateTime(_) | Self::SharedDateTime(_),
+            ) => self.as_str() == other.as_str(),
+            (Self::Num(a), Self::Num(b)) => a == b,
+            _ => false,
+        }
+    }
+}
 impl Eq for Value {}
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Iri(s) => write!(f, "<{s}>"),
+            Value::SharedIri(s) => write!(f, "<{s}>"),
             Value::Str(s) | Value::DateTime(s) => write!(f, "{s:?}"),
+            Value::SharedStr(s) | Value::SharedDateTime(s) => write!(f, "{s:?}"),
             Value::Num(n) => write!(f, "{n}"),
         }
     }
