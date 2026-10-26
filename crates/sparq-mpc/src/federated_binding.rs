@@ -126,6 +126,17 @@ pub const COMMITMENT_DOMAIN_TAG: &[u8] = b"sparq-mpc/m4v1/commitments/v1\0";
 /// field element per public input).
 pub const WORD_BYTES: usize = 32;
 
+/// Maximum declared rows in one holder segment, derived from the MPC output
+/// bound rather than a circuit-specific padding bucket.
+pub const MAX_HOLDER_ROW_CAPACITY: u32 = crate::oblivious_join::MAX_OUTPUT_BOUND as u32;
+
+/// Maximum reconstructed statement size: the five-word header plus one holder
+/// at [`MAX_HOLDER_ROW_CAPACITY`] with one commitment and one attribution bit
+/// (four metadata words, two graph words, and three words per row).
+/// Multiple holders and additional commitments share this same byte budget.
+pub const MAX_PUBLIC_INPUT_BYTES: usize =
+    (5 + 4 + 2 + 3 * MAX_HOLDER_ROW_CAPACITY as usize) * WORD_BYTES;
+
 /// One public-input word: an opaque 32-byte **big-endian** value.
 ///
 /// Opaque on purpose — see the module docs. This crate does not reduce, compare
@@ -221,6 +232,14 @@ pub enum BindingError {
         rows: usize,
         capacity: u32,
     },
+    /// The declared row capacity exceeds [`MAX_HOLDER_ROW_CAPACITY`].
+    RowCapacityTooLarge {
+        holder: HolderId,
+        capacity: u32,
+        max: u32,
+    },
+    /// Public-input sizing overflowed or exceeded the statement byte budget.
+    PublicInputsTooLarge { max_bytes: usize },
     /// The same [`HolderId`] appears twice — the canonical order would be
     /// ambiguous and the attribution ambiguous with it.
     DuplicateHolder { holder: HolderId },
@@ -265,6 +284,14 @@ impl std::fmt::Display for BindingError {
             } => write!(
                 f,
                 "holder {holder}: {rows} disclosed rows exceed the declared capacity {capacity}"
+            ),
+            BindingError::RowCapacityTooLarge { holder, capacity, max } => write!(
+                f,
+                "holder {holder}: declared row capacity {capacity} exceeds the maximum {max}"
+            ),
+            BindingError::PublicInputsTooLarge { max_bytes } => write!(
+                f,
+                "statement public inputs exceed the maximum of {max_bytes} bytes"
             ),
             BindingError::DuplicateHolder { holder } => {
                 write!(f, "holder {holder} appears more than once")
@@ -512,7 +539,8 @@ impl HolderSegment {
     ///   non-empty (a holder attesting to no graph contributes nothing).
     /// - `rows` — the disclosed `[s, p, o]` encodings, at most `row_capacity`.
     /// - `row_capacity` — the DECLARED per-holder row capacity `r_i`; the segment
-    ///   is zero-padded up to it, mirroring the single-source `pad_rows`.
+    ///   is zero-padded up to it, mirroring the single-source `pad_rows`. Values
+    ///   above [`MAX_HOLDER_ROW_CAPACITY`] return [`BindingError::RowCapacityTooLarge`].
     /// - `attribution` — exactly one bit per commitment (#8). A short vector is
     ///   REFUSED rather than padded with `false`: padding would silently widen the
     ///   accepted shape.
@@ -538,6 +566,13 @@ impl HolderSegment {
                 holder,
                 rows: rows.len(),
                 capacity: row_capacity,
+            });
+        }
+        if row_capacity > MAX_HOLDER_ROW_CAPACITY {
+            return Err(BindingError::RowCapacityTooLarge {
+                holder,
+                capacity: row_capacity,
+                max: MAX_HOLDER_ROW_CAPACITY,
             });
         }
         Ok(HolderSegment {
@@ -595,11 +630,41 @@ pub struct FederatedStatement {
     key_set_digest: FieldWord,
     window: ValidityWindow,
     holders: Vec<HolderSegment>,
+    public_input_words: usize,
+}
+
+// Keep the sizing arithmetic separate from storage so overflow boundaries can
+// be exercised without constructing vectors of those lengths.
+fn checked_public_input_word_count(
+    segments: impl IntoIterator<Item = (usize, usize, usize)>,
+) -> Result<usize, BindingError> {
+    let too_large = || BindingError::PublicInputsTooLarge {
+        max_bytes: MAX_PUBLIC_INPUT_BYTES,
+    };
+    // challenge, query_digest, key_set_digest, freshness_tag, holder_count.
+    let words =
+        segments
+            .into_iter()
+            .try_fold(5usize, |words, (commitments, capacity, attribution)| {
+                // holder_tag, k_i, r_i, row_count, then the variable-width fields.
+                words
+                    .checked_add(4)
+                    .and_then(|words| words.checked_add(commitments))
+                    .and_then(|words| capacity.checked_mul(3)?.checked_add(words))
+                    .and_then(|words| words.checked_add(attribution))
+                    .ok_or_else(too_large)
+            })?;
+    let bytes = words.checked_mul(WORD_BYTES).ok_or_else(too_large)?;
+    if bytes > MAX_PUBLIC_INPUT_BYTES {
+        return Err(too_large());
+    }
+    Ok(words)
 }
 
 impl FederatedStatement {
     /// Build a statement, canonicalising the holder order and refusing an empty
-    /// federation or a duplicated holder.
+    /// federation, a duplicated holder, or public inputs exceeding
+    /// [`MAX_PUBLIC_INPUT_BYTES`] (including any sizing overflow).
     ///
     /// Holders are sorted by [`HolderId`] so prover and verifier serialise the
     /// same bytes without agreeing on a wire order out of band. A duplicate is an
@@ -621,12 +686,20 @@ impl FederatedStatement {
                 holder: dup[0].holder.clone(),
             });
         }
+        let public_input_words = checked_public_input_word_count(holders.iter().map(|seg| {
+            (
+                seg.commitments.len(),
+                seg.row_capacity as usize,
+                seg.attribution.len(),
+            )
+        }))?;
         Ok(FederatedStatement {
             challenge,
             query_digest,
             key_set_digest,
             window,
             holders,
+            public_input_words,
         })
     }
 
@@ -695,17 +768,12 @@ impl FederatedStatement {
     }
 
     /// Number of 32-byte words the reconstruction will emit.
+    ///
+    /// Infallible: construction checks every sizing operation and the byte
+    /// ceiling, and all layout fields are immutable. Multiplying this count by
+    /// [`WORD_BYTES`] cannot overflow and is at most [`MAX_PUBLIC_INPUT_BYTES`].
     pub fn public_input_word_count(&self) -> usize {
-        // challenge, query_digest, key_set_digest, freshness_tag, holder_count.
-        let mut words = 5;
-        for seg in &self.holders {
-            // holder_tag, k_i, r_i, row_count.
-            words += 4;
-            words += seg.commitments.len();
-            words += seg.row_capacity as usize * 3;
-            words += seg.attribution.len();
-        }
-        words
+        self.public_input_words
     }
 
     /// Reconstruct the federated `public_inputs` byte vector — the multi-source
@@ -763,13 +831,14 @@ impl FederatedStatement {
     /// primitives are reserved for secret-bearing comparisons (none exist on this
     /// path).
     pub fn bind_public_inputs(&self, proof_public_inputs: &[u8]) -> Result<(), BindingError> {
-        let expected = self.reconstruct_public_inputs();
-        if expected.len() != proof_public_inputs.len() {
+        let expected_bytes = self.public_input_word_count() * WORD_BYTES;
+        if expected_bytes != proof_public_inputs.len() {
             return Err(BindingError::PublicInputLength {
-                expected: expected.len(),
+                expected: expected_bytes,
                 actual: proof_public_inputs.len(),
             });
         }
+        let expected = self.reconstruct_public_inputs();
         for (i, (a, b)) in expected
             .chunks_exact(WORD_BYTES)
             .zip(proof_public_inputs.chunks_exact(WORD_BYTES))
@@ -1141,6 +1210,89 @@ mod tests {
     }
 
     // ---- segment / statement validation ----------------------------------
+
+    #[test]
+    fn holder_row_capacity_is_bounded_inclusively() {
+        assert_eq!(
+            MAX_HOLDER_ROW_CAPACITY as usize,
+            crate::oblivious_join::MAX_OUTPUT_BOUND
+        );
+        let at_cap = segment("alice", 1, 0, MAX_HOLDER_ROW_CAPACITY);
+        assert_eq!(at_cap.row_capacity(), MAX_HOLDER_ROW_CAPACITY);
+        for capacity in [MAX_HOLDER_ROW_CAPACITY + 1, u32::MAX] {
+            assert_eq!(
+                HolderSegment::new(
+                    HolderId::new("alice"),
+                    vec![word(1)],
+                    vec![],
+                    capacity,
+                    vec![true],
+                ),
+                Err(BindingError::RowCapacityTooLarge {
+                    holder: HolderId::new("alice"),
+                    capacity,
+                    max: MAX_HOLDER_ROW_CAPACITY,
+                }),
+                "capacity {capacity} must be refused above MAX_HOLDER_ROW_CAPACITY",
+            );
+        }
+    }
+
+    #[test]
+    fn statement_byte_ceiling_counts_all_holders_and_graph_words() {
+        let at_cap = statement(vec![segment("alice", 1, 0, MAX_HOLDER_ROW_CAPACITY)]);
+        assert_eq!(
+            at_cap.public_input_word_count() * WORD_BYTES,
+            MAX_PUBLIC_INPUT_BYTES
+        );
+        let below_cap = statement(vec![segment("alice", 2, 0, MAX_HOLDER_ROW_CAPACITY - 1)]);
+        assert_eq!(
+            below_cap.public_input_word_count() * WORD_BYTES,
+            MAX_PUBLIC_INPUT_BYTES - WORD_BYTES,
+        );
+        for holders in [
+            vec![segment("alice", 2, 0, MAX_HOLDER_ROW_CAPACITY)],
+            vec![
+                segment("alice", 1, 0, MAX_HOLDER_ROW_CAPACITY),
+                segment("bob", 1, 0, 0),
+            ],
+        ] {
+            assert_eq!(
+                FederatedStatement::new(
+                    at_cap.challenge(),
+                    at_cap.query_digest(),
+                    at_cap.key_set_digest(),
+                    at_cap.window(),
+                    holders,
+                ),
+                Err(BindingError::PublicInputsTooLarge {
+                    max_bytes: MAX_PUBLIC_INPUT_BYTES
+                }),
+            );
+        }
+    }
+
+    #[test]
+    fn public_input_sizing_refuses_arithmetic_overflow() {
+        // Synthetic public lengths exercise boundaries that real Vecs cannot
+        // reach. Cover commitments, row multiplication/addition, attribution,
+        // another holder's metadata, and the final word-to-byte multiplication.
+        for segments in [
+            vec![(usize::MAX, 0, 0)],
+            vec![(0, usize::MAX / 3 + 1, 0)],
+            vec![(usize::MAX - 9, 1, 0)],
+            vec![(0, 0, usize::MAX)],
+            vec![(usize::MAX - 9, 0, 0), (0, 0, 0)],
+            vec![(usize::MAX / WORD_BYTES, 0, 0)],
+        ] {
+            assert_eq!(
+                checked_public_input_word_count(segments),
+                Err(BindingError::PublicInputsTooLarge {
+                    max_bytes: MAX_PUBLIC_INPUT_BYTES
+                }),
+            );
+        }
+    }
 
     #[test]
     fn malformed_segments_are_refused() {

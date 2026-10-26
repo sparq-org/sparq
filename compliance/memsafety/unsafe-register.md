@@ -310,6 +310,28 @@ forward-to-`System` argument, enforced by the file-local
 | `tests/auth_resource_enumeration_memory.rs:60` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :62. |
 | `tests/auth_resource_enumeration_memory.rs:62` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
 
+### `sparq-mpc` — 7 sites (test-only counting global allocator)
+
+The library remains `#![forbid(unsafe_code)]`. All seven sites are confined to
+`tests/federated_binding_allocation.rs`, a separate integration test binary that
+measures capacity and proof-length refusals and observes an explicit reconstruction
+as a positive control. Each allocation operation forwards identical arguments to
+`System`; the wrapper only checks pointer nullness and updates atomic live/peak byte
+counters. It never retains or dereferences a pointer. The file-local
+`clippy::undocumented_unsafe_blocks` lint requires a `// SAFETY:` comment for each
+block and implementation. Miri does not model this `System` global allocator;
+the forwarding argument and the allocation guard test cover this test-only seam.
+
+| File:line | Kind | Invariant relied on | Why sound / how bounded |
+|---|---|---|---|
+| `tests/federated_binding_allocation.rs:26` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | Identical arguments and returned pointers; only atomic counters are added. |
+| `tests/federated_binding_allocation.rs:28` | `unsafe fn alloc` | caller's layout contract forwarded | The inner call at :30 uses the unchanged layout. |
+| `tests/federated_binding_allocation.rs:30` | `System.alloc(layout)` | valid allocation layout | The returned pointer is only null-checked before counting the requested bytes. |
+| `tests/federated_binding_allocation.rs:38` | `unsafe fn dealloc` | matching pointer and layout from this allocator | All allocations also use `System`; the arguments are forwarded unchanged. |
+| `tests/federated_binding_allocation.rs:40` | `System.dealloc(ptr, layout)` | caller's deallocation contract | No pointer access or layout modification is added. |
+| `tests/federated_binding_allocation.rs:45` | `unsafe fn realloc` | caller's pointer/layout/new-size contract | The inner call at :47 forwards all three arguments unchanged. |
+| `tests/federated_binding_allocation.rs:47` | `System.realloc(ptr, layout, new_size)` | caller's reallocation contract | A null result preserves the old live-byte count; success updates only the size delta. |
+
 ### `sparq-lws-core` — 12 sites (example- and test-only counting global allocators) [FABLE-5]
 
 (sq-gg0qq.2 — crate imported whole from jeswr/solid-server-rs.) The **library and the
@@ -384,7 +406,7 @@ standard toolchain. Miri does not model a `#[global_allocator]` that calls `Syst
 
 ## NEEDS-REVIEW
 
-**None.** Every one of the 118 sites now carries a literal `// SAFETY:` comment
+**None.** Every one of the 125 registered sites now carries a literal `// SAFETY:` comment
 immediately preceding the `unsafe` block/impl, mechanically enforced by
 `clippy::undocumented_unsafe_blocks` (MS-G2 closed, sq-8wbn, [OPUS-4.8]) — set
 at crate root on unsafe-bearing libraries (including `sparq-lws-wasm`, sq-wubkf)
