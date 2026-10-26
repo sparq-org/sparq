@@ -27,7 +27,8 @@
 # scripts/tests/feature-matrix-legnames.golden.txt is untouched.
 - name: "sparq-zk (dual-leaf — identity/desync regression guard)"
   crate: "sparq-zk"
-  features: "dual-leaf"
+  # Exercise typed issuance for every recognised method, including the research dial.
+  features: "dual-leaf,commitment-value-only"
   test: true
 
 # sq-bevd3 (epic sq-0dksu, Phase 3): the per-method
