@@ -622,7 +622,8 @@ struct Index {
     versions: HashMap<String, VersionEntry>,
     trash: HashMap<String, TrashEntry>,
     version_order: u64,
-    version_times: std::collections::BTreeSet<(SystemTime, String)>,
+    // Commit order breaks timestamp ties before random member IDs.
+    version_times: std::collections::BTreeSet<(SystemTime, u64, String)>,
     trash_times: std::collections::BTreeSet<(SystemTime, String)>,
     /// container IRI → its direct children, kept in insertion order (a `Vec`, de-duplicated).
     children: HashMap<String, Vec<String>>,
@@ -644,7 +645,8 @@ impl Index {
             entry.member = super::history::rekey_member(&entry.member, to);
             entry.original = to.to_string();
             if let Some(at) = entry.meta.last_modified {
-                self.version_times.insert((at, entry.member.clone()));
+                self.version_times
+                    .insert((at, entry.order, entry.member.clone()));
             }
             self.meta.insert(entry.member.clone(), entry.meta.clone());
             self.versions.insert(entry.member.clone(), entry);
@@ -653,7 +655,8 @@ impl Index {
     fn remove_history(&mut self, member: &str) {
         if let Some(v) = self.versions.remove(member) {
             if let Some(at) = v.meta.last_modified {
-                self.version_times.remove(&(at, member.to_string()));
+                self.version_times
+                    .remove(&(at, v.order, member.to_string()));
             }
         }
         if let Some(t) = self.trash.remove(member) {
@@ -810,7 +813,9 @@ impl SparqClient for InMemorySparqClient {
                 order: index.version_order,
             };
             if let Some(at) = v.meta.last_modified {
-                index.version_times.insert((at, member.to_string()));
+                index
+                    .version_times
+                    .insert((at, v.order, member.to_string()));
             }
             index.meta.insert(member.to_string(), v.meta.clone());
             index.versions.insert(member.to_string(), v);
@@ -927,10 +932,10 @@ impl SparqClient for InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         let mut candidates = Vec::new();
-        for (at, member) in index
+        for (at, _, member) in index
             .version_times
             .iter()
-            .take_while(|(at, _)| *at <= versions_before)
+            .take_while(|(at, _, _)| *at <= versions_before)
             .take(limit)
         {
             if let Some(v) = index.versions.get(member) {

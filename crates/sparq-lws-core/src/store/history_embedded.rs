@@ -81,7 +81,15 @@ fn records(
             format!("{}^^<{}>", sparql::literal(&date), sparql::XSD_DATETIME)
         };
         // The outer query bounds the rows transferred out of the index.
-        q = format!("SELECT * WHERE {{ {{ {q} }} FILTER (?{field} <= {value}) }} ORDER BY ?{field} ?order ?member");
+        let tie = if trash {
+            "?member"
+        } else {
+            // Existing records store commit order as a string literal.
+            "<http://www.w3.org/2001/XMLSchema#integer>(?order) ?member"
+        };
+        q = format!(
+            "SELECT * WHERE {{ {{ {q} }} FILTER (?{field} <= {value}) }} ORDER BY ?{field} {tie}"
+        );
     }
     if let Some(limit) = limit {
         q.push_str(&format!(" LIMIT {limit}"));

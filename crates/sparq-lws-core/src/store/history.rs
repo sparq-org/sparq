@@ -631,6 +631,77 @@ mod tests {
         bounded_sweep(crate::store::EmbeddedSparqClient::in_memory().unwrap()).await;
     }
 
+    async fn expiry_commit_order<S: SparqClient>(index: S) {
+        let store = CompositeStore::new(index, InMemoryBlobStore::new())
+            .with_history(config())
+            .unwrap();
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        for state in 0..13 {
+            let key = format!("state-{state}");
+            store
+                .blob
+                .put(&key, Bytes::from(key.clone()))
+                .await
+                .unwrap();
+            let meta = crate::store::ResourceMeta {
+                content_type: "text/plain".into(),
+                blob_key: key.clone(),
+                etag: key,
+                last_modified: Some(at),
+            };
+            store
+                .sparq
+                .replace_meta_retaining(
+                    IRI,
+                    meta,
+                    // Member order deliberately opposes commit order.
+                    &format!("{}{:032x}", version_dir(IRI), 20 - state),
+                    VersionFields {
+                        original: IRI.into(),
+                        max_versions: 20,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let before = store.versions(Some(IRI)).await.unwrap();
+        assert_eq!(before.len(), 12);
+        assert_eq!(
+            before
+                .iter()
+                .map(|v| v.meta.etag.clone())
+                .collect::<Vec<_>>(),
+            (0..12)
+                .map(|state| format!("state-{state}"))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            store
+                .sweep_history(at + config().versions_retention, 2)
+                .await
+                .unwrap(),
+            2
+        );
+        let remaining = store.versions(Some(IRI)).await.unwrap();
+        assert_eq!(remaining, before[2..]);
+        for (position, version) in before.iter().enumerate() {
+            assert_eq!(
+                store.blob.exists(&version.meta.blob_key).await.unwrap(),
+                position >= 2
+            );
+        }
+        assert_eq!(store.read(IRI).await.unwrap().body, "state-12");
+    }
+    #[tokio::test]
+    async fn expiry_breaks_equal_timestamps_by_commit_order_memory() {
+        expiry_commit_order(InMemorySparqClient::new()).await;
+    }
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn expiry_breaks_equal_timestamps_by_commit_order_embedded() {
+        expiry_commit_order(crate::store::EmbeddedSparqClient::in_memory().unwrap()).await;
+    }
+
     async fn maximum<S: SparqClient>(index: S) {
         let mut c = config();
         c.versions_max = 2;

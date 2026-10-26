@@ -10,7 +10,7 @@ The native server can retain data resource states and move deleted data resource
 | `SOLID_SERVER_VERSIONS_RETENTION` | `P30D` | Positive day/time XSD duration for retained versions. |
 | `SOLID_SERVER_TRASH_RETENTION` | `P30D` | Positive day/time XSD duration for trash entries. |
 
-Retention accepts day, hour, minute and second components, for example `P30D` or `P1DT12H`. Calendar year/month components are not accepted. Each background pass selects and removes a bounded set of expired records, oldest first, and reclaims bytes after removing their index references.
+Retention accepts day, hour, minute and second components, for example `P30D` or `P1DT12H`. Calendar year/month components are not accepted. Each background pass selects and removes a bounded set of expired records, oldest first, and reclaims bytes after removing their index references. Version listings and expiry use numeric commit order to break ties between equal modification times.
 
 The container image accepts these settings through its environment. Solid Suite deployments enable both services explicitly:
 
