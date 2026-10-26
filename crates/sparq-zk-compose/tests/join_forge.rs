@@ -414,9 +414,10 @@ fn honest_join_toml(built: &BuiltJoin) -> (CircuitId, String) {
 #[test]
 #[ignore = "nightly: full bb prove of a join_eq member (nargo + bb)"]
 fn bb_forge_tampered_join_proof_rejected() {
-    if !support::require_toolchain("bb_forge_tampered_join_proof_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("bb_forge_tampered_join_proof_rejected", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let built = honest_built_join();
     let (id, toml) = honest_join_toml(&built);
     assert_eq!(id, JOIN_ID);
@@ -431,6 +432,7 @@ fn bb_forge_tampered_join_proof_rejected() {
         .verify_with(&bad, &art.public_inputs, &vk, &out.join("verify_bad"))
         .expect("verify runs");
     assert!(!rejected, "a tampered join proof must be rejected by bb");
+    support::complete(live);
 }
 
 /// FORGE — UNEQUAL HIDDEN VALUES: claim a join between two graphs whose join-slot
@@ -445,9 +447,12 @@ fn bb_forge_tampered_join_proof_rejected() {
 #[test]
 #[ignore = "nightly: nargo execute of a join_eq member"]
 fn bb_forge_unequal_values_witness_unsatisfiable() {
-    if !support::require_toolchain("bb_forge_unequal_values_witness_unsatisfiable", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "bb_forge_unequal_values_witness_unsatisfiable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // build_join on two graphs that share NO value returns None — there is no honest
     // witness. Confirm that first (the host refuses to forge), then drive the circuit
     // with a hand-spliced unequal-value Prover.toml and assert it is unsatisfiable.
@@ -509,6 +514,7 @@ fn bb_forge_unequal_values_witness_unsatisfiable() {
         res.is_err(),
         "a join over genuinely-unequal hidden values must be UNSATISFIABLE (no witness)",
     );
+    support::complete(live);
 }
 
 /// FORGE — FORGED JOIN COMMITMENT: the public `join_commitment` does NOT bind the
@@ -518,9 +524,12 @@ fn bb_forge_unequal_values_witness_unsatisfiable() {
 #[test]
 #[ignore = "nightly: nargo execute of a join_eq member"]
 fn bb_forge_join_commitment_not_binding_value_unsatisfiable() {
-    if !support::require_toolchain("bb_forge_join_commitment_not_binding_value_unsatisfiable", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "bb_forge_join_commitment_not_binding_value_unsatisfiable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let honest = honest_built_join();
     // Replace the public join_commitment with a hiding commitment to a DIFFERENT
     // value (<ex/OTHER>) under the same blinder. The witness still proves the join
@@ -557,6 +566,7 @@ fn bb_forge_join_commitment_not_binding_value_unsatisfiable() {
         res.is_err(),
         "a join_commitment that does not bind the proven value must be UNSATISFIABLE",
     );
+    support::complete(live);
 }
 
 /// FORGE — ATTACKER VK: verify a valid join proof against a NON-canonical
@@ -565,9 +575,9 @@ fn bb_forge_join_commitment_not_binding_value_unsatisfiable() {
 #[test]
 #[ignore = "nightly: full bb prove of a join_eq member (nargo + bb)"]
 fn bb_forge_wrong_vk_rejected() {
-    if !support::require_toolchain("bb_forge_wrong_vk_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("bb_forge_wrong_vk_rejected", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let built = honest_built_join();
     let (id, toml) = honest_join_toml(&built);
     let prover = CircuitProver::from_crate_root();
@@ -583,6 +593,7 @@ fn bb_forge_wrong_vk_rejected() {
         .verify_with(&art.proof, &art.public_inputs, &wrong_vk, &out.join("verify_wrongvk"))
         .expect("verify runs");
     assert!(!rejected, "a join proof verified against a non-canonical (attacker) vk must be rejected");
+    support::complete(live);
 }
 
 /// The smallest compiled scan member id (for the wrong-vk attacker case).
@@ -599,9 +610,10 @@ fn derive_smallest_scan_id() -> CircuitId {
 #[test]
 #[ignore = "nightly: full bb prove of a join_eq member (nargo + bb)"]
 fn bb_join_value_absent_from_public_inputs() {
-    if !support::require_toolchain("bb_join_value_absent_from_public_inputs", &["nargo", "bb"]) {
+    let Some(live) = support::gate("bb_join_value_absent_from_public_inputs", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let built = honest_built_join();
     let (id, toml) = honest_join_toml(&built);
     let prover = CircuitProver::from_crate_root();
@@ -621,6 +633,7 @@ fn bb_join_value_absent_from_public_inputs() {
         !present,
         "PRIVACY REGRESSION: the join value's 32-byte field word appears in the bb public inputs",
     );
+    support::complete(live);
 }
 
 // ============================================================================
@@ -650,12 +663,12 @@ fn bb_uncovered_join_proof_over_unattested_graphs_rejected() {
         encode_artifacts, verify_manifest, EntailmentPolicy, HolderBindingPolicy, HolderRegistry,
         InMemorySeenNonces, VerifierNonce,
     };
-    if !support::require_toolchain(
+    let Some(live) = support::gate(
         "bb_uncovered_join_proof_over_unattested_graphs_rejected",
         &["nargo", "bb"],
-    ) {
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let sk = test_issuer_sk(1);
     // DEFAULT policy — no downgrade is written down for this manifest.
@@ -753,4 +766,5 @@ fn bb_uncovered_join_proof_over_unattested_graphs_rejected() {
         Err(CheckError::JoinCommitmentMismatch { edge: 0 }) => {}
         other => panic!("a declared edge over other commitments must be refused, got {other:?}"),
     }
+    support::complete(live);
 }
