@@ -129,10 +129,11 @@ pub const WORD_BYTES: usize = 32;
 /// Maximum declared rows in one holder segment, derived from the MPC output
 /// bound rather than a circuit-specific padding bucket.
 pub const MAX_HOLDER_ROW_CAPACITY: u32 = crate::oblivious_join::MAX_OUTPUT_BOUND as u32;
+const _: () = assert!(crate::oblivious_join::MAX_OUTPUT_BOUND <= u32::MAX as usize);
 
-/// Maximum reconstructed public-input bytes: the 128 MiB live-memory envelope
-/// from the sparq-mpc resource plan. All holders and commitments share this
-/// budget, independent of the per-holder row-capacity limit.
+/// Bounds the reconstructed public-input buffer at 128 MiB. All holders and
+/// commitments share this budget, independent of the per-holder row-capacity
+/// limit.
 pub const MAX_PUBLIC_INPUT_BYTES: usize = 128 * 1024 * 1024;
 
 /// One public-input word: an opaque 32-byte **big-endian** value.
@@ -191,6 +192,10 @@ impl FieldWord {
     ///   field element. The residual 248-bit output keeps a ~124-bit birthday
     ///   margin; this is a *canonicality* measure, not a security claim.
     pub fn digest(tag: &[u8], parts: &[&[u8]]) -> Self {
+        Self::digest_parts(tag, parts.iter().copied())
+    }
+
+    fn digest_parts<'a>(tag: &[u8], parts: impl IntoIterator<Item = &'a [u8]>) -> Self {
         let mut hasher = Sha512::new();
         hasher.update(tag);
         for part in parts {
@@ -661,8 +666,8 @@ fn checked_public_input_word_count(
 
 impl FederatedStatement {
     /// Build a statement, canonicalising the holder order and refusing an empty
-    /// federation, a duplicated holder, or public inputs exceeding the 128 MiB
-    /// live-memory envelope [`MAX_PUBLIC_INPUT_BYTES`] (including sizing overflow).
+    /// federation, a duplicated holder, or sizing overflow. [`MAX_PUBLIC_INPUT_BYTES`]
+    /// bounds the reconstructed public-input buffer at 128 MiB.
     ///
     /// Holders are sorted by [`HolderId`] so prover and verifier serialise the
     /// same bytes without agreeing on a wire order out of band. A duplicate is an
@@ -741,7 +746,14 @@ impl FederatedStatement {
     /// pre-image — no SHA-512 property is being leaned on to separate them.
     /// `commitment_digest_binds_holder_arities` pins the exact collision.
     pub fn commitment_digest(&self) -> FieldWord {
-        let mut parts: Vec<[u8; WORD_BYTES]> = Vec::new();
+        // Construction validated a larger public-input word count, so this
+        // smaller sum cannot overflow.
+        let part_count = 1 + self
+            .holders
+            .iter()
+            .map(|seg| 2 + seg.commitments.len())
+            .sum::<usize>();
+        let mut parts: Vec<[u8; WORD_BYTES]> = Vec::with_capacity(part_count);
         parts.push(*uint_word(self.holders.len() as u64).as_be_bytes());
         for seg in &self.holders {
             parts.push(*seg.holder_tag().as_be_bytes());
@@ -750,8 +762,7 @@ impl FederatedStatement {
                 parts.push(*c.as_be_bytes());
             }
         }
-        let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
-        FieldWord::digest(COMMITMENT_DOMAIN_TAG, &refs)
+        FieldWord::digest_parts(COMMITMENT_DOMAIN_TAG, parts.iter().map(|p| p.as_slice()))
     }
 
     /// The out-of-circuit freshness binding for this statement (#4).
@@ -769,8 +780,8 @@ impl FederatedStatement {
     ///
     /// Infallible: construction checks every sizing operation and the byte
     /// ceiling, and all layout fields are immutable. Multiplying this count by
-    /// [`WORD_BYTES`] cannot overflow and is at most the 128 MiB live-memory
-    /// envelope [`MAX_PUBLIC_INPUT_BYTES`].
+    /// [`WORD_BYTES`] cannot overflow. [`MAX_PUBLIC_INPUT_BYTES`] bounds the
+    /// reconstructed public-input buffer at 128 MiB.
     pub fn public_input_word_count(&self) -> usize {
         self.public_input_words
     }
@@ -782,13 +793,15 @@ impl FederatedStatement {
     /// the layout documented on this module. Every value is one 32-byte
     /// big-endian word; rows are zero-padded to each holder's declared capacity.
     pub fn reconstruct_public_inputs(&self) -> Vec<u8> {
+        // Release the commitment digest's parts before allocating the buffer.
+        let freshness_tag = self.freshness_binding().tag();
         let mut out: Vec<u8> = Vec::with_capacity(self.public_input_word_count() * WORD_BYTES);
         let mut push_word = |w: &FieldWord| out.extend_from_slice(w.as_be_bytes());
 
         push_word(&self.challenge.as_word());
         push_word(&self.query_digest);
         push_word(&self.key_set_digest);
-        push_word(&self.freshness_binding().tag());
+        push_word(&freshness_tag);
         push_word(&uint_word(self.holders.len() as u64));
 
         for seg in &self.holders {
@@ -936,6 +949,61 @@ mod tests {
     }
 
     // ---- layout ----------------------------------------------------------
+
+    #[test]
+    fn streamed_digests_match_original_slice_path() {
+        // Retain the original slice-based SHA-512 body as an independent byte
+        // reference, including length prefixes and the cleared leading byte.
+        fn original_digest(tag: &[u8], parts: &[&[u8]]) -> FieldWord {
+            let mut hasher = Sha512::new();
+            hasher.update(tag);
+            for part in parts {
+                hasher.update((part.len() as u64).to_be_bytes());
+                hasher.update(part);
+            }
+            let digest = hasher.finalize();
+            let mut out = [0u8; WORD_BYTES];
+            out.copy_from_slice(&digest[..WORD_BYTES]);
+            out[0] = 0;
+            FieldWord::from_be_bytes(out)
+        }
+
+        let long = [0xA5; 257];
+        for parts in [
+            &[][..],
+            &[b"".as_slice()][..],
+            &[b"ab".as_slice(), b"c".as_slice()][..],
+            &[b"a".as_slice(), b"bc".as_slice()][..],
+            &[long.as_slice(), b"", FieldWord::ZERO.as_be_bytes()][..],
+        ] {
+            for tag in [b"".as_slice(), COMMITMENT_DOMAIN_TAG] {
+                let expected = original_digest(tag, parts);
+                assert_eq!(FieldWord::digest(tag, parts), expected);
+                assert_eq!(
+                    FieldWord::digest_parts(tag, parts.iter().copied()),
+                    expected
+                );
+            }
+        }
+
+        for s in [
+            statement(vec![segment("alice", 1, 0, 0)]),
+            statement(vec![segment("alice", 7, 1, 2)]),
+            statement(vec![segment("bob", 3, 0, 0), segment("alice", 2, 0, 0)]),
+        ] {
+            let mut parts = vec![*uint_word(s.holders().len() as u64).as_be_bytes()];
+            for seg in s.holders() {
+                parts.push(*seg.holder_tag().as_be_bytes());
+                parts.push(*uint_word(seg.commitments().len() as u64).as_be_bytes());
+                parts.extend(seg.commitments().iter().map(|c| *c.as_be_bytes()));
+            }
+            let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+            assert_eq!(
+                s.commitment_digest(),
+                original_digest(COMMITMENT_DOMAIN_TAG, &refs)
+            );
+        }
+    }
 
     /// The reconstruction is deterministic and exactly `public_input_word_count`
     /// words wide, in the documented layout.

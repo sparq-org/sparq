@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**118 `unsafe` sites** across 11 crates (the other crates contain no first-party `unsafe`).
+**125 `unsafe` sites** across 12 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -324,13 +324,13 @@ the forwarding argument and the allocation guard test cover this test-only seam.
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `tests/federated_binding_allocation.rs:26` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | Identical arguments and returned pointers; only atomic counters are added. |
-| `tests/federated_binding_allocation.rs:28` | `unsafe fn alloc` | caller's layout contract forwarded | The inner call at :30 uses the unchanged layout. |
-| `tests/federated_binding_allocation.rs:30` | `System.alloc(layout)` | valid allocation layout | The returned pointer is only null-checked before counting the requested bytes. |
-| `tests/federated_binding_allocation.rs:38` | `unsafe fn dealloc` | matching pointer and layout from this allocator | All allocations also use `System`; the arguments are forwarded unchanged. |
-| `tests/federated_binding_allocation.rs:40` | `System.dealloc(ptr, layout)` | caller's deallocation contract | No pointer access or layout modification is added. |
-| `tests/federated_binding_allocation.rs:45` | `unsafe fn realloc` | caller's pointer/layout/new-size contract | The inner call at :47 forwards all three arguments unchanged. |
-| `tests/federated_binding_allocation.rs:47` | `System.realloc(ptr, layout, new_size)` | caller's reallocation contract | A null result preserves the old live-byte count; success updates only the size delta. |
+| `tests/federated_binding_allocation.rs:32` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | Identical arguments and returned pointers; only atomic counters are added. |
+| `tests/federated_binding_allocation.rs:34` | `unsafe fn alloc` | caller's layout contract forwarded | The inner call at :36 uses the unchanged layout. |
+| `tests/federated_binding_allocation.rs:36` | `System.alloc(layout)` | valid allocation layout | The returned pointer is only null-checked before counting the requested bytes. |
+| `tests/federated_binding_allocation.rs:44` | `unsafe fn dealloc` | matching pointer and layout from this allocator | All allocations also use `System`; the arguments are forwarded unchanged. |
+| `tests/federated_binding_allocation.rs:46` | `System.dealloc(ptr, layout)` | caller's deallocation contract | No pointer access or layout modification is added. |
+| `tests/federated_binding_allocation.rs:51` | `unsafe fn realloc` | caller's pointer/layout/new-size contract | The inner call at :53 forwards all three arguments unchanged. |
+| `tests/federated_binding_allocation.rs:53` | `System.realloc(ptr, layout, new_size)` | caller's reallocation contract | A null result preserves the old live-byte count; success updates only the size delta. |
 
 ### `sparq-lws-core` — 12 sites (example- and test-only counting global allocators) [FABLE-5]
 
