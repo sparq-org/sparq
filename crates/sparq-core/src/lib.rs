@@ -14913,6 +14913,9 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
+    // Windows refuses to rename a directory while files inside it are open, so this base swap
+    // cannot happen there.
+    #[cfg(unix)]
     #[cfg(feature = "mmap")]
     #[test]
     fn a_child_detached_from_its_parent_refuses_writes_once_the_parent_swaps_its_base() {
@@ -14946,6 +14949,64 @@ mod tests {
         );
         drop(child);
         drop(parent);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_child_detached_from_its_parent_keeps_acknowledged_writes_when_a_base_swap_fails() {
+        let dir = txn_tmp_dir("detached-child-failed-swap");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut parent = Graph::open(&dir).unwrap();
+        let (_, mut child) = parent.named.pop().expect("one named graph");
+        let t = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
+        child
+            .apply_delta(std::slice::from_ref(&t), &[])
+            .expect("the detached child's write is acknowledged");
+        assert!(
+            parent.vacuum().is_err(),
+            "the detached child's open files prevent the directory rename on Windows"
+        );
+        drop(child);
+        drop(parent);
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            dump_terms(&reopened),
+            vec![(
+                "<http://ex/base>".into(),
+                "<http://ex/p>".into(),
+                "<http://ex/o>".into(),
+            )]
+        );
+        assert_eq!(
+            dump_terms(
+                reopened
+                    .named_graph(&named("g0"))
+                    .expect("the named graph survives")
+            ),
+            vec![
+                (
+                    "<http://ex/n0>".into(),
+                    "<http://ex/p>".into(),
+                    "<http://ex/o0>".into(),
+                ),
+                (
+                    "<http://ex/s8>".into(),
+                    "<http://ex/p8>".into(),
+                    "<http://ex/o8>".into(),
+                ),
+            ]
+        );
+        drop(reopened);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -15323,6 +15384,9 @@ mod tests {
         }
     }
 
+    // Windows refuses to rename a directory while files inside it are open, so this base swap
+    // cannot happen there.
+    #[cfg(unix)]
     #[cfg(feature = "mmap")]
     #[test]
     fn a_write_cannot_overtake_a_base_swap_that_holds_the_writer_permit() {
