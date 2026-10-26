@@ -40,6 +40,8 @@ async fn create_only_pool_layout_and_foreign_objects() {
         format!("tenant/blobs/nested/{KEY}"),
         "tenant/blobs/foreign".into(),
         "tenant/blobs/pool/foreign".into(),
+        format!("tenant/blobs/$pool${KEY}"),
+        "tenant/blobs/pool/b1-00000000000000000000000000000000/nested".into(),
     ] {
         raw.put(&Path::from(path), Bytes::from_static(b"foreign").into())
             .await
@@ -49,6 +51,21 @@ async fn create_only_pool_layout_and_foreign_objects() {
     let keys: std::collections::BTreeSet<_> = entries.iter().map(|e| e.key.as_str()).collect();
     assert_eq!(keys, [KEY, &pooled].into_iter().collect());
     assert_eq!(entries.len(), 2);
+    for entry in &entries {
+        let path = if entry.key.starts_with("$pool$") {
+            format!("tenant/blobs/pool/{KEY}")
+        } else {
+            format!("tenant/blobs/{KEY}")
+        };
+        assert_eq!(
+            entry.last_modified,
+            raw.head(&Path::from(path))
+                .await
+                .unwrap()
+                .last_modified
+                .into()
+        );
+    }
     store.delete(KEY).await.unwrap();
     store.delete(KEY).await.unwrap();
     assert!(!store.exists(KEY).await.unwrap());
@@ -121,6 +138,17 @@ async fn backend_errors_remain_opaque_and_head_errors_propagate() {
 
 #[test]
 fn provider_features_control_url_construction() {
+    for scheme in ["file", "s3", "az", "gs"] {
+        let url = if scheme == "file" {
+            "file:///tmp/prefix".to_owned()
+        } else {
+            format!("{scheme}://bucket/prefix")
+        };
+        assert_eq!(
+            ObjectBlobStore::from_url(&url, [("unknown_secret_option", "secret")],).unwrap_err(),
+            Error::Configuration
+        );
+    }
     #[cfg(feature = "aws")]
     assert!(ObjectBlobStore::from_url(
         "s3://bucket/prefix",

@@ -43,8 +43,8 @@
 //! and (b) the final delete is an ATOMIC compare-and-delete — [`BlobStore::delete_if_unchanged`] removes
 //! the key ONLY while its current `generation` still equals the witness the fresh stat observed, with
 //! the compare + remove under a single critical section (no suspension point between them). That CLOSES
-//! the race for a [`BlobStore`] with an atomic `delete_if_unchanged` (the in-memory store, the only real
-//! impl): a concurrent rewrite either lands before the CAS (a new generation ⇒ CAS returns `false` ⇒ not
+//! the race for a [`BlobStore`] with an atomic `delete_if_unchanged` (such as the in-memory store):
+//! a concurrent rewrite either lands before the CAS (a new generation ⇒ CAS returns `false` ⇒ not
 //! deleted, recorded `skipped_revalidated`) or after it (the old bytes are already gone) — there is NO
 //! clobber window. A plain `stat()`-then-`delete()` could not close it (a gap always exists between the
 //! two calls); the atomic CAS can.
@@ -57,10 +57,9 @@
 //! the in-memory store's monotonic [`BlobEntry::generation`](crate::store::BlobEntry::generation) — strictly increasing on EVERY write, so a
 //! same-timestamp overwrite still has a strictly different generation and the CAS correctly refuses. The
 //! `last_modified` is still consulted, but ONLY for the time-based age/grace check (correct for "old
-//! enough" / inside-the-grace-window); it is NEVER the delete witness. A real `object_store` backend uses
-//! its native version/ETag/object-generation as the witness (the `M2-next:` seam on
-//! [`BlobStore::delete_if_unchanged`]); a backend with NO native write version (generation `None`) cannot
-//! do a safe CAS and must instead use unique-per-write keys.
+//! enough" / inside-the-grace-window); it is NEVER the delete witness. The native object adapter
+//! reports generation `None`, because its API has no conditional delete, and relies on
+//! unique-per-write keys even when the provider's read metadata includes an ETag.
 //!
 //! ### Which generation observation is the witness — the SNAPSHOT one (Finding 1, the threading fix)
 //! The witness is the generation observed at the START-OF-SWEEP `list()` snapshot, threaded END-TO-END in
@@ -628,6 +627,65 @@ mod tests {
     use crate::store::sparq::{InMemorySparqClient, ResourceMeta};
     use bytes::Bytes;
     use std::sync::Mutex;
+
+    struct LateListingFailure(InMemoryBlobStore);
+
+    #[async_trait::async_trait]
+    impl BlobStore for LateListingFailure {
+        async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+            self.0.get(key).await
+        }
+        async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+            self.0.put(key, body).await
+        }
+        async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+            self.0.exists(key).await
+        }
+        async fn delete(&self, key: &str) -> Result<(), BlobError> {
+            self.0.delete(key).await
+        }
+        async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+            panic!("reconciliation must consume the stream")
+        }
+        async fn list_stream(
+            &self,
+        ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+            let mut entries = self.0.list().await?;
+            entries.sort_by(|a, b| a.key.cmp(&b.key));
+            Ok(futures_util::stream::iter(entries.into_iter().map(Ok))
+                .chain(futures_util::stream::once(async {
+                    Err(BlobError::Backend("listing failed".into()))
+                }))
+                .boxed())
+        }
+        async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
+            self.0.stat(key).await
+        }
+        async fn delete_if_unchanged(&self, key: &str, generation: u64) -> Result<bool, BlobError> {
+            self.0.delete_if_unchanged(key, generation).await
+        }
+    }
+
+    #[tokio::test]
+    async fn late_listing_failure_aborts_the_current_batch() {
+        let blob = LateListingFailure(InMemoryBlobStore::new());
+        for n in 0..1025 {
+            blob.0
+                .put_with_time(&format!("{n:04}"), Bytes::new(), ago(3600))
+                .unwrap();
+        }
+        let error = reconcile_orphans(&InMemorySparqClient::new(), &blob, &opts())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ReconcileError::ListBlobs(_)));
+        for n in 0..1024 {
+            assert!(!blob.exists(&format!("{n:04}")).await.unwrap());
+        }
+        assert!(
+            blob.exists("1024").await.unwrap(),
+            "the failed batch must delete nothing"
+        );
+    }
 
     fn meta(blob_key: &str) -> ResourceMeta {
         ResourceMeta {

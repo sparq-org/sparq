@@ -279,6 +279,8 @@ pub struct InMemoryBlobStore {
     next_generation: AtomicU64,
     /// Immutable admission ceilings; checks happen under `inner`'s lock.
     limits: InMemoryStoreLimits,
+    #[cfg(any(test, feature = "test-support"))]
+    immutable_keys: bool,
 }
 
 impl Default for InMemoryBlobStore {
@@ -299,7 +301,37 @@ impl InMemoryBlobStore {
             inner: Mutex::new(BlobState::default()),
             next_generation: AtomicU64::new(0),
             limits,
+            #[cfg(any(test, feature = "test-support"))]
+            immutable_keys: false,
         }
+    }
+
+    /// Build a validated, create-only store with the default admission limits.
+    /// Available with `test-support`. Legacy constructors retain arbitrary-key replacement
+    /// for existing test doubles.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_immutable_keys() -> Self {
+        Self {
+            immutable_keys: true,
+            ..Self::new()
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn validate_key(&self, key: &str) -> Result<(), BlobError> {
+        if self.immutable_keys {
+            let bare = key.strip_prefix("$pool$").unwrap_or(key);
+            let valid = bare.strip_prefix("b1-").is_some_and(|suffix| {
+                suffix.len() == 32
+                    && suffix
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            });
+            if !valid {
+                return Err(BlobError::Backend("invalid blob key".into()));
+            }
+        }
+        Ok(())
     }
 
     /// Return exact physical usage, including unreferenced versions awaiting reconciliation.
@@ -321,12 +353,18 @@ impl InMemoryBlobStore {
 
     /// Insert one body while atomically enforcing byte and entry ceilings and updating accounting.
     fn put_at(&self, key: &str, body: Bytes, last_modified: SystemTime) -> Result<(), BlobError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.validate_key(key)?;
         let mut guard = self
             .inner
             .lock()
             .map_err(|_| BlobError::Backend("poisoned".into()))?;
         let previous_bytes = guard.entries.get(key).map_or(0, |blob| blob.body.len());
         let is_new = !guard.entries.contains_key(key);
+        #[cfg(any(test, feature = "test-support"))]
+        if self.immutable_keys && !is_new {
+            return Err(BlobError::Backend("blob already exists".into()));
+        }
         // A service-pool record is admitted against the pool's own ceilings and counts towards
         // nothing else, so no number of them makes a write of content fail.
         let pooled = super::is_pooled_blob_key(key);
@@ -427,6 +465,8 @@ impl InMemoryBlobStore {
 #[async_trait]
 impl BlobStore for InMemoryBlobStore {
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.validate_key(key)?;
         let guard = self
             .inner
             .lock()
@@ -443,6 +483,8 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.validate_key(key)?;
         let guard = self
             .inner
             .lock()
@@ -451,6 +493,8 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.validate_key(key)?;
         let mut guard = self
             .inner
             .lock()
@@ -484,6 +528,8 @@ impl BlobStore for InMemoryBlobStore {
     /// enumeration — the shape the real object_store HEAD will take. Surfaces BOTH witnesses: the
     /// `last_modified` (the age/grace witness) and the `generation` (the CAS-delete witness).
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.validate_key(key)?;
         let guard = self
             .inner
             .lock()
@@ -509,6 +555,8 @@ impl BlobStore for InMemoryBlobStore {
         key: &str,
         expected_generation: u64,
     ) -> Result<bool, BlobError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.validate_key(key)?;
         let mut guard = self
             .inner
             .lock()

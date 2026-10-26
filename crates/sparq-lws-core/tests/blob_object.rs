@@ -13,7 +13,7 @@ use futures_util::TryStreamExt;
 use sparq_lws_core::app::{build_router, AppState};
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::ldp::handler::LdpState;
-use sparq_lws_core::store::blob_contract::{self, Profile};
+use sparq_lws_core::store::blob_contract;
 use sparq_lws_core::store::blob_object::{ObjectBlobAdapter, ObjectBlobStore};
 use sparq_lws_core::store::reconcile::{reconcile_orphans, ReconcileOptions};
 use sparq_lws_core::store::{BlobStore, CompositeStore, InMemorySparqClient, SparqClient, Store};
@@ -30,7 +30,19 @@ fn local(dir: &tempfile::TempDir) -> ObjectBlobAdapter {
 #[tokio::test]
 async fn local_filesystem_contract() {
     let dir = tempfile::tempdir().unwrap();
-    blob_contract::run(&local(&dir), Profile::ImmutableKeys).await;
+    let blob = local(&dir);
+    blob_contract::run(&blob).await;
+    let key = "b1-000000000000000000000000000000ff";
+    blob.put(key, Bytes::new()).await.unwrap();
+    let entry = blob.stat(key).await.unwrap().unwrap();
+    assert!(entry.generation.is_none());
+    assert!(entry.last_modified.is_some());
+    assert!(blob
+        .list()
+        .await
+        .unwrap()
+        .iter()
+        .all(|e| e.generation.is_none()));
 }
 
 async fn http_round_trip(blob: ObjectBlobAdapter) {
@@ -267,7 +279,7 @@ fn minio() -> ObjectBlobAdapter {
 #[ignore = "requires a dedicated MinIO bucket and the dependency's aws feature"]
 async fn minio_contract_router_and_orphan_sweep() {
     let blob = minio();
-    blob_contract::run(&blob, Profile::ImmutableKeys).await;
+    blob_contract::run(&blob).await;
     http_round_trip(blob.clone()).await;
     // The HTTP fixture leaves its root ACL. Remove it before the isolated sweep fixture.
     for entry in blob.list().await.unwrap() {

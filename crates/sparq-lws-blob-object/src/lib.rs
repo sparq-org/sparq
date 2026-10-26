@@ -94,9 +94,10 @@ impl ObjectBlobStore {
 
     /// Open `file://`, `s3://` (`aws`), `az://` (`azure`), or `gs://` (`gcp`).
     ///
-    /// Options are the pinned object_store provider's configuration key/value pairs. This does
-    /// not read environment variables. Local directories must already exist. Query strings,
-    /// fragments, and URL user information are refused; pass credentials through options.
+    /// Options are the pinned object_store provider's configuration key/value pairs;
+    /// unknown options are rejected. Provider credential discovery may consult local files,
+    /// environment variables or instance metadata unless explicit credentials are supplied.
+    /// Query strings, fragments, and URL user information are refused.
     pub fn from_url<I, K, V>(url: &str, options: I) -> Result<Self, Error>
     where
         I: IntoIterator<Item = (K, V)>,
@@ -112,6 +113,25 @@ impl ObjectBlobStore {
         {
             return Err(Error::Configuration);
         }
+        let options = options
+            .into_iter()
+            .map(|(key, value)| {
+                let key = key.as_ref();
+                let known = match url.scheme() {
+                    #[cfg(feature = "aws")]
+                    "s3" => key.parse::<object_store::aws::AmazonS3ConfigKey>().is_ok(),
+                    #[cfg(feature = "azure")]
+                    "az" => key.parse::<object_store::azure::AzureConfigKey>().is_ok(),
+                    #[cfg(feature = "gcp")]
+                    "gs" => key.parse::<object_store::gcp::GoogleConfigKey>().is_ok(),
+                    _ => false,
+                };
+                if !known {
+                    return Err(Error::Configuration);
+                }
+                Ok((key.to_owned(), value.into()))
+            })
+            .collect::<Result<Vec<(String, String)>, _>>()?;
         let (store, prefix) =
             object_store::parse_url_opts(&url, options).map_err(|_| Error::Configuration)?;
         Ok(Self {
@@ -205,6 +225,10 @@ impl ObjectBlobStore {
             return None;
         }
         validate_key(&key).ok()?;
+        // Only the canonical physical layout can supply a logical key's metadata.
+        if self.path(&key).ok()? != meta.location {
+            return None;
+        }
         Some(Entry {
             key,
             last_modified: meta.last_modified.into(),

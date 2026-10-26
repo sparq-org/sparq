@@ -27,7 +27,9 @@ LocalFileSystem is always available on native targets. Features `aws`, `azure`,
 and `gcp` enable `s3://`, `az://`, and `gs://` respectively; all are off by default.
 `ObjectBlobStore::new(Arc<dyn ObjectStore>, prefix)` wraps an existing backend.
 `from_url(url, options)` uses the pinned provider's configuration options and
-does not load environment variables. Errors and Debug output omit backend details.
+rejects unknown options. Provider credential discovery can consult local files,
+environment variables and instance metadata; supply explicit credentials to avoid
+ambient discovery. Errors and Debug output omit backend details.
 
 Keys match `($pool$)?b1-[0-9a-f]{32}`. Normal objects live under `<prefix>/b1-…`;
 pooled objects under `<prefix>/pool/b1-…`. Writes use atomic create mode. Callers

@@ -26,8 +26,9 @@ let store = CompositeStore::new(InMemorySparqClient::new(), ObjectBlobAdapter(bl
 
 `ObjectBlobStore::new(Arc<dyn ObjectStore>, prefix)` accepts an existing provider.
 `from_url(url, options)` accepts the pinned provider's key/value configuration,
-including credentials passed separately from the URL. It does not read the
-environment. URL user information, query strings and fragments are rejected.
+including credentials passed separately from the URL. Unknown options are rejected.
+Provider credential discovery can consult local files, environment variables and
+instance metadata; supply explicit credentials to avoid ambient discovery. URL user information, query strings and fragments are rejected.
 Use a dedicated local directory or a provisioned bucket/container and an isolated
 prefix. Errors contain fixed descriptions, without backend diagnostics or URLs.
 
@@ -46,10 +47,10 @@ and nested directories are excluded from listings. If a later page fails, a swee
 returns an error and earlier batches may already have completed.
 
 For backend authors, enable `sparq-lws-core/test-support` and call
-`store::blob_contract::run` on an empty isolated backend using
-`Profile::ImmutableKeys`. The legacy in-memory double runs with
-`Profile::InMemory` to retain its arbitrary-key replacement and generation-race
-fixtures. New backends must pass the immutable profile.
+`store::blob_contract::run(&backend)` on an empty isolated backend. Every backend
+runs the same validated, create-only contract, including concurrent creates of
+one key. `InMemoryBlobStore::with_immutable_keys()` supplies this mode locally;
+its legacy constructors retain arbitrary-key replacement for existing fixtures.
 
 Run the LocalFileSystem contract and router tests with:
 

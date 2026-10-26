@@ -114,7 +114,9 @@ behind the default-off `sparq-lws-core/blob-object` feature. LocalFileSystem is
 included; AWS, Azure and GCP are separate opt-in crate features. Server boot
 wiring is pending. See the [object-store reference](references/blob-object.md)
 for constructors, immutable keys, streaming listings, and the reusable backend
-contract suite exposed by `test-support`.
+contract suite exposed by `test-support`. The same create-only contract runs over
+`InMemoryBlobStore::with_immutable_keys()` (under `test-support`) and the object adapter; legacy in-memory
+constructors keep their replacement semantics.
 
 The seed variables are test-only:
 

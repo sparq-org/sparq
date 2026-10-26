@@ -103,3 +103,35 @@ async fn listing_is_lazy_and_late_page_errors_are_opaque() {
     assert!(!format!("{error:?} {error}").contains("secret"));
     assert!(listing.next().await.is_none());
 }
+
+#[tokio::test]
+async fn invalid_keys_never_reach_the_backend() {
+    use object_store::ObjectStoreExt;
+    let raw = object_store::memory::InMemory::new();
+    let path = Path::from("unused");
+    raw.put(&path, bytes::Bytes::new().into()).await.unwrap();
+    let store = ObjectBlobStore::new(
+        Arc::new(Probe {
+            meta: raw.head(&path).await.unwrap(),
+            polls: Arc::new(AtomicUsize::new(0)),
+        }),
+        "blobs",
+    )
+    .unwrap();
+    for key in [
+        "",
+        "b1-0",
+        "../outside",
+        "$pool$../outside",
+        "b1-0000000000000000000000000000000A",
+    ] {
+        assert_eq!(
+            store.put(key, bytes::Bytes::new()).await,
+            Err(Error::InvalidKey)
+        );
+        assert_eq!(store.get(key).await, Err(Error::InvalidKey));
+        assert_eq!(store.exists(key).await, Err(Error::InvalidKey));
+        assert_eq!(store.delete(key).await, Err(Error::InvalidKey));
+        assert!(matches!(store.stat(key).await, Err(Error::InvalidKey)));
+    }
+}
