@@ -69,7 +69,17 @@ async fn delete_record_by<S: Store>(
     container: &str,
     within: Option<std::time::Duration>,
 ) -> Result<(), Undeleted> {
-    match remove_member(store, iri, Some(container)).await {
+    let removed = remove_member(store, iri, Some(container)).await;
+    resolve_record_removal(store, iri, within, removed).await
+}
+
+async fn resolve_record_removal<S: Store>(
+    store: &S,
+    iri: &str,
+    within: Option<std::time::Duration>,
+    removed: Result<crate::store::DeleteOutcome, crate::error::ServerError>,
+) -> Result<(), Undeleted> {
+    match removed {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
         Err(crate::error::ServerError::Unsettled { fence, detail }) => {
             // Counted from the store's answer: an unsettled answer comes once the call has
@@ -266,6 +276,7 @@ where
     // they are full, and is told the same way: `507`, the storage is full, not `500`.
     let failed = |e: ServerError| match e {
         ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
+        ServerError::ResourceChanged => resources::retry_later("the resource is busy"),
         e => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string())),
     };
     let Some(place) = state.settlements.reserve() else {
@@ -286,89 +297,102 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let ListingLocks {
-            own: own_listing,
-            container: container_lock,
-        } = held;
-        // Under the lock, the name must not be stored either (a quarantined record holds its
-        // name, and no lock).
-        match state.store.exists(&iri).await {
-            Ok(false) => {}
-            Ok(true) => return Err(ServerError::Conflict("the record's name is taken".into())),
-            Err(e) => return Err(e),
-        }
-        let written = state
+        state
             .store
-            .create_in_container(&container, &iri, body, LWS_JSON)
-            .await;
-        let Err(e) = written else {
-            register(&state);
-            drop(gate);
-            return Ok(());
-        };
-        // A record listed is stored for good (its lock keeps a revocation of it out). One not
-        // listed is not stored only once the write is settled: a write that failed unsettled
-        // (an HTTP update that timed out, whose worker may still be running) can still commit
-        // after the listing was read, until its fence succeeds.
-        let unsettled = match &e {
-            ServerError::Unsettled { fence, .. } => Some(fence.clone()),
-            _ => None,
-        };
-        match still_listed(&state.store, &iri, &container).await {
-            Ok(true) => {
-                register(&state);
-                Ok(())
-            }
-            Ok(false) if unsettled.is_none() => Err(e),
-            Ok(false) | Err(_) => {
-                // Settled by a task the state owns, holding the record's own lock (a
-                // revocation of it waits), the quota place (`register` holds it), the lock of
-                // the narrowest listing that shows it, shared, and this change's place among
-                // those being settled. A subscription listed to its subscriber keeps that
-                // listing's lock (so the subscriber's conditional creates wait for it, and
-                // nobody else's, while its other changes go on), and the container's lock is
-                // taken again only to register it. A record listed in the container alone keeps
-                // the container's: a conditional create evaluated on the whole listing (the
-                // owner's) waits for the outcome, as a subscriber's waits on its own, so two
-                // with one entity tag cannot both register. An unsettled write is fenced first,
-                // so the listing it then reads is final.
-                let (own_listing, container_lock) = match own_listing {
-                    Some(own) => {
-                        drop(container_lock);
-                        (Some(own.shared()), None)
+            .change(async {
+                let ListingLocks {
+                    own: own_listing,
+                    container: container_lock,
+                } = held;
+                // Under the lock, the name must not be stored either (a quarantined record holds its
+                // name, and no lock).
+                match state.store.exists(&iri).await {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        return Err(ServerError::Conflict("the record's name is taken".into()))
                     }
-                    None => (None, container_lock.map(ListingGuard::shared)),
+                    Err(e) => return Err(e),
+                }
+                let written = state
+                    .store
+                    .create_in_container(&container, &iri, body, LWS_JSON)
+                    .await;
+                let Err(e) = written else {
+                    register(&state);
+                    drop(gate);
+                    return Ok(());
                 };
-                drop(gate);
-                let (weak, store, locks) =
-                    (state.downgrade(), state.store.clone(), state.locks.clone());
-                state.settlements.spawn(async move {
-                    let _held = (own, place, own_listing);
-                    if let Some(fence) = unsettled {
-                        fence_in_background(&store, &fence).await;
-                    }
-                    if !until_done(|| still_listed(&store, &iri, &container)).await {
-                        return;
-                    }
-                    // Registered under the container's lock, shared (taken after the record's,
-                    // as a revocation takes them, unless still held), so no conditional create
-                    // sees the listing change between its check and its own registration. This
-                    // task holds no admission, so it may wait for it.
-                    let _listing = match container_lock {
-                        Some(held) => held,
-                        None => ListingGuard::Shared(
-                            until_done(|| async { locks.read(&container).await.ok_or(()) }).await,
-                        ),
-                    };
-                    if let Some(state) = weak.upgrade() {
+                // A record listed is stored for good (its lock keeps a revocation of it out). One not
+                // listed is not stored only once the write is settled: a write that failed unsettled
+                // (an HTTP update that timed out, whose worker may still be running) can still commit
+                // after the listing was read, until its fence succeeds.
+                let unsettled = match &e {
+                    ServerError::Unsettled { fence, .. } => Some(fence.clone()),
+                    _ => None,
+                };
+                match still_listed(&state.store, &iri, &container).await {
+                    Ok(true) => {
                         register(&state);
+                        Ok(())
                     }
-                });
-                Err(ServerError::Storage(
+                    Ok(false) if unsettled.is_none() => Err(e),
+                    Ok(false) | Err(_) => {
+                        // Settled by a task the state owns, holding the record's own lock (a
+                        // revocation of it waits), the quota place (`register` holds it), the lock of
+                        // the narrowest listing that shows it, shared, and this change's place among
+                        // those being settled. A subscription listed to its subscriber keeps that
+                        // listing's lock (so the subscriber's conditional creates wait for it, and
+                        // nobody else's, while its other changes go on), and the container's lock is
+                        // taken again only to register it. A record listed in the container alone keeps
+                        // the container's: a conditional create evaluated on the whole listing (the
+                        // owner's) waits for the outcome, as a subscriber's waits on its own, so two
+                        // with one entity tag cannot both register. An unsettled write is fenced first,
+                        // so the listing it then reads is final.
+                        let (own_listing, container_lock) = match own_listing {
+                            Some(own) => {
+                                drop(container_lock);
+                                (Some(own.shared()), None)
+                            }
+                            None => (None, container_lock.map(ListingGuard::shared)),
+                        };
+                        drop(gate);
+                        let (weak, store, locks) =
+                            (state.downgrade(), state.store.clone(), state.locks.clone());
+                        state.settlements.spawn(async move {
+                            let _held = (own, place, own_listing);
+                            if let Some(fence) = unsettled {
+                                fence_in_background(&store, &fence).await;
+                            }
+                            if !until_done(|| still_listed(&store, &iri, &container)).await {
+                                return;
+                            }
+                            // Registered under the container's lock, shared (taken after the record's,
+                            // as a revocation takes them, unless still held), so no conditional create
+                            // sees the listing change between its check and its own registration. This
+                            // task holds no admission, so it may wait for it.
+                            let _listing = match container_lock {
+                                Some(held) => held,
+                                None => ListingGuard::Shared(
+                                    until_done(|| async { locks.read(&container).await.ok_or(()) })
+                                        .await,
+                                ),
+                            };
+                            if let Some(state) = weak.upgrade() {
+                                state
+                                    .store
+                                    .publish(async {
+                                        register(&state);
+                                    })
+                                    .await;
+                            }
+                        });
+                        Err(ServerError::Storage(
                     "whether the record was stored is not known; the request may be retried".into(),
                 ))
-            }
-        }
+                    }
+                }
+            })
+            .await?
     };
     tokio::spawn(task)
         .await
@@ -603,26 +627,30 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let Some(held) = set_aside().await else {
+        let started = state
+            .store
+            .change(async {
+                let held = set_aside().await?;
+                let removed = remove_member(&state.store, &iri, Some(&container)).await;
+                Some((held, removed))
+            })
+            .await
+            .map_err(|error| (error.status(), error.to_string()))?;
+        let Some((held, removed)) = started else {
             return Ok(Removed::Absent);
         };
-        // A delete the store refused for want of room is told as such (`507`), as a create's
-        // refusal is, once the record is known to be still stored.
         let mut refused = false;
-        // The fence budget starts at the store's answer. Once spent, settlement continues
-        // in the background; no second attempt is made against an expired deadline.
-        let pending = match delete_record_by(&state.store, &iri, &container, Some(LOCK_WAIT)).await
+        let pending = match resolve_record_removal(&state.store, &iri, Some(LOCK_WAIT), removed)
+            .await
         {
             Ok(()) => Ok(Some(true)),
             Err(Undeleted::Unfenced { fence, .. }) => Err(Some(fence)),
-            // Settled, but the outcome is unread: try the listing in this request, then keep
-            // the record out of force while the background waits for it to become readable.
             Err(Undeleted::Unread(_)) => match still_listed(&state.store, &iri, &container).await {
                 Ok(listed) => Ok(Some(!listed)),
                 Err(_) => Err(None),
             },
-            Err(Undeleted::Failed(e)) => {
-                refused = matches!(e, crate::error::ServerError::InsufficientStorage);
+            Err(Undeleted::Failed(error)) => {
+                refused = matches!(error, crate::error::ServerError::InsufficientStorage);
                 Ok(still_listed(&state.store, &iri, &container)
                     .await
                     .ok()
@@ -660,7 +688,10 @@ where
                     let Some(state) = weak.upgrade() else {
                         return;
                     };
-                    let author = settle(&state, !listed, held);
+                    let author = state
+                        .store
+                        .publish(async { settle(&state, !listed, held) })
+                        .await;
                     drop((own, listing));
                     if !listed {
                         announce_record(&state, "Delete", &iri, &container, author);
@@ -675,7 +706,10 @@ where
                 ));
             }
         };
-        let author = settle(&state, gone == Some(true), held);
+        let author = state
+            .store
+            .publish(async { settle(&state, gone == Some(true), held) })
+            .await;
         drop((own, listing, place, own_listing));
         match gone {
             Some(true) => {

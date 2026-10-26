@@ -123,6 +123,8 @@ pub mod redis_replay;
 pub mod seed;
 #[cfg(feature = "sparql-endpoint")]
 mod sparql_endpoint;
+#[cfg(feature = "sparql-endpoint")]
+mod sparql_protocol;
 pub mod store;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tls;
