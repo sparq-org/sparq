@@ -7,7 +7,7 @@ Each control in [`controls.md`](./controls.md) is backed here by the **exact** f
 test, or CI job, plus the command an auditor re-runs to confirm it. Paths are
 repo-relative. No timing is recorded (NON-CANONICAL EC2 box).
 
-## MS-1 — confined unsafe surface (56 `forbid` crates, 11 unsafe-bearing crates, 71 total)
+## MS-1 — confined unsafe surface (56 `forbid` crates, 12 unsafe-bearing crates, 71 total)
 
 ```sh
 grep -rlE '^\s*#!?\[[^]]*forbid\(unsafe_code\)' crates/ --include='*.rs' | sed 's#crates/##;s#/.*##' | sort -u | wc -l
@@ -22,9 +22,9 @@ single Arrow FFI block is allowed with a `// SAFETY:` note.)
 ls -d crates/*/ | wc -l       # → 71 total crates
 ```
 Accounting (**the crates do NOT partition cleanly — the two sets overlap, so do not add them**):
-of **71 total** crates, **56** carry a source `forbid(unsafe_code)` and **11** are unsafe-bearing
+of **71 total** crates, **56** carry a source `forbid(unsafe_code)` and **12** are unsafe-bearing
 in `bench/unsafe-snapshot.json` (sparq-core, sparq-vectors, sparq-engine, sparq-py, sparq-cli,
-sparq-zk-compose, sparq-bench, sparq-lws-core, sparq-lws-wasm, sparq-reason, sparq-solid). FOUR crates appear in BOTH sets:
+sparq-zk-compose, sparq-bench, sparq-lws-core, sparq-lws-wasm, sparq-reason, sparq-solid, sparq-mpc). FIVE crates appear in BOTH sets:
 **sparq-py** (conditional `forbid`, above), and
 **sparq-lws-core** (src + bin `forbid`-clean; its 12 counted sites are counting allocators in two
 example harnesses under `examples/` and one integration test under `tests/`, likewise outside the
@@ -33,10 +33,12 @@ crate-root `forbid` — sq-gg0qq.2), and
 `tests/n3_builtin_alloc.rs` and `tests/n3_input_fact_memory.rs`, outside the crate-root `forbid` —
 GH #6833 / #7173), and
 **sparq-solid** (lib `forbid`-clean; its 7 counted sites are a test-only counting allocator in
-`tests/auth_resource_enumeration_memory.rs`, outside the crate-root `forbid` — GH #7175).
+`tests/auth_resource_enumeration_memory.rs`, outside the crate-root `forbid` — GH #7175), and
+**sparq-mpc** (lib `forbid`-clean; its 7 counted sites are a test-only counting allocator in
+`tests/federated_binding_allocation.rs`, outside the crate-root `forbid` — GH #7227).
 The remaining 8 crates carry neither a source `forbid` attribute nor counted unsafe: sparq-acbench,
 sparq-conformance-floors, sparq-difftest, sparq-kb, sparq-lws-authn-saml, sparq-metamorph,
-sparq-secprop-vocab and sparq-wrapper (56 + 11 − 4 + 8 = 71). `sparq-engine` is now an
+sparq-secprop-vocab and sparq-wrapper (56 + 12 − 5 + 8 = 71). `sparq-engine` is now an
 unsafe-bearing library: its four shipped cancellation-pointer sites plus four test-only allocator
 sites are registered and ratcheted. sq-kq9ia. **sparq-lws-wasm** is the ninth
 unsafe-bearing crate and the one deliberately absent from the `forbid` set: its four sites are a
@@ -44,10 +46,10 @@ SHIPPING bounded `#[global_allocator]` (the only way to bound wasm32 linear memo
 `deny(unsafe_code)` plus a single `#[allow(unsafe_code)] pub mod memory;` — every other module in
 the crate still fails to compile on `unsafe`. sq-wubkf.
 
-## MS-2 — 118-site register (ceiling and live), count-verified
+## MS-2 — 125-site register (ceiling and live), count-verified
 
 ```sh
-python3 scripts/unsafe-gate.py --check    # → "live total = 118, snapshot total = 118"
+python3 scripts/unsafe-gate.py --check    # → "live total = 125, snapshot total = 125"
 ```
 Per-crate (from `--check`, matching `bench/unsafe-snapshot.json::crates`):
 
@@ -59,12 +61,13 @@ Per-crate (from `--check`, matching `bench/unsafe-snapshot.json::crates`):
 | sparq-lws-core | 12 | 12 |
 | sparq-engine | 8 | 8 |
 | sparq-solid | 7 | 7 |
+| sparq-mpc | 7 | 7 |
 | sparq-lws-wasm | 4 | 4 |
 | sparq-py | 4 | 4 |
 | sparq-cli | 2 | 2 |
 | sparq-zk-compose | 3 | 3 |
 | sparq-bench | 1 | 1 |
-| **total** | **118** | **118** |
+| **total** | **125** | **125** |
 
 <!-- sq-gg0qq.2: sparq-lws-core imported with EXAMPLE- and TEST-only counting-allocator
 sites (register rows in unsafe-register.md). -->
