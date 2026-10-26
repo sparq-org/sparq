@@ -27,7 +27,9 @@ LocalFileSystem is always available on native targets. Features `aws`, `azure`,
 and `gcp` enable `s3://`, `az://`, and `gs://` respectively; all are off by default.
 `file://` is for tests and development only: its LocalFileSystem configuration
 does not fsync file data or directories and is not crash-durable. For durable
-local storage, use the data-directory `FsBlobStore` (`SOLID_SERVER_DATA_DIR`), pending #7229.
+local storage in library integrations, use `store::blob_fs::FsBlobStore` with the
+native `blob-fs` feature and hold the exclusive data-directory lock. Native server
+boot still selects in-memory blobs.
 `ObjectBlobStore::new(Arc<dyn ObjectStore>, prefix)` wraps an existing backend.
 `from_url(url, options)` uses the pinned provider's configuration options and
 rejects unknown options. Provider credential discovery can consult local files,

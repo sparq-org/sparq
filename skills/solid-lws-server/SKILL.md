@@ -153,6 +153,8 @@ The dependency-free `sparq-lws-blob-key` crate shares `POOL_MARK`, `PREFIX`,
 filesystem and object backends. The object adapter advertises no generation and rejects `delete_if_unchanged`; the
 reconciler uses `BlobStore::delete` for these entries. Its `file://` backend is
 for tests and development only; see the reference for local durability limits.
+The periodic reconciler's shared handle forwards `list_stream`, preserving backend
+streaming when the compatibility snapshot is unavailable or exceeds its limit.
 
 ### Filesystem blobs in library integrations
 
