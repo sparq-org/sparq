@@ -1760,3 +1760,159 @@ async fn stalled_stream_publications_have_a_storage_wide_bound() {
     assert_eq!(state.notify.dropped() - dropped_before, 2);
     lookups.add_permits(2);
 }
+
+#[cfg(feature = "sparql-endpoint")]
+#[tokio::test]
+async fn a_settlement_wait_and_relock_allow_sparql_barriers() {
+    use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
+    async fn query_under_barrier(state: &LwsState<test_store::FlakyStore>) {
+        // Force the real HTTP query through its fair barrier, rather than an optimistic read.
+        let entered = Arc::new(tokio::sync::Semaphore::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let changing = tokio::spawn({
+            let (state, entered, release) = (state.clone(), entered.clone(), release.clone());
+            async move {
+                state
+                    .store
+                    .change(async {
+                        entered.add_permits(1);
+                        release.acquire().await.unwrap().forget();
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        entered.acquire().await.unwrap().forget();
+        let reading = tokio::spawn({
+            let state = state.clone();
+            async move {
+                call(
+                    &state,
+                    "GET",
+                    "/.lws/sparql?query=ASK%7B%7D",
+                    Some(test_store::OWNER),
+                    "",
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(LOCK_WAIT, async {
+            while !state.store.barrier_pending() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        release.add_permits(1);
+        changing.await.unwrap();
+        let response = tokio::time::timeout(LOCK_WAIT, reading)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a settlement wait retained a query change lease"
+        );
+        assert_eq!(test_store::body_json(response).await["boolean"], true);
+    }
+
+    let (state, store) = test_store::closed_state(100).await;
+    let a = "https://a.example/";
+    let topic = state.cfg.storage();
+    test_store::grant_read(&state, a, &[&topic]).await;
+    let unknown = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.unsettle_creates.lock().unwrap() = Some(unknown.clone());
+    store.fail_fence.store(true, Ordering::SeqCst);
+    let body = grant_body(&state).replace("AccessGrant", "AccessRequest");
+    for _ in 0..MAX_SETTLING_PER_PRINCIPAL - 1 {
+        assert_eq!(
+            call(&state, "POST", crate::lws::REQUESTS_PATH, Some(a), &body)
+                .await
+                .status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+    let sending = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.hold_creates.lock().unwrap() = Some(sending.clone());
+    let first = tokio::spawn({
+        let (state, body) = (state.clone(), body.clone());
+        async move {
+            call(&state, "POST", crate::lws::REQUESTS_PATH, Some(a), &body)
+                .await
+                .status()
+        }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while store.creates_waiting.load(Ordering::SeqCst) != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let second = tokio::spawn({
+        let state = state.clone();
+        let body = subscription_body(&state, &topic);
+        async move {
+            call(&state, "POST", SUBSCRIPTIONS_PATH, Some(a), &body)
+                .await
+                .status()
+        }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while store.creates_waiting.load(Ordering::SeqCst) != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    sending.add_permits(1);
+    assert_eq!(first.await.unwrap(), StatusCode::INTERNAL_SERVER_ERROR);
+    sending.add_permits(1);
+    tokio::time::timeout(LOCK_WAIT, async {
+        while state.settlements.principal_waits() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    *store.hold_creates.lock().unwrap() = None;
+    *store.unsettle_creates.lock().unwrap() = None;
+    assert!(!second.is_finished());
+    query_under_barrier(&state).await;
+    assert!(
+        !second.is_finished(),
+        "the principal wait must still be stalled"
+    );
+
+    // Confirmation must take listing locks before taking a new change lease. Holding this
+    // physical listing must not prevent a second real query from passing its barrier.
+    let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+    let listing = state.locks.lock(&container).await.unwrap();
+    unknown.add_permits(MAX_SETTLING_PER_PRINCIPAL + 1);
+    tokio::time::timeout(LOCK_WAIT * 4, async {
+        while store.list_children(&container).await.unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    store.fail_fence.store(false, Ordering::SeqCst);
+    tokio::time::timeout(LOCK_WAIT * 8, async {
+        while state.settlements.listing_relocks() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!second.is_finished());
+    query_under_barrier(&state).await;
+    drop(listing);
+    assert_eq!(
+        tokio::time::timeout(LOCK_WAIT * 8, second)
+            .await
+            .unwrap()
+            .unwrap(),
+        StatusCode::CREATED
+    );
+}

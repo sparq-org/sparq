@@ -1,11 +1,11 @@
 //! Genuine V2 component witnesses and method/member dispatch controls.
 use super::*;
 use serde::Serialize;
-use sparq_zk::commit::CommitmentMethod;
 use sparq_zk::field::field_from_hash_bytes;
 
 pub(super) struct Graph {
     commitment: FieldHex,
+    method_commitment: sparq_zk::sig::MethodCommitment,
     salt: Fr,
     enc: [FieldHex; 3],
     identities: Vec<[FieldHex; 3]>,
@@ -16,10 +16,10 @@ impl Graph {
         let salt = Fr::from(salt);
         let terms = ["http://ex/s", predicate, "http://ex/o"].map(|s| Term::NamedNode(iri(s)));
         let triple = Triple::new(iri("http://ex/s"), iri(predicate), iri("http://ex/o"));
-        let commitment = if v2 {
-            sparq_zk::dual_leaf_v2::commit_triples(&[triple], salt).unwrap().commitment
+        let method_commitment = if v2 {
+            sparq_zk::dual_leaf_v2::commit_triples(&[triple], salt).unwrap().method_commitment()
         } else {
-            commit_triples(&[triple], salt).unwrap().commitment
+            commit_triples(&[triple], salt).unwrap().method_commitment()
         };
         let enc = terms.map(|t| FieldHex::from_field(&if v2 {
             sparq_zk::dual_leaf_v2::encode_term(&t, &salt).unwrap().unwrap()
@@ -29,7 +29,8 @@ impl Graph {
         let mut identities = vec![zero_row(); 16];
         identities[0] = ["http://ex/s", predicate, "http://ex/o"].map(|s|
             FieldHex::from_field(&field_from_hash_bytes(blake3::hash(s.as_bytes()).as_bytes())));
-        Self { commitment: FieldHex::from_field(&commitment), salt, enc, identities }
+        Self { commitment: FieldHex::from_field(&method_commitment.commitment),
+            method_commitment, salt, enc, identities }
     }
 
     fn scan(&self, v2: bool) -> ProofInputs {
@@ -66,7 +67,7 @@ impl Graph {
 
 fn fh0() -> FieldHex { FieldHex("0x0".into()) }
 fn zero_row() -> [FieldHex; 3] { std::array::from_fn(|_| fh0()) }
-fn put(out: &mut String, key: &str, value: &impl Serialize) {
+pub(super) fn put(out: &mut String, key: &str, value: &impl Serialize) {
     out.push_str(&format!("{key} = {}\n", serde_json::to_string(value).unwrap()));
 }
 
@@ -131,13 +132,10 @@ pub(super) fn fixture(v2: bool, join: bool) -> (ProofManifest, Vec<Graph>) {
         }, proof_hex: String::new() });
     }
     for g in &graphs {
-        let method = if v2 { CommitmentMethod::DualLeafV2 } else { CommitmentMethod::StringCanonicalV1 };
         let mut att = attest_with_salt(g.commitment.to_field().unwrap(), g.salt, &test_issuer_sk(1));
         let status = sparq_zk::sig::status_ref_digest(
             &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST), FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
-        att.signature = test_issuer_sk(1).sign_presentation_with_status_and_scheme(
-            &g.commitment.to_field().unwrap(), &g.salt, &status,
-            &sparq_zk::sig::scheme_iri_to_field(method.scheme_iri()));
+        att.signature = test_issuer_sk(1).attest(&g.method_commitment, &g.salt, &status, None);
         m.commitment_attestations.push(att);
     }
     (m, graphs)

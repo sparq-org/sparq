@@ -68,9 +68,20 @@ async fn delete_record_by<S: Store>(
     iri: &str,
     container: &str,
     within: Option<std::time::Duration>,
+    place: Option<(&mut SettlementPlace, &mut SettlementLocks<()>)>,
+) -> Result<(), Undeleted> {
+    let removed = remove_member(store, iri, Some(container)).await;
+    resolve_record_removal(store, iri, within, removed, place).await
+}
+
+async fn resolve_record_removal<S: Store>(
+    store: &S,
+    iri: &str,
+    within: Option<std::time::Duration>,
+    removed: Result<crate::store::DeleteOutcome, crate::error::ServerError>,
     mut place: Option<(&mut SettlementPlace, &mut SettlementLocks<()>)>,
 ) -> Result<(), Undeleted> {
-    match remove_member(store, iri, Some(container)).await {
+    match removed {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
         Err(crate::error::ServerError::Unsettled { fence, detail }) => {
             // Count from the store's answer, including any wait for a principal place.
@@ -278,6 +289,7 @@ where
     // subscription and access-request routes to turn into their ordinary quota response.
     let failed = |e: ServerError| match e {
         ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
+        ServerError::ResourceChanged => resources::retry_later("the resource is busy"),
         ServerError::ServicePoolFull => {
             let mut response = problem(StatusCode::INSUFFICIENT_STORAGE, None);
             response.extensions_mut().insert(PoolFull);
@@ -307,42 +319,71 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        // Under the lock, the name must not be stored either (a quarantined record holds its
-        // name, and no lock).
-        match state.store.exists(&iri).await {
-            Ok(false) => {}
-            Ok(true) => return Err(ServerError::Conflict("the record's name is taken".into())),
-            Err(e) => return Err(e),
-        }
-        let written = state
+        let mut register = Some(register);
+        // The lease starts after the request's locks, as on main. Known writes and their
+        // registration stay together; only an unknown answer can leave this scope.
+        let pending = state
             .store
-            .create_in_container(&container, &iri, body, LWS_JSON)
-            .await;
-        let Err(e) = written else {
-            register(&state, _admission.clone(), None);
+            .change(async {
+                match state.store.exists(&iri).await {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        return Err(ServerError::Conflict("the record's name is taken".into()))
+                    }
+                    Err(e) => return Err(e),
+                }
+                let written = state
+                    .store
+                    .create_in_container(&container, &iri, body, LWS_JSON)
+                    .await;
+                let Err(error) = written else {
+                    register.take().expect("register once")(&state, _admission.clone(), None);
+                    return Ok(None);
+                };
+                let fence = match &error {
+                    ServerError::Unsettled { fence, .. } => Some(fence.clone()),
+                    _ => None,
+                };
+                // Trying never waits under the change lease. A contended acquisition is handled
+                // after this scope ends, so it cannot hold the query barrier off.
+                if fence.is_some() && !place.try_unsettled() {
+                    return Ok(Some((error, fence, None)));
+                }
+                match still_listed(&state.store, &iri, &container).await {
+                    Ok(true) => {
+                        place.settled();
+                        register.take().expect("register once")(&state, _admission.clone(), None);
+                        Ok(None)
+                    }
+                    Ok(false) if fence.is_none() => Err(error),
+                    listed => Ok(Some((error, fence, Some(listed)))),
+                }
+            })
+            .await??;
+        let Some((error, unsettled, observed)) = pending else {
             return Ok(());
         };
-        // A record listed is stored for good (its lock keeps a revocation of it out). One not
-        // listed is not stored only once the write is settled: a write that failed unsettled
-        // (an HTTP update that timed out, whose worker may still be running) can still commit
-        // after the listing was read, until its fence succeeds.
-        let unsettled = match &e {
-            ServerError::Unsettled { fence, .. } => Some(fence.clone()),
-            _ => None,
+        // No change lease is held here. The permit wait first gives up shared gates and
+        // listing locks; reacquire any released listing locks before publishing in memory.
+        place.unsettled(&mut held).await;
+        let listed = match observed {
+            Some(listed) => listed,
+            None => still_listed(&state.store, &iri, &container).await,
         };
-        if unsettled.is_some() {
-            place.unsettled(&mut held).await;
-        }
-        match still_listed(&state.store, &iri, &container).await {
+        match listed {
             Ok(true) => {
                 place.settled();
                 let _reheld = held.relock(&state.locks).await;
-                register(&state, _admission.clone(), None);
+                state
+                    .store
+                    .publish(async {
+                        register.take().expect("register once")(&state, _admission.clone(), None);
+                    })
+                    .await;
                 Ok(())
             }
-            Ok(false) if unsettled.is_none() => Err(e),
+            Ok(false) if unsettled.is_none() => Err(error),
             Ok(false) | Err(_) => {
-                place.unsettled(&mut held).await;
                 // Settled by a task the state owns, holding the record's own lock (a
                 // revocation of it waits), the quota place (`register` holds it), the narrowest
                 // listing's shared lock (or a claim after a principal wait), and its place among
@@ -397,7 +438,12 @@ where
                         })
                     };
                     if let Some(state) = weak.upgrade() {
-                        register(&state, None, Some(place));
+                        state
+                            .store
+                            .publish(async {
+                                register.take().expect("register once")(&state, None, Some(place));
+                            })
+                            .await;
                     }
                 });
                 Err(ServerError::Storage(
@@ -518,6 +564,8 @@ struct SettlementLocks<C> {
     claim: Option<ListingClaim>,
     #[cfg(test)]
     waits: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    relocks: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl<C> SettlementLocks<C> {
@@ -550,7 +598,13 @@ impl<C> SettlementLocks<C> {
             .map(|claim| claim.names.clone())
             .unwrap_or_default();
         let locks = locks.clone();
+        #[cfg(all(test, feature = "sparql-endpoint"))]
+        let relocks = self.relocks.clone();
         async move {
+            #[cfg(all(test, feature = "sparql-endpoint"))]
+            if !names.is_empty() {
+                relocks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let mut held = Vec::new();
             for name in names {
                 held.push(until_done(|| async { locks.read(&name).await.ok_or(()) }).await);
@@ -732,19 +786,28 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let Some(held) = set_aside().await else {
+        let started = state
+            .store
+            .change(async {
+                let held = set_aside().await?;
+                let removed = remove_member(&state.store, &iri, Some(&container)).await;
+                Some((held, removed))
+            })
+            .await
+            .map_err(|error| (error.status(), error.to_string()))?;
+        let Some((held, removed)) = started else {
             return Ok(Removed::Absent);
         };
-        // A delete the store refused for want of room is told as such (`507`), as a create's
-        // refusal is, once the record is known to be still stored.
+        // The query lease ends with the initial answer. Fences and principal waits run
+        // outside it; final confirmation takes a fresh lease after listing locks.
         let mut refused = false;
         // The fence budget starts at the store's answer. Once spent, settlement continues
         // in the background; no second attempt is made against an expired deadline.
-        let pending = match delete_record_by(
+        let pending = match resolve_record_removal(
             &state.store,
             &iri,
-            &container,
             Some(LOCK_WAIT),
+            removed,
             Some((&mut place, &mut held_locks)),
         )
         .await
@@ -798,7 +861,10 @@ where
                     let Some(state) = weak.upgrade() else {
                         return;
                     };
-                    let author = settle(&state, !listed, held);
+                    let author = state
+                        .store
+                        .publish(async { settle(&state, !listed, held) })
+                        .await;
                     drop((own, held_locks, reheld));
                     if !listed {
                         announce_record(
@@ -824,7 +890,10 @@ where
         // Confirmation may wait on a listing lock, but its outcome is already known.
         place.settled();
         let reheld = held_locks.relock(&state.locks).await;
-        let author = settle(&state, gone == Some(true), held);
+        let author = state
+            .store
+            .publish(async { settle(&state, gone == Some(true), held) })
+            .await;
         drop((own, held_locks, reheld));
         match gone {
             Some(true) => {
@@ -911,7 +980,7 @@ pub(crate) const MAINTENANCE_PLACES: usize = 16;
 /// settle a change whose outcome was not known ([`Settlements::spawn`]) are the state's. Such a
 /// task never holds the state across an await: it waits on the store and the locks through their
 /// own handles ([`tracked::Tracked`] and [`resources::IriLocks`] are shared), and upgrades its
-/// weak handle to the state only for the synchronous step that puts the outcome in memory. So
+/// weak handle to the state only for the publication step that puts the outcome in memory. So
 /// dropping every other handle drops the state even while a store call of a settlement is
 /// stalled, and with it these tasks (a [`tokio::task::JoinSet`] aborts its tasks when dropped),
 /// releasing the locks and quota places they hold. A change whose settlement is cut short that
@@ -922,6 +991,8 @@ pub(crate) struct Settlements {
     listings: ListingCounts,
     #[cfg(test)]
     waits: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    relocks: Arc<std::sync::atomic::AtomicUsize>,
     /// The places reserved for the expiry sweeper's removals ([`Remover::Sweeper`]).
     maintenance: Arc<tokio::sync::Semaphore>,
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
@@ -1009,6 +1080,8 @@ impl Settlements {
             listings: Default::default(),
             #[cfg(test)]
             waits: Default::default(),
+            #[cfg(all(test, feature = "sparql-endpoint"))]
+            relocks: Default::default(),
             maintenance: Arc::new(tokio::sync::Semaphore::new(MAINTENANCE_PLACES)),
             tasks: Default::default(),
         }
@@ -1034,7 +1107,14 @@ impl Settlements {
             claim: None,
             #[cfg(test)]
             waits: self.waits.clone(),
+            #[cfg(all(test, feature = "sparql-endpoint"))]
+            relocks: self.relocks.clone(),
         }
+    }
+
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    pub(crate) fn listing_relocks(&self) -> usize {
+        self.relocks.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn listing_claimed(&self, name: &str) -> bool {

@@ -197,6 +197,7 @@ false. **Each carries its own unfilled simulation obligation; none is analyzed h
   `run_federated` routes its join `Disclosed` and never calls it. Lemma A in §3.1 is stated
   generally enough to cover the individual open, but the *composition* for that API — in particular
   the match-graph leakage its `F_join` must carry (§3.5) — is not done here.
+  `HiddenValueJoin::join` was removed; see `HiddenValueJoin::batched_join`.
 - **`hidden_distinct.rs::row_key`** — two degree-`t` opens per sort row, inside the in-process
   simulation.
 - **`batched.rs::BatchedShares::reconstruct`** — element-wise opening of a disclosed batched result.

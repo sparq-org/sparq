@@ -841,6 +841,7 @@ fn store_error(e: ServerError) -> Response {
         ServerError::NotFound => problem(StatusCode::NOT_FOUND, None),
         ServerError::Conflict(m) => problem(StatusCode::CONFLICT, Some(&m)),
         ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
+        ServerError::ResourceChanged => retry_later("the resource is busy"),
         other => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&other.to_string())),
     }
 }
@@ -1460,6 +1461,12 @@ pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::Servic
         }
         catalog.service(service);
     }
+    #[cfg(feature = "sparql-endpoint")]
+    catalog.service(entry(
+        "sparql",
+        &format!("{SSD}SparqlQueryService"),
+        cfg.absolute(super::sparql::PATH),
+    ));
     // Advertise concrete JSON types served here. The PATCH parser also accepts
     // other structured JSON suffix types on data documents.
     catalog.capability(capability(
@@ -1877,92 +1884,100 @@ async fn create<S: Store + 'static>(
             // Held through the write, then passed through selection and webhook queueing:
             // both still count against the concurrency ceiling after the response.
             let _admission = admission;
-            let locks = (child_guards, parent_guard);
-            // Until the content is created, or what the create may have written is put back, the
-            // member is in flight with nothing there before it: a check made without its lock
-            // meanwhile is not decided on the metadata written for it. What cannot be put back
-            // is set aside still in flight, so it stays decided that way until it is.
-            let nothing = super::Prior {
-                existed: Some(false),
-                ..Default::default()
-            };
-            state
-                .locks
-                .changing_from([(child.clone(), nothing)].into_iter().collect());
-            let in_flight = super::InFlight {
-                locks: state.locks.clone(),
-                iris: vec![child.clone()],
-            };
-            // A write that failed unsettled (an HTTP update that timed out) may still commit:
-            // it is fenced before anything it may have written is put back, so nothing it
-            // commits later outlives the undo.
-            let fence = |e: &ServerError| match e {
-                ServerError::Unsettled { fence, .. } => Some(super::Undo::Fence {
-                    fence: fence.clone(),
-                }),
-                _ => None,
-            };
-            let meta_gone = super::Undo::Restore {
-                key: meta_key(&child),
-                prior: None,
-            };
-            let written = state.put_resource_meta(&child, &meta).await;
-            let content_tried = written.is_ok();
-            let created = match written {
-                Ok(()) => {
+            let (created, locks) = state
+                .store
+                .change(async {
+                    let locks = (child_guards, parent_guard);
+                    // Until the content is created, or what the create may have written is put back, the
+                    // member is in flight with nothing there before it: a check made without its lock
+                    // meanwhile is not decided on the metadata written for it. What cannot be put back
+                    // is set aside still in flight, so it stays decided that way until it is.
+                    let nothing = super::Prior {
+                        existed: Some(false),
+                        ..Default::default()
+                    };
                     state
-                        .store
-                        .create_in_container(&parent, &child, body, &content_type)
-                        .await
-                }
-                Err(e) => Err(e),
-            };
-            let created = match created {
-                Ok(m) => {
-                    drop(in_flight);
-                    m
-                }
-                Err(e) => {
-                    // A refusal created nothing, and the metadata goes. A backend failure may
-                    // follow a write that committed (a remote store's lost reply): the member is
-                    // removed first, so committed content is never left without its creator, and
-                    // the metadata after it. Each step is tried a few times with the locks held,
-                    // so no request sees the member or its metadata in between; what is left then
-                    // is set aside with the locks (see
-                    // [`LwsState::set_aside`](super::LwsState::set_aside)).
-                    let mut undo: Vec<super::Undo> = fence(&e).into_iter().collect();
-                    let may_have_landed =
-                        matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. });
-                    if content_tried && may_have_landed {
-                        undo.push(super::Undo::Remove {
-                            iri: child.clone(),
-                            parent: parent.clone(),
-                        });
-                    }
-                    if content_tried || may_have_landed {
-                        undo.push(meta_gone);
-                    }
-                    match super::settle(&state.store, undo).await {
-                        None => {
+                        .locks
+                        .changing_from([(child.clone(), nothing)].into_iter().collect());
+                    let in_flight = super::InFlight {
+                        locks: state.locks.clone(),
+                        iris: vec![child.clone()],
+                    };
+                    // A write that failed unsettled (an HTTP update that timed out) may still commit:
+                    // it is fenced before anything it may have written is put back, so nothing it
+                    // commits later outlives the undo.
+                    let fence = |e: &ServerError| match e {
+                        ServerError::Unsettled { fence, .. } => Some(super::Undo::Fence {
+                            fence: fence.clone(),
+                        }),
+                        _ => None,
+                    };
+                    let meta_gone = super::Undo::Restore {
+                        key: meta_key(&child),
+                        prior: None,
+                    };
+                    let written = state.put_resource_meta(&child, &meta).await;
+                    let content_tried = written.is_ok();
+                    let created = match written {
+                        Ok(()) => {
+                            state
+                                .store
+                                .create_in_container(&parent, &child, body, &content_type)
+                                .await
+                        }
+                        Err(e) => Err(e),
+                    };
+                    let created = match created {
+                        Ok(m) => {
                             drop(in_flight);
-                            drop(locks);
+                            m
                         }
-                        Some(mut left) if content_tried => {
-                            left.1 = Some(in_flight);
-                            state.set_aside(left, locks);
+                        Err(e) => {
+                            // A refusal created nothing, and the metadata goes. A backend failure may
+                            // follow a write that committed (a remote store's lost reply): the member is
+                            // removed first, so committed content is never left without its creator, and
+                            // the metadata after it. Each step is tried a few times with the locks held,
+                            // so no request sees the member or its metadata in between; what is left then
+                            // is set aside with the locks (see
+                            // [`LwsState::set_aside`](super::LwsState::set_aside)).
+                            let mut undo: Vec<super::Undo> = fence(&e).into_iter().collect();
+                            let may_have_landed = matches!(
+                                e,
+                                ServerError::Storage(_) | ServerError::Unsettled { .. }
+                            );
+                            if content_tried && may_have_landed {
+                                undo.push(super::Undo::Remove {
+                                    iri: child.clone(),
+                                    parent: parent.clone(),
+                                });
+                            }
+                            if content_tried || may_have_landed {
+                                undo.push(meta_gone);
+                            }
+                            match super::settle(&state.store, undo).await {
+                                None => {
+                                    drop(in_flight);
+                                    drop(locks);
+                                }
+                                Some(mut left) if content_tried => {
+                                    left.1 = Some(in_flight);
+                                    state.set_aside(left, locks);
+                                }
+                                Some(mut left) => {
+                                    // No content was written, so no listing can show the member: only
+                                    // the member is set aside, and its container's lock goes now.
+                                    let (child_guards, parent_guard) = locks;
+                                    drop(parent_guard);
+                                    left.1 = Some(in_flight);
+                                    state.set_aside_unlisted(left, child_guards);
+                                }
+                            }
+                            return Err(e);
                         }
-                        Some(mut left) => {
-                            // No content was written, so no listing can show the member: only
-                            // the member is set aside, and its container's lock goes now.
-                            let (child_guards, parent_guard) = locks;
-                            drop(parent_guard);
-                            left.1 = Some(in_flight);
-                            state.set_aside_unlisted(left, child_guards);
-                        }
-                    }
-                    return Err(e);
-                }
-            };
+                    };
+                    Ok::<_, ServerError>((created, locks))
+                })
+                .await??;
             // What follows a commit follows it whether or not the client is still there: the
             // container's bookkeeping and the Create notification. Capture the state under
             // the locks; selection and delivery run on the notification task.
@@ -2429,37 +2444,45 @@ where
     let state = state.detached();
     tokio::spawn(async move {
         let _admission = admission;
-        match writes.await {
-            (out, None) => match after(&out) {
-                (None, None) => (out, Some(locks)),
-                (container, event) => {
-                    // Capture commit state while its locks are held. Selection is scheduled
-                    // after releasing them and is never awaited by this task.
-                    let pending = match event {
-                        Some((event, CommitSnapshot::Ready(snapshot))) => {
-                            state.notify.commit(&state, event, snapshot)
-                        }
-                        Some((event, CommitSnapshot::Patch(format))) => {
-                            state.notify.commit_patch(&state, event, format).await
-                        }
-                        None => Default::default(),
-                    };
-                    match container {
-                        Some(container) => touch_after(&state, locks, &container).await,
-                        None => drop(locks),
+        let (out, locks) = state
+            .store
+            .change(async {
+                match writes.await {
+                    (out, None) => (out, Some(locks)),
+                    (out, Some(left)) => {
+                        state.set_aside(left, locks);
+                        (out, None)
                     }
-                    state.notify.send(&state, pending, _admission);
-                    (out, None)
                 }
-            },
-            (out, Some(left)) => {
-                state.set_aside(left, locks);
+            })
+            .await?;
+        let Some(locks) = locks else {
+            return Ok((out, None));
+        };
+        let result = match after(&out) {
+            (None, None) => (out, Some(locks)),
+            (container, event) => {
+                let pending = match event {
+                    Some((event, CommitSnapshot::Ready(snapshot))) => {
+                        state.notify.commit(&state, event, snapshot)
+                    }
+                    Some((event, CommitSnapshot::Patch(format))) => {
+                        state.notify.commit_patch(&state, event, format).await
+                    }
+                    None => Default::default(),
+                };
+                match container {
+                    Some(container) => touch_after(&state, locks, &container).await,
+                    None => drop(locks),
+                }
+                state.notify.send(&state, pending, _admission);
                 (out, None)
             }
-        }
+        };
+        Ok(result)
     })
     .await
-    .map_err(|e| ServerError::Storage(format!("the request failed: {e}")))
+    .map_err(|error| ServerError::Storage(format!("the request failed: {error}")))?
 }
 
 enum CommitSnapshot {

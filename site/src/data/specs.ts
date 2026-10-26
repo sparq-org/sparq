@@ -61,6 +61,39 @@ export const SPECS: Spec[] = [
       "Proving SPARQL query answers over committed RDF graphs in zero knowledge, transcribed from the sparq codebase — an explicit threat model, the committed data model (RDFC-1.0 + Poseidon2/BN254 sponge, Schnorr/Baby-Jubjub attestation), a scoped query fragment and circuit family with a per-construct disposition table plus phase-gated property-path and expression extensions, the ProofManifest member schema, and the fail-closed verifier obligations and four audit gates. Research-grade and NOT externally audited (sq-qhy4).",
   },
   {
+    slug: "zksparql-answers",
+    source: "zksparql-answers.typ",
+    title: "Zero-Knowledge SPARQL Answers: Request and Presentation Data Model",
+    shortName: "zksparql-answers",
+    status: "unofficial",
+    date: "2026-10-10",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "The query request a verifier service sends and the answer presentation a holder service returns, as RDF with a JSON-LD serialization, a companion context and a vocabulary: the SPARQL 1.2 query, the trusted issuers, accepted cryptosuites and proof methods, hidden or revealed signatures, an optional agreed input dataset, and the result with its proof as a verifiable presentation. Proof methods plug in by IRI, zero-knowledge or not; the ones built so far are research prototypes without an external audit.",
+  },
+  {
+    slug: "zksparql-answers-oid4vp",
+    source: "zksparql-answers-oid4vp.typ",
+    title: "Zero-Knowledge SPARQL Answers over OpenID for Verifiable Presentations",
+    shortName: "zksparql-answers-oid4vp",
+    status: "unofficial",
+    date: "2026-10-11",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "Informative companion to the zero-knowledge SPARQL answers data model: how OpenID for Verifiable Presentations 1.0 can carry the query request and answer presentation as a new credential format, and the gaps that remain.",
+  },
+  {
+    slug: "zksparql-answers-implementation",
+    source: "zksparql-answers-implementation.typ",
+    title: "Zero-Knowledge SPARQL Answers: Implementation Status",
+    shortName: "zksparql-answers-implementation",
+    status: "unofficial",
+    date: "2026-10-11",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "Informative companion to the zero-knowledge SPARQL answers data model: how the proof methods and protocol code in the sparq repository compare with it, the proof methods built and proposed, and what is not built yet.",
+  },
+  {
     slug: "zk-merkle-cryptosuite",
     source: "zk-merkle-cryptosuite.typ",
     title: "Merkle-Root Cryptosuites for RDF Verifiable Credentials",
