@@ -63,7 +63,7 @@ fn member_dir(id: &CircuitId) -> std::path::PathBuf {
     let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     here.parent()
         .and_then(std::path::Path::parent)
-        .map(|root| root.join("zk").join("compose").join(id.package()))
+        .map(|root| root.join("zk").join("compose").join(id.package().unwrap()))
         .expect("workspace layout")
 }
 
@@ -89,7 +89,7 @@ fn every_derivable_scan_id_has_a_compiled_member() {
                 let id = derive_scan_id(k, n, r).expect("in-lattice scan id derives");
                 assert_eq!(id, CircuitId::Scan { k, n, r });
                 if !member_dir(&id).join("Nargo.toml").exists() {
-                    missing.push(id.package());
+                    missing.push(id.package().unwrap());
                 }
             }
         }
@@ -108,7 +108,7 @@ fn every_derivable_join_id_has_a_compiled_member() {
             let id = derive_join_eq_id(n_a, n_b).expect("in-lattice join id derives");
             assert_eq!(id, CircuitId::JoinEq { n_a, n_b });
             if !member_dir(&id).join("Nargo.toml").exists() {
-                missing.push(id.package());
+                missing.push(id.package().unwrap());
             }
         }
     }
