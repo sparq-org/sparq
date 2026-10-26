@@ -17561,8 +17561,14 @@ mod unconditional_method_fold_tests {
     }
 
     fn verify(m: &ProofManifest, keys: &KeySet, policy: &RevocationPolicy, root: &Path) -> Result<(), CheckError> {
+        verify_with_prover(m, keys, policy, root, &CircuitProver::new(root))
+    }
+
+    fn verify_with_prover(
+        m: &ProofManifest, keys: &KeySet, policy: &RevocationPolicy, root: &Path, prover: &CircuitProver,
+    ) -> Result<(), CheckError> {
         verify_manifest(
-            m, &CircuitProver::new(root), &root.join("verify"), keys, policy,
+            m, prover, &root.join("verify"), keys, policy,
             &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(),
             &EntailmentPolicy::simple_only(), &VerifierNonce::from_hex("0x2a").unwrap(),
             &InMemorySeenNonces::new(),
@@ -17623,18 +17629,50 @@ mod unconditional_method_fold_tests {
             Err(CheckError::PublicInputMismatch { proof: 0 })));
     }
 
-    // The child has a private PATH containing ONLY the two refusing-by-default
-    // tool stubs. No test changes the parent process environment or invokes the
-    // real toolchain. This checks host ordering, not cryptographic evidence.
+    // Only this prover's subprocesses receive the private stub PATH. The test
+    // runs in-process without changing the environment of concurrent tests.
+    // This checks host ordering, not cryptographic evidence.
     #[cfg(unix)]
     #[test]
     fn the_verifier_runs_the_deferred_postpass_in_every_build() {
         use std::os::unix::fs::PermissionsExt;
         const ROOT_ENV: &str = "SPARQ_METHOD_FOLD_TEST_ROOT";
-        if let Some(root) = std::env::var_os(ROOT_ENV) {
-            let root = std::path::PathBuf::from(root);
-            assert_eq!(std::env::var_os("PATH"), Some(root.join("bin").into_os_string()),
-                "the child may only run with its private stub PATH");
+        struct Temp(std::path::PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let temp = Temp(std::env::temp_dir().join(format!("sparq_method_fold_{}", std::process::id())));
+        let bin = temp.0.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let nargo = "#!/bin/sh\n[ \"$#\" = 3 ] && [ \"$1\" = compile ] && [ \"$2\" = --package ] || exit 91\nprintf '{}' > \"target/$3.json\"\n";
+        let bb = r#"#!/bin/sh
+case "$1" in
+  write_vk)
+    [ "$#" = 7 ] && [ "$2" = -b ] && [ "$4" = -o ] && [ "$6" = -t ] || exit 92
+    printf 'test-key' > "$5/vk" ;;
+  verify)
+    [ "$#" = 9 ] && [ "$2" = -p ] && [ "$4" = -i ] && [ "$6" = -k ] && [ "$8" = -t ] || exit 93 ;;
+  *) exit 94 ;;
+esac
+printf '%s\n' "$1" >> "$SPARQ_METHOD_FOLD_TEST_ROOT/calls"
+"#;
+        for (name, script) in [("nargo", nargo), ("bb", bb)] {
+            let path = bin.join(name);
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let root = temp.0.clone();
+        let environment = std::collections::BTreeMap::from([
+            (std::ffi::OsString::from("PATH"), bin.clone().into_os_string()),
+            (std::ffi::OsString::from(ROOT_ENV), root.clone().into_os_string()),
+        ]);
+        assert_eq!(environment.get(std::ffi::OsStr::new("PATH")).map(std::ffi::OsString::as_os_str), Some(bin.as_os_str()),
+            "the prover may only run with its private stub PATH");
+        let prover = CircuitProver::new(&root);
+        prover.with_test_command_env(environment, || {
+            let verify = |m: &ProofManifest, keys: &KeySet, policy: &RevocationPolicy, work: &Path| {
+                verify_with_prover(m, keys, policy, work, &prover)
+            };
             for unbound in [false, true] {
                 let (mut m, keys, policy) = attested_manifest(true, unbound);
                 let pre = prefilter_manifest_structure_impl(&m, &keys, &policy, false)
@@ -17682,37 +17720,6 @@ mod unconditional_method_fold_tests {
                     std::fs::remove_file(root.join("calls")).unwrap();
                 }
             }
-            return;
-        }
-        struct Temp(std::path::PathBuf);
-        impl Drop for Temp {
-            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
-        }
-        let temp = Temp(std::env::temp_dir().join(format!("sparq_method_fold_{}", std::process::id())));
-        let bin = temp.0.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let nargo = "#!/bin/sh\n[ \"$#\" = 3 ] && [ \"$1\" = compile ] && [ \"$2\" = --package ] || exit 91\nprintf '{}' > \"target/$3.json\"\n";
-        let bb = r#"#!/bin/sh
-case "$1" in
-  write_vk)
-    [ "$#" = 7 ] && [ "$2" = -b ] && [ "$4" = -o ] && [ "$6" = -t ] || exit 92
-    printf 'test-key' > "$5/vk" ;;
-  verify)
-    [ "$#" = 9 ] && [ "$2" = -p ] && [ "$4" = -i ] && [ "$6" = -k ] && [ "$8" = -t ] || exit 93 ;;
-  *) exit 94 ;;
-esac
-printf '%s\n' "$1" >> "$SPARQ_METHOD_FOLD_TEST_ROOT/calls"
-"#;
-        for (name, script) in [("nargo", nargo), ("bb", bb)] {
-            let path = bin.join(name);
-            std::fs::write(&path, script).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "verifier::unconditional_method_fold_tests::the_verifier_runs_the_deferred_postpass_in_every_build", "--nocapture"])
-            .env("PATH", &bin).env(ROOT_ENV, &temp.0).output().unwrap();
-        assert!(output.status.success(), "{}\n{}",
-            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+        });
     }
 }
