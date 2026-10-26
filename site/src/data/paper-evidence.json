@@ -149,7 +149,7 @@
       "note": "Number of distinct conformance suites the central scoreboard registers and ratchets across crates (W3C SPARQL, inference, SHACL core, SHACL-SPARQL, OGC GeoSPARQL, Solid WAC decision parity, Solid ACP decision parity)."
     },
     "memsafety.unsafe_sites_total": {
-      "value": 125,
+      "value": 126,
       "unit": "unsafe-sites",
       "environment": "canonical",
       "kind": "unsafe-count-ratchet-ceiling",
@@ -174,7 +174,7 @@
         "file": "compliance/memsafety/evidence.md",
         "quote": "**12** are unsafe-bearing"
       },
-      "accounting_note": "The current snapshot records 12 unsafe-bearing crates. Five also carry a source forbid(unsafe_code): sparq-py, sparq-lws-core, sparq-reason, sparq-solid and sparq-mpc. sparq-mpc contributes seven test-only counting-allocator sites; its library already carried forbid(unsafe_code), so the forbid count remains 56. See compliance/memsafety/evidence.md MS-1 for the current accounting.",
+      "accounting_note": "The current snapshot records 126 unsafe sites across 12 unsafe-bearing crates. Five also carry a source forbid(unsafe_code): sparq-py, sparq-lws-core, sparq-reason, sparq-solid and sparq-mpc. sparq-mpc contributes seven test-only counting-allocator sites; its library already carried forbid(unsafe_code), so the forbid count remains 56. See compliance/memsafety/evidence.md MS-1 for the current accounting.",
       "note": "[GPT-5.6] Number of first-party crates carrying at least one counted unsafe site in bench/unsafe-snapshot.json. Four of the eleven (sparq-py, sparq-lws-core, sparq-reason and sparq-solid) ALSO carry a source forbid(unsafe_code): sparq-py's sites are arrow-feature-gated (conditional forbid), and sparq-lws-core's are EXAMPLE-only counting allocators (sq-gg0qq.2). sparq-engine is now an unsafe-bearing library because sq-kq9ia adds four shipped cancellation-pointer sites; its four test-only allocator sites remain registered too. [SONNET-4.6] sq-wubkf adds sparq-lws-wasm as the ninth: its four sites are a SHIPPING bounded #[global_allocator], so that crate's root is deny(unsafe_code) plus one #[allow(unsafe_code)] module rather than forbid — it is the one unsafe-bearing crate deliberately absent from the forbid set. sparq-reason is the tenth: its library is forbid(unsafe_code) and its 14 sites are two test-only counting allocators (tests/n3_builtin_alloc.rs, GH #6833; tests/n3_input_fact_memory.rs, GH #7173). sparq-solid is the eleventh: its library is forbid(unsafe_code) and its seven sites are a test-only counting allocator (tests/auth_resource_enumeration_memory.rs, GH #7175). The count is a machine-independent partition of the workspace, not a measurement. NOTE: doc-anchor is existence-strength only (the quote must be present verbatim in evidence.md — it does not parse the number); the snapshot key count is the machine source of truth."
     },
     "memsafety.forbid_crates": {
@@ -206,7 +206,7 @@
       "note": "Total first-party crates in the workspace. Deterministic structural count. The forbid-in-src set (56) and the unsafe-bearing set (12) overlap on five crates: sparq-py, sparq-lws-core, sparq-reason, sparq-solid and sparq-mpc, and 8 crates carry neither, so the two do NOT partition the 71 cleanly — see evidence.md MS-1. NOTE: doc-anchor is existence-strength only (verbatim quote presence); the `ls -d` count in `source` is the machine source of truth."
     },
     "memsafety.unsafe_sites_core": {
-      "value": 51,
+      "value": 52,
       "unit": "unsafe-sites",
       "environment": "canonical",
       "kind": "unsafe-count-ratchet-ceiling",
@@ -217,7 +217,7 @@
         "file": "bench/unsafe-snapshot.json",
         "pointer": "/crates/sparq-core"
       },
-      "note": "Unsafe sites in sparq-core, the single crate concentrating the storage/dictionary/mmap/parallel-scatter/SIMD unsafe (threat-model boundary B5). The largest share of the 76-site total; ratchet-enforced per-crate. Deterministic source scan, not a measurement."
+      "note": "Unsafe sites in sparq-core, the single crate concentrating the storage/dictionary/mmap/parallel-scatter/SIMD unsafe (threat-model boundary B5). The largest share of the 126-site total; ratchet-enforced per-crate. Deterministic source scan, not a measurement."
     },
     "cozk.reaudit_lenses": {
       "value": 4,
