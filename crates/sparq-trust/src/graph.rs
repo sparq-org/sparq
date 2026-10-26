@@ -107,9 +107,7 @@ use oxrdf::{NamedNode, Term};
 use sparq_zk::encode::{encode_term, encode_triple, salt_from_bytes};
 use sparq_zk::field::Fr;
 use sparq_zk::poseidon2;
-use sparq_zk::sig::{
-    commitment_message, holder_key_digest, public_key_to_hex, signature_from_hex, verify, PublicKey,
-};
+use sparq_zk::sig::{commitment_message, holder_key_digest, signature_from_hex, verify, PublicKey};
 
 /// `rdfs:Class` — a node typed this (with SHACL constraints) is an implicit-class SHACL
 /// target, so `root rdf:type rdfs:Class` is a SELECTION edge (the root becomes a class
@@ -304,8 +302,7 @@ fn derive_one_explained(
         return Err(EdgeRejection::Cyclic);
     }
     if direct_rules.iter().any(|r| {
-        r.source.as_str() == cert.certified_issuer.as_str()
-            && public_key_to_hex(&r.issuer_key) == public_key_to_hex(&cert.certified_key)
+        r.source.as_str() == cert.certified_issuer.as_str() && r.issuer_key == cert.certified_key
     }) {
         // The "certified" issuer is already a DIRECT anchor with this key — the edge would
         // form a cycle (issuer certifies its own certifier / itself) and adds nothing.
@@ -322,8 +319,7 @@ fn derive_one_explained(
     let candidate_anchors: Vec<&TrustRule> = direct_rules
         .iter()
         .filter(|r| {
-            r.source.as_str() == cert.certifier.as_str()
-                && public_key_to_hex(&r.issuer_key) == public_key_to_hex(&cert.certifier_key)
+            r.source.as_str() == cert.certifier.as_str() && r.issuer_key == cert.certifier_key
         })
         .collect();
     if candidate_anchors.is_empty() {

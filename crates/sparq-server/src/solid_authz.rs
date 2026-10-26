@@ -30,7 +30,7 @@
 //! * `"server"` — **stateful**: authorise over the **server's own loaded store**. The request must
 //!   NOT carry a `"dataset"` (a body naming both pods is ambiguous, so it is refused). The pinned
 //!   current generation is forked, materialised ONCE, and cached in
-//!   [`AppState`](crate::http::AppState) keyed by the generation number, so the N3 materialisation
+//!   [`AppState`](crate::http::AppState) keyed by serving lineage and generation, so the N3 materialisation
 //!   is paid once per generation rather than once per request.
 //!
 //! Only an ABSENT `"source"` key takes the `"body"` default. A key that is present but is not one
@@ -132,19 +132,227 @@ pub(crate) enum AuthzSource {
     Server,
 }
 
+/// The BOUNDED blocking pool every `/authz/*` authorization-view build runs on.
+///
+/// Materialising an authorization view is CPU-bound and its cost is set by untrusted input —
+/// the request's own dataset on the stateless lane, the store's control documents on the
+/// stateful one — so it belongs on [`tokio::task::spawn_blocking`] rather than an async
+/// worker. `spawn_blocking` alone bounds nothing, though: its queue is unbounded, so N
+/// concurrent requests put N materialisations in flight and the queue behind them grows with
+/// the load. This caps the builds IN FLIGHT and, just as importantly, caps the WAIT: a
+/// request that finds no free slot waits at most [`AuthBuildPool::wait`] and is then refused
+/// with the same retryable `503` a materialisation failure gives — shed, never queued
+/// without limit.
+///
+/// One pool is shared by every lane that builds a view (the stateless per-request build, the
+/// stateful cache misses, the ODRL store and policy builds under one claim, and the
+/// trust lane's parse-through-decision pipeline), so the cap is on
+/// authorization work in flight rather than per endpoint.
+pub(crate) struct AuthBuildPool {
+    /// One permit per concurrent build.
+    permits: Arc<tokio::sync::Semaphore>,
+    /// How long a request waits for a permit before the fail-closed `503`.
+    wait: std::time::Duration,
+    /// Builds admitted to the pool, and builds refused because it was saturated. Counters
+    /// for the tests and for an operator reading them through a decision's absence; they
+    /// carry no request data.
+    admitted: std::sync::atomic::AtomicU64,
+    refused: std::sync::atomic::AtomicU64,
+    /// Serializes the warning timestamp and the count reported by its previous line.
+    shed_log: std::sync::Mutex<(Option<std::time::Instant>, u64)>,
+    #[cfg(test)]
+    build_hook: std::sync::Mutex<Option<Arc<BuildHook>>>,
+    #[cfg(test)]
+    view_hook: std::sync::Mutex<Option<Arc<BuildHook>>>,
+    #[cfg(all(test, feature = "solid-authz-trust"))]
+    trust_verification_calls: std::sync::atomic::AtomicUsize,
+}
+
+/// A per-pool test hook: signal entry, then block the actual blocking build on a barrier.
+#[cfg(test)]
+#[derive(Default)]
+struct BuildHook {
+    entered: tokio::sync::Notify,
+    running: std::sync::atomic::AtomicUsize,
+    release: (std::sync::Mutex<bool>, std::sync::Condvar),
+}
+
+#[cfg(test)]
+impl BuildHook {
+    fn block(&self) {
+        self.running
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.entered.notify_one();
+        let (lock, cv) = &self.release;
+        let mut released = lock.lock().unwrap();
+        while !*released {
+            released = cv.wait(released).unwrap();
+        }
+    }
+
+    fn release(&self) {
+        let (lock, cv) = &self.release;
+        *lock.lock().unwrap() = true;
+        cv.notify_all();
+    }
+}
+
+impl AuthBuildPool {
+    /// A pool admitting `concurrency` builds, clamped to the semaphore's supported range.
+    /// Each request waits at most `wait` for a slot.
+    pub(crate) fn new(concurrency: usize, wait: std::time::Duration) -> AuthBuildPool {
+        AuthBuildPool {
+            permits: Arc::new(tokio::sync::Semaphore::new(
+                concurrency.clamp(1, tokio::sync::Semaphore::MAX_PERMITS),
+            )),
+            wait,
+            admitted: std::sync::atomic::AtomicU64::new(0),
+            refused: std::sync::atomic::AtomicU64::new(0),
+            shed_log: std::sync::Mutex::new((None, 0)),
+            #[cfg(test)]
+            build_hook: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            view_hook: std::sync::Mutex::new(None),
+            #[cfg(all(test, feature = "solid-authz-trust"))]
+            trust_verification_calls: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// Builds this pool has admitted since it was created. Test observability: the 503 a
+    /// saturated pool gives is indistinguishable from a materialisation's own, so a test
+    /// reads this to say WHICH lane's work went through the bound.
+    #[cfg(test)]
+    pub(crate) fn admitted(&self) -> u64 {
+        self.admitted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Builds this pool has refused because every slot was taken for longer than
+    /// [`AuthBuildPool::wait`] (also logged, as `refused_total`, on each refusal).
+    #[cfg(test)]
+    pub(crate) fn refused(&self) -> u64 {
+        self.refused.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Permits currently free — what a test asserts a finished build gave back.
+    #[cfg(test)]
+    pub(crate) fn available(&self) -> usize {
+        self.permits.available_permits()
+    }
+
+    /// Counts to log for this shed, at most once per second for the shared pool.
+    fn shed_warning(
+        &self,
+        clock: impl Fn() -> std::time::Instant,
+        emit: impl FnOnce(u64, u64),
+    ) -> Option<(u64, u64)> {
+        let mut logged = self.shed_log.lock().ok()?;
+        let now = clock();
+        if logged
+            .0
+            .is_some_and(|last| now.duration_since(last).as_secs() < 1)
+        {
+            return None;
+        }
+        let total = self.refused.load(std::sync::atomic::Ordering::Relaxed);
+        let shed = total.saturating_sub(logged.1);
+        emit(shed, total);
+        // Keep the lock through emission and date the next window from its completion.
+        *logged = (Some(clock()), total);
+        Some((shed, total))
+    }
+
+    /// Claim a build slot, waiting at most [`AuthBuildPool::wait`] for one. `None` is a
+    /// SATURATED pool: the caller fails closed rather than waiting further.
+    ///
+    /// A zero `wait` is "do not wait at all", which `tokio::time::timeout` honours (the
+    /// future is polled once, so a free permit is still taken).
+    async fn claim(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        let permits = Arc::clone(&self.permits);
+        match tokio::time::timeout(self.wait, permits.acquire_owned()).await {
+            // The semaphore is never closed, so `acquire_owned` cannot error; treat an
+            // error as saturation anyway rather than running the build unbounded.
+            Ok(Ok(permit)) => {
+                self.admitted
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Some(permit)
+            }
+            Ok(Err(_)) | Err(_) => {
+                self.refused
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                None
+            }
+        }
+    }
+}
+
+/// Run one authorization-view build `work` on the bounded blocking pool
+/// ([`AuthBuildPool`]), or fail closed.
+///
+/// The permit is held for the whole blocking task and released when it ends — and on an
+/// unwinding panic, with the closure's frame — so the cap really is on builds in flight. Two fail-closed `503`s come out of here and neither can become a
+/// decision: a SATURATED pool (no slot inside the wait) and a JOIN failure (the task was
+/// cancelled, or panicked under `panic = "unwind"`).
+// `Response` is large; same `result_large_err` allow as the rest of this module.
+#[allow(clippy::result_large_err)]
+async fn on_build_pool<T, F>(state: &AppState, work: F) -> Result<T, Response>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let pool = Arc::clone(state.authz_build_pool());
+    let Some(permit) = pool.claim().await else {
+        // At most one warning per second, with every shed since the preceding line.
+        let _ = pool.shed_warning(std::time::Instant::now, |shed, total| {
+            tracing::warn!(
+                target: "sparq_server::solid_authz",
+                shed,
+                refused_total = total,
+                "authorization build pool saturated; requests refused"
+            );
+        });
+        return Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the authorization build pool is saturated; retry",
+        ));
+    };
+    let task = tokio::task::spawn_blocking(move || {
+        // Held for the whole build, released when this frame ends.
+        let _permit = permit;
+        #[cfg(test)]
+        {
+            let hook = pool.build_hook.lock().unwrap().clone();
+            if let Some(hook) = hook {
+                hook.block();
+            }
+        }
+        work()
+    });
+    task.await.map_err(|_| {
+        json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "could not materialise the authorization view",
+        )
+    })
+}
+
 /// (sq-snopa.8) The cached STATEFUL authorization view: one materialised
-/// [`PodStore`] plus the generation number and auth model it was built for. Lives in
+/// [`PodStore`] plus the serving lineage, generation and auth model it was built for. Lives in
 /// [`AppState`](crate::http::AppState) behind an `RwLock`; see that field's doc for why a
-/// generation-keyed cache beside the ring is the whole "re-materialise on ACL change" contract.
+/// lineage/generation cache beside the ring provides the invalidation contract.
 ///
 /// The `Arc` is what makes concurrent serving cheap: every request of a generation clones the
 /// same materialised store handle, so the N3 materialisation is paid ONCE per generation rather
 /// than once per request.
 pub(crate) struct CachedAuthView {
+    /// Retaining the core prevents identity reuse after an in-memory restore.
+    #[cfg(feature = "backup")]
+    core: Arc<crate::http::ServingCore>,
     /// The ring generation number this view is a pure function of.
     generation: u64,
     /// Which auth model was materialised (a request that asks for the other one rebuilds).
     view: AuthView,
+    /// The snapshot's automatic selection, also needed when the cached view was explicit.
+    inferred_view: AuthView,
     /// The materialised store, shared by every request pinned to `generation`.
     store: Arc<PodStore>,
 }
@@ -184,7 +392,7 @@ enum ServerViewError {
 enum ResolvedStore {
     /// Stateless: built from the request body's dataset, dies with the response.
     Owned(Box<PodStore>),
-    /// Stateful: the generation-keyed view shared with every other request of this generation.
+    /// Stateful: the lineage/generation view shared by requests of the same snapshot.
     Shared(Arc<PodStore>),
 }
 
@@ -200,7 +408,11 @@ impl ResolvedStore {
 
 /// A parsed `/authz/*` request envelope. The `session` fields are borrowed from the owned JSON
 /// value the caller keeps alive; `dataset` is the owned N-Quads text.
-#[derive(Debug)]
+///
+/// `Clone` so a lane can move the envelope into a blocking-pool task rather than borrow it
+/// across the await ([`on_build_pool`]); every field is owned, and the dataset it copies is
+/// bounded by the request body limit the parse already applied.
+#[derive(Debug, Clone)]
 struct AuthzRequest {
     /// (sq-snopa.8) Which pod to authorise over — the body's dataset (default) or
     /// the server's own loaded store.
@@ -208,6 +420,8 @@ struct AuthzRequest {
     /// The pod dataset as N-Quads (documents + `.acl`/`.acr` control graphs), owned. EMPTY (and
     /// never read) under [`AuthzSource::Server`], which forbids the field outright.
     dataset: String,
+    #[cfg(feature = "odrl-authz")]
+    carries_odrl: bool,
     /// The already-resolved principal — agent (WebID) / client / issuer, all optional; anonymous
     /// when all are absent (fail-closed — an anonymous session sees only public grants).
     agent: Option<String>,
@@ -427,6 +641,8 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
     };
     Ok(AuthzRequest {
         source,
+        #[cfg(feature = "odrl-authz")]
+        carries_odrl: source == AuthzSource::Body && dataset_carries_odrl(&dataset),
         dataset,
         agent: field("agent"),
         client: field("client"),
@@ -516,7 +732,7 @@ fn infer_view(dataset: &str) -> AuthView {
 // its immutable snapshot into an owned `Graph` (`Graph::fork`, whose steady-state cost is
 // O(pending delta) on the already-forked ring lineage — that is what removes the FR-4 note's
 // blocker, which assumed a `&Graph`/no-Clone snapshot forced a full re-parse per request),
-// materialises the auth view ONCE, and caches it in `AppState` keyed by the generation number.
+// materialises the auth view ONCE, and caches it in `AppState` keyed by serving lineage and generation.
 //
 // INVALIDATION is by construction, not by bookkeeping: the view is a pure function of one
 // published generation, and EVERY commit — an `.acl`/`.acr` write included — publishes a new
@@ -617,7 +833,7 @@ fn server_view_error_response(err: ServerViewError) -> Response {
 /// Synchronous and CPU-bound (the N3 materialisation) — call it on the blocking pool, which is
 /// what [`server_store`] does.
 ///
-/// A cache HIT (same generation, same auth model) is one `RwLock` read plus an `Arc` clone. A
+/// A cache HIT (same lineage, generation and auth model) is one `RwLock` read plus an `Arc` clone. A
 /// MISS forks the pinned snapshot, materialises, and installs the result. Two concurrent misses
 /// may both materialise; both results are correct for their generation and the newer one wins
 /// the cache slot, so the duplicated work is the only cost of not holding the lock across the
@@ -629,14 +845,20 @@ fn build_server_view(
     state: &AppState,
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, ServerViewError> {
+    #[cfg(feature = "backup")]
+    let core = state.authz_core();
+    #[cfg(feature = "backup")]
+    let pinned = core.ring.current();
+    #[cfg(not(feature = "backup"))]
     let pinned = state.current();
     let generation = pinned.number();
     let graph = pinned.snapshot();
-    let view = requested_view.unwrap_or(if graph_view_is_acp(graph) {
+    let inferred_view = if graph_view_is_acp(graph) {
         AuthView::Acp
     } else {
         AuthView::Wac
-    });
+    };
+    let view = requested_view.unwrap_or(inferred_view);
     // Refuse BEFORE consulting the cache so the refusal cannot be skipped by a warm entry.
     #[cfg(feature = "odrl-authz")]
     if graph_carries_odrl(graph) {
@@ -644,9 +866,20 @@ fn build_server_view(
     }
     if let Ok(cache) = state.authz_view_cache().read() {
         if let Some(cached) = cache.as_ref() {
-            if cached.generation == generation && cached.view == view {
+            #[cfg(feature = "backup")]
+            let same_lineage = Arc::ptr_eq(&cached.core, &core);
+            #[cfg(not(feature = "backup"))]
+            let same_lineage = true;
+            if same_lineage && cached.generation == generation && cached.view == view {
                 return Ok(cached.store.clone());
             }
+        }
+    }
+    #[cfg(test)]
+    {
+        let hook = state.authz_build_pool().view_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook.block();
         }
     }
     let mut store = PodStore::new(graph.fork());
@@ -659,15 +892,29 @@ fn build_server_view(
     materialized.map_err(|e| ServerViewError::Materialize(materialize_refusal_kind(&e)))?;
     let store = Arc::new(store);
     if let Ok(mut cache) = state.authz_view_cache().write() {
-        // Never let a slow build overwrite a NEWER generation's view with an older one.
+        // An old lineage must never install after restore, even into an empty cache.
+        #[cfg(feature = "backup")]
+        let current_lineage = Arc::ptr_eq(&state.authz_core(), &core);
+        #[cfg(not(feature = "backup"))]
+        let current_lineage = true;
+        // Within the same lineage, never replace a newer generation with an older one.
         let install = match cache.as_ref() {
             None => true,
-            Some(cached) => cached.generation <= generation,
+            Some(cached) => {
+                #[cfg(feature = "backup")]
+                let same_lineage = Arc::ptr_eq(&cached.core, &core);
+                #[cfg(not(feature = "backup"))]
+                let same_lineage = true;
+                !same_lineage || cached.generation <= generation
+            }
         };
-        if install {
+        if current_lineage && install {
             *cache = Some(CachedAuthView {
+                #[cfg(feature = "backup")]
+                core,
                 generation,
                 view,
+                inferred_view,
                 store: store.clone(),
             });
         }
@@ -675,25 +922,42 @@ fn build_server_view(
     Ok(store)
 }
 
-/// [`build_server_view`] on the blocking pool — the materialisation is a whole-store N3 run, so
-/// it must never occupy an async worker (the crate's `spawn_blocking` idiom). A join failure is
-/// a fail-closed 503: no decision is produced.
+/// [`build_server_view`] on the BOUNDED blocking pool — the materialisation is a whole-store
+/// N3 run, so it must never occupy an async worker, and it shares the one authorization-build
+/// cap with every other lane ([`on_build_pool`]). A saturated pool or a join failure is the
+/// same fail-closed 503: no decision is produced.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
 async fn server_store(
     state: &AppState,
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, Response> {
-    let st = state.clone();
-    let task = tokio::task::spawn_blocking(move || build_server_view(&st, requested_view));
-    match task.await {
-        Ok(Ok(store)) => Ok(store),
-        Ok(Err(err)) => Err(server_view_error_response(err)),
-        Err(_) => Err(json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "could not materialise the authorization view",
-        )),
+    // Lineage plus generation identifies the snapshot, including automatic view selection
+    // and the ODRL refusal. Restores can reuse generation zero with different policies.
+    #[cfg(feature = "backup")]
+    let core = state.authz_core();
+    #[cfg(feature = "backup")]
+    let generation = core.ring.current().number();
+    #[cfg(not(feature = "backup"))]
+    let generation = state.current().number();
+    if let Ok(cache) = state.authz_view_cache().read() {
+        if let Some(cached) = cache.as_ref() {
+            #[cfg(feature = "backup")]
+            let same_lineage = Arc::ptr_eq(&cached.core, &core);
+            #[cfg(not(feature = "backup"))]
+            let same_lineage = true;
+            if same_lineage
+                && cached.generation == generation
+                && requested_view.unwrap_or(cached.inferred_view) == cached.view
+            {
+                return Ok(cached.store.clone());
+            }
+        }
     }
+    let st = state.clone();
+    on_build_pool(state, move || build_server_view(&st, requested_view))
+        .await?
+        .map_err(server_view_error_response)
 }
 
 /// [`build_store`] on the blocking pool — the STATELESS lane's counterpart of
@@ -703,22 +967,34 @@ async fn server_store(
 /// body: the N-Quads parse, the resource enumeration and the N3 materialisation are all
 /// CPU-bound, bounded by the body-size limit and `sparq_solid::AuthBudget` rather than
 /// instant, and so must no more occupy an async worker than the stateful lane's whole-store
-/// run does. A join failure is the same fail-closed 503 a materialisation failure is: no
-/// decision is produced.
+/// run does. It shares the one authorization-build cap with every other lane
+/// ([`on_build_pool`]); a saturated pool or a join failure is the same fail-closed 503 a
+/// materialisation failure is: no decision is produced.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
-async fn body_store(req: &AuthzRequest) -> Result<PodStore, Response> {
-    // The task outlives the borrow of `req`, so it owns the two fields `build_store` reads.
-    let dataset = req.dataset.clone();
-    let view = req.view;
-    let task = tokio::task::spawn_blocking(move || build_store_from(&dataset, view));
-    match task.await {
-        Ok(built) => built,
-        Err(_) => Err(json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "could not materialise the authorization view",
-        )),
-    }
+async fn body_store(
+    state: &AppState,
+    req: &AuthzRequest,
+    mode: Mode,
+) -> Result<PodStore, Response> {
+    let owned = req.clone();
+    on_build_pool(state, move || {
+        let store = build_store_from(&owned.dataset, owned.view)?;
+        #[cfg(feature = "odrl-authz")]
+        {
+            let mut store = store;
+            if owned.carries_odrl {
+                apply_odrl_lane(&mut store, &owned, mode)?;
+            }
+            Ok(store)
+        }
+        #[cfg(not(feature = "odrl-authz"))]
+        {
+            let _ = mode;
+            Ok(store)
+        }
+    })
+    .await?
 }
 
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
@@ -729,9 +1005,12 @@ async fn body_store(req: &AuthzRequest) -> Result<PodStore, Response> {
 async fn resolve_store(
     state: &AppState,
     req: &AuthzRequest,
+    mode: Mode,
 ) -> Result<ResolvedStore, Response> {
     match req.source {
-        AuthzSource::Body => body_store(req).await.map(|s| ResolvedStore::Owned(Box::new(s))),
+        AuthzSource::Body => body_store(state, req, mode)
+            .await
+            .map(|s| ResolvedStore::Owned(Box::new(s))),
         AuthzSource::Server => server_store(state, req.view).await.map(ResolvedStore::Shared),
     }
 }
@@ -774,6 +1053,8 @@ pub(crate) async fn decide_endpoint(
         Ok(v) => v,
         Err(_) => return json_error(StatusCode::BAD_REQUEST, "request body is not valid JSON"),
     };
+    #[cfg(feature = "solid-authz-trust")]
+    let mut v = v;
     let resource = match v.get("resource").and_then(|r| r.as_str()) {
         Some(r) => r.to_owned(),
         None => {
@@ -793,10 +1074,7 @@ pub(crate) async fn decide_endpoint(
     // BYPASS the ODRL lane, silently dropping a prohibition (fail-OPEN through a side door).
     // Composing the two lanes is future work; until then the combination is refused up front.
     #[cfg(all(feature = "solid-authz-trust", feature = "odrl-authz"))]
-    if state.config().solid_authz_trust
-        && v.get("trust").is_some()
-        && dataset_carries_odrl(&req.dataset)
-    {
+    if state.config().solid_authz_trust && v.get("trust").is_some() && req.carries_odrl {
         return json_error(
             StatusCode::BAD_REQUEST,
             "the dataset carries ODRL policies; combining the trust extension with the \
@@ -809,7 +1087,7 @@ pub(crate) async fn decide_endpoint(
     // (fail-closed: the trust path can only narrow, never broaden, the admission gate).
     #[cfg(feature = "solid-authz-trust")]
     if state.config().solid_authz_trust {
-        if let Some(trust_val) = v.get("trust") {
+        if let Some(trust_val) = v.get_mut("trust") {
             // sq-snopa.8 — the trust lane decides over its OWN store, built by
             // injecting admitted facts into the BODY dataset, so it cannot compose with the
             // stateful lane's shared per-generation view. Refuse rather than silently authorise
@@ -821,32 +1099,15 @@ pub(crate) async fn decide_endpoint(
                      with 'source':'server' (fail-closed)",
                 );
             }
-            return trust_authz_decide(trust_val, &req, &resource, mode, &v);
+            return trust_authz_decide(&state, trust_val.take(), req, resource, mode).await;
         }
     }
-    let store = match resolve_store(&state, &req).await {
+    let store = match resolve_store(&state, &req, mode).await {
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    // sq-3mu76 — the OPT-IN ODRL lane, on the ADVISORY decision endpoint too: a
-    // dataset-carried prohibition must deny here exactly as `/authz/query` refuses to honour
-    // it. Same refusal matrix as the query lane (non-read mode => 400 until sq-lrtc3.2,
-    // anonymous => 403). Feature OFF => this block does not exist, byte-identical behaviour.
     #[cfg(feature = "odrl-authz")]
-    let (store, odrl_lane_fired) = {
-        let mut store = store;
-        // sq-snopa.8 — the lane reads the BODY dataset, so it fires only in the
-        // stateless lane; `fired` implies `ResolvedStore::Owned` by construction (the stateful
-        // lane forbids `dataset` outright). A server store that carries ODRL rules is REFUSED in
-        // `build_server_view`, never silently un-enforced.
-        let fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
-        if let (true, ResolvedStore::Owned(s)) = (fired, &mut store) {
-            if let Err(resp) = apply_odrl_lane(s, &req, mode) {
-                return resp;
-            }
-        }
-        (store, fired)
-    };
+    let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
     // Deciding is CPU-light here (the materialise already ran), so it stays inline.
     let decision = store.get().decide(&req.session(), &resource, mode);
     // sq-3mu76 — read-scoped advertisement (module doc): when the lane fired, mask
@@ -1246,12 +1507,41 @@ fn predicate_shape_with_labels(
 /// WAC/ACP materialisation.
 #[cfg(feature = "solid-authz-trust")]
 #[allow(clippy::result_large_err)]
-fn trust_authz_decide(
+async fn trust_authz_decide(
+    state: &AppState,
+    trust: serde_json::Value,
+    req: AuthzRequest,
+    resource: String,
+    mode: sparq_solid::Mode,
+) -> Response {
+    let st = state.clone();
+    #[cfg(test)]
+    let pool = state.authz_build_pool().clone();
+    match on_build_pool(state, move || {
+        trust_authz_decide_blocking(
+            &trust,
+            &req,
+            &resource,
+            mode,
+            st.config(),
+            #[cfg(test)]
+            &pool.trust_verification_calls,
+        )
+    })
+    .await
+    {
+        Ok(response) | Err(response) => response,
+    }
+}
+
+#[cfg(feature = "solid-authz-trust")]
+fn trust_authz_decide_blocking(
     trust_val: &serde_json::Value,
     req: &AuthzRequest,
     resource: &str,
     mode: sparq_solid::Mode,
-    full_body: &serde_json::Value,
+    config: &crate::http::ServerConfig,
+    #[cfg(test)] verification_calls: &std::sync::atomic::AtomicUsize,
 ) -> Response {
     use sparq_trust::{
         admit, derive_effective_rules, policy::TrustRule, AdmittedFact,
@@ -1460,12 +1750,6 @@ fn trust_authz_decide(
         });
     }
 
-    // ── 5. Run the cert-graph closure ────────────────────────────────────────
-    // Depth-1 closure: derived rules are NOT re-used as anchors (sq-tu4e discipline).
-    let pre_count = direct_rules.len();
-    let effective_rules = derive_effective_rules(&direct_rules, &certifications, now_unix_secs, 1);
-    let cert_graph_derived = effective_rules.len() > pre_count;
-
     // ── 6. Parse presented credentials ──────────────────────────────────────
     let creds_val = match trust_obj.get("credentials").and_then(|v| v.as_array()) {
         Some(a) => a,
@@ -1486,7 +1770,7 @@ fn trust_authz_decide(
         }
     };
 
-    let mut all_admitted: Vec<AdmittedFact> = Vec::new();
+    let mut credentials = Vec::new();
     for (idx, cred_v) in creds_val.iter().enumerate() {
         let obj = match cred_v.as_object() {
             Some(o) => o,
@@ -1543,19 +1827,66 @@ fn trust_authz_decide(
             issued_at_unix_secs: wire.issued_at_unix_secs,
             revoked: wire.revoked,
         };
-        // Run the admission gate (fail-closed: empty result is fine — that credential just admits
-        // nothing, only a complete trust-block failure => 403).
-        let admitted = admit(&cred, &effective_rules, &trust_session, &resource_node);
-        all_admitted.extend(admitted);
+        credentials.push(cred);
+    }
+
+    // A depth-one certification produces at most one additional rule. Price the upper
+    // bound before deriving any edge or verifying any credential, including empty graphs.
+    let rules_bound = direct_rules.len().saturating_add(certifications.len());
+    let pairs = rules_bound.saturating_mul(creds_val.len());
+    let triples = credentials
+        .iter()
+        .fold(0usize, |n, c| n.saturating_add(c.graph.len()));
+    let validation_work = rules_bound.saturating_mul(triples);
+    if pairs > config.solid_authz_trust_max_pairs {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            trust_deny_json("trust rule/credential pair limit exceeded"),
+        );
+    }
+    if certifications.len() > config.solid_authz_trust_max_certifications {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            trust_deny_json("trust certification limit exceeded"),
+        );
+    }
+    if validation_work > config.solid_authz_trust_max_validation_work {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            trust_deny_json("trust validation-work limit exceeded"),
+        );
+    }
+
+    // ── 5. Run the cert-graph closure ────────────────────────────────────────
+    // Depth-1 closure: derived rules are NOT re-used as anchors (sq-tu4e discipline).
+    let pre_count = direct_rules.len();
+    // Test observability counts entry to the verification-bearing library calls.
+    #[cfg(test)]
+    verification_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let effective_rules = derive_effective_rules(&direct_rules, &certifications, now_unix_secs, 1);
+    let cert_graph_derived = effective_rules.len() > pre_count;
+
+    let mut all_admitted: Vec<AdmittedFact> = Vec::new();
+    for cred in &credentials {
+        #[cfg(test)]
+        verification_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        all_admitted.extend(admit(
+            cred,
+            &effective_rules,
+            &trust_session,
+            &resource_node,
+        ));
     }
 
     // ── 7. Build the WAC/ACP store and decide ───────────────────────────────
     // The trust block extends, never replaces, the WAC/ACP admission stratum: admitted facts
     // are injected INTO the pod dataset for materialisation, exactly as the design specifies.
     // Build the store over the original dataset with admitted facts injected.
-    let store = match build_store_with_admitted(req, &all_admitted, resource, full_body) {
-        Ok(s) => s,
-        Err(resp) => return resp,
+    let admitted_count = all_admitted.len();
+    let admitted_source = all_admitted.first().map(|f| f.issuer.as_str().to_owned());
+    let store = match build_store_with_admitted(req, &all_admitted) {
+        Ok(store) => store,
+        Err(response) => return response,
     };
     let decision = store.decide(&req.session(), resource, mode);
     let status = if decision.allow {
@@ -1565,16 +1896,11 @@ fn trust_authz_decide(
     };
 
     // ── 8. Emit the response with a minimal admission justification ──────────
-    let justification = if !all_admitted.is_empty() {
-        let first_source = all_admitted[0].issuer.as_str().to_owned();
-        Some(TrustJustification {
-            admitted_source: first_source,
-            admitted_count: all_admitted.len(),
-            cert_graph_derived,
-        })
-    } else {
-        None
-    };
+    let justification = admitted_source.map(|first_source| TrustJustification {
+        admitted_source: first_source,
+        admitted_count,
+        cert_graph_derived,
+    });
     let mut body_obj = match serde_json::from_str::<serde_json::Value>(&decision_to_json(&decision)) {
         Ok(v) => v,
         Err(_) => {
@@ -1619,8 +1945,6 @@ fn trust_authz_decide(
 fn build_store_with_admitted(
     req: &AuthzRequest,
     admitted: &[sparq_trust::AdmittedFact],
-    _resource: &str,
-    _full_body: &serde_json::Value,
 ) -> Result<sparq_solid::PodStore, Response> {
     use std::fmt::Write as _;
     // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
@@ -1655,6 +1979,8 @@ fn build_store_with_admitted(
         // sq-snopa.8 — the trust lane decides over THIS augmented body dataset; the
         // stateful lane is refused before `trust_authz_decide` is ever reached.
         source: AuthzSource::Body,
+        #[cfg(feature = "odrl-authz")]
+        carries_odrl: false,
         dataset: augmented,
         agent: req.agent.clone(),
         client: req.client.clone(),
@@ -1733,28 +2059,12 @@ pub(crate) async fn wac_allow_endpoint(
             return json_error(StatusCode::BAD_REQUEST, "'resource' is not a valid IRI");
         }
     };
-    let store = match resolve_store(&state, &req).await {
+    let store = match resolve_store(&state, &req, Mode::Read).await {
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    // sq-3mu76 — the OPT-IN ODRL lane on the advertisement endpoint: a
-    // dataset-carried read prohibition must not be advertised past (`user="read"` from a static
-    // WAC grant that `/authz/query` would refuse to honour). The endpoint has no mode field —
-    // the lane runs for `Mode::Read`, the ONLY action it evidences (sq-lrtc3.2 owns the rest),
-    // and the advertisement is scoped down to that evidence below. Same refusal matrix
-    // (anonymous => 403 etc.). Feature OFF => this block does not exist.
     #[cfg(feature = "odrl-authz")]
-    let (store, odrl_lane_fired) = {
-        let mut store = store;
-        // sq-snopa.8 — body-dataset lane only (see `decide_endpoint`).
-        let fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
-        if let (true, ResolvedStore::Owned(s)) = (fired, &mut store) {
-            if let Err(resp) = apply_odrl_lane(s, &req, Mode::Read) {
-                return resp;
-            }
-        }
-        (store, fired)
-    };
+    let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
     // sq-snopa.7 FR-5: resolve the governing ACL for the Link header BEFORE
     // `wac_allow` consumes the store. `resolve_acl` is a pure index lookup (no mode needed) and
     // returns `None` when no ACL was discovered — fail-closed: no header emitted in that case.
@@ -2064,25 +2374,9 @@ pub(crate) async fn query_endpoint(
             }
         },
     };
-    let store = match resolve_store(&state, &req).await {
+    let store = match resolve_store(&state, &req, mode).await {
         Ok(s) => s,
         Err(resp) => return resp,
-    };
-    // sq-lrtc3.1 — the OPT-IN ODRL lane: when the dataset carries ODRL policy
-    // rules, materialise their bridged grants/denies into the auth view BEFORE the
-    // access-controlled query runs. Feature OFF => this block does not exist and the
-    // endpoint is byte-identical to plain `solid-authz`.
-    #[cfg(feature = "odrl-authz")]
-    let store = {
-        let mut store = store;
-        // sq-snopa.8 — body-dataset lane only (see `decide_endpoint`).
-        let fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
-        if let (true, ResolvedStore::Owned(s)) = (fired, &mut store) {
-            if let Err(resp) = apply_odrl_lane(s, &req, mode) {
-                return resp;
-            }
-        }
-        store
     };
     match store.get().query_json_as(&req.session(), mode, &query) {
         Ok(json) => json_response(StatusCode::OK, json),
@@ -2298,13 +2592,8 @@ mod tests {
             ),
             issuer: oxrdf::NamedNode::new("https://issuer.ex/").unwrap(),
         };
-        let store = super::build_store_with_admitted(
-            &req,
-            &[fact],
-            "https://pod.ex/doc",
-            &serde_json::Value::Null,
-        )
-        .unwrap_or_else(|_| panic!("the store builds"));
+        let store = super::build_store_with_admitted(&req, &[fact])
+            .unwrap_or_else(|_| panic!("the store builds"));
         let session = req.session();
         assert!(
             store
@@ -2334,6 +2623,8 @@ mod tests {
     fn build_store_denies_on_unparseable_dataset() {
         let req = AuthzRequest {
             source: AuthzSource::Body,
+            #[cfg(feature = "odrl-authz")]
+            carries_odrl: false,
             dataset: "this is not n-quads @@@".to_owned(),
             agent: None,
             client: None,
@@ -2353,6 +2644,8 @@ mod tests {
     fn build_store_then_decide_is_authorized_and_anonymous_fails_closed() {
         let req = AuthzRequest {
             source: AuthzSource::Body,
+            #[cfg(feature = "odrl-authz")]
+            carries_odrl: false,
             dataset: WAC_NQUADS.to_owned(),
             agent: Some("https://alice.ex/card#me".to_owned()),
             client: None,
@@ -2651,6 +2944,8 @@ mod odrl_tests {
     fn authz_req(dataset: String, agent: Option<&str>) -> AuthzRequest {
         AuthzRequest {
             source: AuthzSource::Body,
+            #[cfg(feature = "odrl-authz")]
+            carries_odrl: dataset_carries_odrl(&dataset),
             dataset,
             agent: agent.map(str::to_owned),
             client: None,
@@ -2957,4 +3252,718 @@ fn cert_scope_shape_is_canonical_and_reproducible() {
         "an invalid predicate IRI must fail closed"
     );
 }
+}
+
+// ── The bounded authorization-build pool ──────────────────────────────────────
+//
+// These run the REAL handlers in-process (the same `decide_endpoint` /
+// `query_endpoint` / `wac_allow_endpoint` the router serves) rather than a stand-in, so what
+// they observe is what a request observes. They live here, next to the pool, because the
+// counters they read are crate-private: an integration test could see the 503 but not that
+// the build was refused BY the pool rather than by a materialisation.
+#[cfg(test)]
+mod build_pool_tests {
+    use super::*;
+    use crate::http::{AppState, ServerConfig};
+    use std::time::Duration;
+
+    /// A state serving `/authz/*` with a build pool of `concurrency` slots and `wait_ms` of
+    /// patience for one.
+    fn state(concurrency: usize, wait_ms: u64) -> AppState {
+        AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_build_concurrency: concurrency,
+                solid_authz_build_wait: Duration::from_millis(wait_ms),
+                ..ServerConfig::default()
+            },
+        )
+    }
+
+    /// The pod dataset the lane tests authorise over: alice has Read by default on the root.
+    const WAC_NQUADS: &str = concat!(
+        "<https://pod.ex/n1#it> <https://ex.dev/ns#title> \"hello\" <https://pod.ex/n1> .\n",
+        "<https://pod.ex/.acl#o> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ",
+        "<http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#o> <http://www.w3.org/ns/auth/acl#default> ",
+        "<https://pod.ex/> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#o> <http://www.w3.org/ns/auth/acl#agent> ",
+        "<https://alice.ex/card#me> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#o> <http://www.w3.org/ns/auth/acl#mode> ",
+        "<http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n",
+    );
+
+    fn decide_bytes(body: serde_json::Value) -> Bytes {
+        Bytes::from(body.to_string())
+    }
+
+    /// A stateless `decide` body over [`WAC_NQUADS`] as alice.
+    fn body_lane_request() -> Bytes {
+        decide_bytes(serde_json::json!({
+            "dataset": WAC_NQUADS,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+            "mode": "read",
+            "view": "wac",
+        }))
+    }
+
+    struct ReleaseOnDrop(Arc<BuildHook>);
+
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+
+    fn block_builds(st: &AppState) -> Arc<BuildHook> {
+        let hook = Arc::new(BuildHook::default());
+        *st.authz_build_pool().build_hook.lock().unwrap() = Some(hook.clone());
+        hook
+    }
+
+    async fn wait_for_running(hook: &BuildHook, count: usize) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hook.running.load(std::sync::atomic::Ordering::SeqCst) < count {
+                hook.entered.notified().await;
+            }
+        })
+        .await
+        .expect("blocking builds entered the barrier");
+    }
+
+    fn start_build(st: &AppState) -> tokio::task::JoinHandle<Response> {
+        tokio::spawn(decide_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            body_lane_request(),
+        ))
+    }
+
+    async fn response_or_release_extra_build(
+        mut handler: tokio::task::JoinHandle<Response>,
+        hook: &BuildHook,
+        cap: usize,
+    ) -> Response {
+        tokio::select! {
+            response = &mut handler => response.unwrap(),
+            () = wait_for_running(hook, cap + 1) => {
+                // A permit-lifetime mutant admits extra work. Release it so the test
+                // reports its failed assertion instead of leaving blocking workers hung.
+                hook.release();
+                handler.await.unwrap()
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn build_pool_caps_running_builds_even_after_handler_cancellation() {
+        let st = state(2, 50);
+        let hook = block_builds(&st);
+        let _release = ReleaseOnDrop(hook.clone());
+        let first = start_build(&st);
+        let second = start_build(&st);
+        wait_for_running(&hook, 2).await;
+        let third = response_or_release_extra_build(start_build(&st), &hook, 2).await;
+        let running = hook.running.load(std::sync::atomic::Ordering::SeqCst);
+        first.abort();
+        let _ = first.await;
+        let fourth = response_or_release_extra_build(start_build(&st), &hook, 2).await;
+        let running_after_cancel = hook.running.load(std::sync::atomic::Ordering::SeqCst);
+        // Release before asserting, including on mutants, so blocked workers always finish.
+        hook.release();
+        let _ = second.await.unwrap();
+        assert_eq!(third.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(fourth.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(running, 2);
+        assert_eq!(running_after_cancel, 2);
+    }
+
+    #[tokio::test]
+    async fn build_pool_keeps_cancelled_builds_permit_until_blocking_work_ends() {
+        let st = state(1, 50);
+        let hook = block_builds(&st);
+        let _release = ReleaseOnDrop(hook.clone());
+        let handler = start_build(&st);
+        wait_for_running(&hook, 1).await;
+        handler.abort();
+        let _ = handler.await;
+        let available = st.authz_build_pool().available();
+        hook.release();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while st.authz_build_pool().available() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the completed build returns its permit");
+        assert_eq!(
+            available, 0,
+            "aborting the handler cannot free a running build's slot"
+        );
+        assert_eq!(st.authz_build_pool().available(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_warm_server_view_needs_no_build_slot() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_build_concurrency: 1,
+                solid_authz_build_wait: Duration::from_millis(50),
+                ..ServerConfig::default()
+            },
+        );
+        let request = || {
+            decide_bytes(serde_json::json!({
+                "source": "server", "resource": "https://pod.ex/n1", "mode": "read",
+                "session": { "agent": "https://alice.ex/card#me" }
+            }))
+        };
+        let warm = decide_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        assert_eq!(warm.status(), StatusCode::OK);
+        let hook = block_builds(&st);
+        let _release = ReleaseOnDrop(hook.clone());
+        let blocked = start_build(&st);
+        wait_for_running(&hook, 1).await;
+        let response = decide_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        hook.release();
+        let _ = blocked.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            2,
+            "warm hit claimed no slot"
+        );
+        assert_eq!(st.authz_build_pool().refused(), 0);
+    }
+
+    #[tokio::test]
+    async fn automatic_view_selection_does_not_reuse_an_explicit_other_view() {
+        let dataset = format!("{WAC_NQUADS}<urn:s> <urn:p> <urn:o> <https://pod.ex/.acr> .\n");
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(&dataset, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
+        let explicit = server_store(&st, Some(AuthView::Wac)).await.unwrap();
+        let automatic = server_store(&st, None).await.unwrap();
+        let session = Session {
+            agent: Some("https://alice.ex/card#me"),
+            ..Session::default()
+        };
+        assert!(
+            explicit
+                .decide(&session, "https://pod.ex/n1", Mode::Read)
+                .allow
+        );
+        assert!(
+            !automatic
+                .decide(&session, "https://pod.ex/n1", Mode::Read)
+                .allow
+        );
+        assert_eq!(st.authz_build_pool().admitted(), 2);
+        assert_eq!(
+            st.authz_view_cache().read().unwrap().as_ref().unwrap().view,
+            AuthView::Acp
+        );
+    }
+
+    #[test]
+    fn shed_warning_counts_refusals_between_rate_limited_lines() {
+        use std::sync::atomic::Ordering;
+        let pool = AuthBuildPool::new(1, Duration::ZERO);
+        let now = std::time::Instant::now();
+        pool.refused.store(1, Ordering::Relaxed);
+        assert_eq!(pool.shed_warning(|| now, |_, _| {}), Some((1, 1)));
+        pool.refused.store(4, Ordering::Relaxed);
+        assert_eq!(
+            pool.shed_warning(|| now + Duration::from_millis(999), |_, _| {}),
+            None
+        );
+        assert_eq!(
+            pool.shed_warning(|| now + Duration::from_secs(1), |_, _| {}),
+            Some((3, 4))
+        );
+        pool.refused.store(5, Ordering::Relaxed);
+        assert_eq!(
+            pool.shed_warning(|| now + Duration::from_millis(1999), |_, _| {}),
+            None
+        );
+        assert_eq!(
+            pool.shed_warning(|| now + Duration::from_secs(2), |_, _| {}),
+            Some((1, 5))
+        );
+    }
+
+    #[test]
+    fn pool_concurrency_clamps_at_semaphore_limits() {
+        assert_eq!(AuthBuildPool::new(0, Duration::ZERO).available(), 1);
+        assert_eq!(
+            AuthBuildPool::new(usize::MAX, Duration::ZERO).available(),
+            tokio::sync::Semaphore::MAX_PERMITS
+        );
+    }
+
+    /// A SATURATED pool sheds the request with the retryable 503 instead of waiting behind
+    /// the builds already in flight — the whole point of the bound. The only permit is held
+    /// for the duration, so the pool is saturated deterministically rather than by racing
+    /// requests, and the request must come back within its configured patience rather than
+    /// whenever the permit happens to be released.
+    #[tokio::test]
+    async fn a_saturated_build_pool_sheds_the_request_with_503_instead_of_waiting() {
+        let st = state(1, 50);
+        // Hold the one and only build slot for the whole of the request below.
+        let held = st
+            .authz_build_pool()
+            .claim()
+            .await
+            .expect("the only build slot");
+        assert_eq!(
+            st.authz_build_pool().available(),
+            0,
+            "the pool is saturated"
+        );
+
+        let began = std::time::Instant::now();
+        let resp = decide_endpoint(State(st.clone()), HeaderMap::new(), body_lane_request()).await;
+        let waited = began.elapsed();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a saturated pool is the fail-closed, retryable 503"
+        );
+        assert_eq!(
+            st.authz_build_pool().refused(),
+            1,
+            "the refusal came from the pool, not from a materialisation"
+        );
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            1,
+            "only this test's own hold was admitted; the request's build was not"
+        );
+        // It WAITED for the configured patience and then gave up — it neither returned
+        // instantly (that would be no wait at all) nor waited for the permit to be freed.
+        assert!(
+            waited >= Duration::from_millis(50),
+            "the request did not wait for a slot at all ({:?})",
+            waited
+        );
+        assert!(
+            waited < Duration::from_secs(10),
+            "the request waited for the held permit instead of giving up ({:?})",
+            waited
+        );
+
+        // Once a slot frees, the same request is served normally: the bound sheds load, it
+        // does not break the lane.
+        drop(held);
+        let resp = decide_endpoint(State(st.clone()), HeaderMap::new(), body_lane_request()).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "with a free slot the same request is answered"
+        );
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            2,
+            "that build was admitted (after this test's own hold)"
+        );
+    }
+
+    /// Every build slot is given back when its build ends, so the pool cannot leak capacity
+    /// across requests (a leak would turn the cap into a one-shot budget).
+    #[tokio::test]
+    async fn a_finished_build_gives_its_slot_back() {
+        let st = state(2, 1_000);
+        for _ in 0..3 {
+            let resp =
+                decide_endpoint(State(st.clone()), HeaderMap::new(), body_lane_request()).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+        assert_eq!(st.authz_build_pool().admitted(), 3);
+        assert_eq!(st.authz_build_pool().refused(), 0);
+        assert_eq!(
+            st.authz_build_pool().available(),
+            2,
+            "every slot is back after the builds ended"
+        );
+    }
+
+    /// The STATELESS lane's build runs on the pool.
+    #[tokio::test]
+    async fn the_stateless_lane_builds_on_the_pool() {
+        let st = state(4, 1_000);
+        let resp = decide_endpoint(State(st.clone()), HeaderMap::new(), body_lane_request()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            1,
+            "the stateless build went through the pool"
+        );
+    }
+
+    /// The STATEFUL lane's per-generation build runs on the SAME pool.
+    #[tokio::test]
+    async fn the_stateful_lane_builds_on_the_pool() {
+        let st = state(4, 1_000);
+        let body = decide_bytes(serde_json::json!({
+            "source": "server",
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+            "mode": "read",
+        }));
+        let resp = decide_endpoint(State(st.clone()), HeaderMap::new(), body).await;
+        // An empty server store discovers no ACL: the fail-closed `noAcl` deny, not an error.
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            1,
+            "the stateful build went through the pool"
+        );
+    }
+
+    /// The `/authz/query` and `/authz/wac-allow` lanes build on the pool too, so the cap is
+    /// on authorization builds in flight and not on one endpoint's.
+    #[tokio::test]
+    async fn the_query_and_advertisement_lanes_build_on_the_pool() {
+        let st = state(4, 1_000);
+        let query = decide_bytes(serde_json::json!({
+            "dataset": WAC_NQUADS,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "query": "SELECT * WHERE { GRAPH ?g { ?s ?p ?o } }",
+        }));
+        let resp = query_endpoint(State(st.clone()), HeaderMap::new(), query).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let advert = decide_bytes(serde_json::json!({
+            "dataset": WAC_NQUADS,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+        }));
+        let resp = wac_allow_endpoint(State(st.clone()), HeaderMap::new(), advert).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            2,
+            "both lanes built on the pool"
+        );
+    }
+
+    /// The ODRL store and policy builds take one claim per request on every endpoint.
+    #[cfg(feature = "odrl-authz")]
+    #[tokio::test]
+    async fn the_odrl_lane_builds_on_the_pool() {
+        let odrl = "http://www.w3.org/ns/odrl/2/";
+        let dataset = format!(
+            "{WAC_NQUADS}\
+             <https://pol.ex/p1> <{odrl}permission> <https://pol.ex/r1> <https://pod.ex/pol> .\n\
+             <https://pol.ex/r1> <{odrl}action> <{odrl}read> <https://pod.ex/pol> .\n\
+             <https://pol.ex/r1> <{odrl}target> <https://pod.ex/n1> <https://pod.ex/pol> .\n\
+             <https://pol.ex/r1> <{odrl}assignee> <https://alice.ex/card#me> <https://pod.ex/pol> .\n"
+        );
+        let st = state(4, 1_000);
+        let body = decide_bytes(serde_json::json!({
+            "dataset": dataset,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+            "mode": "read",
+            "view": "wac",
+        }));
+        let resp = decide_endpoint(State(st.clone()), HeaderMap::new(), body).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            1,
+            "the store and ODRL builds share one pool claim"
+        );
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[tokio::test]
+    async fn a_trust_parse_failure_still_requires_a_build_slot() {
+        let st = AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_trust: true,
+                solid_authz_build_concurrency: 1,
+                solid_authz_build_wait: Duration::ZERO,
+                ..ServerConfig::default()
+            },
+        );
+        let request = || {
+            decide_bytes(serde_json::json!({
+                "dataset": WAC_NQUADS, "resource": "https://pod.ex/n1", "mode": "read",
+                "session": {"agent": "https://alice.ex/card#me"}, "trust": {}
+            }))
+        };
+        let held = st.authz_build_pool().claim().await.unwrap();
+        let saturated = decide_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        drop(held);
+        let parsed = decide_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        assert_eq!(saturated.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(parsed.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// The whole trust pipeline, including failures before store construction, is pooled.
+    #[cfg(feature = "solid-authz-trust")]
+    #[tokio::test]
+    async fn the_trust_lane_builds_on_the_pool() {
+        let st = AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_trust: true,
+                solid_authz_build_concurrency: 4,
+                solid_authz_build_wait: Duration::from_millis(1_000),
+                ..ServerConfig::default()
+            },
+        );
+        // A well-formed trust block that admits nothing: the lane reaches its WAC/ACP build,
+        // which is the step under test.
+        let body = decide_bytes(serde_json::json!({
+            "dataset": WAC_NQUADS,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+            "mode": "read",
+            "view": "wac",
+            "trust": {
+                "agentIri": "https://alice.ex/card#me",
+                "nowUnixSecs": 1_720_000_000_i64,
+                "rules": [],
+                "certifications": [],
+                "credentials": []
+            }
+        }));
+        let resp = decide_endpoint(State(st.clone()), HeaderMap::new(), body).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "the unchanged WAC grant still decides the trust lane"
+        );
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            1,
+            "the trust lane's build went through the pool"
+        );
+    }
+    #[cfg(feature = "backup")]
+    #[tokio::test]
+    async fn pre_restore_miss_cannot_install_after_a_new_lineage() {
+        let st = state(2, 50);
+        // Start a cache miss on the old lineage and block after its snapshot was pinned.
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        *st.authz_build_pool().view_hook.lock().unwrap() = Some(hook.clone());
+        let old_state = st.clone();
+        let old = tokio::spawn(async move { server_store(&old_state, None).await });
+        wait_for_running(&hook, 1).await;
+        let source = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig::default(),
+        );
+        let mut artifact = Vec::new();
+        source.export_backup(&mut artifact).unwrap();
+        st.restore_from(artifact.as_slice(), false).unwrap();
+        // Warm the restored lineage while the old miss remains blocked.
+        *st.authz_build_pool().view_hook.lock().unwrap() = None;
+        let restored = server_store(&st, None).await.unwrap();
+        assert!(
+            restored
+                .decide(
+                    &Session {
+                        agent: Some("https://alice.ex/card#me"),
+                        ..Default::default()
+                    },
+                    "https://pod.ex/n1",
+                    Mode::Read
+                )
+                .allow
+        );
+        hook.release();
+        old.await.unwrap().unwrap();
+        {
+            let cache = st.authz_view_cache().read().unwrap();
+            assert!(
+                Arc::ptr_eq(&cache.as_ref().unwrap().core, &st.authz_core()),
+                "old build must not replace the restored view"
+            );
+        }
+        let following = server_store(&st, None).await.unwrap();
+        assert!(Arc::ptr_eq(&following, &restored));
+    }
+}
+#[cfg(all(test, feature = "solid-authz-trust"))]
+mod trust_limit_tests {
+    use super::*;
+    use crate::http::{AppState, ServerConfig};
+    use std::sync::atomic::Ordering;
+
+    fn body(rules: usize, credentials: usize, triples: usize, certs: usize) -> serde_json::Value {
+        use oxrdf::{Literal, NamedNode, Triple};
+        use sparq_zk::{
+            commit::commit_triples,
+            encode::salt_from_bytes,
+            sig::{public_key_to_hex, SecretKey},
+        };
+        let key = SecretKey::from_seed(41);
+        let graph: Vec<_> = (0..triples)
+            .map(|i| {
+                Triple::new(
+                    NamedNode::new("https://alice.ex/card#me").unwrap(),
+                    NamedNode::new("urn:claim").unwrap(),
+                    Literal::from(i as i64),
+                )
+            })
+            .collect();
+        let commitment = commit_triples(&graph, salt_from_bytes(&[7; 32])).unwrap();
+        let credential = serde_json::json!({
+            "graphNquads": graph.iter().map(|t| format!("{t} .\n")).collect::<String>(),
+            "issuerSignatureHex": key.sign_commitment(&commitment.commitment),
+            "saltHex": "07".repeat(32), "issuedAtUnixSecs": 100, "revoked": false,
+        });
+        let rule = serde_json::json!({
+            "source": "urn:issuer", "issuerKeyHex": public_key_to_hex(&key.public_key()),
+            "scopeIri": "https://pod.ex/", "freshWithinSecs": 100, "shapePredicateIri": "urn:claim",
+        });
+        let child = SecretKey::from_seed(42);
+        let mut cert = sparq_trust::graph::Certification {
+            certifier: NamedNode::new("urn:issuer").unwrap(),
+            certifier_key: key.public_key(),
+            certified_issuer: NamedNode::new("urn:child").unwrap(),
+            certified_key: child.public_key(),
+            scope: sparq_trust::graph::CertScope::AnyService,
+            valid_from_unix_secs: 0,
+            valid_until_unix_secs: 200,
+            signature_hex: String::new(),
+        };
+        cert.signature_hex = key.sign_commitment(&sparq_trust::graph::certification_message(&cert));
+        let certification = serde_json::json!({
+            "certifierIri":"urn:issuer", "certifierKeyHex":public_key_to_hex(&key.public_key()),
+            "certifiedIssuerIri":"urn:child", "certifiedKeyHex":public_key_to_hex(&child.public_key()),
+            "scopeKind":"anyService", "validFromUnixSecs":0, "validUntilUnixSecs":200,
+            "signatureHex":cert.signature_hex,
+        });
+        serde_json::json!({
+            "dataset": concat!(
+                "<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n",
+                "<https://pod.ex/.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
+                "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .\n",
+                "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .\n",
+                "<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n",
+            ),
+            "resource": "https://pod.ex/n1", "mode": "read", "session": {"agent":"https://alice.ex/card#me"},
+            "trust": {"agentIri":"https://alice.ex/card#me", "nowUnixSecs":100,
+                "rules":vec![rule; rules], "credentials":vec![credential; credentials],
+                "certifications":vec![certification; certs]},
+        })
+    }
+
+    async fn run(
+        config: ServerConfig,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value, usize) {
+        let bytes = body.to_string();
+        assert!(
+            bytes.len() <= 1 << 20,
+            "boundary fixture fits the default body limit"
+        );
+        let state = AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_trust: true,
+                ..config
+            },
+        );
+        let response =
+            decide_endpoint(State(state.clone()), HeaderMap::new(), Bytes::from(bytes)).await;
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&body).unwrap(),
+            state
+                .authz_build_pool()
+                .trust_verification_calls
+                .load(Ordering::Relaxed),
+        )
+    }
+
+    #[tokio::test]
+    async fn default_pair_cap_accepts_boundary_and_refuses_one_more_before_verification() {
+        let defaults = ServerConfig::default();
+        assert_eq!(defaults.solid_authz_trust_max_pairs, 4096);
+        let (status, deny, calls) = run(defaults.clone(), body(17, 241, 1, 0)).await;
+        assert_eq!(17 * 241, defaults.solid_authz_trust_max_pairs + 1);
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenied"], true);
+        assert_eq!(deny["allow"], false);
+        assert_eq!(
+            calls, 0,
+            "no derivation or admission call may start for an over-cap block"
+        );
+        let (status, allow, calls) = run(defaults, body(16, 256, 1, 0)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert_eq!(allow["allow"], true);
+        assert_eq!(allow["trustJustification"]["admittedCount"], 256);
+        assert!(calls > 0);
+    }
+
+    #[tokio::test]
+    async fn certification_cap_prices_potential_derived_rules_before_verification() {
+        let config = ServerConfig::default();
+        let cap = config.solid_authz_trust_max_certifications;
+        assert_eq!(cap, 2048);
+        let (status, deny, calls) = run(config.clone(), body(1, 0, 1, cap + 1)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenied"], true);
+        assert_eq!(calls, 0);
+        let (status, allow, calls) = run(config, body(1, 0, 1, cap)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert!(calls > 0);
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: 2,
+            ..Default::default()
+        };
+        let (status, _, calls) = run(config, body(1, 1, 1, 2)).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "one direct plus two potential derived rules"
+        );
+        assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn validation_work_cap_counts_triples_even_when_pairs_fit() {
+        let config = ServerConfig {
+            solid_authz_trust_max_validation_work: 6,
+            ..Default::default()
+        };
+        let (status, _, calls) = run(config.clone(), body(2, 1, 4, 0)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(calls, 0);
+        let (status, allow, calls) = run(config, body(2, 1, 3, 0)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert!(calls > 0);
+        let defaults = ServerConfig::default();
+        assert_eq!(defaults.solid_authz_trust_max_validation_work, 65536);
+        let rules = defaults.solid_authz_trust_max_validation_work / 128;
+        let (status, _, calls) = run(defaults.clone(), body(rules + 1, 1, 128, 0)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(calls, 0);
+        let (status, allow, calls) = run(defaults, body(rules, 1, 128, 0)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert_eq!(allow["trustJustification"]["admittedCount"], 128);
+        assert!(calls > 0);
+    }
 }

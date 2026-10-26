@@ -304,7 +304,7 @@ fn holder_set_proof_serde_round_trip() {
 #[test]
 fn holder_set_circuit_id_round_trips() {
     let id = CircuitId::HolderSet { depth: HOLDER_SET_DEPTH };
-    assert_eq!(id.package(), "holder_set_d4");
+    assert_eq!(id.package().unwrap(), "holder_set_d4");
     let json = serde_json::to_string(&id).expect("serializes");
     let back: CircuitId = serde_json::from_str(&json).expect("deserializes");
     assert_eq!(back, id, "HolderSet CircuitId round-trips");

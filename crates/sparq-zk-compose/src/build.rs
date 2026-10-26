@@ -1923,22 +1923,22 @@ mod derive_id_tests {
         ];
         // Deterministic: the same id renders the same package name every call.
         for id in &ids {
-            assert_eq!(id.package(), id.package(), "package() is pure");
+            assert_eq!(id.package().unwrap(), id.package().unwrap(), "package() is pure");
         }
         // Distinct: no two distinct ids collide on a package name (one directory
         // per member — a collision would prove the wrong relation under a shared dir).
-        let mut names: Vec<String> = ids.iter().map(|i| i.package()).collect();
+        let mut names: Vec<String> = ids.iter().map(|i| i.package().unwrap()).collect();
         let total = names.len();
         names.sort();
         names.dedup();
         assert_eq!(names.len(), total, "every distinct id maps to a distinct package dir");
         // Spot-check the exact wire names the zk/compose/ directories use.
-        assert_eq!(CircuitId::Scan { k: 2, n: 64, r: 8 }.package(), "scan_k2_n64_r8");
-        assert_eq!(CircuitId::FilterInt { d: 3 }.package(), "filter_int_d3");
-        assert_eq!(CircuitId::FilterF64 { d: 2 }.package(), "filter_f64_d2");
-        assert_eq!(CircuitId::FilterSignedInt { md: 4 }.package(), "filter_signed_int_d4");
-        assert_eq!(CircuitId::FilterDecimal { id: 3, fd: 2 }.package(), "filter_decimal_i3_f2");
-        assert_eq!(CircuitId::JoinEq { n_a: 64, n_b: 64 }.package(), "join_eq_na64_nb64");
+        assert_eq!(CircuitId::Scan { k: 2, n: 64, r: 8 }.package().unwrap(), "scan_k2_n64_r8");
+        assert_eq!(CircuitId::FilterInt { d: 3 }.package().unwrap(), "filter_int_d3");
+        assert_eq!(CircuitId::FilterF64 { d: 2 }.package().unwrap(), "filter_f64_d2");
+        assert_eq!(CircuitId::FilterSignedInt { md: 4 }.package().unwrap(), "filter_signed_int_d4");
+        assert_eq!(CircuitId::FilterDecimal { id: 3, fd: 2 }.package().unwrap(), "filter_decimal_i3_f2");
+        assert_eq!(CircuitId::JoinEq { n_a: 64, n_b: 64 }.package().unwrap(), "join_eq_na64_nb64");
     }
 
     /// The scan / filter_int builders thread the SAME derive-id discipline: the

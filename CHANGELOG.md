@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name beside the target and renamed into place; an output path that names a store, a path
   inside one or a reserved name (lock files, in any letter case) is refused (exit 2), and a
   symbolic link is followed to the file it names, which is the file replaced.
+- **sparq-zk-compose (`dual-leaf`):** complete dispatch coverage for the V2 component-witnessed
+  scan `(1,16,4)` and join `(16,16)` members with dedicated `CircuitId` variants.
+  V2 ids are legal only under `DualLeafV2`. Checked constructors, serde and package-name
+  parsing refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
+  Extended-fragment and value-FILTER refusals remain closed. Experimental and unaudited.
 
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
@@ -186,6 +191,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Graph::open`, `Graph::save`, `Graph::build_external*`), fork through `Graph::fork`, and restore an
   open store with `Graph::restore_in_place` (`Graph::restore_into_durable` refuses a directory a
   graph is open from).
+- **Breaking — sparq-zk-compose:** `CircuitId::package()` now returns
+  `Result<String, CircuitIdError>`. `ProofManifest::to_json()` and
+  `FragmentManifest::to_json()` now return `Result<String, serde_json::Error>`;
+  hand-built uncompiled V2 ids return an error instead of panicking.
+  With `dual-leaf`, opaque scan/join ids are refused under `DualLeafV2`;
+  use the dedicated V2 component-witnessed ids instead.
+- **sparq-zk-compose (`dual-leaf`):** restore the explicit `admit_unbound()` downgrade:
+  all-Unbound sub-proofs resolve as `StringCanonicalV1`, matching pattern encoding.
+  Opaque scans/joins remain legal; mixed Unbound + Bound sub-proofs remain refused.
+  Under `admit_unbound` the commitment is ASSUMED string-canonical; nothing checks it.
+  The downgrade is sound only if the issuer signed unbound messages over
+  string-canonical commitments alone. A dual-leaf commitment signed unbound cannot
+  use the V2 members, and its opaque presentations are not sound.
+  Orphan sub-proofs still require method-independent members.
 
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
@@ -206,14 +225,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ABSENT from the authenticated map, so nothing was authenticated for it at all),
   `CheckError::AuxiliaryMemberIdInSubProof` (a manifest sub-proof declares an id that belongs to
   one of the auxiliary bb roles below) and `CheckError::MemberNotForFixedRole`. Absence from the
-  authenticated map is NOT read as `Unbound`: it is refused by name. A sub-proof all of whose
-  bound commitments authenticated no method has no method to resolve against, so its declared
-  member is NOT echoed back either — it is held to the same method-independence rule as a
-  sub-proof bound to no commitment at all (legal under every admissible method, where
-  `MethodPolicy::widest_admissible()` names that set), which refuses a value-lane member and
-  admits a string-lane one. Under the default `MethodPolicy` an unbound attestation is refused
-  upstream, so that case is reachable only under the written-down `admit_unbound()` downgrade. A
-  sub-proof bound to a commitment covered only by a hidden-issuer
+  authenticated map is NOT read as `Unbound`: it is refused by name. Under the explicit
+  `admit_unbound()` downgrade, a sub-proof all of whose
+  bound commitments authenticate as Unbound resolves as `StringCanonicalV1`:
+  opaque scan/join members remain legal. Under `admit_unbound` the commitment is
+  ASSUMED string-canonical; nothing checks it. The downgrade is sound only if the
+  issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
+  commitment signed unbound cannot use the V2 members, and its opaque presentations
+  are not sound. Under the default policy,
+  unbound attestations are refused upstream. Orphan sub-proofs alone require
+  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —

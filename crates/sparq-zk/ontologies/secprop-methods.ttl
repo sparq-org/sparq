@@ -101,9 +101,9 @@ zk:poseidon2-rdfc10-v1
 # The in-circuit half has shipped for v2: the zk/dual-leaf-v2 Noir library carries the
 # sentinel and the band predicate, and compose_core::dual_leaf_v2_leaf::recompute_term
 # applies the band check and the LANG_NONE reserved-tag check at the witnessed component
-# sites of the scan_v2dl_k1_n16_r4 / join_eq_v2dl_na16_nb16 members. No CircuitId names
-# either member, so no verify path selects one and those asserts are not yet enforced on
-# any verification; v1 has no in-circuit sentinel assert. This records an
+# sites of the scan_v2dl_k1_n16_r4 / join_eq_v2dl_na16_nb16 members. Dedicated
+# CircuitIds select them only for DualLeafV2 commitments;
+# v1 has no in-circuit sentinel assert. This records an
 # unmet requirement of the v1 DERIVATION; it is not a claim about either version's
 # audited security.
 #
@@ -115,7 +115,7 @@ zk:poseidon2-rdfc10-v1
 # ════════════════════════════════════════════════════════════════════════════
 
 zk:poseidon2-dualleaf-v1
-  rdfs:comment "SUPERSEDED by zk:poseidon2-dualleaf-v2 and not production-selectable for new issuance; recognised and verifiable for already-issued credentials. Its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, so the research/zk-field-native-encoding.md §14.1 reserved-tag requirement is unmet; v2 discharges it on the host side, and v2's in-circuit half has shipped in the component-witnessed scan_v2dl / join_eq_v2dl members, which no CircuitId names and so no verify path selects. v1 has no in-circuit sentinel assert. Same INV-VL downgrade as v2; not externally audited (sq-qhy4)."@en-GB ;
+  rdfs:comment "SUPERSEDED by zk:poseidon2-dualleaf-v2 and not production-selectable for new issuance; recognised and verifiable for already-issued credentials. Its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, so the research/zk-field-native-encoding.md §14.1 reserved-tag requirement is unmet; v2 discharges it on the host side, and v2's in-circuit half has shipped in the component-witnessed scan_v2dl / join_eq_v2dl members, selected by dedicated CircuitIds only for DualLeafV2 commitments. v1 has no in-circuit sentinel assert. Same INV-VL downgrade as v2; not externally audited (sq-qhy4)."@en-GB ;
   secx:hasProperty
     [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
@@ -154,8 +154,8 @@ zk:poseidon2-dualleaf-v1
 # §14.1 reserved-tag requirement on the HOST side; the in-circuit half has shipped as
 # the zk/dual-leaf-v2 Noir library plus the band and LANG_NONE checks that
 # compose_core::dual_leaf_v2_leaf::recompute_term applies at the witnessed component
-# sites of the scan_v2dl_k1_n16_r4 / join_eq_v2dl_na16_nb16 members, which no CircuitId
-# names and so no verify path selects), and the xsd:boolean lane has a dedicated member
+# sites of the scan_v2dl_k1_n16_r4 / join_eq_v2dl_na16_nb16 members, selected by
+# dedicated CircuitIds only for DualLeafV2 commitments), and the xsd:boolean lane has a dedicated member
 # that constrains its handle and bound to {0, 1} in-circuit.
 #
 # The SECURITY POSTURE IS THE SAME AS v1's: the versioning changes constant derivation,
@@ -167,7 +167,7 @@ zk:poseidon2-dualleaf-v1
 # ════════════════════════════════════════════════════════════════════════════
 
 zk:poseidon2-dualleaf-v2
-  rdfs:comment "The versioned dual-leaf scheme: value-lane constants derived in BLAKE3 key-derivation mode over a length-framed (datatype, params) pair, a no-value sentinel asserted outside the reachable value-handle band, and a bit-domain xsd:boolean member. Discharges, on the host side, the research/zk-field-native-encoding.md §14.1 reserved-tag requirement that v1 leaves unmet; the in-circuit half has shipped in the component-witnessed scan_v2dl / join_eq_v2dl members, which no CircuitId names and so no verify path selects. Same INV-VL downgrade and the same unaudited posture as v1 (CR-G8 / sq-qhy4)."@en-GB ;
+  rdfs:comment "The versioned dual-leaf scheme: value-lane constants derived in BLAKE3 key-derivation mode over a length-framed (datatype, params) pair, a no-value sentinel asserted outside the reachable value-handle band, and a bit-domain xsd:boolean member. Discharges, on the host side, the research/zk-field-native-encoding.md §14.1 reserved-tag requirement that v1 leaves unmet; the in-circuit half has shipped in the component-witnessed scan_v2dl / join_eq_v2dl members, selected by dedicated CircuitIds only for DualLeafV2 commitments. Same INV-VL downgrade and the same unaudited posture as v1 (CR-G8 / sq-qhy4)."@en-GB ;
   secx:hasProperty
     [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,

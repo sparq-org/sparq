@@ -487,7 +487,7 @@ enum ReindexScope {
 /// The stored facts a failed commit judges (see [`PodStore::touched_with_facts`]).
 enum TouchedFacts {
     /// Every resource, judged against the resources before the commit.
-    All(loader::ResourceGraphs),
+    All(StoredGraphs),
     /// These resources, and whether each existed before the commit.
     Some { resources: Vec<String>, held: Vec<bool> },
 }
@@ -641,6 +641,11 @@ impl PodStore {
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
+        // The provenance pruning below enumerates this store's resources, which BUILDS their
+        // container chains — so it is charged against the store's budget, and before the
+        // materialization installs anything: a stored name past the enumeration caps refuses
+        // the whole rebuild, fail-closed, with the view in force untouched.
+        let resources = self.enumerate_resources()?;
         let stats = materialize::materialize_wac_limited(
             &mut self.graph,
             self.auth_limits,
@@ -649,7 +654,7 @@ impl PodStore {
         // Stored creator and owner facts of resources gone with their access control resource
         // go at any rebuild, so an ACP view built later never revives them.
         let provenance = std::mem::take(&mut self.acp_context.0);
-        self.acp_context.0 = self.existing_provenance(&provenance, false);
+        self.acp_context.0 = self.existing_provenance(&provenance, false, &resources);
         self.record_static_coverage();
         self.view_dropped = false;
         self.acp_uses_provenance = false;
@@ -837,16 +842,18 @@ impl PodStore {
         // The staged rebuild below installs the model `acp` names: checked before it runs.
         let _checked = self.matching_model(acp)?;
         let events = lifecycle::edit_events(&before.0, &self.graph);
-        let staged =
-            lifecycle::provenance_after_names(
-                &before.0,
-                &events,
-                &self.acp_context.0,
-                creator,
-                Some(created),
-                &self.acr_controlled,
-            )
-                .unwrap_or_else(|| self.acp_context.0.clone());
+        // Replay borrows names and container prefixes. Only additions face per-name caps;
+        // removing a name remains possible after the budget has been lowered.
+        let staged = lifecycle::provenance_after_names(
+            &before.0,
+            &events,
+            &self.acp_context.0,
+            creator,
+            Some(created),
+            &self.acr_controlled,
+            self.auth_budget,
+        )?
+        .unwrap_or_else(|| self.acp_context.0.clone());
         if acp {
             self.usable_acp_context()?;
             let credentials = self.acp_context.1.clone();
@@ -877,7 +884,7 @@ impl PodStore {
                 UpdateEffect::Clear(t) | UpdateEffect::Drop(t) => match t {
                     GraphTarget::NamedNode(n) => names.push(n.as_str()),
                     GraphTarget::DefaultGraph => {}
-                    _ => return Some(TouchedFacts::All(loader::ResourceGraphs::of(&self.graph))),
+                    _ => return Some(TouchedFacts::All(self.stored_graphs())),
                 },
                 _ => {}
             }
@@ -906,6 +913,8 @@ impl PodStore {
         match touched {
             None => {}
             Some(TouchedFacts::All(before)) => {
+                let before =
+                    loader::ResourceGraphs::from_names(before.0.iter().map(String::as_str));
                 let after = loader::ResourceGraphs::of(&self.graph);
                 self.acp_context.0.retain(|r| before.holds(r) && after.holds(r));
             }
@@ -926,12 +935,27 @@ impl PodStore {
     /// caller supplies (`supplied`) that differ from the stored ones, is stored now (see
     /// [`lifecycle`]); stored facts passed back are judged as stored. Records which resources
     /// have their `.acr` stored, for the next install.
+    /// This store's resources, with their containers ([`loader::resources`]), charged
+    /// against the store's [`AuthBudget`].
+    ///
+    /// The names are the store's own, but their container chains are BUILT by the walk, so
+    /// the cost is set by the names (one owned prefix string per container) rather than by
+    /// what is already held. A name past [`AuthBudget::max_resource_iri_bytes`] /
+    /// [`AuthBudget::max_resource_path_depth`], or an enumeration past the aggregate
+    /// [`AuthBudget::max_input_bytes`], is `Err` — the typed [`AuthAllowance`] refusal the
+    /// materialization path gives for the same name — and the caller refuses the rebuild
+    /// before anything is installed, so an already-stored name past the caps makes the
+    /// authorization view refuse rather than letting the walk run unbounded.
+    fn enumerate_resources(&self) -> Result<FxHashSet<String>, String> {
+        loader::resources(&self.graph, &mut budget::InputMeter::new(self.auth_budget))
+    }
+
     fn existing_provenance(
         &mut self,
         provenance: &AccessProvenance,
         supplied: bool,
+        resources: &FxHashSet<String>,
     ) -> AccessProvenance {
-        let resources = loader::resources(&self.graph);
         let controlled: FxHashSet<String> = loader::controlled_resources(&self.graph)
             .into_iter()
             .map(str::to_owned)
@@ -1084,6 +1108,8 @@ impl PodStore {
         scope: ReindexScope,
         supplied: bool,
     ) -> Result<MaterializeStats, String> {
+        // Metered, and before anything is installed — see [`PodStore::materialize_wac_scoped`].
+        let resources = self.enumerate_resources()?;
         let stats = materialize::materialize_acp_limited(
             &mut self.graph,
             provenance,
@@ -1092,7 +1118,10 @@ impl PodStore {
             self.auth_budget,
         )?;
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
-        self.acp_context = (self.existing_provenance(provenance, supplied), credentials.clone());
+        self.acp_context = (
+            self.existing_provenance(provenance, supplied, &resources),
+            credentials.clone(),
+        );
         self.acp_uses_provenance = loader::control_documents_name_provenance(&self.graph);
         self.acp_context_stale = false;
         self.installed_acp = Some(true);
@@ -1463,7 +1492,7 @@ impl PodStore {
     fn staged_provenance(
         &self,
         effects: &[sparq_engine::UpdateEffect],
-    ) -> Option<AccessProvenance> {
+    ) -> Result<Option<AccessProvenance>, String> {
         let events = lifecycle::update_events(&self.graph, effects);
         // An update that only creates graphs changes nothing when nothing is known of any
         // resource (it records no creator); otherwise it may bring one with known facts back.
@@ -1472,14 +1501,17 @@ impl PodStore {
                 .iter()
                 .any(|e| !matches!(e, lifecycle::GraphEvent::Added(_)))
         {
-            return None;
+            return Ok(None);
         }
+        // Added names face the per-name caps before commit. Removals borrow their
+        // chains without refusing, even if the budget has since been lowered.
         lifecycle::provenance_after(
             &self.graph,
             &events,
             &self.acp_context.0,
             None,
             &self.acr_controlled,
+            self.auth_budget,
         )
     }
 
@@ -2161,7 +2193,7 @@ impl PodStore {
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                let staged = self.staged_provenance(&effects);
+                let staged = self.staged_provenance(&effects)?;
                 let rebuild = self.provenance_rebuilds(&staged);
                 return self.commit_update(&effects, staged, acp, rebuild);
             }
@@ -2185,7 +2217,7 @@ impl PodStore {
                     &odrl,
                 )?;
                 if !wrote_rules {
-                    let staged = self.staged_provenance(&effects);
+                    let staged = self.staged_provenance(&effects)?;
                     let rebuild = self.provenance_rebuilds(&staged);
                     return self.commit_update(&effects, staged, acp, rebuild);
                 }
@@ -2276,7 +2308,7 @@ impl PodStore {
         // The ACP view is built from trusted provenance too: an update that ends or begins a
         // resource's life stages the provenance that follows, and rebuilds the view with it
         // when the view depends on it.
-        let staged = self.staged_provenance(&effects);
+        let staged = self.staged_provenance(&effects)?;
         let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
         // update, and nothing is changed, so no writer of one access-control document can take

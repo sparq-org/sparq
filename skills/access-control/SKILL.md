@@ -929,6 +929,16 @@ pod costs at most the input budget, whatever shape its names have. Past any of t
 whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
 `InputBytes` for the aggregate), fail-closed, with nothing installed.
 
+The store's provenance pruning owns container strings and uses the same three caps, with
+its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`
+and update provenance staging) instead borrows names from the before-store or edit events,
+and borrows container prefixes as subslices. Only **added** names face the per-name length
+and depth caps, before their chains are walked. Replay charges no aggregate input bytes;
+materialization charges the resulting store once. **Removals and clears are never refused**
+by replay, including stored names beyond the current caps. A pod can therefore remove an
+over-cap name after lowering its budget. A refused addition leaves the installed view in
+place and grants nothing to the refused resource.
+
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
 a bridged ODRL policy's five strata could each spend the full allowance. Each closure now
 reports what it charged (`sparq_reason::n3::compiled::ClosureCharge`), the charges of one

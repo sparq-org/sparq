@@ -168,6 +168,8 @@ fn expect_legal(method_key: &str, member: &str) -> bool {
         // The additive result relation authenticates whole string-canonical
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
+    } else if member.starts_with("scan_k") || member.starts_with("join_eq_na") {
+        matches!(method_key, "string-canonical" | "dual-leaf")
     } else if is_value_lane(member) {
         // BOTH dual-leaf versions commit a value handle, so both admit the value
         // lane — legality is the leaf SHAPE, not which version new issuance may
@@ -522,6 +524,8 @@ fn committed_legality_matches_resolve_circuit() {
             "filter_f64_d2" => Some(CircuitId::FilterF64 { d: 2 }),
             "scan_k1_n16_r4" => Some(CircuitId::Scan { k: 1, n: 16, r: 4 }),
             "join_eq_na16_nb16" => Some(CircuitId::JoinEq { n_a: 16, n_b: 16 }),
+            "scan_v2dl_k1_n16_r4" => Some(CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }),
+            "join_eq_v2dl_na16_nb16" => Some(CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 }),
             "holder_pok" => Some(CircuitId::HolderPok),
             _ => None,
         }
