@@ -56,9 +56,8 @@
 //! (`examples/mpc_bench_matrix.rs`) prints both the JSON and a human table.
 
 use crate::backend::{MaliciousSecurity, MpcBackend, OperatorClass, PreprocessingCost, TrustModel};
-use crate::batched::RowBinding;
 use crate::field::Fp;
-use crate::join::{BatchedHiddenInput, HiddenValueJoin};
+use crate::join::{HiddenKeyedRows, HiddenValueJoin};
 use crate::metrics::CommCounter;
 use crate::oblivious::{shuffle, sort_with_keys, SecretColumn};
 use crate::partial::{HolderId, MpcError};
@@ -506,23 +505,38 @@ pub fn check_aggregate(backend: &ShamirBackend, values: &[u64]) -> Result<u64, M
     }
 }
 
-/// Run the REAL hidden-value join over two holders' `scale`-row tables (keys
-/// `0..scale` on both sides, so exactly `scale` matches) and return the number of
-/// joined rows — the correctness gate for the hidden-join cost cell.
+/// Count per-pair equality matches over two holders' `scale`-row tables (keys
+/// `0..scale` on both sides, so exactly `scale` matches) — the correctness gate
+/// for the hidden-join cost cell.
+///
+/// This is a capped match-count reference for the networked cell, not a join
+/// operator: it returns a count and discloses no joined rows.
+///
+/// Like [`crate::transport::Coordinator::hidden_join`], this reference counts
+/// equality matches over the capped full candidate product without an oblivious
+/// output stage. One dealer per call supplies all scalar equality tests.
 pub fn check_hidden_join(backend: &ShamirBackend, scale: usize) -> Result<usize, MpcError> {
     // `scale` is an operator-chosen size and the harness runs the REAL protocol over
     // `scale x scale` pairs, so cap the cardinality before either table is built.
-    let bound = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+    crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
     let join = HiddenValueJoin::new(backend.clone());
     let left = synthetic_table(HolderId::new("left"), scale);
     let right = synthetic_table(HolderId::new("right"), scale);
-    let (out, _) = join.batched_join(&left, &right, bound)?;
-    Ok(out.rows.len())
+    let mut dealer = backend.dealer();
+    let mut matches = 0;
+    for (lkey, _) in &left.rows {
+        for (rkey, _) in &right.rows {
+            if join.secure_equal(&mut dealer, *lkey, *rkey)? {
+                matches += 1;
+            }
+        }
+    }
+    Ok(matches)
 }
 
 /// Build a `scale`-row hidden-keyed table with keys `0..scale` and a single
 /// disclosed payload column carrying the row index, for the join correctness gate.
-fn synthetic_table(holder: HolderId, scale: usize) -> BatchedHiddenInput {
+fn synthetic_table(holder: HolderId, scale: usize) -> HiddenKeyedRows {
     use oxrdf::{Literal, Term, Variable};
     let payload_vars = vec![Variable::new_unchecked("v")];
     let rows = (0..scale)
@@ -534,13 +548,10 @@ fn synthetic_table(holder: HolderId, scale: usize) -> BatchedHiddenInput {
             (key, payload)
         })
         .collect();
-    BatchedHiddenInput {
+    HiddenKeyedRows {
         holder,
         payload_vars,
         rows,
-        // Common disclosed group: retain the full candidate product while the
-        // equality keys stay separate. The harness supplies its checked bound.
-        binding: RowBinding::Keyed(vec!["candidate-group".to_string(); scale]),
     }
 }
 

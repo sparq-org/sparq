@@ -470,8 +470,7 @@ impl HiddenValueJoin {
     /// behind the same trait. For [`ShamirDealer`] that method *is* `share`, so the
     /// draws — and therefore the output — are unchanged; a source that cannot
     /// verifiably share a holder's own input (PRSS today) fails closed here.
-    #[cfg(test)]
-    fn secure_equal(
+    pub(crate) fn secure_equal(
         &self,
         source: &mut dyn DistributedRandomness,
         a: Fp,
