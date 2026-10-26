@@ -122,9 +122,14 @@ is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so th
 use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
 rewritten or reused, even after deletion; composite writes mint opaque keys with
 no resource IRI embedded. Existing keys fail. The filesystem must support hard
-links and directory sync. Listing excludes `tmp/` and reports `Some(file mtime)`
-with `generation = None`; reconciliation deletes unconditionally under the
-unique-key contract. `delete_if_unchanged` returns an error without a generation
+links and directory sync. Fan-out initialization is synced on first use per open
+store and shared across clones; reopening clears that record. The standalone
+`list()` returns `Listing { blobs, foreign }`, excluding `tmp/`. Invalid names,
+misplaced keys and non-files are reported as foreign entries. The async adapter
+warns once per listing and returns the valid blobs, so foreign entries do not
+stop reconciliation. Filesystem I/O errors still propagate. Blobs report
+`Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
+under the unique-key contract. `delete_if_unchanged` returns an error without a generation
 witness. See the crate README for layout and sync semantics. The native binary
 still selects in-memory blobs; this adapter alone does not enable durable boot.
 

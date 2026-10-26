@@ -118,7 +118,9 @@ fn layout_reopen_and_delete() {
     let store = dir.open();
     assert_eq!(store.get(KEY).unwrap(), b"persistent\0bytes");
     assert_eq!(store.get(POOLED).unwrap(), b"pooled");
-    let entries = store.list().unwrap();
+    let listing = store.list().unwrap();
+    assert!(listing.foreign.is_empty());
+    let entries = listing.blobs;
     assert_eq!(entries.len(), 2);
     for (key, path) in [(KEY, object), (POOLED, pooled)] {
         let entry = entries.iter().find(|entry| entry.key == key).unwrap();
@@ -138,7 +140,7 @@ fn layout_reopen_and_delete() {
     assert!(!store.exists(KEY).unwrap());
     assert!(store.stat(KEY).unwrap().is_none());
     drop(store);
-    assert!(dir.open().list().unwrap().is_empty());
+    assert!(dir.open().list().unwrap().blobs.is_empty());
 }
 
 #[test]
@@ -174,6 +176,7 @@ fn open_sweeps_temporary_leftovers_and_list_skips_them() {
         store
             .list()
             .unwrap()
+            .blobs
             .iter()
             .map(|entry| entry.key.as_str())
             .collect::<Vec<_>>(),
@@ -202,7 +205,7 @@ fn concurrent_distinct_puts_share_fanout_without_losing_bytes() {
             });
         }
     });
-    assert_eq!(store.list().unwrap().len(), 16);
+    assert_eq!(store.list().unwrap().blobs.len(), 16);
     assert_eq!(fs::read_dir(dir.0.join("tmp")).unwrap().count(), 0);
 }
 
@@ -233,7 +236,7 @@ fn concurrent_same_key_has_one_winner_across_independent_handles() {
     });
     assert_eq!(winners.len(), 1);
     assert_eq!(store.get(KEY).unwrap(), winners);
-    assert_eq!(store.list().unwrap().len(), 1);
+    assert_eq!(store.list().unwrap().blobs.len(), 1);
     assert_eq!(fs::read_dir(dir.0.join("tmp")).unwrap().count(), 0);
 }
 
@@ -247,4 +250,103 @@ fn nested_root_is_created_and_io_errors_propagate() {
     assert_eq!(fs::read_dir(root.join("tmp")).unwrap().count(), 0);
     drop(store);
     assert!(FsBlobStore::open(root.join("objects/01")).is_err());
+}
+
+#[test]
+fn misplaced_valid_keys_are_foreign_and_never_listed_as_blobs() {
+    let dir = Directory::new();
+    let store = dir.open();
+    store.put(KEY, b"real").unwrap();
+    store.put(POOLED, b"pooled").unwrap();
+    let wrong_leaf = dir.0.join("objects/01/24");
+    fs::create_dir(&wrong_leaf).unwrap();
+    let mut foreign = vec![
+        wrong_leaf.join(KEY),
+        dir.0.join("objects/01/23").join(POOLED),
+        dir.0.join("pool/fe").join(KEY),
+        dir.0.join("objects").join(KEY),
+    ];
+    for path in &foreign {
+        fs::write(path, b"misplaced").unwrap();
+    }
+    foreign.sort();
+    let listing = store.list().unwrap();
+    assert_eq!(listing.foreign, foreign);
+    assert_eq!(
+        listing
+            .blobs
+            .iter()
+            .map(|blob| blob.key.as_str())
+            .collect::<Vec<_>>(),
+        [POOLED, KEY]
+    );
+}
+
+#[test]
+fn foreign_files_and_directories_do_not_hide_real_blobs() {
+    let dir = Directory::new();
+    let store = dir.open();
+    store.put(KEY, b"real").unwrap();
+    store.put(POOLED, b"pooled").unwrap();
+    let mut foreign = Vec::new();
+    for leaf in ["objects/01/23", "pool/fe"] {
+        let stray_file = dir.0.join(leaf).join(".DS_Store");
+        fs::write(&stray_file, b"foreign").unwrap();
+        foreign.push(stray_file);
+        // A valid key name still must not turn a directory into a blob.
+        let stray_dir = dir.0.join(leaf).join("b1-0123456789abcdef0123456789abcdee");
+        fs::create_dir(&stray_dir).unwrap();
+        fs::write(stray_dir.join(KEY), b"not a blob").unwrap();
+        foreign.push(stray_dir);
+    }
+    let stray_dir = dir.0.join("objects/foreign");
+    fs::create_dir(&stray_dir).unwrap();
+    foreign.push(stray_dir);
+    let stray_file = dir.0.join("pool/.DS_Store");
+    fs::write(&stray_file, b"foreign").unwrap();
+    foreign.push(stray_file);
+    foreign.sort();
+    let listing = store.list().unwrap();
+    assert_eq!(listing.foreign, foreign);
+    assert_eq!(
+        listing
+            .blobs
+            .iter()
+            .map(|blob| blob.key.as_str())
+            .collect::<Vec<_>>(),
+        [POOLED, KEY]
+    );
+    assert_eq!(store.get(KEY).unwrap(), b"real");
+    assert_eq!(store.get(POOLED).unwrap(), b"pooled");
+}
+
+#[test]
+fn listing_still_propagates_filesystem_errors() {
+    let dir = Directory::new();
+    let store = dir.open();
+    fs::remove_dir(dir.0.join("objects")).unwrap();
+    assert_eq!(store.list().unwrap_err().kind(), ErrorKind::NotFound);
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_names_and_symlinks_are_foreign() {
+    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+
+    let dir = Directory::new();
+    let store = dir.open();
+    store.put(KEY, b"real").unwrap();
+    let leaf = dir.0.join("objects/01/23");
+    let non_utf8 = leaf.join(std::ffi::OsString::from_vec(vec![0xff]));
+    fs::write(&non_utf8, b"foreign").unwrap();
+    let linked_file = leaf.join("b1-0123456789abcdef0123456789abcdee");
+    symlink(leaf.join(KEY), &linked_file).unwrap();
+    let linked_dir = dir.0.join("pool/01");
+    symlink(&leaf, &linked_dir).unwrap();
+    let listing = store.list().unwrap();
+    let mut foreign = vec![non_utf8, linked_file, linked_dir];
+    foreign.sort();
+    assert_eq!(listing.foreign, foreign);
+    assert_eq!(listing.blobs.len(), 1);
+    assert_eq!(listing.blobs[0].key, KEY);
 }
