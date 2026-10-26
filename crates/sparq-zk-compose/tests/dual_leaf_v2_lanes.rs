@@ -1113,7 +1113,7 @@ fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
             &hook,
             &lexical,
         ),
-        "Cannot satisfy constraint",
+        "call to assert_max_bit_size",
     );
     // The dedicated boolean member: the `{0, 1}` constraint refuses it.
     assert_refused(
