@@ -1,15 +1,13 @@
 //! Parse an ODRL policy expressed in RDF into the typed [`Policy`] model.
 //!
-//! The parser runs metered SPARQL queries over the loaded
-//! policy graph — ODRL evaluation *is* a SPARQL/SHACL/N3 workload, so extracting
-//! the model with the engine sparq already ships keeps this crate in-family and
-//! dependency-light (no bespoke RDF walker).
+//! The parser extracts policy fields through metered predicate-index scans and
+//! SPARQL queries over the loaded graph. Independent field scans keep constraint
+//! multiplicities additive; rule membership and constraint attachments are shared
+//! across direct constraints, logical constraints and expansion checks.
 //!
-//! Rule and constraint nodes are matched by **variable** (never by a literal
-//! blank-node label), because real ODRL policies overwhelmingly express rules,
-//! constraints and duties as *blank nodes*; the whole rule structure is joined
-//! in one query per (rule-kind, attribute) so a blank-node constraint is bound
-//! through its incident edge, not re-named.
+//! Rule and constraint nodes retain their graph identity, including blank nodes.
+//! Predicate scans preserve the node-listing query's index order, while compound
+//! combinators are still bound by variable in the engine.
 //!
 //! Input forms accepted by [`parse_policy_str`]: any RDF serialization
 //! `sparq_core::Graph::load_str` accepts (`turtle`, `ntriples`, …). The policy
@@ -22,6 +20,7 @@ use crate::model::{
 };
 use crate::validate::ValidatedPolicy;
 use oxrdf::{Literal, Term};
+use sparq_core::dict::Id;
 use sparq_core::meter::{Dim, Exceeded, Ledger, Limits, TermRef};
 use sparq_core::temporal::Temporal;
 use sparq_core::Graph;
@@ -73,7 +72,7 @@ pub fn parse_policy_str_with_memberships(
 /// the main parser's repeated-compound workload. Bytes cover retained terms and
 /// expanded atom copies: wrappers use a source-sized base (or graph fallback)
 /// plus an input-sized retention allowance and a node-bounded copy allowance.
-/// Query rows cover twice the bulk-query count times the graph's triple count
+/// Query rows cover twice the extraction-pass count times the graph's triple count
 /// (at least one). Corpus parity is checked against the frozen main
 /// parser in `tests/parse_differential.rs`. That corpus needs shallow nesting
 /// and small compounds; defaults retain the legacy margins. Shared compounds
@@ -150,7 +149,7 @@ fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> Limits {
     limits
 }
 
-// Upper bound on the fixed set of bulk queries, including memberships.
+// Upper bound on the fixed bulk queries and predicate scans, including memberships.
 const POLICY_QUERY_COUNT: usize = 64;
 const POLICY_NODE_CEILING: usize = 1_906_000;
 
@@ -197,6 +196,28 @@ fn query_metered(graph: &Graph, sparql: &str, ledger: &mut Ledger) -> Result<Que
         .charge(Dim::QueryRows, result.len())
         .map_err(|e| ledger_error(e, ConstraintBudget::Rows))?;
     Ok(result)
+}
+
+// Predicate-bound scans are contiguous index slices. Charge every scanned
+// triple, including rows a consumer filters out, before decoding any terms.
+fn scan_property(
+    graph: &Graph,
+    iri: &str,
+    ledger: &mut Ledger,
+    mut visit: impl FnMut(Id, Id),
+) -> Result<(), String> {
+    let predicate = graph
+        .dict()
+        .lookup(&oxrdf::NamedNode::new_unchecked(iri).into());
+    let scan = graph.store().scan(&[None, Some(predicate), None]);
+    ledger
+        .charge(Dim::QueryRows, scan.rows.len())
+        .map_err(|e| ledger_error(e, ConstraintBudget::Rows))?;
+    for row in scan.rows.iter() {
+        let [subject, _, object] = scan.to_spo(row);
+        visit(subject, object);
+    }
+    Ok(())
 }
 
 /// The `member odrl:partOf collection` edges `graph` states (default graph) whose
@@ -291,7 +312,7 @@ pub fn parse_policy_metered(graph: &Graph, ledger: &mut Ledger) -> Result<Valida
     let lists = rdf_list_table(graph, ledger)?;
     let permissions = rules(graph, "permission", true, &lists, ledger)?;
     let prohibitions = rules(graph, "prohibition", false, &lists, ledger)?;
-    refuse_unsupported_rule_heads(graph, ledger)?;
+    refuse_unsupported_rule_heads(graph, &lists, ledger)?;
     let conflict = policy_conflict(graph, ledger)?;
     let party_collections = party_collections(graph, ledger)?;
     Policy {
@@ -482,20 +503,18 @@ fn rules(
         graph,
         &format!("SELECT ?rule ?rule2 WHERE {{ ?policy <{ODRL_NS}{kind}> ?rule . BIND(?rule AS ?rule2) }}"), ledger)?;
 
-    let actions = group_by_first(
-        graph,
-        &format!("SELECT ?rule ?a WHERE {{ ?rule <{ODRL_NS}action> ?a . FILTER EXISTS {{?policy <{ODRL_NS}{kind}> ?rule}} }}"), ledger)?;
-    let targets = group_by_first(
-        graph,
-        &format!("SELECT ?rule ?t WHERE {{ ?rule <{ODRL_NS}target> ?t . FILTER EXISTS {{?policy <{ODRL_NS}{kind}> ?rule}} }}"), ledger)?;
-    let assignees = group_by_first(
-        graph,
-        &format!("SELECT ?rule ?p WHERE {{ ?rule <{ODRL_NS}assignee> ?p . FILTER EXISTS {{?policy <{ODRL_NS}{kind}> ?rule}} }}"), ledger)?;
-    let assigners = group_by_first(
-        graph,
-        &format!("SELECT ?rule ?p WHERE {{ ?rule <{ODRL_NS}assigner> ?p . FILTER EXISTS {{?policy <{ODRL_NS}{kind}> ?rule}} }}"), ledger)?;
+    ensure_constraint_roots(graph, lists, ledger)?;
+    let roots_ref = lists.roots.borrow();
+    let rule_ids = roots_ref
+        .as_ref()
+        .expect("loaded above")
+        .rules_for_kind(kind);
+    let actions = rule_attributes(graph, rule_ids, "action", ledger)?;
+    let targets = rule_attributes(graph, rule_ids, "target", ledger)?;
+    let assignees = rule_attributes(graph, rule_ids, "assignee", ledger)?;
+    let assigners = rule_attributes(graph, rule_ids, "assigner", ledger)?;
 
-    let mut constraints = constraints_for(graph, kind, "constraint", lists, ledger)?;
+    let mut constraints = constraints_for(graph, kind, lists, ledger)?;
     let mut logical_constraints = logical_constraints_for(graph, kind, lists, ledger)?;
     let mut duties = if with_duties {
         duties_for(graph, kind, ledger)?
@@ -520,6 +539,25 @@ fn rules(
             duties: duties.remove(&rule_key).unwrap_or_default(),
         });
     }
+    Ok(out)
+}
+
+// A semijoin by dictionary id avoids re-evaluating rule membership for each
+// attribute value. Predicate index order retains the original first value.
+fn rule_attributes(
+    graph: &Graph,
+    rules: &BTreeSet<Id>,
+    property: &str,
+    ledger: &mut Ledger,
+) -> Result<BTreeMap<String, Vec<Term>>, String> {
+    let mut out: BTreeMap<String, Vec<Term>> = BTreeMap::new();
+    scan_property(graph, &format!("{ODRL_NS}{property}"), ledger, |s, o| {
+        if rules.contains(&s) {
+            out.entry(node_key(&graph.dict().term(s)))
+                .or_default()
+                .push(graph.dict().term(o));
+        }
+    })?;
     Ok(out)
 }
 
@@ -561,6 +599,7 @@ struct ListTable {
     raw: RefCell<Option<BTreeMap<String, RawConstraint>>>,
     atoms: RefCell<Option<BTreeMap<String, Constraint>>>,
     expansion_checked: std::cell::Cell<bool>,
+    roots: RefCell<Option<ConstraintRoots>>,
     charged_cells: RefCell<BTreeSet<String>>,
     #[cfg(test)]
     walks: std::cell::Cell<usize>,
@@ -634,6 +673,7 @@ fn rdf_list_table(graph: &Graph, ledger: &mut Ledger) -> Result<ListTable, Strin
         raw: RefCell::new(None),
         atoms: RefCell::new(None),
         expansion_checked: std::cell::Cell::new(false),
+        roots: RefCell::new(None),
         resolved: RefCell::new(BTreeMap::new()),
         charged_cells: RefCell::new(BTreeSet::new()),
         #[cfg(test)]
@@ -977,7 +1017,79 @@ impl RawConstraint {
     }
 }
 
-/// Parse the *atomic* constraints attached (via `odrl:<pred>`) to each rule of
+#[derive(Default)]
+struct ConstraintRoots {
+    permission: Vec<(String, String)>,
+    prohibition: Vec<(String, String)>,
+    permission_rules: BTreeSet<Id>,
+    prohibition_rules: BTreeSet<Id>,
+}
+
+impl ConstraintRoots {
+    fn rules_for_kind(&self, kind: &str) -> &BTreeSet<Id> {
+        match kind {
+            "permission" => &self.permission_rules,
+            "prohibition" => &self.prohibition_rules,
+            _ => unreachable!("fixed rule kind"),
+        }
+    }
+
+    fn for_kind(&self, kind: &str) -> &[(String, String)] {
+        match kind {
+            "permission" => &self.permission,
+            "prohibition" => &self.prohibition,
+            _ => unreachable!("fixed rule kind"),
+        }
+    }
+}
+
+fn ensure_constraint_roots(
+    graph: &Graph,
+    lists: &ListTable,
+    ledger: &mut Ledger,
+) -> Result<(), String> {
+    if lists.roots.borrow().is_some() {
+        return Ok(());
+    }
+    let mut permissions = BTreeSet::new();
+    let mut prohibitions = BTreeSet::new();
+    for (kind, rules) in [
+        ("permission", &mut permissions),
+        ("prohibition", &mut prohibitions),
+    ] {
+        scan_property(graph, &format!("{ODRL_NS}{kind}"), ledger, |_, rule| {
+            rules.insert(rule);
+        })?;
+    }
+    let mut roots = ConstraintRoots::default();
+    scan_property(
+        graph,
+        &format!("{ODRL_NS}constraint"),
+        ledger,
+        |rule, constraint| {
+            let permission = permissions.contains(&rule);
+            let prohibition = prohibitions.contains(&rule);
+            if permission || prohibition {
+                let pair = (
+                    node_key(&graph.dict().term(rule)),
+                    node_key(&graph.dict().term(constraint)),
+                );
+                if permission {
+                    roots.permission.push(pair.clone());
+                }
+                if prohibition {
+                    roots.prohibition.push(pair);
+                }
+            }
+        },
+    )?;
+    roots.permission_rules = permissions;
+    roots.prohibition_rules = prohibitions;
+    *lists.roots.borrow_mut() = Some(roots);
+    Ok(())
+}
+
+/// Parse the *atomic* constraints attached via `odrl:constraint` to each rule of
 /// `kind`, keyed by rule node. Constraint *nodes* are bound by variable, so
 /// blank-node constraints are handled correctly.
 ///
@@ -995,41 +1107,28 @@ impl RawConstraint {
 fn constraints_for(
     graph: &Graph,
     kind: &str,
-    pred: &str,
     lists: &ListTable,
     ledger: &mut Ledger,
 ) -> Result<BTreeMap<String, Vec<Constraint>>, String> {
-    // Enumerate nodes independently of their fields. Missing fields still produce
-    // the same guard, and this query alone determines first-seen output order.
-    let q = format!(
-        "SELECT ?rule ?c WHERE {{ ?rule <{ODRL_NS}{pred}> ?c . FILTER EXISTS {{ ?policy <{ODRL_NS}{kind}> ?rule }} }}"
-    );
-    let res = query_metered(graph, &q, ledger)?;
-    let mut order = Vec::new();
-    let mut seen = BTreeSet::new();
-    for row in res.rows {
-        let mut it = row.into_iter();
-        let (Some(rule), Some(c)) = (it.next().flatten(), it.next().flatten()) else {
-            continue;
-        };
-        let rkey = node_key(&rule);
-        let ckey = node_key(&c);
-        if seen.insert((rkey.clone(), ckey.clone())) {
-            order.push((rkey, ckey.clone()));
-        }
-    }
+    // The predicate scan retains the node-listing query's index order, shared
+    // with logical assembly and the policy-wide expansion preflight.
+    ensure_constraint_roots(graph, lists, ledger)?;
+    let roots = lists.roots.borrow();
+    let order = roots.as_ref().expect("loaded above").for_kind(kind);
     ensure_raw_constraints(graph, lists, ledger)?;
     let acc_ref = lists.raw.borrow();
     let acc = acc_ref.as_ref().expect("loaded above");
     let missing = RawConstraint::default();
     let mut out: BTreeMap<String, Vec<Constraint>> = BTreeMap::new();
     for (rkey, ckey) in order {
-        let raw = acc.get(&ckey).unwrap_or(&missing);
+        let raw = acc.get(ckey).unwrap_or(&missing);
         if !raw.is_logical {
             ledger
                 .charge(Dim::Nodes, 1)
                 .map_err(|e| ledger_error(e, ConstraintBudget::Nodes))?;
-            out.entry(rkey).or_default().push(raw.build(lists, ledger)?);
+            out.entry(rkey.clone())
+                .or_default()
+                .push(raw.build(lists, ledger)?);
         }
     }
     Ok(out)
@@ -1063,36 +1162,34 @@ fn absorb_properties(
         "rightOperandReference",
         "unit",
     ] {
-        let q = format!("SELECT ?c ?value WHERE {{ ?c <{ODRL_NS}{property}> ?value }}");
-        for row in query_metered(graph, &q, ledger)?.rows {
-            let mut it = row.into_iter();
-            let (Some(c), Some(v)) = (it.next().flatten(), it.next().flatten()) else {
-                continue;
-            };
-            let raw = acc.entry(node_key(&c)).or_default();
+        scan_property(graph, &format!("{ODRL_NS}{property}"), ledger, |c, v| {
+            let ckey = node_key(&graph.dict().term(c));
+            let v = graph.dict().term(v);
+            let raw = acc.entry(ckey.clone()).or_default();
             match property {
                 "leftOperand" => raw.absorb(Some(v), None, None, false),
                 "operator" => raw.absorb(None, Some(v), None, false),
                 "rightOperand" => {
-                    direct_rights.insert(node_key(&c));
+                    direct_rights.insert(ckey.clone());
                     raw.absorb(None, None, Some(v), false);
                 }
                 // The old OPTIONAL reused ?right: a direct operand takes precedence
                 // over references. Preserve that behavior when both are authored.
-                "rightOperandReference" if !direct_rights.contains(&node_key(&c)) => {
+                "rightOperandReference" if !direct_rights.contains(&ckey) => {
                     raw.absorb(None, None, Some(v), false)
                 }
                 "unit" => raw.unsupported = true,
                 _ => {}
             }
-        }
+        })?;
     }
     if logical {
-        let q = format!("SELECT ?c ?value WHERE {{ ?c ?p ?value . VALUES ?p {{ <{ODRL_NS}and> <{ODRL_NS}or> <{ODRL_NS}xone> }} }}");
-        for row in query_metered(graph, &q, ledger)?.rows {
-            if let Some(Some(c)) = row.first() {
-                acc.entry(node_key(c)).or_default().is_logical = true;
-            }
+        for property in ["and", "or", "xone"] {
+            scan_property(graph, &format!("{ODRL_NS}{property}"), ledger, |c, _| {
+                acc.entry(node_key(&graph.dict().term(c)))
+                    .or_default()
+                    .is_logical = true;
+            })?;
         }
     }
     Ok(())
@@ -1186,48 +1283,30 @@ fn logical_constraints_for(
     // from the pre-loaded `lists.rest_only` set. sq-dkuff.
     fold_list_operands(&mut lc_defs, atoms, lists, ledger)?;
 
-    // (3) The rule → direct-constraint-node map (which of a rule's `odrl:constraint`
-    // objects are LogicalConstraint nodes), in rule/graph order.
-    let rule_lc_q = format!(
-        "SELECT ?rule ?c WHERE {{ \
-           ?rule <{ODRL_NS}constraint> ?c . \
-           FILTER EXISTS {{ ?policy <{ODRL_NS}{kind}> ?rule }} \
-         }}"
-    );
-    let rule_lc_res = query_metered(graph, &rule_lc_q, ledger)?;
+    // (3) Atomic and compound attachments use the same first-seen roots.
+    ensure_constraint_roots(graph, lists, ledger)?;
+    let roots_ref = lists.roots.borrow();
+    let roots = roots_ref.as_ref().expect("loaded above");
     if !lists.expansion_checked.get() {
-        let all_roots = query_metered(graph, &format!(
-            "SELECT ?rule ?c WHERE {{ ?rule <{ODRL_NS}constraint> ?c . FILTER EXISTS {{ ?policy <{ODRL_NS}permission>|<{ODRL_NS}prohibition> ?rule }} }}"
-        ), ledger)?;
-        preflight_expansions(&all_roots, &lc_defs, ledger)?;
+        preflight_expansions(roots, &lc_defs, ledger)?;
         lists.expansion_checked.set(true);
     }
     let mut out: BTreeMap<String, Vec<LogicalConstraint>> = BTreeMap::new();
-    let mut seen_rule_c: BTreeMap<String, ()> = BTreeMap::new();
-    for row in rule_lc_res.rows {
-        let mut it = row.into_iter();
-        let (Some(Some(rule_t)), Some(Some(c_t))) = (it.next(), it.next()) else {
-            continue;
-        };
-        let rkey = node_key(&rule_t);
-        let ckey = node_key(&c_t);
-        if seen_rule_c.insert(format!("{rkey}|{ckey}"), ()).is_some() {
-            continue;
-        }
+    for (rkey, ckey) in roots.for_kind(kind) {
         // Only assemble compound nodes here (atomic direct constraints are handled by
         // constraints_for); a node is compound iff it has a combinator edge.
-        if lc_defs.contains_key(&ckey) {
+        if lc_defs.contains_key(ckey) {
             let mut stack = BTreeMap::new();
             // Every rule and compound consumes the same policy-wide ledger.
-            let lc = assemble_logical(&ckey, &lc_defs, atoms, &mut stack, ledger)?;
-            out.entry(rkey).or_default().push(lc);
+            let lc = assemble_logical(ckey, &lc_defs, atoms, &mut stack, ledger)?;
+            out.entry(rkey.clone()).or_default().push(lc);
         }
     }
     Ok(out)
 }
 
 fn preflight_expansions(
-    rows: &QueryResult,
+    roots: &ConstraintRoots,
     defs: &BTreeMap<String, LcDef>,
     ledger: &Ledger,
 ) -> Result<(), String> {
@@ -1264,13 +1343,9 @@ fn preflight_expansions(
     let mut total = 0usize;
     let mut memo = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    for row in &rows.rows {
-        let (Some(Some(rule)), Some(Some(c))) = (row.first(), row.get(1)) else {
-            continue;
-        };
-        let key = node_key(c);
-        if defs.contains_key(&key) && seen.insert((node_key(rule), key.clone())) {
-            if let Some(n) = size(&key, defs, &mut memo, &mut BTreeSet::new()) {
+    for (rule, key) in roots.permission.iter().chain(&roots.prohibition) {
+        if defs.contains_key(key) && seen.insert((rule.clone(), key.clone())) {
+            if let Some(n) = size(key, defs, &mut memo, &mut BTreeSet::new()) {
                 total = total.saturating_add(n);
             }
         }
@@ -1633,41 +1708,47 @@ pub(crate) fn node_has_guard(n: &ConstraintNode) -> bool {
 /// prohibition whose action, target or assignee is a blank node (a refined action, an
 /// anonymous collection) can never match a request, so it never fires and a sibling
 /// permission grants. Both shapes refuse the whole policy (fail-closed).
-fn refuse_unsupported_rule_heads(graph: &Graph, ledger: &mut Ledger) -> Result<(), String> {
-    let q = format!(
-        "SELECT ?rule ?n WHERE {{ \
-           ?rule <{ODRL_NS}action>|<{ODRL_NS}target>|<{ODRL_NS}assignee> ?n . \
-           FILTER EXISTS {{ ?policy <{ODRL_NS}permission>|<{ODRL_NS}prohibition> ?rule }} \
-           FILTER EXISTS {{ ?n <{ODRL_NS}refinement> ?r }} \
-         }} LIMIT 1"
-    );
-    if let Some(row) = query_metered(graph, &q, ledger)?.rows.into_iter().next() {
-        let n = row
-            .get(1)
-            .cloned()
-            .flatten()
-            .map(|t| node_key(&t))
-            .unwrap_or_default();
+fn refuse_unsupported_rule_heads(
+    graph: &Graph,
+    lists: &ListTable,
+    ledger: &mut Ledger,
+) -> Result<(), String> {
+    ensure_constraint_roots(graph, lists, ledger)?;
+    let roots_ref = lists.roots.borrow();
+    let roots = roots_ref.as_ref().expect("loaded above");
+    let mut refined = BTreeSet::new();
+    scan_property(graph, &format!("{ODRL_NS}refinement"), ledger, |s, _| {
+        refined.insert(s);
+    })?;
+    let mut refined_head = None;
+    let mut blank_prohibition = None;
+    for property in ["action", "target", "assignee"] {
+        scan_property(graph, &format!("{ODRL_NS}{property}"), ledger, |s, o| {
+            let prohibition = roots.prohibition_rules.contains(&s);
+            if refined_head.is_none()
+                && refined.contains(&o)
+                && (prohibition || roots.permission_rules.contains(&s))
+            {
+                refined_head = Some(o);
+            }
+            if blank_prohibition.is_none()
+                && prohibition
+                && matches!(graph.dict().term(o), Term::BlankNode(_))
+            {
+                blank_prohibition = Some(s);
+            }
+        })?;
+    }
+    if let Some(n) = refined_head {
+        let n = node_key(&graph.dict().term(n));
         return Err(format!(
             "a rule's action, target or assignee ({n}) carries an odrl:refinement, which is \
              not supported; reading the rule without it would widen what it grants or \
              disable what it forbids, so the policy is refused (fail-closed)"
         ));
     }
-    let q = format!(
-        "SELECT ?rule ?n WHERE {{ \
-           ?rule <{ODRL_NS}action>|<{ODRL_NS}target>|<{ODRL_NS}assignee> ?n . \
-           FILTER EXISTS {{ ?policy <{ODRL_NS}prohibition> ?rule }} \
-           FILTER(isBlank(?n)) \
-         }} LIMIT 1"
-    );
-    if let Some(row) = query_metered(graph, &q, ledger)?.rows.into_iter().next() {
-        let r = row
-            .first()
-            .cloned()
-            .flatten()
-            .map(|t| node_key(&t))
-            .unwrap_or_default();
+    if let Some(r) = blank_prohibition {
+        let r = node_key(&graph.dict().term(r));
         return Err(format!(
             "prohibition {r} has a blank-node action, target or assignee, which can never \
              match a request; the prohibition would never fire and a sibling permission \
@@ -1802,6 +1883,122 @@ fn is_numeric(dt: oxrdf::NamedNodeRef<'_>) -> bool {
 #[cfg(test)]
 mod metered_tests {
     use super::*;
+
+    #[test]
+    fn indexed_scan_charges_candidates_before_visiting() {
+        let graph = Graph::load_str(
+            "<urn:a> <urn:p> <urn:x> . <urn:b> <urn:p> <urn:y> . <urn:c> <urn:other> <urn:z> .",
+            "turtle",
+        )
+        .unwrap();
+        let mut limits = Limits::default();
+        limits.query_rows = 1;
+        let mut ledger = Ledger::new(limits);
+        let mut visited = Vec::new();
+        let err =
+            scan_property(&graph, "urn:p", &mut ledger, |s, o| visited.push((s, o))).unwrap_err();
+        assert_eq!(
+            constraint_budget_refusal(&err),
+            Some(ConstraintBudget::Rows)
+        );
+        assert!(visited.is_empty(), "charge before processing any candidate");
+        assert_eq!(ledger.spent(Dim::QueryRows), 0);
+
+        limits.query_rows = 2;
+        let mut ledger = Ledger::new(limits);
+        scan_property(&graph, "urn:p", &mut ledger, |s, o| visited.push((s, o))).unwrap();
+        assert_eq!(ledger.spent(Dim::QueryRows), 2);
+        assert_eq!(visited.len(), 2);
+    }
+
+    #[test]
+    fn indexed_roots_preserve_query_order_and_share_scans() {
+        let graph = Graph::load_str(
+            &format!("@prefix o: <{ODRL_NS}> .
+                <urn:p> o:permission <urn:shared>, _:permission ; o:prohibition <urn:shared>, _:prohibition .
+                <urn:other> o:permission <urn:shared> .
+                <urn:shared> o:constraint <urn:z>, <urn:a> .
+                _:permission o:constraint _:c . _:prohibition o:constraint <urn:z> .
+                <urn:unattached> o:constraint <urn:ignored> ; o:action o:read .
+                <urn:shared> o:action o:read, o:use ; o:target <urn:z>, <urn:a> ;
+                    o:assignee _:party, <urn:agent> ; o:assigner <urn:owner> .
+                _:permission o:action o:write ; o:target <urn:literal-target> ."),
+            "turtle",
+        ).unwrap();
+        let mut ledger = Ledger::new(Limits::default());
+        let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+        ensure_constraint_roots(&graph, &lists, &mut ledger).unwrap();
+        let spent = ledger.spent(Dim::QueryRows);
+        ensure_constraint_roots(&graph, &lists, &mut ledger).unwrap();
+        assert_eq!(
+            ledger.spent(Dim::QueryRows),
+            spent,
+            "reuse the policy's roots"
+        );
+        let roots = lists.roots.borrow();
+        for kind in ["permission", "prohibition"] {
+            let query = format!("SELECT ?rule ?c WHERE {{ ?rule <{ODRL_NS}constraint> ?c . FILTER EXISTS {{ ?policy <{ODRL_NS}{kind}> ?rule }} }}");
+            let rows = query_metered(&graph, &query, &mut Ledger::new(Limits::default())).unwrap();
+            let expected: Vec<_> = rows
+                .rows
+                .iter()
+                .map(|row| {
+                    (
+                        node_key(row[0].as_ref().unwrap()),
+                        node_key(row[1].as_ref().unwrap()),
+                    )
+                })
+                .collect();
+            let roots = roots.as_ref().unwrap();
+            assert_eq!(roots.for_kind(kind), expected);
+            for property in ["action", "target", "assignee", "assigner"] {
+                let query = format!("SELECT ?rule ?value WHERE {{ ?rule <{ODRL_NS}{property}> ?value . FILTER EXISTS {{ ?policy <{ODRL_NS}{kind}> ?rule }} }}");
+                let expected =
+                    group_by_first(&graph, &query, &mut Ledger::new(Limits::default())).unwrap();
+                let actual =
+                    rule_attributes(&graph, roots.rules_for_kind(kind), property, &mut ledger)
+                        .unwrap();
+                assert_eq!(actual, expected, "{kind} {property}");
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_rule_heads_preserve_refusals_and_membership() {
+        let check = |rdf: &str| {
+            let graph =
+                Graph::load_str(&format!("@prefix o: <{ODRL_NS}> . {rdf}"), "turtle").unwrap();
+            let mut ledger = Ledger::new(Limits::default());
+            let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+            refuse_unsupported_rule_heads(&graph, &lists, &mut ledger)
+        };
+        for kind in ["permission", "prohibition"] {
+            for property in ["action", "target", "assignee"] {
+                let rdf = format!("<urn:p> o:{kind} <urn:r> . <urn:r> o:{property} <urn:head> . <urn:head> o:refinement <urn:c> .");
+                let err = check(&rdf).unwrap_err();
+                assert!(err.contains("carries an odrl:refinement"), "{err}");
+                let rdf = format!("<urn:p> o:{kind} <urn:r> . <urn:r> o:{property} _:head .");
+                let result = check(&rdf);
+                if kind == "prohibition" {
+                    assert!(result.unwrap_err().contains("blank-node"));
+                } else {
+                    assert!(result.is_ok());
+                }
+            }
+        }
+        assert!(check(
+            "<urn:p> o:permission <urn:r> . <urn:r> o:action o:read .
+            <urn:unattached> o:action _:head . _:head o:refinement <urn:c> ."
+        )
+        .is_ok());
+        // A later refinement retains priority over an earlier blank head.
+        let err = check(
+            "<urn:p> o:prohibition <urn:r> . <urn:r> o:action _:head ;
+            o:target <urn:target> . <urn:target> o:refinement <urn:c> .",
+        )
+        .unwrap_err();
+        assert!(err.contains("carries an odrl:refinement"), "{err}");
+    }
 
     #[test]
     fn query_cap_bounds_intermediate_rows_before_final_charge() {

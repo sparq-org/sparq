@@ -3,7 +3,7 @@
 `default_policy_limits() -> sparq_core::meter::Limits` returns a template. The
 ordinary string and graph wrappers size it to their input; explicit metered calls
 use the caller's limits exactly. One ledger covers both permission and prohibition
-rules, all compounds, atomic constraints, cached RDF lists and extraction queries.
+rules, all compounds, atomic constraints, cached RDF lists, index scans and extraction queries.
 
 - **Depth:** 32 nested descents below the outer compound, retaining the earlier
   parser's bound. The existing policy and bridge corpus needs only shallow nesting.
@@ -27,17 +27,20 @@ rules, all compounds, atomic constraints, cached RDF lists and extraction querie
   multiplier refused an existing shared-compound policy; the expansion allowance
   preserves its result. Explicit caller byte limits remain strict. Term bytes
   are charged before cloning retained atoms or expanded copies.
-- **Query rows:** ordinary wrappers allow twice the maximum bulk-query count times
+- **Query rows:** ordinary wrappers allow twice the maximum extraction-pass count times
   `max(1, triples)`. The graph-independent template uses the node ceiling as its
-  input-size reference. Every extraction query runs with the ledger's remaining
-  row allowance and charges its returned rows. Constraint fields, duty fields and
-  list fields are queried separately. Engine intermediate rows share the query's
-  row cap, even if a later projection would reduce them.
+  input-size reference. Each predicate-index scan charges every candidate triple
+  before decoding its terms, including candidates later filtered by rule membership.
+  Constraint fields are scanned independently. Rule membership and constraint roots
+  are indexed once per policy and reused by both rule kinds and expansion checks.
+  Each remaining SPARQL query runs with the ledger's remaining row allowance and
+  charges its returned rows. Engine intermediate rows share the query's row cap,
+  even if a later projection would reduce them.
 
 RDF list heads cache resolved members as `Rc<[Term]>`; repeated uses share that
 resolution. Each cell consumes nodes on its first walk; subsequent member copies
 still consume bytes. Raw field and typed atom tables are retained once for both
-rule kinds, so atomic constraint fields are queried once across the policy.
+rule kinds, so atomic constraint fields are scanned once across the policy.
 
 ```rust
 use sparq_core::{Graph, meter::Ledger};
