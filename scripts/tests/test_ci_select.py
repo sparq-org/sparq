@@ -202,6 +202,31 @@ class OwnershipMapTests(unittest.TestCase):
         self.assertEqual(sel.mode, "selected")
         self.assertEqual(sel.affected, [])
 
+    def test_pattern_scope_data_only_skips_rust_matrix(self):
+        entries = cs.load_ownership_map(str(MAP_FILE))
+        for name in ("README.md", "workbox-2026-07-11.json"):
+            with self.subTest(name=name):
+                sel = cs.select([f"bench/pattern-scope/{name}"], self.meta, entries)
+                self.assertEqual(sel.mode, "selected")
+                self.assertEqual(sel.affected, [])
+                self.assertEqual(sel.change_class, "map-safe")
+                self.assertEqual(sel.reason, "skipped-by-class: map-safe — no Rust matrix affected")
+
+    def test_pattern_scope_mixed_change_keeps_crate_lane(self):
+        pkg = _pkg("sparq-solid", "crates/sparq-solid", [_dep("core")])
+        self.meta["packages"].append(pkg)
+        self.meta["workspace_members"].append(pkg["id"])
+        entries = cs.load_ownership_map(str(MAP_FILE))
+        paths = ["bench/pattern-scope/README.md", "crates/sparq-solid/src/lib.rs"]
+        for changed in (paths, list(reversed(paths))):
+            with self.subTest(paths=changed):
+                sel = cs.select(changed, self.meta, entries)
+                self.assertEqual(sel.mode, "selected")
+                self.assertEqual(sel.affected, ["sparq-solid"])
+                self.assertEqual(sel.change_class, "mixed")
+                self.assertTrue(cs.lane_runs(sel, ["sparq-solid"]))
+                self.assertFalse(cs.lane_runs(sel, ["core"]))
+
     def test_map_attributes_out_of_crate_path(self):
         # The #1392 refinement: the REAL fetched W3C path is tests/w3c/** and it
         # is read by the conformance crate (here mapped to `engine`).
