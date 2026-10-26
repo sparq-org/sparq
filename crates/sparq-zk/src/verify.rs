@@ -439,24 +439,24 @@ fn flip_cmp(op: FilterCmp) -> FilterCmp {
 /// by any honest proof and must fail closed (audit hardening, lexical-form
 /// note).
 fn comparison_filter(op: FilterCmp, a: &Expression, b: &Expression) -> Option<QueryFilter> {
-    let var_of = |e: &Expression| match e {
-        Expression::Variable(v) => Some(v.as_str().to_string()),
-        _ => None,
-    };
-    let int_of = |e: &Expression| match e {
-        Expression::Literal(l) if l.datatype().as_str() == XSD_INTEGER => {
-            canonical_u64(l.value())
-        }
-        _ => None,
-    };
-    if let (Some(variable), Some(bound)) = (var_of(a), int_of(b)) {
-        return Some(QueryFilter { variable, op, bound });
+    let typed = TypedQueryFilter::from_comparison(op, a, b)?;
+    query_filter_u64(&typed)
+}
+
+/// Reduce a typed conjunct to the established string-lane integer view.
+///
+/// This is the same reduction used by [`fragment_filters`]: only canonical,
+/// non-negative `xsd:integer` literals that fit `u64` have a view. No query is
+/// parsed here; `None` means this conjunct needs a typed value-lane proof.
+pub fn query_filter_u64(filter: &TypedQueryFilter) -> Option<QueryFilter> {
+    if filter.constant.datatype().as_str() != XSD_INTEGER {
+        return None;
     }
-    // `const op ?var` — flip so the variable is on the left.
-    if let (Some(bound), Some(variable)) = (int_of(a), var_of(b)) {
-        return Some(QueryFilter { variable, op: flip_cmp(op), bound });
-    }
-    None
+    Some(QueryFilter {
+        variable: filter.variable.clone(),
+        op: filter.op,
+        bound: canonical_u64(filter.constant.value())?,
+    })
 }
 
 /// Parse a canonical non-negative xsd:integer lexical form to `u64`. Rejects
@@ -2178,6 +2178,29 @@ mod tests {
     fn no_filter_yields_empty() {
         let fs = fragment_filters("SELECT ?s ?o WHERE { ?s <http://ex/age> ?o }").unwrap();
         assert!(fs.is_empty());
+    }
+
+    #[test]
+    fn typed_integer_reduction_matches_the_established_filter_view() {
+        for (expr, reducible) in [
+            ("?o >= 18", true), ("18 < ?o", true), ("!(?o = 18)", true),
+            ("?o = 18446744073709551615", true),
+            ("?o = 18446744073709551616", false),
+            ("?o = \"018\"^^<http://www.w3.org/2001/XMLSchema#integer>", false),
+            ("?o = \"+18\"^^<http://www.w3.org/2001/XMLSchema#integer>", false),
+            ("?o = \"-1\"^^<http://www.w3.org/2001/XMLSchema#integer>", false),
+            ("?o = 1.5", false), ("?o = true", false), ("?o = \"18\"", false),
+        ] {
+            let query = format!("SELECT * WHERE {{ ?s ?p ?o FILTER({expr}) }}");
+            let typed = fragment_typed_filters(&query).unwrap();
+            let view = query_filter_u64(&typed[0]);
+            assert_eq!(view.is_some(), reducible, "{expr}");
+            if let Some(view) = view {
+                assert_eq!(fragment_filters(&query).unwrap(), vec![view]);
+            } else {
+                assert!(fragment_filters(&query).is_err(), "{expr}");
+            }
+        }
     }
 
     // =====================================================================

@@ -14,10 +14,6 @@
 # ---------------------------------------------------------------------------
 # server: "sparq-server" → SPARQL endpoint, port 3030, health GET /health
 # server: "lws"          → Solid/LWS server, port 3000, health GET /livez + /readyz
-#                          NOTE: lws values below are marked "(activates once sq-lmz40 ships)"
-#                          because the ghcr.io/sparq-org/sparq-lws-core image is not yet
-#                          published. Set server: lws once sq-lmz40 merges and the image
-#                          is available.
 server: sparq-server
 
 # ---------------------------------------------------------------------------
@@ -80,7 +76,6 @@ sparqServer:
 
 # ---------------------------------------------------------------------------
 # LWS / sparq-lws-core config (ignored when server=sparq-server)
-# ACTIVATES ONCE sq-lmz40 SHIPS (image not yet published).
 # ---------------------------------------------------------------------------
 lws:
   # REQUIRED for any production LWS deploy. LWS cannot start without a trusted OIDC IdP.

@@ -207,6 +207,71 @@ fn put_acl_rolls_back_on_reserved_principal() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn refused_acl_edits_restore_documents_and_disable_unrebuilt_authorization() {
+    use sparq_solid::{auth_allowance_refusal, default_auth_budget, AuthAllowance};
+    for kind in [AuthAllowance::Deadline, AuthAllowance::InputFacts] {
+        for delete in [false, true] {
+            let mut store = empty_pod();
+            store
+                .put_acl("https://pod.ex/.acl", &root_acl_read(ALICE), "ntriples")
+                .unwrap();
+            assert!(
+                store
+                    .decide(&sess(ALICE), "https://pod.ex/notes/n1", Mode::Read)
+                    .allow
+            );
+            let mut budget = default_auth_budget();
+            match kind {
+                AuthAllowance::Deadline => {
+                    budget.max_materialize_time = Some(std::time::Duration::ZERO)
+                }
+                AuthAllowance::InputFacts => budget.max_input_facts = 0,
+                _ => unreachable!(),
+            }
+            store.set_auth_budget(budget);
+            let result = if delete {
+                store.delete_acl("https://pod.ex/.acl")
+            } else {
+                store.put_acl("https://pod.ex/.acl", &root_acl_read(BOB), "ntriples")
+            };
+            assert_eq!(auth_allowance_refusal(&result.unwrap_err()), Some(kind));
+            let name =
+                oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/.acl"));
+            let restored = store
+                .graph()
+                .named_graph(&name)
+                .expect("the prior ACL is restored");
+            let names =
+                |agent| format!("ASK {{ ?s <http://www.w3.org/ns/auth/acl#agent> <{agent}> }}");
+            assert!(sparq_engine::ask(restored, &names(ALICE)).unwrap());
+            assert!(!sparq_engine::ask(restored, &names(BOB)).unwrap());
+            // Rollback omits the deadline but keeps the input-fact cap.
+            for agent in [ALICE, BOB] {
+                assert_eq!(
+                    store
+                        .decide(&sess(agent), "https://pod.ex/notes/n1", Mode::Read)
+                        .allow,
+                    kind == AuthAllowance::Deadline && agent == ALICE
+                );
+            }
+            store.set_auth_budget(default_auth_budget());
+            store.materialize_wac().unwrap();
+            assert!(
+                store
+                    .decide(&sess(ALICE), "https://pod.ex/notes/n1", Mode::Read)
+                    .allow
+            );
+            assert!(
+                !store
+                    .decide(&sess(BOB), "https://pod.ex/notes/n1", Mode::Read)
+                    .allow
+            );
+        }
+    }
+}
+
 // --- input validation ------------------------------------------------------------------
 
 #[test]
