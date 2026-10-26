@@ -26,6 +26,10 @@ explicit contradictions reject evaluation; this is not full 1.2 conformance.
 With your own `SparqlParser`, keep them via
 `parse_versioned_query`/`parse_versioned_update` (stable upstream parser API).
 
+Read named members through `Graph::named()` or `named_graph(&name)`; direct field
+access is unavailable. Build in-memory datasets with the fallible named graph
+methods documented in [data formats](../data-formats/named-accessors.md).
+
 ## Quickstart
 
 `Cargo.toml`:

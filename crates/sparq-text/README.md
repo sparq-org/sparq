@@ -32,7 +32,7 @@ let hits = index.search("quick fox");     // AND of tokens, BM25-ranked best-fir
 let any  = index.search_any("fox dog");   // OR
 let auto = index.search("auto*");         // *-suffix = prefix token (autocomplete)
 for hit in &hits {
-    let literal = graph.dict.term(hit.id); // hit.id IS the dict id; hit.score is BM25
+    let literal = graph.dict().term(hit.id); // hit.id IS the dict id; hit.score is BM25
 #   let _ = literal;
 }
 # let _ = (any, auto);

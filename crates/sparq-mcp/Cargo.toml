@@ -190,3 +190,7 @@ oxttl.workspace = true
 # appears as an OPTIONAL normal dependency above, pulled in only by the `nlq` feature; the
 # dev entry is what makes it available to tests in the DEFAULT, nlq-off configuration.)
 spargebra = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Directory-backed input is exercised by the Solid working-copy tests.
+sparq-core = { path = "../sparq-core", version = "0.1.6", features = ["mmap"] }

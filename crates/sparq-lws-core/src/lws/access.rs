@@ -703,6 +703,49 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
+/// [`aside`], with the access decided before whether the resource was there is looked at: an
+/// agent that may not take `action` gets [`Aside::Denied`] from the same reads whether it was
+/// there or not; only one that may is told [`Aside::Missing`]. For a decision whose outcome must
+/// not show whether the resource exists (a subscription's topic, say).
+pub async fn aside_read_first<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<Aside, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(Aside::Allowed);
+    }
+    let prior = state.locks.prior(uri);
+    // A change that is creating it: nothing was there, so it is decided as a URI where nothing
+    // is ([`allowed_absent`]), with nothing read of what the change is writing, whatever
+    // metadata the change kept (a create that failed and was set aside keeps the default it
+    // wrote over nothing, with no format, which `decide` would then look up).
+    if prior.existed == Some(false) {
+        return Ok(match allowed_absent(state, action, uri, agent).await? {
+            true => Aside::Missing,
+            false => Aside::Denied,
+        });
+    }
+    // Read as it is stored when the change kept none (a default when absent).
+    let meta = match prior.meta {
+        Some(meta) => meta,
+        None => state.resource_meta(uri).await?,
+    };
+    if !decide(state, action, uri, agent, &meta, prior.format).await? {
+        return Ok(Aside::Denied);
+    }
+    let existed = match prior.existed {
+        Some(existed) => existed,
+        None => state.store.exists(uri).await?,
+    };
+    Ok(if existed {
+        Aside::Allowed
+    } else {
+        Aside::Missing
+    })
+}
+
 /// [`allowed`] as for a URI where nothing is (no metadata, and only a container's format, which is
 /// its listing's): what a caller other than the owner is told about a resource that was not there
 /// before a change in flight began.
@@ -787,6 +830,27 @@ pub async fn allowed_as<S: Store + 'static>(
     )
     .await
     .unwrap_or(false)
+}
+
+/// Whether some grant in force names `agent` itself (its subject, not everyone) for `action`
+/// on `uri`: whether a grant could let it in particular, whatever the resource's metadata says.
+/// Read from the grants alone. A grant to everyone (`foaf:Agent`) does not count: it names no
+/// one, so what turns on this (the type index failing whole for a resource whose access cannot
+/// be decided) never turns on a grant that is not the agent's own.
+pub(crate) fn granted<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> bool {
+    let Some(subject) = agent.subject.as_deref() else {
+        return false;
+    };
+    state
+        .access
+        .policies_covering(action, uri)
+        .iter()
+        .any(|p| p.assignee != FOAF_AGENT && p.assignee == subject)
 }
 
 pub(crate) fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
@@ -2898,8 +2962,8 @@ mod tests {
     /// grant out of force though a restart would put it back, or answered "still in force" though
     /// the record was gone. The answer says only what is confirmed: a removal that reports a
     /// failure but is confirmed by reading the store again revokes; one that cannot be checked is
-    /// answered as not known, with the grant left in force as the store last had it; and a retry
-    /// once the store answers settles it.
+    /// answered as not known, with the grant out of force until the store answers; a restart
+    /// agrees once the outcome is known.
     #[tokio::test]
     async fn a_revocation_answers_only_what_is_confirmed() {
         use std::sync::atomic::Ordering;
@@ -2939,13 +3003,24 @@ mod tests {
         assert!(status.is_server_error());
         assert!(body.contains("not known"), "{body}");
         assert!(!body.contains("still stored"), "{body}");
+        assert!(
+            state.access.grant_policies().is_empty(),
+            "unread revocation in force"
+        );
         store.fail_exists.store(false, Ordering::SeqCst);
         store.fail_list.store(false, Ordering::SeqCst);
         *store.fail_after_delete_of.lock().unwrap() = None;
-        // A retry, the store answering, settles it: the record is gone, so the grant goes too,
-        // and a restart agrees.
+        eventually("the revocation is settled", || {
+            state.settlements.pending() == 0
+        })
+        .await;
+        assert!(
+            state.access.grant_policies().is_empty(),
+            "grant returned to force"
+        );
+        // The background confirmed it gone, so a retry answers absent; a restart agrees.
         let (status, _) = answer(state.clone(), path).await;
-        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(state.access.grant_policies().is_empty());
         let state = restart(&store).await;
         assert!(state.access.grant_policies().is_empty());
@@ -3387,6 +3462,43 @@ mod tests {
         assert!(state.access.grants.read().unwrap().is_empty());
     }
 
+    /// Review of #7183: a revocation whose delete's fence succeeded, but whose outcome could
+    /// not then be read, was answered "left as it was" and the grant put back in force, though
+    /// the delete may have committed. The grant stays out of force until the listing can be
+    /// read, and is then settled from it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_fenced_revocation_that_cannot_be_read_stays_out_of_force() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let iri = granted(&state).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate));
+        store.fail_reads_after_fence.store(true, Ordering::SeqCst);
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known yet"), "{body}");
+        assert!(state.access.grant_policies().is_empty(), "put back in force");
+        store.fail_reads_after_fence.store(false, Ordering::SeqCst);
+        store.fail_exists.store(false, Ordering::SeqCst);
+        store.fail_list.store(false, Ordering::SeqCst);
+        // The delete was fenced before it landed: the grant is still stored, and back in force.
+        eventually("the grant is back in force", || {
+            state.access.grant_policies().len() == 1
+        })
+        .await;
+    }
+
     /// Issue #6836, the mirror: a revocation fenced before its delete lands is settled as not
     /// removed: the grant is put back in force, and the delete, when it arrives, changes nothing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3597,11 +3709,12 @@ mod tests {
         let delete = test_store::request(Method::DELETE, &path, &[], "");
         let r = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
-        // A conditional create needs the container exclusively, held shared by the removal.
+        // A create whose precondition compares the listing's tag needs the container
+        // exclusively, held shared by the removal.
         let post = test_store::request(
             Method::POST,
             GRANTS_PATH,
-            &[("if-match", "*")],
+            &[("if-match", "\"x\"")],
             &access_doc("AccessGrant", "https://a/", None),
         );
         let r = handle(&state, &post, &Agent::anonymous()).await;
@@ -3610,6 +3723,70 @@ mod tests {
         gate.add_permits(1);
         assert_eq!(first.await.unwrap(), StatusCode::NO_CONTENT);
         assert!(state.access.grant_policies().is_empty());
+    }
+
+    /// Review of #7174: a create whose precondition compares no state (a bare `If-Match: *`,
+    /// the only form anyone but the owner may send) took the container alone, so while a
+    /// removal settled in the background (holding it shared through its fence) each such
+    /// create waited `LOCK_WAIT` and answered `503`, and every other create queued behind it.
+    /// It takes the container shared, as an unconditional create does: neither waits.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_create_comparing_no_state_does_not_wait_on_a_settling_removal() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let iri = granted(&state).await;
+        // A revocation whose delete failed unsettled, its fence failing: settled in the
+        // background, holding the container shared until then.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(state.locks.try_lock(&container).is_none(), "held shared");
+        let post = |headers: &'static [(&'static str, &'static str)]| {
+            let state = state.clone();
+            let req = test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                headers,
+                &access_doc("AccessGrant", "https://a/", None),
+            );
+            async move { handle(&state, &req, &Agent::anonymous()).await.status() }
+        };
+        let started = std::time::Instant::now();
+        let conditional = tokio::spawn(post(&[("if-match", "*")]));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(post(&[]).await, StatusCode::CREATED);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "an unconditional create queued behind the conditional one"
+        );
+        assert_eq!(conditional.await.unwrap(), StatusCode::CREATED);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        // A tag still compares the listing, held alone: it waits, and answers `503`.
+        let tagged = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("if-match", "\"x\"")],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        assert_eq!(
+            handle(&state, &tagged, &Agent::anonymous()).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("the removal is settled", || {
+            state.locks.try_lock(&container).is_some()
+        })
+        .await;
     }
 
     /// What a request answered, whether the grant was in force in the process that answered it,

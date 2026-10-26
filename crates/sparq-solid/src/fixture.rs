@@ -159,7 +159,7 @@ fn acl_doc(out: &mut String, resource: &str, auths: &[Auth]) {
 ///
 /// ```
 /// let graph = sparq_core::Graph::load_dataset(&sparq_solid::wac_fixture(), "nquads")?;
-/// assert_eq!(graph.named.len(), 1148); // 864 docs + 259 containers + ACLs + group doc
+/// assert_eq!(graph.named().len(), 1148); // 864 docs + 259 containers + ACLs + group doc
 /// # Ok::<(), String>(())
 /// ```
 ///

@@ -46,7 +46,7 @@ fn rust_set(policy_ttl: &str, action_local: &str, target: &str, party: &str, at:
         req = req.at(t);
     }
     let mut graph = Graph::new();
-    let outcome = materialize_policy(&mut graph, &policy, &req);
+    let outcome = materialize_policy(&mut graph, &policy, &req).unwrap();
     let mut set: AuthSet = Vec::new();
     if let Some(t) = outcome.grant_triple {
         set.push(t);

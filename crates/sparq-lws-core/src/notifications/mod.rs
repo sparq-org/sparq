@@ -44,8 +44,17 @@
 //! and then RE-RUNS the same WAC check for the WebID the token is bound to
 //! ([`NotificationHub::authorize_receive_token`]). Re-checking at connect time keeps the two gates in
 //! lock-step and means a grant REVOKED after subscribe cannot be replayed for the remainder of the
-//! token's TTL. The same check runs again before every frame on an open socket, which is closed
-//! (1008) as soon as the subscriber loses read access.
+//! token's TTL. The token gates connecting only, with at most one socket open per token at a time:
+//! an open socket lives until the client closes it, its subscriber loses read access (1008), or it
+//! is closed 1011 (its backlog overflows, its access cannot be checked on the timer, or a frame was
+//! dropped and the client is to reconnect and reconcile). The same check runs again before every
+//! frame on an open socket (a frame the subscriber may not read is dropped), and on a timer of the
+//! socket's own ([`ws::ACCESS_RECHECK`]), which closes it (1008) once the subscriber has lost read
+//! access. Within two timer periods of losing Read it closes: 1008 for a confirmed denial, or
+//! 1011 if the timer check is undecided. Each check has at most one period; a slower check
+//! counts as undecided and the client must resubscribe. A due tick pre-empts an Event or Lag
+//! check, noting it as missed: a reader then gets a reconcile close (also for a dropped Lag
+//! check, rather than an overflow close). Inbound frames cannot starve the timer or its decision.
 //!
 //! **Existence non-disclosure** (`research/lws-design-records.md` §6): neither gate probes the topic
 //! resource itself — the decision comes ONLY from the ACL-resolution chain — so a denial is the same
@@ -65,10 +74,17 @@ pub use activity::{ActivityType, AS2_CONTEXT, NOTIFICATIONS_CONTEXT};
 
 /// How long a minted receive token stays valid after the authenticated subscribe (make-the-call
 /// decision, documented). 5 minutes: long enough to bridge subscribe-POST → WS-connect (which a
-/// client does immediately) AND to absorb a transient reconnect, short enough that a leaked
-/// `receiveFrom` URL stops working quickly. The token is REUSABLE until expiry (NOT single-use at
-/// connect) so a client that drops the socket can reconnect with the same `receiveFrom` URL within
-/// the window — the standard WebSocketChannel2023 reconnect behaviour; expiry bounds the exposure.
+/// client does immediately) AND to absorb a transient reconnect, short enough that a
+/// `receiveFrom` URL in someone else's hands stops connecting quickly. The token is REUSABLE until
+/// expiry (NOT single-use at connect) so a client that drops the socket can reconnect with the
+/// same `receiveFrom` URL within the window — the standard WebSocketChannel2023 reconnect
+/// behaviour — but it has at most ONE socket open at a time ([`NotificationHub::claim_receive_socket`]):
+/// a connect while a socket opened with it is still open is refused as an invalid token is (401),
+/// and a reconnect is accepted once that socket has closed.
+/// It is a window for CONNECTING: a socket opened within it is not closed when it ends (an open
+/// socket follows its subscriber's access instead, see [`ws::ACCESS_RECHECK`]), so expiry bounds
+/// when a socket can be opened, not how long one stays open: whoever holds the URL within its
+/// window can hold one socket open for as long as the subscriber may read the topic.
 const RECEIVE_TOKEN_TTL: Duration = Duration::from_secs(300);
 
 /// The number of random bytes in a receive token before base64url encoding. 32 bytes = 256 bits of
@@ -86,8 +102,55 @@ struct ReceiveTokenBinding {
     /// [`NotificationHub::authorize_receive_token`] so the receive endpoint can re-run the
     /// per-resource WAC check against the SUBSCRIBER's identity, not merely against the token.
     web_id: String,
-    /// Absolute expiry instant; a token is invalid at/after this point.
-    expires_at: Instant,
+    /// When the token stops connecting.
+    expiry: TokenExpiry,
+    /// Whether a socket opened with this token is open: at most one is at a time (see
+    /// [`NotificationHub::claim_receive_socket`]).
+    open: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// The one socket a receive token may have open, held by that socket's task: released (so the
+/// token can connect again, within its window) when the task ends, however it ends.
+pub(crate) struct SocketClaim(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for SocketClaim {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// When a receive token stops connecting: its expiry instant, and a latch set once it is seen
+/// expired. Once set it stays set, so a token that has expired never connects again, whatever
+/// its binding says later (a binding whose instant is moved later, say). Held in memory, on the
+/// process's monotonic clock: no token outlives the process. It gates connecting only; an open
+/// socket is not closed by it.
+#[derive(Clone, Debug)]
+struct TokenExpiry {
+    at: Instant,
+    lapsed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl TokenExpiry {
+    fn new(at: Instant) -> Self {
+        Self {
+            at,
+            lapsed: Default::default(),
+        }
+    }
+
+    /// Whether the token has expired, by its instant or by having been seen expired before;
+    /// seen expired now, it is latched so.
+    fn expired(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.lapsed.load(Ordering::Acquire) {
+            return true;
+        }
+        let expired = self.at <= Instant::now();
+        if expired {
+            self.lapsed.store(true, Ordering::Release);
+        }
+        expired
+    }
 }
 
 /// How many notifications a per-topic broadcast channel buffers before a slow receiver starts
@@ -143,21 +206,44 @@ impl NotificationHub {
         let binding = ReceiveTokenBinding {
             topic: topic.to_string(),
             web_id: web_id.to_string(),
-            expires_at: Instant::now() + RECEIVE_TOKEN_TTL,
+            expiry: TokenExpiry::new(Instant::now() + RECEIVE_TOKEN_TTL),
+            open: Default::default(),
         };
         let mut tokens = self.receive_tokens.lock().await;
-        let now = Instant::now();
         // Opportunistic sweep: drop any expired token so a stream of subscribes-without-connect
         // cannot leak the map unboundedly.
-        tokens.retain(|_, b| b.expires_at > now);
+        tokens.retain(|_, b| !b.expiry.expired());
         tokens.insert(token.clone(), binding);
+        token
+    }
+
+    /// [`mint_receive_token`](Self::mint_receive_token), for a token that expires `ttl` from
+    /// now.
+    #[cfg(test)]
+    pub(crate) async fn mint_receive_token_for(
+        &self,
+        web_id: &str,
+        topic: &str,
+        ttl: Duration,
+    ) -> String {
+        let token = generate_receive_token();
+        let binding = ReceiveTokenBinding {
+            topic: topic.to_string(),
+            web_id: web_id.to_string(),
+            expiry: TokenExpiry::new(Instant::now() + ttl),
+            open: Default::default(),
+        };
+        self.receive_tokens
+            .lock()
+            .await
+            .insert(token.clone(), binding);
         token
     }
 
     /// Validate a receive token presented on the WS upgrade against the requested `topic`. Returns
     /// `true` ONLY when the token exists, is unexpired, AND its bound topic equals `topic`. An
-    /// absent / unknown / expired / topic-mismatched token returns `false` (fail-closed). An expired
-    /// entry found during lookup is pruned (lazy expiry).
+    /// absent / unknown / expired / topic-mismatched token returns `false` (fail-closed). An
+    /// expired entry is dropped by the next mint's sweep.
     ///
     /// The token is REUSABLE until expiry (it is NOT consumed here) so a client can reconnect within
     /// the TTL window — see `RECEIVE_TOKEN_TTL`. Never logs the token.
@@ -168,25 +254,44 @@ impl NotificationHub {
     /// The identity half of the token gate: validate exactly as
     /// [`validate_receive_token`](Self::validate_receive_token) does AND return the authenticated
     /// WebID the token was minted for. `None` on any failure (absent / unknown / expired /
-    /// topic-mismatched) — fail-closed, and an expired entry found during lookup is pruned.
+    /// topic-mismatched) — fail-closed; an expired entry stays refused (its latch is set) until
+    /// the next mint's sweep drops it.
     ///
     /// The receive endpoint needs the SUBSCRIBER's WebID, not just a yes/no, so it can re-run the
     /// per-resource WAC check at connect time (see [`ws::receive_handler`]): the token proves *who*
     /// subscribed, and WAC then decides whether that WebID may STILL read the topic. Never logs the
     /// token.
     pub async fn authorize_receive_token(&self, token: &str, topic: &str) -> Option<String> {
-        let mut tokens = self.receive_tokens.lock().await;
-        let now = Instant::now();
+        let tokens = self.receive_tokens.lock().await;
         match tokens.get(token) {
-            Some(b) if b.expires_at <= now => {
-                // Expired: prune it and reject.
-                tokens.remove(token);
-                None
-            }
+            // Expired (latched, so it is refused from now on): not pruned here, so the binding
+            // keeps its latch until the next mint's sweep drops it.
+            Some(b) if b.expiry.expired() => None,
             Some(b) if b.topic == topic => Some(b.web_id.clone()),
             // Present but bound to a DIFFERENT topic, or absent entirely.
             _ => None,
         }
+    }
+
+    /// Claim the one socket `token` may have open for `topic`: `None` when the token does not
+    /// validate (as for [`authorize_receive_token`](Self::authorize_receive_token)) or a socket
+    /// opened with it is still open. The claim is released when it is dropped (the socket's task
+    /// has ended), and the token may then connect again within its window.
+    pub(crate) async fn claim_receive_socket(
+        &self,
+        token: &str,
+        topic: &str,
+    ) -> Option<SocketClaim> {
+        use std::sync::atomic::Ordering;
+        let tokens = self.receive_tokens.lock().await;
+        let b = tokens.get(token)?;
+        if b.expiry.expired() || b.topic != topic {
+            return None;
+        }
+        b.open
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()?;
+        Some(SocketClaim(b.open.clone()))
     }
 
     /// The number of LIVE subscribers for a topic (0 if the topic has no channel). Test/observability
@@ -474,18 +579,34 @@ mod tests {
         {
             let mut tokens = hub.receive_tokens.lock().await;
             let b = tokens.get_mut(&tok).expect("token present");
-            b.expires_at = Instant::now() - Duration::from_secs(1);
+            b.expiry.at = Instant::now() - Duration::from_secs(1);
         }
         assert!(
             !hub.validate_receive_token(&tok, "https://pod.example/a")
                 .await,
             "an expired token must be rejected"
         );
-        // And it is pruned on the failed lookup (lazy expiry).
+        // Its instant moved later, it stays refused: it was seen expired.
+        hub.receive_tokens
+            .lock()
+            .await
+            .get_mut(&tok)
+            .expect("token present")
+            .expiry
+            .at = Instant::now() + Duration::from_secs(60);
+        assert!(
+            !hub.validate_receive_token(&tok, "https://pod.example/a")
+                .await,
+            "a token seen expired stays expired"
+        );
+        // And the next mint's sweep drops it.
+        let _ = hub
+            .mint_receive_token("https://alice.example/#me", "https://pod.example/b")
+            .await;
         let tokens = hub.receive_tokens.lock().await;
         assert!(
             !tokens.contains_key(&tok),
-            "an expired token must be pruned on lookup"
+            "an expired token must be pruned by the next mint"
         );
     }
 

@@ -18,15 +18,15 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn triple_set(graph: &Graph) -> BTreeSet<RenderedTriple> {
-    let scan = graph.store.scan(&[None, None, None]);
+    let scan = graph.store().scan(&[None, None, None]);
     scan.rows
         .iter()
         .map(|row| {
             let [subject, predicate, object] = scan.to_spo(row);
             [
-                graph.dict.term(subject).to_string(),
-                graph.dict.term(predicate).to_string(),
-                graph.dict.term(object).to_string(),
+                graph.dict().term(subject).to_string(),
+                graph.dict().term(predicate).to_string(),
+                graph.dict().term(object).to_string(),
             ]
         })
         .collect()
@@ -107,7 +107,7 @@ fn all_wildcards_are_identical_to_load_reader() {
 
     assert_eq!(filtered.len(), full.len());
     assert_eq!(triple_set(&filtered), triple_set(&full));
-    assert_eq!(filtered.dict.len(), full.dict.len());
+    assert_eq!(filtered.dict().len(), full.dict().len());
 }
 
 #[test]
@@ -116,7 +116,11 @@ fn unmatched_pattern_returns_a_truly_empty_graph() {
     let result = filtered(&(None, Some(missing), None));
 
     assert!(result.is_empty());
-    assert_eq!(result.dict.len(), 0, "unmatched terms must not be interned");
+    assert_eq!(
+        result.dict().len(),
+        0,
+        "unmatched terms must not be interned"
+    );
     assert!(triple_set(&result).is_empty());
 }
 
@@ -144,7 +148,7 @@ fn fully_bound_pattern_matches_exactly_one_triple() {
     assert_eq!(result.len(), 1);
     assert_eq!(triple_set(&result), expected);
     assert_eq!(
-        result.dict.len(),
+        result.dict().len(),
         3,
         "only the accepted triple's terms are interned"
     );

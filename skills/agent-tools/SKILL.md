@@ -114,6 +114,10 @@ prompt is refused, never rendered around unvalidated text.
 + a materialized WAC/ACP authorization view), bound to ONE authenticated session fixed
 at construction — the MCP-Solid proposal draft's local-trusted-agent deployment mode
 (`site/specs/mcp-solid.typ` §6.4/§7.3/§9.3). Tools:
+Directory-backed input keeps its durable store: the `update` tool journals writes that
+survive reopening. Resource-slot tools (`resource_put`, `resource_delete`, and
+`container_create`, including ACL slot edits) return a clear error on such stores;
+their replacement and rollback require an in-memory dataset.
 
 | tool | wraps | notes |
 | --- | --- | --- |

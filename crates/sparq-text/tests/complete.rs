@@ -63,7 +63,7 @@ fn builds_and_completes_with_casefolded_deterministic_candidates() {
     ];
     assert_eq!(index.complete("al", 10, None), expected);
     assert_eq!(index.complete("AL", 10, None), expected);
-    assert_eq!(index.indexed_dict_len(), graph.dict.len());
+    assert_eq!(index.indexed_dict_len(), graph.dict().len());
     assert_eq!(index.len(), 16);
     assert!(!index.is_empty());
     assert!(index.heap_bytes() > 0);
@@ -71,7 +71,7 @@ fn builds_and_completes_with_casefolded_deterministic_candidates() {
     // The label result identifies its subject, never the label literal.
     let alpine = index.complete("alpine", 1, None).pop().unwrap();
     assert_eq!(alpine.id, labelled_one);
-    assert_ne!(graph.dict.term(alpine.id).to_string(), "\"Alpine\"@en");
+    assert_ne!(graph.dict().term(alpine.id).to_string(), "\"Alpine\"@en");
 }
 
 #[test]

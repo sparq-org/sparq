@@ -45,15 +45,15 @@ impl<'g> GraphView<'g> {
         let Some(pattern) = self.g.pattern(s, p_node.as_ref(), o) else {
             return Vec::new();
         };
-        let scan = self.g.store.scan(&pattern);
+        let scan = self.g.store().scan(&pattern);
         scan.rows
             .iter()
             .map(|r| {
                 let [s, p, o] = scan.to_spo(r);
                 [
-                    self.g.dict.term(s),
-                    self.g.dict.term(p),
-                    self.g.dict.term(o),
+                    self.g.dict().term(s),
+                    self.g.dict().term(p),
+                    self.g.dict().term(o),
                 ]
             })
             .collect()
@@ -82,25 +82,25 @@ impl<'g> GraphView<'g> {
 
     /// Materialises the term for `id` (the report boundary).
     pub(crate) fn term_of(&self, id: Id) -> Term {
-        self.g.dict.term(id)
+        self.g.dict().term(id)
     }
 
     /// Object ids of `(s, p, ?)` — id twin of [`Self::objects`], same row order.
     pub(crate) fn objects_ids(&self, s: Id, p: Id) -> Vec<Id> {
-        let scan = self.g.store.scan(&[Some(s), Some(p), None]);
+        let scan = self.g.store().scan(&[Some(s), Some(p), None]);
         scan.rows.iter().map(|r| scan.to_spo(r)[2]).collect()
     }
 
     /// Subject ids of `(?, p, o)` — id twin of [`Self::subjects`], same row order.
     pub(crate) fn subjects_ids(&self, p: Id, o: Id) -> Vec<Id> {
-        let scan = self.g.store.scan(&[None, Some(p), Some(o)]);
+        let scan = self.g.store().scan(&[None, Some(p), Some(o)]);
         scan.rows.iter().map(|r| scan.to_spo(r)[0]).collect()
     }
 
     /// `(predicate, object)` id pairs of triples with subject `s` — id twin of
     /// [`Self::predicate_objects`] (`sh:closed`), same row order. (sq-j9hls)
     pub(crate) fn predicate_objects_ids(&self, s: Id) -> Vec<(Id, Id)> {
-        let scan = self.g.store.scan(&[Some(s), None, None]);
+        let scan = self.g.store().scan(&[Some(s), None, None]);
         scan.rows
             .iter()
             .map(|r| {
@@ -116,7 +116,7 @@ impl<'g> GraphView<'g> {
             return false;
         };
         match self.g.pattern(Some(s), Some(&p), Some(o)) {
-            Some([Some(s), Some(p), Some(o)]) => self.g.store.contains([s, p, o]),
+            Some([Some(s), Some(p), Some(o)]) => self.g.store().contains([s, p, o]),
             _ => false,
         }
     }

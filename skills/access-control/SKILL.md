@@ -30,6 +30,16 @@ document scopes distinct and identities stable when unrelated documents are put
 or deleted, even if named-graph positions change. The source documents retain
 their blank nodes; these IRIs appear in the reasoning input and authorization view.
 
+On a directory-backed dataset, authorization materialization creates `<urn:sparq:auth>`
+with `ensure_named` and logs only the inserted and deleted triples relative to the
+previous view. An unchanged view adds no WAL frames. Absent reserved slots are not dropped.
+The dataset retains its durable root and named-graph manifest across repeated rebuilds.
+`PodStore::new` removes reserved input graphs through durable drops when possible;
+if removal cannot complete, it serves a fork as before.
+`put_acl`/`delete_acl` and their ACP variants refuse directory-backed stores because
+slot replacement and rollback require an in-memory dataset. Use the session-checked
+SPARQL update methods for durable rule edits.
+
 ## What this is — and is NOT (read first)
 
 This is an **architecture / research-track** layer, not a deployable Solid server.
@@ -122,8 +132,10 @@ Materialize the authorization view from the access-control documents, then enfor
   authorization materialization of that store runs under (see
   [Input and whole-decision budget](#input-and-whole-decision-budget)). It covers what the
   per-closure `ClosureLimits` cannot: the reasoning INPUT the pod's control documents become
-  (`max_document_bytes` 64 KiB per document, `max_input_bytes` 1 MiB over all of them,
-  `max_input_facts` 32,000, `max_input_term_bytes` 4 KiB for one term) and the AGGREGATE of
+  (`max_document_bytes` 64 KiB per document, `max_input_bytes` 1 MiB over all of them AND
+  over the resource enumeration, `max_input_facts` 32,000, `max_input_term_bytes` 4 KiB for
+  one term, `max_resource_iri_bytes` 2 KiB and `max_resource_path_depth` 64 for one resource
+  IRI the enumeration walks) and the AGGREGATE of
   all the closures one materialization runs (`max_decision_join_rows` 4,000,000,
   `max_decision_facts` 512,000). Same application rules as `set_auth_limits`: from the NEXT
   materialization, WAC and ACP alike, every self-made rebuild included; the free
@@ -131,10 +143,11 @@ Materialize the authorization view from the access-control documents, then enfor
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
   -> bool` — whether a materialization error is a refusal by that allowance or budget rather
   than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
-  RoundsOrFacts, TermBytes, InputBytes, InputFacts, InputTermBytes, DecisionWork,
-  Unspecified}`, `limit_name()` for a message). The refusal carries that kind as a tag read
-  from ANYWHERE in the message, so it still matches when a write path wraps the failed
-  rebuild's error in its own sentence.
+  RoundsOrFacts, TermBytes, InputBytes, InputFacts, InputTermBytes, ResourceIri,
+  DecisionWork, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
+  as a tag directly after the refusal wording, and the pair is read from ANYWHERE in the
+  message, so it still matches when a write path wraps the failed rebuild's error in its own
+  sentence — while an error that merely quotes the tag literal is not read as a refusal.
 - `store.materialize_acp_with(&AccessProvenance) -> Result<MaterializeStats, _>` —
   (sq-3jtd.5) ACP materialization that ALSO resolves `acp:CreatorAgent` /
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
@@ -485,7 +498,14 @@ Materialize the authorization view from the access-control documents, then enfor
   does NOT authenticate — it takes an already-resolved session, exactly as this library does. The
   `decide` `scope` is the ACL-*document* discovery scope, while whether a grant within that ACL
   applies is the verdict the oracle computes.
-- `store.materialize_odrl_permission(&Policy, &Request) -> BridgeOutcome` — **opt-in**
+ODRL materialization and refresh methods (including free bridge functions and
+`BridgeLedger::refresh`) return `Result<_, String>`. Propagate storage failures with
+`?`: on a failed derived-view write, `PodStore` disables authorization until a static
+materialization succeeds. Trust admission methods return view-write failures through
+their existing `Result` and disable the view in the same way. Policy refusals remain
+successful results carrying `BridgeOutcome.refused`; they are distinct from I/O errors.
+
+- `store.materialize_odrl_permission(&Policy, &Request) -> Result<BridgeOutcome, String>` — **opt-in**
   (`odrl-bridge` feature, OFF by default; sq-h3uk): run the `sparq-policy` ODRL
   evaluator and, on a *definite Permit*, materialize the equivalent `principal auth:<mode>
   graph` grant into the auth view, then reindex — so this same enforcement path applies it.
@@ -502,19 +522,23 @@ Materialize the authorization view from the access-control documents, then enfor
 - **Loud refusal of an unimplementable `odrl:conflict` strategy** (sq-ihqbl): the bridge
   implements only `odrl:conflict odrl:prohibit` (deny-overrides). A policy declaring `odrl:perm`,
   `odrl:invalid` **with** a detected conflict, or an unknown strategy IRI is **REFUSED** — every
-  `materialize_odrl_*` entry materializes nothing and returns `BridgeOutcome { refused: true, .. }`
+  `materialize_odrl_*` entry materializes nothing and returns `Ok(BridgeOutcome { refused: true, .. })`
   with a `REFUSED (odrl:conflict): …` reason, rather than silently coercing it into deny-overrides.
   An unset `odrl:conflict` operates under `prohibit` (not refused) — sparq's own fail-closed default, a
   **deliberate divergence** from the ODRL 2.2 IM default of `invalid`, not a spec default the bridge is
   following (the ODRL Formal Semantics CG report supplies no conflict default either — its
   conflict-resolution machinery is explicitly pending). See the `usage-control-policy` skill.
-- `store.materialize_odrl_permission_conditional(&Policy, &Request) -> BridgeOutcome` —
+- `store.materialize_odrl_permission_conditional(&Policy, &Request) -> Result<BridgeOutcome, String>` —
   **opt-in** (`odrl-bridge`): the same one-shot grant as `materialize_odrl_permission`. It
   no longer persists recipient/assignee/`dateTime` constraints as re-checked
   `auth:ConditionalGrant` heads, which could grant a session `decide` denies; a
   clock-bounded permission stores nothing (per-request evaluation: #6743). See the
   `usage-control-policy` skill.
 - `odrl_bridge::materialize_odrl_n3(&mut Graph, policy_ttl: &str, &Request) -> Result<BridgeOutcome, String>`
+  (and `materialize_odrl_n3_with_budget(…, AuthBudget)`, the twin that takes the
+  whole-decision budget its five closures are charged against instead of
+  `default_auth_budget()` — pass the store's own `auth_budget()` so a lowered budget is
+  honoured on this lane as it is on the WAC and ACP ones)
   — **opt-in** (`odrl-bridge`; sq-zgbso.2, sq-zgbso.2): an alternative
   materialization path that runs the stateless ODRL core as **five stratified `reason_n3` calls**
   (`rules/odrl-{a0,a,b,c,d}.n3`), mirroring the WAC/ACP N3-stratification pattern instead of the
@@ -901,24 +925,54 @@ what ONE document may contribute, `max_input_bytes` for all of them together,
 per-term dimensions are charged **while each document is read**, so a document set past the
 budget stops being read at the limit rather than being materialized whole and checked
 afterwards; the fact count is checked on the assembled set, before it is interned.
+
 `ClosureLimits::max_facts` is now charged over the GIVEN facts too, so a refused closure does
 not first hold and copy an input of the caller's choosing.
+
+The input also carries the pod's **resource enumeration**, which neither of those dimensions
+bounds: a resource of the view brings every container on its chain, each an owned prefix
+string, so one name of length L under D containers costs up to L x D bytes — set by the
+pod's NAMES rather than by its documents' bytes, and built before there is a fact to count.
+`max_resource_iri_bytes` bounds the L and `max_resource_path_depth` the D of ONE name, both
+charged before that name's chain is walked, and every string the enumeration owns is charged
+against the aggregate `max_input_bytes` before it is made — so the enumeration of a whole
+pod costs at most the input budget, whatever shape its names have. Past any of the three the
+whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
+`InputBytes` for the aggregate), fail-closed, with nothing installed.
+
+The store's provenance pruning owns container strings and uses the same three caps, with
+its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`
+and update provenance staging) instead borrows names from the before-store or edit events,
+and borrows container prefixes as subslices. Only **added** names face the per-name length
+and depth caps, before their chains are walked. Replay charges no aggregate input bytes;
+materialization charges the resulting store once. **Removals and clears are never refused**
+by replay, including stored names beyond the current caps. A pod can therefore remove an
+over-cap name after lowering its budget. A refused addition leaves the installed view in
+place and grants nothing to the refused resource.
 
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
 a bridged ODRL policy's five strata could each spend the full allowance. Each closure now
 reports what it charged (`sparq_reason::n3::compiled::ClosureCharge`), the charges of one
 materialization go into one ledger, and `max_decision_join_rows` / `max_decision_facts` bound
 their sum. `max_decision_join_rows` is deliberately the same value as one closure's
-`max_total_join_rows`, so an ACP view's three strata TOGETHER may not do more join work than a
-single-stratum WAC view may — the aggregate is never looser than the per-closure cap.
+`max_total_join_rows`, so the ACCEPTED aggregate of an ACP view's three strata is no looser
+than what a single-stratum WAC view may spend. The ledger is charged when a closure
+RETURNS, so the stratum that pushes the aggregate over the cap has already run to completion
+under its own per-closure allowance: the PEAK work one refused decision does is the
+aggregate plus that one closure's cap (up to ~8,000,000 binding rows, ~768,000 facts at the
+defaults), and what the cap bounds exactly is the work of a decision that is ACCEPTED. Every
+closure is independently bounded either way, so the peak is finite in both dimensions, and
+the ledger counts conservatively (each stratum's fixpoint re-counts the facts it was given).
 
 Every default is ten times or more the largest value the fixtures this crate materializes
-need, measured by bisection; the per-field minima and the resulting margins (11x to 36x) are
+need — by bisection for the dimensions a run either fits in or does not, and from the
+fixtures' longest and deepest resource name for the two enumeration caps; the per-field
+minima and the resulting margins (10x to 56x) are
 recorded in `default_auth_budget`'s rustdoc, not here — they are specific to those fixtures
 and that box. A refusal is the same kind of event as a reasoning-allowance
 refusal, with the same fail-closed routes and the same typed `AuthAllowance` kinds
-(`InputBytes`, `InputFacts`, `InputTermBytes`, `DecisionWork`), so a caller that already tells
-an allowance refusal from a deny needs no second check.
+(`InputBytes`, `InputFacts`, `InputTermBytes`, `ResourceIri`, `DecisionWork`), so a caller
+that already tells an allowance refusal from a deny needs no second check.
 
 > The ODRL **parse** has its own, non-configurable budget on the other side of this seam:
 > `sparq_policy`'s constraint assembly bounds the nesting depth and the total operand

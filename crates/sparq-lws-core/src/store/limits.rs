@@ -6,6 +6,12 @@ pub const DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 /// Default stored-entry ceiling for each in-memory storage map.
 pub const DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT: usize = 4_096;
 
+/// How long one call to a remote store may take before it is abandoned, unless the store is
+/// configured otherwise: the SPARQL-over-HTTP client's default per-request timeout
+/// (`http::HttpSparqClient::new`), and the default `Store::call_timeout`, the longest a
+/// background settlement waits for one attempt at a fence before trying again.
+pub const STORE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The path, under a storage's root, of the service container whose records the pool holds: the
 /// LWS notification subscriptions.
 ///

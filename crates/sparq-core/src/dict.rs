@@ -51,23 +51,11 @@ const INLINE_MAX: u32 = (1 << 30) - 1;
 // persistence paths, which are cfg'd out of the default feature set.
 #[allow(dead_code)]
 pub(crate) const DICT_META_MAGIC: u32 = 0x31_56_4D_44; // b"DMV1" little-endian
-/// Bump when the on-disk meta layout changes incompatibly. A build that does not know a
-/// version REFUSES the store with a rebuild-required error rather than reading it, which makes
-/// this field the one place a format change can be announced to an OLDER binary: every other
-/// on-disk marker this crate writes is treated by an older build as a torn tail and silently
-/// TRUNCATED.
-///
-/// (sq-ycle) Version 2 says "the redo journal in this store may hold `WTX2` frames"
-/// (graph-existence records — see `TxnJournal`). An older build meeting such a frame sees an
-/// unknown frame magic, treats it as a torn tail and truncates it, destroying a commit it had
-/// already acknowledged; refusing to open the store at all is the only honest alternative, and
-/// this version is what makes it refuse. Opening a store is therefore a ONE-WAY upgrade.
+/// Version of the dictionary metadata written alongside operation journals.
 #[allow(dead_code)]
 pub(crate) const DICT_META_VERSION: u32 = 2;
 
-/// (sq-ycle) The versions this build can READ. Version 1 is a store written before the
-/// `WTX2` journal format existed; its layout is otherwise identical, so it is read as it is (and
-/// upgraded in place the first time this build appends a journal frame to it).
+/// Metadata versions accepted by this build; version 1 is upgraded on journal append.
 #[allow(dead_code)]
 pub(crate) const DICT_META_VERSIONS_READ: [u32; 2] = [1, DICT_META_VERSION];
 
@@ -137,7 +125,7 @@ pub fn inline_id_of_int(v: i64) -> Option<Id> {
 /// directives target) plus a per-term suffix, and literal datatypes are deduplicated in
 /// `datatypes` — so a long repeated `http://…/` is stored once, not per term, and the
 /// per-term slot (`Stored`) is far smaller than a full `oxrdf::Term`.
-/// `Clone` exists for [`fork`](Dict::fork): on an already-forked dict it bumps the
+/// `Clone` exists for `fork`: on an already-forked dict it bumps the
 /// shared-base `Arc`s and copies only the small extension; on a flat dict it is the
 /// O(n) deep copy that `fork` freezes ONCE into the shared base. It is not intended
 /// as a general-purpose copy (a `Graph` remains deliberately non-`Clone`).
@@ -761,6 +749,9 @@ struct MappedDict {
     offsets: memmap2::Mmap, // [u64; n] byte offset of each term record in `blob`
     hashes: memmap2::Mmap,  // [u64; n] content hashes, SORTED (for lookup)
     hashids: memmap2::Mmap, // [u32; n] term ids parallel to `hashes`
+    // The lock of the store directory these files are in, kept while the mapping (shared by
+    // every clone and fork of the dictionary) lives.
+    _pin: crate::dir_lock::Pin,
 }
 
 #[cfg(feature = "mmap")]
@@ -1221,6 +1212,13 @@ mod kani_proofs {
 }
 
 impl Dict {
+    /// The lock of the store directory a memory-mapped dictionary's files are in, `None` for
+    /// one in memory.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn lock_pin(&self) -> crate::dir_lock::Pin {
+        self.mapped.as_ref().and_then(|m| m._pin.clone())
+    }
+
     pub fn new() -> Self {
         Dict::default()
     }
@@ -2002,8 +2000,11 @@ impl Dict {
     /// Serialises the dictionary (prefixes, datatypes, compact terms) to `path` in a
     /// compact binary format. The hash table is NOT written — it is rebuilt on `open`.
     /// Arena-mode only (it serialises `terms`); the compacted/mmap'd modes persist via
-    /// `save_mmap`, which handles appended terms too.
-    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+    /// `save_mmap`, which handles appended terms too. Test-only: it writes the legacy format
+    /// that [`open`](Self::open) still reads; graphs persist through the locked
+    /// [`Graph::save`](crate::Graph::save).
+    #[cfg(test)]
+    pub(crate) fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         assert_eq!(self.base, 0, "Dict::save is arena-mode only; use save_mmap for blob/mmap'd (or grown) dicts");
         let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
@@ -2050,7 +2051,7 @@ impl Dict {
         w.flush()
     }
 
-    /// Loads a dictionary written by [`save`](Self::save), rebuilding the hash table.
+    /// Loads a dictionary written in the legacy single-file format, rebuilding the hash table.
     pub fn open(path: &std::path::Path) -> std::io::Result<Dict> {
         let file = std::fs::File::open(path)?;
         // sq-f5jh: the legacy single-file `dict.bin` is an UNTRUSTED on-disk file
@@ -2134,8 +2135,10 @@ impl Dict {
     /// meta file (prefixes + datatypes) plus four mmap-friendly blobs — the term records,
     /// their byte offsets, and a hash-sorted `(hash, id)` lookup index. Opened by
     /// [`open_mmap`](Self::open_mmap) with NOTHING large resident and no table rebuild.
+    /// Crate-internal: a directory is written only under its lock, through
+    /// [`Graph::save`](crate::Graph::save) and the builders.
     #[cfg(feature = "mmap")]
-    pub fn save_mmap(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save_mmap(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         std::fs::create_dir_all(dir)?;
         // ALL ids — the blob/mmap'd base plus any APPENDED (delta-overlay) terms — so a
@@ -2144,7 +2147,8 @@ impl Dict {
 
         // meta: (review 1409) version header (magic + version + id partition), then
         // prefixes, datatypes, term count.
-        let mut meta = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-meta.bin"))?);
+        let mut meta =
+            std::io::BufWriter::new(crate::FreshFile::create(&dir.join("dict-meta.bin"))?);
         meta.write_all(&DICT_META_MAGIC.to_le_bytes())?;
         meta.write_all(&DICT_META_VERSION.to_le_bytes())?;
         meta.write_all(&INLINE_BASE.to_le_bytes())?; // the id-space partition this file encodes
@@ -2157,13 +2161,11 @@ impl Dict {
             write_str(&mut meta, d.as_str())?;
         }
         meta.write_all(&(n as u64).to_le_bytes())?;
-        meta.flush()?;
-        // (sq-ycle) Flushed is not durable: a staged dictionary is published by a
-        // rename, so its bytes must be on disk first.
-        meta.into_inner().map_err(std::io::Error::other)?.sync_all()?;
+        crate::commit_fresh(meta)?;
 
         // term blob + per-term byte offsets; collect (hash, id) for the lookup index.
-        let mut blob = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin"))?);
+        let mut blob =
+            std::io::BufWriter::new(crate::FreshFile::create(&dir.join("dict-terms.bin"))?);
         let mut offsets: Vec<u64> = Vec::with_capacity(n);
         let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(n);
         let mut pos: u64 = 0;
@@ -2173,8 +2175,7 @@ impl Dict {
             pos += write_record(&mut blob, &r)?;
             pairs.push((hash_stored_ref(&r, &self.prefixes, &self.datatypes), id));
         }
-        blob.flush()?;
-        blob.into_inner().map_err(std::io::Error::other)?.sync_all()?;
+        crate::commit_fresh(blob)?;
         write_pod_slice(&dir.join("dict-offs.bin"), &offsets)?;
 
         // hash-sorted parallel arrays (binary-searchable lookup). Sorted by (hash, id) —
@@ -2189,12 +2190,19 @@ impl Dict {
         Ok(())
     }
 
-    /// Opens a dictionary written by [`save_mmap`](Self::save_mmap) with the term store +
+    /// Opens a dictionary written by `save_mmap` (through [`Graph::save`](crate::Graph::save)) with the term store +
     /// lookup index MEMORY-MAPPED: open is just `mmap` (no term parse, no table rebuild),
     /// and the large data stays off-heap. Only the small prefix/datatype tables are read
     /// into RAM. Read-only (no further interning).
+    ///
+    /// Crate-internal: a store's files are opened only by its [`Graph`](crate::Graph), under the
+    /// directory's lock, and `pin` (that lock) is kept with the mapping for as long as it, or any
+    /// clone or fork of the dictionary, lives.
     #[cfg(feature = "mmap")]
-    pub fn open_mmap(dir: &std::path::Path) -> std::io::Result<Dict> {
+    pub(crate) fn open_mmap(
+        dir: &std::path::Path,
+        pin: crate::dir_lock::Pin,
+    ) -> std::io::Result<Dict> {
         use std::io::Read;
         let meta_file = std::fs::File::open(dir.join("dict-meta.bin"))?;
         // sq-znld: `dict-meta.bin` is attacker-controlled. Its entry COUNTS (np,
@@ -2263,6 +2271,7 @@ impl Dict {
             offsets: map("dict-offs.bin")?,
             hashes: map("dict-hash.bin")?,
             hashids: map("dict-hid.bin")?,
+            _pin: pin,
         };
         // sq-znld: the four data files above are attacker-controlled. Validate
         // their sizes + every offset + every record (bounds + UTF-8 + table-index range)
@@ -2286,7 +2295,7 @@ impl Dict {
     /// O(extension). `Graph::compact` re-freezes (folds the extension into a fresh
     /// shared base), so the extension — and with it the per-fork cost — stays
     /// bounded by the compaction policy.
-    pub fn fork(&self) -> Dict {
+    pub(crate) fn fork(&self) -> Dict {
         if self.frozen.is_some() {
             // Already forked: Clone bumps the frozen (and mapped) Arcs and copies
             // only the extension arena/table + the small prefix/datatype tables.
@@ -2311,7 +2320,7 @@ impl Dict {
         }
     }
 
-    /// Whether this dictionary was produced by [`fork`](Self::fork) (it resolves a
+    /// Whether this dictionary was produced by `fork` (it resolves a
     /// shared frozen base plus a local extension).
     pub fn is_forked(&self) -> bool {
         self.frozen.is_some()
@@ -2329,7 +2338,7 @@ impl Dict {
     }
 
     /// Folds a forked dictionary's extension into a FRESH frozen base (ids
-    /// unchanged), so subsequent [`fork`](Self::fork)s are O(1) again — the dict
+    /// unchanged), so subsequent forks are O(1) again — the dict
     /// half of `Graph::compact`. Non-forked dicts are returned unchanged (well,
     /// cloned); O(n) — call it from a compaction path only.
     pub fn compacted(&self) -> Dict {
@@ -2565,12 +2574,7 @@ fn write_pod_slice<T: Copy>(path: &std::path::Path, data: &[T]) -> std::io::Resu
     let () = DICT_ON_DISK_LE_GUARD;
     // SAFETY: T is u32/u64 (POD); we only read its bytes.
     let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data)) };
-    // (sq-ycle) Written AND synced: these blobs are part of a base that a rename
-    // publishes, so `std::fs::write`'s page-cache-only guarantee is not enough.
-    use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(bytes)?;
-    f.sync_all()
+    crate::write_fresh(path, bytes)
 }
 
 fn read_u32(r: &mut impl std::io::Read) -> std::io::Result<u32> {
@@ -3642,7 +3646,7 @@ mod tests {
         }
         let dir = std::env::temp_dir().join(format!("sparq-dict-hashfirst-{}", std::process::id()));
         d.save_mmap(&dir).unwrap();
-        let m = Dict::open_mmap(&dir).unwrap();
+        let m = Dict::open_mmap(&dir, None).unwrap();
 
         // (a) A hash that is present: `eq` runs for exactly the entries carrying that hash.
         //     With 64 distinct terms and a 64-bit hash that is one entry, so one compare —
@@ -3751,7 +3755,7 @@ mod tests {
         let (oid, iid) = (d.intern(&outer), d.intern(&inner));
         let dir = std::env::temp_dir().join(format!("sparq-dict-star-mmap-{}", std::process::id()));
         d.save_mmap(&dir).unwrap();
-        let d2 = Dict::open_mmap(&dir).unwrap();
+        let d2 = Dict::open_mmap(&dir, None).unwrap();
         assert_eq!(d2.term(oid), outer);
         assert_eq!(d2.term(iid), inner);
         assert_eq!(d2.lookup(&outer), oid);
@@ -3806,7 +3810,7 @@ mod tests {
 
         // (c) End-to-end: the store re-opens and resolves — i.e. the native-endian mmap readers
         //     and the explicit-LE `validate_dict_bytes` (run inside `open_mmap`) agree.
-        let d2 = Dict::open_mmap(&dir).unwrap();
+        let d2 = Dict::open_mmap(&dir, None).unwrap();
         assert_eq!(d2.lookup(&Term::NamedNode(NamedNode::new_unchecked("http://ex/a"))), 1);
         assert_eq!(d2.lookup(&Term::NamedNode(NamedNode::new_unchecked("http://ex/b"))), 2);
         std::fs::remove_dir_all(&dir).ok();
@@ -3830,20 +3834,20 @@ mod tests {
         assert_eq!(&meta[0..4], &DICT_META_MAGIC.to_le_bytes(), "meta starts with the magic");
         assert_eq!(&meta[4..8], &DICT_META_VERSION.to_le_bytes(), "then the version");
         assert_eq!(&meta[8..12], &INLINE_BASE.to_le_bytes(), "then the id partition");
-        assert!(Dict::open_mmap(&dir).is_ok(), "current-format store must open");
+        assert!(Dict::open_mmap(&dir, None).is_ok(), "current-format store must open");
 
         // (b) A store with a MISMATCHED partition (simulating the old INLINE_BASE = 1<<30) must
         //     be rejected — its inline ids would be misread as dictionary ids.
         let mut tampered = meta.clone();
         tampered[8..12].copy_from_slice(&(1u32 << 30).to_le_bytes());
         std::fs::File::create(dir.join("dict-meta.bin")).unwrap().write_all(&tampered).unwrap();
-        let err = Dict::open_mmap(&dir).err().expect("mismatched partition must be rejected");
+        let err = Dict::open_mmap(&dir, None).err().expect("mismatched partition must be rejected");
         assert!(err.to_string().contains("partition mismatch"), "clear rebuild error: {err}");
 
         // (c) A LEGACY header-less file (begins directly with the prefix count) must be rejected.
         let legacy_body = &meta[12..]; // drop magic+version+partition → pre-versioning layout
         std::fs::File::create(dir.join("dict-meta.bin")).unwrap().write_all(legacy_body).unwrap();
-        let err = Dict::open_mmap(&dir).err().expect("legacy header-less file must be rejected");
+        let err = Dict::open_mmap(&dir, None).err().expect("legacy header-less file must be rejected");
         assert!(err.to_string().contains("legacy"), "clear rebuild error: {err}");
 
         std::fs::remove_dir_all(&dir).ok();

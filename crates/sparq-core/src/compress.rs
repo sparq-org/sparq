@@ -968,7 +968,7 @@ impl CompressedPerm {
 /// once the last block is sealed) must physically precede the block stream. We therefore
 /// buffer the SPARSE directory in RAM (one 16-byte entry per [`BLOCK`] rows ≈ 0.13 B/triple
 /// — the same directory the open path already holds resident) and stream the block bytes to
-/// a side file; [`finish`](Self::finish) writes `header | directory` then appends the block
+/// a side file; `finish` (crate-internal: builds write under the directory's lock) writes `header | directory` then appends the block
 /// side file. The block COPY is over the already-compressed stream (~2.5× smaller than raw),
 /// and there is no decode / re-sort — the saving the bead targets.
 #[cfg(feature = "mmap")]
@@ -1000,18 +1000,18 @@ impl CompressedPermWriter {
     /// [`Format`] the build's `emit_format` config gate selects (`SPQCPRM1` by default), staging
     /// the block stream in a sibling temp file `<out>.blocks` (same directory ⇒ same filesystem,
     /// so the final assembly copy never crosses devices). sq-7d3dj.32.2.7
-    pub fn create(out: &std::path::Path) -> std::io::Result<Self> {
+    pub(crate) fn create(out: &std::path::Path) -> std::io::Result<Self> {
         Self::create_with(out, emit_format())
     }
 
     /// sq-7d3dj.32.2.7 — like [`create`](Self::create) but with an explicit emit
     /// [`Format`], bypassing the config gate. Used by the V2 migration differentials to pin a
     /// format without setting the process env / thread override.
-    pub fn create_with(out: &std::path::Path, format: Format) -> std::io::Result<Self> {
+    pub(crate) fn create_with(out: &std::path::Path, format: Format) -> std::io::Result<Self> {
         let mut body_path = out.as_os_str().to_owned();
         body_path.push(".blocks");
         let body_path = std::path::PathBuf::from(body_path);
-        let body = std::io::BufWriter::new(std::fs::File::create(&body_path)?);
+        let body = std::io::BufWriter::new(crate::create_scratch(&body_path)?);
         Ok(CompressedPermWriter {
             format,
             dir: Vec::new(),
@@ -1076,7 +1076,7 @@ impl CompressedPermWriter {
     /// (NOT a bare 32-byte header), matching `TripleStore::save_compressed` which leaves an
     /// unbuilt permutation raw-empty so `open` skips it by size. This keeps the streaming
     /// build byte-identical to a raw build followed by `recompress`.
-    pub fn finish(mut self, out: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn finish(mut self, out: &std::path::Path) -> std::io::Result<()> {
         self.seal_block()?;
         // Flush and CLOSE the block write handle before re-opening it for reading (portable;
         // avoids a concurrent write+read handle to the same file). `take()` drops the inner
@@ -1086,13 +1086,13 @@ impl CompressedPermWriter {
         drop(body);
         if self.len == 0 {
             // Unbuilt/empty perm: raw-empty file, like `save_compressed`'s `!rows.is_empty()`.
-            std::fs::File::create(out)?;
+            crate::write_fresh(out, &[])?;
             std::fs::remove_file(&self.body_path).ok();
             return Ok(());
         }
         // Re-open the staged block stream for the assembly copy.
         let mut body_rd = std::io::BufReader::new(std::fs::File::open(&self.body_path)?);
-        let mut w = std::io::BufWriter::new(std::fs::File::create(out)?);
+        let mut w = std::io::BufWriter::new(crate::FreshFile::create(out)?);
         {
             use std::io::Write;
             // sq-7d3dj.32.2.7 — magic matches this writer's emit format (V1 unchanged).
@@ -1112,13 +1112,7 @@ impl CompressedPermWriter {
             }
         }
         std::io::copy(&mut body_rd, &mut w)?;
-        std::io::Write::flush(&mut w)?;
-        // (sq-ycle) FSYNC the assembled permutation, for the same reason the raw
-        // external-sort merge does: this file is part of a store image a build publishes, and a
-        // flush leaves it in the page cache only.
-        w.into_inner()
-            .map_err(|e| std::io::Error::other(e.to_string()))?
-            .sync_all()?;
+        crate::commit_fresh(w)?;
         drop(body_rd);
         std::fs::remove_file(&self.body_path).ok();
         Ok(())

@@ -48,6 +48,23 @@ Until saved, legacy opens repeat the dictionary scan and cache allocation.
 Cache versions signal semantic compatibility; they do not authenticate archive
 bytes or change the existing trusted-storage assumption.
 
+## Named graph access
+
+`Graph::named` is private. Read `graph.named()` (an ordered slice) or
+`graph.named_graph(&name)`. Use `add_named`, `extend_named`, `set_named`,
+`remove_named`, `retain_named`, and `take_named` for in-memory members; these
+return `Result` and keep the graph-name prefix index current. Store-backed
+members cannot be replaced, extracted, or shifted through those methods. A directory-backed
+root refuses `add_named`, `set_named`, and nonempty `extend_named` batches of in-memory
+graphs: use a dataset `fork()` for views, or logged insertion through `ensure_named`.
+Use `ensure_named` and `apply_delta_to_named(index, inserts, deletes)` for logged
+updates, and `clear_named_durable`, `drop_named_durable`, or
+`drop_all_named_durable` for durable removal. Frozen and read-only graphs refuse
+mutations. `rebuild_default` and `replace_default` keep named members and mapping
+locks while replacing the default graph with an in-memory view; that view's later
+updates are not logged. See [named accessors and durable layout operations](named-accessors.md)
+for slot persistence, journal operations and recovery methods.
+
 ## Quickstart
 
 Add the dependency (HDT is a separate, native-only crate):
@@ -306,7 +323,7 @@ let g = Graph::load_reader_parallel(reader, "ntriples")?; // N-Triples gets the 
 ```rust
 let trig = r#"<http://ex/g> { <http://ex/a> <http://ex/p> <http://ex/b> . }"#;
 let g = sparq_core::Graph::load_dataset(trig, "trig")?;
-assert_eq!(g.named.len(), 1);          // each named graph is its own sub-Graph
+assert_eq!(g.named().len(), 1);          // each named graph is its own sub-Graph
 ```
 
 **3. Load an HDT archive (and read its header metadata).**
@@ -645,6 +662,151 @@ cargo build -p sparq-cli --features serialize-rdf
 ```
 
 ## Gotchas / feature flags / prerequisites
+
+**One holder per directory:** `Graph::open`, `open_or_create`, `save`, `save_compressed`,
+`restore_into_durable`, `restore_in_place` and the `build_external*` builders lock the
+directory exclusively (`dir_lock`: advisory `flock` on Unix, `LockFileEx` on Windows; the lock
+files are below) before touching it, all through one ownership check. A store's files are reachable only through its
+`Graph` (`g.dict()` and `g.store()` read them; the store, dictionary and permutation openers
+are crate-internal), and every memory-mapped part of a graph carries the lock: it is held while
+the graph, any mapped `fork()`/`snapshot()`, or a graph rebuilt
+around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the graphs `compact`,
+`vacuum` and `restore_in_place` swap in. A second holder, in another process or this one, gets
+`WouldBlock` at once. Rules that follow:
+
+- **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
+  from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused
+  with `InvalidInput`: `g` still maps and logs into the files a save would truncate. That
+  directory already holds `g`'s state: `g.restore_in_place(other)` replaces it with another
+  image (the supported in-place rewrite), `g.compact()` folds the log into its base, and
+  `g.is_backed_by(dir)` tells the case apart. A fork of `g` cannot save over `g`'s directory
+  either.
+- **Ownership is per root, checked when a directory is claimed.** Every store directory
+  carries a marker file, `sparq-store` (`root <id>` or `child <id>`, the id a random identity
+  kept for the store's life), written before anything else. Opening, saving or building at a
+  path is refused (`InvalidInput`) when any ancestor of it is a store, so a named graph's
+  directory (`<root>/named/<i>`) belongs to its root. Only what creates a store (`save`, the
+  builders, `open_or_create`) creates missing parent directories; `open`, `open_read_only` and
+  `compact` of a missing store fail with `NotFound` and create nothing. Saving, building or
+  `restore_into_durable` into a directory is then refused when it holds another root store, a
+  store without a marker, a marker that cannot be read, or a held lock file, and only after
+  those checks recovers an interrupted swap of it. A store saved before markers counts as a
+  root by its dictionary or manifest file and is marked on its next writable open. These
+  checks see what is on disk when they run; they reserve nothing. Separate processes creating
+  nested stores (one inside the other's directory) at the same time are not supported.
+- **Recovery touches only its own staging.** A swap (`compact`, `vacuum`, the restores, a
+  named-graph drop) stages beside the directory under names appended to its whole name
+  (`<dir>.compact-new`/`-old`, so `g.a` and `g.b` never share one; `named.drop-new`/`-old`),
+  taking those paths' lock files first (`<staging>.lock`; a named graph's are inside the
+  store, `named/<i>.compact-new.lock`). A staging directory is made under a scratch name
+  (`<staging>.sparq-part`), given its record `sparq-staging` (`<kind> <store id>`), and only
+  then renamed to its staging name, so it never exists without one. Through the renames one
+  half always carries a record: the old base is marked once it is aside, the new one loses its
+  record just before it is renamed in; a rollback marks the new half again before renaming the
+  old one back, and clears the old one's record last. Cleanup removes the other entries,
+  moves the record-only directory to its `.sparq-part` name, then removes its record and
+  directory; recovery can discard an empty scratch after a stop between those removals.
+  A named drop saves its matching manifest with the staged survivor tree and recovery
+  publishes that manifest before removing the old tree.
+  Recovery, and the next swap, promote or remove a staging directory only when its record
+  names this store, take a half caught between a rename and its record only when its own marker
+  carries that store's identity, and remove a record a crash left in the live directory.
+  Anything else at those names (another store, a scratch directory holding more than a record,
+  or staging an earlier release left, which records nothing) is refused with an error and left
+  in place, never removed (it may hold the only copy of a store): move it by hand, then retry.
+  No open, save or build claims a directory carrying `sparq-staging` on its own: open the store
+  it belongs to. A writable open checks the store's internals before recovering anything.
+- **Advisory, over a namespace you trust.** All of this guards against mistakes and other
+  well-behaved processes, not against someone racing the filesystem: paths are checked and
+  then opened by name (no `O_NOFOLLOW`/`openat`), so a change between the check and the open
+  is not caught. Each file is published on its own, so a save or build is not atomic across
+  a store's files; the swaps are what replace a store as a whole.
+- **A store's internals are not links.** An open, and a save or build into an existing
+  directory, is refused when a file or named graph inside the store is a symbolic link, or a
+  file written in place (`wal.log`, `txn.log`) has another hard link. Every other file is
+  written to a fresh `<name>.tmp` sibling, synced and renamed over its target (taking the
+  replaced file's permissions on Unix), so a hard-linked snapshot of a store (`cp -al`,
+  `rsync --link-dest`) is allowed and never written through: on Unix, `rename` and then an
+  fsync of the directory; on Windows, `MoveFileExW` with `MOVEFILE_WRITE_THROUGH` (there is no
+  directory fsync). A crash leaves the old file or the new one, never a missing or truncated
+  one. A build's side files (sort runs, dictionary spills, the per-graph spill of a quads
+  build) go in a private `.sparq-*` scratch directory made afresh in the store directory and
+  removed when the build ends; scratch a killed build left is removed by the next save,
+  build or restore into that directory.
+- **Tool outputs stay out of stores.** `sparq_core::dir_lock::is_inside_store(path)` says
+  whether a path is a store directory or inside one (`store_root(path)` names the store), and
+  fails closed: a path that cannot be resolved, such as a dangling link, is an error.
+  `dir_lock::is_reserved_store_path(path)` also covers what a store reserves beside itself (its
+  `<dir>.lock`, a `<name>.lock` of anything at `<name>`, any lock file held now, swap staging
+  names and their `.sparq-part` scratch, `sparq-store`, `sparq-staging`, `sparq.lock`,
+  `.sparq-*` scratch), checking the entry itself (so a symbolic link inside a store counts
+  even when it points out) and where it leads. Reserved names and named-staging suffixes
+  match in any letter case, including Unicode aliases of reserved ASCII letters (and, on
+  Windows, ignoring trailing dots and spaces), since a case-insensitive file system resolves
+  `data.LOCK` to `data.lock`. `sparq-cli` refuses such a path for `reason`, `classify`, tabular
+  and benchmark `--json` outputs (exit 2, before any work), and writes every output to a fresh,
+  randomly named owner-only (`0600`) sibling it renames over the path, so a hard link to a
+  store's file is replaced, never written through; just before the rename it takes the
+  replaced file's mode, or a new file's default under the umask. A symbolic link is followed,
+  link by link, to the file it names, and that file is the one checked and replaced (the link
+  stays); a dangling link is an error. A device, pipe or descriptor path (`/dev/stdout`,
+  `/dev/fd/N`, `/proc/<pid>/fd/N`) and anything else that is not a regular file is written in
+  place. `probe-compress` maps a store's file only under the store's shared lock.
+- **One path per directory.** The directory is resolved once (symbolic links and `.`/`..`;
+  a dangling symbolic link is an error) and that path is used for the lock, the log, crash
+  recovery and compaction swaps, so compacting through a link rewrites the real directory and
+  leaves the link alone. `open_or_create` recovers an interrupted swap before deciding to
+  seed. Two bind mounts of one directory are two paths: not excluded.
+- **Read-only opens:** `Graph::open_read_only(dir)` takes available outside and inside locks
+  SHARED (each created when missing and creatable). The inside lock is required; a reader
+  that cannot open or create it returns an error.
+  Read-only opens coexist with each other, never with a writable holder (`WouldBlock` either
+  way), write nothing into the directory but a missing lock file, and refuse every write (also
+  the durable clears, and a rebuilding `sparq_engine::update`; `Graph::check_writable` says
+  so). Pending WAL and transaction records, including named graphs, are replayed in memory;
+  the logs stay unchanged. Interrupted swaps or named-graph drops require a writable open
+  for directory recovery first. This also works with only the inside lock under a read-only
+  parent, where root-directory compaction is unavailable. It can be saved to another directory. A store made under a `077` umask has lock files only its owner can open, so other
+  users cannot open it, even read-only.
+- **A swap releases the graph's files first.** `compact`, `vacuum` and `restore_in_place`
+  stage the new base, then the graph lets go of every file it has in the directory (maps, logs,
+  named graphs) before the renames, since Windows refuses to rename a directory with a file in
+  it open or mapped. On Windows, a fork or snapshot that still maps the store makes the swap
+  fail (the directory is left as it was). Durable named graphs stay within their root store;
+  the named accessors refuse to take them out.
+- **A failed swap** (`compact`, `vacuum`, `restore_in_place`) leaves the directory old-or-new,
+  never lost: it is recovered at once, under the graph's lock. Completed, the call succeeds and
+  the graph is the new store; rolled back, the error is returned and the graph keeps logging to
+  the old store. Only when neither works is the graph frozen (`Graph::is_frozen()`): every
+  later write is refused, and it reads the directory's contents opened read-only with its logs
+  replayed in memory, or nothing if they do not open. Unwinding during a swap also keeps
+  it frozen, with an empty placeholder for the graph being swapped. Report it as failed, drop it
+  and re-open the directory: the embedded LWS store and the Python `Graph` (`frozen`) raise an
+  error rather than serve one.
+- **Special files:** store paths must name directories, and existing lock targets must be
+  regular files. Devices, pipes, and sockets are refused before they are opened as stores
+  or locks, including special files reached through symbolic links. Windows DOS device
+  aliases are refused by basename before metadata lookup.
+- **The lock files** are `<resolved dir>.lock` beside the directory and `sparq.lock` inside
+  it (reserved). Every opener takes the outside one first, when it exists or can be created (an
+  existing one is opened read-only when it cannot be written: a lock needs no write access),
+  then the inside one, always. A store whose parent is not writable (a mount root, say) and has
+  no `<dir>.lock` is held by its inside lock alone: it opens writable or read-only and keeps one
+  writer, but `compact`, `vacuum` and the restores, which rename the directory, are refused
+  with an error naming the parent (create `<dir>.lock` once, make the parent writable, or keep
+  the store in a subdirectory).
+  Filesystem and drive roots have no sibling lock location and also use their inside lock
+  alone. They support ordinary opens and updates; place the store in a subdirectory for
+  compaction, vacuum, or restore operations that rename it.
+  A swap holds the old directory's inside lock until the old directory is gone and locks the
+  new one's before putting it in place (on Windows, which
+  cannot rename a directory with a file open in it, it lets go for the renames and refuses
+  writes afterwards if someone took the lock in between). A swap also leaves the lock files of
+  its staging paths (`<dir>.compact-new.lock`, `<dir>.compact-old.lock`). Anyone who can open a
+  lock file can take a shared lock on it and so keep a writer out; a child made by `fork()`
+  shares its parent's locks (they belong to the open file) and holds them while it lives.
+  Never delete a lock file as stale while the directory may be in use. Network file systems
+  are not supported.
 
 - **Format strings are matched literally — an unknown format is REJECTED, not
   guessed.** Accepted aliases:

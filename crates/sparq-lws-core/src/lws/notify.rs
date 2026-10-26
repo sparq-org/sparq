@@ -570,6 +570,10 @@ pub struct Notifier {
     /// start (what makes them so is what is stored). Each is listed to the owner, counted
     /// against both shares, answers `500` to a read, and goes when the owner deletes it.
     quarantined: RwLock<std::collections::BTreeSet<String>>,
+    /// Live subscriptions out of force while their removal runs ([`Notifier::remove`]): no
+    /// delivery is prepared or made for one, and it is put back in force should its removal
+    /// leave it stored.
+    withdrawn: RwLock<std::collections::BTreeSet<String>>,
     /// The time by which subscriptions are expired, as stored.
     high_water: HighWater,
     /// Added to the clock expiry is decided by ([`Notifier::clock`]).
@@ -793,6 +797,7 @@ impl Notifier {
             sweeper_off: Default::default(),
             held_back: AtomicUsize::new(0),
             quarantined: Default::default(),
+            withdrawn: Default::default(),
             high_water: HighWater {
                 iri: format!("{}{HIGH_WATER_FRAGMENT}", cfg.absolute(SUBSCRIPTIONS_PATH)),
                 ..HighWater::default()
@@ -1241,7 +1246,12 @@ impl Notifier {
         };
         let high_water = self.high_water();
         let subs = self.subs.read().expect("lock");
-        subs.get(id).is_some_and(|s| !s.lapsing(high_water, now))
+        subs.get(id).is_some_and(|s| !s.lapsing(high_water, now)) && !self.is_withdrawn(id)
+    }
+
+    /// Whether the subscription `id` is out of force while its removal runs.
+    fn is_withdrawn(&self, id: &str) -> bool {
+        self.withdrawn.read().expect("lock").contains(id)
     }
 
     /// Remove a subscription as every service record is removed
@@ -1278,9 +1288,12 @@ impl Notifier {
         }
         // An expired subscription is listed nowhere, so its removal holds no listing's lock and
         // keeps no conditional create waiting; a live one is in its subscriber's listing too.
-        // Expiry is decided again under the record's lock, before anything is removed, on
-        // either branch: one that expired meanwhile is not removed as live (it is listed
-        // nowhere now), and one listed nowhere is removed only while it is expired.
+        // Expiry is decided again under the record's lock, before anything is removed
+        // (`set_aside`, below): a removal taken as of a live subscription (holding its
+        // listing's lock) goes on only while it is still live, and one taken as of an expired
+        // subscription (holding none) only while it is still expired. Otherwise nothing is
+        // removed and the removal finds it `Absent`: a subscriber's DELETE of one that expired
+        // meanwhile is answered `404`, and the sweeper removes it later as an expired one.
         let own_listing = {
             let high_water = self.high_water();
             let subs = self.subs.read().expect("lock");
@@ -1309,25 +1322,37 @@ impl Notifier {
                 let high_water = me.high_water();
                 let subs = me.subs.read().expect("lock");
                 subs.get(&id)
-                    .filter(|s| s.lapsing(high_water, now) == unlisted)
-                    .map(drop)
+                    .filter(|s| s.lapsing(high_water, now) == unlisted)?;
+                // A live one is taken out of force while its removal runs: nothing is delivered
+                // to it from here on, and it is put back should its removal leave it stored.
+                // (An expired one is out of force already.)
+                if !unlisted {
+                    me.withdrawn.write().expect("lock").insert(id.clone());
+                }
+                Some(!unlisted)
             }
         };
         let settle = {
             let id = id.to_string();
-            move |state: &LwsState<S>, gone: bool, ()| {
-                if !gone {
-                    return None;
-                }
+            move |state: &LwsState<S>, gone: bool, withdrawn: bool| {
                 let me = &state.notify;
-                // An expired subscription is listed nowhere, so its removal changes no listing.
-                let removed = me.subs.write().expect("lock").remove(&id);
-                me.high_water.unrecorded.lock().expect("lock").remove(&id);
-                let author = removed.as_ref().and_then(|s| s.subscriber.clone());
-                if removed.is_some_and(|s| !s.expired(me.high_water())) {
-                    *me.etag.write().expect("lock") = new_etag();
+                // Back in force once its removal left it stored; gone from memory first
+                // otherwise, so no preparation sees it in force between the two.
+                let author = gone.then(|| {
+                    // An expired subscription is listed nowhere, so its removal changes no
+                    // listing.
+                    let removed = me.subs.write().expect("lock").remove(&id);
+                    me.high_water.unrecorded.lock().expect("lock").remove(&id);
+                    let author = removed.as_ref().and_then(|s| s.subscriber.clone());
+                    if removed.is_some_and(|s| !s.expired(me.high_water())) {
+                        *me.etag.write().expect("lock") = new_etag();
+                    }
+                    author
+                });
+                if withdrawn {
+                    me.withdrawn.write().expect("lock").remove(&id);
                 }
-                author
+                author.flatten()
             }
         };
         let removed = super::records::remove_record(
@@ -1444,8 +1469,9 @@ impl Notifier {
         } else {
             let high_water = self.high_water();
             let subs = self.subs.read().expect("lock");
+            let withdrawn = self.withdrawn.read().expect("lock");
             subs.values()
-                .filter(|s| hears(s) && !s.expired(high_water))
+                .filter(|s| hears(s) && !s.expired(high_water) && !withdrawn.contains(&s.id))
                 .cloned()
                 .collect()
         };
@@ -2237,7 +2263,8 @@ fn listing_lock(container: &str, subscriber: Option<&str>) -> String {
 
 /// Remove the requester's own expired subscriptions, as a new one is requested: at most
 /// [`EXPIRED_REMOVED_PER_SUBSCRIBE`], all of them `subscriber`'s own, read through the
-/// subscriber index. This is the only purging the request waits for, so the work it does here
+/// subscriber index, once every one of them past its expiry by the clock is decided expired
+/// ([`Notifier::decide`]), so none of those counts against its capacity, whichever are removed. This is the only purging the request waits for, so the work it does here
 /// is bounded by its own records; everyone else's are swept by the expiry sweeper
 /// ([`spawn_expiry_sweeper`]). Never while the request holds the listing alone.
 ///
@@ -2248,7 +2275,23 @@ async fn purge_own_expired<S: Store + 'static>(
     subscriber: Option<&str>,
     admission: Option<crate::overload::AdmissionSlot>,
 ) -> bool {
-    let (high_water, now) = (state.notify.high_water(), state.notify.clock());
+    // Every one of the subscriber's own subscriptions past its expiry by the clock is decided
+    // first, whatever the removals below reach: decided, none is counted against the
+    // subscriber's capacity, even when the removals are spent on expired ones that cannot be
+    // removed (whose ids may come first).
+    let subscriber_owned = subscriber.map(str::to_string);
+    let decided = state
+        .notify
+        .decide(&state.store, |subs| {
+            subs.mine(subscriber_owned.as_deref())
+                .map(|s| s.id.clone())
+                .collect()
+        })
+        .await;
+    let Some(now) = decided else {
+        return false;
+    };
+    let high_water = state.notify.high_water();
     let expired = {
         let subs = state.notify.subs.read().expect("lock");
         subs.expired_of(subscriber, high_water, now, EXPIRED_REMOVED_PER_SUBSCRIBE)
@@ -2664,14 +2707,17 @@ async fn subscribe<S: Store + 'static>(
             if !resource.starts_with(storage) {
                 return false;
             }
+            // Read is decided before anything is asked of whether the topic is there, so a
+            // subscriber that may not read it causes the same store work, and gets the same
+            // answer, whether it exists or not.
             if aside {
                 return matches!(
-                    access::aside(state, Action::Read, &resource, agent).await,
+                    access::aside_read_first(state, Action::Read, &resource, agent).await,
                     Ok(access::Aside::Allowed)
                 );
             }
-            state.store.exists(&resource).await.unwrap_or(false)
-                && state.allowed(Action::Read, &resource, agent).await
+            state.allowed(Action::Read, &resource, agent).await
+                && state.store.exists(&resource).await.unwrap_or(false)
         }
     };
     for topic in &topics {
@@ -3823,6 +3869,265 @@ mod tests {
         assert!(state.notify.lease().is_some());
     }
 
+    /// The store a running state hands out reaches the high water only through its raise:
+    /// putting a held record back, or any other generic write, under the marker's IRI is
+    /// refused, and the high water stays as stored.
+    #[tokio::test]
+    async fn the_states_store_cannot_lower_the_high_water() {
+        let (state, _store) = test_store::state(100).await;
+        let marker = format!(
+            "{}{HIGH_WATER_FRAGMENT}",
+            state.cfg.absolute(SUBSCRIPTIONS_PATH)
+        );
+        let before = stored_high_water(&state.store, &state.cfg).await;
+        assert!(before.is_some());
+        let lower = crate::store::sparq::marker_meta("1");
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        for parent in [None, Some(container.as_str())] {
+            let r = state.store.reinstate(&marker, parent, &lower).await;
+            assert!(
+                matches!(r, Err(crate::error::ServerError::Forbidden)),
+                "{r:?}"
+            );
+            let r = state
+                .store
+                .restore(&marker, parent, Bytes::from_static(b"1"), &lower)
+                .await;
+            assert!(
+                matches!(r, Err(crate::error::ServerError::Forbidden)),
+                "{r:?}"
+            );
+            let r = state.store.delete(&marker, parent).await;
+            assert!(
+                matches!(r, Err(crate::error::ServerError::Forbidden)),
+                "{r:?}"
+            );
+        }
+        let r = state
+            .store
+            .write(&marker, Bytes::from_static(b"1"), LWS_JSON)
+            .await;
+        assert!(
+            matches!(r, Err(crate::error::ServerError::Forbidden)),
+            "{r:?}"
+        );
+        assert_eq!(stored_high_water(&state.store, &state.cfg).await, before);
+    }
+
+    /// Review of #7138: a create purged the first of its subscriber's lapsing subscriptions in
+    /// id order, so expired ones it could not remove used up the purge, and those only past
+    /// their expiry by the clock were left undecided and counted against the subscriber's
+    /// capacity (a `429` with none of them live). Every one of them is decided before counting.
+    #[tokio::test]
+    async fn a_create_counts_none_of_its_subscribers_due_subscriptions() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let me = "https://alice.example/#me";
+        let now = jose::now_secs();
+        set_high_water(&state, now - 60).await;
+        let mine = |expires_at: i64| Subscription {
+            subscriber: Some(me.into()),
+            ..sub_until(expires_at)
+        };
+        // Expired by the stored high water, and first in id order: their removal fails.
+        for i in 0..EXPIRED_REMOVED_PER_SUBSCRIBE {
+            stored_sub(&state, &format!("a{i:02}"), mine(now - 120)).await;
+        }
+        // Past their expiry by the clock alone, as many as the subscriber may hold.
+        for i in 0..MAX_SUBSCRIPTIONS_PER_SUBSCRIBER {
+            stored_sub(&state, &format!("z{i:02}"), mine(now - 30)).await;
+        }
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let req = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let status = handle(&state, &req, &test_store::agent(me)).await.status();
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "expired subscriptions were counted"
+        );
+        assert!(
+            state.notify.high_water() >= now - 30,
+            "decided before counting"
+        );
+    }
+
+    /// Review of #7138: the check that a reclaim removes only a subscription still expired
+    /// once its removal decides (`Notifier::remove`) had no test. The sweeper picks one past its
+    /// expiry by the clock alone; the clock steps back before the removal runs: it stands, and
+    /// is neither removed nor taken out of force.
+    #[tokio::test]
+    async fn a_reclaim_leaves_a_subscription_the_clock_stepped_back_before() {
+        let (state, _store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let now = jose::now_secs();
+        set_high_water(&state, now - 60).await;
+        let iri = stored_sub(&state, "s", sub_until(now - 30)).await;
+        // Chosen while it is past its expiry by the clock...
+        assert!(state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .get("s")
+            .unwrap()
+            .lapsing(state.notify.high_water(), state.notify.clock()));
+        // ...and the clock steps back before it is removed.
+        state.notify.clock_offset.store(-120, Ordering::SeqCst);
+        let by = super::super::records::Remover::Sweeper;
+        let removed = state.notify.remove(&state, "s", None, by, true).await;
+        assert!(matches!(
+            removed,
+            Ok(super::super::records::Removed::Absent)
+        ));
+        assert!(
+            state.notify.is_live("s"),
+            "a subscription that stands was removed"
+        );
+        assert!(state.store.exists(&iri).await.unwrap());
+    }
+
+    /// The create body for a subscription by the storage's anonymous subscriber, expiring at
+    /// `expires_at`.
+    fn expiring_body(state: &LwsState<test_store::FlakyStore>, expires_at: i64) -> String {
+        json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+            "expires": super::super::access::format_rfc3339(expires_at),
+        })
+        .to_string()
+    }
+
+    /// Review of #7138: the create's recheck of its expiry under the raise lock had no test.
+    /// The high water passes the expiry while the create waits for that lock: it is refused,
+    /// `400`, and nothing is stored.
+    #[tokio::test]
+    async fn a_create_whose_expiry_passes_while_it_waits_is_refused() {
+        let (state, _store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let expires_at = jose::now_secs() + 30;
+        let writing = state.notify.high_water.writing.clone();
+        let held = writing.lock_owned().await;
+        let creating = {
+            let state = state.clone();
+            let body = expiring_body(&state, expires_at);
+            tokio::spawn(async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                handle(&state, &req, &Agent::anonymous()).await.status()
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !creating.is_finished(),
+            "the create waits on the raise lock"
+        );
+        set_high_water(&state, expires_at).await;
+        drop(held);
+        assert_eq!(creating.await.unwrap(), StatusCode::BAD_REQUEST);
+        assert!(state.notify.subs.read().unwrap().is_empty());
+    }
+
+    /// Review of #7138: that a create holds the raise lock through its write had no test. A
+    /// raise that fails while the create's write is under way waits for it: the create is
+    /// answered with the service not halted, and only then does the raise fail and halt it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_raise_waits_for_a_create_under_way() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let expires_at = jose::now_secs() + 3600;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let creating = {
+            let state = state.clone();
+            let body = expiring_body(&state, expires_at);
+            tokio::spawn(async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                handle(&state, &req, &Agent::anonymous()).await.status()
+            })
+        };
+        // The write is under way (its gate taken).
+        while store.hold_next_create.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        store.fail_marker_write.store(true, Ordering::SeqCst);
+        let raising = {
+            let state = state.clone();
+            let to = state.notify.high_water() + 10;
+            tokio::spawn(async move { state.notify.raise(&state.store, to).await })
+        };
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            !raising.is_finished(),
+            "the raise did not wait for the write"
+        );
+        assert!(!state.notify.halted());
+        gate.add_permits(1);
+        // A `201` was decided with the service not halted (a halted one answers `503`); whether
+        // the raise has failed by the time the create's task ends is not this test's to say.
+        assert_eq!(creating.await.unwrap(), StatusCode::CREATED);
+        assert!(!raising.await.unwrap());
+        assert!(state.notify.halted());
+    }
+
+    /// A wrapper of a running state's store keeps that state's lease: a state built over it,
+    /// wrapped once or twice more, is refused, so it cannot run the recovery (and lower the high
+    /// water) under the running service.
+    #[tokio::test]
+    async fn a_state_over_a_wrapper_of_a_running_ones_store_is_refused() {
+        use super::super::tracked::Tracked;
+        let (state, _store) = test_store::state(100).await;
+        let mut cfg = state.cfg.clone();
+        cfg.reset_subscription_clock = true;
+        let root = cfg.storage();
+        let marks_before = _store.marker_writes.load(Ordering::SeqCst);
+        let once = Tracked::new(state.store.clone(), root.clone());
+        let Err(why) = LwsState::new(once, cfg.clone()).await else {
+            panic!("a state was built over a wrapper of a running one's store");
+        };
+        assert!(why.contains("another LWS service"), "{why}");
+        let twice = Tracked::new(
+            Tracked::new(state.store.clone(), root.clone()),
+            root.clone(),
+        );
+        let Err(why) = LwsState::new(twice, cfg.clone()).await else {
+            panic!("a state was built over a nested wrapper of a running one's store");
+        };
+        assert!(why.contains("another LWS service"), "{why}");
+        assert_eq!(
+            _store.marker_writes.load(Ordering::SeqCst),
+            marks_before,
+            "a refused state wrote no marker"
+        );
+        // Once the running state is gone, a wrapper of its store may be served.
+        let backend = state.store.clone();
+        drop(state);
+        let state = LwsState::new(Tracked::new(backend, root), cfg)
+            .await
+            .unwrap();
+        assert!(state.notify.lease().is_some());
+    }
+
     /// A conditional create that waits for the listing it compares, while a subscription
     /// registered meanwhile passes its expiry by the clock, decides what that listing leaves out
     /// once it holds it: the subscription is left out only with its expiry stored.
@@ -4738,6 +5043,57 @@ mod tests {
         state.notify.subs.write().unwrap().insert(id.into(), sub);
         *state.notify.etag.write().unwrap() = new_etag();
         format!("{SUBSCRIPTIONS_PATH}{id}")
+    }
+
+    /// Review of #7135: a live subscription whose removal was under way still heard of
+    /// changes, and still had deliveries made to it, until the store confirmed it gone. Its
+    /// removal takes it out of force at once; a removal that leaves it stored puts it back.
+    #[tokio::test]
+    async fn a_subscription_being_removed_hears_nothing_until_it_stays() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let path = subscribe_root(&state, "s").await;
+        let iri = state.cfg.absolute(&path);
+        let event = Event {
+            kind: "Update",
+            uri: state.cfg.storage(),
+            is_container: true,
+            relation: None,
+        };
+        let heard = || {
+            let (state, event) = (state.clone(), event.clone());
+            async move {
+                let prepared = state.notify.prepare(&state, &event).await;
+                let stands = state.notify.stands_now(&state.store, "s").await;
+                (prepared.len(), stands)
+            }
+        };
+        assert_eq!(heard().await, (1, true));
+        // The removal's store step is held: the subscription is out of force meanwhile.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *state.store.hold_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let deleting = {
+            let state = state.clone();
+            let delete = test_store::request(Method::DELETE, &path, &[], "");
+            tokio::spawn(async move { handle(&state, &delete, &Agent::anonymous()).await.status() })
+        };
+        while state.store.hold_next_delete_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert_eq!(heard().await, (0, false), "heard while its removal ran");
+        gate.add_permits(1);
+        assert_eq!(deleting.await.unwrap(), StatusCode::NO_CONTENT);
+        assert_eq!(heard().await, (0, false));
+        // A removal that fails, the subscription still stored, puts it back in force.
+        let path = subscribe_root(&state, "s").await;
+        *state.store.fail_delete_of.lock().unwrap() = Some(iri.clone());
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let status = handle(&state, &delete, &Agent::anonymous()).await.status();
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(heard().await, (1, true), "still stored, so back in force");
     }
 
     /// A quarantined subscription is listed to the owner, refuses a read, and goes, freeing its
@@ -7566,6 +7922,114 @@ mod tests {
         assert_eq!(ask_grant(&reader).await, StatusCode::FORBIDDEN);
         assert_eq!(ask_grant(&stranger).await, StatusCode::FORBIDDEN);
         assert_eq!(ask_grant(&owner).await, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// A subscriber that may not read a topic causes the same store work, and gets the same
+    /// answer, whether the topic exists or not: its access is decided before anything is asked
+    /// of whether the topic is there, both when the topic's lock is free and when a change to it
+    /// holds it (one that kept nothing of what it was, or, as a change does, an update of a topic
+    /// that is there, kept as it was, against a create of one that is not).
+    #[tokio::test]
+    async fn a_topic_the_subscriber_may_not_read_is_decided_the_same_whether_it_exists() {
+        use test_store::{agent, closed_state, data};
+        let (state, store) = closed_state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let there = data(&state, "there").await;
+        let gone = format!("{}gone", state.cfg.storage());
+        assert!(!state.store.exists(&gone).await.unwrap());
+        let stranger = agent("https://stranger.example/#me");
+        let as_stored = super::super::Prior {
+            existed: Some(true),
+            meta: Some(state.resource_meta(&there).await.unwrap()),
+            format: Some(Some("text/plain".to_string())),
+        };
+        let creating = super::super::Prior {
+            existed: Some(false),
+            ..super::super::Prior::default()
+        };
+        let attempt = |topic: String, changing: Option<super::super::Prior>| {
+            let (state, store, who) = (state.clone(), store.clone(), stranger.clone());
+            async move {
+                let body = json!({
+                    "type": WEBHOOK,
+                    "topic": [topic.clone()],
+                    "inbox": "https://inbox.example/",
+                })
+                .to_string();
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                // A change in flight to it: its lock held, and what it was before not kept, so
+                // that is read as stored.
+                let held = match changing.clone() {
+                    Some(before) => {
+                        let held = state.locks.lock(&topic).await.unwrap();
+                        state
+                            .locks
+                            .changing_from([(topic.clone(), before)].into_iter().collect());
+                        Some(held)
+                    }
+                    None => None,
+                };
+                *store.trace.lock().unwrap() = Some(Vec::new());
+                let r = test_store::route_as(&state, req, &who).await;
+                let trace = store.trace.lock().unwrap().take().unwrap();
+                if changing.is_some() {
+                    state.locks.landed(std::slice::from_ref(&topic));
+                }
+                drop(held);
+                let status = r.status();
+                let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let trace: Vec<String> = trace
+                    .into_iter()
+                    .map(|t| t.replace(&topic, "{topic}"))
+                    .collect();
+                (status, body, trace)
+            }
+        };
+        for changing in [None, Some(super::super::Prior::default())] {
+            let a = attempt(there.clone(), changing.clone()).await;
+            let b = attempt(gone.clone(), changing.clone()).await;
+            assert_eq!(a.0, StatusCode::FORBIDDEN);
+            assert_eq!(a, b, "changing: {changing:?}");
+        }
+        // An update in flight on the topic that is there, against a create in flight of the
+        // one that is not.
+        let updating = attempt(there.clone(), Some(as_stored.clone())).await;
+        let created = attempt(gone.clone(), Some(creating.clone())).await;
+        assert_eq!(updating.0, StatusCode::FORBIDDEN);
+        assert_eq!(updating, created);
+        // Review of #7174: a create that failed and was set aside keeps the default metadata
+        // it wrote over nothing (and no format). It is still a URI where nothing was: with a
+        // grant to the subscriber whose format constraint the topic does not meet, nothing is
+        // read of it either (its format is not looked up), as for the update in flight.
+        state.access.put_grant_for_test(
+            "format",
+            access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": ["read"],
+                    "assignee": "https://stranger.example/#me",
+                    "constraint": [{"leftOperand": "format", "operator": "isAnyOf",
+                        "rightOperand": ["text/turtle"]}]}]),
+                &state.cfg.storage(),
+            )
+            .unwrap(),
+        );
+        let failed_create = super::super::Prior {
+            existed: Some(false),
+            meta: Some(super::super::ResourceMeta::default()),
+            format: None,
+        };
+        let updating = attempt(there.clone(), Some(as_stored)).await;
+        let created = attempt(gone.clone(), Some(creating)).await;
+        let failed = attempt(gone.clone(), Some(failed_create)).await;
+        assert_eq!(updating.0, StatusCode::FORBIDDEN);
+        assert_eq!(updating, created);
+        assert_eq!(created, failed);
     }
 
     /// Issue #6814 (review): a subscription POST said the subscriptions container was set

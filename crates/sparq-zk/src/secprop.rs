@@ -451,9 +451,8 @@ pub fn production_method_iris() -> Vec<&'static str> {
 /// sentinel and the band predicate as `global`s, and
 /// `compose_core::dual_leaf_v2_leaf::recompute_term` applies the band check and the
 /// `LANG_NONE` reserved-tag check at the witnessed component sites of the
-/// `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members. No `CircuitId` names
-/// either member, so no verify path selects one and the asserts are not yet
-/// enforced on any verification; V1 has no in-circuit sentinel assert. This is a
+/// `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members. Dedicated `CircuitId` variants select
+/// them only for `DualLeafV2` commitments. V1 has no in-circuit sentinel assert. This is a
 /// recorded UNMET REQUIREMENT of the V1
 /// derivation, not a claim about either method's audited security: both carry the
 /// same INV-VL downgrade and the estate is NOT externally audited (sq-qhy4).
@@ -464,8 +463,8 @@ pub const fn dual_leaf_v1_posture() -> &'static str {
      reserved no-value sentinel lies INSIDE the reachable value-handle band, so the \
      research/zk-field-native-encoding.md §14.1 reserved-tag requirement is UNMET; v2 \
      discharges it on the host side, and v2's in-circuit half has shipped in the \
-     component-witnessed scan_v2dl / join_eq_v2dl members, which no CircuitId names and so \
-     no verify path selects. V1 has no in-circuit sentinel assert. Same INV-VL downgrade as \
+     component-witnessed scan_v2dl / join_eq_v2dl members, selected by dedicated CircuitIds \
+     only for DualLeafV2 commitments. V1 has no in-circuit sentinel assert. Same INV-VL downgrade as \
      v2; NOT externally audited (sq-qhy4)"
 }
 
@@ -766,9 +765,8 @@ mod tests {
                  which shipped with the component-witnessed V2 members: {posture}"
             );
         }
-        // ...while still recording WHY it changes nothing a verifier does: no
-        // `CircuitId` names either V2 member, so no verify path selects one.
-        for fragment in ["in-circuit half has shipped", "no verify path selects"] {
+        // V2 dispatch coverage uses dedicated ids and an explicit method pairing.
+        for fragment in ["in-circuit half has shipped", "only for DualLeafV2 commitments"] {
             assert!(
                 posture.contains(fragment),
                 "the v1 posture must state {fragment:?}: {posture}"
@@ -782,16 +780,16 @@ mod tests {
             "the annotation graph must record v1's unmet reserved-tag requirement"
         );
         // The Turtle comment and the prose posture must not drift apart on that
-        // point: neither may call the in-circuit half open, and both must say it
-        // is unreached.
+        // point: neither may call the in-circuit half open, and both name the
+        // V2-only method pairing.
         assert!(
             !METHODS_TTL.contains("in-circuit half is still open")
                 && !METHODS_TTL.contains("in-circuit half of that requirement has not shipped"),
             "the annotation graph must not still describe the in-circuit half as open"
         );
         assert!(
-            METHODS_TTL.contains("no verify path selects"),
-            "the annotation graph must record that no verify path selects a V2 member"
+            METHODS_TTL.contains("only for DualLeafV2 commitments"),
+            "the annotation graph must record the dedicated V2 method pairing"
         );
         // v1 is no longer required by the completeness guard; v2 is.
         let required = production_method_iris();

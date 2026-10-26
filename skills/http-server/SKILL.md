@@ -736,8 +736,7 @@ curl http://127.0.0.1:3030/metrics                              # Prometheus tex
 # Admin WAL compaction / vacuum for ERASURE-COMPLETENESS (sq-x32t). POST-only; gated by the
 # WRITE token. Physically purges data removed by DELETE / DROP (incl. orphaned literal VALUES) from the
 # on-disk store so a logical erasure is followed by real erasure. 200 ok; 409 if in-memory
-# (no --persist, nothing to purge); 503 on a durable-write error (retryable only if the swap had
-# not yet staged its new base — past that the store is frozen until a restart, sq-ycle):
+# (no --persist, nothing to purge); 503 on a durable-write error (check server recovery logs):
 curl -X POST -H 'Authorization: Bearer <TOKEN>' http://127.0.0.1:3030/admin/compact
 
 # Online consistent-snapshot backup + restore (feature `backup`, default OFF). POST-only, WRITE-gated.
@@ -780,11 +779,8 @@ batches** (no race with a concurrent write), preserves the live triple set **exa
 generation published; reads keep flowing throughout). **POST-only**, gated by the **write** token
 (`--auth-token`), like an UPDATE. Responses: `200` ok; `409` if the server is in-memory (no
 `--persist` — there is no on-disk history to purge, so a no-op success would mislead); `503` on a
-durable-write error (the writer stays alive and reads keep flowing either way). That `503` is
-retryable only when the failure came BEFORE the swap staged its new base: past that point core
-freezes the store — every later durable write is refused — until the server is restarted against
-the same `--persist` dir, which replays what is on disk, so nothing acknowledged is lost
-(`sq-ycle`). **Offline equivalent:** stop the
+durable-write error. Reads continue from the published snapshot. Check the server logs for
+recovery status; a frozen store refuses further writes until it is reopened. **Offline equivalent:** stop the
 server and run `sparq-cli compact <persist-dir>` (see the `cli` skill). **Honest scope:** this
 scrubs the engine's own on-disk segments + dictionary; it cannot reach bytes already copied off-box
 (filesystem snapshots, COW history, external backups) — those are the operator's responsibility
@@ -821,8 +817,12 @@ to a sibling and swapped in with a **two-rename directory swap** (parent dir fsy
 that an interrupted crash heals deterministically (`Graph::restore_into_durable` reuses the exact WAL
 compaction swap + `recover_compaction` healer). **Fail-closed throughout:** the artifact is imported
 + validated **before** any on-disk change, so a corrupt artifact is `400` with the durable store
-**untouched** and no swap-sibling leftovers; a swap I/O error leaves the OLD store intact and the
-writer alive. `?persist=true` on an **in-memory** server is `409` (no durable dir). **Restore-on-start:**
+**untouched** and no swap-sibling leftovers. A swap I/O error is recovered at once under the
+store's lock: rolled back, the OLD store is intact and the writer appends to it; completed, the
+restore succeeded. Only if neither works is the durable graph frozen (every later update refused
+until a restart re-opens the directory, which heals it to old-or-new); the writer stays alive. A
+store whose parent directory is not writable (no `<dir>.lock` beside it) serves, but its restores
+and compactions are refused: they rename the directory. `?persist=true` on an **in-memory** server is `409` (no durable dir). **Restore-on-start:**
 `--restore <FILE>` / `SPARQ_RESTORE` seeds the in-memory store before binding (bootstrap for
 horizontal-scaling stage-2 + PITR base); with `--persist DIR` it is **refused unless** you add
 **`--restore-persist`** / `SPARQ_RESTORE_PERSIST=1`, which writes the artifact through to `DIR`
@@ -1429,7 +1429,8 @@ surface, `research/sparq-solid-scope.md` §4); this is exactly that missing shel
     (party = session agent, action = `odrl:read`, target = each rule's target graph, and each
     member the dataset states `odrl:partOf` a target, with that edge as its asset evidence)
     BEFORE the query — an ODRL prohibition beats a static WAC grant through the unchanged
-    `∪ allow ∖ ∪ deny` enforcement. The lane runs on **all three endpoints** (sq-3mu76): the
+    `∪ allow ∖ ∪ deny` enforcement. A failed bridge view write returns `503` and disables
+    that authorization view. The lane runs on **all three endpoints** (sq-3mu76): the
     advisory `/authz/decide` and `/authz/wac-allow` never report an allow `/authz/query` would
     refuse to honour, and their advertisements are **read-scoped** while the lane evidences only
     `odrl:read` — `grantedModes` is masked to the requested mode, `wacAllow` carries at most
@@ -1455,6 +1456,31 @@ deny, never a grant. **Double opt-in**, OFF by default: compiled only with the `
 feature **and** served only when `--solid-authz` / `SPARQ_SOLID_AUTHZ=1` is set (mirrors `shacl` /
 `terse`); with the feature but not the flag, `/authz/*` is `404`. Read-gated by `--auth-token-read`.
 
+Trust count limits apply to the whole parsed block before certification derivation or
+credential admission, including potential derived rules even if an edge would fail verification.
+An over-limit block returns the existing `403` response with `allow: false` and `trustDenied: true`.
+They bound work counts rather than elapsed time; the body-size limit still applies independently.
+Malformed numeric overrides leave defaults unchanged; valid overrides are nonnegative counts.
+
+**Bounded authorization-build pool.** Materialising an authorization view is CPU-bound and its
+size is chosen by untrusted input — the request's own `"dataset"` on the stateless lane, the
+store's control documents on the stateful one. Every lane that builds a view therefore runs on
+ONE bounded blocking pool: the stateless per-request build, stateful per-generation **cache
+misses** (hits use an O(1) read-lock lookup and claim no slot), the `odrl-authz` lane's store
+build plus policy evaluation and index rebuild under **one claim**, and the
+`solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
+credential N-Quads parsing, admission, augmented store build and decision) under one claim.
+The permit remains in the blocking task until it finishes, even if the handler is cancelled.
+`SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` is clamped to `1..=tokio::sync::Semaphore::MAX_PERMITS`
+(0 becomes 1), and caps the
+builds in flight (default: the CPU count — the work is CPU-bound, so more concurrency than cores
+buys queueing, not throughput) and `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` caps the WAIT: a request
+that finds every slot taken waits at most that long and is then **shed** with the same retryable
+`503` a materialisation failure gives, never queued without limit. The existing mappings are
+unchanged — an unparseable dataset is still `400`, a materialisation refusal still `503` — and a
+shed request produces no decision (fail-closed). Saturation warnings emit at most once per
+second, with the count shed since the preceding warning.
+
 **Which pod: `"source"` (`sq-snopa.8`).** Every endpoint takes an optional `"source"` field:
 
 - `"body"` (**default**, and the only mode before sq-snopa.8) — **stateless**: the pod dataset
@@ -1463,10 +1489,11 @@ feature **and** served only when `--solid-authz` / `SPARQ_SOLID_AUTHZ=1` is set 
   carry a `"dataset"` (a body naming both pods is ambiguous → `400`). A pod resource IS a named
   graph of the loaded store, so `"resource"` must be that graph's absolute IRI; relative paths are
   not resolved. The pinned current generation is forked, materialised once, and cached in
-  `AppState` keyed by the **generation number** — so the N3 materialisation is paid once per
+  `AppState` keyed by the **serving lineage and generation number** — so the N3 materialisation is paid once per
   generation, not once per request, and **an `.acl`/`.acr` write re-materialises automatically**
-  (every commit publishes a new generation, which makes the cached view stale by construction;
-  there is no window in which a revoked grant is still served).
+  (every commit publishes a new generation; an in-memory `/admin/restore` replaces the serving
+  lineage even when it restarts at generation zero. Both cache hits and installation check lineage,
+  so an in-flight build from the replaced store cannot install after restore).
 
 The stateful lane is fail-closed on the same terms, and additionally **refuses** (never silently
 un-enforces) two combinations it cannot evaluate faithfully: under `odrl-authz`, a server store
@@ -1528,6 +1555,11 @@ env overrides the default.
 | `--shacl-shapes FILE` | `SPARQ_SHACL_SHAPES` | unset | (feature `shacl`) load the guard shapes graph once at startup; required when the guard is on |
 | `--solid-authz` | `SPARQ_SOLID_AUTHZ` | off | (feature `solid-authz`) serve the Solid WAC/ACP authorization endpoints `POST /authz/decide`+`/wac-allow`+`/query` — a fail-closed HTTP shell over `sparq-solid`; POST the pod dataset (or `"source":"server"` for the server's own loaded store, sq-snopa.8) + an already-resolved session, get the decision / `WAC-Allow` value / access-controlled query result; read-only — see "Solid WAC/ACP authorization endpoints" |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) maximum potential `(rule, credential)` pairs: `(direct rules + certifications) × presented credentials`; each depth-one certification can add at most one rule. Checked after parsing and before derivation/admission; excess → `403` trust deny, no grant. `0` permits no pairs. |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` | `2048` | (feature `solid-authz-trust`) maximum certification edges per block, checked before any signature verification; excess → `403` trust deny. `0` permits no certifications. |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK` | `65536` | (feature `solid-authz-trust`) maximum potential rule/triple validations: `(direct rules + certifications) × sum(credential triple counts)`; checked before derivation/admission because a pair can carry many triples. Excess → `403` trust deny. `0` permits no validation work. |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` | CPU count | (feature `solid-authz`) how many authorization-view BUILDS may run at once on the bounded blocking pool, across every `/authz/*` lane; `0` is read as `1` — see "Bounded authorization-build pool" |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` | `2000` | (feature `solid-authz`) how long an `/authz/*` request waits for a free build slot before the fail-closed, retryable `503`; `0` refuses immediately when the pool is saturated — see "Bounded authorization-build pool" |
 | `--brtpf-max-bindings N` | `SPARQ_BRTPF_MAX_BINDINGS` | `1024` (`0`=off) | (feature `brtpf`) **DoS cap on the brTPF binding-set mapping COUNT** — one index scan per mapping, so cost is super-linear in the count, not the bytes → `413` (`sq-r74h`) |
 | `--brtpf-max-values-bytes N` | `SPARQ_BRTPF_MAX_VALUES_BYTES` | `1048576` (`0`=off) | (feature `brtpf`) **DoS cap on the raw brTPF `values` payload BYTES** — bounds the GET query-string carrier that `--max-body-bytes` never sees → `413` (`sq-r74h`) |
 | `--audit-log` | `SPARQ_AUDIT_LOG` | off | (feature `audit-log`) per-query **access audit log** — see "Access audit log" |
@@ -1926,106 +1958,36 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
-- **One UPDATE body = one durable commit, graph SET included (`sq-ycle`).** A multi-operation
-  UPDATE body is resolved into ONE redo-journal frame (`DIR/txn.log`) that is fsync'd before any
-  per-graph WAL is touched, so a crash part-way through materialising it recovers the whole body
-  or none of it. The frame now records graph-EXISTENCE changes as well as triples: `CREATE GRAPH
-  <g>` of a new empty graph and `DROP GRAPH <g>` of an empty one carry no triples at all, so
-  without those records a crash between the commit and the materialisation could come back with a
-  different graph SET from the one the `204` acknowledged. Records replay in commit order, so a
-  create and a drop of the same graph in one body recover with the last one winning. A journal
-  written by an older build (before the existence records) is still replayed, not discarded.
-- **A failed materialisation freezes the WHOLE store until a restart.** If a body's commit
-  succeeds but materialising it fails, the frame is KEPT for the next open to replay and every
-  durable write in that store — the default graph, every named graph, a graph create or drop, a
-  compaction, a vacuum, and the journal clear itself — is refused until the store is reopened
-  (`503` over HTTP). Accepting a write in that window would let the recovery redo silently undo
-  or reorder something already acknowledged. The refusal is tree-wide in both directions: a frame
-  retained by a named graph freezes the root too.
-- **A durable path that fails part-way freezes the store the same way.** Not only a failed
-  materialisation: a WAL append, a graph create, a graph drop, a journal clear, or a compaction
-  or vacuum whose swap fails after its new base is staged all freeze the store until it is
-  reopened, because each has already changed part of it or part of the in-memory image by the
-  time it can fail. Over HTTP that is a `503` until the process is restarted against the same
-  `DIR`; the restart replays what is on disk, so nothing acknowledged is lost and nothing refused
-  appears.
-- **`--persist DIR` written by this version cannot be opened by an earlier one.** The store's
-  on-disk format version moves with the journal format, and an older build refuses a version it
-  does not know rather than silently truncating a journal frame it cannot read (which would
-  destroy an acknowledged commit). A `DIR` written by an older build is marked the first time
-  this version commits a body to it, so this is a one-way upgrade per store: keep a backup before
-  rolling a server forward if a rollback matters. A `DIR` still on the pre-`dict-meta.bin`
-  dictionary layout carries no such field: an atomic UPDATE on it is REFUSED — like any other
-  refused durable write, so a `503` over HTTP — with an error saying to re-save the store with
-  this build first (`Graph::open(old)?.save(new)?`).
-  Queries and single-operation updates of such a store are unaffected.
-- **A `--persist DIR` is a claimed store directory.** Every store carries a `sparq-store` marker
-  naming its role (a root, or a named graph of one), and every open, create, save, external build
-  and restore goes through one constructor: the path is resolved once, refused when any ancestor
-  is a store (so `DIR/named/<i>` is not a store you can point `--persist` at), and refused when
-  its name ends in a suffix a compaction or a named-graph drop derives for its own staging
-  directories. A store written before markers existed gets one on its next writable open.
-- **A whole-store write goes to a FRESH directory.** `Graph::save`, `save_compressed` and the
-  `build_external*` builders refuse a destination that exists and is not empty. The online
-  restore (`POST /admin/restore` with the durable store) is unaffected: it goes through
-  `Graph::restore_in_place`, which the graph itself performs — it stages the complete new base
-  beside the store and renames it in, giving its log up only once that base is on disk, so a
-  staging failure leaves the store exactly as writable as it was.
-- **A handle whose directory was replaced refuses writes.** Each graph records the layout
-  generation of the DIRECTORY its log lives in, and every base swap (compaction, vacuum, restore)
-  and every named-graph drop records which directory it replaced. A handle inside a replaced
-  directory — a named graph taken out of its parent's `named` vector before the parent swapped
-  its base, for instance — is refused rather than left appending to an unlinked log. A swap
-  elsewhere in the tree (a sibling graph, or a child beneath a root that is still there) does not
-  make a handle stale, so a sequential writer can compact a store with named graphs and carry on
-  writing. A compaction of a store that HAS named graphs stages the whole tree once and publishes
-  it once. Every republish of the manifest is built from the ATTACHED named graphs, so a create
-  or a drop performed while a handle is detached records that handle's directory as replaced
-  too: its next write is refused rather than acknowledged into a directory the store no longer
-  names.
-- **A named graph's directory is handed out once.** `named.bin` (format 2; format 1 is still
-  read, and a store this build has written is NOT readable by a build before it) records each
-  named graph's `named/<slot>` id and the next id to hand out, so the id is monotonic rather than
-  the graph's position — between whole-store rewrites: a `save`, a compaction or a vacuum writes
-  a fresh image and numbers it from zero, which is safe because that image contains no residue. A
-  `DROP GRAPH` rewrites the manifest — the commit point — and then removes that graph's own
-  directory, leaving every other graph's slot and handle alone; a drop of every named graph
-  leaves a manifest naming none, which is what keeps the counter. A graph created after a drop
-  therefore cannot land in a dropped graph's directory, even if the removal of that directory
-  failed or a crash interrupted it. A slot id is its plain decimal spelling and nothing else, the
-  manifest may not name one twice, and the only directories a drop or a recovery ever removes are
-  the store's own `named/` container, its interrupted-drop siblings and its `named/<slot>` paths —
-  a graph opened from somewhere else and pushed onto the public named set is refused, not
-  dropped, and a name under any of those that is not a real directory is refused too.
-- **A store is durable when the call returns, not merely written.** Every manifest publish
-  fsyncs the sub-trees it names, the `named/` container, the store root AND the root's own files
-  — the indexes, the dictionary and the numeric/temporal/per-predicate caches, which are written
-  through buffers that are otherwise only flushed. A file that cannot be made durable refuses the
-  publish. A `save` or external build of a store with NO named graphs writes no manifest, so it
-  runs that last rung directly rather than returning with its bytes in the page cache.
-- **A named graph's slot is reserved by creating its directory**, in one `mkdir`: an id whose
-  directory already exists is skipped, and any other error refuses the create instead of being
-  read as a free id — so a new graph can never be put on top of an interrupted create's residue
-  and inherit its log.
-- **An open never removes a slot the manifest does not declare.** A drop commits at its
-  manifest rewrite and removes the slot directory after it, so a crash in between leaves the
-  dropped graph's bytes under a slot nothing names. They STAY there — an orphan nothing opens —
-  until a whole-store rewrite (`save`, compaction, vacuum) writes a fresh image; that is the
-  boundary for an erasure runbook, because "undeclared" is not "garbage" (a create made while a
-  caller holds a child detached leaves that live child's slot undeclared, writes and all). A drop
-  reports what it removed and never removes data it cannot attribute to the slot it was asked to
-  drop, so a `DROP` whose removal failed is an error you retry or vacuum, not a silent success.
-- **A drop that cannot remove its directories is an error.** The removals are reported, not
-  discarded, and the failure freezes the store until it is reopened: for a `DROP` performed to
-  ERASE data (the retention/erasure runbook), reporting success while the data is still on disk
-  is the one answer that must not be given. Over HTTP this is a refused update, not a 2xx.
-- **One writer per `--persist DIR`.** Within this process the store tree holds a writer permit,
-  so two handles on one tree — a root and a named graph detached from it, say — cannot write
-  concurrently, and a handle's staleness check cannot be overtaken by maintenance between the
-  check and the append it guards. Two writing PROCESSES on one directory still corrupt it and
-  nothing detects that; cross-process exclusion is designed in
-  [`research/core-versioned-store-design.md`](../../research/core-versioned-store-design.md) and
-  is not implemented yet.
+- **Durable UPDATE journals include named-graph existence.** One committed frame records
+  inserts, deletes, creates and drops in order. Recovery supports both the previous data-only
+  journal and the current operation format. A failed journal materialization or indeterminate
+  log write freezes the tree; later durable writes are refused until recovery.
+- **Named-graph layout recovery is hardened.** The manifest records stable slot ids and the
+  next allocation id. Creating a graph adds one manifest entry; dropping one removes only that
+  entry. Removing a child from the attached in-memory set does not remove its on-disk manifest
+  entry. Use the durable drop methods to change the persisted set. Public named accessors refuse
+  moving durable children and refuse inserting in-memory children into a directory-backed root.
+  A stale child may be removed from memory without changing the current directories.
+- **Writable opens validate before cleanup.** Every declared slot must be a real directory of
+  the correct role; linked `named/` containers are refused. Only a writable opener holding the
+  exclusive store lock cleans undeclared slots. Cleanup failures leave the slot in place and
+  emit a warning naming its path. Read-only opens perform no sweep. A whole-store rewrite
+  (save, compaction or vacuum) produces a fresh layout.
+- **Manifest publication follows the durability barrier.** Child files and directories, the
+  named container, and root files (including numeric, temporal and streamed caches) are synced
+  before publication. Default-only saves and builds sync root files as well. Slot reservation
+  creates a fresh directory, skips occupied ids and reports other errors.
+- **One server per `--persist DIR`.** The server holds `DIR`'s exclusive lock (sparq-core
+  `dir_lock`; `Graph::open_or_create`) for its lifetime: a second server, `sparq-cli compact`, or a
+  read-only `sparq-cli query-mmap` on the same `DIR` fails at once (`WouldBlock`) while it runs.
+  The lock files are `DIR.lock` **beside** `DIR` (taken when it exists or can be created) and
+  `DIR/sparq.lock` inside it. `/admin/restore?persist=true` and `/admin/compact` swap `DIR` under
+  that same lock (`Graph::restore_in_place`, `Graph::vacuum`), and a swap renames `DIR`, so it
+  needs `DIR.lock`: with `--persist` at a volume root on a read-only root filesystem (`/data`,
+  whose `DIR.lock` would go in `/`) the server starts and keeps one writer through the inside
+  lock, but those two endpoints are refused with an error naming the parent; point `--persist`
+  at a subdirectory (`/data/store`) to have both. Never delete either lock file as stale while
+  `DIR` may be in use.
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with
   `--features backup` to mount the WRITE-gated, POST-only `/admin/backup` (stream a
   self-describing snapshot artifact of the live store WITHOUT stopping the world) and

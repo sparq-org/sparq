@@ -183,13 +183,13 @@ fn no_entry_point_grants(ttl: &str, req: &Request, what: &str) {
     assert_eq!(attached_grants(&policy), [false, false], "request-time layer granted: {what}");
 
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_permission(&policy, req);
+    store.materialize_odrl_permission(&policy, req).unwrap();
     assert!(!alice_reads(&store), "one-shot granted: {what}");
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_policy(&policy, req);
+    store.materialize_odrl_policy(&policy, req).unwrap();
     assert!(!alice_reads(&store), "policy materialiser granted: {what}");
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_permission_conditional(&policy, req);
+    store.materialize_odrl_permission_conditional(&policy, req).unwrap();
     assert!(
         !alice_reads(&store),
         "conditional materialiser granted: {what}"
@@ -204,15 +204,15 @@ fn no_entry_point_grants(ttl: &str, req: &Request, what: &str) {
     ] {
         let mut store = PodStore::new(pod());
         match kind {
-            BridgeKind::Permission => store.materialize_odrl_permission(&granting(), req),
-            BridgeKind::Policy => store.materialize_odrl_policy(&granting(), req),
-            _ => store.materialize_odrl_permission_conditional(&granting(), req),
+            BridgeKind::Permission => store.materialize_odrl_permission(&granting(), req).unwrap(),
+            BridgeKind::Policy => store.materialize_odrl_policy(&granting(), req).unwrap(),
+            _ => store.materialize_odrl_permission_conditional(&granting(), req).unwrap(),
         };
         assert!(
             alice_reads(&store),
             "{label} grant is live before the change: {what}"
         );
-        store.refresh_odrl_grant(&policy, req, kind);
+        store.refresh_odrl_grant(&policy, req, kind).unwrap();
         assert!(
             !alice_reads(&store),
             "{label} replay kept the grant: {what}"
@@ -283,13 +283,13 @@ fn a_decidable_grant_still_reaches_every_entry_point() {
             .granted
     );
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_permission(&granting(), &request());
+    store.materialize_odrl_permission(&granting(), &request()).unwrap();
     assert!(alice_reads(&store));
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_policy(&granting(), &request());
+    store.materialize_odrl_policy(&granting(), &request()).unwrap();
     assert!(alice_reads(&store));
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_permission_conditional(&granting(), &request());
+    store.materialize_odrl_permission_conditional(&granting(), &request()).unwrap();
     assert!(alice_reads(&store));
     assert_eq!(attached_grants(&granting()), [true, false], "only alice is the assignee");
 }

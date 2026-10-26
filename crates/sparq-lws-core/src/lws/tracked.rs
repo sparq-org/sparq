@@ -122,8 +122,9 @@ impl Drop for Mutating<'_> {
 pub struct Tracked<S> {
     inner: std::sync::Arc<S>,
     gens: std::sync::Arc<Generations>,
-    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one, shared by
-    /// every clone, so a service built over a clone is refused while this one runs.
+    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one (so a
+    /// `Tracked` over a `Tracked` shares its lease), shared by every clone, so a service built
+    /// over a clone, or over a wrapper of one, is refused while this one runs.
     lifecycle: std::sync::Arc<crate::store::Lifecycle>,
 }
 
@@ -138,11 +139,12 @@ impl<S> Clone for Tracked<S> {
 }
 
 impl<S: Store> Tracked<S> {
-    /// Track `inner`, whose storage root is `root`, and whose backend's lease is `lifecycle`
-    /// (`inner`'s own, when it keeps one: see [`Store::lifecycle`]).
-    pub fn new(inner: S, root: String, lifecycle: std::sync::Arc<crate::store::Lifecycle>) -> Self {
+    /// Track `inner`, whose storage root is `root`. Its backend's lease is `inner`'s own when it
+    /// keeps one ([`Store::lifecycle`]), and a new one otherwise: no caller chooses it, so
+    /// wrapping a store that is already tracked keeps the lease of the service running over it.
+    pub fn new(inner: S, root: String) -> Self {
         Self {
-            lifecycle,
+            lifecycle: inner.lifecycle().unwrap_or_default(),
             inner: std::sync::Arc::new(inner),
             gens: std::sync::Arc::new(Generations::new(root)),
         }
@@ -239,6 +241,10 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.finish_reclaims().await
     }
 
+    fn exclusive(&self) -> ServerResult<()> {
+        self.inner.exclusive()
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);
@@ -270,6 +276,10 @@ impl<S: Store> Store for Tracked<S> {
 
     fn raises_markers(&self) -> bool {
         self.inner.raises_markers()
+    }
+
+    fn call_timeout(&self) -> std::time::Duration {
+        self.inner.call_timeout()
     }
 
     /// A marker shows in no listing, so it moves no snapshot.

@@ -1610,8 +1610,7 @@ pub enum CheckError {
     /// which raises them: an unparseable bound commitment, two bound commitments
     /// authenticating DIFFERENT methods, or a bound commitment authenticating a
     /// method beside one authenticating none. `resolve_member_for_sub_proof` also
-    /// raises it for a sub-proof whose bound commitments authenticated NO method,
-    /// and for an ORPHAN one — bound to no committed graph — when the member is
+    /// raises it for an ORPHAN sub-proof — bound to no committed graph — when its member is
     /// not legal under every ADMISSIBLE method, so no method-independent member
     /// exists to select.
     ///
@@ -2179,6 +2178,43 @@ pub enum CheckError {
     /// Opt-in (`extended-fragment`).
     #[cfg(feature = "extended-fragment")]
     FragmentJoin(FragmentJoinError),
+
+    /// An extended-fragment presentation carries NO
+    /// [`crate::manifest::BranchWitness`] at all, so it discloses no solution and
+    /// attributes nothing to a branch — refused fail-closed by
+    /// [`verify_fragment_manifest`].
+    ///
+    /// Every branch-local binding layer of that entry point iterates the branch
+    /// witnesses, so an empty vector leaves all of them with nothing to check: the
+    /// routing, the disclosed-term binding, the scan-slot binding and the join
+    /// coherence are each a no-op, and the presentation would be accepted on the
+    /// crypto stage alone — sub-proofs that verify but are tied to no branch of
+    /// the query. [`dispatch_fragment`]'s per-branch ROUTING stays a deliberate
+    /// no-op on such a manifest (it is also callable on its own, over a
+    /// stage-1-style presentation, and its query-hygiene, FILTER and id checks
+    /// still run); this refusal is the end-to-end entry point's, where the claim
+    /// being accepted is a query answer.
+    /// Opt-in (`extended-fragment`).
+    #[cfg(feature = "extended-fragment")]
+    FragmentNoBranchWitness,
+    /// A committed graph this extended-fragment presentation refers to
+    /// authenticated a commitment method the extended binding layers do not have
+    /// ONE encoding policy for, so the presentation is refused BY NAME instead of
+    /// being compared under an encoder parts of it were never derived under.
+    ///
+    /// The extended layers re-encode a disclosed solution term with
+    /// `encode_term` — the STRING-CANONICAL encoding — and compare the result
+    /// against disclosed scan-row slots and `PathReach` endpoint encodings. That
+    /// is coherent exactly while every commitment the presentation refers to
+    /// authenticated `CommitmentMethod::StringCanonicalV1`, or authenticated no
+    /// method at all (whose pattern encoder is the same one). Under any other
+    /// authenticated method the row slots carry a DIFFERENT encoding of the same
+    /// term, so the comparison would fail for an honest presentation and pass for
+    /// nothing: refusing the combination is the honest verdict, and it is the
+    /// bound on the lane rather than a property of the proofs.
+    /// Opt-in (`extended-fragment`).
+    #[cfg(feature = "extended-fragment")]
+    FragmentUnsupportedCommitmentMethod { commitment: String, method_iri: String },
 }
 
 impl std::fmt::Display for CheckError {
@@ -2668,6 +2704,24 @@ impl std::fmt::Display for CheckError {
             CheckError::FragmentJoin(e) => {
                 write!(f, "extended-fragment per-branch join coherence rejected: {}", e)
             }
+            #[cfg(feature = "extended-fragment")]
+            CheckError::FragmentNoBranchWitness => write!(
+                f,
+                "the extended-fragment presentation carries no branch witness, so it \
+                 discloses no solution and every branch-local binding gate would have \
+                 nothing to check (refused fail-closed)"
+            ),
+            #[cfg(feature = "extended-fragment")]
+            CheckError::FragmentUnsupportedCommitmentMethod { commitment, method_iri } => write!(
+                f,
+                "commitment {} authenticated commitment method {}, which the \
+                 extended-fragment binding layers have no single encoding policy for \
+                 (they re-encode a disclosed term string-canonically and compare it \
+                 against the disclosed row slots); the combination is refused \
+                 fail-closed rather than compared under an encoder part of the \
+                 presentation was never derived under",
+                commitment, method_iri
+            ),
         }
     }
 }
@@ -2699,6 +2753,18 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
             let r_bucket = rows.len() as u32;
             // n cannot be derived without the witness; trust the declared n in
             // the id but bind k and r.
+            #[cfg(feature = "dual-leaf")]
+            if let CircuitId::ScanV2Dl { n, .. } = inputs.circuit_id() {
+                // Re-derive k/r from the statement, then restrict the resulting
+                // bucket to the one compiled V2 member. Validate the declaration
+                // too: an uncompiled declared shape never aliases a compiled one.
+                inputs.circuit_id().validate().ok()?;
+                return match derive_scan_id(k, *n, r_bucket.max(*row_count))? {
+                    CircuitId::Scan { k: 1, n: 16, r: 4 } =>
+                        Some(CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }),
+                    _ => None,
+                };
+            }
             let declared_n = match inputs.circuit_id() {
                 CircuitId::Scan { n, .. } => *n,
                 _ => return None,
@@ -2784,6 +2850,15 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
         // reconstruction + canonical-vk recompute pin, so a wrong bucket cannot
         // byte-match a real member's proof.
         ProofInputs::JoinEq { .. } => {
+            #[cfg(feature = "dual-leaf")]
+            if let CircuitId::JoinEqV2Dl { n_a, n_b } = inputs.circuit_id() {
+                inputs.circuit_id().validate().ok()?;
+                return match derive_join_eq_id(*n_a, *n_b)? {
+                    CircuitId::JoinEq { n_a: 16, n_b: 16 } =>
+                        Some(CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 }),
+                    _ => None,
+                };
+            }
             let (n_a, n_b) = match inputs.circuit_id() {
                 CircuitId::JoinEq { n_a, n_b } => (*n_a, *n_b),
                 _ => return None,
@@ -2881,8 +2956,11 @@ struct Prefiltered {
     /// byte-compare is what holds the proof to it. A consumer must therefore read
     /// such an entry only after the bb stage has run.
     ///
-    /// A commitment absent from the map had no method authenticated, which the
-    /// consumers treat as the method-UNBOUND case — i.e. exactly the behaviour
+    /// A commitment absent from the map had no method authenticated. That is not
+    /// the same fact as an explicit `Unbound` entry and is not read alike: the
+    /// per-sub-proof member resolution refuses it by name
+    /// ([`CheckError::SubProofCommitmentNotAuthenticated`]), while the
+    /// pattern-constant encoder selection reads it as `Unbound` — the behaviour
     /// that predates method authentication. Every clear-attested commitment the
     /// attestation gate accepted carries an explicit entry, and so does every
     /// hidden-only one whose per-graph salt the manifest resolves. A hidden-only
@@ -3048,6 +3126,8 @@ fn prefilter_manifest_structure_impl(
         if let ProofInputs::Scan { attribution, commitments, .. } = &sp.inputs {
             let k = match &declared {
                 CircuitId::Scan { k, .. } => *k as usize,
+                #[cfg(feature = "dual-leaf")]
+                CircuitId::ScanV2Dl { k, .. } => *k as usize,
                 _ => unreachable!("Scan inputs always carry a Scan circuit id"),
             };
             if attribution.len() != k {
@@ -5697,7 +5777,7 @@ fn fixed_member(role: FixedMemberRole, id: CircuitId) -> Result<CircuitId, Check
     } else {
         Err(CheckError::MemberNotForFixedRole {
             role: role.name().to_string(),
-            circuit: id.package(),
+            circuit: id.label(),
         })
     }
 }
@@ -5707,8 +5787,15 @@ fn fixed_member(role: FixedMemberRole, id: CircuitId) -> Result<CircuitId, Check
 /// It matters for exactly one case: a HIDDEN-ONLY commitment's entry in the
 /// authenticated map is the method its declared hidden-issuer message SELECTS,
 /// and only `bind_hidden_issuer_attestations` byte-binds a proof to it. So before
-/// that gate the entry is a CANDIDATE, not an authenticated method, and must not
-/// be read as one.
+/// that gate the entry is a CANDIDATE rather than an authenticated method.
+///
+/// Deferring is DEFENCE IN DEPTH, not a necessity for the verdict: a hidden proof
+/// that does not bind its declared message is refused by that gate anyway, so a
+/// manifest whose candidate differs from what the proof binds never reaches an
+/// accept either way. What the deferral buys is that no member is ever SELECTED
+/// against a method only a prover's declaration asserts — and the post-pass that
+/// re-runs the resolution afterwards checks the member it names equals the one
+/// the verification key was selected for, rather than assuming it.
 #[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MethodStage {
@@ -5724,10 +5811,8 @@ enum MethodStage {
 #[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubProofMethod {
-    /// ONE authenticated method, agreed by every commitment the sub-proof binds.
+    /// One agreed method, or string-canonical for explicitly all-Unbound attestations.
     One(sparq_zk::commit::CommitmentMethod),
-    /// Every bound commitment authenticated NO method (all `Unbound`).
-    NoneAttested,
     /// At least one bound commitment is hidden-only, so its method is still a
     /// candidate at this stage.
     Deferred,
@@ -5738,6 +5823,54 @@ enum SubProofMethod {
     /// RECOGNISED method (the `value-only` research dial is recognised and
     /// admissible under no policy).
     NoCommitment,
+}
+
+/// The VALIDATED endpoint commitments of every declared
+/// [`crate::manifest::JoinEdge`], grouped by the `JoinEq` sub-proof the edge
+/// covers — built ONCE per manifest in one pass over `join_edges`.
+///
+/// `bound_commitments` needs a join proof's endpoints for every `JoinEq`
+/// sub-proof it is asked about, and its caller asks about every sub-proof in
+/// turn. Resolving them per question re-walked the whole `join_edges` vector and
+/// re-validated each matching edge once per sub-proof; both vectors are
+/// prover-controlled, so that product is a cost a presentation can choose. The
+/// index pays it once.
+///
+/// Only edges that VALIDATE ([`validate_join_edge`]) are recorded, which is what
+/// keeps the entry a validated endpoint rather than a prover-declared one: an
+/// edge that does not validate contributes nothing, and a join proof it was the
+/// only edge for ends up with an EMPTY entry — the orphan case, admitted only
+/// where the member is method-independent. (Such a manifest is separately refused
+/// by stage 2g′, which runs over the same edges and fails on the first that does
+/// not validate.)
+#[cfg(feature = "dual-leaf")]
+struct JoinEndpointIndex {
+    /// `join_proof` index -> the validated endpoint commitments of every edge
+    /// naming it, in edge order (`(a, b)` per edge).
+    by_join: std::collections::BTreeMap<usize, Vec<FieldHex>>,
+}
+
+#[cfg(feature = "dual-leaf")]
+impl JoinEndpointIndex {
+    /// One pass over `manifest.join_edges`, validating each edge exactly once.
+    fn build(manifest: &ProofManifest) -> Self {
+        let mut by_join: std::collections::BTreeMap<usize, Vec<FieldHex>> =
+            std::collections::BTreeMap::new();
+        for (e, edge) in manifest.join_edges.iter().enumerate() {
+            if let Ok(v) = validate_join_edge(manifest, e, edge) {
+                let slot = by_join.entry(edge.join_proof).or_default();
+                slot.push(v.endpoints.0);
+                slot.push(v.endpoints.1);
+            }
+        }
+        Self { by_join }
+    }
+
+    /// The validated endpoints recorded for `proof`, empty when no edge that
+    /// validates names it.
+    fn endpoints_of(&self, proof: usize) -> Vec<FieldHex> {
+        self.by_join.get(&proof).cloned().unwrap_or_default()
+    }
 }
 
 /// The commitments a SUB-PROOF's member is run against — the ones whose
@@ -5781,7 +5914,11 @@ enum SubProofMethod {
 /// all, so no method can be derived for it. [`resolve_member_for_sub_proof`]
 /// admits it only where the member is legal under every admissible method.
 #[cfg(feature = "dual-leaf")]
-fn bound_commitments(manifest: &ProofManifest, proof: usize) -> Vec<FieldHex> {
+fn bound_commitments(
+    manifest: &ProofManifest,
+    proof: usize,
+    joins: &JoinEndpointIndex,
+) -> Vec<FieldHex> {
     let Some(sp) = manifest.sub_proofs.get(proof) else {
         return Vec::new();
     };
@@ -5789,21 +5926,10 @@ fn bound_commitments(manifest: &ProofManifest, proof: usize) -> Vec<FieldHex> {
         ProofInputs::Scan { commitments, .. } => commitments.clone(),
         #[cfg(feature = "extended-fragment")]
         ProofInputs::PathReach { commitments, .. } => commitments.clone(),
-        ProofInputs::JoinEq { .. } => {
-            // The VALIDATED endpoints of every edge that covers this join proof —
-            // never its own prover-declared `commit_a`/`commit_b`.
-            let mut out: Vec<FieldHex> = Vec::new();
-            for (e, edge) in manifest.join_edges.iter().enumerate() {
-                if edge.join_proof != proof {
-                    continue;
-                }
-                if let Ok(v) = validate_join_edge(manifest, e, edge) {
-                    out.push(v.endpoints.0);
-                    out.push(v.endpoints.1);
-                }
-            }
-            out
-        }
+        // The VALIDATED endpoints of every edge that covers this join proof —
+        // never its own prover-declared `commit_a`/`commit_b`. Read from the
+        // index, which validated each edge ONCE for the whole manifest.
+        ProofInputs::JoinEq { .. } => joins.endpoints_of(proof),
         // Every remaining variant is a FILTER member, which binds to committed
         // data only through a binding edge. Listed exhaustively rather than with a
         // wildcard, so a NEW `ProofInputs` variant has to state its own relation
@@ -5934,13 +6060,14 @@ fn fold_bound_methods(
     }
     match seen.expect("a non-empty bound set always sets `seen`") {
         AuthenticatedMethod::Bound(m) => Ok(SubProofMethod::One(m)),
-        AuthenticatedMethod::Unbound => Ok(SubProofMethod::NoneAttested),
+        AuthenticatedMethod::Unbound => Ok(SubProofMethod::One(
+            sparq_zk::commit::CommitmentMethod::StringCanonicalV1,
+        )),
     }
 }
 
 /// The member to select when the dispatch matrix has NO method input — a
-/// sub-proof bound to no committed graph, or one whose bound commitments all
-/// authenticated no method.
+/// sub-proof bound to no committed graph.
 ///
 /// `id` is admitted only where the matrix's answer does not DEPEND on the method:
 /// it must be legal under every method some [`MethodPolicy`] admits
@@ -5988,32 +6115,21 @@ fn method_independent_member(
 /// answer.
 ///
 /// `crate::dispatch::resolve_circuit` echoes its id on success, so for every legal
-/// pair the returned member equals the declared one and no key selection changes:
-/// this adds refusals and no acceptance. The caller takes the returned member
+/// pair the returned member equals the declared one. The caller takes that member
 /// rather than re-using the declared id because that is where the member comes
 /// from in this design; it is NOT a claim that a REWRITING resolver would be
 /// honoured end to end — the deferred pass asserts the resolved member EQUALS the
 /// declared one, so a resolver that rewrote an id would be refused there, and
 /// making rewriting work would mean revisiting both sites.
 ///
-/// # The rule when no method was attested
-/// [`SubProofMethod::NoneAttested`] — every bound commitment carried an explicit
-/// `AuthenticatedMethod::Unbound` entry — has no method to resolve against: the
-/// matrix takes a [`sparq_zk::commit::CommitmentMethod`] and `Unbound` is the
-/// explicit ABSENCE of one. In particular the member is NOT resolved against
-/// `StringCanonicalV1`, which would be substituting a method no issuer attested.
-///
-/// It does not echo the declared member either. Hardening: it is held to the SAME
-/// method-independence rule as an orphan (below), so the only member admitted is
-/// one whose legality no admissible method could have changed. Echoing let a
-/// sub-proof over method-unattested commitments pick any member the id named.
-/// A MIXED set — some bound, some not — is refused by [`fold_bound_methods`]
-/// rather than resolved either way, and a commitment with NO map entry is refused
-/// outright as [`CheckError::SubProofCommitmentNotAuthenticated`].
-///
-/// Under the default [`MethodPolicy`] an unbound attestation is already refused at
-/// stage 2d, so this arm is reachable only under the written-down
-/// [`MethodPolicy::admit_unbound`] downgrade.
+/// # Explicitly method-unbound attestations
+/// When every bound commitment authenticated as `AuthenticatedMethod::Unbound`,
+/// resolve as `StringCanonicalV1`, matching the pattern encoder's legacy reading.
+/// This is reachable only under the explicit [`MethodPolicy::admit_unbound`]
+/// downgrade: opaque scan/join members remain legal, while V2 members are refused.
+/// A mixture of bound and unbound attestations is refused by [`fold_bound_methods`];
+/// a commitment with no map entry is refused as
+/// [`CheckError::SubProofCommitmentNotAuthenticated`].
 ///
 /// # The rule for an ORPHAN sub-proof
 /// A sub-proof bound to NO committed graph has no method to resolve against. It
@@ -6044,6 +6160,7 @@ fn resolve_member_for_sub_proof(
     methods: &AuthenticatedMethods,
     hidden_only: &BTreeSet<String>,
     stage: MethodStage,
+    joins: &JoinEndpointIndex,
 ) -> Result<Option<CircuitId>, CheckError> {
     let label = format!("sub_proofs[{}]", proof);
     // An AUXILIARY gate's member can never be selected for a manifest sub-proof,
@@ -6056,30 +6173,31 @@ fn resolve_member_for_sub_proof(
         let _ = role;
         return Err(CheckError::AuxiliaryMemberIdInSubProof {
             proof,
-            circuit: id.package(),
+            circuit: id.label(),
         });
     }
-    let bound = bound_commitments(manifest, proof);
+    let bound = bound_commitments(manifest, proof, joins);
     match fold_bound_methods(&label, &bound, methods, hidden_only, stage)? {
         SubProofMethod::Deferred => Ok(None),
-        // No method was attested, and no commitment was bound: NEITHER gives the
-        // matrix an input, so both are held to the same method-independence rule.
+        // An orphan supplies no method input to the matrix.
         SubProofMethod::NoCommitment => {
             method_independent_member(&label, id, "it is bound to no committed graph")
                 .map(Some)
         }
-        SubProofMethod::NoneAttested => method_independent_member(
-            &label,
-            id,
-            "every commitment it is bound to authenticated no commitment method",
-        )
-        .map(Some),
         SubProofMethod::One(method) => {
             let resolved = crate::dispatch::resolve_circuit(method, id).map_err(|_| {
+                let method_iri = if bound.iter().any(|c| {
+                    c.to_field().and_then(|c| methods.get(&field_to_hex(&c)))
+                        == Some(&AuthenticatedMethod::Unbound)
+                }) {
+                    format!("unbound, read as string-canonical ({})", method.scheme_iri())
+                } else {
+                    method.scheme_iri().to_string()
+                };
                 CheckError::MemberNotLegalForMethod {
                     proof: label.clone(),
-                    method_iri: method.scheme_iri().to_string(),
-                    circuit: id.package(),
+                    method_iri,
+                    circuit: id.label(),
                 }
             })?;
             Ok(Some(resolved))
@@ -6577,6 +6695,8 @@ fn validate_join_edge(
     };
     let (commit_a_join, commit_b_join, join_commitment, slot_a, slot_b) = match &join.inputs {
         ProofInputs::JoinEq { commit_a, commit_b, join_commitment, slot_a, slot_b, .. } => {
+            // join_eq_v2dl_na16_nb16/src/main.nr uses this declaration order:
+            // challenge, commit_a, commit_b, join_commitment, slot_a, slot_b.
             (commit_a, commit_b, join_commitment, *slot_a, *slot_b)
         }
         _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
@@ -6624,8 +6744,15 @@ fn validate_join_edge(
 /// scan↔path hidden join has no endpoint commitment this rule can resolve, so it
 /// is refused rather than admitted unvalidated.
 fn bind_join_endpoints(manifest: &ProofManifest) -> Result<(), CheckError> {
+    // EVERY declared edge is validated — not only the first, and not short-cut
+    // once one has validated. The covered join-proof indices are collected in this
+    // SAME pass, so the coverage rule below is a set lookup per sub-proof rather
+    // than a re-walk of `join_edges` for each one (both vectors are
+    // prover-controlled, so the product of their lengths is not a cost to pay).
+    let mut covered: BTreeSet<usize> = BTreeSet::new();
     for (e, edge) in manifest.join_edges.iter().enumerate() {
         validate_join_edge(manifest, e, edge)?;
+        covered.insert(edge.join_proof);
     }
     // And every `JoinEq` sub-proof must be NAMED by one of those edges. An edge is
     // the only thing that ties a join proof's prover-chosen `commit_a`/`commit_b`
@@ -6634,12 +6761,13 @@ fn bind_join_endpoints(manifest: &ProofManifest) -> Result<(), CheckError> {
     // query obligation, and used to ride along in the manifest unexamined — the
     // gate above returned early on an empty `join_edges` vector and inspected
     // nothing else. Refused fail-closed, in BOTH stage-1 regimes and in every
-    // feature state.
+    // feature state. The loop runs over EVERY sub-proof index, including 0, and is
+    // reached whether or not any edge was declared.
     for (i, sp) in manifest.sub_proofs.iter().enumerate() {
         if !matches!(sp.inputs, ProofInputs::JoinEq { .. }) {
             continue;
         }
-        if !manifest.join_edges.iter().any(|e| e.join_proof == i) {
+        if !covered.contains(&i) {
             return Err(CheckError::JoinProofNotBoundToAnEdge { proof: i });
         }
     }
@@ -7860,8 +7988,26 @@ fn verify_manifest_impl(
     // to one of these defer their member resolution to after that gate.
     #[cfg(feature = "dual-leaf")]
     let hidden_only = hidden_only_commitments(manifest, trusted_key_set);
+    // The validated join endpoints, resolved ONCE for the whole manifest rather
+    // than per sub-proof asked about (see `JoinEndpointIndex`).
+    #[cfg(feature = "dual-leaf")]
+    let join_endpoints = JoinEndpointIndex::build(manifest);
     #[cfg(feature = "dual-leaf")]
     let mut deferred_members: Vec<usize> = Vec::new();
+
+    // Resolve every structural pairing before examining detached proof bytes.
+    // Hidden-only methods still defer until their issuer proof authenticates them.
+    #[cfg(feature = "dual-leaf")]
+    let resolved_members: Vec<Option<CircuitId>> = manifest.sub_proofs.iter().enumerate()
+        .map(|(i, sp)| {
+            let resolved = resolve_member_for_sub_proof(
+                manifest, i, sp.inputs.circuit_id(), &prefiltered.methods,
+                &hidden_only, MethodStage::BeforeHiddenIssuer, &join_endpoints,
+            )?;
+            if resolved.is_none() { deferred_members.push(i); }
+            Ok(resolved)
+        })
+        .collect::<Result<_, CheckError>>()?;
 
     for (i, sp) in manifest.sub_proofs.iter().enumerate() {
         if sp.proof_hex.is_empty() {
@@ -7884,46 +8030,10 @@ fn verify_manifest_impl(
             return Err(CheckError::PublicInputMismatch { proof: i });
         }
 
-        // (b) Recompute the canonical vk verifier-side from the member named by
-        // the re-derived circuit id — NEVER the prover's art.vk (audit #2).
-        // derive_id already passed in stage 1b, so the id names the member the
-        // public inputs' SHAPE implies (full CircuitId pins the n/d/r bucket,
-        // subsuming audit #11).
+        // Select only the structurally resolved member's canonical VK.
         let id = sp.inputs.circuit_id();
-        // (b′) This is the ONE member-selection site whose id originates in the
-        // manifest, and the id's shape says nothing about the LEAF SHAPE of the
-        // graphs the sub-proof is bound to — which is what decides whether the
-        // member may legally read them. So resolve the member PER SUB-PROOF
-        // through the (commitment-method × circuit) dispatch matrix against the
-        // one authenticated method of the commitments THIS sub-proof is bound to
-        // (`bound_commitments` / `fold_bound_methods`), and select the key below
-        // from the RESOLVED member rather than from the id. `resolve_circuit`
-        // echoes a legal pair, so this adds refusals and changes no accepted
-        // manifest's key selection.
-        //
-        // A sub-proof bound to a HIDDEN-ONLY commitment defers: that commitment's
-        // map entry is the method its declared hidden-issuer message selects, and
-        // only `bind_hidden_issuer_attestations` — which runs AFTER this loop —
-        // byte-binds a proof to it. Reading it here would treat a candidate as
-        // authenticated, so the resolution is recorded and re-run after that gate
-        // instead. Deferring is sound for the accept/reject verdict: a refusal
-        // raised after this loop rejects the manifest just as one raised inside it
-        // would, and no deferred sub-proof is accepted without being resolved.
         #[cfg(feature = "dual-leaf")]
-        let resolved_member = resolve_member_for_sub_proof(
-            manifest,
-            i,
-            id,
-            &prefiltered.methods,
-            &hidden_only,
-            MethodStage::BeforeHiddenIssuer,
-        )?;
-        #[cfg(feature = "dual-leaf")]
-        if resolved_member.is_none() {
-            deferred_members.push(i);
-        }
-        #[cfg(feature = "dual-leaf")]
-        let id = resolved_member.as_ref().unwrap_or(id);
+        let id = resolved_members[i].as_ref().unwrap_or(id);
         let sub_work = work_dir.join(format!("sub{i}"));
         let canonical_vk = prover
             .canonical_vk(id, &sub_work.join("vk"))
@@ -8005,6 +8115,7 @@ fn verify_manifest_impl(
             &prefiltered.methods,
             &hidden_only,
             MethodStage::AfterHiddenIssuer,
+            &join_endpoints,
         )?;
         // The key for this sub-proof was selected in the loop above, for its
         // declared member. `resolve_circuit` echoes a legal pair, so a successful
@@ -8106,6 +8217,25 @@ pub enum FragmentDispatchError {
     PathDepthExceedsClosure { witness: usize, obligation: usize, member_d: u32, fixed: usize },
     /// A VALUES-row index is out of range of the re-derived block's rows.
     ValuesRowOutOfRange { witness: usize, block: usize, row: usize, rows: usize },
+    /// A re-derived branch carries one or more query `FILTER`s, which NO gate on
+    /// the extended-fragment path discharges — refused fail-closed.
+    ///
+    /// The flat path discharges a query FILTER in `bind_query_correctness` (the
+    /// operand/slot binding against a true-verdict `FilterInt` sub-proof through a
+    /// [`crate::manifest::BindingEdge`]). The extended regime skips that gate
+    /// (`skip_query_binding`) and has no branch-local replacement for it, and
+    /// nothing else on this path reads `FragmentBranch::filters`. A FILTER left
+    /// undischarged does not narrow the admitted solutions at all, so a disclosed
+    /// row the FILTER excludes would be accepted. Rather than accept a query whose
+    /// FILTER means nothing, the gate refuses every branch that carries one.
+    ///
+    /// `branch` is the re-derived branch index and `filters` how many it carries.
+    /// This is a WHOLE-QUERY refusal: every branch is checked, not only the ones a
+    /// [`crate::manifest::BranchWitness`] attributes a solution to, so a filtered
+    /// branch cannot be smuggled past by attributing nothing to it. The
+    /// branch-local typed FILTER obligation that would let this be lifted does not
+    /// exist yet.
+    FilterNotDischarged { branch: usize, filters: usize },
 }
 
 #[cfg(feature = "extended-fragment")]
@@ -8171,6 +8301,13 @@ impl std::fmt::Display for FragmentDispatchError {
                 "branch witness {} VALUES block {}: row index {} out of range ({} row(s))",
                 witness, block, row, rows
             ),
+            FragmentDispatchError::FilterNotDischarged { branch, filters } => write!(
+                f,
+                "branch {} carries {} query FILTER(s) that no gate on the \
+                 extended-fragment path discharges, so the query is refused \
+                 fail-closed rather than answered with its FILTER(s) ignored",
+                branch, filters
+            ),
         }
     }
 }
@@ -8199,7 +8336,13 @@ impl std::error::Error for FragmentDispatchError {}
 ///    disclosed `depth_bound` equals its compiled `d` (soundness req 1) and whose
 ///    `allow_zero` matches the closure — a path claimed WITHOUT a bound path
 ///    sub-proof, a `k`/depth mismatch, or a closure mismatch all REJECT;
-/// 4. each disclosed VALUES row-index is in range of the re-derived block.
+/// 4. each disclosed VALUES row-index is in range of the re-derived block;
+/// 5. NO re-derived branch carries a query `FILTER`
+///    ([`FragmentDispatchError::FilterNotDischarged`]). Nothing on the
+///    extended-fragment path discharges one — the flat `bind_query_correctness`
+///    FILTER obligation is skipped in this regime and no branch-local replacement
+///    exists — so a query carrying one is refused rather than answered with the
+///    FILTER ignored. Checked over every branch, attributed or not.
 ///
 /// # Honest scope (load-bearing)
 /// This is the STRUCTURAL ROUTING gate. It binds each construct to a bound
@@ -8224,6 +8367,23 @@ pub fn dispatch_fragment(
     let fq = fragment_query(&manifest.query)
         .map_err(|e| FragmentDispatchError::OutsideFragment(e.to_string()))?;
 
+    // (1b) Hardening: a query FILTER is NOT discharged anywhere on this path, so
+    // refuse every query that carries one. The flat regime discharges a FILTER in
+    // `bind_query_correctness`; the extended regime skips that gate and nothing
+    // here or in layers 2-4 of `verify_fragment_manifest` reads
+    // `FragmentBranch::filters`, so an accepted presentation would answer the
+    // query as though the FILTER were absent. Checked over EVERY re-derived branch
+    // rather than only the attributed ones, so attributing no solution to a
+    // filtered branch does not get past it.
+    for (bi, branch) in fq.branches.iter().enumerate() {
+        if !branch.filters.is_empty() {
+            return Err(FragmentDispatchError::FilterNotDischarged {
+                branch: bi,
+                filters: branch.filters.len(),
+            });
+        }
+    }
+
     // (2) Every embedded sub-proof MUST carry a known, compiled circuit id whose
     // DECLARED value equals the id re-derived from its public inputs — no unknown /
     // uncompiled member, and no claim/member mismatch (e.g. a wrong `k` bucket),
@@ -8243,8 +8403,10 @@ pub fn dispatch_fragment(
     }
 
     // A manifest with no branch attribution carries no extended-fragment claim to
-    // route (a stage-1 presentation): the query-hygiene + id checks above are all
-    // that apply. This keeps the gate a strict no-op on stage-1 manifests.
+    // route (a stage-1 presentation): the query-hygiene, FILTER and id checks
+    // above are all that apply. So the per-branch ROUTING is a no-op on stage-1
+    // manifests — not the whole gate. `verify_fragment_manifest` additionally
+    // refuses such a manifest outright, because an accept there is a query answer.
     if fm.branch_witnesses.is_empty() {
         return Ok(());
     }
@@ -8435,6 +8597,35 @@ pub enum FragmentSolutionError {
     /// non-`PathReach` sub-proof). Kept so this gate is SELF-CONTAINED and never
     /// panics on an index — a fail-closed refusal even if reached directly.
     Structure { witness: usize, what: &'static str },
+    /// The disclosed solution names the SAME variable twice — refused rather than
+    /// resolved to either binding.
+    ///
+    /// The solution is a LIST, so a repeated name used to be last-wins: a
+    /// presentation could carry a binding this gate checks beside another a
+    /// relying party reads, and the two need not agree. Which one a consumer sees
+    /// is then a function of iteration order, so neither is the disclosed answer.
+    /// Refused fail-closed.
+    DuplicateSolutionVariable { witness: usize, var: String },
+    /// The disclosed solution binds a variable the query does NOT project.
+    ///
+    /// A non-projected variable is EXISTENTIAL by design — the prover witnesses
+    /// it without disclosing it — so no gate binds a disclosed value for one, and
+    /// a binding carried for it is a claim nothing checks. Refused fail-closed
+    /// rather than skipped.
+    SolutionVariableNotProjected { witness: usize, var: String },
+    /// The disclosed solution binds a projected variable that the ATTRIBUTED
+    /// branch does not bind.
+    ///
+    /// Under `UNION` semantics a solution answers ONE branch, and only the
+    /// variables that branch binds — its BGP pattern slots, its `PathReach`
+    /// endpoints, and the `VALUES` columns whose SELECTED cell is not `UNDEF` —
+    /// are bound in it. A variable outside that set carries no obligation in the
+    /// attributed branch, so no gate reads the binding and it is a free claim:
+    /// the OTHER branch's variables, a variable whose `VALUES` cell is `UNDEF`,
+    /// or any variable at all for a branch that binds nothing (an empty group).
+    /// Refused fail-closed — which also means a branch that binds NOTHING can
+    /// carry no disclosed binding at all.
+    SolutionVariableNotBoundByBranch { witness: usize, branch: usize, var: String },
 }
 
 #[cfg(feature = "extended-fragment")]
@@ -8484,6 +8675,21 @@ impl std::fmt::Display for FragmentSolutionError {
                 f,
                 "branch witness {} disclosed-solution structure error: {} out of range (fail-closed)",
                 witness, what
+            ),
+            FragmentSolutionError::DuplicateSolutionVariable { witness, var } => write!(
+                f,
+                "branch witness {} discloses ?{} more than once, so which binding is the answer is not determined (fail-closed)",
+                witness, var
+            ),
+            FragmentSolutionError::SolutionVariableNotProjected { witness, var } => write!(
+                f,
+                "branch witness {} discloses a binding for ?{}, which the query does not project, so no gate binds it (fail-closed)",
+                witness, var
+            ),
+            FragmentSolutionError::SolutionVariableNotBoundByBranch { witness, branch, var } => write!(
+                f,
+                "branch witness {} discloses a binding for ?{}, which the attributed branch {} does not bind, so no gate reads it (fail-closed)",
+                witness, var, branch
             ),
         }
     }
@@ -8557,6 +8763,174 @@ fn bind_path_endpoint(
     }
 }
 
+/// The variables the ATTRIBUTED branch actually BINDS, under the row selection
+/// the manifest declares — the only variables a disclosed solution for that
+/// branch may carry a binding for.
+///
+/// A solution answers ONE `UNION` branch (design record §3.2), and a variable is
+/// bound in it only where the branch gives it an obligation:
+///
+/// * a VARIABLE slot of one of the branch's BGP patterns;
+/// * a VARIABLE endpoint (subject / object) of one of its `PathReach`
+///   obligations;
+/// * a `VALUES` column whose SELECTED row's cell is not `UNDEF` (an `UNDEF` cell
+///   is compatible with any binding of that variable, so it binds nothing).
+///
+/// `values_rows` is the manifest's per-block row selection; a block with no
+/// selection, or one whose selection is out of range, contributes nothing (the
+/// arity and range are separately enforced by `dispatch_fragment`, so this is the
+/// safe-narrower reading rather than the only check).
+///
+/// Everything outside this set is EXISTENTIAL or belongs to another branch, so
+/// nothing in the verifier reads a disclosed value for it.
+// sq-1zf94 hardening.
+#[cfg(feature = "extended-fragment")]
+fn branch_bound_variables(
+    branch: &sparq_zk::verify::FragmentBranch,
+    values_rows: &[usize],
+) -> BTreeSet<String> {
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for pattern in &branch.patterns {
+        for slot in &pattern.slots {
+            if let SlotPattern::Var(v) = slot {
+                out.insert(v.clone());
+            }
+        }
+    }
+    for obligation in &branch.path_reach {
+        for slot in [&obligation.subject, &obligation.object] {
+            if let SlotPattern::Var(v) = slot {
+                out.insert(v.clone());
+            }
+        }
+    }
+    for (bi, block) in branch.values.iter().enumerate() {
+        let Some(&row) = values_rows.get(bi) else {
+            continue;
+        };
+        let Some(cells) = block.rows.get(row) else {
+            continue;
+        };
+        for (col, var) in block.variables.iter().enumerate() {
+            // `Some(Some(term))` is a real cell; `Some(None)` is UNDEF and
+            // `None` is a short row — neither binds the variable.
+            if matches!(cells.get(col), Some(Some(_))) {
+                out.insert(var.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Why a disclosed solution is not an admissible answer for its attributed
+/// branch, independent of which gate asked.
+///
+/// Returned by [`re_encode_solution`] so each gate can map it into its own error
+/// type without the rule being written twice.
+// sq-1zf94 hardening.
+#[cfg(feature = "extended-fragment")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SolutionFault {
+    /// The term cannot be re-encoded by the verifier.
+    Malformed,
+    /// The variable is bound twice in the same solution.
+    Duplicate,
+    /// The query does not project the variable (it is existential).
+    NotProjected,
+    /// The attributed branch does not bind the variable.
+    NotBoundByBranch,
+}
+
+/// Re-encode a disclosed solution to `var -> Fr`, VERIFIER-recomputed, after
+/// checking every binding is one this branch could answer with.
+///
+/// Three admissibility rules, all fail-closed, applied before any obligation is
+/// read:
+///
+/// 1. **No duplicate name.** The solution is a list, so a repeated name was
+///    last-wins and no single value was the disclosed answer.
+/// 2. **Projected only.** A non-projected variable is existential, so a
+///    disclosed value for it is bound by nothing.
+/// 3. **Bound by the attributed branch** ([`branch_bound_variables`]). A
+///    projected variable the branch does not bind — the other branch's
+///    variables, a variable whose selected `VALUES` cell is `UNDEF`, or any
+///    variable when the branch binds nothing — likewise has no obligation to be
+///    read against.
+///
+/// Together they make the disclosed solution a map whose EVERY entry some
+/// obligation of the attributed branch then checks, rather than a list that may
+/// also carry free claims.
+///
+/// On the first inadmissible binding it returns that variable's name and the
+/// fault, in the solution's own order, so the caller's refusal names it.
+// sq-1zf94 hardening.
+#[cfg(feature = "extended-fragment")]
+fn re_encode_solution(
+    solution: &[crate::manifest::SolutionBinding],
+    projected: &BTreeSet<String>,
+    bound: &BTreeSet<String>,
+    salt: &Fr,
+) -> Result<std::collections::BTreeMap<String, Fr>, (String, SolutionFault)> {
+    let mut mu: std::collections::BTreeMap<String, Fr> = std::collections::BTreeMap::new();
+    for sb in solution {
+        if mu.contains_key(&sb.var) {
+            return Err((sb.var.clone(), SolutionFault::Duplicate));
+        }
+        if !projected.contains(&sb.var) {
+            return Err((sb.var.clone(), SolutionFault::NotProjected));
+        }
+        if !bound.contains(&sb.var) {
+            return Err((sb.var.clone(), SolutionFault::NotBoundByBranch));
+        }
+        let term = sb
+            .term
+            .to_term()
+            .ok_or_else(|| (sb.var.clone(), SolutionFault::Malformed))?;
+        let enc = encode_term(&term, salt)
+            .ok_or_else(|| (sb.var.clone(), SolutionFault::Malformed))?;
+        mu.insert(sb.var.clone(), enc);
+    }
+    Ok(mu)
+}
+
+/// ONE encoding policy for the extended-fragment binding layers: refuse a
+/// presentation referring to a committed graph whose AUTHENTICATED commitment
+/// method is not the one those layers encode under.
+///
+/// The layers below re-encode a disclosed solution term with [`encode_term`] (the
+/// string-canonical encoding) and compare the result against disclosed scan-row
+/// slots, `PathReach` endpoint encodings and re-encoded `VALUES` cells. Those
+/// four are comparable to each other only while every commitment involved
+/// authenticated [`sparq_zk::commit::CommitmentMethod::StringCanonicalV1`] — or
+/// authenticated nothing ([`AuthenticatedMethod::Unbound`]), whose pattern
+/// encoder is the same one.
+///
+/// Under any other authenticated method the disclosed rows carry a different
+/// encoding of the same term, so comparing them against a string-canonical
+/// re-encoding would REFUSE an honest presentation and admit nothing. Rather than
+/// leave that as a silent false refusal, or encode each surface under its own
+/// method (which would mean one coherent policy across all four surfaces — the
+/// larger change this bound defers), the combination is refused BY NAME. This is
+/// a bound on the lane, not a property established about any proof.
+// sq-ygk6x / sq-j506 follow-up.
+#[cfg(feature = "extended-fragment")]
+fn bind_fragment_encoding_policy(methods: &AuthenticatedMethods) -> Result<(), CheckError> {
+    for (commitment, entry) in methods {
+        let Some(method) = entry.method() else {
+            // `Unbound`: no method was attested, and the pattern encoder for that
+            // case IS the string-canonical one, so the layers stay coherent.
+            continue;
+        };
+        if method != sparq_zk::commit::CommitmentMethod::StringCanonicalV1 {
+            return Err(CheckError::FragmentUnsupportedCommitmentMethod {
+                commitment: commitment.clone(),
+                method_iri: method.scheme_iri().to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// FAIL-CLOSED wave-1 extended-fragment DISCLOSED-SOLUTION term binding
 /// (sq-1zf94): the composition analogue of the flat query-text term binding
 /// (`bind_query_correctness`'s scan-const check + the `bind_joins` slot binding),
@@ -8624,17 +8998,34 @@ pub fn bind_fragment_solution(
         };
 
         // Re-encode the disclosed solution: var -> Fr, VERIFIER-recomputed (never a
-        // prover-supplied encoding).
-        let mut mu: std::collections::BTreeMap<String, Fr> = std::collections::BTreeMap::new();
-        for sb in &bw.solution {
-            let term = sb.term.to_term().ok_or_else(|| {
-                FragmentSolutionError::MalformedSolutionTerm { witness: wi, var: sb.var.clone() }
-            })?;
-            let enc = encode_term(&term, &salt).ok_or_else(|| {
-                FragmentSolutionError::MalformedSolutionTerm { witness: wi, var: sb.var.clone() }
-            })?;
-            mu.insert(sb.var.clone(), enc);
-        }
+        // prover-supplied encoding), after checking every binding is one this
+        // branch could answer with — no duplicate name, nothing unprojected, and
+        // nothing the ATTRIBUTED branch does not bind. Without the last two a
+        // binding could be carried that no obligation of this branch ever reads
+        // (the other UNION branch's variables, a variable whose selected VALUES
+        // cell is UNDEF, or anything at all for a branch that binds nothing), so
+        // it stood as a free claim beside the ones the gates do check.
+        let bound = branch_bound_variables(branch, &bw.values_rows);
+        let mu = re_encode_solution(&bw.solution, &projected, &bound, &salt).map_err(
+            |(var, fault)| match fault {
+                SolutionFault::Malformed => {
+                    FragmentSolutionError::MalformedSolutionTerm { witness: wi, var }
+                }
+                SolutionFault::Duplicate => {
+                    FragmentSolutionError::DuplicateSolutionVariable { witness: wi, var }
+                }
+                SolutionFault::NotProjected => {
+                    FragmentSolutionError::SolutionVariableNotProjected { witness: wi, var }
+                }
+                SolutionFault::NotBoundByBranch => {
+                    FragmentSolutionError::SolutionVariableNotBoundByBranch {
+                        witness: wi,
+                        branch: bw.branch,
+                        var,
+                    }
+                }
+            },
+        )?;
 
         // (1)+(2) Path predicate + endpoint binding.
         for (oi, &pi) in bw.path_proofs.iter().enumerate() {
@@ -8667,7 +9058,11 @@ pub fn bind_fragment_solution(
                 return Err(FragmentSolutionError::Structure { witness: wi, what: "values row" });
             };
             for (col, var) in block.variables.iter().enumerate() {
-                // A non-projected VALUES variable is existential here (not term-bound).
+                // A non-projected VALUES variable has no disclosed term to bind it
+                // to, so THIS gate skips it. It is not unconstrained: the selected
+                // cell is merged into the branch coherence map by
+                // `bind_fragment_join_coherence`, which requires the scan slot /
+                // path endpoint carrying the variable to equal it.
                 if !projected.contains(var) {
                     continue;
                 }
@@ -8741,6 +9136,12 @@ pub enum FragmentScanError {
     /// The selected supporting row index is outside the scan's ACTIVE disclosed
     /// rows (`min(row_count, rows.len())`).
     RowOutOfRange { witness: usize, obligation: usize, row: usize, active: usize },
+    /// A scan attributed to a branch witness discloses NO active row
+    /// (`min(row_count, rows.len()) == 0`). The scan circuit admits an empty
+    /// result, so an empty scan proves only that it ran — not that the pattern has
+    /// a match. A branch whose solution rests on that pattern (including a fully
+    /// ground one, which needs no variable binding) is refused fail-closed.
+    NoActiveRow { witness: usize, obligation: usize },
     /// A PROJECTED (disclosed) variable occupies a scan slot but is absent from the
     /// disclosed solution — omitting it to dodge the binding is refused fail-closed.
     UnboundProjectedScanVar { witness: usize, obligation: usize, slot: usize, var: String },
@@ -8756,6 +9157,15 @@ pub enum FragmentScanError {
     /// A scan pattern slot is an unnamed wildcard (the BGP fragment never produces
     /// one; refused for totality).
     WildcardSlot { witness: usize, obligation: usize, slot: usize },
+    /// The disclosed solution is not an admissible answer for its attributed
+    /// branch: it binds a variable twice, binds one the query does not project,
+    /// or binds a projected one the ATTRIBUTED branch does not bind.
+    ///
+    /// The same rule [`bind_fragment_solution`] enforces by name, restated here
+    /// so this gate is self-contained when called on its own (it runs second in
+    /// [`verify_fragment_manifest`], so in the end-to-end order the sibling gate's
+    /// named refusal is the one reported). `why` says which of the three it was.
+    InadmissibleSolution { witness: usize, var: String, why: &'static str },
 }
 
 #[cfg(feature = "extended-fragment")]
@@ -8792,6 +9202,11 @@ impl std::fmt::Display for FragmentScanError {
                 "branch witness {} BGP obligation {}: selected row {} is outside the {} active disclosed rows (fail-closed)",
                 witness, obligation, row, active
             ),
+            FragmentScanError::NoActiveRow { witness, obligation } => write!(
+                f,
+                "branch witness {} BGP obligation {}: the attributed scan discloses no active row, so the pattern is not shown to match (fail-closed)",
+                witness, obligation
+            ),
             FragmentScanError::UnboundProjectedScanVar { witness, obligation, slot, var } => write!(
                 f,
                 "branch witness {} BGP obligation {} slot {}: projected scan variable ?{} is not disclosed in the solution (fail-closed)",
@@ -8811,6 +9226,11 @@ impl std::fmt::Display for FragmentScanError {
                 f,
                 "branch witness {} BGP obligation {} slot {}: unnamed wildcard slot (fail-closed)",
                 witness, obligation, slot
+            ),
+            FragmentScanError::InadmissibleSolution { witness, var, why } => write!(
+                f,
+                "branch witness {} discloses a binding for ?{} that its attributed branch cannot answer with: {} (fail-closed)",
+                witness, var, why
             ),
         }
     }
@@ -8910,17 +9330,33 @@ pub fn bind_fragment_scans(
             return Err(FragmentScanError::Structure { witness: wi, what: "branch" });
         };
 
-        // Re-encode the disclosed solution: var -> Fr, VERIFIER-recomputed.
-        let mut mu: std::collections::BTreeMap<String, Fr> = std::collections::BTreeMap::new();
-        for sb in &bw.solution {
-            let term = sb.term.to_term().ok_or_else(|| {
-                FragmentScanError::MalformedSolutionTerm { witness: wi, var: sb.var.clone() }
-            })?;
-            let enc = encode_term(&term, &salt).ok_or_else(|| {
-                FragmentScanError::MalformedSolutionTerm { witness: wi, var: sb.var.clone() }
-            })?;
-            mu.insert(sb.var.clone(), enc);
-        }
+        // Re-encode the disclosed solution: var -> Fr, VERIFIER-recomputed, held to
+        // the SAME admissibility rule as `bind_fragment_solution` (no duplicate
+        // name, projected only, bound by the attributed branch) so this gate is
+        // self-contained when called directly.
+        let bound = branch_bound_variables(branch, &bw.values_rows);
+        let mu = re_encode_solution(&bw.solution, &projected, &bound, &salt).map_err(
+            |(var, fault)| match fault {
+                SolutionFault::Malformed => {
+                    FragmentScanError::MalformedSolutionTerm { witness: wi, var }
+                }
+                SolutionFault::Duplicate => FragmentScanError::InadmissibleSolution {
+                    witness: wi,
+                    var,
+                    why: "it is disclosed more than once",
+                },
+                SolutionFault::NotProjected => FragmentScanError::InadmissibleSolution {
+                    witness: wi,
+                    var,
+                    why: "the query does not project it",
+                },
+                SolutionFault::NotBoundByBranch => FragmentScanError::InadmissibleSolution {
+                    witness: wi,
+                    var,
+                    why: "the attributed branch does not bind it",
+                },
+            },
+        )?;
 
         // Per-branch coherence map for EXISTENTIAL (non-projected) variables shared
         // across the branch's scans (the disclosed-row join analogue of bind_joins).
@@ -8955,7 +9391,18 @@ pub fn bind_fragment_scans(
                 return Err(FragmentScanError::ScanPatternMismatch { witness: wi, obligation: oi });
             }
 
-            // A pattern with no variable slot is fully bound by (1); no row needed.
+            // Every pattern a branch's solution rests on must actually match: the
+            // attributed scan has to disclose at least one ACTIVE row. The circuit
+            // admits an empty result, so this is checked here, ahead of the
+            // ground-pattern shortcut below, which would otherwise accept a branch
+            // over a triple the graph lacks.
+            let active = (*row_count as usize).min(rows.len());
+            if active == 0 {
+                return Err(FragmentScanError::NoActiveRow { witness: wi, obligation: oi });
+            }
+
+            // A pattern with no variable slot is fully bound by (1) plus the
+            // non-empty check above; no particular row needs selecting.
             let has_var = pattern.slots.iter().any(|s| matches!(s, SlotPattern::Var(_)));
             if !has_var {
                 continue;
@@ -8966,7 +9413,6 @@ pub fn bind_fragment_scans(
             let Some(&row) = bw.scan_rows.get(oi) else {
                 return Err(FragmentScanError::MissingRowSelection { witness: wi, obligation: oi });
             };
-            let active = (*row_count as usize).min(rows.len());
             if row >= active {
                 return Err(FragmentScanError::RowOutOfRange {
                     witness: wi,
@@ -9081,6 +9527,29 @@ pub enum FragmentJoinError {
     /// obligation, so it is refused fail-closed (the branch-local analogue of the
     /// flat `recheck` MissingObligation rejection).
     UncoveredCrossGraphJoin { witness: usize, variable: String },
+    /// Two `VALUES` blocks of the SAME branch pin the SAME variable to disagreeing
+    /// cells in the rows the manifest selected — there is no single witness for it,
+    /// so the selection is refused fail-closed.
+    ///
+    /// The scan / path side of the same disagreement is
+    /// [`FragmentJoinError::Incoherent`]: the `VALUES` cells are merged into the
+    /// branch's coherence map BEFORE the atoms are read, so an atom that disagrees
+    /// with a selected cell is reported against that atom.
+    ValuesCellIncoherent { witness: usize, block: usize, var: String },
+    /// A selected `VALUES` cell is a term the verifier cannot re-encode under the
+    /// branch's commitment method, so it cannot be compared with the atoms'
+    /// disclosed values — refused fail-closed rather than skipped.
+    ValuesCellUnencodable { witness: usize, block: usize, column: usize },
+    /// The branch selects a `VALUES` row, but the ONE commitment method its
+    /// `VALUES` cells must be encoded under could not be derived: the branch's
+    /// atoms authenticated methods selecting DIFFERENT pattern-constant encoders,
+    /// or a scan the branch names is not resolvable at all.
+    ///
+    /// A cell has a different encoding under each method, so encoding it under
+    /// the wrong one could only mismatch, and resolving to "whichever matches"
+    /// would let the prover pick. Refused fail-closed — the same discipline
+    /// `CheckError::ScanPatternMethodsMixed` applies within one scan.
+    ValuesMethodUnresolved { witness: usize },
 }
 
 #[cfg(feature = "extended-fragment")]
@@ -9112,12 +9581,101 @@ impl std::fmt::Display for FragmentJoinError {
                 "branch witness {}: required cross-graph join on ?{} is not covered by the disclosed data (fail-closed)",
                 witness, variable
             ),
+            FragmentJoinError::ValuesCellIncoherent { witness, block, var } => write!(
+                f,
+                "branch witness {} VALUES block {} (?{}): the selected rows of two VALUES blocks pin this variable to disagreeing cells (join incoherent)",
+                witness, block, var
+            ),
+            FragmentJoinError::ValuesCellUnencodable { witness, block, column } => write!(
+                f,
+                "branch witness {} VALUES block {} column {}: the selected cell cannot be re-encoded under the branch's commitment method, so it cannot be compared with the atoms' disclosed values (fail-closed)",
+                witness, block, column
+            ),
+            FragmentJoinError::ValuesMethodUnresolved { witness } => write!(
+                f,
+                "branch witness {}: the one commitment method its VALUES cells must be encoded under could not be derived (its atoms authenticated methods selecting different pattern-constant encoders, or a named scan is unresolvable) — refused rather than compared under an encoder the cells were never derived under",
+                witness
+            ),
         }
     }
 }
 
 #[cfg(feature = "extended-fragment")]
 impl std::error::Error for FragmentJoinError {}
+
+/// The ONE commitment method a branch's `VALUES` cells must be encoded under, or
+/// `None` fail-closed.
+///
+/// A `VALUES` cell is compared against the disclosed row slots of the branch's
+/// BGP scans, which the prover encoded with the method that built the committed
+/// graph. So the cell must go through the SAME encoder
+/// ([`encode_pattern_slot`]), and every scan the branch names must agree on it —
+/// two scans whose authenticated methods select different pattern-constant
+/// encoders give the cell two encodings, and resolving to "whichever matches"
+/// would let the prover choose. `None` then, and `None` for a scan whose own
+/// commitments mix encoders (`resolved_method` already refuses that by returning
+/// `None`) or that the manifest does not resolve.
+///
+/// A branch naming NO scan has nothing to compare a cell against through a row,
+/// so the method-UNBOUND entry — the string-canonical encoder, the behaviour that
+/// predates method authentication — is the answer; a `PathReach` endpoint
+/// encoding is derived the same way (`resolved_method` reports a non-`Scan`
+/// sub-proof as method-unbound, which is the pre-existing reading of a path
+/// graph's encoder and is not changed here).
+// sq-1zf94 / sq-j506 hardening.
+#[cfg(feature = "extended-fragment")]
+fn branch_cell_encoder(
+    manifest: &ProofManifest,
+    bw: &crate::manifest::BranchWitness,
+    methods: &AuthenticatedMethods,
+) -> Option<AuthenticatedMethod> {
+    let mut resolved: Option<AuthenticatedMethod> = None;
+    for &pi in &bw.scan_proofs {
+        let sp = manifest.sub_proofs.get(pi)?;
+        let m = resolved_method(&sp.inputs, methods)?;
+        match resolved {
+            None => resolved = Some(m),
+            Some(prev) if pattern_encoder_of(prev) == pattern_encoder_of(m) => {
+                // Prefer a BOUND entry, so the cell is held to an attested
+                // method rather than the unbound default — the same preference
+                // `scan_pattern_method_inner` applies within one scan.
+                if prev.method().is_none() {
+                    resolved = Some(m);
+                }
+            }
+            Some(_) => return None,
+        }
+    }
+    Some(resolved.unwrap_or(AuthenticatedMethod::Unbound))
+}
+
+/// Record `var -> val` in a branch coherence map, refusing a DISAGREEING
+/// duplicate rather than overwriting it. Returns `false` when the variable is
+/// already recorded with a different value.
+///
+/// Hardening: every site that fills one of these maps goes through this, because
+/// a plain `insert` silently drops the earlier value and with it the comparison.
+/// The case that made it load-bearing is a variable occurring TWICE in ONE atom —
+/// `ASK { ?x <p>+ ?x }`, where the path obligation's subject and object are the
+/// same variable, so `src_enc` was inserted and then overwritten by `dst_enc` and
+/// `src != dst` was never compared; a proof of a chain from `a` to a DIFFERENT `b`
+/// then answered a query that asks for a cycle. The same shape exists for a BGP
+/// atom (`{ ?x <p> ?x }`), whose two slots land in the same map.
+// sq-ygk6x.
+#[cfg(feature = "extended-fragment")]
+fn insert_coherent(
+    map: &mut std::collections::BTreeMap<String, Fr>,
+    var: &str,
+    val: Fr,
+) -> bool {
+    match map.get(var) {
+        None => {
+            map.insert(var.to_string(), val);
+            true
+        }
+        Some(prev) => *prev == val,
+    }
+}
 
 /// FAIL-CLOSED wave-1 extended-fragment PER-BRANCH JOIN COHERENCE + cross-graph Q6
 /// non-bnode gate (sq-ygk6x): the branch-local analogue of the flat cross-graph
@@ -9146,6 +9704,20 @@ impl std::error::Error for FragmentJoinError {}
 ///    directions. Because `src_enc` / `dst_enc` and the scan `rows` are byte-bound
 ///    into the `bb` public inputs (audit #1), a coherent selection genuinely ties
 ///    the shared existential value across the scan and path sub-proofs.
+///
+///    The map is SEEDED from the selected `VALUES` rows first, so a `VALUES` cell
+///    constrains its variable whether or not that variable is PROJECTED: an
+///    UNPROJECTED `VALUES` variable (which [`bind_fragment_solution`] skips,
+///    because there is no disclosed term to bind it to) must now equal the scan
+///    slot / path endpoint that carries it. Two blocks pinning one variable to
+///    disagreeing cells is [`FragmentJoinError::ValuesCellIncoherent`]; an
+///    atom disagreeing with a seeded cell is reported against that atom.
+///
+///    A variable repeated WITHIN one atom is held to the same rule rather than
+///    overwritten: a path whose subject and object are the same variable
+///    (`ASK { ?x <p>+ ?x }`) claims a cycle, so its `src_enc` must equal its
+///    `dst_enc`, and the two slots of `{ ?x <p> ?x }` must agree in the selected
+///    row.
 /// 2. **Cross-graph Q6 non-bnode obligation (item 1).** Re-derives the branch's Q6
 ///    obligations with [`branch_obligations`] over the PROOF-BOUND per-obligation
 ///    graph attributions (each scan / path sub-proof's `attribution` bits over its
@@ -9197,6 +9769,7 @@ impl std::error::Error for FragmentJoinError {}
 #[cfg(feature = "extended-fragment")]
 pub fn bind_fragment_join_coherence(
     fm: &crate::manifest::FragmentManifest,
+    methods: &AuthenticatedMethods,
 ) -> Result<(), FragmentJoinError> {
     let manifest = &fm.manifest;
     // Re-derive the fragment from the query TEXT alone (never the manifest).
@@ -9221,6 +9794,71 @@ pub fn bind_fragment_join_coherence(
         let mut intern: std::collections::BTreeMap<[u8; 32], usize> =
             std::collections::BTreeMap::new();
         let mut next_id = 0usize;
+
+        // The per-branch coherence map, SEEDED from the selected `VALUES` rows
+        // before any atom is read (below), then extended by each atom.
+        let mut seen: std::collections::BTreeMap<String, Fr> = std::collections::BTreeMap::new();
+
+        // --- VALUES obligations (seeded first). ---
+        //
+        // Hardening: a `VALUES` cell constrains its variable whether or not that
+        // variable is PROJECTED. `bind_fragment_solution` binds the projected cells
+        // to the disclosed solution and SKIPS the rest, so an UNPROJECTED `VALUES`
+        // variable used to enter no map at all and the selected row's cell for it
+        // was never compared with anything — `SELECT ?s { VALUES ?o { <a> } ?s <p>
+        // ?o }` accepted a scan row whose object was some other term. Merging every
+        // selected non-UNDEF cell into the branch coherence map is what makes the
+        // cell a constraint on the atoms: the scan slot / path endpoint that carries
+        // the variable must now equal it. The merge (rather than refusing
+        // unprojected `VALUES` variables outright) keeps the construct usable for
+        // the existential case it exists for, and it is the SAME mechanism the
+        // scan<->path coherence already uses, so it adds no new trusted input: the
+        // cell is a query-text CONSTANT the verifier re-encodes itself.
+        //
+        // A `VALUES` cell is compared against the disclosed row slots / endpoint
+        // encodings of this branch's atoms, so it must be encoded under the SAME
+        // commitment method those were derived under — the method-AWARE
+        // `encode_pattern_slot`, exactly as the flat pattern-constant gates do,
+        // never the string-canonical encoder as a fallback. The branch's atoms
+        // must agree on that encoder; a branch whose atoms disagree, or whose
+        // method has no encoding in this build, is refused BY NAME rather than
+        // compared under an encoder the cell was never derived under. Resolved
+        // only when the branch actually selects a `VALUES` row, so a presentation
+        // without `VALUES` is unaffected.
+        if !bw.values_rows.is_empty() {
+            let cell_method = branch_cell_encoder(manifest, bw, methods)
+                .ok_or(FragmentJoinError::ValuesMethodUnresolved { witness: wi })?;
+            for (bi, &row) in bw.values_rows.iter().enumerate() {
+                let Some(block) = branch.values.get(bi) else {
+                    return Err(FragmentJoinError::Structure { witness: wi, what: "values block" });
+                };
+                let Some(cells) = block.rows.get(row) else {
+                    return Err(FragmentJoinError::Structure { witness: wi, what: "values row" });
+                };
+                for (col, var) in block.variables.iter().enumerate() {
+                    // An UNDEF cell constrains nothing.
+                    let Some(Some(term)) = cells.get(col) else {
+                        continue;
+                    };
+                    let unencodable = || FragmentJoinError::ValuesCellUnencodable {
+                        witness: wi,
+                        block: bi,
+                        column: col,
+                    };
+                    let val = encode_pattern_slot(&Some(term.clone()), cell_method)
+                        .ok_or_else(unencodable)?
+                        .to_field()
+                        .ok_or_else(unencodable)?;
+                    if !insert_coherent(&mut seen, var, val) {
+                        return Err(FragmentJoinError::ValuesCellIncoherent {
+                            witness: wi,
+                            block: bi,
+                            var: var.clone(),
+                        });
+                    }
+                }
+            }
+        }
 
         // --- BGP-scan obligations. ---
         for oi in 0..n_scans {
@@ -9261,7 +9899,15 @@ pub fn bind_fragment_join_coherence(
                                 what: "scan row slot",
                             },
                         )?;
-                        map.insert(v.clone(), val);
+                        // A variable repeated across this pattern's slots must
+                        // resolve to ONE value — never overwritten.
+                        if !insert_coherent(&mut map, v, val) {
+                            return Err(FragmentJoinError::Incoherent {
+                                witness: wi,
+                                obligation: oi,
+                                var: v.clone(),
+                            });
+                        }
                     }
                 }
             }
@@ -9298,7 +9944,13 @@ pub fn bind_fragment_join_coherence(
                     obligation: combined,
                     what: "path src_enc",
                 })?;
-                map.insert(v.clone(), val);
+                if !insert_coherent(&mut map, v, val) {
+                    return Err(FragmentJoinError::Incoherent {
+                        witness: wi,
+                        obligation: combined,
+                        var: v.clone(),
+                    });
+                }
             }
             if let SlotPattern::Var(v) = &obligation.object {
                 let val = dst_enc.to_field().ok_or(FragmentJoinError::MalformedField {
@@ -9306,29 +9958,32 @@ pub fn bind_fragment_join_coherence(
                     obligation: combined,
                     what: "path dst_enc",
                 })?;
-                map.insert(v.clone(), val);
+                // A path whose two endpoints are the SAME variable (`?x <p>+ ?x`)
+                // claims a CYCLE: `src_enc` must equal `dst_enc`. Overwriting here
+                // dropped that comparison entirely.
+                if !insert_coherent(&mut map, v, val) {
+                    return Err(FragmentJoinError::Incoherent {
+                        witness: wi,
+                        obligation: combined,
+                        var: v.clone(),
+                    });
+                }
             }
             per_obl.push(map);
         }
 
         // (1) JOIN COHERENCE (item 2): every shared variable resolves to ONE value
-        // across all atoms (scan↔scan, scan↔path, path↔path). The safe-coarser
-        // direction — it can only reject more.
-        let mut seen: std::collections::BTreeMap<String, Fr> = std::collections::BTreeMap::new();
+        // across all atoms (scan↔scan, scan↔path, path↔path) AND agrees with the
+        // `VALUES` cells `seen` was seeded with above. The safe-coarser direction —
+        // it can only reject more.
         for (idx, map) in per_obl.iter().enumerate() {
             for (v, val) in map {
-                match seen.get(v) {
-                    None => {
-                        seen.insert(v.clone(), *val);
-                    }
-                    Some(prev) if *prev == *val => {}
-                    Some(_) => {
-                        return Err(FragmentJoinError::Incoherent {
-                            witness: wi,
-                            obligation: idx,
-                            var: v.clone(),
-                        })
-                    }
+                if !insert_coherent(&mut seen, v, *val) {
+                    return Err(FragmentJoinError::Incoherent {
+                        witness: wi,
+                        obligation: idx,
+                        var: v.clone(),
+                    });
                 }
             }
         }
@@ -9412,11 +10067,15 @@ fn intern_attribution(
 /// Five layers, all fail-closed:
 /// 1. [`dispatch_fragment`] re-derives the query fragment from the query TEXT
 ///    alone (`fragment_query`, never the manifest), REFUSES anything outside the
-///    wave-1 fragment, and routes each disclosed solution's branch witness to a
-///    bound sub-proof of the correct circuit member — mapped into
+///    wave-1 fragment — including any query carrying a `FILTER`, which nothing on
+///    this path discharges — and routes each disclosed solution's branch witness to
+///    a bound sub-proof of the correct circuit member — mapped into
 ///    [`CheckError::FragmentDispatch`]. It runs FIRST, before the verifier nonce
 ///    is burnt or any `bb` subprocess starts, so an outside-fragment / mis-routed
-///    presentation is refused without side effects.
+///    presentation is refused without side effects. Immediately after it, a
+///    presentation carrying NO branch witness is refused
+///    ([`CheckError::FragmentNoBranchWitness`]): it discloses no solution, so
+///    layers 2-4 would each have nothing to check.
 /// 2. [`bind_fragment_solution`] (sq-1zf94) binds each bound path's
 ///    `pred_enc`/`src_enc`/`dst_enc` and each disclosed `VALUES` cell to the
 ///    encoding the verifier RE-DERIVES from the query text + the disclosed solution
@@ -9453,7 +10112,9 @@ fn intern_attribution(
 /// disclosed solution's BGP-scan variables (all via the audit-#1 byte binding of
 /// those public inputs), and layer 4 (sq-ygk6x) additionally enforces the flat
 /// cross-graph Q6 non-bnode obligation PER BRANCH for BGP scans and binds every
-/// existential variable shared across scan↔scan / scan↔path / path↔path atoms. So an
+/// existential variable shared across scan↔scan / scan↔path / path↔path atoms —
+/// including a variable a `VALUES` cell pins (projected or not) and one repeated
+/// within a single atom. So an
 /// accepted proof's disclosed path endpoints, VALUES-constrained variables, and
 /// BGP-scan-bound variables ARE tied to the specific disclosed terms, and its
 /// per-branch cross-graph scan AND single-graph-path joins carry the same non-bnode
@@ -9467,7 +10128,10 @@ fn intern_attribution(
 /// fail-closed. A MULTI-graph path is still refused fail-closed. What remains BY
 /// DESIGN (not a gap): an EXISTENTIAL (non-projected) path endpoint's value stays
 /// hidden. So the extended regime now carries the SAME attestation + salt discipline
-/// as the flat path for scan↔scan / scan↔path / path↔path cross-graph joins. The
+/// as the flat path for scan↔scan / scan↔path / path↔path cross-graph joins.
+/// What this path does NOT discharge is REFUSED rather than ignored: a query
+/// carrying a `FILTER` (there is no branch-local FILTER obligation yet) and a
+/// presentation with no branch witness are both fail-closed refusals. The
 /// whole verifier stack is internally re-audited but **NOT externally audited**
 /// (sq-qhy4). NO soundness / privacy property is asserted as achieved.
 // sq-h732x: extended-fragment end-to-end routing. Opt-in
@@ -9492,6 +10156,26 @@ pub fn verify_fragment_manifest(
     // the correct member.
     dispatch_fragment(fm).map_err(CheckError::FragmentDispatch)?;
 
+    // (1b) Hardening: a presentation with NO branch witness is refused here. Every
+    // layer below iterates `branch_witnesses`, so an empty vector makes all four
+    // of them vacuous and the accept would rest on the crypto stage alone — a set
+    // of sub-proofs that verify while being tied to no branch of the query, which
+    // is not an answer to it. `dispatch_fragment` stays a no-op on such a manifest
+    // because it is also called on its own over stage-1-style presentations; this
+    // entry point accepts a QUERY ANSWER, so it demands at least one disclosed
+    // solution. Placed AFTER the routing gate so an outside-fragment query still
+    // reports the fragment refusal, and still before the nonce is burnt.
+    if fm.branch_witnesses.is_empty() {
+        return Err(CheckError::FragmentNoBranchWitness);
+    }
+
+    // (1c) ONE ENCODING POLICY for every layer below. The authenticated-method
+    // map is read here rather than after layer (2) because layer (2) is the first
+    // gate that re-encodes a disclosed term, and all four layers must agree on the
+    // encoding they compare under. See `bind_fragment_encoding_policy`.
+    let fragment_methods = authenticated_methods_for(&fm.manifest, trusted_key_set)?;
+    bind_fragment_encoding_policy(&fragment_methods)?;
+
     // (2) FAIL-CLOSED DISCLOSED-SOLUTION term binding (sq-1zf94): bind each bound
     // path's pred_enc/src_enc/dst_enc and each disclosed VALUES cell to the encoding
     // the verifier re-derives from the query text + the disclosed solution (never a
@@ -9513,7 +10197,6 @@ pub fn verify_fragment_manifest(
     // stage below runs it again as part of the full pre-filter, so nothing is
     // skipped: a refusal here is a refusal that stage would also raise, reported
     // before the nonce is burnt.
-    let fragment_methods = authenticated_methods_for(&fm.manifest, trusted_key_set)?;
     bind_scan_pattern_methods(&fm.manifest, &fragment_methods)?;
     bind_fragment_scans(fm, &fragment_methods).map_err(CheckError::FragmentScan)?;
 
@@ -9527,7 +10210,7 @@ pub fn verify_fragment_manifest(
     // non-bnode obligation the verifier cannot discharge. Also before the nonce is
     // burnt or any bb runs. The remaining residual is documented on
     // `bind_fragment_join_coherence`.
-    bind_fragment_join_coherence(fm).map_err(CheckError::FragmentJoin)?;
+    bind_fragment_join_coherence(fm, &fragment_methods).map_err(CheckError::FragmentJoin)?;
 
     // (3) Crypto stage over the EMBEDDED manifest, with stage-1a routed through
     // `fragment_query` (`skip_query_binding = true`) so the extended query is not
@@ -9609,6 +10292,10 @@ fn reconstruct_public_inputs(
             attribution,
             ..
         } => {
+            // scan_v2dl_k1_n16_r4/src/main.nr declares the SAME public
+            // layout as scan: challenge, commitments, pattern flags, pattern
+            // encodings, rows (row-major), row_count, attribution. Only its
+            // component witness and canonical VK differ.
             // commitments[k] — exactly k words (k is the declared CircuitId.k,
             // re-derived from commitments.len() in stage 1b).
             for c in commitments {
@@ -9626,6 +10313,8 @@ fn reconstruct_public_inputs(
             // zero rows (matching the prover's pad_rows / the circuit's R).
             let r = match inputs.circuit_id() {
                 CircuitId::Scan { r, .. } => *r as usize,
+                #[cfg(feature = "dual-leaf")]
+                CircuitId::ScanV2Dl { r, .. } => *r as usize,
                 _ => return Err(CheckError::MalformedField { proof, what: "scan id" }),
             };
             for j in 0..r {
@@ -9657,6 +10346,8 @@ fn reconstruct_public_inputs(
             // shape because the structural gate runs unconditionally before here.
             let k = match inputs.circuit_id() {
                 CircuitId::Scan { k, .. } => *k as usize,
+                #[cfg(feature = "dual-leaf")]
+                CircuitId::ScanV2Dl { k, .. } => *k as usize,
                 _ => return Err(CheckError::MalformedField { proof, what: "scan id" }),
             };
             for g in 0..k {
@@ -9805,7 +10496,8 @@ fn reconstruct_public_inputs(
         // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN
         // public inputs, in the `join_eq` member's `main` declaration order:
         // challenge (pushed above), commit_a, commit_b, join_commitment, slot_a,
-        // slot_b. Cross-reference `zk/compose/join_eq_na16_nb16/src/main.nr`. This
+        // slot_b. Both `join_eq_na16_nb16/src/main.nr` and
+        // `join_eq_v2dl_na16_nb16/src/main.nr` declare exactly this order. This
         // is the pure public-input SERIALIZATION (the audit-#1 byte-layout) — it
         // does NOT perform the `bind_joins` gate (commitment-equality to the scan
         // proofs, the `UnboundJoin` query binding, the slot binding), which is
@@ -10211,7 +10903,7 @@ mod tests {
                     Some(&id),
                     "{} must not re-derive the auxiliary member {}",
                     what,
-                    id.package()
+                    id.label()
                 );
             }
         }
@@ -12612,6 +13304,37 @@ mod fragment_dispatch_tests {
         attest_routing_fixture(&mut m.manifest)
     }
 
+    /// As [`attest_fragment_fixture`], but the issuer attests a CHOSEN commitment
+    /// method rather than the string-canonical one the other fixtures use — so a
+    /// test can build an honestly attested presentation over a method the extended
+    /// lane does not encode under.
+    #[cfg(feature = "dual-leaf")]
+    fn attest_fragment_fixture_with_method(
+        m: &mut crate::manifest::FragmentManifest,
+        method: sparq_zk::commit::CommitmentMethod,
+    ) -> KeySet {
+        let ks = attest_routing_fixture(&mut m.manifest);
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let list_id = sparq_zk::sig::status_list_id_to_field(TEST_STATUS_LIST);
+        let status_ref =
+            sparq_zk::sig::status_ref_digest(&list_id, TEST_STATUS_INDEX, TEST_STATUS_VERSION);
+        for att in &mut m.manifest.commitment_attestations {
+            let c = att.commitment.to_field().expect("a parseable fixture commitment");
+            let salt = att
+                .salt
+                .as_ref()
+                .and_then(|s| s.to_field())
+                .expect("the fixture attestation carries a salt");
+            att.signature = sk.sign_presentation_with_status_and_scheme(
+                &c,
+                &salt,
+                &status_ref,
+                &sparq_zk::sig::scheme_iri_to_field(method.scheme_iri()),
+            );
+        }
+        ks
+    }
+
     fn dummy_prover() -> CircuitProver {
         // Never invoked in these tests — every case rejects before the sub-proof
         // bb loop, so no nargo/bb toolchain is needed.
@@ -12893,24 +13616,36 @@ mod fragment_dispatch_tests {
             );
         }
 
-        // CONTROL: the honest edge passes stage 2g′ and is refused later (its
-        // `join_eq` sub-proof carries no proof bytes), so the two refusals above
-        // are not an artefact of the fixture.
+        // CONTROL: the honest edge passes stage 2g′ AND every later structural
+        // stage, and the refusal that does arrive is the CRYPTO stage's — the
+        // fixture's sub-proofs carry no proof bytes, so `bb` has nothing to
+        // verify. Asserted by name rather than as "not the endpoint error", so a
+        // fixture that started failing some earlier stage could not pass as a
+        // control.
         let (m, k) = union_with_hidden_join((endpoint_commitment(), endpoint_commitment()));
         let err = run_fragment(&m, &k).unwrap_err();
         assert!(
-            !matches!(err, CheckError::JoinCommitmentMismatch { .. }),
-            "the honest edge must pass the endpoint gate, got {:?}",
+            matches!(err, CheckError::MissingProof { proof: 0 }),
+            "the honest edge must reach the crypto stage, got {:?}",
             err
         );
     }
 
     /// The ENDPOINT half runs ahead of the regime switch, so the extended regime
-    /// reaches it on a query the FLAT regime refuses at stage 1a. Pinned from the
-    /// other side too: with the hidden join removed, that same fixture gets past
-    /// stage 2g′ and the extended regime's own stage-1a routing accepts the UNION.
+    /// reaches it on a query the FLAT regime refuses at stage 1a.
     ///
-    /// The flat counterpart of the two refusals above lives in
+    /// The fixture here drops the hidden join ENTIRELY — the `JoinEdge` and the
+    /// `JoinEq` sub-proof it named — so the manifest really does get PAST stage
+    /// 2g′ (nothing for either of that gate's rules to refuse) and the extended
+    /// regime's refusal is the crypto stage's. That is what makes this the
+    /// positive half: the gate the flat regime never reaches is reached, passed,
+    /// and the query carries on.
+    ///
+    /// Dropping only the EDGE is a different case (the `JoinEq` is then covered by
+    /// nothing and 2g′'s coverage rule refuses it by name); that one is
+    /// `dropping_only_the_edge_leaves_the_join_uncovered` below.
+    ///
+    /// The flat counterpart of the endpoint refusals above lives in
     /// `tests/join_gates.rs`, where the fixture is a flat-fragment join query.
     #[test]
     fn the_endpoint_gate_is_reached_on_a_query_only_the_extended_regime_accepts() {
@@ -12923,14 +13658,86 @@ mod fragment_dispatch_tests {
             matches!(flat, CheckError::Sparqzk(VerifyError::UnsupportedFragment(_))),
             "the flat regime refuses this UNION query at stage 1a, got {flat:?}"
         );
-        // Extended, same fixture with NO hidden join: stage 2g′ has nothing to
-        // validate and the refusal comes from a later stage.
+        // Extended, same fixture with the hidden join dropped ENTIRELY (the edge
+        // AND the `JoinEq` sub-proof it named, index 3): stage 2g′ has nothing to
+        // refuse, so the manifest passes it and every later structural stage, and
+        // the refusal is the crypto stage's missing proof bytes.
         let (mut ok, k2) = union_with_hidden_join((fh("0xdead"), fh("0xbeef")));
         ok.manifest.join_edges.clear();
+        ok.manifest.sub_proofs.remove(3);
         let err = run_fragment(&ok, &k2).unwrap_err();
         assert!(
-            !matches!(err, CheckError::JoinCommitmentMismatch { .. }),
-            "with no declared edge the endpoint gate must be silent, got {:?}",
+            matches!(err, CheckError::MissingProof { proof: 0 }),
+            "with no hidden join at all the extended regime must get past stage 2g′ \
+             into the crypto stage, got {:?}",
+            err
+        );
+    }
+
+    /// A presentation whose query carries a solution SLICE is refused END TO END,
+    /// not only by the query-side extractor.
+    ///
+    /// The counterexample is a positive OFFSET over a one-solution answer:
+    /// `SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has the EMPTY answer,
+    /// yet the fixture below — a witness for branch 0, row 0, disclosing
+    /// `?x = <urn:a>`, with NO sub-proofs at all — was accepted while the slice
+    /// was peeled off and the query re-derived without it. The verifier must now
+    /// refuse it at the routing gate, before the nonce is burnt.
+    #[test]
+    fn a_sliced_query_is_refused_end_to_end() {
+        const SLICED: &str = "SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1";
+        const UNSLICED: &str = "SELECT ?x WHERE { VALUES ?x { <urn:a> } }";
+        let witness = || {
+            vec![bw_scan(0, vec![], vec![], vec![0], sol(&[("x", "urn:a")]))]
+        };
+
+        let m = fm(SLICED, vec![], witness());
+        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        match err {
+            CheckError::FragmentDispatch(FragmentDispatchError::OutsideFragment(ref msg)) => {
+                assert!(msg.contains("LIMIT / OFFSET"), "got `{}`", msg);
+            }
+            other => panic!("a sliced query must be refused at the routing gate, got {:?}", other),
+        }
+        // The routing gate on its own refuses it too.
+        assert!(matches!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::OutsideFragment(_))
+        ));
+
+        // CONTROL: the SAME presentation WITHOUT the slice is ACCEPTED — and
+        // soundly so, which is exactly what made the sliced case a false accept.
+        // A `VALUES`-only query's answer is fixed by the query TEXT: `?x = <urn:a>`
+        // is its answer whatever the data, so there is nothing for a sub-proof to
+        // establish and a presentation with none is correct. Add `OFFSET 1` and the
+        // answer becomes EMPTY, so the identical presentation is no longer an
+        // answer to anything — hence the refusal above rather than a peel.
+        let ok = fm(UNSLICED, vec![], witness());
+        assert_eq!(dispatch_fragment(&ok), Ok(()));
+        let got = verify_fragment_manifest(&ok, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen);
+        assert!(
+            got.is_ok(),
+            "a VALUES-only query's own answer needs no sub-proof, got {:?}",
+            got.err()
+        );
+    }
+
+    /// Dropping only the `JoinEdge` is NOT a way to make stage 2g′ silent: the
+    /// `JoinEq` sub-proof it named is then covered by nothing, and the gate's
+    /// coverage rule refuses it BY NAME.
+    ///
+    /// Separated from the positive case above so each assertion has one fixture:
+    /// this one keeps the join sub-proof, that one removes it.
+    #[test]
+    fn dropping_only_the_edge_leaves_the_join_uncovered() {
+        let (mut m, k) = union_with_hidden_join((fh("0xdead"), fh("0xbeef")));
+        m.manifest.join_edges.clear();
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinProofNotBoundToAnEdge { proof: 3 }),
+            "dropping the edge must leave the join uncovered and refused, got {:?}",
             err
         );
     }
@@ -13231,12 +14038,19 @@ mod fragment_dispatch_tests {
         // End-to-end: a VALUES cell that disagrees with the disclosed solution is
         // refused as a structured CheckError::FragmentSolution — BEFORE the nonce is
         // burnt or any bb subprocess runs.
-        let m = fm(
+        //
+        // The fixture is ATTESTED because the encoding-policy gate (layer 1c) reads
+        // the authenticated-method map ahead of this layer, so an unattested
+        // commitment would be refused there first — a refusal about the fixture, not
+        // about the disclosed solution.
+        let mut m = fm(
             VALUES,
             vec![sub(scan_min())],
             vec![bw_sol(0, vec![0], vec![], vec![1], sol(&[("o", "http://ex/z")]))],
         );
-        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let ks = attest_fragment_fixture(&mut m);
+        let m = m;
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
         let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
             .unwrap_err();
         assert!(
@@ -13530,6 +14344,57 @@ mod fragment_dispatch_tests {
     }
 
     #[test]
+    fn a_ground_pattern_over_an_empty_scan_is_refused() {
+        // The scan proves the ground triple's pattern constants but discloses no
+        // row: the graph lacks the triple, so the ASK answer is false and must not
+        // be accepted as true. Control: the same scan with the row disclosed.
+        const GROUND: &str = "ASK { <http://ex/a> <http://ex/p> <http://ex/b> }";
+        let consts = [Some("http://ex/a"), Some("http://ex/p"), Some("http://ex/b")];
+        let empty = scan_real(consts, vec![]);
+        let m = fm(GROUND, vec![sub(empty)], vec![bw_scan(0, vec![0], vec![], vec![], vec![])]);
+        assert_eq!(
+            bind_fragment_scans(&m, &AuthenticatedMethods::new()),
+            Err(FragmentScanError::NoActiveRow { witness: 0, obligation: 0 })
+        );
+        let full = scan_real(consts, vec![[iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")]]);
+        let m = fm(GROUND, vec![sub(full)], vec![bw_scan(0, vec![0], vec![], vec![], vec![])]);
+        assert_eq!(bind_fragment_scans(&m, &AuthenticatedMethods::new()), Ok(()));
+    }
+
+    #[test]
+    fn a_values_answer_beside_an_empty_ground_scan_is_refused_end_to_end() {
+        // The VALUES cell supplies ?x without any scan row; the ground pattern
+        // beside it must still be shown to match. With an empty scan the true
+        // answer is empty, so the disclosed x=<urn:a> is refused before bb.
+        const Q: &str = "SELECT ?x WHERE { VALUES ?x { <urn:a> } <urn:s> <urn:p> <urn:o> . }";
+        let consts = [Some("urn:s"), Some("urn:p"), Some("urn:o")];
+        let empty = scan_real(consts, vec![]);
+        let mut m = fm(Q, vec![sub(empty)], vec![bw_scan(0, vec![0], vec![], vec![0], sol(&[("x", "urn:a")]))]);
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentScan(FragmentScanError::NoActiveRow { witness: 0, obligation: 0 })
+            ),
+            "an empty ground scan must be refused as NoActiveRow, got {err:?}"
+        );
+        // Control: the triple exists, so every structural gate passes; what is
+        // left is the cryptographic check, which this fixture cannot satisfy.
+        let full = scan_real(consts, vec![[iri("urn:s"), iri("urn:p"), iri("urn:o")]]);
+        let mut m = fm(Q, vec![sub(full)], vec![bw_scan(0, vec![0], vec![], vec![0], sol(&[("x", "urn:a")]))]);
+        let ks = attest_fragment_fixture(&mut m);
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            !matches!(err, CheckError::FragmentScan(_) | CheckError::FragmentDispatch(_) | CheckError::FragmentJoin(_)),
+            "the honest ground-plus-VALUES shape must clear every structural gate, got {err:?}"
+        );
+    }
+
+    #[test]
     fn verify_fragment_manifest_refuses_wrong_scan_row_before_bb() {
         // End-to-end: a scan row inconsistent with the disclosed solution is refused
         // as a structured CheckError::FragmentScan BEFORE the nonce is burnt or any
@@ -13560,6 +14425,7 @@ mod fragment_dispatch_tests {
             FragmentScanError::ScanPatternMismatch { witness: 0, obligation: 0 },
             FragmentScanError::MissingRowSelection { witness: 0, obligation: 0 },
             FragmentScanError::RowOutOfRange { witness: 0, obligation: 0, row: 3, active: 1 },
+            FragmentScanError::NoActiveRow { witness: 0, obligation: 0 },
             FragmentScanError::UnboundProjectedScanVar { witness: 0, obligation: 0, slot: 0, var: "s".into() },
             FragmentScanError::ScanSlotMismatch { witness: 0, obligation: 0, slot: 2, var: "o".into() },
             FragmentScanError::JoinIncoherent { witness: 0, obligation: 1, slot: 0, var: "x".into() },
@@ -13638,7 +14504,7 @@ mod fragment_dispatch_tests {
             vec![sub(sc), sub(pa)],
             vec![bw_full(0, vec![0], vec![1], vec![], vec![0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        assert_eq!(bind_fragment_join_coherence(&m), Ok(()));
+        assert_eq!(bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()), Ok(()));
     }
 
     #[test]
@@ -13656,7 +14522,7 @@ mod fragment_dispatch_tests {
             vec![bw_full(0, vec![0], vec![1], vec![], vec![0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_join_coherence(&m),
+            bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()),
             Err(FragmentJoinError::Incoherent { witness: 0, obligation: 1, var: "x".to_string() })
         );
     }
@@ -13676,7 +14542,7 @@ mod fragment_dispatch_tests {
             vec![bw_full(0, vec![0], vec![1], vec![], vec![0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_join_coherence(&m),
+            bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()),
             Err(FragmentJoinError::Incoherent { witness: 0, obligation: 1, var: "x".to_string() })
         );
     }
@@ -13692,7 +14558,7 @@ mod fragment_dispatch_tests {
             vec![bw_full(0, vec![], vec![0], vec![], vec![], sol(&[("o", "http://ex/b")]))],
         );
         assert_eq!(
-            bind_fragment_join_coherence(&m),
+            bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()),
             Err(FragmentJoinError::MultiGraphPath { witness: 0, obligation: 0 })
         );
     }
@@ -13718,7 +14584,7 @@ mod fragment_dispatch_tests {
             vec![bw_full(0, vec![0, 1], vec![], vec![], vec![0, 0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
         assert_eq!(
-            bind_fragment_join_coherence(&m),
+            bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()),
             Err(FragmentJoinError::Incoherent { witness: 0, obligation: 1, var: "x".to_string() })
         );
     }
@@ -13743,7 +14609,7 @@ mod fragment_dispatch_tests {
             vec![sub(sc0), sub(sc1)],
             vec![bw_full(0, vec![0, 1], vec![], vec![], vec![0, 0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        assert_eq!(bind_fragment_join_coherence(&m), Ok(()));
+        assert_eq!(bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()), Ok(()));
     }
 
     #[test]
@@ -13912,6 +14778,1195 @@ mod fragment_dispatch_tests {
             "an attested, distinctly-salted scan+path must pass the issuer + salt gate"
         );
     }
+
+    // --- Hardening: extended-fragment shapes the verifier does NOT discharge ---
+    //
+    // Each case below is an honest-looking presentation of a QUERY SHAPE no gate
+    // on this path answers, and each is paired with a positive control showing
+    // the shape the verifier DOES discharge still gets past the gate under test.
+    // Structural (no nargo/bb): every case refuses before the sub-proof loop.
+
+    /// An `xsd:integer` literal term, for a FILTER-shaped row.
+    fn int_lit(v: u64) -> oxrdf::Term {
+        oxrdf::Term::Literal(oxrdf::Literal::new_typed_literal(
+            v.to_string(),
+            oxrdf::NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
+        ))
+    }
+
+    /// A single BGP pattern with a FILTER on its (unprojected) object.
+    const FILTERED: &str = "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o > 5) }";
+    /// The SAME query without the FILTER — the positive control.
+    const UNFILTERED: &str = "SELECT ?s WHERE { ?s <http://ex/p> ?o }";
+    /// A FILTER in only ONE branch of a UNION.
+    const FILTERED_BRANCH: &str = "SELECT ?s WHERE { { ?s <http://ex/p> ?o } UNION \
+                                   { ?s <http://ex/q> ?o FILTER(?o > 5) } }";
+
+    /// A branch carrying a FILTER is refused, whatever the disclosed row says.
+    ///
+    /// The row below discloses `?o = 3`, which the query's `FILTER(?o > 5)`
+    /// excludes. No gate on this path reads `FragmentBranch::filters`: the flat
+    /// FILTER obligation lives in `bind_query_correctness`, which the extended
+    /// regime skips, so the presentation would otherwise be accepted with the
+    /// FILTER ignored — i.e. the query answered as `UNFILTERED`.
+    #[test]
+    fn a_branch_carrying_a_filter_is_refused_before_bb() {
+        let sc = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), int_lit(3)]],
+        );
+        let mut m = fm(
+            FILTERED,
+            vec![sub(sc)],
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1")]))],
+        );
+        let k = attest_fragment_fixture(&mut m);
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentDispatch(FragmentDispatchError::FilterNotDischarged {
+                    branch: 0,
+                    filters: 1
+                })
+            ),
+            "a FILTER no gate discharges must be refused by name, got {:?}",
+            err
+        );
+        // The routing gate alone refuses it too, so a caller using
+        // `dispatch_fragment` on its own is not left with the acceptance.
+        assert_eq!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::FilterNotDischarged { branch: 0, filters: 1 })
+        );
+
+        // CONTROL: the same fixture under the FILTER-free query passes the routing
+        // gate and is refused later (its sub-proof carries no proof bytes), so the
+        // refusal above is the FILTER and not the fixture.
+        let sc2 = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), int_lit(3)]],
+        );
+        let mut ok = fm(
+            UNFILTERED,
+            vec![sub(sc2)],
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1")]))],
+        );
+        let k2 = attest_fragment_fixture(&mut ok);
+        assert_eq!(dispatch_fragment(&ok), Ok(()));
+        let ok_err = run_fragment(&ok, &k2).unwrap_err();
+        assert!(
+            !matches!(
+                ok_err,
+                CheckError::FragmentDispatch(FragmentDispatchError::FilterNotDischarged { .. })
+            ),
+            "the FILTER-free control must get past the routing gate, got {:?}",
+            ok_err
+        );
+    }
+
+    /// The FILTER refusal is over EVERY re-derived branch, not only the ones a
+    /// branch witness attributes a solution to: attributing everything to the
+    /// unfiltered branch does not get the filtered one past the gate.
+    #[test]
+    fn a_filter_in_an_unattributed_branch_is_refused_too() {
+        let sc = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), int_lit(3)]],
+        );
+        let m = fm(
+            FILTERED_BRANCH,
+            vec![sub(sc)],
+            // Branch 0 (the FILTER-free one) is the only one attributed.
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1")]))],
+        );
+        assert_eq!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::FilterNotDischarged { branch: 1, filters: 1 })
+        );
+    }
+
+    /// A VALUES block over an UNPROJECTED variable constrains that variable: the
+    /// selected cell is merged into the branch coherence map, so the scan row
+    /// bound to the same variable must equal it.
+    ///
+    /// `?o` is not projected, so `bind_fragment_solution` has no disclosed term to
+    /// bind the cell to and skips it; before the merge the cell entered no map at
+    /// all and a scan row naming any other object was accepted.
+    #[test]
+    fn an_unprojected_values_cell_must_agree_with_the_scan_row() {
+        const VALUES_EXISTENTIAL: &str =
+            "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        // The scan row's object is <b>, the VALUES cell is <a>.
+        let sc = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), iri("http://ex/b")]],
+        );
+        let mut m = fm(
+            VALUES_EXISTENTIAL,
+            vec![sub(sc)],
+            vec![bw_scan(0, vec![0], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        let k = attest_fragment_fixture(&mut m);
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentJoin(FragmentJoinError::Incoherent { witness: 0, var: ref v, .. })
+                    if v == "o"
+            ),
+            "the VALUES cell must constrain the unprojected variable, got {:?}",
+            err
+        );
+
+        // CONTROL: the same presentation with the row's object EQUAL to the cell
+        // passes the coherence gate and is refused later.
+        let sc_ok = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), iri("http://ex/a")]],
+        );
+        let mut ok = fm(
+            VALUES_EXISTENTIAL,
+            vec![sub(sc_ok)],
+            vec![bw_scan(0, vec![0], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        let k2 = attest_fragment_fixture(&mut ok);
+        let ok_err = run_fragment(&ok, &k2).unwrap_err();
+        assert!(
+            !matches!(ok_err, CheckError::FragmentJoin(_)),
+            "an agreeing VALUES cell must pass the coherence gate, got {:?}",
+            ok_err
+        );
+    }
+
+    /// A path whose two endpoints are the SAME variable claims a CYCLE, so its
+    /// proof-bound `src_enc` must equal its `dst_enc`.
+    ///
+    /// `?x` is existential under `ASK`, so the disclosed-term gate says nothing
+    /// about either endpoint; the branch coherence map is the only place the two
+    /// meet, and a plain insert overwrote `src_enc` with `dst_enc` so they were
+    /// never compared — a reachability proof from `<a>` to a DIFFERENT `<b>`
+    /// answered the query.
+    #[test]
+    fn a_path_claiming_a_cycle_must_have_equal_endpoints() {
+        const CYCLE: &str = "ASK { ?x <http://ex/p>+ ?x }";
+        let mut m = fm(
+            CYCLE,
+            vec![sub(path_real(4, 1, 16, false, "http://ex/p", "http://ex/a", "http://ex/b"))],
+            vec![bw_sol(0, vec![], vec![0], vec![], vec![])],
+        );
+        let k = attest_fragment_fixture(&mut m);
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentJoin(FragmentJoinError::Incoherent {
+                    witness: 0,
+                    obligation: 0,
+                    var: ref v
+                }) if v == "x"
+            ),
+            "a <a> -> <b> chain must not answer a cycle query, got {:?}",
+            err
+        );
+
+        // CONTROL: the genuine cycle (src == dst) passes the coherence gate.
+        let mut ok = fm(
+            CYCLE,
+            vec![sub(path_real(4, 1, 16, false, "http://ex/p", "http://ex/a", "http://ex/a"))],
+            vec![bw_sol(0, vec![], vec![0], vec![], vec![])],
+        );
+        let k2 = attest_fragment_fixture(&mut ok);
+        let ok_err = run_fragment(&ok, &k2).unwrap_err();
+        assert!(
+            !matches!(ok_err, CheckError::FragmentJoin(_)),
+            "an honest cycle must pass the coherence gate, got {:?}",
+            ok_err
+        );
+    }
+
+    /// The same rule for a BGP atom whose two slots carry ONE variable, asserted
+    /// on the gate directly: `bind_fragment_scans` refuses this shape first in the
+    /// end-to-end order, so the coherence gate's own per-atom rule is pinned here.
+    #[test]
+    fn a_scan_atoms_repeated_variable_must_agree_in_the_selected_row() {
+        const SELF_LOOP: &str = "ASK { ?x <http://ex/p> ?x }";
+        let sc = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")]],
+        );
+        let m = fm(SELF_LOOP, vec![sub(sc)], vec![bw_scan(0, vec![0], vec![0], vec![], vec![])]);
+        assert_eq!(
+            bind_fragment_join_coherence(&m, &AuthenticatedMethods::new()),
+            Err(FragmentJoinError::Incoherent {
+                witness: 0,
+                obligation: 0,
+                var: "x".to_string()
+            })
+        );
+        // CONTROL: a row whose two slots agree passes.
+        let sc_ok = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/a")]],
+        );
+        let ok =
+            fm(SELF_LOOP, vec![sub(sc_ok)], vec![bw_scan(0, vec![0], vec![0], vec![], vec![])]);
+        assert_eq!(bind_fragment_join_coherence(&ok, &AuthenticatedMethods::new()), Ok(()));
+    }
+
+    /// An extended presentation that discloses NO solution is refused: every
+    /// branch-local binding layer iterates the branch witnesses, so an empty
+    /// vector leaves all four with nothing to check and the accept would rest on
+    /// the crypto stage alone.
+    #[test]
+    fn a_presentation_with_no_branch_witness_is_refused() {
+        let sc0 = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s0"), iri("http://ex/p"), iri("http://ex/o0")]],
+        );
+        let sc1 = scan_real(
+            [None, Some("http://ex/q"), None],
+            vec![[iri("http://ex/o1"), iri("http://ex/q"), iri("http://ex/s1")]],
+        );
+        let mut m = fm(UNION, vec![sub(sc0.clone()), sub(sc1.clone())], vec![]);
+        let k = attest_fragment_fixture(&mut m);
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(err, CheckError::FragmentNoBranchWitness),
+            "a presentation with no disclosed solution must be refused, got {:?}",
+            err
+        );
+
+        // CONTROL: the SAME manifest with its two branch witnesses restored gets
+        // past this refusal.
+        let mut ok = fm(
+            UNION,
+            vec![sub(sc0), sub(sc1)],
+            vec![
+                bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s0"), ("o", "http://ex/o0")])),
+                bw_scan(1, vec![1], vec![0], vec![], sol(&[("o", "http://ex/o1"), ("s", "http://ex/s1")])),
+            ],
+        );
+        let k2 = attest_fragment_fixture(&mut ok);
+        let ok_err = run_fragment(&ok, &k2).unwrap_err();
+        assert!(
+            !matches!(ok_err, CheckError::FragmentNoBranchWitness),
+            "a presentation that discloses solutions must get past it, got {:?}",
+            ok_err
+        );
+    }
+
+    // --- Hardening: the VALUES seed reads the WHOLE selected row of EVERY block ---
+    //
+    // The seed is what makes a `VALUES` cell constrain its variable. These cases
+    // pin each dimension of "every cell of the selected row of every block",
+    // because a seed that read only the first block, only the first column, or
+    // only the first row would still pass the single-block single-cell case.
+
+    /// A scan over `<http://ex/p>` whose one disclosed row has `object = <obj>`.
+    fn p_scan_with_object(obj: &str) -> ProofInputs {
+        scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), iri(obj)]],
+        )
+    }
+
+    /// One BGP scan plus `values_rows`, attributed to branch 0, disclosing `?s`.
+    fn values_fixture(query: &str, obj: &str, values_rows: Vec<usize>) -> FragmentManifest {
+        fm(
+            query,
+            vec![sub(p_scan_with_object(obj))],
+            vec![bw_scan(0, vec![0], vec![0], values_rows, sol(&[("s", "http://ex/s1")]))],
+        )
+    }
+
+    fn join_coherence(m: &FragmentManifest) -> Result<(), FragmentJoinError> {
+        bind_fragment_join_coherence(m, &AuthenticatedMethods::new())
+    }
+
+    /// Two `VALUES` blocks pinning the SAME variable to disagreeing cells are
+    /// refused: there is no single witness for it, so no row selection is
+    /// coherent. A seed that overwrote the first cell with the second would
+    /// silently pick one.
+    #[test]
+    fn two_values_blocks_pinning_one_variable_to_different_cells_are_refused() {
+        const Q: &str = "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } \
+                         VALUES ?o { <http://ex/b> } ?s <http://ex/p> ?o }";
+        // The scan row agrees with the SECOND block, so an overwriting seed would
+        // accept; the two blocks still disagree with each other.
+        let m = values_fixture(Q, "http://ex/b", vec![0, 0]);
+        let err = join_coherence(&m).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                FragmentJoinError::ValuesCellIncoherent { witness: 0, block: 1, var: ref v }
+                    if v == "o"
+            ),
+            "two blocks disagreeing on one variable must be refused, got {:?}",
+            err
+        );
+        // CONTROL: two blocks AGREEING, with a row that matches, passes.
+        const Q_OK: &str = "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } \
+                            VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        assert_eq!(join_coherence(&values_fixture(Q_OK, "http://ex/a", vec![0, 0])), Ok(()));
+    }
+
+    /// The SELECTED row is the one that constrains, not the first: with row 1
+    /// selected, a scan row matching row 0's cell is refused.
+    #[test]
+    fn the_selected_values_row_is_the_one_that_constrains() {
+        const Q: &str = "SELECT ?s WHERE { VALUES (?o ?q) \
+                         { (<http://ex/a> <http://ex/x>) (<http://ex/b> <http://ex/y>) } \
+                         ?s <http://ex/p> ?o }";
+        // Row 1 pins ?o = <b>; the scan row says <a>, which is row 0's cell.
+        let m = values_fixture(Q, "http://ex/a", vec![1]);
+        let err = join_coherence(&m).unwrap_err();
+        assert!(
+            matches!(err, FragmentJoinError::Incoherent { witness: 0, var: ref v, .. } if v == "o"),
+            "the selected row must constrain, got {:?}",
+            err
+        );
+        // CONTROLS: row 1 with the matching scan row, and row 0 with its own.
+        assert_eq!(join_coherence(&values_fixture(Q, "http://ex/b", vec![1])), Ok(()));
+        assert_eq!(join_coherence(&values_fixture(Q, "http://ex/a", vec![0])), Ok(()));
+    }
+
+    /// EVERY block is read, not only the first: a second block constraining `?o`
+    /// is enforced.
+    #[test]
+    fn every_values_block_is_read_not_only_the_first() {
+        const Q: &str = "SELECT ?s WHERE { VALUES ?q { <http://ex/x> } \
+                         VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        let m = values_fixture(Q, "http://ex/b", vec![0, 0]);
+        let err = join_coherence(&m).unwrap_err();
+        assert!(
+            matches!(err, FragmentJoinError::Incoherent { witness: 0, var: ref v, .. } if v == "o"),
+            "the SECOND block must constrain too, got {:?}",
+            err
+        );
+        assert_eq!(join_coherence(&values_fixture(Q, "http://ex/a", vec![0, 0])), Ok(()));
+    }
+
+    /// EVERY column of the selected row is read, not only the first: a second
+    /// column constraining `?o` is enforced.
+    #[test]
+    fn every_values_column_is_read_not_only_the_first() {
+        const Q: &str = "SELECT ?s WHERE { VALUES (?q ?o) \
+                         { (<http://ex/x> <http://ex/a>) } ?s <http://ex/p> ?o }";
+        let m = values_fixture(Q, "http://ex/b", vec![0]);
+        let err = join_coherence(&m).unwrap_err();
+        assert!(
+            matches!(err, FragmentJoinError::Incoherent { witness: 0, var: ref v, .. } if v == "o"),
+            "the SECOND column must constrain too, got {:?}",
+            err
+        );
+        assert_eq!(join_coherence(&values_fixture(Q, "http://ex/a", vec![0])), Ok(()));
+    }
+
+    // --- Hardening: the FILTER sweep covers branches with no BGP scan ---
+
+    /// A branch whose only obligations are `VALUES` rows still has its `FILTER`
+    /// refused. Such a branch needs NO sub-proof, so a sweep restricted to
+    /// branches that carry a BGP pattern would let it through with none.
+    #[test]
+    fn a_values_only_branch_carrying_a_filter_is_refused() {
+        const FILTERED: &str = "SELECT ?o WHERE { VALUES ?o { 3 9 } FILTER(?o > 5) }";
+        const UNFILTERED: &str = "SELECT ?o WHERE { VALUES ?o { 3 9 } }";
+        let witness = || {
+            vec![BranchWitness {
+                branch: 0,
+                scan_proofs: vec![],
+                path_proofs: vec![],
+                values_rows: vec![1],
+                scan_rows: vec![],
+                solution: vec![SolutionBinding {
+                    var: "o".to_string(),
+                    term: DisclosedTerm::Literal {
+                        value: "9".to_string(),
+                        datatype: Some(
+                            "http://www.w3.org/2001/XMLSchema#integer".to_string(),
+                        ),
+                        language: None,
+                    },
+                }],
+            }]
+        };
+        let m = fm(FILTERED, vec![], witness());
+        assert_eq!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::FilterNotDischarged { branch: 0, filters: 1 })
+        );
+        // CONTROL: the same presentation under the FILTER-free query passes the
+        // routing gate and all four binding layers — the disclosed `?o = 9` is
+        // row 1's cell, so the honest shape is not refused by this change.
+        let ok = fm(UNFILTERED, vec![], witness());
+        assert_eq!(dispatch_fragment(&ok), Ok(()));
+        assert_eq!(bind_fragment_solution(&ok), Ok(()));
+        assert_eq!(bind_fragment_scans(&ok, &AuthenticatedMethods::new()), Ok(()));
+        assert_eq!(join_coherence(&ok), Ok(()));
+    }
+
+    /// A branch whose only obligation is a bounded PATH still has its `FILTER`
+    /// refused — the sweep is not restricted to BGP-carrying branches either way.
+    #[test]
+    fn a_path_only_branch_carrying_a_filter_is_refused() {
+        const Q: &str = "SELECT ?o WHERE { <http://ex/a> <http://ex/p>+ ?o FILTER(?o > 5) }";
+        let m = fm(
+            Q,
+            vec![sub(path_real(4, 1, 16, false, "http://ex/p", "http://ex/a", "http://ex/b"))],
+            vec![bw_sol(0, vec![], vec![0], vec![], sol(&[("o", "http://ex/b")]))],
+        );
+        assert_eq!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::FilterNotDischarged { branch: 0, filters: 1 })
+        );
+    }
+
+    /// The sweep runs BEFORE the "no branch attribution, nothing to route" early
+    /// return, so `dispatch_fragment` refuses a FILTER query carrying no witness
+    /// at all.
+    #[test]
+    fn the_filter_sweep_runs_even_with_no_branch_witness() {
+        let m = fm("SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o > 5) }", vec![], vec![]);
+        assert_eq!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::FilterNotDischarged { branch: 0, filters: 1 })
+        );
+        // ... and END-TO-END the sweep is reached BEFORE the no-witness refusal,
+        // so the reported reason is the query's, not the presentation's. (Both
+        // refuse, so only the ORDER distinguishes them: a sweep moved after the
+        // early return would report `FragmentNoBranchWitness` here.)
+        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentDispatch(FragmentDispatchError::FilterNotDischarged {
+                    branch: 0,
+                    filters: 1
+                })
+            ),
+            "the query-text FILTER sweep must run before the no-witness refusal, got {err:?}"
+        );
+    }
+
+    /// A `VALUES` cell is encoded under the branch's AUTHENTICATED commitment
+    /// method, not string-canonically, and a branch whose atoms disagree on that
+    /// encoder is refused by name rather than compared under either.
+    ///
+    /// `ValuesMethodUnresolved` is also what a branch naming an out-of-range scan
+    /// gets, which is why the dangling case is asserted in every feature state
+    /// below.
+    #[test]
+    fn a_values_cell_needs_one_resolvable_commitment_method() {
+        const Q: &str =
+            "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        // A branch naming a scan index the manifest does not carry has no method
+        // to resolve, so the cell cannot be encoded for comparison.
+        let dangling = fm(
+            Q,
+            vec![sub(p_scan_with_object("http://ex/a"))],
+            vec![bw_scan(0, vec![9], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        assert_eq!(
+            join_coherence(&dangling),
+            Err(FragmentJoinError::ValuesMethodUnresolved { witness: 0 })
+        );
+        // CONTROL: the same branch naming the real scan resolves (every
+        // commitment here is method-unbound, i.e. the string-canonical encoder).
+        assert_eq!(join_coherence(&values_fixture(Q, "http://ex/a", vec![0])), Ok(()));
+    }
+
+    /// The `VALUES` cell really is encoded under the AUTHENTICATED method, as
+    /// `bind_fragment_join_coherence` is called DIRECTLY here: the same
+    /// presentation passes that gate when the branch's scan authenticates
+    /// `DualLeafV2` and its disclosed rows carry dual-leaf encodings, and fails it
+    /// when the map says string-canonical instead.
+    ///
+    /// This gate is therefore method-aware, but the LANE is not: the end-to-end
+    /// entry point refuses a non-string-canonical commitment outright at layer 1c
+    /// (`bind_fragment_encoding_policy`), because the OTHER extended layers
+    /// re-encode a disclosed term string-canonically. That refusal is asserted in
+    /// `an_extended_presentation_over_a_non_string_canonical_commitment_is_refused`.
+    /// This test is about what this one gate compares under; it is NOT a claim
+    /// that a dual-leaf presentation verifies end to end.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn a_values_cell_is_encoded_under_the_scans_authenticated_method() {
+        const Q: &str =
+            "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        let salt = Fr::from(0u64);
+        let dl = |t: &oxrdf::Term| {
+            FieldHex(field_to_hex(
+                &sparq_zk::dual_leaf_v2::encode_term(t, &salt).unwrap().unwrap(),
+            ))
+        };
+        let commitment = fh("0x1");
+        // A scan whose pattern constant AND disclosed row slots are DUAL-LEAF
+        // encodings — what a graph committed under `DualLeafV2` discloses.
+        let rows = vec![[
+            dl(&iri("http://ex/s1")),
+            dl(&iri("http://ex/p")),
+            dl(&iri("http://ex/a")),
+        ]];
+        let scan = ProofInputs::Scan {
+            id: crate::build::derive_scan_id(1, 16, 1).expect("scan id in family"),
+            commitments: vec![commitment.clone()],
+            pattern_is_const: [false, true, false],
+            pattern_const_enc: [fh("0x0"), dl(&iri("http://ex/p")), fh("0x0")],
+            rows,
+            row_count: 1,
+            attribution: vec![true],
+        };
+        let m = fm(
+            Q,
+            vec![sub(scan)],
+            vec![bw_scan(0, vec![0], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        let key = field_to_hex(&commitment.to_field().expect("a parseable commitment"));
+        let mut dual_leaf_map = AuthenticatedMethods::new();
+        dual_leaf_map.insert(
+            key.clone(),
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::DualLeafV2),
+        );
+        assert_eq!(
+            bind_fragment_join_coherence(&m, &dual_leaf_map),
+            Ok(()),
+            "the cell must be encoded under the scan's authenticated method"
+        );
+        // Not vacuous: told the commitment is string-canonical instead, the cell
+        // is folded by the other encoder and no longer equals the row slot.
+        let mut canonical_map = AuthenticatedMethods::new();
+        canonical_map.insert(
+            key,
+            AuthenticatedMethod::Bound(sparq_zk::commit::CommitmentMethod::StringCanonicalV1),
+        );
+        let err = bind_fragment_join_coherence(&m, &canonical_map).unwrap_err();
+        assert!(
+            matches!(err, FragmentJoinError::Incoherent { witness: 0, var: ref v, .. } if v == "o"),
+            "under the wrong encoder the cell must not match the row, got {:?}",
+            err
+        );
+    }
+
+    /// The extended lane has ONE encoding policy, and a commitment that
+    /// authenticated any other commitment method is refused BY NAME at layer 1c
+    /// rather than compared under an encoder part of the presentation was never
+    /// derived under (which would be a false refusal of an honest prover).
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn an_extended_presentation_over_a_non_string_canonical_commitment_is_refused() {
+        let mut m = fm(
+            VALUES,
+            vec![sub(scan_min())],
+            vec![bw_sol(0, vec![0], vec![], vec![0], sol(&[("o", "http://ex/x")]))],
+        );
+        // Attest the fixture under DUAL-LEAF-V2 rather than string-canonical.
+        let ks = attest_fragment_fixture_with_method(
+            &mut m,
+            sparq_zk::commit::CommitmentMethod::DualLeafV2,
+        );
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        match err {
+            CheckError::FragmentUnsupportedCommitmentMethod { ref method_iri, .. } => {
+                assert_eq!(
+                    method_iri,
+                    sparq_zk::commit::CommitmentMethod::DualLeafV2.scheme_iri(),
+                    "the refusal must name the method it refused"
+                );
+            }
+            other => panic!(
+                "a non-string-canonical commitment must be refused by name, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn a_v2_member_is_refused_by_the_extended_entry_point() {
+        let mut m = fm(
+            VALUES,
+            vec![sub(scan_min())],
+            vec![bw_sol(0, vec![0], vec![], vec![0], sol(&[("o", "http://ex/x")]))],
+        );
+        if let ProofInputs::Scan { id, .. } = &mut m.manifest.sub_proofs[0].inputs {
+            *id = CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 };
+        }
+        // Attest the fixture under DUAL-LEAF-V2 rather than string-canonical.
+        let ks = attest_fragment_fixture_with_method(
+            &mut m,
+            sparq_zk::commit::CommitmentMethod::DualLeafV2,
+        );
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        match err {
+            CheckError::FragmentUnsupportedCommitmentMethod { ref method_iri, .. } => {
+                assert_eq!(
+                    method_iri,
+                    sparq_zk::commit::CommitmentMethod::DualLeafV2.scheme_iri(),
+                    "the refusal must name the method it refused"
+                );
+            }
+            other => panic!(
+                "a non-string-canonical commitment must be refused by name, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// FULL-STACK positive control: an HONEST string-canonical presentation —
+    /// disclosed solution, a BGP scan with its selected row, and an UNPROJECTED
+    /// `VALUES` cell constraining that row's object — passes layers 1, 1b, 1c, 2,
+    /// 2b and 2c and is refused only by the CRYPTO stage, which has no proof bytes
+    /// to verify in a fixture.
+    ///
+    /// This is the control the per-layer tests cannot give: every layer runs over
+    /// ONE presentation, in order, with the attested method map the real entry
+    /// point builds — so none of the refusals added on this lane refuses an honest
+    /// shape.
+    #[test]
+    fn an_honest_extended_presentation_passes_every_binding_layer() {
+        const Q: &str =
+            "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        let mut m = fm(
+            Q,
+            vec![sub(p_scan_with_object("http://ex/a"))],
+            vec![bw_scan(0, vec![0], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, _rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        // The relying party's own authoritative snapshot, showing the attested
+        // status index UNSET — stage 2f reads this, never the prover's.
+        let rp = join_fixture_policy();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            matches!(err, CheckError::MissingProof { .. }),
+            "an honest presentation must reach the crypto stage, got {:?}",
+            err
+        );
+    }
+
+    // --- Hardening: a disclosed solution may only bind what its branch binds ---
+    //
+    // Three admissibility rules, enforced before any obligation is read (see
+    // `re_encode_solution`). Without them a presentation could carry bindings no
+    // gate ever reads, beside the ones the gates do check.
+
+    /// `SELECT ?s ?z` over a UNION: branch 0 binds `?s`/`?o`, branch 1 binds
+    /// `?s`/`?z`.
+    const UNION_AZ: &str = "SELECT ?s ?z WHERE \
+                            { { ?s <http://ex/age> ?o } UNION { ?s <http://ex/role> ?z } }";
+
+    /// A disclosed binding the ATTRIBUTED branch does not bind is refused, for
+    /// each shape that produces one.
+    ///
+    /// The shapes differ in WHY the branch does not bind the variable: it belongs
+    /// to the other UNION branch; the branch is an empty group and binds nothing
+    /// at all; or the branch's `VALUES` cell for it is `UNDEF`, which constrains
+    /// no binding. In every one of them no obligation of the attributed branch
+    /// reads the disclosed value, so it stood as a free claim.
+    #[test]
+    fn a_disclosed_binding_the_attributed_branch_does_not_bind_is_refused() {
+        let scan = || {
+            scan_real(
+                [None, Some("http://ex/age"), None],
+                vec![[iri("http://ex/alice"), iri("http://ex/age"), iri("http://ex/o0")]],
+            )
+        };
+        let p_scan = || {
+            scan_real(
+                [None, Some("http://ex/p"), None],
+                vec![[iri("http://ex/s1"), iri("http://ex/p"), iri("http://ex/o1")]],
+            )
+        };
+        let cases: Vec<(&str, FragmentManifest, &str)> = vec![
+            (
+                "the other UNION branch's variable",
+                fm(
+                    UNION_AZ,
+                    vec![sub(scan())],
+                    vec![bw_scan(
+                        0,
+                        vec![0],
+                        vec![0],
+                        vec![],
+                        sol(&[("s", "http://ex/alice"), ("z", "http://ex/root")]),
+                    )],
+                ),
+                "z",
+            ),
+            (
+                "an empty-group branch binds nothing",
+                fm(
+                    "SELECT ?s WHERE { }",
+                    vec![],
+                    vec![bw_scan(0, vec![], vec![], vec![], sol(&[("s", "http://ex/evil")]))],
+                ),
+                "s",
+            ),
+            (
+                "an empty UNION branch binds nothing",
+                fm(
+                    "SELECT ?s WHERE { { } UNION { ?s <http://ex/p> ?o } }",
+                    vec![],
+                    vec![bw_scan(0, vec![], vec![], vec![], sol(&[("s", "http://ex/evil")]))],
+                ),
+                "s",
+            ),
+            (
+                "an UNDEF VALUES cell binds nothing",
+                fm(
+                    "SELECT ?z WHERE { VALUES ?z { UNDEF } }",
+                    vec![],
+                    vec![bw_scan(0, vec![], vec![], vec![0], sol(&[("z", "http://ex/evil")]))],
+                ),
+                "z",
+            ),
+            (
+                "an UNDEF VALUES cell beside a real BGP atom",
+                fm(
+                    "SELECT ?s ?z WHERE { ?s <http://ex/p> ?o VALUES ?z { UNDEF } }",
+                    vec![sub(p_scan())],
+                    vec![bw_scan(
+                        0,
+                        vec![0],
+                        vec![0],
+                        vec![0],
+                        sol(&[("s", "http://ex/s1"), ("z", "http://ex/evil")]),
+                    )],
+                ),
+                "z",
+            ),
+        ];
+        for (what, m, var) in cases {
+            let err = bind_fragment_solution(&m).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    FragmentSolutionError::SolutionVariableNotBoundByBranch {
+                        witness: 0,
+                        var: ref v,
+                        ..
+                    } if v == var
+                ),
+                "{}: a binding the branch does not bind must be refused for ?{}, got {:?}",
+                what,
+                var,
+                err
+            );
+            // The sibling scan-slot gate, reached directly, holds the same rule.
+            let scan_err = bind_fragment_scans(&m, &AuthenticatedMethods::new()).unwrap_err();
+            assert!(
+                matches!(
+                    scan_err,
+                    FragmentScanError::InadmissibleSolution { witness: 0, var: ref v, .. }
+                        if v == var
+                ),
+                "{}: the scan-slot gate must hold the same rule, got {:?}",
+                what,
+                scan_err
+            );
+        }
+
+        // CONTROL: the SAME branch-0 attribution, disclosing only what branch 0
+        // binds, passes both gates.
+        let ok = fm(
+            UNION_AZ,
+            vec![sub(scan())],
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/alice")]))],
+        );
+        assert_eq!(bind_fragment_solution(&ok), Ok(()));
+        assert_eq!(bind_fragment_scans(&ok, &AuthenticatedMethods::new()), Ok(()));
+        // And the SAME solution attributed to branch 1, which does bind ?z, with a
+        // scan answering that branch's pattern.
+        let ok1 = fm(
+            UNION_AZ,
+            vec![sub(scan_real(
+                [None, Some("http://ex/role"), None],
+                vec![[iri("http://ex/alice"), iri("http://ex/role"), iri("http://ex/root")]],
+            ))],
+            vec![bw_scan(
+                1,
+                vec![0],
+                vec![0],
+                vec![],
+                sol(&[("s", "http://ex/alice"), ("z", "http://ex/root")]),
+            )],
+        );
+        assert_eq!(bind_fragment_solution(&ok1), Ok(()));
+        assert_eq!(bind_fragment_scans(&ok1, &AuthenticatedMethods::new()), Ok(()));
+    }
+
+    /// A variable disclosed TWICE is refused rather than resolved to either
+    /// binding: the solution is a list, so a repeated name was last-wins and no
+    /// single value was the disclosed answer.
+    #[test]
+    fn a_duplicate_disclosed_binding_is_refused() {
+        let sc = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/alice"), iri("http://ex/p"), iri("http://ex/o1")]],
+        );
+        let m = fm(
+            "SELECT ?s WHERE { ?s <http://ex/p> ?o }",
+            vec![sub(sc.clone())],
+            vec![bw_scan(
+                0,
+                vec![0],
+                vec![0],
+                vec![],
+                sol(&[("s", "http://ex/mallory"), ("s", "http://ex/alice")]),
+            )],
+        );
+        let err = bind_fragment_solution(&m).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                FragmentSolutionError::DuplicateSolutionVariable { witness: 0, var: ref v }
+                    if v == "s"
+            ),
+            "a twice-disclosed variable must be refused, got {:?}",
+            err
+        );
+        // BOTH orders: neither of the two bindings is the one that decides.
+        let swapped = fm(
+            "SELECT ?s WHERE { ?s <http://ex/p> ?o }",
+            vec![sub(sc.clone())],
+            vec![bw_scan(
+                0,
+                vec![0],
+                vec![0],
+                vec![],
+                sol(&[("s", "http://ex/alice"), ("s", "http://ex/mallory")]),
+            )],
+        );
+        assert!(matches!(
+            bind_fragment_solution(&swapped),
+            Err(FragmentSolutionError::DuplicateSolutionVariable { .. })
+        ));
+        // CONTROL: the honest single binding passes.
+        let ok = fm(
+            "SELECT ?s WHERE { ?s <http://ex/p> ?o }",
+            vec![sub(sc)],
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/alice")]))],
+        );
+        assert_eq!(bind_fragment_solution(&ok), Ok(()));
+    }
+
+    /// A disclosed binding for a variable the query does NOT project is refused:
+    /// a non-projected variable is existential by design, so no gate binds a
+    /// disclosed value for it and the binding is a claim nothing checks.
+    #[test]
+    fn a_non_projected_disclosed_binding_is_refused() {
+        let sc = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), iri("http://ex/o1")]],
+        );
+        let m = fm(
+            "SELECT ?s WHERE { ?s <http://ex/p> ?o }",
+            vec![sub(sc)],
+            vec![bw_scan(
+                0,
+                vec![0],
+                vec![0],
+                vec![],
+                sol(&[("s", "http://ex/s1"), ("o", "http://ex/evil")]),
+            )],
+        );
+        let err = bind_fragment_solution(&m).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                FragmentSolutionError::SolutionVariableNotProjected { witness: 0, var: ref v }
+                    if v == "o"
+            ),
+            "a binding for an existential variable must be refused, got {:?}",
+            err
+        );
+    }
+
+    // --- Stage 2g′ in the EXTENDED regime: coverage and per-edge validation ---
+
+    /// An honest covered join beside an UNCOVERED `JoinEq` is refused in the
+    /// EXTENDED regime too, naming the uncovered proof.
+    ///
+    /// The coverage rule reads no query text, so it runs in both regimes; this is
+    /// the extended half (the flat half is in `tests/join_gates.rs`).
+    #[test]
+    fn an_uncovered_join_is_refused_in_the_extended_regime() {
+        let (mut m, k) = union_with_hidden_join((endpoint_commitment(), endpoint_commitment()));
+        // The honest fixture's own join is covered by edge 0; add a SECOND
+        // `JoinEq` at index 4 that no edge names.
+        let extra = ProofInputs::JoinEq {
+            id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
+            commit_a: endpoint_commitment(),
+            commit_b: endpoint_commitment(),
+            join_commitment: fh("0x12d"),
+            slot_a: 2,
+            slot_b: 2,
+        };
+        m.manifest.sub_proofs.push(sub(extra));
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinProofNotBoundToAnEdge { proof: 4 }),
+            "the extended regime must refuse an uncovered join, got {:?}",
+            err
+        );
+    }
+
+    /// EVERY declared edge is validated in the extended regime: a manifest whose
+    /// FIRST edge is honest and whose SECOND names commitments its endpoint scans
+    /// do not carry is refused as `{ edge: 1 }`.
+    #[test]
+    fn the_extended_regime_validates_every_edge_not_only_the_first() {
+        let (mut m, k) = union_with_hidden_join((endpoint_commitment(), endpoint_commitment()));
+        let second = ProofInputs::JoinEq {
+            id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
+            commit_a: fh("0xdead"),
+            commit_b: endpoint_commitment(),
+            join_commitment: fh("0x12d"),
+            slot_a: 2,
+            slot_b: 2,
+        };
+        m.manifest.sub_proofs.push(sub(second));
+        m.manifest.join_edges.push(crate::manifest::JoinEdge {
+            scan_a: 0,
+            graph_a: 0,
+            scan_b: 1,
+            graph_b: 0,
+            join_proof: 4,
+        });
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinCommitmentMismatch { edge: 1 }),
+            "the SECOND edge must be validated too, got {:?}",
+            err
+        );
+    }
+
+    /// A hidden `JoinEdge` whose endpoint is a bounded-path sub-proof rather than
+    /// a `Scan` is refused fail-closed: a scan↔path hidden join has no endpoint
+    /// commitment the endpoint rule can resolve.
+    #[test]
+    fn a_path_endpoint_of_a_hidden_join_is_refused_in_the_extended_regime() {
+        const PATH_AND_BGP: &str =
+            "SELECT * WHERE { ?s <http://ex/p>+ ?o . ?o <http://ex/q> ?z }";
+        let path = path_real(4, 1, 16, false, "http://ex/p", "http://ex/a", "http://ex/b");
+        let sc = scan_real(
+            [None, Some("http://ex/q"), None],
+            vec![[iri("http://ex/b"), iri("http://ex/q"), iri("http://ex/z1")]],
+        );
+        let join = ProofInputs::JoinEq {
+            id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
+            commit_a: fh("0x1"),
+            commit_b: fh("0x1"),
+            join_commitment: fh("0x12c"),
+            slot_a: 2,
+            slot_b: 0,
+        };
+        let mut m = fm(
+            PATH_AND_BGP,
+            vec![sub(path), sub(sc), sub(join)],
+            vec![BranchWitness {
+                branch: 0,
+                scan_proofs: vec![1],
+                path_proofs: vec![0],
+                values_rows: vec![],
+                scan_rows: vec![0],
+                solution: sol(&[
+                    ("s", "http://ex/a"),
+                    ("o", "http://ex/b"),
+                    ("z", "http://ex/z1"),
+                ]),
+            }],
+        );
+        // `scan_a` names the PATH sub-proof, which carries no endpoint
+        // commitment this rule can resolve.
+        m.manifest.join_edges = vec![crate::manifest::JoinEdge {
+            scan_a: 0,
+            graph_a: 0,
+            scan_b: 1,
+            graph_b: 0,
+            join_proof: 2,
+        }];
+        let k = attest_fragment_fixture(&mut m);
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinEdgeKindMismatch { edge: 0 }),
+            "a path endpoint of a hidden join must be refused, got {:?}",
+            err
+        );
+        // CONTROL: with `scan_a` moved to the real scan the edge resolves and the
+        // refusal that arrives is no longer about the endpoint KIND.
+        let mut ok = m.clone();
+        ok.manifest.join_edges[0].scan_a = 1;
+        let ok_err = run_fragment(&ok, &k).unwrap_err();
+        assert!(
+            !matches!(ok_err, CheckError::JoinEdgeKindMismatch { .. }),
+            "a scan↔scan edge must get past the endpoint-kind rule, got {:?}",
+            ok_err
+        );
+    }
+
+}
+
+// Stage 2g′ (`bind_join_endpoints`) — the gate's OWN structure, in EVERY feature
+// state. The gate is unconditional, so these cases are too: they call it directly
+// with hand-built manifests, so no query text, no attestation and no nargo/bb are
+// involved, and each one pins a separate structural rule of the gate.
+#[cfg(test)]
+mod join_endpoint_gate_tests {
+    use super::*;
+    use crate::manifest::{JoinEdge as MJoinEdge, SubProof};
+
+    fn fj(s: &str) -> FieldHex {
+        FieldHex(s.to_string())
+    }
+
+    fn scan_of(commitments: Vec<FieldHex>) -> ProofInputs {
+        let k = commitments.len() as u32;
+        ProofInputs::Scan {
+            id: CircuitId::Scan { k, n: 16, r: 4 },
+            attribution: vec![false; commitments.len()],
+            commitments,
+            pattern_is_const: [false, false, false],
+            pattern_const_enc: [fj("0x0"), fj("0x0"), fj("0x0")],
+            rows: vec![],
+            row_count: 0,
+        }
+    }
+
+    fn join_of(a: &FieldHex, b: &FieldHex) -> ProofInputs {
+        ProofInputs::JoinEq {
+            id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
+            commit_a: a.clone(),
+            commit_b: b.clone(),
+            join_commitment: fj("0x12c"),
+            slot_a: 2,
+            slot_b: 2,
+        }
+    }
+
+    fn manifest(subs: Vec<ProofInputs>, edges: Vec<MJoinEdge>) -> ProofManifest {
+        ProofManifest {
+            r#type: "urn:sparq:zk:ProofManifest".to_string(),
+            query: "SELECT * WHERE { ?s ?p ?o }".to_string(),
+            issuers: vec![],
+            key_set: vec![],
+            commitment_attestations: vec![],
+            attributions: vec![],
+            pattern_scans: vec![],
+            join_obligations: vec![],
+            entailment_regime: EntailmentRegime::Simple,
+            derivation_steps: vec![],
+            binding: BindingMode::Challenge { challenge: fj("0x2a") },
+            revocation: None,
+            status_snapshots: vec![],
+            sub_proofs: subs
+                .into_iter()
+                .map(|inputs| SubProof { inputs, proof_hex: String::new() })
+                .collect(),
+            binding_edges: vec![],
+            join_edges: edges,
+            hidden_revocation: None,
+            hidden_issuer_attestations: vec![],
+            holder_pok_proofs: vec![],
+            holder_set_proofs: vec![],
+            fully_hidden_revocation: None,
+        }
+    }
+
+    fn edge(scan_a: usize, scan_b: usize, join_proof: usize) -> MJoinEdge {
+        MJoinEdge { scan_a, graph_a: 0, scan_b, graph_b: 0, join_proof }
+    }
+
+    /// Two scans over `c1`/`c2` plus one honest `JoinEq` at index 2, covered by
+    /// edge 0. The control every case below is built from.
+    fn honest() -> ProofManifest {
+        let (c1, c2) = (fj("0x64"), fj("0xc8"));
+        manifest(
+            vec![scan_of(vec![c1.clone()]), scan_of(vec![c2.clone()]), join_of(&c1, &c2)],
+            vec![edge(0, 1, 2)],
+        )
+    }
+
+    /// The control: an honest covered edge passes the whole gate.
+    #[test]
+    fn an_honest_covered_edge_passes() {
+        assert!(bind_join_endpoints(&honest()).is_ok());
+    }
+
+    /// The coverage rule is NOT short-cut once an edge exists: an honest covered
+    /// join beside an UNCOVERED one is refused, naming the uncovered proof.
+    ///
+    /// Returning `Ok` as soon as any edge validated would accept this manifest —
+    /// the uncovered join's `commit_a`/`commit_b` are then read by nothing.
+    #[test]
+    fn an_uncovered_join_beside_a_covered_one_is_refused() {
+        let mut m = honest();
+        let (c1, c2) = (fj("0x64"), fj("0xc8"));
+        // A SECOND `JoinEq`, at index 3, that no edge names. Its declared
+        // commitments are the honest ones, so nothing but the coverage rule
+        // separates it from the covered join at index 2.
+        m.sub_proofs.push(SubProof { inputs: join_of(&c1, &c2), proof_hex: String::new() });
+        let err = bind_join_endpoints(&m).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinProofNotBoundToAnEdge { proof: 3 }),
+            "the uncovered join at index 3 must be named, got {:?}",
+            err
+        );
+    }
+
+    /// The coverage rule starts at sub-proof index 0: an uncovered `JoinEq` THERE
+    /// is refused as `{ proof: 0 }`.
+    ///
+    /// A loop that skipped the first index would accept this manifest, whose only
+    /// sub-proof is a join no edge names.
+    #[test]
+    fn an_uncovered_join_at_index_zero_is_refused() {
+        let (c1, c2) = (fj("0x64"), fj("0xc8"));
+        let m = manifest(vec![join_of(&c1, &c2)], vec![]);
+        let err = bind_join_endpoints(&m).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinProofNotBoundToAnEdge { proof: 0 }),
+            "an uncovered join at index 0 must be named, got {:?}",
+            err
+        );
+    }
+
+    /// EVERY declared edge is validated, not only the first: a manifest whose
+    /// FIRST edge is honest and whose SECOND names commitments its endpoint scans
+    /// do not carry is refused as `{ edge: 1 }`.
+    #[test]
+    fn every_edge_is_validated_not_only_the_first() {
+        let mut m = honest();
+        let (c1, c2) = (fj("0x64"), fj("0xc8"));
+        // A second join proof at index 3 declaring a commitment NEITHER endpoint
+        // scan carries, covered by edge 1 so the coverage rule is satisfied and
+        // only the endpoint equality can refuse it.
+        m.sub_proofs.push(SubProof {
+            inputs: join_of(&fj("0xdead"), &c2),
+            proof_hex: String::new(),
+        });
+        m.join_edges.push(edge(0, 1, 3));
+        let err = bind_join_endpoints(&m).unwrap_err();
+        assert!(
+            matches!(err, CheckError::JoinCommitmentMismatch { edge: 1 }),
+            "the SECOND edge must be validated too, got {:?}",
+            err
+        );
+        // Not vacuous: with that second join declaring the honest endpoints, the
+        // same two-edge manifest passes.
+        let mut ok = honest();
+        ok.sub_proofs.push(SubProof { inputs: join_of(&c1, &c2), proof_hex: String::new() });
+        ok.join_edges.push(edge(0, 1, 3));
+        assert!(bind_join_endpoints(&ok).is_ok());
+    }
 }
 
 /// Every member a MANIFEST sub-proof can select a key for in this build — the
@@ -13930,6 +15985,8 @@ fn query_members() -> Vec<CircuitId> {
     ];
     #[cfg(feature = "dual-leaf")]
     v.extend([
+        CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 },
+        CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 },
         CircuitId::FilterValueDl,
         CircuitId::FilterValueDlF64,
         CircuitId::FilterValueDlDecimal,
@@ -14152,7 +16209,7 @@ mod fixed_member_role_tests {
                 match fixed_member(*role, other.clone()) {
                     Err(CheckError::MemberNotForFixedRole { role: named, circuit }) => {
                         assert_eq!(named, role.name());
-                        assert_eq!(circuit, other.package());
+                        assert_eq!(circuit, other.label());
                     }
                     other_result => panic!(
                         "{} must refuse {}'s member, got {:?}",
@@ -14179,7 +16236,7 @@ mod fixed_member_role_tests {
                     ),
                     "{} must refuse the query member {}",
                     role.name(),
-                    member.package()
+                    member.label()
                 );
             }
         }
@@ -14211,7 +16268,7 @@ mod fixed_member_role_tests {
                     !role.owns(id),
                     "a manifest sub-proof carrying {} would select the {} gate's \
                      member",
-                    id.package(),
+                    id.label(),
                     role.name()
                 );
             }
@@ -14272,6 +16329,7 @@ mod member_from_authenticated_method_tests {
             methods,
             &no_hidden(),
             MethodStage::BeforeHiddenIssuer,
+            &JoinEndpointIndex::build(manifest),
         )
     }
 
@@ -14378,7 +16436,7 @@ mod member_from_authenticated_method_tests {
             Err(CheckError::MemberNotLegalForMethod { proof, method_iri, circuit }) => {
                 assert_eq!(proof, "sub_proofs[3]");
                 assert_eq!(method_iri, CommitmentMethod::StringCanonicalV1.scheme_iri());
-                assert_eq!(circuit, CircuitId::FilterValueDl.package());
+                assert_eq!(circuit, CircuitId::FilterValueDl.label());
             }
             other => panic!("expected the member/method refusal, got {:?}", other),
         }
@@ -14437,7 +16495,7 @@ mod member_from_authenticated_method_tests {
         }
         // Agreeing commitments resolve normally, so the refusal is about the
         // disagreement and not about `k = 2`.
-        assert!(resolve(&m, 0, &map_of(&[(&c1, Some(V2)), (&c2, Some(V2))])).is_ok());
+        assert!(resolve(&m, 0, &map_of(&[(&c1, Some(CANON)), (&c2, Some(CANON))])).is_ok());
     }
 
     fn join_over(a: &FieldHex, b: &FieldHex) -> ProofInputs {
@@ -14489,7 +16547,7 @@ mod member_from_authenticated_method_tests {
             );
         }
         // And both orders resolve when the endpoints agree.
-        let agreed = map_of(&[(&c1, Some(V2)), (&c2, Some(V2))]);
+        let agreed = map_of(&[(&c1, Some(CANON)), (&c2, Some(CANON))]);
         for (a, b) in [(&c1, &c2), (&c2, &c1)] {
             let m = join_manifest_of(a, b, (a, b));
             assert!(resolve(&m, 2, &agreed).is_ok());
@@ -14516,13 +16574,13 @@ mod member_from_authenticated_method_tests {
 
         let honest = join_manifest_of(&c1, &c2, (&c1, &c2));
         assert_eq!(
-            bound_commitments(&honest, 2),
+            bound_commitments(&honest, 2, &JoinEndpointIndex::build(&honest)),
             vec![c1.clone(), c2.clone()],
             "an honest edge binds its two endpoint scans' commitments"
         );
 
         let decoys = join_manifest_of(&c1, &c2, (&decoy, &decoy));
-        let bound = bound_commitments(&decoys, 2);
+        let bound = bound_commitments(&decoys, 2, &JoinEndpointIndex::build(&decoys));
         assert!(
             !bound.contains(&decoy),
             "a declared commitment that is not an endpoint must never be bound, \
@@ -14534,7 +16592,7 @@ mod member_from_authenticated_method_tests {
         let mut uncovered = honest.clone();
         uncovered.join_edges.clear();
         assert!(
-            bound_commitments(&uncovered, 2).is_empty(),
+            bound_commitments(&uncovered, 2, &JoinEndpointIndex::build(&uncovered)).is_empty(),
             "a join proof no edge covers has no validated endpoint"
         );
     }
@@ -14595,20 +16653,10 @@ mod member_from_authenticated_method_tests {
         );
     }
 
-    /// Every bound commitment explicitly `Unbound`: the declared member is NOT
-    /// echoed back. It is held to the METHOD-INDEPENDENCE rule, exactly as an
-    /// edge-less sub-proof is — a member legal under every admissible method is
-    /// the only one a relying party can select without knowing the method.
-    ///
-    /// Both arms are pinned on the same manifest shape. The VALUE-LANE member is
-    /// the probe that tells the readings apart: echoing it back would admit it,
-    /// and the rule refuses it. The STRING-LANE member shows the rule is not a
-    /// blanket refusal.
-    ///
-    /// A commitment ABSENT from the map is a different case again: nothing was
-    /// authenticated for it, so it is refused by name before any fold.
+    /// Explicitly unbound attestations use the string-canonical downgrade;
+    /// missing attestations remain a separate refusal.
     #[test]
-    fn an_unattested_sub_proof_is_held_to_the_method_independence_rule() {
+    fn an_unbound_sub_proof_resolves_as_string_canonical() {
         let c = fhx("0x64");
         let edge = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         let mut value = manifest_of(vec![scan_over(vec![c.clone()]), filter_value_dl()]);
@@ -14624,20 +16672,29 @@ mod member_from_authenticated_method_tests {
              vacuous"
         );
 
-        assert!(
-            matches!(
-                resolve(&value, 1, &map_of(&[(&c, Some(UNBOUND))])),
-                Err(CheckError::SubProofMethodUnresolved { .. })
-            ),
-            "an all-Unbound value-lane member is not method-independent, so it \
-             must be refused rather than echoed back"
-        );
+        let error = resolve(&value, 1, &map_of(&[(&c, Some(UNBOUND))]))
+            .expect_err("an all-Unbound value-lane member is refused under string-canonical");
+        assert!(matches!(&error, CheckError::MemberNotLegalForMethod { .. }));
+        assert!(error.to_string().contains("unbound, read as string-canonical"));
         assert_eq!(
             resolve(&string_lane, 1, &map_of(&[(&c, Some(UNBOUND))]))
                 .expect("a method-independent member resolves"),
             Some(CircuitId::FilterInt { d: 1 }),
-            "an all-Unbound member legal under every admissible method resolves"
+            "an all-Unbound string-lane member resolves"
         );
+        let methods = map_of(&[(&c, Some(UNBOUND))]);
+        assert_eq!(resolve(&string_lane, 0, &methods).unwrap(),
+            Some(CircuitId::Scan { k: 1, n: 16, r: 4 }));
+        let joined = join_manifest_of(&c, &c, (&c, &c));
+        assert_eq!(resolve(&joined, 2, &methods).unwrap(),
+            Some(CircuitId::JoinEq { n_a: 16, n_b: 16 }));
+        let mut v2 = scan_over(vec![c.clone()]);
+        if let ProofInputs::Scan { id, .. } = &mut v2 {
+            *id = CircuitId::scan_v2_dl(1, 16, 4).unwrap();
+        }
+        assert!(matches!(resolve(&manifest_of(vec![v2]), 0, &methods),
+            Err(CheckError::MemberNotLegalForMethod { .. })),
+            "Unbound attestations cannot select V2 members");
         assert!(
             matches!(
                 resolve(&value, 1, &map_of(&[(&c, None)])),
@@ -14658,34 +16715,50 @@ mod member_from_authenticated_method_tests {
     /// load-bearing and not a restatement of the rule below it.
     #[test]
     fn a_manifest_declared_auxiliary_member_id_is_refused_at_the_sub_proof_site() {
-        let aux = CircuitId::HolderPok;
-        for method in CommitmentMethod::recognised() {
-            if !MethodPolicy::widest_admissible().admits_method(*method) {
-                continue;
+        // ONE id per role, so the refusal is pinned over the whole auxiliary
+        // population rather than for `HolderPok` alone. The `match` is exhaustive,
+        // so a new role does not compile until it names its own family here.
+        for role in FixedMemberRole::ALL {
+            let aux = match role {
+                FixedMemberRole::HiddenRevocation => CircuitId::RevokeUnset { depth: 10 },
+                FixedMemberRole::FullyHiddenRevocation => {
+                    CircuitId::RevokeHiddenRef { depth: 10, set_depth: 4 }
+                }
+                FixedMemberRole::HiddenIssuer => CircuitId::HiddenIssuer { depth: 4 },
+                FixedMemberRole::HolderPok => CircuitId::HolderPok,
+                FixedMemberRole::HolderSet => CircuitId::HolderSet { depth: 4 },
+            };
+            assert!(role.owns(&aux), "{} must own the id under test", role.name());
+            for method in CommitmentMethod::recognised() {
+                if !MethodPolicy::widest_admissible().admits_method(*method) {
+                    continue;
+                }
+                assert_eq!(
+                    crate::dispatch::resolve_circuit(*method, &aux).as_ref(),
+                    Ok(&aux),
+                    "the matrix echoes {} under {}, so the method-independence \
+                     rule alone would admit it",
+                    aux.label(),
+                    method.scheme_iri()
+                );
             }
-            assert_eq!(
-                crate::dispatch::resolve_circuit(*method, &aux).as_ref(),
-                Ok(&aux),
-                "the matrix echoes the auxiliary member under {}, so the \
-                 method-independence rule alone would admit it",
-                method.scheme_iri()
+            let m = manifest_of(vec![ProofInputs::FilterInt {
+                id: aux.clone(),
+                operand_enc: fhx("0x0"),
+                op: crate::manifest::FilterOp::Gt,
+                bound: 1,
+                expected: true,
+            }]);
+            assert!(
+                matches!(
+                    resolve(&m, 0, &AuthenticatedMethods::new()),
+                    Err(CheckError::AuxiliaryMemberIdInSubProof { .. })
+                ),
+                "the {} role's member id, declared by a manifest sub-proof, must \
+                 be refused by name",
+                role.name()
             );
         }
-        let m = manifest_of(vec![ProofInputs::FilterInt {
-            id: aux.clone(),
-            operand_enc: fhx("0x0"),
-            op: crate::manifest::FilterOp::Gt,
-            bound: 1,
-            expected: true,
-        }]);
-        assert!(
-            matches!(
-                resolve(&m, 0, &AuthenticatedMethods::new()),
-                Err(CheckError::AuxiliaryMemberIdInSubProof { .. })
-            ),
-            "an auxiliary member id declared by a manifest sub-proof must be \
-             refused by name"
-        );
     }
 
     /// A `JoinEq` sub-proof no `JoinEdge` names is refused.
@@ -14758,11 +16831,111 @@ mod member_from_authenticated_method_tests {
             Some(CircuitId::FilterInt { d: 1 })
         );
 
-        // A scan with an empty commitment vector is an orphan too, and `Scan` is a
-        // string-lane member legal under every admissible method, so the same rule
-        // admits it.
+        // Neither scan family is method-independent: an empty commitment
+        // vector cannot supply a method for either one.
         let empty = manifest_of(vec![scan_over(vec![])]);
-        assert!(resolve(&empty, 0, &methods).is_ok());
+        assert!(matches!(resolve(&empty, 0, &methods),
+            Err(CheckError::SubProofMethodUnresolved { .. })));
+    }
+
+    /// Derivation binds the V2 family and public arity to compiled shapes.
+    #[test]
+    fn v2_derivation_refuses_uncompiled_shapes_and_rederives_scan_arity() {
+        let mut scan = scan_over(vec![fhx("0x64")]);
+        if let ProofInputs::Scan { id, .. } = &mut scan {
+            *id = CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 };
+        }
+        assert_eq!(derive_id(&scan), Some(CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }));
+        let mut invalid = scan.clone();
+        if let ProofInputs::Scan { id, .. } = &mut invalid {
+            *id = CircuitId::ScanV2Dl { k: 2, n: 16, r: 4 };
+        }
+        assert_eq!(derive_id(&invalid), None, "uncompiled V2 scan must not derive an id");
+        let mut too_many_rows = scan.clone();
+        if let ProofInputs::Scan { rows, .. } = &mut too_many_rows {
+            rows.resize(5, [fhx("0x0"), fhx("0x0"), fhx("0x0")]);
+        }
+        assert_eq!(derive_id(&too_many_rows), None, "five public rows exceed V2 capacity");
+        let mut too_large_count = scan.clone();
+        if let ProofInputs::Scan { row_count, .. } = &mut too_large_count {
+            *row_count = 5;
+        }
+        assert_eq!(derive_id(&too_large_count), None, "row_count five exceeds V2 capacity");
+        if let ProofInputs::Scan { commitments, .. } = &mut scan {
+            commitments.push(fhx("0xc8"));
+        }
+        assert_eq!(derive_id(&scan), None, "V2 k is rederived from public commitments");
+        let mut join = join_over(&fhx("0x64"), &fhx("0xc8"));
+        if let ProofInputs::JoinEq { id, .. } = &mut join {
+            *id = CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 };
+        }
+        assert_eq!(derive_id(&join), Some(CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 }));
+        if let ProofInputs::JoinEq { id, .. } = &mut join {
+            *id = CircuitId::JoinEqV2Dl { n_a: 8, n_b: 16 };
+        }
+        assert_eq!(derive_id(&join), None, "uncompiled V2 join must not derive an id");
+    }
+
+    /// Dedicated V2 members cannot be selected without a commitment method.
+    #[test]
+    fn an_edge_less_v2_member_is_refused_by_the_orphan_rule() {
+        let methods = AuthenticatedMethods::new();
+        let mut scan = scan_over(vec![]);
+        if let ProofInputs::Scan { id, .. } = &mut scan {
+            *id = CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 };
+        }
+        let mut join = join_over(&fhx("0x64"), &fhx("0xc8"));
+        if let ProofInputs::JoinEq { id, .. } = &mut join {
+            *id = CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 };
+        }
+        for inputs in [scan, join] {
+            let m = manifest_of(vec![inputs]);
+            assert!(matches!(resolve(&m, 0, &methods),
+                Err(CheckError::SubProofMethodUnresolved { .. })),
+                "a V2 orphan cannot infer its commitment method");
+        }
+        let control = manifest_of(vec![filter_int()]);
+        assert_eq!(resolve(&control, 0, &methods).unwrap(), Some(CircuitId::FilterInt { d: 1 }));
+    }
+
+    /// The ORPHAN guard (`method_independent_member`) ON ITS OWN, with no bound
+    /// sub-proof anywhere in the fixture.
+    ///
+    /// The test above exercises the orphan rule and, in the same body, a BOUND
+    /// control that goes through the matrix. That makes it red for a mutation of
+    /// EITHER site, so it does not witness the orphan guard by itself. This one
+    /// has no bound arm and no binding edge, so only the orphan guard can move it:
+    /// a value-lane member whose legality varies is refused BY THE ORPHAN REASON,
+    /// and a string-lane member is selected unchanged.
+    #[test]
+    fn the_orphan_guard_alone_decides_an_edge_less_sub_proofs_member() {
+        // No commitment is attested at all, and no manifest below binds one, so
+        // the matrix arm (`SubProofMethod::One`) is unreachable in this test.
+        let methods = AuthenticatedMethods::new();
+
+        let varies = manifest_of(vec![filter_value_dl()]);
+        match resolve(&varies, 0, &methods) {
+            Err(CheckError::SubProofMethodUnresolved { proof, reason }) => {
+                assert_eq!(proof, "sub_proofs[0]");
+                assert!(
+                    reason.contains("bound to no committed graph")
+                        && reason.contains("not legal under every admissible method"),
+                    "the orphan guard's own reason must be the one reported, got {:?}",
+                    reason
+                );
+            }
+            other => panic!(
+                "an edge-less value-lane member must be refused by the orphan guard, got {:?}",
+                other
+            ),
+        }
+
+        let independent = manifest_of(vec![filter_int()]);
+        assert_eq!(
+            resolve(&independent, 0, &methods)
+                .expect("a method-independent member resolves for an orphan"),
+            Some(CircuitId::FilterInt { d: 1 })
+        );
     }
 
     /// A sub-proof bound to a HIDDEN-ONLY commitment DEFERS before the
@@ -14787,7 +16960,8 @@ mod member_from_authenticated_method_tests {
                 &id,
                 &methods,
                 &hidden_only,
-                MethodStage::BeforeHiddenIssuer
+                MethodStage::BeforeHiddenIssuer,
+                &JoinEndpointIndex::build(&m)
             )
             .expect("a candidate method must not be read as authenticated"),
             None,
@@ -14803,11 +16977,36 @@ mod member_from_authenticated_method_tests {
                     &id,
                     &methods,
                     &hidden_only,
-                    MethodStage::AfterHiddenIssuer
+                    MethodStage::AfterHiddenIssuer,
+                    &JoinEndpointIndex::build(&m)
                 ),
                 Err(CheckError::MemberNotLegalForMethod { .. })
             ),
             "at the later stage the entry is authenticated and the member is refused"
+        );
+    }
+
+    /// A hidden-only unbound entry defers before the hidden-issuer gate too.
+    #[test]
+    fn a_hidden_only_unbound_commitment_defers_until_its_proof_is_bound() {
+        let c = fhx("0x64");
+        let m = manifest_of(vec![scan_over(vec![c.clone()])]);
+        let methods = map_of(&[(&c, Some(UNBOUND))]);
+        let hidden_only = BTreeSet::from([key_of(&c)]);
+        let id = CircuitId::Scan { k: 1, n: 16, r: 4 };
+
+        assert_eq!(
+            resolve_member_for_sub_proof(
+                &m,
+                0,
+                &id,
+                &methods,
+                &hidden_only,
+                MethodStage::BeforeHiddenIssuer,
+                &JoinEndpointIndex::build(&m)
+            )
+            .expect("an unbound candidate must defer before the hidden-issuer gate"),
+            None
         );
     }
 
@@ -14835,7 +17034,8 @@ mod member_from_authenticated_method_tests {
                 &id,
                 &methods,
                 &hidden_only,
-                MethodStage::BeforeHiddenIssuer
+                MethodStage::BeforeHiddenIssuer,
+                &JoinEndpointIndex::build(&m)
             )
             .expect("a candidate method must not be read as authenticated"),
             None,
@@ -14849,7 +17049,8 @@ mod member_from_authenticated_method_tests {
                     &id,
                     &methods,
                     &hidden_only,
-                    MethodStage::AfterHiddenIssuer
+                    MethodStage::AfterHiddenIssuer,
+                    &JoinEndpointIndex::build(&m)
                 ),
                 Err(CheckError::SubProofMethodUnresolved { .. })
             ),
@@ -14865,7 +17066,8 @@ mod member_from_authenticated_method_tests {
                 &id,
                 &map_of(&[(&hidden, Some(CANON)), (&clear, Some(CANON))]),
                 &hidden_only,
-                MethodStage::AfterHiddenIssuer
+                MethodStage::AfterHiddenIssuer,
+                &JoinEndpointIndex::build(&m)
             )
             .expect("agreeing endpoints resolve"),
             Some(id.clone())
@@ -14898,57 +17100,29 @@ mod member_from_authenticated_method_tests {
             graph_b: 1,
             join_proof: 2,
         }];
-        assert_eq!(bound_commitments(&m, 0), vec![c1.clone(), c2.clone()]);
+        assert_eq!(bound_commitments(&m, 0, &JoinEndpointIndex::build(&m)), vec![c1.clone(), c2.clone()]);
         // The join's two bound commitments are its edge's endpoints — here the
         // two graphs of scan 0, which its declared inputs also name.
-        let join_bound = bound_commitments(&m, 2);
+        let join_bound = bound_commitments(&m, 2, &JoinEndpointIndex::build(&m));
         assert_eq!(join_bound, vec![c1.clone(), c2.clone()]);
         assert!(
             !join_bound.contains(&join_c),
             "the hiding join commitment is not a committed graph"
         );
         assert!(
-            bound_commitments(&m, 1).is_empty(),
+            bound_commitments(&m, 1, &JoinEndpointIndex::build(&m)).is_empty(),
             "a FILTER no binding edge binds is bound to no commitment"
         );
         m.binding_edges =
             vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
-        assert_eq!(bound_commitments(&m, 1), vec![c1, c2]);
+        assert_eq!(bound_commitments(&m, 1, &JoinEndpointIndex::build(&m)), vec![c1, c2]);
         // An out-of-range index is bound to nothing (no panic).
-        assert!(bound_commitments(&m, 99).is_empty());
+        assert!(bound_commitments(&m, 99, &JoinEndpointIndex::build(&m)).is_empty());
     }
 
-    /// WHAT THIS GATE CAN REFUSE IN THIS BUILD — the reachability facts, pinned so
-    /// that relaxing one is a visible change here.
-    ///
-    /// An illegal `(method, member)` pair needs either a value-lane member or the
-    /// `value-only` method, and both are refused UPSTREAM of the selection site
-    /// today: a value-lane sub-proof at stage 0 of `prefilter_manifest_structure`
-    /// (`ValueLaneSubProofNotAccepted`, asserted behaviourally by
-    /// `tests/value_lane_pin.rs` and `tests/dual_leaf_v2_lanes.rs`), and
-    /// `value-only` by every `MethodPolicy`. So the matrix refusal added at the
-    /// selection site refuses no pair that reaches it in this build, and becomes
-    /// load-bearing when either is relaxed (sq-j506 opens the value lane).
-    ///
-    /// The `SubProofMethodUnresolved` family splits:
-    /// - the MIXED-method case is reachable today (two bound commitments
-    ///   authenticating different methods, or one attested beside one unattested
-    ///   under the written-down `admit_unbound()` downgrade), which is why it is a
-    ///   stated behaviour change, and
-    ///   `tests/join_gates.rs::a_joins_member_is_resolved_in_the_verify_loop_from_its_endpoints_methods`
-    ///   drives it through `verify_manifest`;
-    /// - the METHOD-INDEPENDENCE case (no derivable method, so the member must be
-    ///   legal under every admissible method) sits in the SAME position as the
-    ///   matrix refusal: only a value-lane member fails it, and a value-lane
-    ///   sub-proof is refused at stage 0. It too becomes load-bearing when that is
-    ///   relaxed.
-    ///
-    /// This test asserts the `value-only` half and the admissible-method half, over
-    /// the two string-lane shapes the resolver treats differently (a scan, which
-    /// reads its own commitments, and an edge-bound FILTER, which inherits them).
-    /// It claims nothing about any pair being unreachable for another reason.
+    /// Scan legality varies by method; the token FILTER remains method-independent.
     #[test]
-    fn an_illegal_pair_needs_an_upstream_refusal_relaxed_first() {
+    fn scan_method_refusals_are_reachable_without_opening_a_value_gate() {
         #[cfg(feature = "commitment-value-only")]
         for policy in [
             MethodPolicy::current(),
@@ -14963,8 +17137,7 @@ mod member_from_authenticated_method_tests {
             );
         }
 
-        // Every method a policy CAN admit is one these string-lane query members
-        // are legal for — checked through the resolver, not asserted.
+        // The opaque scan refuses V2; the token FILTER keeps its method coverage.
         let c = fhx("0x64");
         let scan_only = manifest_of(vec![scan_over(vec![c.clone()])]);
         let mut with_filter = manifest_of(vec![scan_over(vec![c.clone()]), filter_int()]);
@@ -14979,9 +17152,10 @@ mod member_from_authenticated_method_tests {
                 ("a scan", &scan_only, 0),
                 ("an edge-bound FILTER", &with_filter, 1),
             ] {
-                assert!(
+                assert_eq!(
                     resolve(m, i, &methods).is_ok(),
-                    "{} under the admissible method {:?} must resolve",
+                    i == 1 || method != CommitmentMethod::DualLeafV2,
+                    "{} under the admissible method {:?} has the wrong verdict",
                     what,
                     method
                 );

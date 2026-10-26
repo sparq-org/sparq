@@ -72,10 +72,10 @@ fn evaluate_inner<E: From<Rejected>>(
     // Inspect all source graphs, including unselected named graphs, so captured
     // blank-node substitution never enters the disputed SPARQL 1.1 EXISTS lane.
     if std::iter::once(&graph)
-        .chain(graph.named.iter().map(|(_, graph)| graph))
+        .chain(graph.named().iter().map(|(_, graph)| graph))
         .any(|graph| {
             graph
-                .dict
+                .dict()
                 .iter()
                 .any(|(_, term)| matches!(term, sparq_core::dict::TermParts::Blank(_)))
         })

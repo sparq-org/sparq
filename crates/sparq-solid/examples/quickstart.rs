@@ -13,7 +13,7 @@ fn main() -> Result<(), String> {
     // 1. Load a pod: named graph per document (the bundled fixture is a synthetic
     //    ~1.1k-graph pod — swap in your own N-Quads/TriG dump).
     let graph = Graph::load_dataset(&wac_fixture(), "nquads")?;
-    println!("loaded {} named graphs", graph.named.len());
+    println!("loaded {} named graphs", graph.named().len());
 
     // 2. Wrap it (fail-closed: nobody sees anything yet) and materialize the WAC
     //    auth view — the N3 rules run and install <urn:sparq:auth>.

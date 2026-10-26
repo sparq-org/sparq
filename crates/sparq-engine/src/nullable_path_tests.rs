@@ -8,7 +8,7 @@ fn specification(graph: &Graph, path: &P, x: Option<Id>, y: Option<Id>) -> Vec<(
     let mut result = match path {
         P::NamedNode(predicate) => {
             let pid = graph.id_of(&Term::NamedNode(predicate.clone()));
-            let scan = graph.store.scan(&[None, None, None]);
+            let scan = graph.store().scan(&[None, None, None]);
             scan.rows
                 .iter()
                 .filter_map(|row| {

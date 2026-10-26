@@ -46,17 +46,17 @@ fn tiny_total() -> ClosureLimits {
 fn all_quads(store: &PodStore) -> Vec<String> {
     let mut out = Vec::new();
     for (name, g) in std::iter::once((String::from("<default>"), store.graph()))
-        .chain(store.graph().named.iter().map(|(n, g)| (format!("{}", n), g)))
+        .chain(store.graph().named().iter().map(|(n, g)| (format!("{}", n), g)))
     {
-        let scan = g.store.scan(&[None, None, None]);
+        let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {
             let [s, p, o] = scan.to_spo(r);
             out.push(format!(
                 "{} {} {} {}",
                 name,
-                g.dict.term(s),
-                g.dict.term(p),
-                g.dict.term(o)
+                g.dict().term(s),
+                g.dict().term(p),
+                g.dict().term(o)
             ));
         }
     }
@@ -283,6 +283,28 @@ fn only_the_kind_tag_makes_a_refusal() {
             AUTH_ALLOWANCE_REFUSAL
         )),
         Some(AuthAllowance::JoinRows)
+    );
+}
+
+/// The tag is read only where the refusal WORDING precedes it, so an error that is not a
+/// refusal but quotes the tag literal — inside a pod's own IRI, say — is not read as one.
+#[test]
+fn a_quoted_tag_literal_is_not_a_refusal() {
+    assert_eq!(
+        auth_allowance_refusal(
+            "update denied: <https://pod.ex/x%20[allowance=join-rows]%20y> is not a resource"
+        ),
+        None,
+        "a tag quoted inside an IRI is not a refusal"
+    );
+    assert!(!is_auth_allowance_refusal("n3: [allowance=input-bytes]: no wording"));
+    // The real shape, wrapped in a sentence, still reads.
+    assert_eq!(
+        auth_allowance_refusal(&format!(
+            "update denied: … ({} [allowance=input-bytes]: …); nothing was changed",
+            AUTH_ALLOWANCE_REFUSAL
+        )),
+        Some(AuthAllowance::InputBytes)
     );
 }
 

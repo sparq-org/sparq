@@ -9,18 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **sparq-core / sparq-engine (`sq-ycle`):** the durable redo journal records GRAPH-EXISTENCE
-  changes, not only triples. New public `sparq_core::TxnOp` (`Insert` / `Delete` / `Create` /
-  `Drop`) plus `Graph::commit_txn_ops` and `Graph::commit_txn_ops_checked` commit a whole UPDATE
-  body as one frame over that vocabulary; `commit_txn`/`commit_txn_checked` keep their tuple
-  signatures and now delegate to them. `CREATE GRAPH <g>` of a new empty graph and `DROP GRAPH
-  <g>` of an empty one resolve to no triple record at all, so a data-only frame carried no trace
-  of them and a crash between the commit and the materialisation could recover a dataset whose
-  graph SET differed from the one the commit had acknowledged; the engine's effect resolver now
-  emits a `Create` for each CREATE and, after its retractions, a `Drop` for each dropped named
-  graph, and `Graph::open` redoes a frame's records in commit order. The frame magic moves to
-  `WTX2`; a `WTX1` frame left by an older build is still replayed (data records only). A CLEAR
-  emits no existence record, and the default graph never gets one.
+- **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
+  removal alongside triple changes, with ordered replay and support for the previous journal
+  format. Hardens named-graph layout recovery alongside directory ownership support:
+  stable manifest slots, checked allocation and cleanup, complete durability barriers, and
+  shared write refusal after indeterminate log writes. Removing a child from the attached
+  in-memory set no longer removes its on-disk manifest entry; durable drop methods change the
+  persisted set. Read-only opens leave undeclared slots alone; writable cleanup failures warn
+  with the affected path.
+- **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
+  open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
+  `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
+  build or compaction of the same store fails at once (`WouldBlock`) instead of corrupting it;
+  `Graph::open_read_only` opens share the lock with each other. A store whose parent directory
+  is not writable (a mount root, say) still opens, writable or read-only, held by its inside
+  lock alone; a compaction, vacuum or restore there (they rename the directory) is refused with
+  an error naming the parent. Compaction and restore swaps stage the new base under a recorded
+  staging name, recover an interrupted swap at once, and roll back on a failure; a swap that
+  can neither complete nor roll back freezes the graph: `Graph::is_frozen` reports it, every
+  write is refused, and the embedded LWS store and the Python `Graph` (`frozen` property) report
+  it as an error instead of serving it. New: `Graph::open_read_only`, `Graph::restore_in_place`,
+  `Graph::is_backed_by`, `Graph::check_writable`, `Graph::is_frozen`, `Graph::into_dict`, and
+  `dir_lock::{store_root, is_inside_store, is_reserved_store_path}`.
+- **sparq-cli:** output files (`--out`, `reason`, tabular conversions) are written under a fresh
+  name beside the target and renamed into place; an output path that names a store, a path
+  inside one or a reserved name (lock files, in any letter case) is refused (exit 2), and a
+  symbolic link is followed to the file it names, which is the file replaced.
+- **sparq-zk-compose (`dual-leaf`):** complete dispatch coverage for the V2 component-witnessed
+  scan `(1,16,4)` and join `(16,16)` members with dedicated `CircuitId` variants.
+  V2 ids are legal only under `DualLeafV2`. Checked constructors, serde and package-name
+  parsing refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
+  Extended-fragment and value-FILTER refusals remain closed. Experimental and unaudited.
 
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
@@ -169,6 +188,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-core (BREAKING API):** `Graph::dict` and `Graph::store` are no longer public fields;
+  read them with `Graph::dict()` / `Graph::store()`, and take the dictionary out with
+  `Graph::into_dict()` (rebuild with `Graph::from_parts`). These openers and writers of a
+  store's files became crate-internal, so a store's files are reachable only through the
+  locked `Graph`: `Dict::{save, save_mmap, open_mmap, fork}`, `TripleStore::{open, save,
+  save_compressed, save_pred_stats, fork}`, `compress::CompressedPermWriter::{create, create_with,
+  finish}`, and `extsort::{spill_run, kway_merge, kway_merge_compressed, external_sort,
+  external_sort_compressed, map_perm}`. Migration: open, save and build through `Graph`
+  (`Graph::open`, `Graph::save`, `Graph::build_external*`), fork through `Graph::fork`, and restore an
+  open store with `Graph::restore_in_place` (`Graph::restore_into_durable` refuses a directory a
+  graph is open from).
+- **Breaking — sparq-zk-compose:** `CircuitId::package()` now returns
+  `Result<String, CircuitIdError>`. `ProofManifest::to_json()` and
+  `FragmentManifest::to_json()` now return `Result<String, serde_json::Error>`;
+  hand-built uncompiled V2 ids return an error instead of panicking.
+  With `dual-leaf`, opaque scan/join ids are refused under `DualLeafV2`;
+  use the dedicated V2 component-witnessed ids instead.
+- **sparq-zk-compose (`dual-leaf`):** restore the explicit `admit_unbound()` downgrade:
+  all-Unbound sub-proofs resolve as `StringCanonicalV1`, matching pattern encoding.
+  Opaque scans/joins remain legal; mixed Unbound + Bound sub-proofs remain refused.
+  Under `admit_unbound` the commitment is ASSUMED string-canonical; nothing checks it.
+  The downgrade is sound only if the issuer signed unbound messages over
+  string-canonical commitments alone. A dual-leaf commitment signed unbound cannot
+  use the V2 members, and its opaque presentations are not sound.
+  Orphan sub-proofs still require method-independent members.
+
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
   that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
@@ -179,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `commit_a`/`commit_b`, and a `Filter*` member inherits the method of the source scan of every
   validated binding edge that binds it; all of them must agree. The declared id is resolved through the
   `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
-  `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
+  `dual-leaf`) and only the resolved member is used. Five new fail-closed refusals:
   `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
   `CheckError::SubProofMethodUnresolved` (no single method could be derived — differing methods
   across bound commitments, a mixture of attested and unattested ones, an unparseable bound
@@ -188,14 +233,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ABSENT from the authenticated map, so nothing was authenticated for it at all),
   `CheckError::AuxiliaryMemberIdInSubProof` (a manifest sub-proof declares an id that belongs to
   one of the auxiliary bb roles below) and `CheckError::MemberNotForFixedRole`. Absence from the
-  authenticated map is NOT read as `Unbound`: it is refused by name. A sub-proof all of whose
-  bound commitments authenticated no method has no method to resolve against, so its declared
-  member is NOT echoed back either — it is held to the same method-independence rule as a
-  sub-proof bound to no commitment at all (legal under every admissible method, where
-  `MethodPolicy::widest_admissible()` names that set), which refuses a value-lane member and
-  admits a string-lane one. Under the default `MethodPolicy` an unbound attestation is refused
-  upstream, so that case is reachable only under the written-down `admit_unbound()` downgrade. A
-  sub-proof bound to a commitment covered only by a hidden-issuer
+  authenticated map is NOT read as `Unbound`: it is refused by name. Under the explicit
+  `admit_unbound()` downgrade, a sub-proof all of whose
+  bound commitments authenticate as Unbound resolves as `StringCanonicalV1`:
+  opaque scan/join members remain legal. Under `admit_unbound` the commitment is
+  ASSUMED string-canonical; nothing checks it. The downgrade is sound only if the
+  issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
+  commitment signed unbound cannot use the V2 members, and its opaque presentations
+  are not sound. Under the default policy,
+  unbound attestations are refused upstream. Orphan sub-proofs alone require
+  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
@@ -212,7 +259,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
   decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
   `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
-  state. Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
+  state. Of the five refusals above, the first four compile only with `dual-leaf`;
+  `CheckError::MemberNotForFixedRole` is UNCONDITIONAL, as are `FixedMemberRole` and the
+  per-role `fixed_member` selection path that raises it, which run in every feature state.
+  Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
   achieved.
 
 - **sparq-zk-compose:** the hidden-join gate's ENDPOINT half now runs in BOTH stage-1 regimes.
@@ -227,11 +277,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names commitments other than its endpoint scans' is now refused
   (`CheckError::JoinCommitmentMismatch`) instead of standing as a prover-declared linkage, and a
   hidden join one of whose endpoints is a bounded-path (`PathReach`) sub-proof rather than a
-  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's verdicts
-  are unchanged — it already ran the whole gate. In BOTH regimes and in EVERY feature state, a
+  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's ENDPOINT
+  verdicts are unchanged — it already ran that half of the gate — but see the coverage rule
+  below, which is new in both regimes. In BOTH regimes and in EVERY feature state, a
   `JoinEq` sub-proof that no `JoinEdge` names is now refused
   (`CheckError::JoinProofNotBoundToAnEdge`): its `commit_a`/`commit_b` were free of the manifest's
   declared linkage, and no later gate read them. Adds refusals and no acceptance.
+
+- **sparq-zk-compose (opt-in `extended-fragment`):** the extended-fragment verifier now REFUSES
+  the query/presentation shapes it does not discharge, instead of accepting them.
+  (1) A query one of whose re-derived branches carries a `FILTER` is refused by the routing gate
+  (`FragmentDispatchError::FilterNotDischarged { branch, filters }`): the flat FILTER obligation
+  lives in `bind_query_correctness`, which this regime skips, and nothing on this path reads
+  `FragmentBranch::filters`, so an accepted presentation would have answered the query as though
+  the FILTER were absent. Checked over EVERY branch, attributed or not; the branch-local typed
+  FILTER obligation that would lift it does not exist yet.
+  (2) A `VALUES` cell now constrains its variable whether or not that variable is PROJECTED:
+  `bind_fragment_join_coherence` merges every selected non-`UNDEF` cell — re-encoded by the
+  verifier from the query text, never a prover encoding — into the branch coherence map before
+  the atoms are read, so the scan slot or `PathReach` endpoint carrying the variable must equal
+  it. `bind_fragment_solution` still binds only the PROJECTED cells, having no disclosed term for
+  the rest; before the merge an unprojected `VALUES` variable entered no map at all. Two blocks
+  pinning one variable to disagreeing cells is `FragmentJoinError::ValuesCellIncoherent`, a cell
+  the verifier cannot re-encode is `ValuesCellUnencodable`, and an atom disagreeing with a seeded
+  cell is `Incoherent` against that atom.
+  (3) The branch coherence maps refuse a DISAGREEING duplicate rather than overwriting it, so a
+  variable occurring twice in ONE atom is compared: a path whose subject and object are the same
+  variable (`ASK { ?x <p>+ ?x }`) must carry `src_enc` equal to `dst_enc`, and the two slots of a
+  self-joining BGP atom must agree in the selected row.
+  (4) `verify_fragment_manifest` refuses a presentation carrying NO `BranchWitness`
+  (`CheckError::FragmentNoBranchWitness`): every branch-local layer iterates the witnesses, so an
+  empty vector left all four of them with nothing to check and the accept would have rested on the
+  crypto stage alone. `dispatch_fragment`'s per-branch ROUTING stays a deliberate no-op over such a
+  manifest, since it is also used over stage-1-style presentations; its query-hygiene, FILTER
+  and id checks still run.
+  (5) A disclosed binding must be BOUND BY THE ATTRIBUTED BRANCH, projected, and unique.
+  `bind_fragment_solution` and `bind_fragment_scans` build the re-encoded disclosed map through one
+  shared admissibility rule: a branch binds the variables of its pattern `SlotPattern::Var` slots,
+  its `path_reach` subject/object positions, and the `VALUES` columns whose SELECTED row carries a
+  non-`UNDEF` cell. A disclosed variable outside that set is refused
+  (`FragmentSolutionError::SolutionVariableNotBoundByBranch`) — previously a solution could carry a
+  variable the attributed branch binds nowhere (the other arm of a `UNION`, a branch with no atoms,
+  or a `VALUES` column selected at an `UNDEF` row) and every obligation over it was simply absent.
+  A variable the query does not project is refused (`SolutionVariableNotProjected`), and a second
+  binding of one variable is refused (`DuplicateSolutionVariable`) instead of silently replacing the
+  first, which went unchecked.
+  (6) A `VALUES` cell is encoded under the commitment method the branch's scans AUTHENTICATE:
+  `bind_fragment_join_coherence` now takes `&AuthenticatedMethods`, resolves one pattern-constant
+  encoder across the branch's scans and encodes each seeded cell with `encode_pattern_slot` under
+  it, so the cell is comparable to the slots and endpoints it constrains under the authenticated
+  method rather than under string-canonical always. A branch whose scans resolve no single method,
+  or disagree, is refused (`FragmentJoinError::ValuesMethodUnresolved`). This is a breaking change
+  to that function's signature; it is `pub` behind the opt-in feature and has no callers outside
+  the crate's own verifier path.
+  (7) The lane has ONE encoding policy. `verify_fragment_manifest` reads the authenticated-method
+  map BEFORE the first layer that re-encodes a disclosed term and refuses a presentation referring
+  to a commitment that authenticated any method other than
+  `sparq_zk::commit::CommitmentMethod::StringCanonicalV1`
+  (`CheckError::FragmentUnsupportedCommitmentMethod`; a method-UNATTESTED commitment is admitted,
+  its pattern encoder being the same one). The layers re-encode a disclosed term with `encode_term`
+  — string-canonical — and compare the result against disclosed scan-row slots and `PathReach`
+  endpoint encodings, which is coherent only under that method; under another, an HONEST
+  presentation would be refused for an encoding mismatch and nothing would be admitted, so the
+  combination is refused by name instead. This is a bound on the lane, not a property established
+  about any proof, and one coherent policy across all four surfaces is the deferred follow-up. Two
+  consequences of reading the map earlier: an unattested or revoked commitment is now reported
+  before the disclosed-solution layer rather than after it (both refusals, same accept set), and
+  `bind_fragment_join_coherence` stays method-aware for the `VALUES` seed even though the lane
+  admits only the one method.
+  All of these ADD refusals and open nothing. The feature is OFF by default, so no default-build
+  verdict changes with them, and no new dependency is added. Research grade, NOT externally audited
+  (`sq-qhy4`). No soundness or privacy claim.
+  <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
+
+- **sparq-zk-compose (extended-fragment):** a scan attributed to a branch witness must disclose
+  at least one ACTIVE row (`FragmentScanError::NoActiveRow`). The scan circuit admits an empty
+  result, and a fully ground pattern binds no variable, so the ground-pattern shortcut in
+  `bind_fragment_scans` previously accepted a branch over a triple the graph lacks (for example
+  `ASK { <a> <p> <b> }`, or a `VALUES`-supplied answer beside a ground pattern). The check now runs
+  ahead of that shortcut for every attributed scan. A standalone empty scan proof is unaffected.
+  Adds a refusal and opens nothing.
+
+- **sparq-zk:** every query extractor refuses a solution SLICE (`LIMIT` and/or `OFFSET`) at any
+  depth, under one shared reason, instead of descending through it: `verify::fragment_query`'s
+  top-level modifier peel and its subquery arm, and the flat `verify::fragment_patterns`,
+  `verify::fragment_filters` and `verify::fragment_expr_trees` walkers. A proof of this design
+  states that a disclosed solution is a MEMBER of the query's answer, and a slice makes that
+  unprovable from the disclosed data in both directions: a positive `OFFSET` can empty a
+  non-empty answer (`SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has no solutions at all),
+  `LIMIT 0` always empties it, and a `LIMIT` smaller than the answer selects an
+  implementation-nondeterministic subset. Peeling the modifier off therefore proved membership in
+  the UNSLICED answer and accepted a solution the query text excludes. `DISTINCT` / `REDUCED` are
+  still peeled. `sparq_zk_compose::planner` already refused to PLAN a sliced query, so no honest
+  consumer in the estate asks for one. Adds refusals and opens nothing.
+
+- **sparq-zk-compose:** stage 2g′ (`bind_join_endpoints`) collects the covered join-proof indices
+  in the SAME pass that validates the declared edges, so the coverage rule is a set lookup per
+  sub-proof rather than a re-walk of `join_edges` for each one, and the `JoinEq` arm of the
+  per-sub-proof member resolution reads a per-manifest index of validated endpoints
+  (`JoinEndpointIndex`, built once) rather than re-validating the matching edges for every
+  sub-proof it is asked about. Both vectors are prover-controlled, so neither product is a cost a
+  presentation can choose any more. No verdict changes: the same edges are validated and the same
+  endpoints are read.
 
 - **sparq-lws-core (notifications):** subscription expiry is decided against a durable
   high-water time stored in the index, so a restart with the clock stepped back does not revive
@@ -245,10 +392,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
   which, while the state is built, removes every subscription with an `expires` and then stores
   the clock.
-  An `LwsState` now holds its backend's lease (shared by every clone of its store) while it
-  lives: a second `LwsState` built over a running one's store is refused, so a state that
-  replaces another must be built after the old one is dropped. `Store::reset_marker` takes that
-  lease's guard.
+  An `LwsState` now holds a lease per store handle (shared by every clone of its store,
+  `LwsState::store`, and by any `Tracked` wrapper of one) while it lives: a second `LwsState`
+  built over a clone or a wrapper of a running state's store is refused, so a state that replaces
+  another must be built after the old one is dropped. A store that keeps no lease of its own
+  (`Store::lifecycle` is `None`, as for a plain `CompositeStore`) gets a new one in each
+  `LwsState::new`, so two states built over clones of one such store each get their own lease;
+  a store opened again separately over the same backend has a lease of its own too. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
+  store's lease and no longer accepts one from the caller, and the store's generic mutators refuse
+  an IRI shaped like the stored time, which changes only through `raise_marker` and
+  `reset_marker`.
 
 - **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
   change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
@@ -381,281 +534,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forward-closure limit. Wherever both the old and the new behaviour answer, the answers are
   identical; no run that previously answered is now refused.
 
-- **sparq-core (`sq-ycle`):** a kept journal frame now freezes the WHOLE graph tree. State shared
-  by a root and its named sub-graphs carries the "a committed frame is kept for the reopen" flag,
-  and every durable mutation passes one central gate before writing a byte: a delta on the root or
-  on any named graph, a graph create or drop, a compaction, a vacuum, and `clear_txn` itself are
-  all refused until the store is reopened — previously only compaction and vacuum were, so a
-  direct write could be acknowledged and then undone or reordered by the recovery redo. The
-  refusal propagates in both directions: a frame retained by a named graph refuses the root's
-  writes too. `clear_txn` is gated like an append because truncating the journal destroys
-  committed records. A durable path that fails PART-WAY — a WAL append, a graph create, a graph
-  drop, a journal clear, or a base swap after its new base is staged — freezes the tree the same
-  way, because each has already changed part of the store or the in-memory image by the time it
-  can fail; the store is writable again after it is reopened, which replays what is on disk.
-
-- **sparq-core (`sq-ycle`): a durable store written by this version cannot be opened by an
-  earlier one.** The dictionary's on-disk format version (`dict-meta.bin`) moves to 2, and an
-  older build refuses a version it does not know with a rebuild-required error. This is
-  deliberate: an older build meeting a `WTX2` journal frame treats the unknown frame magic as a
-  torn tail and TRUNCATES it, destroying a commit it had already acknowledged, and the format
-  version is the only field such a build hard-errors on instead of truncating. A store written by
-  an older build is marked the first time this version appends a journal frame to it, so opening
-  a store read-only does not mark it, and a store this version has committed to is a one-way
-  upgrade. A store still on the pre-`dict-meta.bin` layout (the legacy single-file `dict.bin`)
-  has no such field, so there is nothing to mark: an atomic UPDATE on such a store is now
-  REFUSED rather than written unmarked, with an error saying to re-save it with this version
-  (`Graph::open(old)?.save(new)?`) first. Reads and ordinary updates of such a store are
-  unaffected. In the other direction, a journal frame whose format version is NEWER than this
-  build knows is an error that changes nothing, instead of a torn tail that gets truncated.
-
-- **sparq-core (`sq-ycle`): a named graph's directory is a MONOTONIC slot id, not its
-  position.** `named.bin` is format version 2: it records the `named/<slot>` id of every named
-  graph and, in its header, the next id to hand out. A version-1 manifest is still read (its ids
-  are its positions). Three behaviours follow. A drop no longer renumbers the survivors into a
-  fresh sub-tree and swaps it in — it rewrites the manifest, which is the commit point, and
-  removes the dropped graph's own directory, so survivors keep their slots and their handles. A
-  drop of every named graph rewrites the manifest naming NOTHING instead of removing it, because
-  the header carries the counter: removing it reset the counter, and the next created graph then
-  landed in slot 0 on top of whatever the removal of the old slot 0 had left behind — base, WAL
-  and journal — whose replay brought the dropped graph's triples back under the new graph's
-  name. And the removals themselves are REPORTED rather than discarded: a drop whose directories
-  are still on disk afterwards is an error that freezes the store, which for a DROP performed to
-  erase data is the only honest answer. A whole-store write — `save`, or the base swap a
-  compaction publishes — writes a FRESH image whose slots are numbered from zero again and whose
-  counter starts past them, which is sound precisely because nothing of the old image survives
-  there for an id to collide with. Format 2 is a ONE-WAY upgrade, like the dictionary's: an
-  earlier build refuses any `named.bin` version but 1, and this version writes format 2 from
-  every save, create and drop that touches a named set — including the manifest naming nothing
-  that a drop of every named graph leaves, where an earlier build left no manifest at all.
-
-- **sparq-core (`sq-ycle`): a republish of the named manifest records EVERY slot it stops
-  naming.** The named set is public and detaching a child graph to write through it is a
-  supported pattern, but every republish rebuilds the manifest from the ATTACHED children — so a
-  create, or a drop of a sibling, performed while a child is detached published a set that no
-  longer named that child. Only the dropped slot was recorded as replaced, so the detached
-  handle's next write was ACKNOWLEDGED into a directory the store no longer named and was gone on
-  the next open; when the drop had emptied the set, `named/` itself was removed and the write was
-  acknowledged into an unlinked log. The invalidated set is now derived from the manifest diff
-  (declared before, not declared after), so such a write is refused with the reason instead; and
-  the slot a drop REMOVES is recorded whether or not that diff notices it, because the diff
-  compares declared sets and another attached child can still claim the removed slot.
-
-- **sparq-core (`sq-ycle`): a drop removes the store's OWN slot directory, and a slot id is
-  the store's own.** The directory a drop removed used to be the dropped handle's own `wal.dir()`
-  — whatever directory that handle was opened from. Since the named set is public, a graph opened
-  from ANOTHER store could be pushed onto it and dropped, and the removal then deleted that other
-  store's directory. Every removal on these paths is now built from this store's `named/` plus a
-  slot id, and refuses a symlink or a file planted under that name instead of removing it, so
-  the last component of a path the store built cannot redirect a removal out of the store (a
-  `named/` container that is itself a link is a documented boundary, not a case this covers). For the same reason a child's slot id is accepted only when
-  its directory is exactly `named/<slot>` of THIS store: a foreign child's basename used to be
-  recorded as a local slot, which left the manifest naming a directory that was not there or —
-  when the id collided with a local child's — opened two graph names onto one directory, sharing
-  one base and one WAL. A manifest may not name one slot twice, where it is written or where it
-  is read — and a third time where a republish is built FROM, the attached set, which is where
-  the state can first be seen — and a slot name is its plain decimal spelling only, so a stray
-  `named/05` is not a second name for slot 5. A manifest must also END at its last declared
-  entry: a publish rewrites the whole file, so trailing bytes are a longer manifest partly
-  overwritten or a file edited underneath the store, and reading the prefix would adopt a named
-  set that is a truncation of what is on disk. The residue and slot probes on these paths are fallible: an unreadable
-  path is an error, not an "absent".
-
-- **sparq-core (`sq-ycle`): the layout record is a per-directory map, not a scanned log.**
-  Staleness is a question about a handle's directory and its ancestors, so it is asked of those —
-  a bounded number of lookups — instead of scanning every directory the tree has ever replaced,
-  and recording a directory now drops the entries beneath it, which a replacement of that
-  directory already answers for. The map is ORDERED so that those entries are one range of it —
-  `Path` compares component-wise — and a recording therefore costs the entries it actually
-  subsumes rather than testing every entry in the log. Because slot ids are monotonic, each
-  create/drop cycle added a distinct entry that nothing ever removed, and every durable write to
-  every handle in the tree then paid for each drop since the last whole-tree swap. A drop of
-  every named graph records the `named/` container once, whatever the store holds, and resolving
-  the attached set tests each slot against a SET rather than scanning what it has collected so
-  far, which made creating graphs one at a time quadratic in the set's size per create.
-
-- **sparq-core (`sq-ycle`): a named-graph slot id is reserved by CREATING its
-  directory.** One `mkdir` decides it: the id is taken when that reports `AlreadyExists`, and any
-  other error is propagated — and freezes the store — rather than read as a free id. Asking
-  `exists()` first and creating later decided nothing, because `exists()` answers "no" for a
-  directory it cannot stat and the create that followed was idempotent: a transient stat error on
-  an occupied slot made the new graph ADOPT that directory, keeping the previous graph's base,
-  WAL and journal for the next open to replay under the new graph's name. The format-1 upgrade
-  path is where that bit hardest, because a version-1 manifest carries no counter and the next id
-  is its entry count — exactly where an interrupted create leaves a directory.
-
-- **sparq-core (`sq-ycle`): the durability barrier syncs the store's own FILES, not just
-  its directories — and a store written with no named graphs is made durable too.** A sub-tree
-  handed to the barrier had every file in it synced, but the root's files were synced by nothing:
-  the permutation indexes, the dictionary, and the numeric, temporal and per-predicate caches,
-  whose writers only flush their buffers. `open` accepts such a cache when its length and marker
-  agree with the dictionary, so a crash that lost part of one left a store that opens and answers
-  queries from torn cache cells instead of recomputing them. A file that cannot be made durable
-  now REFUSES the manifest publish. And the publish is not the only path: a default-graph-only
-  `save` or external build writes no manifest, so it ran no barrier at all and reported success
-  with every byte still in the page cache — it now runs the same rung.
-
-- **sparq-core (`sq-ycle`): an open never removes a named-graph slot the manifest does not
-  declare.** A drop commits at its manifest rewrite and removes the slot directory after it, so
-  an interruption in between leaves the dropped graph's bytes under a slot nothing names, and the
-  bytes stay until a whole-store rewrite (`save`, `compact`, `vacuum`) writes a fresh image — an
-  orphan nothing opens, and a documented boundary rather than something an open tidies away.
-  "Undeclared" is not the same as "garbage": a republish is built from the ATTACHED children, so
-  a create, or a drop of a sibling, performed while a caller holds a child detached leaves that
-  child's slot undeclared with every write it acknowledged still in it, and a manifest restored
-  from a different point in time than `named/` leaves live graphs undeclared too. A drop reports
-  what it removed and never removes data it cannot attribute to the slot it was asked to drop.
-
-- **sparq-core (`sq-ycle`): one bottom-up durability barrier for every named-graph
-  manifest publish.** Each level is made durable before the level that names it — the sub-trees'
-  files and their own directories, then the `named/` container, then the store root that holds
-  `named/` and the manifest — and every publish site goes through it, the external quad builder
-  included (it wrote the manifest directly, so it synced nothing at all). The root rung was the
-  one previously missing: when a create was what made `named/` exist, the root's directory entry
-  for it reached disk only in the fsync that followed the manifest rename. The external-sort
-  merge and the compressed-permutation writer now fsync the index they produce instead of
-  flushing it.
-
-- **sparq-core (`sq-ycle`): layout generations are PER SUB-TREE, and a root compaction
-  stages the whole tree once.** A handle is stale when the directory its log lives in — or one
-  containing it — was replaced, not when anything anywhere in the tree was. One tree-wide
-  counter made a child's base swap mark the root and every sibling stale, so a root compaction
-  that folded its children one at a time refused at the second child, and with a single child
-  the root's own next write refused. A directory-backed compaction now stages the whole tree's
-  new base once and publishes it once (the image `save` writes already contains every named
-  graph, folded), so a sequential writer can compact a root with named graphs and carry on
-  writing.
-
-- **sparq-core (`sq-ycle`): a tree-wide WRITER PERMIT.** One writer at a time across a
-  durable tree, held across a write's staleness check, log append and in-memory application, and
-  by maintenance from staging through publish; reentrant, because a write at the top of a tree
-  materialises through writes further down it. The check-then-append sequence was not atomic
-  against maintenance elsewhere: a handle on a named graph taken out of its parent's public
-  `named` vector could pass the check, and the parent could then stage a new base, record the
-  replacement and unlink the old directory, before the detached child appended to — and
-  acknowledged — the log inside it. Exclusion BETWEEN PROCESSES is a different problem and is
-  still not solved here.
-
-- **sparq-core (`sq-ycle`): an interrupted named-graph drop reconciles EVERY candidate
-  before removing any of them.** The manifest names a definite set of slots, and a candidate
-  sub-tree agrees only if it holds exactly that set; the first candidate that agrees is
-  published, the losers are removed only afterwards, and when NONE agrees the open is refused
-  with all of them left on disk. A present `named/` that disagreed used to be deleted so that
-  `named.drop-old` could be promoted, without checking that `drop-old` agreed either. Slot
-  inspection is also fallible now: it walked directory entries with `is_dir()`, which an I/O
-  error answers the same way a missing directory does, so an unreadable sub-tree read as a
-  shorter one.
-
-- **sparq-core (`sq-ycle`): one committed-frame decoder for the WAL and the redo
-  journal.** Both files are the same frame format and had two copies of the scan, which had
-  drifted: the journal treated a COMMITTED, checksum-valid body it could not decode as a torn
-  tail and truncated it — an acknowledged commit discarded on the strength of a byte the build
-  could not interpret — and sized its record vector with an infallible reservation from the
-  untrusted header count. Through the shared decoder the journal now reports such a body as an
-  error that rewrites nothing, bounds the declared count by the body length before reserving
-  fallibly, refuses an unknown opcode, and refuses bytes left after the last record.
-
-- **sparq-core (`sq-ycle`): a graph store directory now says what it is.** Every store
-  carries a `sparq-store` marker file naming its role — a root (opened, saved or built on its
-  own) or a named graph of one — written before anything else in the directory, and a store
-  written before markers existed gets one on its next writable open. What a directory is was
-  previously inferred from its name and its contents. Every open, create, save, external build
-  and restore now goes through one constructor, which resolves the path once, refuses it when any
-  ancestor is a store (so a named graph's directory, or anything else inside a store, belongs to
-  that store), refuses a name a staging directory would collide with, and for a whole-store write
-  additionally refuses a destination that holds another store. A directory in a `named/` slot
-  that is marked as a store ROOT is refused rather than adopted as a named graph.
-
-- **sparq-core (`sq-ycle`): a store image is written to a FRESH destination only.**
-  `Graph::save`, `Graph::save_compressed` and every `build_external*` builder now refuse a
-  destination directory that exists and is not empty, through one shared check. Writing over a
-  store in place was the common root of several losses: the writers remove the `named/` sub-tree
-  they are about to walk, rewrite the base a live graph has mapped, leave the old root `wal.log`
-  and `txn.log` in place for the next open to replay into the replacement, and discard any
-  committed journal frame the destination was keeping. To replace a store's contents, build the
-  image elsewhere and swap it in: `Graph::restore_in_place` for a graph that is open, or
-  `Graph::restore_into_durable` for one that is not — both stage a complete base and rename it
-  into place. `restore_into_durable` still refuses a store whose `txn.log` keeps an unreplayed
-  committed frame. A graph name that is neither an IRI nor a blank node is also refused rather
-  than coerced into the manifest as a lexical form the manifest's own decoder rejects.
-
-- **sparq-core (`sq-ycle`): a graph is never writable without a write-ahead log.** The
-  log field is an explicit three-state value — durable (it holds a log), poisoned (it had one and
-  a durable path failed part-way), or deliberately in-memory — instead of an `Option` whose
-  `None` meant both of the last two. Every write path matches on it, so the paths that used to
-  reach the no-log branch and act in memory are refused instead: a named-graph create no longer
-  builds an unpersisted in-memory child on a frozen store, a batch `DROP` no longer clears the
-  set in memory while writing nothing, and a delta is refused rather than applied.
-  `Graph::close_wal` is gone from the public API: a restore is now the graph's own operation
-  (`Graph::restore_in_place`), which gives the log up only once the new base is staged, so a
-  failed restore leaves the store writable rather than logless-but-accepting. Callers that used
-  `persist_dir` + `close_wal` + `restore_into_durable` on an OPEN graph should call
-  `restore_in_place` instead.
-
-- **sparq-core (`sq-ycle`):** a handle whose directory was replaced by maintenance performed
-  elsewhere in the tree now refuses durable writes instead of appending to an unlinked file. Each
-  graph records the tree's layout generation, which a base swap (compaction, vacuum, restore) and
-  a named-graph drop bump; a mismatch is refused with an error naming both generations. This
-  covers the case a parent cannot reach: a named graph taken out of its parent's public `named`
-  vector keeps a log inside the parent's directory, which the parent's next swap unlinks.
-
-- **sparq-core (`sq-ycle`):** a compaction whose staging step fails is retry-safe. The
-  overlay is now folded by adopting the re-opened store, never before the swap publishes;
-  previously the fold happened first, so a retry saw nothing pending, truncated the log that
-  still carried the acknowledged batch, and reported success.
-
-- **sparq-core (`sq-ycle`):** a base swap HEALS an interrupted earlier swap before it
-  clears the staging siblings. The clear ran first, so a restore attempted after a crash between
-  the two renames removed the only surviving copy of the store.
-
-- **sparq-core (`sq-ycle`):** a committed, checksum-valid WAL batch this build cannot read
-  back is now an ERROR rather than a torn tail that gets truncated — the bytes are what the
-  writer wrote, so discarding them discards an acknowledged write. Replay bounds the declared
-  record count by the body that holds it and reserves fallibly (a 32-bit count used to reserve
-  that many records before a byte of the body was examined), requires the records to fill the
-  body exactly, and reads opcodes explicitly (any byte that was not `insert` applied as a
-  DELETE). Both encoders refuse, UNWRITTEN, a record that does not fit its `u32` on-disk field
-  and a triple whose positions are not valid RDF — a literal predicate used to be fsynced,
-  acknowledged, applied in memory, and then dropped by the replay meant to recover it.
-
-- **sparq-core (`sq-ycle`):** `fsync` of a directory no longer reports success when the
-  filesystem rejected it. Every caller is making a rename durable before treating it as
-  committed, and the `InvalidInput` case that was swallowed cannot be told from a real failure.
-  One helper now publishes a named-graph set: it fsyncs the child or survivor trees' FILES, then
-  their container, and only then writes the manifest that names them — a create used to publish
-  the manifest before the child's own bytes were on disk, and a drop synced the staging container
-  without the survivor trees inside it.
-
-- **sparq-core:** a staged base is now fsynced file by file and then directory by directory before
-  the rename that publishes it, and a WAL or journal file this process creates gets its directory
-  entry synced once. Flushing a buffered writer moves bytes into the page cache only, so a crash
-  just after the swap could leave the canonical directory naming an index, dictionary or manifest
-  whose bytes were never written.
-
-- **sparq-core:** the staging directories a compaction, a vacuum and a named-graph drop use are
-  now derived by appending the suffix to the store's WHOLE name (`data.a.compact-new`), not by
-  replacing its file extension (`data.compact-new`). Two stores in one directory whose names
-  differ only after a dot shared staging paths, so opening or swapping one could remove or
-  overwrite the other's — including the retained staging directory that is a store's only copy
-  after a crash mid-swap. A store whose own name ends in `.compact-new`, `.compact-old`,
-  `.drop-new` or `.drop-old` is refused on open, as a save destination and as an external-build
-  destination: such a store derives its own path as its staging sibling, so a swap removed the
-  store it was swapping. The check reads the name's native bytes (`as_bytes` on unix,
-  `encode_wide` on Windows), so a name that is not valid UTF-8 no longer slips past it. A store
-  whose canonical directory is missing while a sibling named the OLD way (`data.compact-new` for
-  a store `data.a`) survives is not recovered automatically: that stem is shared with every other
-  store of the same stem, so the open is refused with an error naming the sibling, and
-  `Graph::adopt_legacy_staging` finishes the swap once the owner has been confirmed.
-
-- **sparq-core:** a crash between a named-graph DROP's sub-tree swap and the manifest rewrite that
-  commits it left a manifest naming a slot the swapped-in sub-tree no longer had, and the store
-  did not open at all. Recovery now reconciles the two by count in EVERY branch: whichever
-  sub-tree the manifest's count agrees with is the one published, whether that is the sub-tree in
-  place or one of the two staging siblings. Promoting whichever sibling happened to survive could
-  publish the post-drop set under a pre-drop manifest and delete the roll-back candidate on the
-  way out. When neither surviving sibling agrees with the manifest the open is refused and both
-  are left on disk for a deliberate recovery, and a manifest that is present but unreadable is an
-  error rather than a licence to guess.
+- **sparq-core (`sq-ycle`):** hardens named-graph layout recovery. Stable manifest slots,
+  checked allocation and removal, complete file-sync barriers, and ordered journal replay
+  integrate with exclusive directory locks and role markers. Read-only opens do no cleanup.
+  Whole-tree compaction keeps the existing rollback and frozen-view recovery behavior.
+  Layout-generation lookups follow path ancestors; ordinary slot records do not scan the log.
+  Dictionary metadata and named manifests write version 2 while reading version 1. A legacy
+  single-file dictionary must be re-saved before atomic UPDATE journaling. Preserve a backup
+  if an older executable must remain usable.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that
@@ -945,6 +831,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
+  while a request waits on it tries each step up to three times, each attempt waiting for a
+  fence two seconds at most (counted from the store's answer); a step whose write failed
+  unsettled and whose fence has not succeeded is set aside, its fence first, and never tried
+  again before that fence succeeds, in the request or in the background (the background
+  put-back and the start-up settling still wait as long as the store takes). A removal whose
+  fence lands with the record still stored is answered at once from the listing; one whose
+  outcome cannot be read after its fence stays out of force and is settled in the background.
+  A journal's commit fences an unsettled clearing of its intent before reading the intent. A service-container
+  create whose precondition compares no state (a bare `If-Match: *`) takes the container shared,
+  as an unconditional create does, so it no longer waits on a removal being settled or holds up
+  other creates. A background fence's attempts are capped at the store's own call timeout
+  (`Store::call_timeout`, new, defaulting to `STORE_CALL_TIMEOUT`; the `http` index reports the
+  timeout it was built with), clamped to between two seconds and one hour per attempt.
+  Forward removals and intent creates keep their unsettled fences through rollback and commit.
+  A settled removal whose outcome cannot be read stays out of force until the listing answers.
+  A WebSocket socket closes `1011` for the client to reconcile at the
+  next point where the subscriber may read the topic after any notification was dropped
+  (whether it could not be read or its check could not be made), instead of delivering later
+  ones; a receive token has at most one socket open at a time (a second connect gets `401`); pings
+  are answered while an access check runs. A due tick takes priority over inbound frames and
+  queued notifications, pre-empts a running notification or lag check and notes it as missed:
+  a reader gets `RECONCILE` for either dropped check, rather than `OVERFLOW` for a dropped lag
+  check. Within two periods of losing Read the socket closes: `1008` for a confirmed denial,
+  or `1011` if the timer check is undecided. Each check has at most one period; a slower check
+  counts as undecided and the client must resubscribe. An LDP write also refuses a dot segment around a
+  %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is,
+  whatever metadata the change kept.
+
+- **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
+  subscriber's current access. A WebSocket notification the subscriber may no longer read is
+  not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the
+  socket (1008) once read access is gone; a check that cannot be made closes it `1011` (on the
+  timer) or drops the notification and asks a subscriber that may read to reconcile
+  (`1011`) at the next tick. The receive token gates connecting only: an open socket is not
+  closed when it expires, and an expired token never connects again in the process. A webhook
+  subscription decides access before asking whether its topic exists, and a topic being created
+  is decided with nothing read of it. The type index decides read access before anything else is
+  asked of a resource, passes over one the caller may not read as one not there (failing only
+  when a grant names the caller itself), and charges linkset-record names nothing against its
+  budget. A record removal waits for its fence at most as long as for a lock in the request, and
+  in the background for longer each attempt up to the store's call timeout
+  (`STORE_CALL_TIMEOUT`); it keeps the container held until a removal left to settle in the
+  background is settled, and answers `507` when the store refuses it for want of room; a
+  subscription being cancelled hears nothing until it is back in force; a subscription create
+  decides its subscriber's due subscriptions before counting. An LDP write refuses a dot segment
+  a URL normaliser could resolve away (%-decoded, or between backslashes) with `400`; what is
+  stored under one can still be read and deleted.
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to

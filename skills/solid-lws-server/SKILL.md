@@ -66,6 +66,20 @@ Set `PSS_SPARQ_BACKEND` to one of:
 - `embedded`: the default-enabled in-process engine. Set
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
   ephemeral.
+  Directory-backed mutations commit through the transaction journal; in-memory
+  mutations retain the engine's atomic update path. `EmbeddedSparqClient::save(dir)`
+  exports an independent snapshot to a different directory. Into the client's open
+  backing directory (by file identity, including path and symlink aliases), it compacts
+  the graph and reopens its journals so later writes remain durable. Repeated refused
+  compactions retain pending writes for reopen. Path components created while resolving a
+  save alias are removed when empty on compaction or failure. A frozen graph,
+  path resolution or snapshot/compaction I/O failure, unavailable compaction (including
+  a missing outside lock or poisoned transaction journal), or stopped actor returns a
+  backend error. After an indeterminate commit or job panic, the actor closes its queue and
+  drops pending jobs, including sends already in flight; their callers receive the stopped-actor
+  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
+  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
   read its own writes: a query sent after an update has completed must see what the
@@ -73,8 +87,10 @@ Set `PSS_SPARQ_BACKEND` to one of:
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. An update that times out
   can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions, and the content write of a resource create, are fenced
-  against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
+  requests and subscriptions, forward resource removals, intent creates, and the
+  content write of a resource create retain their fences. HTTP index metadata/listing
+  writes and the generic write adapter still need fencing support, so the native LWS
+  server refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -133,15 +149,51 @@ WAC also covers notification subscriptions: a `POST` to the
 (`acl:Control` when the topic is an `.acl`), and the WebSocket receive endpoint
 re-checks that same mode for the subscriber when the socket connects and again
 before every notification it sends — so a revoked grant is not replayable through
-an already-issued `receiveFrom` URL, and an open socket is closed (code 1008) once
-its subscriber loses read access. With the `odrl-authz` gate attached, its deny
+an already-issued `receiveFrom` URL. Notifications follow the subscriber's current
+access: one it may no longer read is dropped (not sent, and it neither closes the
+socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
+closes the socket within two periods of losing Read: `1008` for a confirmed
+denial, or `1011` if the timer check is undecided. Each check has at most one
+period; a slower check counts as undecided and the client must resubscribe.
+A due tick takes priority over inbound frames and queued notifications and
+pre-empts a running notification or lag check, noting it as missed. A reader
+whose notification check spans a tick gets a reconcile close; a dropped lag
+check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). The
+timing of a revocation close follows the timer, even while the client floods frames. A check that cannot
+be made (a backend fault) is no denial: on the timer it closes the socket
+(`1011`); a notification whose check cannot be made is dropped. A dropped
+notification (whichever check dropped it) is noted, and from then on the next
+point where the subscriber may read the topic, a notification or a tick, closes
+the socket (`1011`, "reconnect and reconcile") instead of delivering, so nothing
+is delivered after a gap without saying so, also when read access came back
+before the timer ticked; a subscriber that may not read the topic at that point
+gets the revocation close and is never told. Residual: a subscriber whose read
+access is revoked and restored between two ticks learns, from that reconcile
+close, that the topic changed while it could not read it (not what changed). A
+socket closes when the client
+closes it, on the revocation close (`1008`), or on a `1011`: a backlog overflow,
+a timer check that cannot be made, or a reconcile after a dropped notification.
+Pings are answered while a check is in progress. The receive token gates
+connecting only: its 5-minute window is for connecting and reconnecting, and a
+socket opened within it stays open until one of those closes. A token has at most
+one socket open at a time: a connect while a socket it opened is still open is
+refused with the same `401` as an invalid token, and it reconnects once that
+socket has closed (a client whose previous socket the server has not yet seen
+close subscribes again). A token that has expired never connects again, even when
+its `receiveFrom` URL is used again in the same process, so a client told to
+reconnect after the window subscribes again (the old URL answers `401`). Whoever
+holds a `receiveFrom` URL within its window can hold one socket open for as long
+as the subscriber may read the topic. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
 server's storage root is refused with `400` before the WAC gate runs. A topic on it is taken
 in one canonical form, the IRI `parse_target` gives its path (query and fragment dropped), for
 the WAC check, the receive token and the notifications alike; a topic with none — a linkset
-record (`X.meta`, in any case), anything under `/.lws/`, a dot segment — gets the same `403`
-as a topic the caller may not read.
+record (`X.meta`, in any case), anything under `/.lws/`, a dot segment (%-decoded or between
+backslashes too) — gets the same `403` as a topic the caller may not read. (A resource stored
+under an encoded dot segment before writes refused one can still be read and deleted, but not
+subscribed to over WebSocket. LWS webhook subscriptions, below, decide a topic by Read on its
+stored key as given, so such a resource can be subscribed to there by whoever may read it.)
 
 ## Serve provider WebIDs off the pod (optional)
 
@@ -227,7 +279,7 @@ whichever surfaces are enabled. A container of that name (`X.meta/`) and what li
 ordinary resources: a stored record never lists as a member, conflicts with that container or
 serves as a group document, and a container whose only members are such records is empty. So
 is any path under `/.lws/` below the storage root, where the LWS surface keeps its grants, access
-requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`) is a `400`; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
+requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`), or a raw dot segment (`.` or `..`), is a `400`; an encoded separator (`%2F`) is part of a name; a `PUT`, `PATCH` or `POST` (a `POST`'s container included) naming a dot segment a URL normaliser could resolve away (%-decoded, `%2E%2E`, between raw backslashes, `..\x`, or between a decoded slash or backslash, `..%2Fx`; `a%2Fb` holds none) is a `400` (a doubly encoded dot, `%252E`, is decoded once only, as by standard normalisers, and is a name), while what is stored under such a name from before can still be read and deleted; leading and trailing repeated slashes are kept as part of the name, so what is stored under such a name can be read and deleted, but a `PUT`, `PATCH` or `POST` naming one (a `POST`'s container included) is a `400`, decided on the name before anything is authorized or looked up.
 
 ## Negotiate RDF representations
 
@@ -294,10 +346,10 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later. Only the creates and
-removals of service records (grants, requests, subscriptions), and a resource create's
-content write, are fenced against that (see below); other resource writes, and putting a
-failed change back, are not.
+because a remote write reported as failed may still commit later. Service-record creates
+and removals, forward resource removals, intent creates and a resource create's content
+write retain their fences (see below). HTTP index metadata/listing writes and the generic
+write adapter still need fencing support before this refusal can be lifted.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
 (413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
@@ -347,7 +399,11 @@ one small record in the store's index alone (`Store::raise_marker`, under a frag
 subscriptions container that no request can name), raised in one step under the index's own
 write lock, so a raise that lands late never lowers it; it needs no blob capacity, and its index
 entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
-one IRI, the first marker stored; any other IRI of that shape takes room in the pool). A listing,
+one IRI, the first marker stored; any other IRI of that shape takes room in the pool). The mark
+is only as durable as the backend's own persistence: the in-memory index holds it for the life of
+the process; the directory-backed embedded index journals each raise before acknowledging it.
+Restoring an independent snapshot taken before a raise restores the earlier mark and loses
+expiries decided after that snapshot. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -377,12 +433,19 @@ subscription must expire after it. A start logs a warning when it is more than 2
 before the state (or its store) is handed out, so no request is in flight: it removes every stored
 subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
 the mark; construction fails, the mark unchanged, while any of them is still stored (start again
-once it can be removed). An `LwsState` holds its backend's lease (`store::Lifecycle`, shared
-by every clone of `LwsState::store`) for as long as it lives: a second `LwsState` built in the
-same process over a clone of a running one's store is refused, and only the holder may lower the
-mark (`Store::reset_marker` takes the lease's guard, which only this crate makes). A state that
-replaces another must be built after the old one is dropped. Running a second process over the
-same store directory is unsupported, and nothing at this release keeps one out. A create whose
+once it can be removed). An `LwsState` holds a lease (`store::Lifecycle`) for as long as it
+lives, and the lease is per store handle: it is shared by every clone of `LwsState::store` and by
+any `Tracked` wrapper of one (`Tracked::new` takes its inner store's lease and offers no other), so
+a second `LwsState` built in the same process over a clone or a wrapper of a running one's store
+is refused, and only the holder may lower the mark (`Store::reset_marker` takes the lease's guard,
+which only this crate makes). It is not exclusion per backend: a store opened again separately
+over the same backend, or wrapped by a `Store` implementation that does not forward
+`Store::lifecycle`, has a lease of its own. A state that replaces another must be built after the
+old one is dropped. Running a second process over the same store directory is unsupported, and
+nothing at this release keeps one out. The mark changes only through `Store::raise_marker` and
+`Store::reset_marker`: the generic mutators of the store (`write`, `create_in_container`,
+`restore`, `hold`, `reinstate`, `delete`, `delete_container_if_empty`) refuse an IRI shaped like
+the mark (`ServerError::Forbidden`). A create whose
 purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
 its listing locks are held, a subscription create takes the mark's raise lock and checks again
 that the service is not halted and that its expiry is after both the clock and the stored mark
@@ -397,8 +460,9 @@ process alone, and a halt shows no expiry, so a subscription never durably expir
 between the clock passing its expiry and the mark being stored, or a stop while halted after a
 failed raise, or a create whose store outcome was unknown, answered `500`, and committed late)
 may be delivered to again after a restart whose clock was stepped back before its expiry; nothing
-outside saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
-memory and expire by the process's monotonic clock, and none survives a restart. A
+outside saw it expire. A WebSocket receive token's expiry is a latch held in memory: it expires
+by the process's monotonic clock, and once expired it never connects again in that process
+(a socket it opened is not closed by it); none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
 registered (when the store leaves the create's outcome unknown, it holds that listing shared
@@ -566,7 +630,11 @@ What the server exposes, all discoverable from the storage description
   settled, the record's narrowest listing stays held, shared: a subscriber's own listing for
   a subscription, the container's for a grant, a request or an owner's subscription. So a
   conditional create evaluated on that listing waits for the outcome (`503` past the lock
-  wait), and two with one entity tag cannot both register. A fence is
+  wait), and two with one entity tag cannot both register. A conditional create whose
+  precondition compares no state (a bare `*`, the only form anyone but the owner may send to
+  the grant and request containers, or a date, which a service listing does not carry) asks only whether the container exists, and
+  takes its listings shared as an unconditional create does, so it neither waits on a removal
+  being settled nor holds up other creates. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
@@ -577,13 +645,38 @@ What the server exposes, all discoverable from the storage description
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
   takes the record's lock and the container's the same way (at most two seconds, then `503`),
-  and takes the grant out of force while the removal runs, and keeps it out only once the removal
-  is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
-  revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
-  cannot be read again, with the grant left in force. A removal whose outcome can still change
+  and takes the grant out of force while the removal runs: `204` once confirmed revoked;
+  `500` "still stored" when confirmed still listed (the grant back in force). A settled
+  Storage failure whose existence and listing reads both fail answers `500` "not known
+  yet" and keeps the grant out of force until background settlement reads the listing.
+  An insufficient-storage refusal keeps its refusal handling. A removal whose outcome can still change
   is fenced the same way: until its fence lands, the answer is `500` "not known yet", the grant
   stays out of force, and it is removed or put back once the listing read after the fence
-  says which. A record holds its place in the request
+  says which. A request waits for its fence at most as long as for a lock (two seconds, shared
+  between the fences it writes), then answers so and leaves the fence to the background; the
+  container stays held until that background settling is done. In the background each attempt
+  at the fence is given longer, from two seconds doubling up to the store's own call timeout
+  (`Store::call_timeout`: 30 seconds by default, `STORE_CALL_TIMEOUT`; an `http` index built with
+  `HttpSparqClient::with_timeout` uses that timeout), clamped between two seconds and
+  one hour per attempt, so a fence slower than one hour is retried rather than waited
+  on indefinitely. A removal whose fence lands with the record still stored is answered at once from the listing.
+  Putting a change back while a request waits on it (its own rollback or commit, with its locks
+  held) tries each step up to three times with short growing waits between, each attempt
+  waiting for a fence two seconds at most (counted from the store's answer to the write it
+  fences); a step whose write failed unsettled and whose fence has not succeeded is never tried
+  again in the request: it is set aside with the rest, its fence first, and the set-aside (which
+  holds the locks) fences it before putting the step back, so a write that arrives late can no
+  longer undo what was put back since. The background put-back of a set-aside change, and the
+  settling of intents at start-up, wait for a fence as the store's call allows; background
+  retries use the same capped per-attempt budget. Both fence a step's unsettled write before
+  trying the step again. Forward removals and intent creates retain their fences in the
+  journal: rollback fences before recreation or Forget, and commit fences before changing
+  the intent. A removal whose fence lands but
+  whose outcome cannot then be read stays out of force and is settled in the background once the
+  listing can be read. A removal the store refuses for
+  want of room answers `507`, the record still stored and back in force. A subscription
+  being cancelled hears of no change from the moment its removal begins until it is back in
+  force. A record holds its place in the request
   quota until the store confirms it is gone: while its create's outcome is not known and while
   its withdrawal runs. Nothing a start puts back in the background begins until every step of
   the start that can fail has succeeded. A stored grant or request that cannot be read stops
@@ -616,7 +709,9 @@ What the server exposes, all discoverable from the storage description
   owner, counted against both totals, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
-  not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
+  not read is refused (`403`, or `401` anonymous) at once, whatever its state. Access is decided
+  before the store is asked whether the topic exists, so that refusal, and the work done before
+  it, are the same whether it does. One it may read
   is checked again under its lock, waited for at most two seconds (then `503`), or answered `503`
   at once while set aside. The bound on deliveries prepared for one change counts only authorized
   ones: a subscriber that may not read the resource takes no place from one that may. Once it is
@@ -669,7 +764,18 @@ What the server exposes, all discoverable from the storage description
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
-  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
+  storage is served by one process at a time. The LWS service starts only over a store whose
+  index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
+  whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
+  by the graph on its actor's thread). If that thread panics the graph, and with it the lock,
+  is dropped, and every later store call fails (`5xx`): the index is never used without the
+  lock. Over any other index (a remote SPARQL endpoint, or a store that does not say; the wasm
+  host's persistent store does not say) the start fails before anything is read or written.
+  The lock is `<dir>.lock` beside the index directory, when it exists or can be created, and
+  `sparq.lock` inside it; an index directory whose parent is not writable is held by the inside
+  lock alone and serves; compaction that must swap the index's root directory is refused.
+  A graph a failed compaction froze is reported
+  as a failed store call (`5xx`), never served: restart to re-open the directory. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
@@ -775,9 +881,18 @@ What the server exposes, all discoverable from the storage description
   most 8 KiB, so that its page links fit a request head: a longer well-formed one (up to 32
   KiB) is too complex to answer (`422`), as one with too many groups is; a QUERY body past 32 KiB
   is refused as it is read, and a page link carrying a filter past 8 KiB, which this server never
-  makes, gets `413`. When
-  any listing, permission check or metadata read fails, the whole index fails with one
-  generic `500` that names no resource. Both carry an `ETag` of what they serve and
+  makes, gets `413`. Whether the caller may read a resource is decided before anything else
+  is asked of it but its lock (a resource set aside gets the `503` below first, whoever
+  asks): a document it may not read is passed over as one that is not there, with nothing
+  asked of whether it is; a container it may not read is still listed (for what under it may
+  be readable), its listing read and charged to the walk's budget as any is. When any listing,
+  permission check or metadata read fails, the whole index fails with one generic `500` that
+  names no resource; a resource whose access cannot be decided is passed over unless a grant
+  names the caller itself for it (a grant to everyone does not count). So a resource whose
+  metadata cannot be read, and which the caller could read only as its creator or through a
+  grant to everyone, is left out of a `200` answer: a client should not take an index or search
+  answer as proof that nothing else matching is there. Names of
+  linkset records a listing holds are not followed and not charged to the walk's budget. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
   While walking the storage they keep only what they return (a search its matches, the index
   its distinct types) and the walk's own state (the listing in hand and the members still to
@@ -811,7 +926,13 @@ the server pins:
   DPoP proof is verified locally on every request — proof signature, `htm`/`htu`/`iat`,
   `ath`, the `jti` replay mark against the same shared replay store, and the `cnf.jkt`
   binding — orchestrated from the verifier's own public primitives
-  (`crates/sparq-lws-core/src/auth_cache.rs`). Separately, the
+  (`crates/sparq-lws-core/src/auth_cache.rs`). Residual: `htu` is compared after
+  normalising both URLs, as RFC 9449 calls for, by parsing and serialising them with
+  `url::Url::parse` (WHATWG URL parsing): that resolves `%2E%2E` as a dot segment (the RFC 3986
+  §6.2.2 syntax-based normalisation) and also takes a backslash as a slash (from the WHATWG
+  parser, not RFC 3986), so a proof made for `GET /x` also verifies for `GET /alice/%2E%2E/x`, a request the server answers for that literal stored key
+  (readable when a key was stored under it before writes refused one). This is the spec's
+  comparison; the proof's single-use `jti` limits it to one request. Separately, the
   server layers **opt-in** proof-of-possession tiers on top of an already-verified token:
   RFC 8705 mTLS cert-bound tokens, and DPoP-SK below. Both are off by default
   (`crates/sparq-lws-core/src/auth.rs`).

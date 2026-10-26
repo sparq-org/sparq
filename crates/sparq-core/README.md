@@ -34,17 +34,19 @@ subtype facets on the raw RDF lexical form, independently of finite arithmetic
 capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
 representation and the existing NaN sentinel; larger literals can remain valid.
 
-`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional keys with
-checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
 Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
 `numerics.bin`/`temporals.bin` and both v2 caches, rebuilding in memory while
 preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bin`; missing or
 wrong-sized current files also trigger rebuilds.
-
-Legacy opens cost a dictionary scan until migrated with `Graph::open(old)?.save(new)?`; a store written before the `sparq-store` marker existed gets one
-on its next writable open. Versions mark semantic compatibility, not integrity. A pre-`dict-meta.bin` store is refused an atomic UPDATE until migrated, and `save`/`save_compressed`/`build_external*` write to a FRESH destination only — replace a store by swapping a staged image in. A named graph lives in the `named/<slot>` directory its manifest (`named.bin`, format 2; format 1 is still read, and format 2 is a ONE-WAY upgrade — an earlier build refuses it) records; a slot id is handed out once between whole-store rewrites (a `save`, compaction or vacuum writes a fresh, residue-free image and renumbers it), so a graph dropped and a graph created afterwards can never share a directory. A drop or a recovery removes only the store's own `named/<slot>` paths, and an open removes nothing it does not open — residue of an interrupted drop stays until a whole-store rewrite; a save, a build and every manifest publish fsync the store's FILES — indexes, dictionary and caches — not just its directories, so a store is durable when the call returns. One writer at a time per open store tree, in this process; a drop that cannot remove its directories is an error, not a silent success. Details: [data-formats](../../skills/data-formats/SKILL.md), [durability](../../skills/http-server/SKILL.md).
+Legacy opens cost a dictionary scan and cache allocation until migrated with
+`Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
+Versions mark semantic compatibility, not integrity; the trusted-storage contract
+still applies. A directory has one writable holder (`dir_lock`); read-only opens share it among
+readers. A second conflicting holder gets `WouldBlock`. Named graphs use manifest-recorded slots; create and drop change only their own entries. Removing a child from memory keeps its persisted entry. Writable opens validate the layout before cleaning undeclared slots; read-only opens leave them alone. Saves, builds and manifest publication sync root files and caches.
+Ownership checks are advisory; concurrently creating nested stores or racing filesystem changes is unsupported. See the [data-formats guide](../../skills/data-formats/SKILL.md).
 
 ## ✨ Features
 

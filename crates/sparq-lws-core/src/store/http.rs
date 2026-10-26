@@ -75,7 +75,7 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Default per-request timeout. The whole request/response cycle (connect + send + read) must finish
 /// inside this, else the request is abandoned with a retryable [`SparqHttpError::Timeout`].
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_TIMEOUT: Duration = super::limits::STORE_CALL_TIMEOUT;
 
 const CT_SPARQL_QUERY: &str = "application/sparql-query";
 const CT_SPARQL_UPDATE: &str = "application/sparql-update";
@@ -681,6 +681,11 @@ impl SparqClient for HttpSparqClient {
             .map_err(SparqHttpError::into_sparq)
     }
 
+    /// The per-request timeout this client was built with ([`HttpSparqClient::with_timeout`]).
+    fn call_timeout(&self) -> Duration {
+        self.timeout
+    }
+
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         let u = sparql::update_remove_child(container, child)?;
         self.update_raw(&u)
@@ -833,6 +838,21 @@ impl HttpSparqClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review of #7174: a background fence's attempts were capped at the default call timeout
+    /// whatever the client was built with. The client, and a store over it, say the timeout it
+    /// was built with.
+    #[test]
+    fn the_call_timeout_is_the_one_configured() {
+        use crate::store::{CompositeStore, InMemoryBlobStore, Store};
+        let default = HttpSparqClient::new("http://127.0.0.1:9/sparql");
+        assert_eq!(default.call_timeout(), super::super::STORE_CALL_TIMEOUT);
+        let longer = Duration::from_secs(90);
+        let client = HttpSparqClient::with_timeout("http://127.0.0.1:9/sparql", longer);
+        assert_eq!(client.call_timeout(), longer);
+        let store = CompositeStore::new(client, InMemoryBlobStore::new());
+        assert_eq!(Store::call_timeout(&store), longer);
+    }
 
     /// Review finding: a body past the cap and a body that failed part way were one error, so a
     /// connection reset on a small listing read as a listing too large to keep (`507`). They are
