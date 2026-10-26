@@ -499,7 +499,7 @@ impl<S: Store> LdpState<S> {
     /// path). Returns the granted modes on Allow, or the spec 401/403 on deny.
     ///
     /// write-2: planned walk — see [`authorize_planned_iri`](Self::authorize_planned_iri).
-    async fn authorize_iri(
+    pub(crate) async fn authorize_iri(
         &self,
         target_iri: &str,
         required: AccessMode,
@@ -1611,7 +1611,23 @@ pub async fn delete_handler<S: Store>(
         }
     } else {
         // A plain resource: the (non-atomic) removal is fine — there is no empty-check to race.
-        state.store.delete(&target.iri, parent.as_deref()).await?;
+        if state.store.history_config().trash && crate::store::history::data_resource(&target.iri) {
+            state
+                .store
+                .trash_resource(
+                    &target.iri,
+                    parent.as_deref(),
+                    crate::store::history::TrashFields {
+                        original: target.iri.clone(),
+                        trashed_at: crate::clock::now(),
+                        deleted_by: token.web_id.clone(),
+                        deleter_could_read: may_read(&target.iri, &granted),
+                    },
+                )
+                .await?;
+        } else {
+            state.store.delete(&target.iri, parent.as_deref()).await?;
+        }
         // A DELETE of an `.acl` removed the access rules (the resource now inherits): invalidate the
         // cached parse so the NEXT read no longer sees the deleted ACL's grants (the `meta` probe will
         // now report it absent and the walk inherits — invalidating frees the slot at once).

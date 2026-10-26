@@ -45,5 +45,9 @@ EXPOSE 3000
 # Base URL, TLS, trusted issuer/audience, auth policy, and storage selection are
 # intentionally not baked in. Operators supply the existing SOLID_SERVER_* / PSS_*
 # contract; in particular, no development auth or loopback escape hatch is enabled.
+# Optional history services: SOLID_SERVER_VERSIONS=1 and SOLID_SERVER_TRASH=1.
+# Both default off; Solid Suite supplies both at deployment. Retention settings:
+# SOLID_SERVER_VERSIONS_MAX=20, SOLID_SERVER_VERSIONS_RETENTION=P30D,
+# SOLID_SERVER_TRASH_RETENTION=P30D. Requires the memory or embedded index.
 ENTRYPOINT ["/usr/local/bin/sparq-lws-core"]
 CMD []

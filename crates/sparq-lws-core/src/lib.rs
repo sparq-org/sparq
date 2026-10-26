@@ -89,8 +89,10 @@ pub mod body_limit;
 mod clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod describe;
-pub mod error;
 pub(crate) mod entity_tag;
+pub mod error;
+#[cfg(not(target_arch = "wasm32"))]
+mod history_http;
 pub(crate) mod http_date;
 /// Provider-issued WebIDs hosted OUTSIDE the pod — the identity host (the RSS adaptation of PSS
 /// `decisions/0020`; design in `research/lws-design-records.md` §4). The id-docs live in a reserved

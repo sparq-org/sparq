@@ -38,6 +38,67 @@ impl<T> Clone for SharedStore<T> {
 
 #[async_trait]
 impl<T: SparqClient> SparqClient for SharedStore<T> {
+    async fn replace_meta_retaining(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+        member: &str,
+        fields: sparq_lws_core::store::history::VersionFields,
+    ) -> Result<Option<sparq_lws_core::store::history::VersionEntry>, SparqError> {
+        self.0
+            .replace_meta_retaining(iri, meta, member, fields)
+            .await
+    }
+    async fn move_to_trash(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        member: &str,
+        fields: sparq_lws_core::store::history::TrashFields,
+    ) -> Result<(), SparqError> {
+        self.0.move_to_trash(iri, parent, member, fields).await
+    }
+    async fn restore_from_trash(
+        &self,
+        member: &str,
+        target: &str,
+        parent: &str,
+    ) -> Result<(), SparqError> {
+        self.0.restore_from_trash(member, target, parent).await
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> Result<Vec<sparq_lws_core::store::history::VersionEntry>, SparqError> {
+        self.0.versions(original).await
+    }
+    async fn trash_entries(
+        &self,
+    ) -> Result<Vec<sparq_lws_core::store::history::TrashEntry>, SparqError> {
+        self.0.trash_entries().await
+    }
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<sparq_lws_core::store::history::VersionEntry>, SparqError> {
+        self.0.version_entry(member).await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<sparq_lws_core::store::history::TrashEntry>, SparqError> {
+        self.0.trash_entry(member).await
+    }
+    async fn expired_history(
+        &self,
+        versions_before: std::time::SystemTime,
+        trash_before: std::time::SystemTime,
+        limit: usize,
+    ) -> Result<Vec<sparq_lws_core::store::history::ExpiredEntry>, SparqError> {
+        self.0
+            .expired_history(versions_before, trash_before, limit)
+            .await
+    }
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         self.0.get_meta(iri).await
     }
@@ -78,6 +139,13 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.delete_meta(iri).await
     }
 
+    async fn delete_resource_retiring(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<sparq_lws_core::store::history::RetiredResource, SparqError> {
+        self.0.delete_resource_retiring(iri, parent).await
+    }
     async fn delete_resource(
         &self,
         iri: &str,

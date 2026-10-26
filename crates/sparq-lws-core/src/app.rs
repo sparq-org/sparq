@@ -368,9 +368,48 @@ where
         ))
         // OUTERMOST: CORS (preflight short-circuit + the Access-Control-* headers on every response).
         .layer(axum::middleware::from_fn(cors_middleware));
+    let protected = if ldp.store.history_config().versions {
+        protected.layer(axum::middleware::from_fn_with_state(
+            ldp.clone(),
+            crate::history_http::solid_links::<S>,
+        ))
+    } else {
+        protected
+    };
+    crate::history_http::spawn_solid_sweep(&ldp);
     let protected = protected.with_state(ldp.clone());
 
     let mut router = Router::new();
+    let history = ldp.store.history_config();
+    crate::history_http::catalog(&mut catalog, base, false, &history);
+    if history.enabled() {
+        let mut routes = Router::new();
+        for (enabled, path) in [
+            (history.versions, "/.versions/"),
+            (history.trash, "/.trash/"),
+        ] {
+            if enabled {
+                routes = routes
+                    .route(
+                        path,
+                        axum::routing::any(crate::history_http::solid_handler::<S>),
+                    )
+                    .route(
+                        &format!("{path}{{*member}}"),
+                        axum::routing::any(crate::history_http::solid_handler::<S>),
+                    );
+            }
+        }
+        router = router.merge(
+            routes
+                .layer(axum::middleware::from_fn_with_state(
+                    auth.clone(),
+                    auth_middleware::<J, R>,
+                ))
+                .layer(axum::middleware::from_fn(cors_middleware))
+                .with_state(ldp.clone()),
+        );
+    }
 
     // sq-r1ei8: the query surface is a distinct protected route so
     // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.

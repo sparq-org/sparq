@@ -669,6 +669,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|s| s.trim().to_ascii_lowercase())
         .unwrap_or_else(|| "memory".to_string());
 
+    sparq_lws_core::store::history::HistoryConfig::from_env()?.validate_backend(&backend)?;
+
     // --- Startup operational-safety guards (fail-closed at boot, before any backend is built). -----
     // The blob store is currently ALWAYS the in-memory double (the S3 blob is an unimplemented stub),
     // so `blob_is_in_memory` is `true`. Read it from one place so the guard is honest when a durable
@@ -1092,7 +1094,7 @@ where
             sparq.clone(),
             blob.clone(),
             body_cache_from_env(),
-        );
+        ).with_history(sparq_lws_core::store::history::HistoryConfig::from_env()?)?;
         let app = build_app_for_store(
             store,
             base_url,
@@ -1106,7 +1108,7 @@ where
         let task = spawn_periodic_if_configured(sparq, blob, reconcile_interval);
         Ok((app, task))
     } else {
-        let store = CompositeStore::with_body_cache(sparq, blob, body_cache_from_env());
+        let store = CompositeStore::with_body_cache(sparq, blob, body_cache_from_env()).with_history(sparq_lws_core::store::history::HistoryConfig::from_env()?)?;
         let app = build_app_for_store(
             store,
             base_url,

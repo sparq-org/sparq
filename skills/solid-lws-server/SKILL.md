@@ -1045,3 +1045,9 @@ reconstructed from the code and cites it line by line; it also maps the source-r
   default-off `trust-graph` feature. It adds the library function
   `authz::trust_admit::trust_admit_verdict`, which is deliberately not wired
   into the request pipeline, so enabling it changes no request's outcome.
+
+## Optional versions and trash
+
+`SOLID_SERVER_VERSIONS=1` and `SOLID_SERVER_TRASH=1` enable the services in either protocol; both default to unset (off). `SOLID_SERVER_VERSIONS_MAX` defaults to `20` retained states per resource. `SOLID_SERVER_VERSIONS_RETENTION` and `SOLID_SERVER_TRASH_RETENTION` default to `P30D` and accept positive day/time XSD durations. An HTTP index with either service enabled is refused at startup. Empty-container deletion and recursive LWS `Depth: infinity` deletion remain permanent.
+
+See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.

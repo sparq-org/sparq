@@ -296,6 +296,65 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    async fn replace_meta_retaining(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+        member: &str,
+        fields: crate::store::history::VersionFields,
+    ) -> Result<Option<crate::store::history::VersionEntry>, SparqError> {
+        self.inner
+            .replace_meta_retaining(iri, meta, member, fields)
+            .await
+    }
+    async fn move_to_trash(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        member: &str,
+        fields: crate::store::history::TrashFields,
+    ) -> Result<(), SparqError> {
+        self.inner.move_to_trash(iri, parent, member, fields).await
+    }
+    async fn restore_from_trash(
+        &self,
+        member: &str,
+        target: &str,
+        parent: &str,
+    ) -> Result<(), SparqError> {
+        self.inner.restore_from_trash(member, target, parent).await
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> Result<Vec<crate::store::history::VersionEntry>, SparqError> {
+        self.inner.versions(original).await
+    }
+    async fn trash_entries(&self) -> Result<Vec<crate::store::history::TrashEntry>, SparqError> {
+        self.inner.trash_entries().await
+    }
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<crate::store::history::VersionEntry>, SparqError> {
+        self.inner.version_entry(member).await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<crate::store::history::TrashEntry>, SparqError> {
+        self.inner.trash_entry(member).await
+    }
+    async fn expired_history(
+        &self,
+        versions_before: std::time::SystemTime,
+        trash_before: std::time::SystemTime,
+        limit: usize,
+    ) -> Result<Vec<crate::store::history::ExpiredEntry>, SparqError> {
+        self.inner
+            .expired_history(versions_before, trash_before, limit)
+            .await
+    }
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
@@ -357,6 +416,22 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.delete_meta(iri).await
     }
 
+    async fn delete_resource_retiring(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<crate::store::history::RetiredResource, SparqError> {
+        let _g = self.counters.op_guard();
+        let result = self.inner.delete_resource_retiring(iri, parent).await;
+        if !matches!(result, Err(SparqError::Unsupported)) {
+            self.counters.count_queries(1);
+            self.counters.count_update();
+            if parent.is_some() {
+                self.counters.count_update();
+            }
+        }
+        result
+    }
     async fn delete_resource(
         &self,
         iri: &str,

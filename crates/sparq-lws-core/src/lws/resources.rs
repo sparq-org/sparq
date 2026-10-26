@@ -3800,6 +3800,60 @@ async fn delete<S: Store + 'static>(
             }
         }
     }
+    if state.store.history_config().trash
+        && crate::store::history::data_resource(uri)
+        && !req
+            .header("depth")
+            .is_some_and(|d| d.eq_ignore_ascii_case("infinity"))
+    {
+        let could_read = super::access::allowed(state, Action::Read, uri, agent)
+            .await
+            .unwrap_or(false);
+        let fields = crate::store::history::TrashFields {
+            original: uri.to_string(),
+            trashed_at: crate::clock::now(),
+            deleted_by: agent.subject.clone(),
+            deleter_could_read: could_read,
+        };
+        let removal = {
+            let state = state.detached();
+            let uri = uri.to_string();
+            let parent = parent.clone();
+            async move {
+                let event = Event {
+                    kind: "Delete",
+                    is_container: false,
+                    uri: uri.clone(),
+                    relation: parent.clone().map(|p| ("origin", p)),
+                };
+                let pending = state.notify.prepare(&state, &event).await;
+                let outcome = state
+                    .store
+                    .trash_resource(&uri, parent.as_deref(), fields)
+                    .await;
+                if outcome.is_ok() {
+                    let _ = state.store.delete(&meta_key(&uri), None).await;
+                    state.notify.send(&state, pending);
+                }
+                ((Vec::<String>::new(), outcome), None)
+            }
+        };
+        let after = move |(_, outcome): &(Vec<String>, Result<(), ServerError>)| {
+            (parent.filter(|_| outcome.is_ok()), None)
+        };
+        return match hold_locks(
+            state,
+            (guards, listing),
+            req.admission.clone(),
+            after,
+            removal,
+        )
+        .await
+        {
+            Ok(((_, Ok(())), _)) => problem(StatusCode::NO_CONTENT, None),
+            Ok(((_, Err(e)), _)) | Err(e) => store_error(e),
+        };
+    }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks, and the listing lock, until the removals are
     // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
