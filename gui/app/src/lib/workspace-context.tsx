@@ -176,7 +176,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   // re-running / re-creating. These are stable useCallbacks, but the ref keeps lint honest.
   const engine = useEngine();
   const engineRef = React.useRef(engine);
-  engineRef.current = engine;
+  React.useLayoutEffect(() => {
+    engineRef.current = engine;
+  }, [engine]);
 
   /** Commit a workspace to both the render state and the synchronous ref. */
   const applyWorkspace = React.useCallback((ws: Workspace | null) => {

@@ -656,8 +656,11 @@ const EXPORT_SERIALIZE_FORMAT: Record<ExportFormat, string> = {
   jsonld: "jsonld-compacted",
 };
 
+export const subscribeRuntime = () => () => {};
+const serverUnavailable = () => false;
+
 export function EngineProvider({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = React.useState<EngineStatus>({ kind: "cold" });
+  const [status, setStatus] = React.useState<EngineStatus>({ kind: "warming" });
   const [storeSize, setStoreSize] = React.useState(0);
   // [OPUS-4.8] sq-vw3ax (#820) — the live on-device footprint (snapshot bytes) + in-flight import.
   const [storeBytes, setStoreBytes] = React.useState(0);
@@ -681,7 +684,6 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
 
   // [OPUS-4.8] sq-tp1m (#757) — the per-workspace inference regime + its materialised closure.
   const [inferenceMode, setInferenceModeState] = React.useState<WorkspaceInferenceMode>("off");
-  const [inferenceStatus, setInferenceStatus] = React.useState<InferenceStatus>({ kind: "off" });
   // The reasoned (closure) store read queries run against when a regime is active, plus the cache
   // key (`mode:epoch`) it was built for. `storeEpoch` bumps whenever the BASE store content
   // changes (warm / import / update) so a stale closure is rebuilt automatically.
@@ -717,6 +719,22 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   const n3RulesRef = React.useRef<WorkspaceRulesDoc[]>([]);
   const rulesEpochRef = React.useRef(0);
   const [rulesEpoch, setRulesEpoch] = React.useState(0);
+  const activeRulesEpoch = inferenceMode === "n3" ? rulesEpoch : 0;
+  const inferenceRequest = React.useMemo(
+    () => ({ mode: inferenceMode, storeEpoch, rulesEpoch: activeRulesEpoch }),
+    [inferenceMode, storeEpoch, activeRulesEpoch],
+  );
+  const [inferenceResult, setInferenceResult] = React.useState<{
+    request: typeof inferenceRequest;
+    status: InferenceStatus;
+  } | null>(null);
+  const inferenceStatus = React.useMemo<InferenceStatus>(
+    () => inferenceMode === "off"
+      ? { kind: "off" }
+      : inferenceResult?.request === inferenceRequest
+        ? inferenceResult.status : { kind: "loading" },
+    [inferenceMode, inferenceResult, inferenceRequest],
+  );
 
   // [OPUS-4.8] sq-lcd6e — a hydration request that arrived BEFORE the wasm ctor warmed (the
   // workspace-restore bridge can call hydrateFromSnapshot while the engine is still cold). It is
@@ -776,10 +794,6 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
     },
     [],
   );
-  // Keep a stable ref so the warm effect (deps []) can apply a queued request without re-running.
-  const applyHydrationRef = React.useRef(applyHydration);
-  applyHydrationRef.current = applyHydration;
-
   const hydrateFromSnapshot = React.useCallback(
     (nquads: string | null, opts?: { seedSampleWhenEmpty?: boolean }) => {
       const req = { nquads, seedSampleWhenEmpty: opts?.seedSampleWhenEmpty ?? false };
@@ -801,7 +815,6 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     let cancelled = false;
     const opts = { basePath: basePath() };
-    setStatus({ kind: "warming" });
     prewarmSparq(opts)
       .then(() => loadSparq(opts))
       .then((Store) => {
@@ -810,7 +823,7 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
         const pending = pendingHydrationRef.current;
         if (pending) {
           pendingHydrationRef.current = null;
-          applyHydrationRef.current(Store, pending);
+          applyHydration(Store, pending);
         }
       })
       .catch((err: unknown) => {
@@ -823,7 +836,7 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyHydration]);
 
   // [OPUS-4.8] sq-cno90 (#820 follow-up) — probe the OS-reported on-disk byte total of the
   // workspaces tree via the native `disk_usage` command. On the desktop shell this is the precise
@@ -963,14 +976,14 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   // tear the closure down for "off", else (re)materialise it and publish the entailed-triple
   // counts. Idempotent; the single place reasoning is (re)applied (see the effect below).
   const applyInferenceMode = React.useCallback(
-    async (mode: WorkspaceInferenceMode): Promise<void> => {
+    async (request: typeof inferenceRequest): Promise<void> => {
+      const { mode } = request;
       // Claim this generation up-front; any invocation started later supersedes us.
       const gen = ++inferenceGenRef.current;
       if (mode === "off") {
         reasonedStoreRef.current = null;
         reasonedKeyRef.current = null;
         entailedCacheRef.current = null;
-        setInferenceStatus({ kind: "off" });
         return;
       }
       // The engine/store may not have warmed yet — e.g. a workspace REOPENED with inference
@@ -980,21 +993,8 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
       // materialisation failure, so the toolbar never flashes "reasoner unavailable" over a
       // reasoner that is in fact fine.
       if (!storeRef.current || !ctorRef.current) {
-        setInferenceStatus({ kind: "loading" });
         return;
       }
-      // Check if the closure for this mode + store epoch (+ rules hash for N3) is already built.
-      const cachedKeyPrefix =
-        mode === "n3"
-          ? `n3:${storeEpochRef.current}:`
-          : `${mode}:${storeEpochRef.current}`;
-      const alreadyBuilt =
-        reasonedKeyRef.current !== null &&
-        reasonedStoreRef.current !== null &&
-        (mode === "n3"
-          ? reasonedKeyRef.current.startsWith(cachedKeyPrefix)
-          : reasonedKeyRef.current === cachedKeyPrefix);
-      if (!alreadyBuilt) setInferenceStatus({ kind: "loading" });
       try {
         const reasoned = await buildReasonedStore(mode);
         // A newer invocation ran while we awaited — drop this stale result so we don't clobber it.
@@ -1003,16 +1003,19 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
         const info: ReasoningInfo = base
           ? computeReasoningInfo(base, reasoned, mode)
           : { mode, baseTriples: 0, closureTriples: 0, entailed: 0 };
-        setInferenceStatus({ kind: "ready", info });
+        setInferenceResult({ request, status: { kind: "ready", info } });
       } catch (err) {
         // Superseded invocations must not publish a stale error over the newer state either.
         if (gen !== inferenceGenRef.current) return;
         reasonedStoreRef.current = null;
         reasonedKeyRef.current = null;
         entailedCacheRef.current = null;
-        setInferenceStatus({
-          kind: "error",
-          message: err instanceof Error ? err.message : String(err),
+        setInferenceResult({
+          request,
+          status: {
+            kind: "error",
+            message: err instanceof Error ? err.message : String(err),
+          },
         });
       }
     },
@@ -1099,12 +1102,10 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
     setRulesEpoch(rulesEpochRef.current);
   }, []);
 
-  // [OPUS-4.8] sq-tp1m — whenever the mode OR the base store content OR the N3 rules change,
-  // reconcile the closure + status. The SINGLE place reasoning is applied. `rulesEpoch` is in
-  // deps so a rules change (via setN3Rules) re-fires this effect when N3 is active.
+  // Reconcile the closure when its mode, store epoch, or active N3 rules change.
   React.useEffect(() => {
-    void applyInferenceMode(inferenceMode);
-  }, [inferenceMode, storeEpoch, rulesEpoch, applyInferenceMode]);
+    void applyInferenceMode(inferenceRequest);
+  }, [inferenceRequest, applyInferenceMode]);
 
   // [OPUS-4.8] sq-ixc3.13 — the Import drawer's ingest. A `file` import (a disk path) goes
   // through the NATIVE loader IPC (`load_path`: compressed + native-only HDT, no wasm-tab
@@ -1498,20 +1499,17 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   );
 
   // [OPUS-4.8] sq-ixc3.13 — whether the native loader IPC is reachable (inside the Tauri shell).
-  // Computed once on mount (the runtime never changes mid-session) so the status bar / drawer can
-  // label the loader honestly without re-detecting on every render.
-  const [nativeLoaderAvailable, setNativeLoaderAvailable] = React.useState(false);
-  React.useEffect(() => {
-    setNativeLoaderAvailable(hasNativeLoader());
-  }, []);
+  // The runtime is fixed for the session; use a server snapshot without desktop capabilities
+  // so static-export hydration matches before reading the Tauri bridge.
+  const nativeLoaderAvailable = React.useSyncExternalStore(
+    subscribeRuntime, hasNativeLoader, serverUnavailable,
+  );
 
   // [FABLE-5] sq-ixc3.14 — whether the native federated-query IPC is reachable (inside the
-  // Tauri shell). Same once-on-mount discipline as nativeLoaderAvailable, so the Query tool
-  // can label the SERVICE run location honestly without re-detecting per render.
-  const [nativeFederationAvailable, setNativeFederationAvailable] = React.useState(false);
-  React.useEffect(() => {
-    setNativeFederationAvailable(hasNativeFederation());
-  }, []);
+  // Tauri shell). Read the bridge with the same hydration discipline as nativeLoaderAvailable.
+  const nativeFederationAvailable = React.useSyncExternalStore(
+    subscribeRuntime, hasNativeFederation, serverUnavailable,
+  );
 
   const value = React.useMemo<EngineContextValue>(
     () => ({
