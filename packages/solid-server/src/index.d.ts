@@ -2,6 +2,7 @@
 // [FABLE-5] #2323: transport-agnostic dispatcher (`createSolidPod`) + host building blocks.
 import type { Buffer } from 'node:buffer';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import type { ChildProcess } from 'node:child_process';
 
 export interface SolidServerOptions {
   port?: number;
@@ -9,14 +10,31 @@ export interface SolidServerOptions {
   ownerWebid?: string;
   /** Verify Solid-OIDC credentials in Node; failed or absent credentials remain anonymous. */
   oidc?: boolean;
+  /** Defaults to solid. LWS always uses the optional native platform package. */
+  protocol?: 'solid' | 'lws';
+  /** Use the native server for Solid, including WebSocketChannel2023 notifications. */
+  native?: boolean;
+  /** Native embedded snapshot directory, subject to the binary's backend checks. */
+  data?: string;
 }
 
 export interface SolidHttpServer extends Server {
   closeAsync(): Promise<void>;
 }
 
-/** Start a loopback-only, in-memory local-development server. */
-export function startSolidServer(options?: SolidServerOptions): Promise<SolidHttpServer>;
+/** A native child process with a bound loopback listener. */
+export interface NativeSolidServer {
+  child: ChildProcess;
+  exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+  baseUrl: string;
+  address(): { address: string; family: 'IPv4'; port: number };
+  closeAsync(): Promise<void>;
+}
+
+/** Start a loopback-only local-development server, with ephemeral storage by default. */
+export function startSolidServer(options: SolidServerOptions & ({ protocol: 'lws' } | { native: true })): Promise<NativeSolidServer>;
+export function startSolidServer(options?: SolidServerOptions & { protocol?: 'solid'; native?: false }): Promise<SolidHttpServer>;
+export function startSolidServer(options: SolidServerOptions): Promise<SolidHttpServer | NativeSolidServer>;
 
 export interface SolidPodOptions {
   /** Required: the public pod origin; with no listener there is no port to derive it from. */

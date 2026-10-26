@@ -49,6 +49,11 @@ on:
         required: false
         type: string
         default: ""
+      solid-server-native:
+        description: "Include native Solid/LWS server executables in the release archives."
+        required: false
+        type: boolean
+        default: false
     # sq-toze.25 (GX-11): the `archive`-mode subjects blob for the ISOLATED
     # trusted-builder provenance job in release.yml. The build matrix NEVER signs this — it only
     # publishes the digests of the bytes it uploaded; the signing happens in a separate,
@@ -158,6 +163,14 @@ jobs:
           RUSTFLAGS="$FLAGS" cargo auditable build --release --locked -p sparq-cli --target ${{ matrix.target }}
           RUSTFLAGS="$FLAGS" cargo auditable build --release --locked -p sparq-server --target ${{ matrix.target }}
 
+      - name: Build native Solid/LWS server
+        if: >-
+          inputs.solid-server-native &&
+          contains(fromJSON('["x64-baseline","arm64-linux","x64-darwin","arm64-darwin","win-x64-baseline"]'), matrix.tier)
+        shell: bash
+        # npm selects os/cpu, so these executables use the target's baseline CPU.
+        run: cargo auditable build --release --locked -p sparq-lws-core --features authn-saml --target ${{ matrix.target }}
+
       # ---- archive mode (release.yml): versioned tar.gz/zip + README + LICENSE + CHANGELOG ----
       # sq-v286.6: the per-tier archive now carries BOTH binaries (sparq-cli +
       # sparq-server). The archive name is unchanged (`sparq-cli-<ver>-<tier>`) to keep the
@@ -177,6 +190,9 @@ jobs:
           mkdir -p "pkg/$PKG"
           cp "target/${{ matrix.target }}/release/sparq-cli${{ matrix.ext }}" "pkg/$PKG/"
           cp "target/${{ matrix.target }}/release/sparq-server${{ matrix.ext }}" "pkg/$PKG/"
+          if [ -f "target/${{ matrix.target }}/release/sparq-lws-core${{ matrix.ext }}" ]; then
+            cp "target/${{ matrix.target }}/release/sparq-lws-core${{ matrix.ext }}" "pkg/$PKG/"
+          fi
           cp README.md "pkg/$PKG/"
           # LICENSE is copied when present (license = MIT is declared in Cargo.toml; adding
           # the LICENSE file itself is on the pre-release checklist in docs/release.md).

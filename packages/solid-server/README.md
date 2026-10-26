@@ -2,8 +2,9 @@
 # @sparq-org/solid-server
 
 A local-development [Solid](https://solidproject.org/) LDP + WAC server backed by
-sparq WebAssembly. Node owns the loopback HTTP listener; one long-lived wasm
-`SolidServer` owns the in-memory pod.
+sparq WebAssembly by default, with optional native Solid and LWS modes. Node owns
+the default loopback HTTP listener; one long-lived wasm `SolidServer` owns the
+in-memory pod.
 
 > This v1 package is not a production server. Its default mode treats every
 > request as the configured owner without authentication. Solid-OIDC verification
@@ -44,6 +45,48 @@ const server = await startSolidServer({
 
 Options may also come from `SPARQ_SOLID_PORT` (or `PORT`),
 `SPARQ_SOLID_BASE_URL`, and `SPARQ_SOLID_OWNER_WEBID`.
+
+## Native Solid and LWS modes
+
+```sh
+npx @sparq-org/solid-server --protocol lws --port 3000 --base-url http://127.0.0.1:3000
+npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:3000
+```
+
+`--protocol` accepts `solid` (default) or `lws`. LWS runs the native
+`sparq-lws-core` executable; `--native` selects that executable for Solid mode,
+including WebSocketChannel2023 notifications. The native server keeps its own
+authentication and protocol configuration; see the
+[Solid/LWS server skill](../../skills/solid-lws-server/SKILL.md).
+`ownerWebid` and `oidc` are wasm host options and are rejected in native mode.
+
+npm installs an optional `@sparq-org/solid-server-native-<platform>` package at
+exactly the host version for `linux-x64`, `linux-arm64`, `darwin-x64`,
+`darwin-arm64`, or `win32-x64`. These packages ship their executables without
+lifecycle scripts, so installation with `ignore-scripts=true` works. Resolution
+uses only installed files. A missing platform package produces an error naming
+that package. The CLI forwards SIGINT/SIGTERM and exits with the native process.
+
+Native mode binds loopback and maps `--port` to `SOLID_SERVER_BIND`, and
+`--base-url` to `SOLID_SERVER_BASE_URL`. It inherits the other documented native
+environment settings, with `PSS_SPARQ_BACKEND=memory` as the default. `--data
+<dir>` maps to `PSS_SPARQ_BACKEND=embedded` and `SOLID_SERVER_SPARQ_DIR`; the
+current native binary refuses this durable configuration until its durable
+blob backend is available. It does not turn ephemeral storage into persistence.
+
+The Node API mirrors the CLI:
+
+```js
+const nativeServer = await startSolidServer({
+  protocol: 'lws', // or protocol: 'solid', native: true
+  port: 3000,
+  baseUrl: 'http://127.0.0.1:3000',
+});
+// nativeServer.child is the ChildProcess; nativeServer.exited reports code/signal.
+// nativeServer.address() exposes the listener; await nativeServer.closeAsync() stops it.
+```
+
+The default Solid mode continues to return the existing Node `http.Server`.
 
 ## ✨ Scope
 

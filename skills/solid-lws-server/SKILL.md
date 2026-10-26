@@ -1,6 +1,6 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint, or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint, or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server and the native modes of the `@sparq-org/solid-server` development host."
 license: MIT
 metadata:
   version: "0.1.0"
@@ -17,6 +17,34 @@ separate `@sparq-org/solid-server` loopback development host.
 Query entry points and structural rewrites retain VERSION announcements;
 see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
 or incompatible labels do not silently select REC 2013.
+
+## Start from npm
+
+`@sparq-org/solid-server` keeps its wasm Solid mode by default. Select the native
+executable for LWS or for Solid with WebSocketChannel2023 notifications:
+
+```sh
+npx @sparq-org/solid-server --protocol lws --port 3000 --base-url http://127.0.0.1:3000
+npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:3000
+```
+
+`--protocol` is `solid` by default and also accepts `lws`; LWS always selects the
+native executable. npm supplies optional platform packages for Linux x64/arm64,
+Darwin x64/arm64 and Windows x64, at exactly the host version. They install with
+`ignore-scripts=true`. Runtime resolution uses installed files; a missing
+package is an error naming the required package. Signals reach the native child.
+
+`startSolidServer({ protocol: 'lws', port, baseUrl })` and
+`startSolidServer({ protocol: 'solid', native: true, port, baseUrl })` return a
+handle with `child`, `exited` (a promise of `{ code, signal }`), `address()` and
+`closeAsync()`. Default Solid mode returns the existing Node server. Native mode
+uses the native authentication settings below; wasm `ownerWebid`/`oidc` options
+are rejected. `--port` sets `SOLID_SERVER_BIND=127.0.0.1:<port>`;
+`--base-url` sets `SOLID_SERVER_BASE_URL`. Other native environment settings are
+inherited. `PSS_SPARQ_BACKEND` defaults to `memory`. `--data <dir>` (API: `data`)
+sets `PSS_SPARQ_BACKEND=embedded` and `SOLID_SERVER_SPARQ_DIR=<dir>`; the current
+binary's startup checks refuse this durable configuration pending the durable
+blob backend. Use the default ephemeral backend for local development.
 
 ## Start a local server
 

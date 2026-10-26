@@ -127,6 +127,20 @@ export async function createSolidPod(options = {}) {
 }
 
 export async function startSolidServer(options = {}) {
+  const protocol = options.protocol ?? 'solid';
+  if (!['solid', 'lws'].includes(protocol)) {
+    throw new TypeError('protocol must be solid or lws');
+  }
+  if (options.native !== undefined && typeof options.native !== 'boolean') {
+    throw new TypeError('native must be a boolean');
+  }
+  if (protocol === 'lws' || options.native) {
+    const { startNativeServer } = await import('./native.js');
+    return startNativeServer(options, { normalizePort, normalizeBaseUrl });
+  }
+  if (options.data !== undefined) {
+    throw new TypeError('data requires --native or --protocol lws');
+  }
   const port = normalizePort(options.port);
   const baseUrl = normalizeBaseUrl(options.baseUrl, port);
   const ownerWebid = normalizeOwnerWebid(options.ownerWebid);

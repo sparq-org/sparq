@@ -188,7 +188,12 @@ configure both ceilings with `InMemoryStoreLimits::new(max_total_bytes, max_reso
 `quota()` views. The current JS `SolidServer` constructor uses the bounded Rust defaults and does not
 yet expose per-instance limit options.
 
-`@sparq-org/solid-server` supplies the local Node host. Install and run it with
+`@sparq-org/solid-server` supplies the local Node host. `--protocol lws` selects
+the optional native platform executable, and `--native` selects native Solid
+with WebSocketChannel2023 notifications. The Node API mirrors these through
+`startSolidServer({ protocol: 'lws' })` or `{ native: true }`; see
+[`solid-lws-server`](../solid-lws-server/SKILL.md) for native options and lifecycle.
+Install and run the default wasm mode with
 `npx @sparq-org/solid-server --port 3000 --base-url http://127.0.0.1:3000 --owner-webid
 https://id.example/alice#me`, or import `startSolidServer({ port, baseUrl, ownerWebid })`; it resolves
 to a listening Node `http.Server` with an async `closeAsync()` helper. The listener binds

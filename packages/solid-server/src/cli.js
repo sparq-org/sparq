@@ -12,6 +12,9 @@ Options:
   --port <number>       Loopback listener port (env: SPARQ_SOLID_PORT or PORT)
   --base-url <origin>   Public pod origin (env: SPARQ_SOLID_BASE_URL)
   --owner-webid <url>   Fixed local owner WebID (env: SPARQ_SOLID_OWNER_WEBID)
+  --protocol <mode>     solid (default) or lws (native server)
+  --native              Run Solid mode with the native server and notifications
+  --data <dir>          Pass an embedded snapshot directory to the native server
   -h, --help            Show this help
 `;
 }
@@ -23,6 +26,10 @@ export function parseArgs(argv, defaults = DEFAULT_OPTIONS) {
     if (argument === '-h' || argument === '--help') {
       return { help: true };
     }
+    if (argument === '--native') {
+      options.native = true;
+      continue;
+    }
     const value = argv[index + 1];
     if (value === undefined || value.startsWith('--')) {
       throw new Error(`${argument} requires a value`);
@@ -33,6 +40,10 @@ export function parseArgs(argv, defaults = DEFAULT_OPTIONS) {
       options.baseUrl = value;
     } else if (argument === '--owner-webid') {
       options.ownerWebid = value;
+    } else if (argument === '--protocol') {
+      options.protocol = value;
+    } else if (argument === '--data') {
+      options.data = value;
     } else {
       throw new Error(`unknown option ${argument}`);
     }
