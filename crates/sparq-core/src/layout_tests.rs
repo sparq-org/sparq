@@ -38,6 +38,42 @@ fn store(path: &Path, count: usize) -> Graph {
 }
 
 #[test]
+fn durability_barrier_preserves_open_mapped_files_and_logs() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    Graph::load_dataset(
+        "<http://example/s> <http://example/p> <http://example/o> .\n\
+         <http://example/s> <http://example/p> <http://example/o> <http://example/g0> .",
+        "nquads",
+    )
+    .unwrap()
+    .save(&path)
+    .unwrap();
+    let root = Graph::open(&path).unwrap();
+    let child = path.join("named/0");
+    let files = [
+        path.join("dict-terms.bin"),
+        path.join("wal.log"),
+        child.join("dict-terms.bin"),
+        child.join("wal.log"),
+    ];
+    let before = files.each_ref().map(|file| std::fs::read(file).unwrap());
+    durability_barrier(&path, &[&child]).unwrap();
+    for (file, bytes) in files.iter().zip(before) {
+        assert_eq!(std::fs::read(file).unwrap(), bytes, "{}", file.display());
+    }
+    assert_eq!(root.len(), 1);
+    assert_eq!(root.named_graph(&name("g0")).unwrap().len(), 1);
+
+    let missing = path.join("missing.bin");
+    assert_eq!(
+        fsync_file(&missing).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert!(!missing.exists());
+}
+
+#[test]
 fn detached_child_survives_sibling_create_and_drop() {
     for create in [false, true] {
         let tmp = tempdir().unwrap();

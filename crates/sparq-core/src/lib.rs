@@ -5200,6 +5200,18 @@ pub(crate) fn commit_fresh(w: std::io::BufWriter<FreshFile>) -> std::io::Result<
         .commit()
 }
 
+/// Syncs an existing regular file without creating or truncating it.
+#[cfg(feature = "mmap")]
+fn fsync_file(path: &std::path::Path) -> std::io::Result<()> {
+    // FlushFileBuffers requires write access. Keep the standard sharing flags so files
+    // already open as logs or read-only memory maps can still be synced.
+    #[cfg(windows)]
+    let file = std::fs::OpenOptions::new().write(true).open(path)?;
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path)?;
+    file.sync_all()
+}
+
 /// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. A filesystem that
 /// does not support fsync on a directory handle (`InvalidInput`) counts as done; any other error
 /// is returned.
@@ -5817,7 +5829,7 @@ fn fsync_files_in(dir: &std::path::Path) -> std::io::Result<()> {
                 path.display()
             )));
         }
-        std::fs::File::open(&path)?.sync_all()?;
+        fsync_file(&path)?;
     }
     fsync_dir(dir)
 }
@@ -6796,7 +6808,7 @@ fn fsync_tree(dir: &std::path::Path) -> std::io::Result<()> {
         if entry.file_type()?.is_dir() {
             fsync_tree(&path)?;
         } else if entry.file_type()?.is_file() {
-            std::fs::File::open(&path)?.sync_all()?;
+            fsync_file(&path)?;
         }
     }
     fsync_dir(dir)
@@ -17539,6 +17551,7 @@ mod tests {
             "the other store still has its named graph"
         );
 
+        #[cfg(unix)]
         {
             let named_dir = dir.join(NAMED_SUBDIR);
             std::fs::create_dir_all(&named_dir).unwrap();
@@ -17552,6 +17565,7 @@ mod tests {
             std::fs::remove_file(named_dir.join("7")).unwrap();
         }
 
+        #[cfg(unix)]
         {
             let staged = staging_sibling(&dir.join(NAMED_SUBDIR), "drop-old");
             std::os::unix::fs::symlink(&outside, &staged).unwrap();
