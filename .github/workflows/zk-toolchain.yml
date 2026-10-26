@@ -545,7 +545,16 @@ jobs:
             v2_members_live::live_v2_join_verifies_end_to_end \
             v2_members_live::live_v2_scan_cross_vk_is_refused \
             v2_members_live::live_v2_join_cross_vk_is_refused \
-            v2_members_live::live_opaque_scan_cross_v2_vk_is_refused; do
+            v2_members_live::live_opaque_scan_cross_v2_vk_is_refused \
+            value_filters_live::live_v2_integer_filter_verifies_end_to_end \
+            value_filters_live::live_v2_decimal_filter_verifies_end_to_end \
+            value_filters_live::live_v2_datetime_filter_verifies_end_to_end \
+            value_filters_live::live_v2_double_filter_verifies_end_to_end \
+            value_filters_live::live_v2_boolean_filter_verifies_end_to_end \
+            value_filters_live::live_v2_value_filter_wrong_row_is_refused \
+            value_filters_live::live_v2_value_filter_false_verdict_is_refused \
+            value_filters_live::live_v2_value_filter_different_constant_is_refused \
+            value_filters_live::live_v2_value_filter_crypto_is_reached; do
             echo "::group::$t"
             cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
               -- --ignored --exact --test-threads=1 "$t" 2>&1 | tee "/tmp/dl-e2e-$t.log"
@@ -559,6 +568,41 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Reject the value-proof verification skip mutation (real bb)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          set -euo pipefail
+          cp crates/sparq-zk-compose/src/verifier.rs /tmp/value-gate-verifier.rs
+          trap 'cp /tmp/value-gate-verifier.rs crates/sparq-zk-compose/src/verifier.rs' EXIT
+          python3 - <<'PYMUTATION'
+          from pathlib import Path
+          path = Path("crates/sparq-zk-compose/src/verifier.rs")
+          source = path.read_text()
+          marker = "    for (i, sp) in manifest.sub_proofs.iter().enumerate() {\n        if sp.proof_hex.is_empty() {"
+          if source.count(marker) != 1:
+              raise SystemExit("value verification mutation must match exactly one crypto loop")
+          mutant = marker.replace("        if sp.proof_hex.is_empty() {", "        if crate::dispatch::value_lane_fields(&sp.inputs).is_some() { continue; }\n        if sp.proof_hex.is_empty() {")
+          path.write_text(source.replace(marker, mutant, 1))
+          PYMUTATION
+          set +e
+          cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
+            -- --ignored --exact --test-threads=1 value_filters_live::live_v2_value_filter_crypto_is_reached \
+            2>&1 | tee /tmp/value-gate-bb-skip-mutation.log
+          mutation_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$mutation_status" -eq 0 ]; then
+            echo "FAIL: value-proof verification skip mutation survived" >&2
+            exit 1
+          fi
+          if ! grep -qE '^test result: FAILED\. 0 passed; 1 failed; 0 ignored; 0 measured;' /tmp/value-gate-bb-skip-mutation.log; then
+            echo "FAIL: value-proof mutation did not reach the selected live test" >&2
+            exit 1
+          fi
+          if ! grep -Fq 'bb must reject changed value proof bytes after public input equality passes' /tmp/value-gate-bb-skip-mutation.log; then
+            echo "FAIL: value-proof mutation failed outside the intended assertion" >&2
+            exit 1
+          fi
 
       # The OFF-by-default `extended-fragment` lane's regression cases live INLINE
       # in `src/verifier.rs` (`verifier::fragment_dispatch_tests`), so
