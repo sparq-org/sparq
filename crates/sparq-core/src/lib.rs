@@ -27,6 +27,7 @@ pub mod extsort;
 #[cfg(feature = "iri-fast")]
 pub mod iri;
 pub mod json;
+pub mod meter;
 pub mod net;
 mod nt;
 pub mod percent;

@@ -317,6 +317,26 @@ Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (store-scop
 
 **What one closure charged (`eval_charged`).** Every `ClosureLimits` field is PER CLOSURE and each closure gets it afresh, so a caller running a PIPELINE of closures — `sparq-solid`'s three ACP strata, its five ODRL-bridge strata — may spend each limit once per closure. `eval_charged` returns the closure's `ClosureCharge` (the rows and firings it charged over all its rounds, and the facts its fixpoint held) so such a caller can add them up and cap the aggregate itself. `join_rows` is `None` when `max_total_join_rows` was left at its unbounded default, because nothing is counted then.
 
+**Work ledger.** `sparq_core::meter::{Ledger, Limits, Dim, Exceeded}` supplies reusable,
+explicit accounting; start with `Limits::default()` (`usize::MAX` is unbounded) and
+set fields before `Ledger::new(limits)`. With `compiled-rules`, use
+`n3::compiled::eval_metered(dict, facts, rules, closure_limits, &mut ledger)` or
+`BoundRuleSet::eval_metered(dict, facts, closure_limits, &mut ledger)`. Both return
+`Result<(Vec<[Id; 3]>, ClosureCharge), MeteredError>`. The effective closure caps are
+the smaller of the caller's `max_total_join_rows` / `max_facts` and the ledger's
+remaining `Dim::JoinRows` / `Dim::ClosureFacts`. Success debits the actual charge;
+a refusal debits neither. An unbounded join cap runs as `usize::MAX - 1` so
+`join_rows` is always `Some(actual_rows)`. A strictly narrower ledger cap produces
+`MeteredError::Ledger(Exceeded)`; caller caps (including ties) and other failures
+produce `MeteredError::Closure` with the existing error string. Acceptance matches
+per-closure evaluation followed by checking its charge against the ledger, with
+refusal at the effective cap. Nested closures retain fresh allowances and only
+the top-level charge is debited; the compiled subset currently has no nested
+closure builtin. Dictionary interning is not rolled back on refusal. Existing
+closure entry points retain their behaviour. No production caller uses this
+ledger yet.
+
+
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.
 
 ## RIF-Core rule front-end (opt-in `rif-core` feature, `sparq_reason::rif`)

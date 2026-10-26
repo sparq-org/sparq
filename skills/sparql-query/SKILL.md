@@ -72,6 +72,17 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::meter::{Ledger, Limits, Dim, Exceeded, TermRef}` provides explicit work
+  accounting. `Limits::default()` uses `usize::MAX` as the unbounded sentinel.
+  `charge` refuses without debiting; `Bytes` checks and charges aggregate and current
+  document bytes together; `open_document` resets only document bytes. `term` and
+  `stored_term` size lexical components plus `TERM_NODE_BYTES` per RDF node, refuse
+  terms over `term_bytes`, and walk triple terms iteratively up to
+  `MAX_TRIPLE_DEPTH`. `stored_term` reads dictionary parts and sizes inline integer
+  lexical forms without reconstruction. `mint` charges joined bytes before reserving
+  the string; `reserve` charges before fallible vector reservation and refunds on an
+  allocation failure (`Dim::Alloc`). `enter` / `leave` track current depth.
+  This additive module does not meter existing query or loading entry points.
 - `sparq_core::baseenc::{base58btc_encode, base58btc_encode_into, base58btc_decode, base64url_encode,
   base64url_encode_into, base64url_decode}` are the shared multibase `z` / `u` body codecs; both
   decoders return `Result<Vec<u8>, DecodeError>` and base64url accepts only the one canonical
