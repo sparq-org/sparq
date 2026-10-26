@@ -347,13 +347,14 @@ impl AclIndex {
     /// nearest ancestor container that HAS an ACL governs by `acl:default`. `None` when no
     /// ACL exists anywhere up to the pod root (the resource is un-protected ⇒ the caller
     /// fails closed). The container-prefix walk is exactly the loader's `parent_iri`
-    /// slash-semantics walk, so discovery and materialization can never disagree.
+    /// slash-semantics walk for names admitted by the view's resource caps.
     pub(crate) fn resolve_acl(&self, resource: &str) -> Option<EffectiveAcl> {
         if self.control.is_empty() {
             return None;
         }
         // Count in a linear borrowed walk, then skip prefixes deeper than any
-        // admitted target. Even an unenumerated request keeps bounded hash work.
+        // admitted target. There is at most one own-target lookup plus as many
+        // ancestor lookups as the view's container-depth cap permits.
         let mut depth = parent_iris(resource).count();
         // Own ACL → accessTo scope.
         if let Some(acl) = (depth <= self.max_target_depth)
@@ -731,6 +732,46 @@ mod tests {
                         <= budget.max_resource_path_depth * budget.max_resource_iri_bytes
                 );
             }
+        }
+    }
+
+    #[test]
+    fn acl_resolution_counts_the_own_target_with_custom_depth_caps() {
+        use std::sync::atomic::Ordering;
+        for depth in [0, 1, 2, 64] {
+            let mut budget = crate::default_auth_budget();
+            budget.max_resource_iri_bytes = 256;
+            budget.max_resource_path_depth = depth;
+            // A long authority keeps even the root probe near the byte cap.
+            let root = format!("https://{}/", "h".repeat(256 - 2 * depth - 9));
+            let resource = format!("{root}{}", "a/".repeat(depth));
+            assert_eq!(resource.len(), budget.max_resource_iri_bytes);
+            let mut g = Graph::default();
+            // The other target admits probes at every depth without matching.
+            for target in [&root, &resource.replace('h', "j")] {
+                g.add_named(
+                    Term::NamedNode(NamedNode::new_unchecked(format!("{target}.acl"))),
+                    Graph::default(),
+                )
+                .unwrap();
+            }
+            let ix = AclIndex::build(&g, budget);
+            let effective = ix.resolve_acl(&resource).unwrap();
+            assert_eq!(effective.acl.as_str(), format!("{root}.acl"));
+            assert_eq!(
+                effective.scope,
+                if depth == 0 {
+                    AclScope::AccessTo
+                } else {
+                    AclScope::Default
+                }
+            );
+            // Independently total the full borrowed keys presented to the table,
+            // including the resource itself and its ancestor containers.
+            let expected_bytes = (0..=depth).map(|d| root.len() + 2 * d).sum::<usize>();
+            let bytes = ix.lookup_bytes.load(Ordering::Relaxed);
+            assert_eq!(bytes, expected_bytes);
+            assert!(bytes <= (depth + 1) * budget.max_resource_iri_bytes);
         }
     }
 

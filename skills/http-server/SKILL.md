@@ -1481,7 +1481,10 @@ Stateful cache-hit decisions and `WAC-Allow` calculation run inline on the async
 without a build claim. ACL targets are indexed once per view; targets longer than
 `max_resource_iri_bytes` or deeper than `max_resource_path_depth` are omitted. Each
 borrowed ancestor-prefix lookup hashes at most the byte cap; prefixes deeper than the
-indexed targets are skipped. The ancestor walks scan the request resource linearly.
+indexed targets are skipped. Resolution includes the resource's own target plus at most
+`max_resource_path_depth` ancestor probes, bounding the total lookup-key bytes by
+`(max_resource_path_depth + 1) * max_resource_iri_bytes`, including a zero depth cap.
+This counts keys submitted to the hash table. The ancestor walks scan the request resource linearly.
 Cache-hit queries use a blocking worker so the handler can
 bound their await; they also claim no build slot. A saturated build pool therefore keeps
 serving cached requests. A stateless or cache-miss query holds its build permit through

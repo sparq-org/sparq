@@ -1119,7 +1119,7 @@ impl PodStore {
     }
 
     /// The single re-index seam (`self.auth` is assigned NOWHERE else — the #1577 sweep).
-    /// Rebuilds the auth view + drops the persistent structural ACL index in lock-step, and
+    /// Rebuilds the auth view and persistent structural ACL index in lock-step, and
     /// invalidates the session cache at `scope`:
     ///
     /// - [`ReindexScope::Full`] clears every session's cached set (a change that could touch
