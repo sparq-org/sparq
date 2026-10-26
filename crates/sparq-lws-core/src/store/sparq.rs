@@ -173,6 +173,7 @@ pub trait SparqClient: Send + Sync {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         let previous = match self.get_meta(iri).await {
             Ok(m) => Some(m),
             Err(SparqError::NotFound) => None,
@@ -281,6 +282,22 @@ pub trait SparqClient: Send + Sync {
     /// `Store::call_timeout`). The default is [`crate::store::STORE_CALL_TIMEOUT`].
     fn call_timeout(&self) -> std::time::Duration {
         crate::store::STORE_CALL_TIMEOUT
+    }
+
+    /// Reset a marker under the running service's lifecycle lease.
+    ///
+    /// # Errors
+    /// Refuses by default; clients supporting resets write the marker in one operation.
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        let _ = (iri, value, lease);
+        Err(SparqError::Backend(
+            "this index cannot reset markers".into(),
+        ))
     }
 
     /// Raise the time stored as a marker under `iri` to `value`, unless a later one is stored,
@@ -569,6 +586,18 @@ pub(crate) fn max_rows(container: &str, max_bytes: usize) -> usize {
     max_bytes / (container.len() + 1)
 }
 
+impl InMemorySparqClient {
+    async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        self.admit_resource(&guard, iri)?;
+        guard.meta.insert(iri.to_string(), meta);
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl SparqClient for InMemorySparqClient {
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
@@ -580,13 +609,18 @@ impl SparqClient for InMemorySparqClient {
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        self.admit_resource(&guard, iri)?;
-        guard.meta.insert(iri.to_string(), meta);
-        Ok(())
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        self.put_meta_unchecked(iri, meta).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        _: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
+            .await
     }
 
     async fn replace_meta(
@@ -594,6 +628,7 @@ impl SparqClient for InMemorySparqClient {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // One step under the single lock: the returned record is exactly the one this insert replaced.
         let mut guard = self
             .inner
@@ -662,6 +697,7 @@ impl SparqClient for InMemorySparqClient {
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         let mut guard = self
             .inner
             .lock()
@@ -682,6 +718,7 @@ impl SparqClient for InMemorySparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let mut guard = self
             .inner
             .lock()
@@ -721,6 +758,7 @@ impl SparqClient for InMemorySparqClient {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let mut guard = self
             .inner
             .lock()
@@ -741,6 +779,7 @@ impl SparqClient for InMemorySparqClient {
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let mut guard = self
             .inner
             .lock()
@@ -815,6 +854,13 @@ impl SparqClient for InMemorySparqClient {
                 .map(|c| (c.clone(), guard.meta.get(c).map(|m| m.etag.clone())))
                 .collect(),
         })
+    }
+}
+
+#[cfg(test)]
+impl InMemorySparqClient {
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, marker_meta(value)).await
     }
 }
 
@@ -918,10 +964,11 @@ mod tests {
         index.raise_marker(a, 1).await.unwrap();
         index.raise_marker(b, 1).await.unwrap();
         assert_eq!(pooled(&index), 1);
-        index.delete_meta(a).await.unwrap();
+        // Exercise internal accounting for a legacy marker removal; public mutators refuse it.
+        index.inner.lock().unwrap().meta.remove(a);
         index.raise_marker(b, 2).await.unwrap();
         assert_eq!(pooled(&index), 1, "moved into the slot");
-        index.delete_meta(b).await.unwrap();
+        index.inner.lock().unwrap().meta.remove(b);
         assert_eq!(pooled(&index), 0);
         // The pool's two places are both free again, and the slot takes a new marker apart.
         for at in ["x", "y"] {

@@ -392,12 +392,11 @@ pub trait Store: Send + Sync {
         STORE_CALL_TIMEOUT
     }
 
-    /// The lease every handle to this backend shares, when it keeps one: a service built over
-    /// it takes the lease for as long as it runs. The default is none (each service built over
-    /// such a store takes a lease of its own).
-    fn lifecycle(&self) -> Option<std::sync::Arc<Lifecycle>> {
-        None
-    }
+    /// The lease shared by every handle to this backend.
+    ///
+    /// Implementations retain one lease; wrappers forward their inner store's lease and
+    /// clones return the same `Arc`. A service acquires it before any backend work.
+    fn lifecycle(&self) -> std::sync::Arc<Lifecycle>;
 
     /// Raise the time stored under `iri` to `value`, unless a later one is stored, in one
     /// indivisible step under the index's own write lock, and return the time stored once it is
@@ -511,17 +510,30 @@ pub const READ_RACE_RETRIES: usize = 3;
 /// The default [`Store`]: SPARQ (authoritative metadata) + a blob store (backup bytes), with a
 /// [`BodyCache`] (read-4 — `backend-read-path.md` §3.4) in front of the blob byte-fetch.
 pub struct CompositeStore<S: SparqClient, B: BlobStore> {
-    sparq: S,
-    blob: B,
+    sparq: std::sync::Arc<S>,
+    blob: std::sync::Arc<B>,
+    lifecycle: std::sync::Arc<Lifecycle>,
     /// The `(blob_key, etag)`-keyed blob-body LRU (read-4). Every lookup is keyed with THIS
     /// request's authoritative index metadata, so a hit is provably the bytes that metadata
     /// committed with — never stale, never an authz surface (see [`body_cache`]'s module docs).
-    body_cache: BodyCache,
+    body_cache: std::sync::Arc<BodyCache>,
     /// The holds ([`Store::hold`]) taken through this instance and not yet released, counted by
     /// the blob key they hold: bytes this names are held, without asking the index. Bytes it does
     /// not name may still be held, through another instance over the same backends, so whether
     /// they are is then asked of the index (see [`CompositeStore::reclaim_blob`]).
-    holding: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    holding: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+impl<S: SparqClient, B: BlobStore> Clone for CompositeStore<S, B> {
+    fn clone(&self) -> Self {
+        Self {
+            sparq: self.sparq.clone(),
+            blob: self.blob.clone(),
+            lifecycle: self.lifecycle.clone(),
+            body_cache: self.body_cache.clone(),
+            holding: self.holding.clone(),
+        }
+    }
 }
 
 /// The container every hold's record is a member of ([`Store::hold`]): outside every storage (a
@@ -563,9 +575,10 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// `SOLID_SERVER_BODY_CACHE_MAX_ENTRY_BYTES` boot wiring, or a disabled sentinel in tests).
     pub fn with_body_cache(sparq: S, blob: B, body_cache: BodyCache) -> Self {
         Self {
-            sparq,
-            blob,
-            body_cache,
+            sparq: std::sync::Arc::new(sparq),
+            blob: std::sync::Arc::new(blob),
+            body_cache: std::sync::Arc::new(body_cache),
+            lifecycle: Default::default(),
             holding: Default::default(),
         }
     }
@@ -824,19 +837,18 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     }
 }
 
+#[cfg(test)]
+impl
+    CompositeStore<CountingSparqClient<InMemorySparqClient>, CountingBlobStore<InMemoryBlobStore>>
+{
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
+        self.sparq.plant_marker(iri, value).await.expect("planted");
+    }
+}
+
 // The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
-    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
-    /// plants to stand for an earlier, or a damaged, one.
-    #[cfg(test)]
-    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
-        self.sparq
-            .put_meta(iri, sparq::marker_meta(value))
-            .await
-            .expect("planted");
-    }
-
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
     pub fn in_memory_with_limits(limits: InMemoryStoreLimits) -> Self {
         Self::new(
@@ -887,6 +899,10 @@ fn refuse_marker(iris: &[Option<&str>]) -> ServerResult<()> {
 
 #[async_trait]
 impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
+    fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
+        self.lifecycle.clone()
+    }
+
     async fn read(&self, iri: &str) -> ServerResult<Resource> {
         // Authoritative existence + metadata FIRST (SPARQ), then fetch the bytes it points at —
         // through the read-4 body cache, keyed by THIS lookup's authoritative `(blob_key, etag)`
@@ -1299,7 +1315,12 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .map_err(marker_error)
     }
 
-    async fn reset_marker(&self, iri: &str, value: i64, _: &LifecycleGuard) -> ServerResult<()> {
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &LifecycleGuard,
+    ) -> ServerResult<()> {
         if !self.sparq.raises_markers() {
             return Err(ServerError::Storage(
                 "this store cannot raise a marker atomically".into(),
@@ -1307,7 +1328,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         }
         // One record put: the index admits a marker's record apart from every ceiling.
         self.sparq
-            .put_meta(iri, sparq::marker_meta(&value.to_string()))
+            .reset_marker(iri, value, lease)
             .await
             .map_err(marker_error)
     }
@@ -2254,5 +2275,83 @@ mod tests {
             .build()
             .expect("test runtime")
             .block_on(f)
+    }
+    /// Every raw mutator refuses either marker operand before touching its backend.
+    async fn check_raw_mutators_refuse_a_marker(client: &impl SparqClient) {
+        let refused = |r: Result<(), SparqError>| {
+            assert!(
+                matches!(r, Err(SparqError::Backend(ref e)) if e == "service markers require the lifecycle lease"),
+                "{r:?}"
+            );
+        };
+        refused(client.put_meta(MARKER, lower()).await);
+        refused(client.replace_meta(MARKER, lower()).await.map(|_| ()));
+        refused(client.delete_meta(MARKER).await);
+        for (iri, parent) in [(MARKER, None), (MARKER_CONTAINER, Some(MARKER))] {
+            refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
+        }
+        for (container, child) in [(MARKER, MARKER_CONTAINER), (MARKER_CONTAINER, MARKER)] {
+            refused(client.create_child(container, child, lower()).await);
+            refused(client.remove_child(container, child).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_mutators_refuse_a_marker_in_memory() {
+        let client = InMemorySparqClient::new();
+        client.raise_marker(MARKER, 7).await.unwrap();
+        check_raw_mutators_refuse_a_marker(&client).await;
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "7");
+        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        client.reset_marker(MARKER, 2, &lease).await.unwrap();
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn raw_mutators_refuse_a_marker_embedded() {
+        let client = EmbeddedSparqClient::in_memory().unwrap();
+        client.raise_marker(MARKER, 7).await.unwrap();
+        let before = client.engine_round_trips();
+        check_raw_mutators_refuse_a_marker(&client).await;
+        assert_eq!(
+            client.engine_round_trips(),
+            before,
+            "refusal reached the engine"
+        );
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "7");
+        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        client.reset_marker(MARKER, 2, &lease).await.unwrap();
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn raw_mutators_refuse_a_marker_http() {
+        // A backend that cannot be reached: only the fixed local refusal may answer.
+        let client = HttpSparqClient::new("http://127.0.0.1:1/sparql");
+        check_raw_mutators_refuse_a_marker(&client).await;
+    }
+
+    #[tokio::test]
+    async fn two_states_over_one_composite_store_are_refused() {
+        let counters = std::sync::Arc::new(BackendCounters::default());
+        let store = CompositeStore::new(
+            CountingSparqClient::new(InMemorySparqClient::new(), counters.clone()),
+            CountingBlobStore::new(InMemoryBlobStore::new(), counters.clone()),
+        );
+        let mut cfg = crate::lws::LwsConfig::new("https://pod.example");
+        cfg.open = true;
+        let first = crate::lws::LwsState::new(store.clone(), cfg.clone())
+            .await
+            .unwrap();
+        first.notify.pause_sweeper();
+        counters.take_methods();
+        assert!(crate::lws::LwsState::new(store.clone(), cfg.clone())
+            .await
+            .is_err());
+        assert!(counters.take_methods().is_empty());
+        drop(first);
+        assert!(crate::lws::LwsState::new(store, cfg).await.is_ok());
     }
 }

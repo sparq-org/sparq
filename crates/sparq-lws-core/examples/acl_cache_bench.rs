@@ -60,6 +60,10 @@ impl<S: Store> CountingStore<S> {
 
 #[async_trait]
 impl<S: Store> Store for CountingStore<S> {
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     async fn read(&self, iri: &str) -> ServerResult<Resource> {
         self.reads.fetch_add(1, Ordering::Relaxed);
         self.inner.read(iri).await

@@ -234,7 +234,9 @@ curl -i -X POST \
 collision-resistant child IRI below a container, `PATCH` accepts supported
 Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
-conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
+conditional mutations. Every `If-Match` or `If-None-Match` field, including a bare `*`,
+requires the target's read permission (`Control` for an ACL document).
+`If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
 listing can change without moving their recorded time. `If-Modified-Since` on a
@@ -420,18 +422,21 @@ before the state (or its store) is handed out, so no request is in flight: it re
 subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
 the mark; construction fails, the mark unchanged, while any of them is still stored (start again
 once it can be removed). An `LwsState` holds a lease (`store::Lifecycle`) for as long as it
-lives, and the lease is per store handle: it is shared by every clone of `LwsState::store` and by
-any `Tracked` wrapper of one (`Tracked::new` takes its inner store's lease and offers no other), so
-a second `LwsState` built in the same process over a clone or a wrapper of a running one's store
-is refused, and only the holder may lower the mark (`Store::reset_marker` takes the lease's guard,
-which only this crate makes). It is not exclusion per backend: a store opened again separately
-over the same backend, or wrapped by a `Store` implementation that does not forward
-`Store::lifecycle`, has a lease of its own. A state that replaces another must be built after the
+lives. Every `Store` must keep and return one lease through the required
+`Store::lifecycle() -> Arc<Lifecycle>` method; wrappers forward their inner store's lease.
+`CompositeStore` clones share their backend handles, cache, holds and lease. Every clone of
+`LwsState::store` and every `Tracked` wrapper shares that lease too, so a second `LwsState`
+built over any of them is refused before backend work. Only the holder may lower the mark
+(`Store::reset_marker` and `SparqClient::reset_marker` take its guard, which only this crate
+makes). Separately opening the same backend still creates a separate in-process lease.
+A state that replaces another must be built after the
 old one is dropped. Running a second process over the same store directory is unsupported, and
 nothing at this release keeps one out. The mark changes only through `Store::raise_marker` and
 `Store::reset_marker`: the generic mutators of the store (`write`, `create_in_container`,
 `restore`, `hold`, `reinstate`, `delete`, `delete_container_if_empty`) refuse an IRI shaped like
-the mark (`ServerError::Forbidden`). A create whose
+the mark (`ServerError::Forbidden`). The raw index mutators also refuse every marker operand,
+including either containment operand and the parent of an empty-container removal, with a fixed
+backend error before backend work. A create whose
 purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
 its listing locks are held, a subscription create takes the mark's raise lock and checks again
 that the service is not halted and that its expiry is after both the clock and the stored mark
@@ -812,14 +817,12 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. A bare `*` asks only whether the target exists and needs no Read: a writer learns
-  that much from any write's response (`201` or `204`, a `DELETE`'s `404`). The Read check comes
-  first, before the target's existence, format or metadata decide anything, and an
-  `If-Unmodified-Since` counts as a comparison on every route that evaluates dates, whether or not
-  the target has a recorded time. A
-  precondition that compares no state (`*`, or a field the write ignores or cannot read) is
-  evaluated on the target's existence alone, without its listing, so neither a page past the last
-  nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
+  outcome would have been. Any `If-Match` or `If-None-Match` field, including a bare `*`,
+  requires Read on a resource. The Read check comes before authorization waits, existence,
+  metadata and format lookups. `If-Unmodified-Since` requires Read when the route evaluates
+  the date. A bare `*` can still avoid generating a listing after Read is granted. Service
+  containers (grants, requests and subscriptions) retain their existence-only `*` handling.
+  A conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
   that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
@@ -831,6 +834,29 @@ What the server exposes, all discoverable from the storage description
   subscriber's subscription listing, and its `ETag`, change only with its own subscriptions, and
   are read through a per-subscriber index, so neither what it is shown nor the work taken to
   show it grows with how many subscriptions anyone else holds.
+- Access grant/request IDs owned by someone else answer exactly like absent IDs for every
+  method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
+  a borrowed record; only a match is cloned. Subscription lookups do the same.
+- Unconditional LWS data-resource `DELETE` by a caller allowed Delete but denied Read answers `204` for
+  both present and absent targets. An absent delete changes and announces nothing. A caller
+  with Read retains `404` for an absent target. Container deletion still requires Read.
+- Authorization computes applicable grant policies in memory first. With no applicable policy,
+  an anonymous caller is denied without reading resource metadata. An authenticated caller's
+  creator check parses only creator and pending; full metadata is parsed only for a policy.
+  Residual backend work: an absent creator record costs one index lookup, while a present
+  `.meta` record can also fetch its bytes. Keeping creator in the index row is deferred.
+- Conformance-pinned residuals remain explicit:
+  - LDP PUT returns `201` with Location for creation versus `204` for replacement:
+    RFC 9110 section 9.3.4 and CTH `web-access-control/protected-operation/write-access-bob.feature`,
+    "Bob can PUT fictive W inherited [201]".
+  - POST into an existing unreadable container returns `201`; an absent container is refused.
+    CTH `write-access-bob.feature`, "Bob can POST container no A", and Touchstone
+    `core/data_resources#create-in-missing-container-404` pin this split. LWS create has the
+    same split (an authorized absent parent is `404`).
+  - LDP DELETE retains absent `401`/`403` versus present `204`: CTH `write-access-bob.feature`,
+    "Bob cannot DELETE fictive W inherited [403]" and "Bob can DELETE plain W inherited".
+  - LDP insert-only PATCH status remains deferred to the later brief.
+
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link

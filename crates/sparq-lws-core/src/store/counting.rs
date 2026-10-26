@@ -56,6 +56,9 @@ use super::sparq::{DeleteOutcome, ReadPlan, ResourceMeta, SparqClient, SparqErro
 /// `Arc` and diffs [`snapshot`](BackendCounters::snapshot)s around one operation.
 #[derive(Debug, Default)]
 pub struct BackendCounters {
+    #[cfg(test)]
+    methods: Mutex<Vec<&'static str>>,
+
     /// SPARQL Protocol **query** requests (SELECT / ASK / CONSTRUCT) the live client would issue.
     sparql_queries: AtomicU64,
     /// SPARQL Protocol **update** requests.
@@ -141,6 +144,20 @@ impl CounterSnapshot {
 }
 
 impl BackendCounters {
+    #[cfg(test)]
+    fn record_method(&self, method: &'static str) {
+        self.methods.lock().expect("methods lock").push(method);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_methods(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for method in std::mem::take(&mut *self.methods.lock().expect("methods lock")) {
+            *counts.entry(method).or_default() += 1;
+        }
+        counts
+    }
+
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -296,13 +313,30 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.reset_marker");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.inner.reset_marker(iri, value, lease).await
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.get_meta");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.get_meta(iri).await
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.put_meta");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.put_meta(iri, meta).await
@@ -313,6 +347,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.replace_meta");
         let _g = self.counters.op_guard();
         // The live client has no atomic replace: it pays the trait default's metadata SELECT plus
         // the upsert UPDATE. Forwarded to `inner` so a wrapped atomic override still answers.
@@ -322,12 +358,16 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.exists");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.exists(iri).await
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.begin_reclaim");
         let _g = self.counters.op_guard();
         // The live client: the guarded update, then the ASK that reads it back.
         self.counters.count_update();
@@ -336,18 +376,24 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.end_reclaim");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.end_reclaim(blob_key).await
     }
 
     async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.reclaiming");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.reclaiming().await
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.delete_meta");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.delete_meta(iri).await
@@ -358,6 +404,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.delete_meta_if_empty");
         let _g = self.counters.op_guard();
         // The live client: 1 guarded update, then the marker ASK; a non-Deleted outcome needs the
         // second (exists) ASK to split NotEmpty from NotFound.
@@ -378,6 +426,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.create_child");
         let _g = self.counters.op_guard();
         // The live client: 1 guarded update + 1 create-marker ASK (issued for BOTH the created and
         // the container-missing outcome — the ASK is how NotFound is learned).
@@ -387,12 +437,16 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.remove_child");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.remove_child(container, child).await
     }
 
     async fn fence(&self, fence: &super::sparq::Fence) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.fence");
         // The live client: one update (the fence).
         let _g = self.counters.op_guard();
         self.counters.count_update();
@@ -408,6 +462,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.raise_marker");
         // One update: the read and the write are one step.
         let _g = self.counters.op_guard();
         self.counters.count_update();
@@ -415,6 +471,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.list_children");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.list_children(container).await
@@ -425,12 +483,16 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         container: &str,
         max_bytes: usize,
     ) -> Result<Option<Vec<String>>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.list_children_within");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.list_children_within(container, max_bytes).await
     }
 
     async fn referenced_blob_keys(&self) -> Result<HashSet<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.referenced_blob_keys");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.referenced_blob_keys().await
@@ -441,6 +503,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         target: &str,
         acl_candidates: &[String],
     ) -> Result<ReadPlan, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.read_plan");
         let _g = self.counters.op_guard();
         // ONE combined SELECT on the live client (§3.1) — the read-2 win this decorator exists to
         // evidence. Forwarded to `inner` (never the default loop), so the wrapped client's
@@ -466,36 +530,48 @@ impl<B: BlobStore> CountingBlobStore<B> {
 #[async_trait]
 impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.get");
         let _g = self.counters.op_guard();
         self.counters.blob_gets.fetch_add(1, Ordering::Relaxed);
         self.inner.get(key).await
     }
 
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.put");
         let _g = self.counters.op_guard();
         self.counters.blob_puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put(key, body).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.exists");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.exists(key).await
     }
 
     async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.delete");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.delete(key).await
     }
 
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.list");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.list().await
     }
 
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.stat");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.stat(key).await
@@ -506,11 +582,20 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
         key: &str,
         expected_generation: u64,
     ) -> Result<bool, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.delete_if_unchanged");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner
             .delete_if_unchanged(key, expected_generation)
             .await
+    }
+}
+
+#[cfg(test)]
+impl CountingSparqClient<super::InMemorySparqClient> {
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) -> Result<(), SparqError> {
+        self.inner.plant_marker(iri, value).await
     }
 }
 

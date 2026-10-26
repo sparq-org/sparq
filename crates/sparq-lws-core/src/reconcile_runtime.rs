@@ -107,6 +107,15 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.call_timeout()
     }
 
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.0.reset_marker(iri, value, lease).await
+    }
+
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
         self.0.raise_marker(iri, value).await
     }

@@ -390,6 +390,7 @@ mod tests {
 
     /// The server started again over the same store, as after a process stop.
     async fn restart(store: &FlakyStore) -> LwsState<FlakyStore> {
+        super::super::test_store::wait_for_stop(store).await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
@@ -583,12 +584,13 @@ mod tests {
             .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
             .await
             .unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         assert_eq!(intents_left(&st).await, 1);
         assert_ne!(
             snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
             before
         );
+        drop(st);
         let st = restart(&store).await;
         assert_eq!(
             snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
@@ -628,8 +630,9 @@ mod tests {
         }
         journal.remove_member(&m, Some(&c)).await.unwrap();
         journal.delete_meta(&m).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         assert_ne!(snapshot(&st, &store, &all, &listings).await, before);
+        drop(st);
         let st = restart(&store).await;
         assert_eq!(snapshot(&st, &store, &all, &listings).await, before);
         assert_eq!(intents_left(&st).await, 0);
@@ -645,8 +648,9 @@ mod tests {
         let mut journal = st.journal();
         journal.stage(&d).await.unwrap();
         journal.stage(&meta_key(&d)).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         assert!(!st.store.holds().await.unwrap().is_empty());
+        drop(st);
         let st = restart(&store).await;
         assert!(st.store.holds().await.unwrap().is_empty());
         let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
@@ -662,7 +666,7 @@ mod tests {
             let (st, store, d, _) = typed_doc().await;
             let mut journal = st.journal();
             journal.stage(&d).await.unwrap();
-            std::mem::forget(journal);
+            journal.abandon();
             let held = st.store.holds().await.unwrap();
             assert_eq!(held.len(), 1);
             // Its intent stored as kept, naming only a container to touch.
@@ -671,6 +675,7 @@ mod tests {
                 .await
                 .unwrap();
             store.fail_release.store(failing, Ordering::SeqCst);
+            drop(st);
             let st = restart(&store).await;
             store.fail_release.store(false, Ordering::SeqCst);
             if failing {
@@ -688,13 +693,14 @@ mod tests {
         let (st, store, d, _) = typed_doc().await;
         let mut journal = st.journal();
         journal.stage(&d).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         let held = st.store.holds().await.unwrap();
         assert_eq!(held.len(), 1);
         (store, held[0].0.clone(), d)
     }
 
     async fn start(store: &FlakyStore) -> Result<LwsState<FlakyStore>, String> {
+        super::super::test_store::wait_for_stop(store).await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         LwsState::new(store.clone(), cfg).await
@@ -717,6 +723,7 @@ mod tests {
         let refused = start(&store).await.err().expect("refused");
         assert!(refused.contains("cannot be listed"), "{refused}");
         assert_eq!(store.holds().await.unwrap().len(), 1);
+        drop(st);
         let st = restart(&store).await;
         assert!(st.store.holds().await.unwrap().is_empty());
     }
@@ -769,13 +776,14 @@ mod tests {
         st.release_later("urn:x", &meta);
         assert_eq!(st.dropped_releases(), 1);
         // A start's sweep with the list full: a hold left again, whose release fails.
+        drop(st);
         let st = restart(&store).await;
         for _ in 0..super::super::UNRELEASED_LIMIT {
             st.release_later("urn:x", &meta);
         }
         let mut journal = st.journal();
         journal.stage(&d).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         store.fail_release.store(true, Ordering::SeqCst);
         let refused = recover(&st).await.err().expect("refused");
         assert!(refused.contains("cannot be released"), "{refused}");
@@ -788,15 +796,18 @@ mod tests {
         let (st, store, d, _) = typed_doc().await;
         let mut journal = st.journal();
         journal.stage(&d).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         let mut cfg = LwsConfig::new("http://localhost:3001");
         cfg.open = true;
+        drop(st);
+        super::super::test_store::wait_for_stop(&store).await;
         let other = LwsState::new(store.clone(), cfg).await.expect("starts");
         assert_eq!(
             other.store.holds().await.unwrap().len(),
             1,
             "swept another's"
         );
+        drop(other);
         let st = restart(&store).await;
         assert!(st.store.holds().await.unwrap().is_empty());
     }
@@ -829,6 +840,7 @@ mod tests {
             .write(&d, Bytes::from_static(b"<> a <urn:b> ."), "text/turtle")
             .await
             .unwrap();
+        drop(st);
         let st = restart(&store).await;
         let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
         assert_eq!(after, before);
@@ -851,10 +863,11 @@ mod tests {
         journal.stage(&meta_key(&d)).await.unwrap();
         meta.pending = false;
         journal.write_meta(&d, &meta).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         assert_eq!(st.store.holds().await.unwrap().len(), 2);
         // Putting it back fails at start: it is set aside, and put back in the background.
         *store.fail_restore_of.lock().unwrap() = Some(meta_key(&d));
+        drop(st);
         let st = restart(&store).await;
         *store.fail_restore_of.lock().unwrap() = None;
         until(&st, "put back", |st| st.visible(&d)).await;
@@ -886,6 +899,7 @@ mod tests {
         // The process stops; the store is well again by the next start.
         *store.fail_write_of.lock().unwrap() = None;
         *store.fail_restore_of.lock().unwrap() = None;
+        drop(st);
         let st = restart(&store).await;
         assert_eq!(
             snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
@@ -962,6 +976,7 @@ mod tests {
         // Kept, and the process stops before the touch.
         assert!(journal.commit(Some(&c)).await.is_ok());
         assert_eq!(intents_left(&st).await, 1);
+        drop(st);
         let st = restart(&store).await;
         assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
         assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
@@ -1014,6 +1029,7 @@ mod tests {
         *store.fail_after_write_of.lock().unwrap() = None;
         assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
         // A stop before the touch: the next start touches the container.
+        drop(st);
         let st = restart(&store).await;
         assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
         assert!(!st.store.exists(&m).await.unwrap());
@@ -1039,6 +1055,7 @@ mod tests {
         *store.fail_after_write_of.lock().unwrap() = None;
         *store.fail_read_of.lock().unwrap() = None;
         drop(left);
+        drop(st);
         let st = restart(&store).await;
         assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
         assert_eq!(intents_left(&st).await, 0);
@@ -1084,7 +1101,8 @@ mod tests {
         let mut meta = st.resource_meta(&c).await.unwrap();
         meta.pending = true;
         journal.write_meta(&c, &meta).await.unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
+        drop(st);
         let st = restart(&store).await;
         assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
         assert_eq!(intents_left(&st).await, 0);
@@ -1120,8 +1138,9 @@ mod tests {
             .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
             .await
             .unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         *store.fail_restore_of.lock().unwrap() = Some(d.clone());
+        drop(st);
         let st = restart(&store).await;
         assert!(st.is_untouched(&root), "the touch waits");
         // The change set aside still needs what it held: the start's sweep leaves it.
@@ -1194,7 +1213,7 @@ mod tests {
                 .await
                 .unwrap();
             let restores = super::super::Unsettled::new(std::mem::take(&mut journal.undo));
-            std::mem::forget(journal);
+            journal.abandon();
             // A kept change owing `/c/` a touch, as a start leaves it.
             let record = mint(&st.cfg.storage());
             store(&st, &record, false, &[], std::slice::from_ref(&c))
@@ -1245,7 +1264,7 @@ mod tests {
             .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
             .await
             .unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         *store.fail_restore_of.lock().unwrap() = Some(d.clone());
         let h = [("content-type", "text/turtle")];
         let bad = mint(&st.cfg.storage());
@@ -1288,6 +1307,7 @@ mod tests {
         assert_eq!(intents_left(&st).await, 0);
         let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
         assert_ne!(after, before);
+        drop(st);
         let st = restart(&store).await;
         assert_eq!(
             snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
@@ -1312,6 +1332,8 @@ mod tests {
             .unwrap();
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
+        drop(st);
+        super::super::test_store::wait_for_stop(&store).await;
         let err = LwsState::new(store.clone(), cfg)
             .await
             .err()

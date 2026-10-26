@@ -440,6 +440,10 @@ mod wasm_store {
 
     #[async_trait]
     impl<S: Store> Store for PersistentStore<S> {
+        fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+            self.inner.lifecycle()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             self.inner.read(iri).await
         }

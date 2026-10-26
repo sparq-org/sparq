@@ -156,6 +156,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-lws-core:** resource writes require Read for every `If-Match` or
+  `If-None-Match` field, including bare `*`. LWS service containers retain their
+  existence-only handling. `Store::lifecycle` is required and returns `Arc<Lifecycle>`;
+  `CompositeStore` clones share it.
+
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
   that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
@@ -762,6 +767,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
+  subscription lookups clone only owned records. A nonreader's authorized unconditional LWS data DELETE
+  returns `204` even when absent. Unsupported resource-linkset methods return `405` before
+  backend reads. Anonymous grant denials skip metadata reads, creator-only checks ignore
+  unrelated metadata, and raw index mutations refuse service-marker operands; marker resets
+  require a lifecycle guard.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a
