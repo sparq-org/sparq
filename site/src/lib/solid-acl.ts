@@ -11,7 +11,7 @@
 // (which graphs are authorized) is the materialized `sparq-solid` output, precomputed at
 // build time per the honesty framing; the RESTRICTION is the real SPARQL engine.
 
-import { termToNTriples, tokenizeSparql } from "@sparq/client";
+import { termToNTriples } from "@sparq/client";
 
 /** Guaranteed-absent graph used when a session has no authorized graphs (fail-closed). */
 export const NOTHING_SENTINEL = "urn:sparq:nothing";
@@ -39,26 +39,55 @@ export function rewriteForGraphs(sparql: string, allowed: string[]): string {
     return `${sparql}\n${fromNamed}`;
   }
   const prefix = sparql.slice(0, whereIdx);
-  return `${prefix}${/\s$/.test(prefix) ? "" : "\n"}${fromNamed}\n${sparql.slice(whereIdx)}`;
+  return `${prefix}${/[ \t\r\n]$/.test(prefix) ? "" : "\n"}${fromNamed}\n${sparql.slice(whereIdx)}`;
 }
 
 /** Locate WHERE or ASK's group, ignoring comments, IRIs, literals and nested expressions. */
 function findWhereIndex(sparql: string): number {
-  let offset = 0;
+  // This scans boundaries, not highlighting tokens: comparison '<' is not an IRI,
+  // and escaped punctuation in prefixed names must not open strings or comments.
+  const iri = /<(?:[^\u0000-\u0020<>"{}|^`\\]|\\u[\da-fA-F]{4}|\\U[\da-fA-F]{8})*>/y;
+  const word = /[?$]?(?:\\[^\r\n]|[^ \t\r\n{}()[\]<>"';,=!?$+*/|&^#\\])+/y;
   let depth = 0;
   let ask = false;
-  for (const token of tokenizeSparql(sparql)) {
-    if (depth === 0 && token.type === "keyword") {
-      const keyword = token.text.toUpperCase();
-      if (keyword === "ASK") ask = true;
-      if (keyword === "WHERE") return offset;
+  for (let offset = 0; offset < sparql.length;) {
+    const char = sparql[offset];
+    if (char === "#") {
+      while (offset < sparql.length && !/[\r\n]/.test(sparql[offset])) offset += 1;
+      continue;
     }
-    if (token.type === "punctuation") {
-      if (token.text === "{" && depth === 0 && ask) return offset;
-      if (token.text === "{" || token.text === "(") depth += 1;
-      if (token.text === "}" || token.text === ")") depth -= 1;
+    if (char === '"' || char === "'") {
+      const delimiter = sparql.startsWith(char.repeat(3), offset) ? char.repeat(3) : char;
+      offset += delimiter.length;
+      while (offset < sparql.length) {
+        if (sparql[offset] === "\\") offset += 2;
+        else if (sparql.startsWith(delimiter, offset)) {
+          offset += delimiter.length;
+          break;
+        } else offset += 1;
+      }
+      continue;
     }
-    offset += token.text.length;
+    iri.lastIndex = offset;
+    if (char === "<" && iri.test(sparql)) {
+      offset = iri.lastIndex;
+      continue;
+    }
+    word.lastIndex = offset;
+    const token = word.exec(sparql);
+    if (token) {
+      if (depth === 0) {
+        const keyword = token[0].toUpperCase();
+        if (keyword === "ASK") ask = true;
+        if (keyword === "WHERE") return offset;
+      }
+      offset = word.lastIndex;
+      continue;
+    }
+    if (char === "{" && depth === 0 && ask) return offset;
+    if (char === "{" || char === "(") depth += 1;
+    if (char === "}" || char === ")") depth -= 1;
+    offset += 1;
   }
   return -1;
 }

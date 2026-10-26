@@ -90,6 +90,10 @@ test.describe("compiler-compatible demo state", () => {
     await expect(page.getByText("ASK → true", { exact: true })).toHaveCount(1);
     await expect(page.getByText("ASK → false", { exact: true })).toHaveCount(1);
     // WHERE is optional in ASK; the graph restriction must precede its group.
+    // First change the answer so keeping the previous result cannot pass this check.
+    await editor.fill("ASK{ GRAPH <https://alice.pod.example/health/records> { ?s ?p ?o } FILTER(false) }");
+    await page.getByRole("button", { name: "Run your query for both pairs", exact: true }).click();
+    await expect(page.getByText("ASK → false", { exact: true })).toHaveCount(2);
     await editor.fill("ASK{ GRAPH <https://alice.pod.example/health/records> { ?s ?p ?o } }");
     await page.getByRole("button", { name: "Run your query for both pairs", exact: true }).click();
     await expect(page.getByText("ASK → true", { exact: true })).toHaveCount(1);

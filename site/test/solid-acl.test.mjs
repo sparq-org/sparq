@@ -38,3 +38,50 @@ test("CONSTRUCT keeps its template ahead of the dataset clause", () => {
   const group = "WHERE { GRAPH ?g { ?s ?p ?o } }";
   assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
 });
+
+test("ASK dataset prefixed names keep escaped punctuation opaque", () => {
+  for (const escaped of ["#", "(", ")", "'", "/", "?", ";", "="]) {
+    for (const where of ["", "WHERE "]) {
+      const prefix = `PREFIX ex: <https://example.org/> ASK FROM NAMED ex:part\\${escaped}WHERE `;
+      const group = `${where}{ GRAPH ?g { ?s ?p ?o } }`;
+      assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+    }
+  }
+});
+
+test("comments end at CR, LF or CRLF before ASK groups and WHERE", () => {
+  for (const newline of ["\r", "\n", "\r\n"]) {
+    for (const form of ["ASK", "SELECT ?WHERE"]) {
+      const prefix = `${form} # WHERE { ignored${newline}`;
+      const group = `${form === "ASK" ? "" : "WHERE "}{ GRAPH ?g { ?s ?p ?o } }`;
+      assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+    }
+  }
+});
+
+test("SELECT comparison operators do not swallow the outer WHERE", () => {
+  const prefix = "SELECT (1 < 2 AS ?less) ";
+  const group = "WHERE { GRAPH ?g { ?s ?p ?o FILTER (?o > 3) } }";
+  assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+});
+
+test("escaped and long projection strings do not contribute pattern boundaries", () => {
+  for (const literal of [
+    String.raw`'WHERE \' {'`,
+    String.raw`"WHERE \" {"`,
+    "'''WHERE\n'' {'''",
+    '"""WHERE\n"" {"""',
+  ]) {
+    const prefix = `BASE <urn:WHERE> SELECT (${literal} AS ?WHERE) `;
+    const group = "WHERE { GRAPH ?g { ?s ?p ?o } }";
+    assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+  }
+});
+
+test("Unicode name characters are not SPARQL token separators", () => {
+  for (const name of ["ex:\u1680WHERE", "ex:\uFEFFWHERE", "ex:graph\uFEFF"]) {
+    const prefix = `PREFIX ex: <https://example.org/> ASK FROM NAMED ${name}`;
+    const group = "{ GRAPH ?g { ?s ?p ?o } }";
+    assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}\nFROM NAMED <${graph}>\n${group}`);
+  }
+});
