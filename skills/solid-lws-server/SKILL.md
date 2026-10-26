@@ -595,7 +595,25 @@ What the server exposes, all discoverable from the storage description
   suite takes), `LwsConfig::suites` lists them, and the metadata lists their token and
   identifier types. `SOLID_SERVER_LWS_AUTHN` picks among the suites built in.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
-  gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
+  gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", realm="…", as_uri="…"`.
+  RFC 9728 discovery is public at `<base>/.well-known/oauth-protected-resource`,
+  obtained by inserting the well-known path before the storage root path. Only that
+  computed path is served; other suffixes return `404`. GET and HEAD return JSON
+  with an ETag and `Cache-Control: public, max-age=300`; `If-None-Match` revalidates it.
+  The document has `resource` and `jlws_storage_description` equal to `<base>/`,
+  `authorization_servers: ["<base>"]` (exactly the AS metadata issuer, without a
+  trailing slash), and `bearer_methods_supported: ["header"]`. It omits `resource_name`
+  and DPoP algorithm metadata: storage access uses bearer tokens; a DPoP proof on the
+  subject-token exchange is a separate operation. AS metadata is also available at
+  `/.well-known/oauth-authorization-server`. Both AS aliases and the protected resource
+  metadata support CORS fetches without credentials. The storage-description pointer
+  serves the existing CID with `Accept: application/lws+cid`.
+  Every LWS challenge keeps the `Link` with `rel="https://www.w3.org/ns/lws#storage"`.
+  The first auth parameter is `resource_metadata`; `realm` equals the storage root and
+  access-token audience, and `as_uri` is retained for transitioning clients. An anonymous
+  challenge has no `error`; a rejected bearer token adds `error="invalid_token"`.
+  For child resource requests, validate containment within the PRM's storage-root
+  `resource`, rather than string equality with the child's URL.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
   `/.lws/requests/`. Documents need an `@context` that includes
   `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
