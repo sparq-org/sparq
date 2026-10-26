@@ -12,9 +12,10 @@
 //! A second attempt fails at once ([`std::io::ErrorKind::WouldBlock`]) rather than wait.
 //! Callers that expect to reopen a just-dropped holder amid child-process creation may use
 //! a bounded retry of the whole open on `WouldBlock`; the embedded LWS client allows 250 ms.
-//! The lock itself never waits or bypasses a live holder. Advisory locks over network file
-//! systems (NFS and the like) are not relied on: such
-//! directories are not supported.
+//! The lock itself never waits or bypasses a live holder. The retry budget is subject to
+//! filesystem and scheduler delays; it cannot guarantee a reopen when an inherited descriptor
+//! is retained beyond that budget. Advisory locks over network file systems (NFS and the like)
+//! are not relied on: such directories are not supported.
 //!
 //! A store's lock is two lock files ([`DirLock`]): `<dir>.lock` beside the directory, taken
 //! when it exists or can be created, then `sparq.lock` inside it, always. A store whose parent

@@ -119,8 +119,11 @@ Set `PSS_SPARQ_BACKEND` to one of:
   a missing outside lock or poisoned transaction journal), or stopped actor returns a
   backend error. After an indeterminate commit or job panic, the actor closes its queue and
   drops pending jobs, including sends already in flight; their callers receive the stopped-actor
-  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
-  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  error and must restart to recover. Dropping the last client joins its actor thread and drops
+  this process's directory-lock handles before returning. A child between fork and exec can
+  briefly retain inherited handles; embedded opens retry `WouldBlock` with the bounded budget
+  described in [native storage](references/native-storage.md).
+  A refused compaction that leaves the graph unfrozen keeps reads and
   writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must

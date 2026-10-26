@@ -44,10 +44,14 @@ impl Drop for Directory {
     }
 }
 
-async fn drop_then_reopen_loop() {
-    let dir = Directory::empty();
+async fn drop_then_reopen_loop(dir: Directory) {
     for i in 0..500 {
-        let c = dir.open();
+        let open = |phase| {
+            EmbeddedSparqClient::open(&dir.0).unwrap_or_else(|error| {
+                panic!("iteration {i}, {phase}({}) failed: {error}", dir.0.display())
+            })
+        };
+        let c = open("open before write");
         c.put_meta(CHILD, meta(&format!("record-{i}")))
             .await
             .unwrap();
@@ -58,7 +62,7 @@ async fn drop_then_reopen_loop() {
             actor.upgrade().is_none(),
             "the actor must not outlive its last client"
         );
-        let reopened = dir.open();
+        let reopened = open("reopen after drop");
         assert_eq!(
             reopened.get_meta(CHILD).await.unwrap(),
             meta(&format!("record-{i}"))
@@ -68,7 +72,7 @@ async fn drop_then_reopen_loop() {
 
 #[tokio::test]
 async fn drop_then_reopen_without_child_processes() {
-    drop_then_reopen_loop().await;
+    drop_then_reopen_loop(Directory::empty()).await;
 }
 
 #[cfg(unix)]
@@ -95,8 +99,11 @@ async fn drop_then_reopen_while_spawning_child_processes() {
         );
         return;
     }
+    // Finish creating the empty store before any fork can inherit its save's locks.
+    let dir = Directory::empty();
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stopped = stop.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
     let child_thread = std::thread::spawn(move || {
         let mut spawned = 0;
         while !stopped.load(Ordering::Relaxed) {
@@ -105,10 +112,15 @@ async fn drop_then_reopen_while_spawning_child_processes() {
                 .unwrap()
                 .success());
             spawned += 1;
+            if spawned == 1 {
+                ready_tx.send(()).unwrap();
+            }
         }
         spawned
     });
-    let result = tokio::spawn(drop_then_reopen_loop()).await;
+    // Establish that child spawning has started before the first directory open.
+    ready_rx.recv().unwrap();
+    let result = tokio::spawn(drop_then_reopen_loop(dir)).await;
     stop.store(true, Ordering::Relaxed);
     assert!(child_thread.join().unwrap() > 0);
     result.unwrap();
@@ -141,7 +153,8 @@ async fn directory_open_retries_both_lock_files_after_transient_contention() {
             result
         })
         .unwrap();
-        assert_eq!(attempts, 2, "the entire open must be tried again");
+        // Other tests can fork while `held` is live, retaining its descriptor past drop.
+        assert!(attempts >= 2, "the entire open must be tried again");
         let c = EmbeddedSparqClient::over(graph).unwrap();
         c.put_meta(CHILD, meta("after-contention")).await.unwrap();
         drop(c);

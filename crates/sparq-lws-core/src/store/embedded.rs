@@ -62,7 +62,9 @@
 //! the one strict improvement: `Mutex` wakeups were arbitrary, so a caller could be starved.
 //!
 //! Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the actor thread.
-//! Its graph and directory lock are released before drop returns.
+//! Its graph and this process's lock handles are dropped before drop returns. On Unix, a child
+//! between fork and exec can briefly retain inherited handles; [`EmbeddedSparqClient::open`]
+//! gives that transient contention a bounded retry budget.
 //!
 //! ## Persistence
 //! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
@@ -140,8 +142,9 @@ struct GraphActor {
 impl GraphActor {
     /// Move `graph` onto a fresh dedicated OS thread and start serving jobs.
     ///
-    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread, releasing
-    /// the graph's directory lock before returning. A spawn failure is a backend error.
+    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread,
+    /// dropping the graph and this process's lock handles before returning. A child can briefly
+    /// retain inherited handles between fork and exec. A spawn failure is a backend error.
     fn spawn(graph: Graph) -> Result<Self, SparqError> {
         let (tx, rx) = mpsc::unbounded_channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -291,7 +294,7 @@ impl EmbeddedSparqClient {
     /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
     /// snapshot). The on-disk path the persistence option selects.
     ///
-    /// Retries `WouldBlock` for up to 250 ms: on Unix, a child between fork and exec can briefly
+    /// Retries `WouldBlock` with a 250 ms budget: on Unix, a child between fork and exec can briefly
     /// retain a dropped graph's lock descriptors. A holder that remains live is still refused
     /// once that retry budget expires; other I/O errors are returned immediately.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
