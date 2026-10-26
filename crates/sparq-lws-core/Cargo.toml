@@ -13,6 +13,7 @@ readme = "README.md"
 publish = false
 
 [dependencies]
+futures-util = "0.3"
 # HTTP framework: axum on hyper 1.x + tokio (spike §4). The closest structural analogue to the
 # framework-agnostic LDP handler seam in prod-solid-server. The `ws` feature enables the
 # WebSocketChannel2023 notification receive endpoint (axum's WebSocket upgrade); it pulls in
@@ -217,6 +218,7 @@ itoa = "1"
 # Declared for native targets below.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sparq-lws-blob-object = { path = "../sparq-lws-blob-object", optional = true }
 # Existing default-member JSON-LD processor for compact storage-description output.
 sparq-jsonld = { path = "../sparq-jsonld" }
 # Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
@@ -307,6 +309,7 @@ js-sys = "0.3"
 sha2 = "0.10"
 
 [dev-dependencies]
+tempfile = "3"
 sparq-shacl = { path = "../sparq-shacl" }
 sparq-core = { path = "../sparq-core" }
 # Mint test JWS access tokens + DPoP proofs for the auth-middleware unit tests (mirrors the
@@ -335,7 +338,6 @@ http-body-util = "0.1"
 # provides the Sink/Stream combinators (`SinkExt`/`StreamExt`) for the client socket; it too is
 # already transitively present (tokio-tungstenite + axum depend on it).
 tokio-tungstenite = "0.29"
-futures-util = "0.3"
 # The live WS test's HTTP client (subscribe POST + the PUT) AND the round-2 authenticated load client
 # (`examples/auth_load.rs`). reqwest is ALREADY in the resolved tree (the verifier's `network` feature
 # pulls it in for OIDC/JWKS/WebID fetches with `rustls-tls`), so naming these features here adds NO new
@@ -361,6 +363,10 @@ h3-quinn = "0.0.10"
 
 
 [features]
+# Optional native object-store adapter; provider features are selected on its dependency.
+blob-object = ["dep:sparq-lws-blob-object"]
+# Reusable backend contract suite for downstream adapters.
+test-support = []
 # Linked Web Storage authentication suites, each in its own package; the server offers each one
 # compiled in that is configured (and that `SOLID_SERVER_LWS_AUTHN` names, when set). SAML 2.0
 # subject tokens (`sparq-lws-authn-saml`), offered when

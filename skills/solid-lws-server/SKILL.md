@@ -107,6 +107,15 @@ The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
 present the native image as a durable production data service.
 
+### Object-store blob plane
+
+The native-only `sparq-lws-blob-object` crate is available, with a thin adapter
+behind the default-off `sparq-lws-core/blob-object` feature. LocalFileSystem is
+included; AWS, Azure and GCP are separate opt-in crate features. Server boot
+wiring is pending. See the [object-store reference](references/blob-object.md)
+for constructors, immutable keys, streaming listings, and the reusable backend
+contract suite exposed by `test-support`.
+
 The seed variables are test-only:
 
 - `SOLID_SERVER_SEED_CONFORMANCE=1` provisions conformance fixtures.

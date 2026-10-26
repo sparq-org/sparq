@@ -24,6 +24,11 @@ on:
       - "crates/sparq-lws-authn*/**"
       - ".github/workflows/lws-conformance.yml"
   workflow_dispatch:
+    inputs:
+      blob_object:
+        description: Run the optional object-store contract against MinIO
+        type: boolean
+        default: false
 
 concurrency:
   group: lws-conformance-${{ github.ref }}
@@ -38,6 +43,47 @@ env:
   LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
 
 jobs:
+  blob-object:
+    # Dispatch-only integration signal; not a required PR check.
+    if: github.event_name == 'workflow_dispatch' && inputs.blob_object
+    name: lws object-store integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_BUILD_JOBS: "2"
+      LWS_BLOB_TEST_URL: s3://blob-contract/integration
+      LWS_BLOB_TEST_ENDPOINT: http://127.0.0.1:9000
+      LWS_BLOB_TEST_ACCESS_KEY: local-contract-user
+      LWS_BLOB_TEST_SECRET_KEY: local-contract-password
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: lws-blob-object
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Start isolated MinIO
+        run: |
+          docker run --detach --name blob-minio --publish 127.0.0.1:9000:9000 \
+            --env MINIO_ROOT_USER="$LWS_BLOB_TEST_ACCESS_KEY" \
+            --env MINIO_ROOT_PASSWORD="$LWS_BLOB_TEST_SECRET_KEY" \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e \
+            server /data
+          curl --fail --retry 20 --retry-delay 1 --retry-connrefused \
+            "$LWS_BLOB_TEST_ENDPOINT/minio/health/ready"
+          docker exec blob-minio mc alias set fixture http://127.0.0.1:9000 \
+            "$LWS_BLOB_TEST_ACCESS_KEY" "$LWS_BLOB_TEST_SECRET_KEY"
+          docker exec blob-minio mc mb fixture/blob-contract
+      - name: Run MinIO contract, router round trip and grace-window sweep
+        run: |
+          cargo test -p sparq-lws-core \
+            --features blob-object,test-support,sparq-lws-blob-object/aws \
+            --test blob_object minio_contract_router_and_orphan_sweep -- --ignored
+      - name: Remove MinIO
+        if: always()
+        run: docker rm --force blob-minio
+
   touchstone:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true

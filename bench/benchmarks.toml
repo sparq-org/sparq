@@ -2036,3 +2036,17 @@ pinning     = "fixture.ttl + select-all.rq + select-group.rq + expected.tsv comm
 records_to  = "stdout JSON or --json-out; loose/in-process scope is machine-labelled"
 status      = "implemented"
 featured    = false
+
+[[benchmark]]
+id          = "lws-blob-object"
+name        = "Object-store blob plane contract — registry stub"
+category    = "storage"
+measures    = "Correctness only: immutable writes, pool layout, listings and reconciliation"
+invoke      = "cargo test -p sparq-lws-blob-object"
+source      = "crates/sparq-lws-blob-object"
+dataset     = "Isolated temporary LocalFileSystem; opt-in dedicated MinIO bucket"
+quiet_box_sensitive = false
+pinning     = "Pinned object_store dependency; deterministic fixture keys"
+records_to  = "Test output"
+featured    = false
+status      = "planning"

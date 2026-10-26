@@ -17,10 +17,10 @@
 //! ## What it does — and the grace period (LOAD-BEARING)
 //! [`reconcile_orphans`]:
 //! 1. asks SPARQ for the WHOLE referenced-blob-key set ONCE ([`SparqClient::referenced_blob_keys`]),
-//! 2. lists the physically-stored blobs ([`BlobStore::list`]) — the START-OF-SWEEP snapshot,
+//! 2. streams physically-stored blobs ([`BlobStore::list_stream`]) into bounded batch snapshots,
 //! 3. classifies each stored blob against that snapshot (referenced / too-young / undated / a
 //!    delete candidate),
-//! 4. if there ARE delete candidates, re-fetches the referenced set ONCE more (skipped entirely when
+//! 4. if a batch has delete candidates, re-fetches the referenced set once for that batch (skipped when
 //!    there are none — see Finding 2), then for each delete candidate RE-CHECKS it against that fresh
 //!    set AND RE-STATS its current `last_modified` + `generation` ([`BlobStore::stat`]) — see the
 //!    snapshot-staleness race below,
@@ -128,10 +128,11 @@
 //! cron hitting an admin endpoint), NOT a per-replica timer racing N sweeps — which is why periodic
 //! remains an explicit runtime opt-in rather than a boot default.
 
+use futures_util::StreamExt;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 
-use super::blob::{BlobError, BlobStore};
+use super::blob::{BlobEntry, BlobError, BlobStore};
 use super::sparq::{SparqClient, SparqError};
 
 /// The default grace window: an unreferenced blob younger than this is PROTECTED (it may be a
@@ -190,7 +191,7 @@ pub struct ReconcileReport {
     pub too_young: usize,
     /// Orphans whose backend reported no `last_modified` — KEPT fail-closed (age unknowable).
     pub skipped_unknown_age: usize,
-    /// Orphans that looked deletable from the START-OF-SWEEP snapshot but turned out to be live again —
+    /// Orphans that looked deletable from the current batch snapshot but turned out to be live again —
     /// either now referenced by a freshly-committed index row, or rewritten. KEPT. This is the Finding-1
     /// defence-in-depth guard against clobbering a recreate that landed mid-sweep on a reused key (now
     /// closed at the root by unique-per-write keys, but retained as the strictly-stronger versioned path),
@@ -210,14 +211,15 @@ pub struct ReconcileReport {
     pub delete_errors: usize,
 }
 
-/// An error that ABORTS the whole sweep before (or independent of) any per-blob disposition.
+/// An error that aborts the sweep. Earlier streaming batches may have completed before a
+/// later listing or reference-query error; no further candidates are deleted after the error.
 #[derive(Debug, thiserror::Error)]
 pub enum ReconcileError {
-    /// The referenced-set query failed — we fail closed and do NOT delete anything (a missing
+    /// The referenced-set query failed — this batch deletes nothing (a missing
     /// referenced set must NEVER be read as "nothing is referenced").
     #[error("could not fetch the referenced-blob-key set: {0}")]
     ReferencedSet(#[source] SparqError),
-    /// Listing the blob store failed — nothing to reconcile against, so abort.
+    /// Listing the blob store failed — abort before processing any further batch.
     #[error("could not list the blob store: {0}")]
     ListBlobs(#[source] BlobError),
 }
@@ -241,16 +243,37 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
         .await
         .map_err(ReconcileError::ReferencedSet)?;
 
-    // 2. The physically-stored blobs.
-    let stored = blob.list().await.map_err(ReconcileError::ListBlobs)?;
+    // Keep object listing and candidate storage bounded. Each batch retains its listing-time
+    // witnesses and receives a fresh index check before deletion. A later listing error aborts
+    // the sweep; earlier batches may already have been reclaimed.
+    let mut stored = blob
+        .list_stream()
+        .await
+        .map_err(ReconcileError::ListBlobs)?
+        .chunks(1024);
+    let mut report = ReconcileReport::default();
+    while let Some(batch) = stored.next().await {
+        let stored = batch
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ReconcileError::ListBlobs)?;
+        reconcile_batch(sparq, blob, opts, &referenced, stored, &mut report).await?;
+    }
+    Ok(report)
+}
 
+async fn reconcile_batch<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
+    sparq: &S,
+    blob: &B,
+    opts: &ReconcileOptions,
+    referenced: &HashSet<String>,
+    stored: Vec<BlobEntry>,
+    report: &mut ReconcileReport,
+) -> Result<(), ReconcileError> {
     let now = crate::clock::now();
-    let mut report = ReconcileReport {
-        scanned: stored.len(),
-        ..Default::default()
-    };
+    report.scanned += stored.len();
 
-    // First pass — classify against the START-OF-SWEEP snapshot. Everything that is referenced,
+    // First pass — classify against the current batch snapshot. Everything that is referenced,
     // too-young, or undated is decided HERE (these dispositions need no fresh re-check: a referenced or
     // too-young or undated blob is never a delete candidate). The blobs that LOOK deletable from the
     // snapshot (old-enough + unreferenced) are collected — WITH the SNAPSHOT's `generation` (if any) as
@@ -324,11 +347,11 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
     // SPARQ query that could fail a sweep that had no work. Return the report (already fully partitioned
     // by the first pass — everything was referenced / too-young / undated) BEFORE the re-check.
     if candidates.is_empty() {
-        return Ok(report);
+        return Ok(());
     }
 
-    // RE-CHECK against the INDEX once, just before the delete pass (Finding 1, part a). The
-    // start-of-sweep `referenced` set can be stale. With unique-per-write keys a recreate gets a fresh
+    // RE-CHECK against the INDEX once per candidate batch, just before its delete pass (Finding 1, part a). The
+    // initial `referenced` set can be stale. With unique-per-write keys a recreate gets a fresh
     // key so it can no longer re-reference a candidate's key — but on a key-reusing backend a resource
     // recreated between the snapshot and now could commit a FRESH index row pointing at a candidate key,
     // and deleting it would clobber live bytes. Re-fetching the referenced set ONCE here (not per-key)
@@ -496,7 +519,7 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
         }
     }
 
-    Ok(report)
+    Ok(())
 }
 
 /// The SHARED second-pass eligibility outcome — the SINGLE "would this candidate be deleted?" decision
@@ -533,7 +556,7 @@ enum CandidateWitness {
 struct Candidate {
     /// The blob key being considered for GC.
     key: String,
-    /// The `last_modified` the START-OF-SWEEP snapshot observed — the AGE anchor the fresh re-stat is
+    /// The `last_modified` the current batch snapshot observed — the AGE anchor the fresh re-stat is
     /// compared against (a newer fresh stamp ⇒ rewritten ⇒ kept).
     snapshot_ts: SystemTime,
     /// How to delete it: an atomic CAS on the snapshot generation (versioned) or an unconditional delete

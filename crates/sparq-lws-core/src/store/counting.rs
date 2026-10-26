@@ -515,6 +515,14 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
         self.inner.list().await
     }
 
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        let _g = self.counters.op_guard();
+        self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
+        self.inner.list_stream().await
+    }
+
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);

@@ -7,6 +7,10 @@
 //! whole stack is testable without a running SPARQ or S3.
 
 pub mod blob;
+#[cfg(any(test, feature = "test-support"))]
+pub mod blob_contract;
+#[cfg(all(feature = "blob-object", not(target_arch = "wasm32")))]
+pub mod blob_object;
 // The blob-body LRU cache (read-4 — backend-read-path.md §3.4): `(blob_key, etag)`-keyed,
 // byte-budgeted, sat in front of BlobStore::get inside CompositeStore so a hot unchanged
 // resource's repeat read pays zero blob round-trips. Immutable-by-construction (unique-per-write
@@ -753,9 +757,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// forcing the elaborate `generation`-CAS + grace-window + snapshot-threading machinery in
     /// [`super::blob`] and [`super::reconcile`] to exist purely to make a reused key safe.
     ///
-    /// This mints a NEW key on EVERY write: an IRI-derived prefix (kept for operator-debuggability — a
-    /// key still traces back to its resource) plus a hyphen-joined **128-bit cryptographically-random
-    /// suffix** from the OS RNG. So:
+    /// This mints a NEW key on EVERY write: the opaque `b1-` version prefix plus a
+    /// **128-bit cryptographically-random suffix** from the OS RNG. So:
     ///
     /// - **Two concurrent writes to the same IRI get DIFFERENT keys** — they write to disjoint blob
     ///   objects and can never collide or interleave. The "latest committed" winner is decided solely by
@@ -773,7 +776,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; the IRI prefix is cosmetic (debuggability) and carries no uniqueness requirement.
+    /// negligible; the fixed `b1-` prefix versions the opaque key format.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -786,9 +789,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
     fn mint_blob_key(iri: &str) -> ServerResult<String> {
-        // The IRI-derived prefix is for human/operator traceability only; uniqueness comes entirely from
-        // the random suffix, so the prefix need not be collision-free.
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
+        let prefix = "b1";
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -2196,16 +2197,14 @@ mod tests {
     }
 
     #[test]
-    fn mint_blob_key_keeps_an_iri_derived_prefix_for_traceability() {
-        // Uniqueness comes from the random suffix; the IRI-derived prefix is retained (cosmetic) so an
-        // operator can still trace a key back to its resource. The minted key must START with the
-        // percent-flattened IRI followed by the `-` separator.
+    fn mint_blob_key_uses_the_opaque_backend_key_format() {
+        // Every backend accepts the same opaque, versioned key grammar.
         let iri = "https://pod.example/alice/data";
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
+        let prefix = "b1";
         let key = S::mint_blob_key(iri).expect("the OS RNG must be available in tests");
         assert!(
             key.starts_with(&format!("{prefix}-")),
-            "minted key {key:?} must keep the IRI-derived prefix {prefix:?} for traceability"
+            "minted key {key:?} must use the opaque version prefix"
         );
         // ...and the suffix is the 32-hex-char (128-bit) random tail.
         let suffix = &key[prefix.len() + 1..];
@@ -2215,7 +2214,7 @@ mod tests {
             "the random suffix is 16 bytes = 32 hex chars"
         );
         assert!(
-            suffix.bytes().all(|b| b.is_ascii_hexdigit()),
+            suffix.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
             "the suffix must be lowercase hex"
         );
     }
@@ -2231,7 +2230,7 @@ mod tests {
         let iri = "https://pod.example/alice/data";
         let key =
             S::mint_blob_key(iri).expect("the OS RNG is available on every supported platform");
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
+        let prefix = "b1";
         assert!(
             key.starts_with(&format!("{prefix}-")) && key.len() == prefix.len() + 1 + 32,
             "the success path still mints a prefix + 32-hex-char random suffix"

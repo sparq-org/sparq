@@ -1,0 +1,29 @@
+[package]
+name = "sparq-lws-blob-object"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Native object-store blob plane for the experimental LWS server"
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+publish = false
+readme = "README.md"
+
+[features]
+default = []
+aws = ["object_store/aws"]
+azure = ["object_store/azure"]
+gcp = ["object_store/gcp"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+object_store = { version = "=0.14.2", default-features = false, features = ["fs"] }
+bytes = "1"
+futures-util = "0.3"
+thiserror = "2"
+url = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+async-trait = "0.1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }

@@ -1,10 +1,8 @@
 // AUTHORED-BY Claude Opus 4.8
 //! The blob (byte) store seam.
 //!
-//! Per the architecture, `object_store`/S3 is **backup-only** for resource bytes: SPARQ is the
-//! authoritative index, and the blob store holds a durable copy of the bytes keyed by an opaque
-//! `s3Key`. This module defines the [`BlobStore`] trait and an in-memory test impl. The real
-//! `object_store`-backed impl (S3 / Local) is an M2 adapter behind the same trait.
+//! The authoritative index refers to resource bytes through opaque unique-per-write keys.
+//! The default backend is in memory; `blob_object` supplies the optional native object adapter.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -45,9 +43,10 @@ pub enum BlobError {
 ///   generation is a TRUE, strictly-increasing write version: every overwrite gets a STRICTLY DIFFERENT
 ///   generation regardless of the clock, so the reconciler can compare-and-delete on it race-free and
 ///   clock-independently. For the in-memory store it is a store-wide monotonic counter stamped on each
-///   write; a real `object_store` backend maps it to the backend's native version/ETag/generation (the
-///   `M2-next:` seam below). `None` ⇒ the backend exposes no write version ⇒ the reconciler cannot do a
-///   safe CAS and MUST instead rely on unique-per-write keys (documented in `delete_if_unchanged`).
+///   write. A backend may advertise a version only when it can atomically delete against that witness.
+///   The native object adapter reports `None`: its API has no conditional delete, even when read
+///   metadata contains an ETag. The reconciler then relies on unique-per-write keys (documented in
+///   `delete_if_unchanged`).
 #[derive(Debug, Clone)]
 pub struct BlobEntry {
     /// The opaque storage key the bytes live under.
@@ -59,21 +58,23 @@ pub struct BlobEntry {
     /// A strictly-increasing, immutable-per-write version of THIS stored blob — the authoritative CAS
     /// witness for [`BlobStore::delete_if_unchanged`]. Every write (even a same-millisecond, even a
     /// clock-rolled-back overwrite) gets a strictly different value, so it distinguishes two writes the
-    /// way a `last_modified` cannot. `None` ⇒ the backend has no native write version ⇒ no safe CAS
+    /// way a `last_modified` cannot. `None` ⇒ the backend has no usable atomic-delete witness ⇒ no safe CAS
     /// (use unique-per-write keys instead).
     pub generation: Option<u64>,
 }
 
 /// The byte store: a key/value store of resource bodies, keyed by an opaque storage key.
 ///
-/// M2: an `object_store`-backed impl (`object_store::aws::AmazonS3` / `LocalFileSystem`) plugs in
-/// here, using `PutMode::Create`/`Update` for the S3 If-None-Match/If-Match CAS (spike §6).
+/// Native object storage is available through the optional `blob-object` adapter.
 #[async_trait]
 pub trait BlobStore: Send + Sync {
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
 
-    /// Write (create-or-replace) the bytes for a storage key.
+    /// Write bytes under a fresh storage key. Durable backends may refuse an existing key;
+    /// the legacy in-memory double also supports replacement for generation-race tests.
+    /// Callers must never reuse a key, including after deletion. CompositeStore mints
+    /// `($pool$)?b1-[0-9a-f]{32}` keys for this purpose.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
 
     /// Whether a key exists.
@@ -92,12 +93,19 @@ pub trait BlobStore: Send + Sync {
     /// "SPARQ is the source of truth" invariant); the reconciler is the documented exception because GC
     /// is *about* the bytes the index does not know about.
     ///
-    /// M2-next (the `object_store` adapter): implement via `object_store::ObjectStore::list` — its
-    /// `ObjectMeta` carries `location` (→ `key`) + `last_modified` (a `chrono::DateTime<Utc>` → map to
-    /// [`SystemTime`]), so the real S3/Local backend reports a real timestamp and the grace window
-    /// works against true object age. Until that adapter lands the in-memory double below is the only
-    /// impl.
+    /// This compatibility snapshot may impose a size limit. Use [`BlobStore::list_stream`]
+    /// for paginated backends and unbounded namespaces. The native object adapter reports
+    /// backend modification times and no delete generation.
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError>;
+
+    /// Stream entries for reconciliation with bounded blob-listing batches. Backends with paginated listings should override
+    /// this; the compatibility default uses the existing `list` snapshot.
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        use futures_util::StreamExt;
+        Ok(futures_util::stream::iter(self.list().await?.into_iter().map(Ok)).boxed())
+    }
 
     /// Re-read ONE key's current state (its present `last_modified`), or `None` if the key no longer
     /// exists. The single-key counterpart to [`list`](BlobStore::list).
@@ -157,13 +165,11 @@ pub trait BlobStore: Send + Sync {
     ///
     /// No trait DEFAULT is provided: a default built on `stat()`-then-`delete()` would NOT be atomic and
     /// would reintroduce exactly the TOCTOU this method exists to close — a non-atomic "default" would be
-    /// a silent footgun. So every impl MUST provide a genuinely atomic implementation.
+    /// a silent footgun. A versioned impl MUST provide a genuinely atomic implementation.
     ///
-    /// M2-next (the `object_store` adapter): implement with a backend-native conditional/versioned delete
-    /// keyed on the backend's OWN write version — the native ETag / object-version / generation that maps
-    /// into [`BlobEntry::generation`] (`object_store` `PutMode`/delete with an `if_match`/version
-    /// precondition on the backends that support it: S3 conditional writes / object versioning). On a
-    /// backend WITHOUT a conditional delete (and no native version ⇒ [`BlobEntry::generation`] is `None`),
+    /// A versioned backend needs a native conditional delete keyed on its own write generation.
+    /// The native object adapter has no conditional-delete API and advertises
+    /// [`BlobEntry::generation`] as `None`. On a backend WITHOUT a conditional delete,
     /// safety rests on the **unique-per-write blob keys** the composite store now mints
     /// (`CompositeStore::mint_blob_key`): an overwrite never reuses a candidate's key, so the
     /// reconciler can never target live bytes and the delete is safe to be unconditional.
