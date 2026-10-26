@@ -187,4 +187,3 @@ let art = prover.prove_in(&CircuitId::RevokeUnset { depth }, &toml, std::path::P
 // RevocationPolicy::...with_hidden_index_depth(depth). (Hidden-issuer attestations mirror this
 // with sparq_zk_compose::issuer::* + KeySet::with_hidden_issuer_depth.)
 ```
-

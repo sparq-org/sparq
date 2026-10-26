@@ -171,9 +171,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sparq-zk-compose (`dual-leaf`):** restore the explicit `admit_unbound()` downgrade:
   all-Unbound sub-proofs resolve as `StringCanonicalV1`, matching pattern encoding.
   Opaque scans/joins remain legal; mixed Unbound + Bound sub-proofs remain refused.
-  Residual: a V2 commitment signed with an unbound message is read as string-canonical
-  and cannot use V2 members (fail-closed). Orphan sub-proofs still require
-  method-independent members.
+  Under `admit_unbound` the commitment is ASSUMED string-canonical; nothing checks it.
+  The downgrade is sound only if the issuer signed unbound messages over
+  string-canonical commitments alone. A dual-leaf commitment signed unbound cannot
+  use the V2 members, and its opaque presentations are not sound.
+  Orphan sub-proofs still require method-independent members.
 
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
@@ -197,8 +199,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authenticated map is NOT read as `Unbound`: it is refused by name. Under the explicit
   `admit_unbound()` downgrade, a sub-proof all of whose
   bound commitments authenticate as Unbound resolves as `StringCanonicalV1`:
-  opaque scan/join members remain legal and V2 members are refused. A V2 commitment
-  signed with an unbound message cannot use V2 members. Under the default policy,
+  opaque scan/join members remain legal. Under `admit_unbound` the commitment is
+  ASSUMED string-canonical; nothing checks it. The downgrade is sound only if the
+  issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
+  commitment signed unbound cannot use the V2 members, and its opaque presentations
+  are not sound. Under the default policy,
   unbound attestations are refused upstream. Orphan sub-proofs alone require
   method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate

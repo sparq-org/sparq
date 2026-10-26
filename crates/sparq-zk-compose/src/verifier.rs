@@ -1610,8 +1610,7 @@ pub enum CheckError {
     /// which raises them: an unparseable bound commitment, two bound commitments
     /// authenticating DIFFERENT methods, or a bound commitment authenticating a
     /// method beside one authenticating none. `resolve_member_for_sub_proof` also
-    /// raises it for a sub-proof whose bound commitments authenticated NO method,
-    /// and for an ORPHAN one — bound to no committed graph — when the member is
+    /// raises it for an ORPHAN sub-proof — bound to no committed graph — when its member is
     /// not legal under every ADMISSIBLE method, so no method-independent member
     /// exists to select.
     ///
@@ -6187,9 +6186,17 @@ fn resolve_member_for_sub_proof(
         }
         SubProofMethod::One(method) => {
             let resolved = crate::dispatch::resolve_circuit(method, id).map_err(|_| {
+                let method_iri = if bound.iter().any(|c| {
+                    c.to_field().and_then(|c| methods.get(&field_to_hex(&c)))
+                        == Some(&AuthenticatedMethod::Unbound)
+                }) {
+                    format!("unbound, read as string-canonical ({})", method.scheme_iri())
+                } else {
+                    method.scheme_iri().to_string()
+                };
                 CheckError::MemberNotLegalForMethod {
                     proof: label.clone(),
-                    method_iri: method.scheme_iri().to_string(),
+                    method_iri,
                     circuit: id.label(),
                 }
             })?;
@@ -16665,13 +16672,10 @@ mod member_from_authenticated_method_tests {
              vacuous"
         );
 
-        assert!(
-            matches!(
-                resolve(&value, 1, &map_of(&[(&c, Some(UNBOUND))])),
-                Err(CheckError::MemberNotLegalForMethod { .. })
-            ),
-            "an all-Unbound value-lane member is refused under string-canonical"
-        );
+        let error = resolve(&value, 1, &map_of(&[(&c, Some(UNBOUND))]))
+            .expect_err("an all-Unbound value-lane member is refused under string-canonical");
+        assert!(matches!(&error, CheckError::MemberNotLegalForMethod { .. }));
+        assert!(error.to_string().contains("unbound, read as string-canonical"));
         assert_eq!(
             resolve(&string_lane, 1, &map_of(&[(&c, Some(UNBOUND))]))
                 .expect("a method-independent member resolves"),
@@ -16979,6 +16983,30 @@ mod member_from_authenticated_method_tests {
                 Err(CheckError::MemberNotLegalForMethod { .. })
             ),
             "at the later stage the entry is authenticated and the member is refused"
+        );
+    }
+
+    /// A hidden-only unbound entry defers before the hidden-issuer gate too.
+    #[test]
+    fn a_hidden_only_unbound_commitment_defers_until_its_proof_is_bound() {
+        let c = fhx("0x64");
+        let m = manifest_of(vec![scan_over(vec![c.clone()])]);
+        let methods = map_of(&[(&c, Some(UNBOUND))]);
+        let hidden_only = BTreeSet::from([key_of(&c)]);
+        let id = CircuitId::Scan { k: 1, n: 16, r: 4 };
+
+        assert_eq!(
+            resolve_member_for_sub_proof(
+                &m,
+                0,
+                &id,
+                &methods,
+                &hidden_only,
+                MethodStage::BeforeHiddenIssuer,
+                &JoinEndpointIndex::build(&m)
+            )
+            .expect("an unbound candidate must defer before the hidden-issuer gate"),
+            None
         );
     }
 
