@@ -267,12 +267,14 @@ impl PodStore {
             .take_named_slot(&term)
             .map_err(|e| format!("put_acl denied: {e}"))?;
         let existed = prior.is_some();
+        self.graph
+            .add_named(term.clone(), new_graph)
+            .map_err(|e| format!("put_acl denied: {e}"))?;
         if let (false, Some(governed)) = (existed, acl_iri.strip_suffix(crate::loader::ACR_SUFFIX)) {
             // A new `.acr` keeps no facts of a resource that does not exist, whatever an
             // earlier install saw (a rebuild after a failure resets this from the graph).
             self.acr_controlled.remove(governed);
         }
-        self.graph.add_named(term.clone(), new_graph).expect(crate::WRITABLE);
 
         // Re-materialize; roll back to the prior content on any error. sq-b7k7u
         // (issue #1571): the whole WAC/ACP view is still re-derived, but the session cache

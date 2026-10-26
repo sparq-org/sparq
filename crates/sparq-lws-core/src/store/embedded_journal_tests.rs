@@ -33,20 +33,8 @@ impl Directory {
     }
 
     fn open(&self) -> EmbeddedSparqClient {
-        // Dropping the last client closes the channel; the actor releases its lock when
-        // its thread exits. Wait only for that lock, never for a corrupt store to heal.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            match Graph::open(&self.0) {
-                Ok(graph) => return EmbeddedSparqClient::over(graph).unwrap(),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
-                    && std::time::Instant::now() < deadline =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-                Err(error) => panic!("graph reopen({}) failed: {error}", self.0.display()),
-            }
-        }
+        EmbeddedSparqClient::open(&self.0)
+            .unwrap_or_else(|error| panic!("graph reopen({}) failed: {error}", self.0.display()))
     }
 }
 
@@ -107,6 +95,7 @@ async fn save_compacts_the_open_directory_and_aliases_without_losing_later_write
             _ => unreachable!(),
         };
         c.save(&destination).await.expect(spelling);
+        assert!(!dir.0.join("new").exists());
         assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("before"));
         assert_eq!(c.list_children(PARENT).await.unwrap(), [CHILD]);
         // Compaction folds each named graph's overlay into its base and reopens its log.
@@ -186,19 +175,32 @@ async fn refused_inside_only_compaction_keeps_reads_and_writes_available() {
     assert!(dir.0.join("sparq.lock").is_file());
     assert!(!parent.0.join("store.lock").exists());
     c.put_meta(PARENT, meta("before")).await.unwrap();
-    let error = c.save(&dir.0).await.unwrap_err();
-    assert!(
-        matches!(error, SparqError::Backend(ref message)
-            if message.contains(&parent.0.display().to_string())),
-        "{error}"
-    );
+    for _ in 0..2 {
+        let error = c.save(&dir.0.join("new/..")).await.unwrap_err();
+        assert!(
+            matches!(error, SparqError::Backend(ref message)
+                if message.contains(&parent.0.display().to_string())),
+            "{error}"
+        );
+        assert!(!dir.0.join("new").exists());
+    }
     assert_eq!(c.get_meta(PARENT).await.unwrap(), meta("before"));
     c.create_child(PARENT, CHILD, meta("after")).await.unwrap();
     drop(c);
+    let read_only = Graph::open_read_only(&dir.0).unwrap();
+    assert!(sparq_engine::ask(&read_only, "ASK { <urn:m5:s> <urn:m5:p> <urn:m5:o> }").unwrap());
+    drop(read_only);
     let reopened = dir.open();
     assert_eq!(reopened.get_meta(PARENT).await.unwrap(), meta("before"));
     assert_eq!(reopened.get_meta(CHILD).await.unwrap(), meta("after"));
     assert_eq!(reopened.list_children(PARENT).await.unwrap(), [CHILD]);
+    reopened
+        .dispatch(|g| {
+            assert!(sparq_engine::ask(g, "ASK { <urn:m5:s> <urn:m5:p> <urn:m5:o> }").unwrap());
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert!(!parent.0.join("store.lock").exists());
     drop(reopened);
     drop(permissions);
@@ -505,6 +507,7 @@ async fn indeterminate_commit_stops_reads_writes_and_snapshots() {
             );
         }
     }
+    drop(c);
     assert!(!dir.open().exists(CHILD).await.unwrap());
 }
 
@@ -571,6 +574,10 @@ async fn journal_cannot_repair_an_incomplete_named_snapshot() {
     let snapshot = dir.0.join("named/1/dict-meta.bin");
     let saved = std::fs::read(&snapshot).unwrap();
     std::fs::remove_file(&snapshot).unwrap();
+    let error = Graph::open(&dir.0)
+        .err()
+        .expect("incomplete named snapshot is refused");
+    assert_ne!(error.kind(), std::io::ErrorKind::WouldBlock, "{error}");
     assert!(matches!(
         EmbeddedSparqClient::open(&dir.0),
         Err(SparqError::Backend(_))
@@ -777,4 +784,22 @@ async fn composite_delete_delegates_one_atomic_index_job_and_reclaims_its_key() 
     assert!(store.blob.exists(&unrelated.blob_key).await.unwrap());
     assert!(!c.exists(CHILD).await.unwrap());
     assert!(c.list_children(PARENT).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn failed_saves_remove_only_empty_directories_they_created() {
+    let dir = Directory::empty();
+    let c = dir.open();
+    let destination = dir.0.join("new/deep");
+    assert!(c.save(&destination).await.is_err());
+    assert!(!dir.0.join("new").exists());
+    std::fs::create_dir(dir.0.join("kept")).unwrap();
+    assert!(c.save(&dir.0.join("kept/new/deep")).await.is_err());
+    assert!(dir.0.join("kept").is_dir());
+    assert!(!dir.0.join("kept/new").exists());
+    let blocker = dir.0.join("file");
+    std::fs::write(&blocker, b"existing").unwrap();
+    assert!(c.save(&dir.0.join("new/../file/deep")).await.is_err());
+    assert!(!dir.0.join("new").exists());
+    assert_eq!(std::fs::read(blocker).unwrap(), b"existing");
 }

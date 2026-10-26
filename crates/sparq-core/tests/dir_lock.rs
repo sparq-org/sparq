@@ -329,14 +329,10 @@ fn read_only_opens_share_the_directory_and_exclude_a_writer() {
     );
     writer.apply_delta(&[triple("logged")], &[]).unwrap();
     drop(writer);
-    // A log to replay needs a writable open (and a compaction) first.
-    let err = Graph::open_read_only(&dir)
-        .err()
-        .expect("opened read-only over a log");
-    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
-    Graph::open(&dir).unwrap().compact().unwrap();
+    let log = std::fs::read(dir.join("wal.log")).unwrap();
     let g = Graph::open_read_only(&dir).unwrap();
     assert!(has(&g, "logged"));
+    assert_eq!(std::fs::read(dir.join("wal.log")).unwrap(), log);
     // The directory of a named graph is refused read-only too.
     assert!(Graph::open_read_only(&dir.join("named").join("0")).is_err());
     drop(g);
@@ -1064,8 +1060,11 @@ fn a_store_in_a_read_only_parent_opens_and_keeps_one_writer() {
         assert!(would_block(Graph::open(&dir)), "a second writer got in");
         assert!(would_block(Graph::open_read_only(&dir)), "a reader got in beside the writer");
         g.apply_delta(&[triple("x")], &[]).unwrap();
-        let err = g.compact().unwrap_err();
-        assert!(err.contains(&parent.display().to_string()), "{err}");
+        for _ in 0..2 {
+            let err = g.compact().unwrap_err();
+            assert!(err.contains(&parent.display().to_string()), "{err}");
+            assert!(!g.is_frozen());
+        }
         let err = g.restore_in_place(Graph::new()).unwrap_err().to_string();
         assert!(err.contains(&parent.display().to_string()), "{err}");
         let slot = g.ensure_named(&iri("fresh")).unwrap();
@@ -1073,6 +1072,17 @@ fn a_store_in_a_read_only_parent_opens_and_keeps_one_writer() {
         g.clear_named_durable(&iri("g1")).unwrap();
         g.drop_named_durable(&iri("g0")).unwrap();
         g.apply_delta(&[triple("y")], &[]).unwrap();
+        drop(g);
+        let logs: Vec<_> = [&dir, &dir.join("named/1")]
+            .into_iter()
+            .map(|d| (d.join("wal.log"), std::fs::read(d.join("wal.log")).unwrap()))
+            .collect();
+        let g = Graph::open_read_only(&dir).expect("reads logged updates with a 0555 parent");
+        assert!(has(&g, "x") && has(&g, "y") && has(&g, "a"));
+        assert!(has(g.named_graph(&iri("fresh")).unwrap(), "named-update"));
+        for (path, bytes) in logs {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
         drop(g);
         let g = Graph::open(&dir).unwrap();
         assert!(has(&g, "x") && has(&g, "y") && has(&g, "a"));
@@ -1328,6 +1338,13 @@ fn a_read_only_open_requires_access_to_the_inside_lock() {
     save_dataset(&dir);
     std::fs::remove_file(dir.join("sparq.lock")).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(dir.join("probe"), b"").is_ok() {
+        std::fs::remove_file(dir.join("probe")).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("skipped: permissions are not enforced here");
+        std::fs::remove_dir_all(root).unwrap();
+        return;
+    }
     let result = Graph::open_read_only(&dir);
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(result.err().expect("opened without the inside lock").kind(), ErrorKind::PermissionDenied);
@@ -1378,4 +1395,54 @@ fn store_paths_reject_regular_files_before_creating_locks() {
     assert!(!root.join("ordinary-file.lock").exists());
     assert_eq!(std::fs::read(&path).unwrap(), b"keep");
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// In-memory views are installed on forks; durable members keep contiguous on-disk slots.
+#[test]
+fn durable_named_slots_refuse_in_memory_views() {
+    for method in ["add", "set", "extend"] {
+        for action in ["ensure", "compact", "drop"] {
+            let root = scratch(&format!("view-{method}-{action}"));
+            let dir = root.join("g");
+            save_dataset(&dir);
+            let mut graph = Graph::open(&dir).unwrap();
+            let view =
+                Graph::load_str("<http://ex/view> <http://ex/p> <http://ex/o> .", "ntriples")
+                    .unwrap();
+            let result = match method {
+                "add" => graph.add_named(iri("view"), view),
+                "set" => graph.set_named(iri("g0"), view).map(|_| ()),
+                _ => graph.extend_named([(iri("view"), view)]),
+            };
+            assert!(result.unwrap_err().contains("ensure_named"));
+            assert_eq!(graph.named().len(), 2);
+            match action {
+                "ensure" => {
+                    let slot = graph.ensure_named(&iri("fresh")).unwrap();
+                    graph
+                        .apply_delta_to_named(slot, &[triple("fresh")], &[])
+                        .unwrap();
+                }
+                "compact" => {
+                    graph.apply_delta(&[triple("pending")], &[]).unwrap();
+                    graph.compact().unwrap();
+                }
+                _ => {
+                    graph.drop_named_durable(&iri("g1")).unwrap();
+                }
+            }
+            drop(graph);
+            let graph = Graph::open(&dir).unwrap();
+            assert!(graph.named_graph(&iri("view")).is_none());
+            assert!(has(sub_graph(&graph, "g0"), "b"));
+            assert!(has(&graph, "a"));
+            match action {
+                "ensure" => assert!(has(sub_graph(&graph, "fresh"), "fresh")),
+                "compact" => assert!(has(&graph, "pending")),
+                _ => assert!(graph.named_graph(&iri("g1")).is_none()),
+            }
+            drop(graph);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 }

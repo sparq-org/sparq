@@ -114,6 +114,10 @@ prompt is refused, never rendered around unvalidated text.
 + a materialized WAC/ACP authorization view), bound to ONE authenticated session fixed
 at construction — the MCP-Solid proposal draft's local-trusted-agent deployment mode
 (`site/specs/mcp-solid.typ` §6.4/§7.3/§9.3). Tools:
+Directory-backed input is served through an in-memory dataset fork. Resource writes,
+containment updates, and rollback operate on this working copy; save the resulting
+graph to a separate directory when a persisted snapshot is needed.
+
 
 | tool | wraps | notes |
 | --- | --- | --- |

@@ -213,11 +213,9 @@ fn wrap_read(sparql: &str) -> Result<String, String> {
 pub struct StoredGraphs(FxHashSet<String>);
 
 
-/// Why a change to an in-memory named graph of a [`PodStore`]'s dataset (its auth view, an
-/// access-control document it replaces) cannot be refused: the dataset accepts writes
-/// ([`PodStore::new`] forks one that does not), and those named graphs are in memory.
-pub(crate) const WRITABLE: &str =
-    "a PodStore's dataset accepts writes (PodStore::new forks one that does not)";
+/// Context for bridge and trust view installation on a writable dataset.
+#[cfg(any(feature = "odrl-bridge", feature = "trust-graph"))]
+pub(crate) const WRITABLE: &str = "the auth view update completed on the writable dataset";
 
 /// A pod dataset + its materialized auth view + the per-session graph-set cache.
 ///
@@ -519,9 +517,9 @@ impl PodStore {
     /// ```
     ///
     /// A graph that refuses writes (opened read-only, or frozen) is replaced by an in-memory
-    /// [`fork`](Graph::fork) of it, and so is a directory-backed one whose reserved graphs
-    /// cannot be dropped (a named graph of its store is in the reserved space, or follows
-    /// one): the store never serves a reserved graph it did not make.
+    /// [`fork`](Graph::fork) of it. A directory-backed input removes reserved slots through
+    /// durable drops, retaining its root; if that cannot complete, it uses a fork instead.
+    /// Only views materialized by this store are served.
     pub fn new(mut graph: Graph) -> PodStore {
         if graph.check_writable().is_err() {
             graph = graph.fork();
@@ -627,8 +625,8 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if the N3 reasoner fails. On error the previous auth view (if any) is
-    /// left in place. A document stating a triple it may not (one about a node outside it, a
+    /// Returns `Err` if reasoning or durable view installation fails. Input and reasoning
+    /// refusals leave the previous auth view (if any) in place. A document stating a triple it may not (one about a node outside it, a
     /// minted name, a reserved principal such as a `urn:sparq:` IRI or one containing
     /// `&client=`, or view vocabulary) is not an error: the loader rejects it whole and the
     /// resources it governs get no grant from any source.

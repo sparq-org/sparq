@@ -54,7 +54,9 @@ bytes or change the existing trusted-storage assumption.
 `graph.named_graph(&name)`. Use `add_named`, `extend_named`, `set_named`,
 `remove_named`, `retain_named`, and `take_named` for in-memory members; these
 return `Result` and keep the graph-name prefix index current. Store-backed
-members cannot be replaced, extracted, or shifted through those methods.
+members cannot be replaced, extracted, or shifted through those methods. A directory-backed
+root refuses `add_named`, `set_named`, and nonempty `extend_named` batches of in-memory
+graphs: use a dataset `fork()` for views, or logged insertion through `ensure_named`.
 Use `ensure_named` and `apply_delta_to_named(index, inserts, deletes)` for logged
 updates, and `clear_named_durable`, `drop_named_durable`, or
 `drop_all_named_durable` for durable removal. Frozen and read-only graphs refuse
@@ -760,11 +762,10 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   Read-only opens coexist with each other, never with a writable holder (`WouldBlock` either
   way), write nothing into the directory but a missing lock file, and refuse every write (also
   the durable clears, and a rebuilding `sparq_engine::update`; `Graph::check_writable` says
-  so). One is refused while the directory has updates still to fold in (a non-empty WAL or txn
-  journal, or the residue of an interrupted swap, a named graph's included): open it writable
-  once, which recovers or replays that (`sparq-cli compact <dir>` does, and folds the logs into
-  the base); if that open is refused, its error says why. It can be saved to another
-  directory. A store made under a `077` umask has lock files only its owner can open, so other
+  so). Pending WAL and transaction records, including named graphs, are replayed in memory;
+  the logs stay unchanged. Interrupted swaps or named-graph drops require a writable open
+  for directory recovery first. This also works with only the inside lock under a read-only
+  parent, where root-directory compaction is unavailable. It can be saved to another directory. A store made under a `077` umask has lock files only its owner can open, so other
   users cannot open it, even read-only.
 - **A swap releases the graph's files first.** `compact`, `vacuum` and `restore_in_place`
   stage the new base, then the graph lets go of every file it has in the directory (maps, logs,

@@ -486,7 +486,7 @@ pub(crate) fn materialize_wac_limited(
     )?;
     let mut work = DecisionWork::new(budget);
     let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
-    strip_reserved_graphs(graph)?;
+    prepare_auth_view(graph)?;
     let mut stats = install_auth_view(graph, &dict, &closure)?;
     stats.strata_facts = vec![closure.len()];
     stats.millis = elapsed_millis(
@@ -636,7 +636,7 @@ pub(crate) fn materialize_acp_limited(
         strata_facts.push(closure.len());
     }
 
-    strip_reserved_graphs(graph)?;
+    prepare_auth_view(graph)?;
     let mut stats = install_auth_view(graph, &dict, &closure)?;
     stats.strata_facts = strata_facts;
     stats.millis = elapsed_millis(
@@ -658,6 +658,29 @@ fn elapsed_millis(t0: Instant) -> f64 {
 #[cfg(target_arch = "wasm32")]
 fn elapsed_millis() -> f64 {
     0.0
+}
+
+/// Remove other reserved graphs while retaining a durable auth slot for replacement.
+fn prepare_auth_view(graph: &mut Graph) -> Result<(), String> {
+    if !graph.is_directory_backed() {
+        return strip_reserved_graphs(graph);
+    }
+    let reserved: Vec<_> = graph
+        .named()
+        .iter()
+        .filter_map(|(name, _)| match name {
+            Term::NamedNode(n)
+                if n.as_str().starts_with("urn:sparq:") && n.as_str() != AUTH_GRAPH =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    for name in reserved {
+        graph.drop_named_durable(&name)?;
+    }
+    Ok(())
 }
 
 /// Whether a closure triple belongs in the auth view: `auth:*` predicates, `rdf:type`
@@ -698,7 +721,7 @@ fn install_auth_view(
     let stats = MaterializeStats { auth_triples: ids.len(), ..Default::default() };
     let auth = Graph::from_parts(adict, ids);
     let name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    graph.set_named(name, auth)?;
+    crate::loader::install_named_view(graph, name, auth)?;
     Ok(stats)
 }
 

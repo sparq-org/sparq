@@ -23,3 +23,9 @@ A directory-backed member stays in its positional slot until a durable operation
 updates the manifest and its files. To use its contents in another dataset,
 make an independent in-memory copy with `fork()`; mapped copies keep the original
 store's lock while their mappings live.
+
+A directory-backed root refuses in-memory insertion through `add_named`, `set_named`,
+and nonempty `extend_named`. Create the slot with `ensure_named(&name)?` and insert
+terms through `apply_delta_to_named(slot, &inserts, &deletes)?`. Use a dataset fork
+when installing temporary views. A refused compaction retains the pending overlay
+until a later swap publishes the new base.

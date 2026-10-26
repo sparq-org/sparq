@@ -722,10 +722,17 @@ impl SolidMcpServer {
     /// (re-)materializing the authorization view under the configured model so the
     /// served view is never stale and always matches [`SolidServerConfig::acp`].
     ///
+    /// Directory-backed input is served through an in-memory fork. Resource slot swaps and
+    /// their rollback operate on that working copy; persist it separately with `Graph::save`.
+    ///
     /// # Errors
     ///
     /// Returns `Err` if that materialization fails.
-    pub fn with_config(store: PodStore, config: SolidServerConfig) -> Result<Self, String> {
+    pub fn with_config(mut store: PodStore, config: SolidServerConfig) -> Result<Self, String> {
+        if store.graph().is_directory_backed() {
+            let fork = store.graph().fork();
+            *store.graph_unchecked_mut() = fork;
+        }
         let mut server = SolidMcpServer {
             store,
             config,
@@ -2020,6 +2027,66 @@ mod unit {
         assert_eq!(c.max_rows, Some(1_000_000));
         assert_eq!(c.server_name, "sparq-mcp-solid");
         assert!(c.agent.is_none() && c.client.is_none() && c.issuer.is_none() && c.now.is_none());
+    }
+
+    /// Durable input supplies a working copy for resource, containment and rollback edits.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn directory_backed_input_uses_a_working_copy_for_resource_slots() {
+        let root =
+            std::env::temp_dir().join(format!("sparq-mcp-working-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("store");
+        let nq = r#"
+<https://pod.ex/> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/ldp#Container> <https://pod.ex/> .
+<https://pod.ex/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/.acl> .
+"#;
+        Graph::load_dataset(nq, "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let store = PodStore::new(Graph::open(&dir).unwrap());
+        let config = SolidServerConfig {
+            agent: Some("https://alice.ex/card#me".into()),
+            allow_update: true,
+            ..Default::default()
+        };
+        let mut server = SolidMcpServer::with_config(store, config).unwrap();
+        assert!(!server.store().graph().is_directory_backed());
+        for value in ["first", "second"] {
+            server.tool_resource_put(&json!({
+                "url": "https://pod.ex/fresh/note",
+                "content": format!("<https://pod.ex/fresh/note#it> <https://ex.dev/p> \"{value}\" ."),
+                "content_type": "text/turtle"
+            })).unwrap();
+        }
+        server
+            .tool_container_create(&json!({"url": "https://pod.ex/created/"}))
+            .unwrap();
+        let name = Term::NamedNode(NamedNode::new_unchecked("https://pod.ex/fresh/note"));
+        let prior = server.take_slot(&name).unwrap();
+        server.restore_slot(&name, prior);
+        assert!(server.store().graph().named_graph(&name).is_some());
+        assert!(server
+            .slot_index(&Term::NamedNode(NamedNode::new_unchecked(
+                "https://pod.ex/fresh/"
+            )))
+            .is_some());
+        drop(server);
+        let mut graph = Graph::open(&dir).unwrap();
+        assert!(graph.named_graph(&name).is_none());
+        assert_eq!(graph.named().len(), 2);
+        let slot = graph.ensure_named(&name).unwrap();
+        graph.apply_delta_to_named(slot, &[], &[]).unwrap();
+        graph.compact().unwrap();
+        drop(graph);
+        assert!(Graph::open(&dir).unwrap().named_graph(&name).is_some());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A two-principal pod: alice reads `pub/`, bob reads `priv/` — and neither can

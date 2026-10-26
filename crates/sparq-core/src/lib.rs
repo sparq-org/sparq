@@ -1693,10 +1693,17 @@ impl Graph {
     /// `Err` unless `g` may become a named graph of this graph: this graph accepts writes, and
     /// `g` is in memory (no directory, no log) and accepts writes too. A store's named graph
     /// never moves to another graph, or back into its own: it is logged in, and locked with,
-    /// the store it came from. (An in-memory named graph of a directory-backed graph is not
-    /// logged: it lives as long as the graph.)
+    /// the store it came from. A directory-backed destination creates named graphs through
+    /// `ensure_named` and writes their contents through logged inserts.
     fn check_named_insertable(&self, g: &Graph) -> Result<(), String> {
         self.refuse_if_detached()?;
+        if self.is_directory_backed() {
+            return Err(
+                "a directory-backed dataset accepts named graphs through ensure_named \
+                 and apply_delta_to_named: fork the dataset for in-memory views"
+                    .to_owned(),
+            );
+        }
         if g.is_directory_backed() {
             return Err("a directory-backed graph cannot become a named graph of another graph \
                  (its updates are logged in its own store): fork it for an in-memory copy"
@@ -1720,8 +1727,8 @@ impl Graph {
 
     /// Adds the in-memory graph `g` as a named graph called `name`, after the others (a second
     /// graph of the same name is not merged). Refused when this graph refuses writes, and for a
-    /// `g` that is directory-backed or refuses writes ([`set_named`](Self::set_named) says
-    /// why).
+    /// directory-backed destination (use [`ensure_named`](Self::ensure_named) and logged
+    /// inserts), and for a `g` that is directory-backed or refuses writes.
     pub fn add_named(&mut self, name: Term, g: Graph) -> Result<(), String> {
         self.check_named_insertable(&g)?;
         self.named.push((name, g));
@@ -1750,7 +1757,8 @@ impl Graph {
     /// refuses writes, when the one it would replace is a named graph of this graph's store
     /// (those change only through the durable methods), and when `g` is directory-backed (a
     /// store's named graph stays in its store: [`fork`](Self::fork) it for an in-memory copy)
-    /// or refuses writes.
+    /// or refuses writes. A directory-backed destination uses [`ensure_named`](Self::ensure_named)
+    /// and [`apply_delta_to_named`](Self::apply_delta_to_named) instead.
     pub fn set_named(&mut self, name: Term, g: Graph) -> Result<Option<Graph>, String> {
         self.check_named_insertable(&g)?;
         let old = match self.named.iter().position(|(n, _)| *n == name) {
@@ -2357,25 +2365,20 @@ impl Graph {
         Self::open_dir(&dir, Some(lock), true, Role::Root)
     }
 
-    /// Opens the store in `dir` READ-ONLY, for readers that may run side by side (queries and
-    /// benchmarks over a built index, several processes over one directory): the directory's
-    /// lock ([`dir_lock`], at the same location as [`open`](Self::open)'s) is taken SHARED, so
-    /// read-only opens coexist with each other but not with a writable holder (`WouldBlock`
-    /// either way round: a directory in use by a server, which can compact it underneath, is
-    /// refused). Both lock files (`<dir>.lock` beside the directory, `sparq.lock` inside it)
-    /// are taken shared, each created when missing and creatable; a reader that can neither
-    /// open nor create either holds no lock. Nothing else in the directory is written.
+    /// Opens a store read-only under shared directory locks.
     ///
-    /// Refused (`InvalidInput`) while the directory, or any named graph in it, has something a
-    /// writable open would replay or recover: a non-empty write-ahead log or transaction
-    /// journal, or the residue of an interrupted compaction or named-graph drop. A writable
-    /// open recovers or replays that: [`open`](Self::open) it once (`sparq-cli compact <dir>`
-    /// does, and folds the logs into the base), then open it read-only.
+    /// Readers share the available outside lock and the required inside lock, each created
+    /// when missing and creatable. They exclude writable holders (`WouldBlock`). Pending WAL
+    /// and transaction records are replayed in memory, including named graphs; log files and
+    /// store contents are unchanged. Interrupted directory swaps or named-graph drops require
+    /// recovery through a writable open first.
     ///
-    /// The graph refuses every write ([`apply_delta`](Self::apply_delta), updates,
-    /// [`compact`](Self::compact), [`vacuum`](Self::vacuum), restores) and is not
-    /// [directory-backed](Self::is_directory_backed). It can still be saved to ANOTHER
-    /// directory (that reads only its own files); never into its own.
+    /// The graph refuses every write and is not [directory-backed](Self::is_directory_backed).
+    /// It can be saved to another directory.
+    ///
+    /// # Errors
+    /// Returns an error for unavailable locks, unreadable store files or logs, or pending
+    /// directory recovery.
     #[cfg(feature = "mmap")]
     pub fn open_read_only(dir: &std::path::Path) -> std::io::Result<Graph> {
         let owned = claim_store(dir, Claim::ReadOnly, |_, _| Ok(()))?;
@@ -2386,22 +2389,23 @@ impl Graph {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(
-                    "{} cannot be opened read-only: {why}. A writable open recovers or replays \
-                     that: open it writable once (`sparq-cli compact <dir>` does, and folds the \
-                     logs into the base), then open it read-only; if the writable open refuses, \
-                     its error says why and what to do",
+                    "{} cannot be opened read-only: {why}. Open it writable once to recover \
+                     the directory, then open it read-only; if recovery is unavailable, the \
+                     writable open reports the required access",
                     dir.display()
                 ),
             ));
         }
-        Self::open_dir(&resolved, Some(lock), false, Role::Root)
+        let mut graph = Self::open_dir(&resolved, Some(lock), false, Role::Root)?;
+        graph.replay_logs_in_memory(&resolved)?;
+        Ok(graph)
     }
 
     /// Opens the store of `role` in the resolved `dir`, under `lock`, held by the caller (from
     /// [`claim_store`], or the root's for a named graph). Writable: crash residue is recovered,
     /// the logs replayed and kept open for appends, and a legacy store without a marker gets
-    /// one. Read-only (the caller has checked that there is no residue and no log to replay):
-    /// nothing in `dir` is written, and the graph and its named graphs refuse writes. Either
+    /// one. Read-only: the base is opened without writing into `dir`, and the graph and its
+    /// named graphs refuse writes. The caller replays logs in memory afterward. Either
     /// way the store's internals are checked first: no symbolic link among them, and no other
     /// hard link to a file written in place (its logs; on Unix).
     #[cfg(feature = "mmap")]
@@ -4203,7 +4207,8 @@ impl Graph {
     /// it keeps compaction O(triples) with no re-interning). For a directory-backed
     /// graph the new base is persisted ATOMICALLY (written to a fresh sibling directory,
     /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
-    /// memory-mapped from the new base. Refused while the txn journal is poisoned
+    /// memory-mapped from the new base. Staging refusals retain the overlay and log for retry.
+    /// Refused while the txn journal is poisoned
     /// ([`Graph::poison_txn`]), as the new base would start a journal without its frame.
     pub fn compact(&mut self) -> Result<(), String> {
         self.refuse_while_txn_poisoned()?;
@@ -4251,6 +4256,14 @@ impl Graph {
             let temporals = std::mem::replace(&mut self.temporals, TempData::Sparse(rustc_hash::FxHashMap::default()));
             self.temporals = temporals.fold(n);
         }
+        // Directory staging serializes the overlay directly. Keep it until publication
+        // succeeds, so another attempt still has the complete pending state.
+        #[cfg(feature = "mmap")]
+        if self.store.has_overlay() {
+            if let Some(dir) = dir {
+                return self.persist_swap(&dir);
+            }
+        }
         if self.store.has_overlay() {
             let triples: Vec<[Id; 3]> = {
                 let scan = self.store.scan(&[None, None, None]);
@@ -4264,10 +4277,6 @@ impl Graph {
                 w.truncate().map_err(|e| e.to_string())?;
             }
             return Ok(());
-        }
-        #[cfg(feature = "mmap")]
-        if let Some(dir) = dir {
-            self.persist_swap(&dir)?;
         }
         Ok(())
     }
@@ -4459,7 +4468,7 @@ impl Graph {
 
     /// Applies what the logs of the store in `dir` (opened read-only into this graph, and its
     /// named graphs, each from `named/<i>`) hold, in memory only, without changing a byte on
-    /// disk: so a frozen graph reads what a re-open would.
+    /// disk. Used by shared readers and frozen views.
     #[cfg(feature = "mmap")]
     fn replay_logs_in_memory(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
         self.replay_wal_in_memory(dir)?;
@@ -4473,7 +4482,12 @@ impl Graph {
                 Some(name) => match self.named.iter().position(|(n, _)| *n == name) {
                     Some(i) => &mut self.named[i].1,
                     None if insert => {
-                        self.named.push((name, Graph::new()));
+                        let mut sub = Graph::new();
+                        sub.detached = Some(Detached {
+                            why: "it was opened read-only".to_owned(),
+                            frozen: false,
+                        });
+                        self.named.push((name, sub));
                         &mut self.named.last_mut().expect("just pushed").1
                     }
                     None => continue,
@@ -5842,7 +5856,7 @@ fn hard_links(_path: &std::path::Path, _meta: &std::fs::Metadata) -> std::io::Re
 }
 
 /// What in the resolved graph directory `dir` (or a named graph in it) only a writable open
-/// may touch, if anything: a log to replay, or the residue of an interrupted swap.
+/// may touch, if anything: the residue of an interrupted directory swap or drop.
 #[cfg(feature = "mmap")]
 fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>> {
     // Links first: past this, nothing in `dir` or its `named/` is a symbolic link, so the walk
@@ -5871,16 +5885,6 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
                 "an interrupted drop left {}",
                 sibling.display()
             )));
-        }
-    }
-    for log in [Wal::path(dir), TxnJournal::path(dir)] {
-        match std::fs::metadata(&log) {
-            Ok(m) if m.len() > 0 => {
-                return Ok(Some(format!("{} holds updates to replay", log.display())));
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
         }
     }
     if named.is_dir() {

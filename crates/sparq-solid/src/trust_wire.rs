@@ -347,7 +347,7 @@ fn write_back_auth_terms(graph: &mut Graph, g_name: &Term, terms: Vec<[Term; 3]>
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
         .collect();
     let sub = Graph::from_parts(dict, ids);
-    graph.set_named(g_name.clone(), sub).expect(crate::WRITABLE);
+    crate::loader::install_named_view(graph, g_name.clone(), sub).expect(crate::WRITABLE);
 }
 
 /// Map a derived `auth:read|write|append|control` predicate IRI to its `acl:` mode IRI

@@ -752,9 +752,7 @@ fn reset_auth_view(graph: &mut Graph, terms: Vec<[Term; 3]>, preserve_empty_mark
     if terms.is_empty() && preserve_empty_marker {
         let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
         if graph.named_graph(&g_name).is_some() {
-            graph
-                .set_named(g_name, Graph::from_parts(Dict::new(), Vec::new()))
-                .expect(crate::WRITABLE);
+            crate::loader::install_named_view(graph, g_name, Graph::new()).expect(crate::WRITABLE);
         }
         return;
     }
@@ -769,7 +767,7 @@ fn reset_auth_view(graph: &mut Graph, terms: Vec<[Term; 3]>, preserve_empty_mark
 fn install_triples(graph: &mut Graph, name: &str, terms: Vec<[Term; 3]>) {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
     if terms.is_empty() {
-        graph.retain_named(|n, _| *n != g_name).expect(crate::WRITABLE);
+        graph.drop_named_durable(&g_name).expect(crate::WRITABLE);
         return;
     }
     let mut dict = Dict::new();
@@ -778,7 +776,7 @@ fn install_triples(graph: &mut Graph, name: &str, terms: Vec<[Term; 3]>) {
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
         .collect();
     let sub = Graph::from_parts(dict, ids);
-    graph.set_named(g_name, sub).expect(crate::WRITABLE);
+    crate::loader::install_named_view(graph, g_name, sub).expect(crate::WRITABLE);
 }
 
 /// The triples currently in a named graph (empty if absent).

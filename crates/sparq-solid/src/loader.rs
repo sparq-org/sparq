@@ -407,13 +407,39 @@ fn document_view<'a>(
 /// sentinel (`urn:sparq:nothing`) or a FORGED auth view; only `install_auth_view`
 /// creates `<urn:sparq:auth>`, after a successful materialization (roborev 1727).
 ///
-/// All or nothing: `Err`, dropping nothing, when a reserved graph, or a graph after one, is a
-/// named graph of a directory-backed graph's store (those are never taken out or moved).
+/// Directory-backed roots remove reserved slots through the durable drop methods.
+/// Returns an error when a removal cannot complete.
 pub(crate) fn strip_reserved_graphs(graph: &mut Graph) -> Result<(), String> {
+    if graph.is_directory_backed() {
+        let reserved: Vec<_> = graph
+            .named()
+            .iter()
+            .filter_map(|(name, _)| match name {
+                Term::NamedNode(n) if n.as_str().starts_with(RESERVED_PREFIX) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        for name in reserved {
+            graph.drop_named_durable(&name)?;
+        }
+        return Ok(());
+    }
     graph.retain_named(|name, _| match name {
         Term::NamedNode(n) => !n.as_str().starts_with(RESERVED_PREFIX),
         _ => true,
     })
+}
+
+/// Install a named view through logged writes when the dataset has a durable root.
+pub(crate) fn install_named_view(graph: &mut Graph, name: Term, view: Graph) -> Result<(), String> {
+    if graph.is_directory_backed() {
+        let inserts = graph_triples(&view);
+        let slot = graph.ensure_named(&name)?;
+        let deletes = graph_triples(&graph.named()[slot].1);
+        graph.apply_delta_to_named(slot, &inserts, &deletes)
+    } else {
+        graph.set_named(name, view).map(|_| ())
+    }
 }
 
 /// Empties every in-memory graph in the reserved IRI space in place (positions unchanged): what

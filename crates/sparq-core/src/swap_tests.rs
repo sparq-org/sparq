@@ -550,3 +550,69 @@ fn a_panicking_named_swap_freezes_the_root_and_keeps_its_data() {
     assert_intact(&dir);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// A staging refusal preserves each overlay until its base has been published.
+#[test]
+fn retrying_a_named_compaction_after_staging_failure_keeps_logged_updates() {
+    let root = scratch("named-staging-retry");
+    let dir = root.join("g");
+    let mut g = open_with_logged_update(&dir);
+    g.compact().unwrap();
+    g.apply_delta_to_named(0, &[triple("b3")], &[]).unwrap();
+    let new = is(&staging_path(&dir.join("named/0"), "compact-new"));
+    fault::fail_when(move |step, p| step == "create" && new(p));
+    assert!(g.compact().is_err());
+    assert_eq!(fault::disarm(), 1);
+    assert!(!g.is_frozen() && !sub(&g, "g0").is_frozen());
+    g.compact().unwrap();
+    drop(g);
+    assert_intact(&dir);
+    assert!(has(sub(&Graph::open(&dir).unwrap(), "g0"), "b3"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Read-only replay combines per-graph logs and committed transaction frames in memory.
+#[test]
+fn read_only_replays_pending_logs_without_changing_their_bytes() {
+    let root = scratch("read-only-logs");
+    let dir = root.join("g");
+    let mut g = open_with_logged_update(&dir);
+    g.txn
+        .as_mut()
+        .unwrap()
+        .append(&[
+            (true, None, triple("transaction")),
+            (false, Some(iri("g0")), triple("b")),
+            (true, Some(iri("g0")), triple("transaction-named")),
+            (true, Some(iri("fresh")), triple("fresh")),
+        ])
+        .unwrap();
+    drop(g);
+    let logs: Vec<_> = [
+        dir.join("wal.log"),
+        dir.join("txn.log"),
+        dir.join("named/0/wal.log"),
+    ]
+    .into_iter()
+    .map(|path| {
+        let bytes = std::fs::read(&path).unwrap();
+        (path, bytes)
+    })
+    .collect();
+    for _ in 0..2 {
+        let g = Graph::open_read_only(&dir).unwrap();
+        assert!(has(&g, "a2") && has(&g, "transaction"));
+        assert!(has(sub(&g, "g0"), "b2") && has(sub(&g, "g0"), "transaction-named"));
+        assert!(!has(sub(&g, "g0"), "b"));
+        assert!(has(sub(&g, "fresh"), "fresh"));
+        assert!(g.check_writable().is_err());
+        assert!(g
+            .named()
+            .iter()
+            .all(|(_, sub)| sub.check_writable().is_err()));
+        for (path, bytes) in &logs {
+            assert_eq!(&std::fs::read(path).unwrap(), bytes);
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

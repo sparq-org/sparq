@@ -61,8 +61,8 @@
 //! call fails closed with a [`SparqError::Backend`], exactly as a poisoned `Mutex` did. FIFO order is
 //! the one strict improvement: `Mutex` wakeups were arbitrary, so a caller could be starved.
 //!
-//! The actor thread exits when the last [`EmbeddedSparqClient`] clone drops (the channel closes) —
-//! no explicit shutdown handshake, no leaked thread.
+//! Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the actor thread.
+//! Its graph and directory lock are released before drop returns.
 //!
 //! ## Persistence
 //! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
@@ -133,17 +133,17 @@ struct GraphActor {
     /// reply, so a task can have at most ONE job outstanding — the queue is bounded in practice by
     /// the number of in-flight requests, which the server's own concurrency limits already cap.
     tx: mpsc::UnboundedSender<Job>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl GraphActor {
     /// Move `graph` onto a fresh dedicated OS thread and start serving jobs.
     ///
-    /// The thread runs until the channel closes (i.e. until the last [`EmbeddedSparqClient`] clone
-    /// drops the sender), so there is no shutdown handshake to get wrong and no leaked thread. A
-    /// spawn failure (the OS refused a thread) is a fail-closed backend error rather than a panic.
+    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread, releasing
+    /// the graph's directory lock before returning. A spawn failure is a backend error.
     fn spawn(graph: Graph) -> Result<Self, SparqError> {
         let (tx, rx) = mpsc::unbounded_channel::<Job>();
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name(ACTOR_THREAD_NAME.to_string())
             .spawn(move || actor_loop(graph, rx))
             .map_err(|e| {
@@ -152,7 +152,10 @@ impl GraphActor {
                     e
                 ))
             })?;
-        Ok(Self { tx })
+        Ok(Self {
+            tx,
+            thread: Some(thread),
+        })
     }
 
     /// Send one engine closure to the actor and await its result off the reactor.
@@ -178,6 +181,44 @@ impl GraphActor {
         reply_rx
             .await
             .map_err(|_| SparqError::Backend(ACTOR_STOPPED.into()))?
+    }
+}
+
+impl Drop for GraphActor {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Box::new(|graph| graph.stopped = true));
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Directories this save created, removed when empty unless the snapshot uses them.
+#[derive(Default)]
+struct SaveDirectories(Vec<std::path::PathBuf>);
+
+impl SaveDirectories {
+    fn create(&mut self, path: &Path) -> std::io::Result<()> {
+        if path.is_dir() {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            self.create(parent)?;
+        }
+        match std::fs::create_dir(path) {
+            Ok(()) => self.0.push(path.to_path_buf()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {}
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SaveDirectories {
+    fn drop(&mut self) {
+        for path in self.0.iter().rev() {
+            let _ = std::fs::remove_dir(path);
+        }
     }
 }
 
@@ -346,18 +387,24 @@ impl EmbeddedSparqClient {
         self.actor
             .call(move |graph| {
                 refuse_frozen(graph)?;
-                // Resolve after creating the destination: a missing component followed by `..`
-                // otherwise hides an alias of the live directory from the file-identity check.
-                std::fs::create_dir_all(&dir).map_err(|e| {
+                // Resolve through any newly created components, retaining only directories
+                // used by a successful snapshot to a separate destination.
+                let mut created = SaveDirectories::default();
+                created.create(&dir).map_err(|e| {
                     SparqError::Backend(format!("fatal: save directory creation failed: {e}"))
                 })?;
                 let dir = dir.canonicalize().map_err(|e| {
                     SparqError::Backend(format!("fatal: save directory resolution failed: {e}"))
                 })?;
                 let saved = if graph.is_backed_by(&dir) {
+                    drop(created);
                     graph.compact()
                 } else {
-                    graph.save(&dir).map_err(|e| e.to_string())
+                    let saved = graph.save(&dir).map_err(|e| e.to_string());
+                    if saved.is_ok() {
+                        created.0.clear();
+                    }
+                    saved
                 };
                 saved.map_err(|e| {
                     SparqError::Backend(format!("fatal: graph save({}) failed: {e}", dir.display()))
@@ -1281,16 +1328,8 @@ mod tests {
                 .await
                 .expect("saved over its own directory, spelled differently");
             drop(first);
-            // The actor drops the graph, and with it the lock, once its last handle goes.
-            let mut reopened = None;
-            for _ in 0..200 {
-                if let Ok(c) = EmbeddedSparqClient::open(&dir) {
-                    reopened = Some(c);
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            assert!(reopened.is_some(), "the lock outlived the graph");
+            let reopened =
+                EmbeddedSparqClient::open(&dir).expect("lock released before drop returns");
             drop(reopened);
             let _ = std::fs::remove_dir_all(&root);
         });

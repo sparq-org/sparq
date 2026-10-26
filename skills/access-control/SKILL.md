@@ -30,6 +30,12 @@ document scopes distinct and identities stable when unrelated documents are put
 or deleted, even if named-graph positions change. The source documents retain
 their blank nodes; these IRIs appear in the reasoning input and authorization view.
 
+On a directory-backed dataset, authorization materialization creates `<urn:sparq:auth>`
+with `ensure_named` and replaces its contents through logged inserts and deletes.
+The dataset retains its durable root and named-graph manifest across repeated rebuilds.
+`PodStore::new` removes reserved input graphs through durable drops when possible;
+if removal cannot complete, it serves a fork as before.
+
 ## What this is — and is NOT (read first)
 
 This is an **architecture / research-track** layer, not a deployable Solid server.
