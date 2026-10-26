@@ -767,7 +767,13 @@ fn reset_auth_view(graph: &mut Graph, terms: Vec<[Term; 3]>, preserve_empty_mark
 fn install_triples(graph: &mut Graph, name: &str, terms: Vec<[Term; 3]>) {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(name));
     if terms.is_empty() {
-        graph.drop_named_durable(&g_name).expect(crate::WRITABLE);
+        if graph.is_directory_backed() {
+            while graph.drop_named_durable(&g_name).expect(crate::WRITABLE) {}
+        } else {
+            graph
+                .retain_named(|name, _| *name != g_name)
+                .expect(crate::WRITABLE);
+        }
         return;
     }
     let mut dict = Dict::new();
@@ -2436,3 +2442,18 @@ fn serialize_request_n3(req: &Request) -> Result<String, String> {
     Ok(out)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_view_removal_clears_all_in_memory_slots() {
+        let mut graph = Graph::new();
+        let name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
+        graph.add_named(name.clone(), Graph::new()).unwrap();
+        graph.add_named(name.clone(), Graph::new()).unwrap();
+        install_triples(&mut graph, AUTH_GRAPH, Vec::new());
+        assert!(graph.named_graph(&name).is_none());
+        assert!(graph.named().is_empty());
+    }
+}

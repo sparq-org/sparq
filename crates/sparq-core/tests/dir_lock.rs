@@ -1400,12 +1400,12 @@ fn store_paths_reject_regular_files_before_creating_locks() {
 /// In-memory views are installed on forks; durable members keep contiguous on-disk slots.
 #[test]
 fn durable_named_slots_refuse_in_memory_views() {
-    for method in ["add", "set", "extend"] {
-        for action in ["ensure", "compact", "drop"] {
-            let root = scratch(&format!("view-{method}-{action}"));
-            let dir = root.join("g");
-            save_dataset(&dir);
-            let mut graph = Graph::open(&dir).unwrap();
+    for action in ["ensure", "compact", "drop"] {
+        let root = scratch(&format!("view-{action}"));
+        let dir = root.join("g");
+        save_dataset(&dir);
+        let mut graph = Graph::open(&dir).unwrap();
+        for method in ["add", "set", "extend"] {
             let view =
                 Graph::load_str("<http://ex/view> <http://ex/p> <http://ex/o> .", "ntriples")
                     .unwrap();
@@ -1416,33 +1416,34 @@ fn durable_named_slots_refuse_in_memory_views() {
             };
             assert!(result.unwrap_err().contains("ensure_named"));
             assert_eq!(graph.named().len(), 2);
-            match action {
-                "ensure" => {
-                    let slot = graph.ensure_named(&iri("fresh")).unwrap();
-                    graph
-                        .apply_delta_to_named(slot, &[triple("fresh")], &[])
-                        .unwrap();
-                }
-                "compact" => {
-                    graph.apply_delta(&[triple("pending")], &[]).unwrap();
-                    graph.compact().unwrap();
-                }
-                _ => {
-                    graph.drop_named_durable(&iri("g1")).unwrap();
-                }
-            }
-            drop(graph);
-            let graph = Graph::open(&dir).unwrap();
-            assert!(graph.named_graph(&iri("view")).is_none());
             assert!(has(sub_graph(&graph, "g0"), "b"));
-            assert!(has(&graph, "a"));
-            match action {
-                "ensure" => assert!(has(sub_graph(&graph, "fresh"), "fresh")),
-                "compact" => assert!(has(&graph, "pending")),
-                _ => assert!(graph.named_graph(&iri("g1")).is_none()),
-            }
-            drop(graph);
-            std::fs::remove_dir_all(root).unwrap();
         }
+        match action {
+            "ensure" => {
+                let slot = graph.ensure_named(&iri("fresh")).unwrap();
+                graph
+                    .apply_delta_to_named(slot, &[triple("fresh")], &[])
+                    .unwrap();
+            }
+            "compact" => {
+                graph.apply_delta(&[triple("pending")], &[]).unwrap();
+                graph.compact().unwrap();
+            }
+            _ => {
+                graph.drop_named_durable(&iri("g1")).unwrap();
+            }
+        }
+        drop(graph);
+        let graph = Graph::open(&dir).unwrap();
+        assert!(graph.named_graph(&iri("view")).is_none());
+        assert!(has(sub_graph(&graph, "g0"), "b"));
+        assert!(has(&graph, "a"));
+        match action {
+            "ensure" => assert!(has(sub_graph(&graph, "fresh"), "fresh")),
+            "compact" => assert!(has(&graph, "pending")),
+            _ => assert!(graph.named_graph(&iri("g1")).is_none()),
+        }
+        drop(graph);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

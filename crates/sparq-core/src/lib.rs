@@ -4256,6 +4256,14 @@ impl Graph {
             let temporals = std::mem::replace(&mut self.temporals, TempData::Sparse(rustc_hash::FxHashMap::default()));
             self.temporals = temporals.fold(n);
         }
+        // Directory staging serializes the overlay directly. Keep it until publication
+        // succeeds, so another attempt still has the complete pending state.
+        #[cfg(feature = "mmap")]
+        if self.store.has_overlay() {
+            if let Some(dir) = dir {
+                return self.persist_swap(&dir);
+            }
+        }
         if self.store.has_overlay() {
             let triples: Vec<[Id; 3]> = {
                 let scan = self.store.scan(&[None, None, None]);
@@ -4269,10 +4277,6 @@ impl Graph {
                 w.truncate().map_err(|e| e.to_string())?;
             }
             return Ok(());
-        }
-        #[cfg(feature = "mmap")]
-        if let Some(dir) = dir {
-            self.persist_swap(&dir)?;
         }
         Ok(())
     }
