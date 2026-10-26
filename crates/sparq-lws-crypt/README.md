@@ -1,10 +1,8 @@
 # sparq-lws-crypt
 
-Native, unpublished key providers and the `e1` encrypted blob format for P1-1 of
-[#7189](https://github.com/sparq-org/sparq/issues/7189). The crate is a standalone
-workspace member; no server, environment variables or blob-store decorator are wired.
-Its API and dependencies are absent on wasm32. Runtime dependencies are the existing
-`aws-lc-rs`, `zeroize` and `async-trait` crates; no cloud SDK is included.
+Native, unpublished key providers and the `e1` encrypted blob format for P1-1 of [#7189](https://github.com/sparq-org/sparq/issues/7189). The crate is a standalone
+workspace member, consumed by the default-off native `sparq-lws-core/crypt` library decorator. Server activation and environment wiring are a separate stage.
+Its API and dependencies are absent on wasm32; no cloud SDK is included.
 
 ## 🚀 Quickstart
 
@@ -81,13 +79,22 @@ with an invalid tag/context returns `AuthenticationFailed`.
 
 ### Key lifecycle
 
-The hard limit is **2^32 seal attempts per DEK**, using random 96-bit nonces;
-rotate well before it. `Dek::seal_count()` includes failed attempts after reservation.
+The hard limit is **2^32 seal attempts per DEK**, using random 96-bit nonces; rotate well before it. `Dek::seal_count()` includes failed attempts after reservation.
 The counter is atomic across callers sharing one `Dek`, and cannot wrap past the
 limit. Import a conservative lifetime count with `Dek::new`; persist reservations
 before use or rotate on restart. Independently imported copies/processes do not
 share a counter. Exhausted keys remain readable. KEK wrapping uses a separate
 random nonce space; operators must also rotate a heavily used KEK.
+
+### How P1-2 uses this
+
+The native `sparq-lws-core/crypt` decorator keeps each wrapped DEK in a reserved
+index record outside HTTP and blob GC, with `WrappedKey::to_bytes()`, random
+`dek_id`, pod, scheme (`lws`/`solid`), creation time, current flag and `reserved_seals`.
+It durably reserves `2^16` attempts before use; restart/expiry skips unused attempts,
+and rotation starts a fresh key at `2^31`. Per-pod reservations and per-id unwraps
+are serialized under one TTL policy. Back up index, blobs and KEK together. Runtime
+activation is held for the reference audit and storage-runtime stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
 
 ### Threat model
 
@@ -102,8 +109,7 @@ ETags derive from plaintext, so equal bodies get equal ETags across pods.
 
 ## 📚 Learn more
 
-The [Solid/LWS server skill](../../skills/solid-lws-server/SKILL.md) describes the
-server's current integration status. Run `cargo test -p sparq-lws-crypt` for vectors,
+The [Solid/LWS server skill](../../skills/solid-lws-server/SKILL.md) describes the server's current integration status. Run `cargo test -p sparq-lws-crypt` for vectors,
 tamper checks, parser properties, nonce uniqueness and key-file permission checks.
 `tests/vectors/e1.json` contains public test-only keys and deterministic vectors,
 checked through private test-only nonce hooks and independently cross-checked with

@@ -158,6 +158,15 @@ impl<T: BlobStore> BlobStore for SharedStore<T> {
         self.0.put(key, body).await
     }
 
+    async fn put_scoped(
+        &self,
+        scope: &sparq_lws_core::store::BlobScope,
+        key: &str,
+        body: Bytes,
+    ) -> Result<(), BlobError> {
+        self.0.put_scoped(scope, key, body).await
+    }
+
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {
         self.0.exists(key).await
     }

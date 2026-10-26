@@ -94,6 +94,15 @@ pub(crate) fn has_normalisable_dot_segment(path: &str) -> bool {
     })
 }
 
+/// Whether an HTTP path projects the internal wrapped-key namespace.
+#[cfg(all(feature = "crypt", not(target_arch = "wasm32")))]
+pub(crate) fn is_data_key_record_path(path: &str) -> bool {
+    crate::store::is_data_key_record(path.trim_start_matches('/'))
+        || crate::store::is_data_key_record(
+            crate::identity::percent_decode_lossy(path).trim_start_matches('/'),
+        )
+}
+
 /// Parse a request path against the public base URL into an [`LdpTarget`].
 ///
 /// `base` is the server's public origin (e.g. `https://pod.example`), WITHOUT a trailing slash.
@@ -113,6 +122,13 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     let path_only = path.split(['?', '#']).next().unwrap_or("");
     if !path_only.starts_with('/') {
         return Err(ServerError::BadRequest("path must be absolute".into()));
+    }
+
+    // With the native encryption capability, HTTP projections of the internal
+    // key namespace remain absent for every method, including encoded spellings.
+    #[cfg(all(feature = "crypt", not(target_arch = "wasm32")))]
+    if is_data_key_record_path(path_only) {
+        return Err(ServerError::NotFound);
     }
 
     // The reserved provider-identity namespace (`/.identity/**` — see `crate::identity` and

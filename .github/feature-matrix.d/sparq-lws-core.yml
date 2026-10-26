@@ -109,3 +109,9 @@
   crate: "sparq-lws-core"
   features: "authn-openid"
   test: true
+
+# Native byte-plane envelope encryption and reservation/cache lifecycle tests.
+- name: "sparq-lws-core (crypt)"
+  crate: "sparq-lws-core"
+  features: "crypt"
+  test: true

@@ -24,9 +24,16 @@ pub enum BlobError {
     /// The configured in-memory byte or entry ceiling would be exceeded.
     #[error("in-memory blob-store quota exceeded")]
     QuotaExceeded,
+    /// An envelope names no durable wrapped-key record.
+    #[error("UnknownDataKey")]
+    UnknownDataKey,
     #[error("blob backend error: {0}")]
     Backend(String),
 }
+
+/// The stable pod identity supplied by the resource write path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlobScope(pub String);
 
 /// One stored blob, as surfaced by [`BlobStore::list`] for the reconciler's orphan sweep.
 ///
@@ -75,6 +82,11 @@ pub trait BlobStore: Send + Sync {
 
     /// Write (create-or-replace) the bytes for a storage key.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
+
+    /// Write resource bytes for a pod. Ordinary backends ignore the scope.
+    async fn put_scoped(&self, _scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
+        self.put(key, body).await
+    }
 
     /// Whether a key exists.
     async fn exists(&self, key: &str) -> Result<bool, BlobError>;

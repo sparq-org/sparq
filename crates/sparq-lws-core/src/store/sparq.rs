@@ -454,6 +454,8 @@ struct Meta {
     pooled: usize,
     /// Records of holds ([`super::is_hold_record`]), admitted apart from every ceiling.
     holds: usize,
+    /// Reserved wrapped-key records, admitted apart from content.
+    data_keys: usize,
     /// The one notification marker ([`super::is_service_marker`]) holding the slot kept for it,
     /// admitted apart from every ceiling and counted in none: the first stored. Any other IRI of
     /// that shape (another origin's) is an ordinary pool record.
@@ -506,6 +508,7 @@ impl Meta {
         let marker = self.is_marker_slot(&iri);
         let pooled = super::in_service_pool(&iri) && !marker;
         let hold = super::is_hold_record(&iri);
+        let data_key = super::limits::is_data_key_record(&iri);
         if marker && self.marker.is_none() {
             self.marker = Some(iri.clone());
         }
@@ -513,6 +516,7 @@ impl Meta {
         if replaced.is_none() {
             self.pooled += usize::from(pooled);
             self.holds += usize::from(hold);
+            self.data_keys += usize::from(data_key);
         }
         replaced
     }
@@ -526,6 +530,9 @@ impl Meta {
         }
         if super::is_hold_record(iri) {
             self.holds -= 1;
+        }
+        if super::limits::is_data_key_record(iri) {
+            self.data_keys -= 1;
         }
         Some(gone)
     }
@@ -579,6 +586,7 @@ impl InMemorySparqClient {
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
         if index.meta.contains_key(iri)
             || super::is_hold_record(iri)
+            || super::limits::is_data_key_record(iri)
             || index.meta.is_marker_slot(iri)
         {
             return Ok(());
@@ -588,7 +596,11 @@ impl InMemorySparqClient {
             (pooled, self.limits.max_pool_resource_count)
         } else {
             (
-                index.meta.len() - pooled - index.meta.holds() - index.meta.markers(),
+                index.meta.len()
+                    - pooled
+                    - index.meta.holds()
+                    - index.meta.markers()
+                    - index.meta.data_keys,
                 self.limits.max_resource_count,
             )
         };
@@ -854,7 +866,12 @@ impl SparqClient for InMemorySparqClient {
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         // Every metadata record's `blob_key` is a live reference. Mirrors the live path's
         // `SELECT DISTINCT ?bk` over the `pss:blobKey` predicate across all graphs.
-        Ok(guard.meta.values().map(|m| m.blob_key.clone()).collect())
+        Ok(guard
+            .meta
+            .values()
+            .filter(|m| !m.blob_key.is_empty())
+            .map(|m| m.blob_key.clone())
+            .collect())
     }
 
     async fn read_plan(

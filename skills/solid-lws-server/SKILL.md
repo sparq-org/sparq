@@ -117,20 +117,30 @@ They are refused on non-memory backends unless
 `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` is explicitly set. Use that escape hatch
 only for an ephemeral test instance.
 
-## Encryption at rest (in progress)
+## Encryption at rest
 
-`sparq-lws-crypt` is the native, unpublished P1-1 crate for key providers and the
-versioned `e1` blob envelope. It provides a local KEK provider with context-bound
-AES-256-GCM wrapping, zeroizing secret keys and a per-DEK seal counter. See its
-[format and API reference](../../crates/sparq-lws-crypt/README.md).
-Nothing is wired into the server yet; the blob-store decorator and environment
-configuration belong to P1-2 of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+The native, default-off `crypt` feature adds the P1-2 library decorator
+`store::blob_crypt::EncryptingBlobStore` over the P1-1
+[envelope and key-provider API](../../crates/sparq-lws-crypt/README.md).
+`BlobStore::put_scoped(&BlobScope, key, body)` defaults to `put` for ordinary
+backends; `CompositeStore` uses it for every body write. The decorator refuses
+plain `put`. `BlobScopePolicy` selects the storage root for LWS, the first path
+segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
+seal reservations live in reserved index records, outside HTTP resources.
 
-Once integrated, blob encryption protects lost/stolen volumes and snapshots,
-cloud/backup operators with byte-plane access and no KMS grant, and storage admins
-without the KEK. It does not protect a root admin dumping process memory or reading
-the mmap'd index on the running host (P3 scope). The sparq index directory holds
-the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
+This is the library stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+Runtime activation is held for the D1 reference audit and the
+[#7232](https://github.com/sparq-org/sparq/pull/7232) storage-runtime integration;
+the binary accepts no encryption environment configuration at this stage.
+The [integration reference](references/blob-encryption.md) records the reserved
+environment settings, one-way major format transition, KEK backup requirement,
+and legacy `SQLB` limitation for that stage. The wasm graph excludes this feature.
+
+Blob encryption protects lost/stolen volumes and snapshots, cloud/backup
+operators with byte-plane access and no KMS grant, and storage admins without
+the KEK. It does not protect a root admin dumping process memory or reading the
+mmap'd index on the running host (P3 scope). The sparq index directory holds the
+RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
 (EBS/Azure Disk/dm-crypt). Application-level index encryption is research
 ([#2567](https://github.com/sparq-org/sparq/issues/2567)).
 ETags derive from plaintext, so equal bodies get equal ETags across pods.
