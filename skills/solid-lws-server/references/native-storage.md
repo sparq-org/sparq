@@ -50,8 +50,8 @@ Dropping the final client joins its actor and releases the index lock.
 
 ## Backup and restore
 
-This procedure describes the durable `SOLID_SERVER_DATA_DIR` contract; it requires
-the filesystem adapter boot integration noted above. It applies to both Solid
+This procedure uses the durable `SOLID_SERVER_DATA_DIR` contract with the default
+native build described above. It applies to both Solid
 and LWS protocol modes. It does not back up ephemeral in-memory storage or a
 remote SPARQ service.
 
@@ -129,9 +129,17 @@ A backup is only as consistent as the stop that preceded it. A SIGKILL, forced
 container termination, failed compaction or non-zero exit is not a clean stop;
 retain the original files for recovery rather than labelling their copy clean.
 
+A clean stop compacts the index but currently can leave unreferenced blob files,
+including after Solid container creation. It does not guarantee an orphan-free
+blob plane. The offline archive preserves those files too; do not omit blobs
+from the backup or delete files by guessing which keys are live.
+
 For a container, stop it and wait for clean exit before detaching the data
 volume. On Kubernetes, scale the workload to zero, wait for its pod to finish
 cleanly and for the volume to detach, then snapshot the detached volume. Ensure
 the orchestrator allows shutdown to finish rather than escalating to SIGKILL.
 Snapshot the volume holding the **whole** data directory, not just one plane.
 Restore its snapshot into a fresh volume before starting the workload.
+See the [native container configuration](../../../crates/sparq-lws-core/README.md)
+and [Helm persistence settings](../../helm-deploy/SKILL.md#use-persistence-and-private-images)
+for the deployment configuration to restore alongside the volume.

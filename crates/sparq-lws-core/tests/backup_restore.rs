@@ -97,11 +97,15 @@ fn tree(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
     files
 }
 
-fn refuses(data: &Path, expected: &str) {
+fn refuses(data: &Path, mode: Mode, expected: &str) {
     let before = tree(data);
+    let mut values = vec![("SOLID_SERVER_DATA_DIR", data.to_str().unwrap())];
+    if mode == Mode::Lws {
+        values.push(("SOLID_SERVER_PROTOCOL", "lws"));
+    }
     let output = Process::start(
         env!("CARGO_BIN_EXE_sparq-lws-core"),
-        &[("SOLID_SERVER_DATA_DIR", data.to_str().unwrap())],
+        &values,
     )
     .finish();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -117,7 +121,7 @@ fn refuses(data: &Path, expected: &str) {
     );
 }
 
-fn incompatible_majors(data: &Path) {
+fn incompatible_majors(data: &Path, mode: Mode) {
     let marker = data.join("format.json");
     let original = std::fs::read(&marker).unwrap();
     let format: Value = serde_json::from_slice(&original).unwrap();
@@ -125,7 +129,7 @@ fn incompatible_majors(data: &Path) {
         let mut altered = format.clone();
         altered[plane]["major"] = json!(2);
         std::fs::write(&marker, serde_json::to_vec(&altered).unwrap()).unwrap();
-        refuses(data, "unsupported format.json");
+        refuses(data, mode, "unsupported format.json");
     }
     std::fs::write(marker, original).unwrap();
 }
@@ -176,13 +180,12 @@ async fn verify(corpus: &Corpus, f: &Fixture) {
     }
 }
 
-async fn offline_backup_and_restore(mode: Mode) {
+async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
     let original = Fixture::new(mode).await;
     let server = original.boot().await;
     let corpus = Corpus::write(&original).await;
     verify(&corpus, &original).await;
     server.stop(); // SIGTERM, exit zero, drained and compacted before tar starts.
-    inspect_blobs(&original, false).await;
 
     let backup = Directory::new();
     let archive_path = backup.0.join("data.tar");
@@ -246,8 +249,16 @@ async fn offline_backup_and_restore(mode: Mode) {
     }
     restored_server.stop();
     original_server.stop();
+    incompatible_majors(&restored.data(), mode);
+    (original, restored)
+}
+
+// Keep exact orphan checks independently failing: an unreferenced blob must not prevent
+// the archive, HTTP equality, grant, refusal and independent-directory checks from executing.
+async fn backup_blob_planes_match_index(mode: Mode) {
+    let (original, restored) = offline_backup_and_restore(mode).await;
+    inspect_blobs(&original, false).await;
     inspect_blobs(&restored, false).await;
-    incompatible_majors(&restored.data());
 }
 
 #[tokio::test]
@@ -264,8 +275,21 @@ async fn offline_backup_and_restore_lws() {
         .expect("LWS backup/restore exceeded deadline");
 }
 
-#[test]
-fn foreign_restore_target_is_refused_without_changes() {
+#[tokio::test]
+async fn backup_blob_planes_match_index_solid() {
+    tokio::time::timeout(TEST_DEADLINE, backup_blob_planes_match_index(Mode::Solid))
+        .await
+        .expect("Solid backup blob inspection exceeded deadline");
+}
+
+#[tokio::test]
+async fn backup_blob_planes_match_index_lws() {
+    tokio::time::timeout(TEST_DEADLINE, backup_blob_planes_match_index(Mode::Lws))
+        .await
+        .expect("LWS backup blob inspection exceeded deadline");
+}
+
+fn foreign_restore_target_is_refused_without_changes(mode: Mode) {
     let source = archive_fixture();
     let backup = Directory::new();
     let archive_path = backup.0.join("data.tar");
@@ -285,8 +309,18 @@ fn foreign_restore_target_is_refused_without_changes() {
             "unpack overwrote foreign data"
         );
         // Pre-extraction boot guard: never overlay this directory with a valid marker from tar.
-        refuses(&destination.0, "refusing foreign data directory");
+        refuses(&destination.0, mode, "refusing foreign data directory");
     }
+}
+
+#[test]
+fn foreign_restore_target_is_refused_without_changes_solid() {
+    foreign_restore_target_is_refused_without_changes(Mode::Solid);
+}
+
+#[test]
+fn foreign_restore_target_is_refused_without_changes_lws() {
+    foreign_restore_target_is_refused_without_changes(Mode::Lws);
 }
 
 // Synthetic on-disk bytes for archive fidelity and guards that run before either plane opens.
@@ -311,8 +345,7 @@ fn archive_fixture() -> Directory {
     source
 }
 
-#[test]
-fn archive_layout_locks_and_restored_format_guards() {
+fn archive_layout_locks_and_restored_format_guards(mode: Mode) {
     // The HTTP tests above additionally alter both majors in a restored real corpus.
     let source = archive_fixture();
     let backup = Directory::new();
@@ -321,6 +354,16 @@ fn archive_layout_locks_and_restored_format_guards() {
     let destination = Directory::new();
     unpack(&archive_path, &destination.0).unwrap();
     assert_eq!(tree(&destination.0), tree(&source.0));
-    incompatible_majors(&destination.0);
+    incompatible_majors(&destination.0, mode);
     assert_eq!(tree(&destination.0), tree(&source.0));
+}
+
+#[test]
+fn archive_layout_locks_and_restored_format_guards_solid() {
+    archive_layout_locks_and_restored_format_guards(Mode::Solid);
+}
+
+#[test]
+fn archive_layout_locks_and_restored_format_guards_lws() {
+    archive_layout_locks_and_restored_format_guards(Mode::Lws);
 }
