@@ -210,16 +210,37 @@ fn linked_named_container_is_refused_before_open_or_drop_all() {
 
 #[test]
 fn unremovable_undeclared_slot_does_not_fail_open() {
+    const CHILD_STORE: &str = "SPARQ_TEST_UNREMOVABLE_SLOT_STORE";
+    if let Some(path) = std::env::var_os(CHILD_STORE) {
+        let path = std::path::PathBuf::from(path);
+        let failed = path.join("named/9");
+        fault::fail_when(move |step, p| step == "remove-tree" && p == failed);
+        let opened = Graph::open(&path);
+        assert_eq!(fault::disarm(), 1);
+        assert_eq!(opened.unwrap().named().len(), 1);
+        assert!(path.join("named/9").is_dir());
+        return;
+    }
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("store");
     drop(store(&path, 1));
     std::fs::create_dir(path.join("named/9")).unwrap();
-    let failed = path.join("named/9");
-    fault::fail_when(move |step, p| step == "remove-tree" && p == failed);
-    let opened = Graph::open(&path);
-    assert_eq!(fault::disarm(), 1);
-    let opened = opened.unwrap();
-    assert_eq!(opened.named().len(), 1);
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "layout_tests::unremovable_undeclared_slot_does_not_fail_open",
+            "--nocapture",
+        ])
+        .env(CHILD_STORE, &path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let warning = String::from_utf8(output.stderr).unwrap();
+    assert!(warning.contains("warning:"), "{warning}");
+    assert!(
+        warning.contains(&path.join("named/9").display().to_string()),
+        "{warning}"
+    );
     assert!(path.join("named/9").is_dir());
 }
 
@@ -526,4 +547,200 @@ fn invalid_layout_preserves_recorded_child_staging_before_recovery() {
     );
     assert!(staging.join(STAGING_MARKER).is_file());
     assert!(path.join("named/1").is_dir());
+}
+
+#[test]
+fn nested_layout_validation_precedes_slot_cleanup() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    let mut root = store(&path, 2);
+    root.named[1].1.ensure_named(&name("nested")).unwrap();
+    drop(root);
+    let child = path.join("named/1");
+    write_named_manifest(&child, &[(4, name("nested"))], 5).unwrap();
+    let orphan = path.join("named/9");
+    std::fs::create_dir(&orphan).unwrap();
+    std::fs::write(orphan.join("preserve"), b"preserve").unwrap();
+    let sibling_orphan = path.join("named/0/named/9");
+    std::fs::create_dir_all(&sibling_orphan).unwrap();
+    std::fs::write(sibling_orphan.join("preserve"), b"preserve").unwrap();
+    assert!(Graph::open(&path).is_err());
+    assert_eq!(std::fs::read(orphan.join("preserve")).unwrap(), b"preserve");
+    assert_eq!(
+        std::fs::read(sibling_orphan.join("preserve")).unwrap(),
+        b"preserve"
+    );
+    assert!(child.join("named/0").is_dir());
+}
+
+#[test]
+fn undeclared_root_store_is_preserved_during_cleanup() {
+    for legacy in [false, true] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        drop(store(&path, 1));
+        let outside = tmp.path().join("other");
+        Graph::load_dataset(
+            "<http://example/s> <http://example/p> <http://example/o> .",
+            "ntriples",
+        )
+        .unwrap()
+        .save(&outside)
+        .unwrap();
+        if legacy {
+            std::fs::remove_file(outside.join(STORE_MARKER)).unwrap();
+        }
+        let orphan = path.join("named/9");
+        std::fs::rename(&outside, &orphan).unwrap();
+        let before = std::fs::read(orphan.join("dict-meta.bin")).unwrap();
+        let mut opened = Graph::open(&path).unwrap();
+        assert_eq!(std::fs::read(orphan.join("dict-meta.bin")).unwrap(), before);
+        assert!(opened.drop_all_named_durable().is_err());
+        assert_eq!(std::fs::read(orphan.join("dict-meta.bin")).unwrap(), before);
+    }
+}
+
+#[test]
+fn journal_upgrade_preserves_existing_temporary_file_links() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    drop(store(&path, 0));
+    let meta = path.join("dict-meta.bin");
+    let mut bytes = std::fs::read(&meta).unwrap();
+    bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+    std::fs::write(&meta, bytes).unwrap();
+    let preserved = tmp.path().join("preserved.bin");
+    std::fs::write(&preserved, b"preserve").unwrap();
+    std::fs::hard_link(&preserved, path.join("dict-meta.bin.tmp")).unwrap();
+    let mut root = Graph::open(&path).unwrap();
+    root.commit_txn_ops(&[TxnOp::Create(name("fresh"))])
+        .unwrap();
+    assert_eq!(std::fs::read(&preserved).unwrap(), b"preserve");
+    drop(root);
+    assert!(Graph::open(&path)
+        .unwrap()
+        .named_graph(&name("fresh"))
+        .is_some());
+}
+
+#[test]
+fn journal_upgrade_publication_error_prevents_frame_append() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    drop(store(&path, 0));
+    let meta = path.join("dict-meta.bin");
+    let mut before = std::fs::read(&meta).unwrap();
+    before[4..8].copy_from_slice(&1u32.to_le_bytes());
+    std::fs::write(&meta, &before).unwrap();
+    let mut root = Graph::open(&path).unwrap();
+    let temporary = path.join("dict-meta.bin.tmp");
+    fault::fail_when(move |step, p| step == "rename" && p == temporary);
+    assert!(root
+        .commit_txn_ops(&[TxnOp::Create(name("fresh"))])
+        .is_err());
+    assert_eq!(fault::disarm(), 1);
+    assert!(root.is_frozen());
+    assert_eq!(std::fs::read(&meta).unwrap(), before);
+    assert!(std::fs::read(path.join("txn.log")).unwrap().is_empty());
+    drop(root);
+    assert!(Graph::open(&path).unwrap().named().is_empty());
+}
+
+#[test]
+fn nested_layout_validation_precedes_retained_container_cleanup() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    let mut root = store(&path, 1);
+    root.named[0].1.ensure_named(&name("nested")).unwrap();
+    let named = path.join("named");
+    let old = staging_path(&named, "drop-old");
+    root.named[0]
+        .1
+        .save_unlocked(&old.join("0"), Role::Child)
+        .unwrap();
+    drop(root);
+    let id = read_marker(&path).unwrap().unwrap().id.unwrap();
+    mark_staging(&old, "drop-old", &id).unwrap();
+    write_named_manifest(&named.join("0"), &[(4, name("nested"))], 5).unwrap();
+    let retained = old.join("0/named/0/dict-meta.bin");
+    let before = std::fs::read(&retained).unwrap();
+    assert!(Graph::open(&path).is_err());
+    assert_eq!(std::fs::read(&retained).unwrap(), before);
+    assert!(old.join(STAGING_MARKER).is_file());
+}
+
+#[test]
+fn declared_nested_swaps_remain_recoverable_during_container_recovery() {
+    for (has_new, has_old, record_new, record_old) in [
+        (true, true, true, false),
+        (true, true, false, true),
+        (false, true, false, true),
+        (true, false, true, false),
+    ] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        let mut root = store(&path, 1);
+        let child = &mut root.named[0].1;
+        child.ensure_named(&name("nested")).unwrap();
+        child.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+        let leaf = path.join("named/0/named/0");
+        let new = staging_path(&leaf, "compact-new");
+        let old = staging_path(&leaf, "compact-old");
+        let id = read_marker(&leaf).unwrap().unwrap().id.unwrap();
+        if has_new {
+            child.named[0].1.save_unlocked(&new, Role::Child).unwrap();
+            write_marker(&new, Role::Child, &id).unwrap();
+            if record_new {
+                mark_staging(&new, "compact-new", &id).unwrap();
+            }
+        }
+        drop(root);
+        if has_old {
+            std::fs::rename(&leaf, &old).unwrap();
+            if record_old {
+                mark_staging(&old, "compact-old", &id).unwrap();
+            }
+        } else {
+            std::fs::remove_dir_all(&leaf).unwrap();
+        }
+        let residue = staging_path(&path.join("named"), "drop-new");
+        std::fs::create_dir(&residue).unwrap();
+        let root_id = read_marker(&path).unwrap().unwrap().id.unwrap();
+        mark_staging(&residue, "drop-new", &root_id).unwrap();
+        assert!(Graph::open_read_only(&path).is_err());
+        for _ in 0..2 {
+            let reopened = Graph::open(&path).unwrap();
+            let child = reopened.named_graph(&name("g0")).unwrap();
+            assert_eq!(child.named_graph(&name("nested")).unwrap().len(), 1);
+        }
+        assert!(!old.exists());
+        assert!(!new.exists());
+        assert!(!residue.exists());
+    }
+}
+
+#[test]
+fn undeclared_slot_with_a_held_lock_is_preserved_until_released() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    drop(store(&path, 1));
+    let orphan = path.join("named/9");
+    std::fs::create_dir(&orphan).unwrap();
+    write_store_marker(&orphan, Role::Child).unwrap();
+    let lock = std::fs::File::create(orphan.join("descendant.lock")).unwrap();
+    fs4::FileExt::try_lock(&lock).unwrap();
+    drop(Graph::open(&path).unwrap());
+    assert!(orphan.join("descendant.lock").exists());
+    drop(lock);
+    drop(Graph::open(&path).unwrap());
+    assert!(!orphan.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn unsupported_directory_sync_is_an_error() {
+    assert_eq!(
+        fsync_dir(Path::new("/dev/null")).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
 }

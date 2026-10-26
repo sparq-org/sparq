@@ -6,7 +6,8 @@ description: Parse and load RDF into a sparq Graph (Turtle/N-Triples/N-Quads/Tri
 # sparq data formats
 
 For named graph access, durable create/drop, and layout recovery, see
-[named graph accessors](named-accessors.md).
+[named graph accessors](named-accessors.md), including cleanup after the complete declared
+tree opens and durable journal format upgrades.
 
 How to get RDF *into* a sparq `Graph` and how to snapshot one cheaply. Text formats
 (Turtle / N-Triples / N-Quads / TriG) and the in-memory + streaming + external-memory

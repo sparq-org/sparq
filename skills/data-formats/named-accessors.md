@@ -34,9 +34,10 @@ until a later swap publishes the new base.
 
 Create and drop update only their own manifest entries. Removing an internal in-memory
 attachment does not remove its declaration on disk; use durable drop methods to update the
-persisted set. The public accessors refuse moving durable children. Writable opens validate all
-declared slots before cleaning undeclared slots under the exclusive directory lock. Read-only
-opens leave undeclared slots alone. A cleanup warning names any undeclared slot left in place.
+persisted set. The public accessors refuse moving durable children. Writable opens load the
+complete declared tree, including nested named graphs, before cleaning undeclared slots under
+the exclusive directory lock. Cleanup preserves separate root stores, unmarked store images
+and directories containing held locks. Read-only opens leave undeclared slots alone. A cleanup warning names any undeclared slot left in place.
 An invalid declared layout refuses the open before cleanup removes any slot. A linked `named/`
 container is refused. Layout invalidation records accumulate between whole-tree rewrites;
 ordinary slot removals do not scan those records, and a whole-tree swap prunes them.
@@ -51,7 +52,8 @@ The existing tuple-based `commit_txn` methods remain available for triple-only o
 Recovery reads the previous journal format as well as the operation format.
 
 Dictionary metadata and named manifests written by this build use version 2; version 1 remains
-readable. Re-save a legacy single-file dictionary before atomic UPDATE journaling. Keep a backup
+readable. Journal format upgrades use the same durable file publication as saves.
+Re-save a legacy single-file dictionary before atomic UPDATE journaling. Keep a backup
 when an older executable must remain usable. `Graph::adopt_legacy_staging(path)` explicitly
 adopts stem-based staging for a known store; use it only after confirming that staging belongs
 to that store. Ordinary opens require recorded staging provenance for automatic recovery.

@@ -2322,16 +2322,12 @@ impl Graph {
                 check_named_slot(&sub_dir)?;
             }
         }
-        if writable {
-            debug_assert!(lock.is_some());
-            sweep_named_slots(&named_dir, &manifest.entries)?;
-        }
         let mut out = Vec::new();
         out.try_reserve(manifest.entries.len())
             .map_err(std::io::Error::other)?;
         for (slot, name) in manifest.entries {
             let sub_dir = named_dir.join(slot.to_string());
-            let sub = Graph::open_dir(&sub_dir, lock.clone(), writable, Role::Child)?;
+            let sub = Graph::open_dir_unswept(&sub_dir, lock.clone(), writable, Role::Child)?;
             out.push((name, sub));
         }
         Ok((out, manifest.next_slot))
@@ -2432,6 +2428,37 @@ impl Graph {
     /// hard link to a file written in place (its logs; on Unix).
     #[cfg(feature = "mmap")]
     fn open_dir(
+        dir: &std::path::Path,
+        lock: Option<std::sync::Arc<dir_lock::DirLock>>,
+        writable: bool,
+        role: Role,
+    ) -> std::io::Result<Graph> {
+        validate_declared_named_layout(dir)?;
+        let graph = Self::open_dir_unswept(dir, lock, writable, role)?;
+        if writable {
+            graph.sweep_undeclared_named(dir)?;
+        }
+        Ok(graph)
+    }
+
+    /// Cleans residue only after every declared descendant has opened successfully.
+    #[cfg(feature = "mmap")]
+    fn sweep_undeclared_named(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        debug_assert!(self.lock.is_some());
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let entries = read_named_manifest(dir)?
+            .map(|m| m.entries)
+            .unwrap_or_default();
+        sweep_named_slots(&named_dir, &entries)?;
+        for ((_, child), (slot, _)) in self.named.iter().zip(entries) {
+            child.sweep_undeclared_named(&named_dir.join(slot.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Opens and replays the complete declared tree before the caller starts its sweep.
+    #[cfg(feature = "mmap")]
+    fn open_dir_unswept(
         dir: &std::path::Path,
         lock: Option<std::sync::Arc<dir_lock::DirLock>>,
         writable: bool,
@@ -5212,9 +5239,9 @@ fn fsync_file(path: &std::path::Path) -> std::io::Result<()> {
     file.sync_all()
 }
 
-/// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. A filesystem that
-/// does not support fsync on a directory handle (`InvalidInput`) counts as done; any other error
-/// is returned.
+/// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. An absent
+/// directory is accepted; all other open errors and every sync error are returned,
+/// including `InvalidInput` from a filesystem that cannot sync a directory.
 ///
 /// On Windows there is nothing to do: a directory cannot be synced through a plain handle
 /// (opening one needs `FILE_FLAG_BACKUP_SEMANTICS`), and the renames that need it are made
@@ -5677,6 +5704,81 @@ fn check_named_container(path: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+/// Checks the effective declared layout without recovering or removing any directory.
+#[cfg(feature = "mmap")]
+fn validate_declared_named_layout(dir: &std::path::Path) -> std::io::Result<()> {
+    check_store_internals(dir)?;
+    if let Some(plan) = plan_named_drop(dir)? {
+        return validate_declared_named_slots(&plan.agreeing, &plan.entries);
+    }
+    let entries = read_named_manifest(dir)?
+        .map(|m| m.entries)
+        .unwrap_or_default();
+    validate_declared_named_slots(&dir.join(NAMED_SUBDIR), &entries)
+}
+
+#[cfg(feature = "mmap")]
+fn validate_declared_named_slots(
+    named: &std::path::Path,
+    entries: &[(u32, Term)],
+) -> std::io::Result<()> {
+    check_named_container(named)?;
+    for (slot, _) in entries {
+        let path = named.join(slot.to_string());
+        let source = named_slot_source(&path)?;
+        validate_declared_named_layout(&source)?;
+    }
+    Ok(())
+}
+
+/// The live child, or the recorded image that a missing child's swap would recover.
+#[cfg(feature = "mmap")]
+fn named_slot_source(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let missing = match check_named_slot(path) {
+        Ok(()) => return Ok(path.to_path_buf()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => e,
+        Err(e) => return Err(e),
+    };
+    let mut source = None;
+    let mut owner = None;
+    let mut identities = Vec::new();
+    for kind in ["compact-new", "compact-old"] {
+        let staged = staging_path(path, kind);
+        if !something_at(&staged)? {
+            continue;
+        }
+        check_named_slot(&staged)?;
+        let marker = read_marker(&staged)?.and_then(|m| m.id);
+        if let Some(recorded) = staging_mark(&staged, kind, path)? {
+            if owner.as_ref().is_some_and(|id| *id != recorded) {
+                return Err(not_own_staging(
+                    &staged,
+                    kind,
+                    "names another store",
+                    Some(path),
+                ));
+            }
+            owner = Some(recorded);
+        }
+        identities.push(marker);
+        if source.is_none() {
+            source = Some(staged);
+        }
+    }
+    let Some(owner) = owner else {
+        return Err(missing);
+    };
+    if identities.iter().any(|id| id.as_ref() != Some(&owner)) {
+        return Err(not_own_staging(
+            path,
+            "compact",
+            "has inconsistent store identities",
+            Some(path),
+        ));
+    }
+    source.ok_or(missing)
+}
+
 /// Cleans undeclared slots after the complete declared layout has been validated.
 #[cfg(feature = "mmap")]
 fn sweep_named_slots(named: &std::path::Path, entries: &[(u32, Term)]) -> std::io::Result<()> {
@@ -5762,9 +5864,10 @@ fn remove_named_slot(named_dir: &std::path::Path, slot: u32) -> std::io::Result<
 
 /// Removes a real directory, treating an absent directory as success.
 ///
-/// The final component must be a directory, never a symlink or file. Callers validate
-/// the named container before operating on slots; filesystem changes by outside actors
-/// while the exclusive store lock is held are unsupported.
+/// The final component must be a directory, never a symlink or file. Separate stores,
+/// unmarked store images and held descendant locks are refused. Callers validate the named
+/// container before operating on slots; filesystem changes by outside actors while the
+/// exclusive store lock is held are unsupported.
 #[cfg(feature = "mmap")]
 fn remove_dir_tree_checked(target: &std::path::Path) -> std::io::Result<()> {
     let meta = match std::fs::symlink_metadata(target) {
@@ -5783,6 +5886,17 @@ fn remove_dir_tree_checked(target: &std::path::Path) -> std::io::Result<()> {
             ),
         ));
     }
+    let role = read_store_marker(target)?;
+    if role == Some(Role::Root) || (role.is_none() && holds_store_files(target)) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{} is a root or unmarked store, so it will not be removed",
+                target.display()
+            ),
+        ));
+    }
+    refuse_foreign_below(target, false)?;
     remove_tree(target)
 }
 
@@ -6925,23 +7039,26 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<Recovered> {
     }
 }
 
-/// Recovers recorded named-container staging using its declared slot set.
+/// The candidate selected for a recorded named-container recovery, without changing disk.
 #[cfg(feature = "mmap")]
-fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
+struct NamedDropPlan {
+    agreeing: std::path::PathBuf,
+    entries: Vec<(u32, Term)>,
+    owner: String,
+    has_pending: bool,
+}
+
+#[cfg(feature = "mmap")]
+fn plan_named_drop(dir: &std::path::Path) -> std::io::Result<Option<NamedDropPlan>> {
     let named_dir = dir.join(NAMED_SUBDIR);
     check_named_container(&named_dir)?;
     let new_dir = staging_path(&named_dir, "drop-new");
     let old_dir = staging_path(&named_dir, "drop-old");
     let id = read_marker(dir)?.and_then(|m| m.id);
-    if something_at(&named_dir)? && leftover_record(&named_dir, "drop-old", id.as_deref())? {
-        clear_staging_mark(&named_dir)?;
-    }
     let has_new = something_at(&new_dir)?;
     let has_old = something_at(&old_dir)?;
     if !has_new && !has_old {
-        remove_staging_scratch(&new_dir, "drop-new")?;
-        remove_staging_scratch(&old_dir, "drop-old")?;
-        return Ok(false);
+        return Ok(None);
     }
     let new_mark = if has_new {
         staging_mark(&new_dir, "drop-new", &named_dir)?
@@ -7023,18 +7140,48 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
     } else {
         manifest.map(|m| m.entries).unwrap_or_default()
     };
-    for (slot, _) in &entries {
-        check_named_slot(&agreeing.join(slot.to_string()))?;
+    Ok(Some(NamedDropPlan {
+        agreeing: agreeing.clone(),
+        entries,
+        owner,
+        has_pending,
+    }))
+}
+
+/// Recovers recorded named-container staging after validating its declared descendants.
+#[cfg(feature = "mmap")]
+fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
+    let plan = plan_named_drop(dir)?;
+    let named_dir = dir.join(NAMED_SUBDIR);
+    let new_dir = staging_path(&named_dir, "drop-new");
+    let old_dir = staging_path(&named_dir, "drop-old");
+    if let Some(plan) = &plan {
+        validate_declared_named_slots(&plan.agreeing, &plan.entries)?;
     }
-    let replaced = agreeing != &named_dir;
+    let id = read_marker(dir)?.and_then(|m| m.id);
+    if something_at(&named_dir)? && leftover_record(&named_dir, "drop-old", id.as_deref())? {
+        clear_staging_mark(&named_dir)?;
+    }
+    let Some(NamedDropPlan {
+        agreeing,
+        entries: _,
+        owner,
+        has_pending,
+    }) = plan
+    else {
+        remove_staging_scratch(&new_dir, "drop-new")?;
+        remove_staging_scratch(&old_dir, "drop-old")?;
+        return Ok(false);
+    };
+    let replaced = agreeing != named_dir;
     if replaced {
         remove_dir_tree_checked(&named_dir)?;
-        if agreeing == &new_dir {
-            clear_staging_mark(agreeing)?;
+        if agreeing == new_dir {
+            clear_staging_mark(&agreeing)?;
         }
-        publish_rename(agreeing, &named_dir)?;
+        publish_rename(&agreeing, &named_dir)?;
         fsync_dir(dir)?;
-        if agreeing == &old_dir {
+        if agreeing == old_dir {
             clear_staging_mark(&named_dir)?;
         }
     }
@@ -8148,15 +8295,7 @@ impl TxnJournal {
             return Ok(());
         }
         bytes[4..8].copy_from_slice(&dict::DICT_META_VERSION.to_le_bytes());
-        let tmp = self.dir.join("dict-meta.bin.tmp");
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(&bytes)?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, &meta)?;
-        fsync_dir(&self.dir)?;
+        write_fresh(&meta, &bytes)?;
         self.format_marked = true;
         Ok(())
     }
