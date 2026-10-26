@@ -1737,8 +1737,8 @@ pub struct BindingEdge {
     /// Index into `sub_proofs` of the consuming filter proof.
     pub to_proof: usize,
     /// Query FILTER conjunct index for value obligations; legacy edges omit it.
-    /// The diagnostic value predicate requires `Some(index)`. Existing accepting
-    /// paths do not use this field; the value-lane gate stays CLOSED.
+    /// Flat verification requires `Some(index)` on V2 value edges and `None`
+    /// on string-lane edges. Extended verification refuses all value members.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<usize>,
 }

@@ -144,8 +144,9 @@ use sparq_zk::sig::{
     verify as sig_verify, PublicKey, SignatureScheme,
 };
 use sparq_zk::verify::{
-    fragment_filters, fragment_pattern_consts, fragment_patterns, recheck, variable_slots,
-    FilterCmp, JoinEdge, QueryFilter, VerifyError,
+    fragment_pattern_consts, fragment_patterns, fragment_typed_filters, query_filter_u64, recheck,
+    variable_slots,
+    FilterCmp, JoinEdge, VerifyError,
 };
 // sq-3kd2g.6: the wave-1 extended-fragment query re-derivation the
 // fail-closed `dispatch_fragment` routing gate consumes (never trusting the
@@ -1354,9 +1355,15 @@ pub enum CheckError {
     /// A binding edge connects proofs whose kinds cannot be bound (e.g. the
     /// source is not a scan or the target is not a filter).
     EdgeKindMismatch { edge: usize },
-    /// A binding edge carries a FILTER index while the value-lane gate is CLOSED.
-    /// The later accepting PR replaces this check with value-obligation binding.
-    EdgeFilterIndexNotAccepted { edge: usize },
+    /// Only a V2 value proof may carry an explicit conjunct index.
+    EdgeFilterIndexOnNonValueProof { edge: usize },
+    /// An indexed value edge names no typed query conjunct.
+    EdgeFilterIndexOutOfRange { edge: usize },
+    /// A value edge must explicitly identify its query conjunct.
+    ValueEdgeWithoutConjunct { edge: usize },
+    /// A value edge or proof violates query-derived coverage.
+    #[cfg(feature = "dual-leaf")]
+    ValueObligation(crate::value_obligation::ObligationError),
     /// A binding edge's encodings disagree: the scanned column does not equal
     /// the filter's operand (the join the prover claimed is a lie).
     BindingInconsistent { edge: usize },
@@ -1551,22 +1558,7 @@ pub enum CheckError {
     /// `reason` carries its `Display`.
     #[cfg(feature = "dual-leaf")]
     LaneMemberMismatch { proof: usize, reason: String },
-    /// A value-lane sub-proof, which this verifier does not accept in a manifest
-    /// at all.
-    ///
-    /// The refusal is UNCONDITIONAL on the sub-proof being a value-lane member —
-    /// it inspects no edge. The reason it is sound to refuse them wholesale is
-    /// that `filter_edge_true`, the only place a sub-proof discharges a query
-    /// FILTER obligation, accepts `ProofInputs::FilterInt` and nothing else, so no
-    /// value-lane member can discharge an obligation here (the value-lane query
-    /// binding is sq-j506). Before this, such a sub-proof was reconstructed and
-    /// verified at stage 3 while discharging nothing, and a relying party reading
-    /// the accepted manifest could take it for a checked FILTER.
-    ///
-    /// BEHAVIOUR CHANGE: a manifest carrying a value-lane sub-proof used to be
-    /// accepted (discharging nothing) and is now refused. When sq-j506 wires the
-    /// value-lane query binding, this refusal is what that work replaces with a
-    /// real edge check.
+    /// Extended verification refuses every value member before reading edges.
     #[cfg(feature = "dual-leaf")]
     ValueLaneSubProofNotAccepted { proof: usize },
     /// A V1 value lane is never admitted by the legacy string-lane policy.
@@ -2237,10 +2229,14 @@ impl std::fmt::Display for CheckError {
             CheckError::EdgeKindMismatch { edge } => {
                 write!(f, "binding edge {edge} connects incompatible proof kinds")
             }
-            CheckError::EdgeFilterIndexNotAccepted { edge } => write!(
+            CheckError::EdgeFilterIndexOnNonValueProof { edge } => write!(
                 f,
-                "binding edge {edge}: FILTER index not accepted; value-lane gate is CLOSED"
+                "binding edge {edge}: FILTER index requires a V2 value proof"
             ),
+            CheckError::EdgeFilterIndexOutOfRange { edge } => write!(f, "binding edge {edge}: conjunct index out of range"),
+            CheckError::ValueEdgeWithoutConjunct { edge } => write!(f, "binding edge {edge}: value proof requires a conjunct index"),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::ValueObligation(error) => error.fmt(f),
             CheckError::BindingInconsistent { edge } => write!(
                 f,
                 "binding edge {edge}: scanned column does not equal the filter operand"
@@ -2356,11 +2352,8 @@ impl std::fmt::Display for CheckError {
             #[cfg(feature = "dual-leaf")]
             CheckError::ValueLaneSubProofNotAccepted { proof } => write!(
                 f,
-                "sub-proof {} is a value-lane member, which this verifier does not \
-                 accept: it discharges a query FILTER only through a filter_int edge, \
-                 so a value-lane sub-proof would be verified while discharging nothing \
-                 (the value-lane query binding is sq-j506) — refused",
-                proof
+                "sub-proof {proof} is a value-lane member refused by extended verification: \
+                 no branch-local value FILTER obligation is discharged"
             ),
             CheckError::ScanPatternMethodsMixed { proof, first, second } => write!(
                 f,
@@ -3034,12 +3027,8 @@ fn prefilter_manifest_structure_impl(
             }
             other => CheckError::LaneMemberMismatch { proof: i, reason: other.to_string() },
         })?;
-        // And a value-lane sub-proof is refused outright, rather than
-        // verified-but-undischarging. No edge is inspected: `filter_edge_true`
-        // accepts a `FilterInt` edge and nothing else, so NO value-lane member can
-        // satisfy a query FILTER obligation in this verifier (sq-j506 is that
-        // wiring). Such a manifest used to be accepted while discharging nothing.
-        if crate::dispatch::value_lane_fields(&sp.inputs).is_some() {
+        // The extended path has no branch-local value obligation model.
+        if skip_query_binding && crate::dispatch::value_lane_fields(&sp.inputs).is_some() {
             return Err(CheckError::ValueLaneSubProofNotAccepted { proof: i });
         }
     }
@@ -3049,9 +3038,8 @@ fn prefilter_manifest_structure_impl(
     // authenticated-method map it returns is what selects the pattern-constant
     // encoder those gates compare under. It reads only the manifest and the
     // EXTERNAL key set, so it depends on nothing the gates below establish. The
-    // gate SET is unchanged and every gate below still runs, so no manifest that
-    // was refused becomes acceptable; what changes is which refusal is reported
-    // first when a manifest fails both an attestation check and a pattern check.
+    // authentication precedes query binding so the gates below consume the
+    // issuer-bound method map, including the flat value-obligation predicate.
     // Every scan sub-proof's commitments[g] must carry a valid issuer signature
     // whose key ∈ the EXTERNAL trusted K (the verifier's argument, NOT
     // manifest.key_set). commitments[g] is byte-bound into the bb public inputs
@@ -3185,9 +3173,6 @@ fn prefilter_manifest_structure_impl(
 
     // --- Stage 2: binding-consistency edges. ---
     for (e, edge) in manifest.binding_edges.iter().enumerate() {
-        if edge.filter.is_some() {
-            return Err(CheckError::EdgeFilterIndexNotAccepted { edge: e });
-        }
         let from = manifest
             .sub_proofs
             .get(edge.from_proof)
@@ -3209,11 +3194,28 @@ fn prefilter_manifest_structure_impl(
         // into a SIGNED xsd:integer FILTER (filter_signed_int) or an xsd:decimal
         // FILTER (filter_decimal); both carry `operand_enc` as the scan-proof anchor,
         // bound to the committed literal in-circuit (same mechanism as filter_int).
-        let operand = match &to.inputs {
-            ProofInputs::FilterInt { operand_enc, .. } => operand_enc,
-            ProofInputs::FilterF64 { operand_enc, .. } => operand_enc,
-            ProofInputs::FilterSignedInt { operand_enc, .. } => operand_enc,
-            ProofInputs::FilterDecimal { operand_enc, .. } => operand_enc,
+        let operand = match (&edge.filter, &to.inputs) {
+            (None, ProofInputs::FilterInt { operand_enc, .. }
+                | ProofInputs::FilterF64 { operand_enc, .. }
+                | ProofInputs::FilterSignedInt { operand_enc, .. }
+                | ProofInputs::FilterDecimal { operand_enc, .. }) => operand_enc,
+            #[cfg(feature = "dual-leaf")]
+            (filter, ProofInputs::FilterValueDl { operand_enc, .. }
+                | ProofInputs::FilterValueDlF64 { operand_enc, .. }
+                | ProofInputs::FilterValueDlDecimal { operand_enc, .. }
+                | ProofInputs::FilterValueDlDateTime { operand_enc, .. }
+                | ProofInputs::FilterValueDlBool { operand_enc, .. }) => {
+                if filter.is_none() {
+                    return Err(CheckError::ValueEdgeWithoutConjunct { edge: e });
+                }
+                if let ProofInputs::Scan { row_count, .. } = &from.inputs {
+                    if edge.from_row >= *row_count as usize {
+                        return Err(CheckError::ValueObligation(crate::value_obligation::ObligationError::RowOutOfRange));
+                    }
+                }
+                operand_enc
+            }
+            (Some(_), _) => return Err(CheckError::EdgeFilterIndexOnNonValueProof { edge: e }),
             _ => return Err(CheckError::EdgeKindMismatch { edge: e }),
         };
         if scanned != operand {
@@ -6235,7 +6237,7 @@ pub(crate) fn scan_binding_cell(inputs: &ProofInputs, row: usize, slot: usize) -
     }
 }
 
-/// Resolve a diagnostic scan through the same authenticated-method fold as dispatch.
+/// Resolve an obligation source scan through the authenticated-method fold used by dispatch.
 #[cfg(feature = "dual-leaf")]
 pub(crate) fn obligation_scan_method(
     manifest: &ProofManifest,
@@ -6409,50 +6411,22 @@ pub(crate) fn check_pattern_scans(
     Ok(())
 }
 
-/// Stage 2b/2c: bind every query BGP pattern's constants to a scan sub-proof
-/// (audit #10) and every query FILTER to a slot-bound, true-verdict
-/// `filter_int` sub-proof reached via a binding edge (audit #5/#6/#7).
+/// Bind query patterns and typed FILTER conjuncts to their answering scans.
 ///
-/// FILTER var→slot mapping: a query FILTER `?v op c` is satisfied iff there is
-/// a binding edge `(from_proof=scan, from_row, from_slot, to_proof=filter)`
-/// such that (1) the scan answers the query pattern in which `?v` binds (its
-/// constants match, `scan_matches_pattern`); (2) `from_slot` is exactly the
-/// slot `?v` occupies in that pattern (audit #6 — closes "point the operand at
-/// the salary slot for an age filter"); (3) the filter's bound `(op, bound)`
-/// EQUAL the query's `(op, c)` (audit #5 — closes the 17-vs-`>=18`
-/// comparison-substitution); and (4) the filter's `expected == true` (audit
-/// #5/#6 — the verdict gates row inclusion; an `expected==false` row may not be
-/// presented as passing).
-///
-/// # EVERY slot, not the first (sq-q9r5e / audit L-1)
-/// A scan is matched to a query pattern by constant MEMBERSHIP, so ONE scan can
-/// answer SEVERAL patterns — and those patterns may place the filtered variable
-/// at DIFFERENT slots. The obligation is therefore per `(scan, row, slot)` over
-/// the FULL set of slots `?v` occupies across the patterns that scan answers,
-/// not the first such slot. Gating only the first accepted a manifest whose
-/// other disclosed ?v column was never proven against the FILTER (confirmed
-/// reachable; witness `filter_reject_ungated_second_slot_within_scan`).
-///
-/// This is deliberately FAIL-CLOSED on the pattern→scan ambiguity: where two
-/// patterns share a constant layout the verifier cannot tell which one a given
-/// scan was meant to answer, so it demands the FILTER be discharged for every
-/// slot that scan could be read at. A manifest that cannot supply those proofs
-/// is REJECTED rather than accepted on the strength of one of them. A prover's
-/// `manifest.pattern_scans` declaration does NOT relax this — see
-/// [`check_pattern_scans`] for why narrowing needs a verified result witness the
-/// flat manifest cannot yet express.
-///
-/// A FILTER with no such edge ⇒ REJECT (audit #10 FILTER-add / a `filter_int`
-/// over the wrong operand). Stage 2 already enforced the edge's scanned-slot
-/// encoding equals the filter `operand_enc` (so #7 operand substitution is
-/// closed by that equality over the now-bb-bound values + this slot check).
+/// Each conjunct, matching scan, active row and variable slot needs coverage:
+/// either a `filter_int` on an unindexed edge with the canonical integer view,
+/// or exactly one indexed V2 value edge checked by the shared obligation
+/// predicate. Value and string coverage cannot both claim the same obligation.
+/// Every value edge must answer a real obligation and every value proof needs
+/// an edge. Constant membership determines all answering slots; declared
+/// `pattern_scans` cannot narrow them.
 fn bind_query_correctness(
     manifest: &ProofManifest,
     methods: &AuthenticatedMethods,
 ) -> Result<(), CheckError> {
     let patterns = fragment_patterns(&manifest.query)?;
     let consts = fragment_pattern_consts(&patterns);
-    let filters = fragment_filters(&manifest.query)?;
+    let filters = fragment_typed_filters(&manifest.query)?;
     let var_slots = variable_slots(&patterns);
 
     // (2b) every query BGP pattern's constants are bound by SOME scan sub-proof.
@@ -6471,9 +6445,30 @@ fn bind_query_correctness(
     // Per-row gating is the load-bearing part of #5/#6: the disclosed result is
     // the scans' rows, so a FILTER row whose verdict is false must be EXCLUDED —
     // i.e. every active row of a filtered pattern must carry a true-verdict
-    // filter_int sub-proof over that row's operand slot. A single missing/false
-    // row makes the FILTER unproven for the disclosed set => REJECT.
-    for QueryFilter { variable, op, bound } in &filters {
+    // FILTER sub-proof over that row's operand slot. A single missing/false row
+    // makes the FILTER unproven for the disclosed set => REJECT.
+    #[cfg(feature = "dual-leaf")]
+    let mut used_value_edges = BTreeSet::new();
+    for (e, edge) in manifest.binding_edges.iter().enumerate() {
+        if edge.filter.is_some_and(|i| i >= filters.len()) {
+            return Err(CheckError::EdgeFilterIndexOutOfRange { edge: e });
+        }
+    }
+    #[cfg(feature = "dual-leaf")]
+    for (proof, sp) in manifest.sub_proofs.iter().enumerate() {
+        if crate::dispatch::value_lane_fields(&sp.inputs).is_some()
+            && !manifest.binding_edges.iter().any(|e| e.to_proof == proof)
+        {
+            return Err(CheckError::ValueObligation(
+                crate::value_obligation::ObligationError::OrphanValueProof { proof },
+            ));
+        }
+    }
+    for (filter, typed) in filters.iter().enumerate() {
+        let variable = &typed.variable;
+        let integer = query_filter_u64(typed);
+        // Only value-lane builds consume the conjunct index below.
+        let _ = filter;
         // The (pattern, slot) positions ?variable binds to. A FILTER over a
         // variable that never binds to a scanned column is unmappable.
         let positions: Vec<(usize, usize)> = var_slots
@@ -6541,16 +6536,40 @@ fn bind_query_correctness(
                 continue;
             }
             any_scan_answered = true;
-            // Every ACTIVE disclosed row must have a true-verdict filter_int
-            // edge at EACH such slot with matching (op, bound).
+            // Every active row and slot needs matching true FILTER coverage.
             for row in 0..row_count.min(rows.len()) {
                 for &slot in &slots {
-                    let gated = manifest.binding_edges.iter().any(|edge| {
-                        edge.from_proof == spi
-                            && edge.from_row == row
-                            && edge.from_slot == slot
-                            && filter_edge_true(manifest, edge.to_proof, *op, *bound)
+                    let string_gated = integer.as_ref().is_some_and(|f| {
+                        manifest.binding_edges.iter().any(|edge| {
+                            edge.filter.is_none() && edge.from_proof == spi
+                                && edge.from_row == row && edge.from_slot == slot
+                                && filter_edge_true(manifest, edge.to_proof, f.op, f.bound)
+                        })
                     });
+                    #[allow(unused_mut)]
+                    let mut gated = string_gated;
+                    #[cfg(feature = "dual-leaf")]
+                    {
+                        let obligation = crate::value_obligation::ValueObligation {
+                            filter, source_proof: spi, row, slot, var: variable.clone(),
+                        };
+                        let mut value_gated = false;
+                        for (e, edge) in manifest.binding_edges.iter().enumerate().filter(|(_, edge)| {
+                            edge.filter == Some(filter) && edge.from_proof == spi
+                                && edge.from_row == row && edge.from_slot == slot
+                        }) {
+                            crate::value_obligation::check_value_edge(manifest, methods, &obligation, typed, edge)
+                                .map_err(CheckError::ValueObligation)?;
+                            if value_gated || string_gated {
+                                return Err(CheckError::ValueObligation(
+                                    crate::value_obligation::ObligationError::DischargedTwice { obligation },
+                                ));
+                            }
+                            value_gated = true;
+                            used_value_edges.insert(e);
+                        }
+                        gated |= value_gated;
+                    }
                     if !gated {
                         return Err(CheckError::UnboundFilter { variable: variable.clone() });
                     }
@@ -6564,6 +6583,13 @@ fn bind_query_correctness(
             return Err(CheckError::UnboundFilter { variable: variable.clone() });
         }
     }
+    #[cfg(feature = "dual-leaf")]
+    for (e, edge) in manifest.binding_edges.iter().enumerate() {
+        if edge.filter.is_some() && !used_value_edges.contains(&e) {
+            return Err(CheckError::ValueObligation(crate::value_obligation::ObligationError::EdgeMismatch));
+        }
+    }
+
     Ok(())
 }
 
@@ -14951,7 +14977,7 @@ mod fragment_dispatch_tests {
         for index in [0, 99] {
             m.manifest.binding_edges[0].filter = Some(index);
             let err = run_fragment(&m, &k).unwrap_err();
-            assert!(matches!(err, CheckError::EdgeFilterIndexNotAccepted { edge: 0 }),
+            assert!(matches!(err, CheckError::EdgeFilterIndexOnNonValueProof { edge: 0 }),
                 "FILTER index {index} must be refused by name, got {err:?}");
         }
     }

@@ -66,7 +66,7 @@ impl Graph {
 
 fn fh0() -> FieldHex { FieldHex("0x0".into()) }
 fn zero_row() -> [FieldHex; 3] { std::array::from_fn(|_| fh0()) }
-fn put(out: &mut String, key: &str, value: &impl Serialize) {
+pub(super) fn put(out: &mut String, key: &str, value: &impl Serialize) {
     out.push_str(&format!("{key} = {}\n", serde_json::to_string(value).unwrap()));
 }
 

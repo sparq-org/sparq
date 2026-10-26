@@ -61,9 +61,11 @@ fn check_error_display_covers_structural_reject_reasons() {
     assert_display_carries(&CheckError::DanglingEdge { edge: 5 }, &["edge", "5"]);
     assert_display_carries(&CheckError::EdgeKindMismatch { edge: 6 }, &["edge", "6"]);
     assert_display_carries(
-        &CheckError::EdgeFilterIndexNotAccepted { edge: 8 },
-        &["edge", "8", "FILTER index", "CLOSED"],
+        &CheckError::EdgeFilterIndexOnNonValueProof { edge: 8 },
+        &["edge", "8", "FILTER index", "V2 value proof"],
     );
+    assert_display_carries(&CheckError::EdgeFilterIndexOutOfRange { edge: 8 }, &["edge", "8", "out of range"]);
+    assert_display_carries(&CheckError::ValueEdgeWithoutConjunct { edge: 8 }, &["edge", "8", "conjunct"]);
     assert_display_carries(&CheckError::BindingInconsistent { edge: 7 }, &["edge", "7"]);
     assert_display_carries(&CheckError::ProofRejected { proof: 1 }, &["bb", "1"]);
     assert_display_carries(&CheckError::MissingProof { proof: 2 }, &["2"]);
