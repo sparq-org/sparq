@@ -103,3 +103,9 @@
   crate: "sparq-lws-core"
   features: "odrl-authz"
   test: true
+
+# RFC 9728 SQ-6 walk exchanges an OpenID ID-token subject through the real LWS router.
+- name: "sparq-lws-core (authn-openid)"
+  crate: "sparq-lws-core"
+  features: "authn-openid"
+  test: true

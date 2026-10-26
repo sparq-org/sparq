@@ -5336,6 +5336,7 @@ dependencies = [
  "sparq-core",
  "sparq-engine",
  "sparq-http3",
+ "sparq-jsonld",
  "sparq-lws-authn",
  "sparq-lws-authn-openid",
  "sparq-lws-authn-saml",

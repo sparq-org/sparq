@@ -27,6 +27,7 @@
 
 pub mod access;
 pub mod authz_server;
+mod discovery;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;
@@ -628,6 +629,8 @@ pub struct Inner<S: Store> {
     /// Every change to the store moves the listing snapshots it concerns (see [`tracked`]).
     pub store: tracked::Tracked<S>,
     pub cfg: LwsConfig,
+    /// Services mounted by the LWS dispatcher.
+    pub catalog: crate::describe::ServiceCatalog,
     pub access: access::AccessStore,
     pub notify: notify::Notifier,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
@@ -709,6 +712,14 @@ impl<S: Store + 'static> LwsState<S> {
     /// start puts back are true only while no other process writes the index. Over any other
     /// store nothing is read or written, and the start fails.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
+        Self::with_catalog(store, cfg, crate::describe::ServiceCatalog::default()).await
+    }
+
+    pub(crate) async fn with_catalog(
+        store: S,
+        cfg: LwsConfig,
+        additional: crate::describe::ServiceCatalog,
+    ) -> Result<Self, String> {
         store
             .exclusive()
             .map_err(|e| format!("the storage cannot be served over this store: {e}"))?;
@@ -744,10 +755,13 @@ impl<S: Store + 'static> LwsState<S> {
         let notify = notify::Notifier::new(&cfg)?;
         notify.hold(lease);
         let (owner, closed) = tokio::sync::watch::channel(());
+        let mut catalog = resources::service_catalog(&cfg);
+        catalog.extend(additional);
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
                 store,
+                catalog,
                 cfg,
                 access,
                 notify,
@@ -1111,13 +1125,18 @@ impl<S: Store + 'static> LwsState<S> {
             .map(|_| ())
     }
 
-    /// A 401 with the Bearer challenge naming this authorization server and realm, and the storage
-    /// link (section 9.2).
+    /// A 401 with RFC 9728 metadata, the transitional issuer, realm, and storage link.
+    /// Pass an error only when a presented access token was rejected.
     pub fn challenge(&self, error: Option<&str>) -> Response {
+        let metadata = match discovery::prm_url(&self.cfg.storage()) {
+            Ok(url) => url,
+            Err(_) => return problem(StatusCode::INTERNAL_SERVER_ERROR, None),
+        };
         let mut c = format!(
-            "Bearer as_uri=\"{}\", realm=\"{}\"",
-            self.cfg.issuer(),
-            self.cfg.realm()
+            "Bearer resource_metadata=\"{}\", realm=\"{}\", as_uri=\"{}\"",
+            metadata,
+            self.cfg.realm(),
+            self.cfg.issuer()
         );
         if let Some(e) = error {
             c.push_str(&format!(", error=\"{e}\""));
@@ -2397,7 +2416,21 @@ pub(crate) fn encode_meta(meta: &ResourceMeta) -> Result<Vec<u8>, crate::error::
 
 /// Build the LWS router over `store`.
 pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Router, String> {
-    let state = LwsState::new(store, cfg).await?;
+    router_with_catalog(store, cfg, crate::describe::ServiceCatalog::default()).await
+}
+
+/// Build the LWS router with entries for additional mounted routes.
+///
+/// The caller must mount every endpoint registered in `catalog` on the returned router.
+///
+/// # Errors
+/// Returns an error when storage initialization or recovery fails.
+pub async fn router_with_catalog<S: Store + 'static>(
+    store: S,
+    cfg: LwsConfig,
+    catalog: crate::describe::ServiceCatalog,
+) -> Result<Router, String> {
+    let state = LwsState::with_catalog(store, cfg, catalog).await?;
     Ok(Router::new()
         .fallback(dispatch::<S>)
         .with_state(state)
@@ -2517,6 +2550,9 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         return authz_server::handle(state, &req).await;
     }
     if path.starts_with("/.well-known/") {
+        if discovery::prm_url(&state.cfg.storage()).is_ok_and(|url| url.path() == path) {
+            return discovery::handle(state, &req);
+        }
         return problem(StatusCode::NOT_FOUND, None);
     }
     let agent = match tokens::authenticate(state, &req) {
