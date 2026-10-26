@@ -165,11 +165,14 @@ access: one it may no longer read is dropped (not sent, and it neither closes th
 socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
 closes the socket within two periods of losing Read: `1008` for a confirmed
 denial, or `1011` if the timer check is undecided. Each check has at most one
-period; a slower check counts as undecided and the client must resubscribe.
+period; a slower check counts as undecided and the client must resubscribe. Sending
+a notification or close frame has one further period at most before the connection ends.
 A due tick takes priority over inbound frames and queued notifications and
 pre-empts a running notification or lag check, noting it as missed. A reader
 whose notification check spans a tick gets a reconcile close; a dropped lag
-check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). The
+check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). A tick that
+becomes ready while a finished but unpolled Event decision waits drops that decision,
+and the reader gets `RECONCILE`. The
 timing of a revocation close follows the timer, even while the client floods frames. A check that cannot
 be made (a backend fault) is no denial: on the timer it closes the socket
 (`1011`); a notification whose check cannot be made is dropped. A dropped
@@ -184,6 +187,10 @@ close, that the topic changed while it could not read it (not what changed). A
 socket closes when the client
 closes it, on the revocation close (`1008`), or on a `1011`: a backlog overflow,
 a timer check that cannot be made, or a reconcile after a dropped notification.
+`NotificationMetrics` counts overflow closes and their skipped events only after confirmed
+read access. This includes `RECONCILE` after a lag check preempted by a tick that confirms
+read access; a completed denied or undecided lag check does not count toward either counter.
+A `REVOKED` or undecided timer close does not count toward either overflow counter.
 Pings are answered while a check is in progress. The receive token gates
 connecting only: its 5-minute window is for connecting and reconnecting, and a
 socket opened within it stays open until one of those closes. A token has at most
@@ -435,7 +442,9 @@ one IRI, the first marker stored; any other IRI of that shape takes room in the 
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
 the process; the directory-backed embedded index journals each raise before acknowledging it.
 Restoring an independent snapshot taken before a raise restores the earlier mark and loses
-expiries decided after that snapshot. A listing,
+expiries decided after that snapshot. The wasm adapter's `PersistentStore` reports no
+atomic-marker capability: its snapshot journal does not yet preserve marker mutations or forward
+the lifecycle lease, so `LwsState::new` refuses it before reading or writing. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -713,12 +722,19 @@ What the server exposes, all discoverable from the storage description
   Putting a change back while a request waits on it (its own rollback or commit, with its locks
   held) tries each step up to three times with short growing waits between, each attempt
   waiting for a fence two seconds at most (counted from the store's answer to the write it
-  fences); a step whose write failed unsettled and whose fence has not succeeded is never tried
+  fences). A `Fence` step whose deadline expires is left at once; quick errors get the normal
+  retries; a step whose write failed unsettled and whose fence has not succeeded is never tried
   again in the request: it is set aside with the rest, its fence first, and the set-aside (which
   holds the locks) fences it before putting the step back, so a write that arrives late can no
   longer undo what was put back since. The background put-back of a set-aside change, and the
-  settling of intents at start-up, wait for a fence as the store's call allows; background
-  retries use the same capped per-attempt budget. Both fence a step's unsettled write before
+  settling of intents at start-up, differ in their waits: start-up waits as the store's call
+  allows; every background fence call uses a capped per-attempt budget, including the first call.
+  After a container touch lands, owed intents are cleared under a shared two-second fence
+  budget. At the deadline the request returns while a detached task holding only the store
+  finishes any in-flight delete and clears remaining records with capped fence attempts,
+  without retaining the state or its lifecycle lease or owing another touch. A touch with no
+  owed intents starts no clearing task.
+  Both fence a step's unsettled write before
   trying the step again. Forward removals and intent creates retain their fences in the
   journal: rollback fences before recreation or Forget, and commit fences before changing
   the intent. A removal whose fence lands but

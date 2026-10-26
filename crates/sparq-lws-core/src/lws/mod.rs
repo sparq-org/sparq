@@ -1464,19 +1464,31 @@ pub(crate) enum Undo {
     },
 }
 
+/// A fence deadline is distinct from an error returned by the store.
+enum ApplyError {
+    Failed(crate::error::ServerError),
+    FenceTimedOut,
+}
+
+impl From<crate::error::ServerError> for ApplyError {
+    fn from(error: crate::error::ServerError) -> Self {
+        Self::Failed(error)
+    }
+}
+
 impl Undo {
     /// Put this change back, with the mutation's locks still held. `within` bounds how long a
     /// step waits for a fence (an [`Undo::Fence`], or an unsettled removal's in
     /// [`records::delete_record`]): [`records::LOCK_WAIT`] while a request waits on it
     /// ([`settle`]), so a fence that stalls leaves the step to be set aside rather than holding
-    /// the request and its locks; `None` for as long as the store's own call takes (the
-    /// background put-back, and the settling of intents at start-up).
+    /// the request and its locks; a capped store call timeout for background put-back;
+    /// `None` for as long as the store's own call takes at start-up.
     async fn apply<S: Store>(
         &self,
         store: &S,
         within: Option<std::time::Duration>,
-    ) -> Result<(), crate::error::ServerError> {
-        match self {
+    ) -> Result<(), ApplyError> {
+        let result = match self {
             Undo::Restore {
                 key,
                 prior: Some(kept),
@@ -1497,15 +1509,10 @@ impl Undo {
                 records::delete_record(store, iri, parent, within).await
             }
             Undo::Fence { fence } => match within {
-                Some(within) => {
-                    let deadline = records::deadline_after(within);
-                    match records::fenced_by(store, fence, Some(deadline)).await {
-                        true => Ok(()),
-                        false => Err(crate::error::ServerError::Storage(
-                            "the fence did not succeed in time".into(),
-                        )),
-                    }
-                }
+                Some(within) => match tokio::time::timeout(within, store.fence(fence)).await {
+                    Ok(result) => return result.map_err(ApplyError::Failed),
+                    Err(_) => return Err(ApplyError::FenceTimedOut),
+                },
                 None => store.fence(fence).await,
             },
             Undo::Locked { .. } => Ok(()),
@@ -1519,7 +1526,8 @@ impl Undo {
                 }
                 intents::clear(store, record, within).await
             }
-        }
+        };
+        result.map_err(ApplyError::Failed)
     }
 
     /// The resources this change is to: a member's container too, when its listing changes.
@@ -1724,7 +1732,8 @@ const UNDO_ATTEMPTS: u32 = 3;
 
 /// Apply `undo` in order while a request waits on it (with its locks held), each tried a few
 /// times ([`UNDO_ATTEMPTS`], with short waits between): `None` once all are applied, else what is
-/// left, from the step that kept failing on. Each attempt waits for a fence for
+/// left, from the step that kept failing on. A Fence step whose deadline elapsed is left at
+/// once; a quick error gets the normal retries. Each attempt waits for a fence for
 /// [`records::LOCK_WAIT`] at most ([`Undo::apply`]). A step whose write failed unsettled (its
 /// fence not succeeding in that time) is not tried again: it is left at once with its fence
 /// first, for the set-aside, which holds the locks, to fence before it puts the step back
@@ -1759,7 +1768,12 @@ async fn settle_within<S: Store>(
                 // tried now: the step is not tried again until its fence has succeeded. It is
                 // left with its fence first, for the set-aside (which holds the locks) to fence
                 // before it puts the step back.
-                Err(crate::error::ServerError::Unsettled { fence, .. }) => {
+                Err(ApplyError::FenceTimedOut) => {
+                    return Some(Unsettled::new(std::iter::once(step).chain(steps).collect()));
+                }
+                Err(ApplyError::Failed(crate::error::ServerError::Unsettled { fence, .. }))
+                    if !matches!(step, Undo::Fence { .. }) =>
+                {
                     let left = [Undo::Fence { fence }, step].into_iter().chain(steps);
                     return Some(Unsettled::new(left.collect()));
                 }
@@ -1782,10 +1796,17 @@ async fn settle_within<S: Store>(
 /// the step that failed unsettled (whose fence did not succeed) may still land, so its fence is
 /// made to succeed before the step is tried again: no later attempt is outlived by an earlier one.
 pub(crate) async fn put_back_until_done<S: Store>(undo: &Undo, store: &S) {
+    if let Undo::Fence { fence } = undo {
+        records::fence_in_background(store, fence).await;
+        return;
+    }
+    let within = store
+        .call_timeout()
+        .clamp(records::LOCK_WAIT, records::MAX_FENCE_ATTEMPT);
     until_done(|| async {
-        match undo.apply(store, None).await {
+        match undo.apply(store, Some(within)).await {
             Ok(()) => Ok(()),
-            Err(crate::error::ServerError::Unsettled { fence, .. }) => {
+            Err(ApplyError::Failed(crate::error::ServerError::Unsettled { fence, .. })) => {
                 records::fence_in_background(store, &fence).await;
                 Err(())
             }
@@ -2074,8 +2095,8 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         mut self,
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
-        // An intent create/rewrite that answered unsettled must settle before a later
-        // rewrite or Forget can run; otherwise the original plan could arrive afterwards.
+        // An unsettled write must settle before a later rewrite or Forget can run;
+        // otherwise the earlier write could arrive afterwards.
         while let Some(at) = self
             .undo
             .iter()
@@ -2087,7 +2108,9 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             let deadline = records::deadline_after(records::LOCK_WAIT);
             if !records::fenced_by(&self.state.store, fence, Some(deadline)).await {
                 return Err((
-                    crate::error::ServerError::Storage("the intent could not be settled".into()),
+                    crate::error::ServerError::Storage(
+                        "the unsettled write could not be settled".into(),
+                    ),
                     self.rollback().await,
                 ));
             }
@@ -3101,6 +3124,8 @@ pub(crate) mod test_store {
         pub unsettle_next_intent: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// Every metadata read stalls while set.
         pub hang_meta: Arc<AtomicBool>,
+        /// Delay every conditional delete by this many milliseconds.
+        pub slow_delete_ms: Arc<std::sync::atomic::AtomicU64>,
         /// Delay an unsettled delete's answer by this many milliseconds.
         pub slow_delete_answer_ms: Arc<std::sync::atomic::AtomicU64>,
         /// As `unsettle_next_create`, for the next `delete_container_if_empty` of the IRI named.
@@ -3109,6 +3134,8 @@ pub(crate) mod test_store {
         pub unsettle_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// `fence` fails, as while the remote store cannot be reached.
         pub fail_fence: Arc<AtomicBool>,
+        /// Fail the next fence once, before changing anything.
+        pub fail_next_fence: Arc<AtomicBool>,
         /// Once a `fence` succeeds, `exists` and `list_children` fail (`fail_exists`,
         /// `fail_list`), as when the store becomes unreachable just after it.
         pub fail_reads_after_fence: Arc<AtomicBool>,
@@ -3198,10 +3225,12 @@ pub(crate) mod test_store {
                 unsettle_next_create: Default::default(),
                 unsettle_next_intent: Default::default(),
                 hang_meta: Default::default(),
+                slow_delete_ms: Default::default(),
                 slow_delete_answer_ms: Default::default(),
                 unsettle_next_delete_of: Default::default(),
                 unsettle_creates: Default::default(),
                 fail_fence: Default::default(),
+                fail_next_fence: Default::default(),
                 fences_tried: Default::default(),
                 fail_reads_after_fence: Default::default(),
                 hang_fence: Default::default(),
@@ -3599,6 +3628,10 @@ pub(crate) mod test_store {
             iri: &str,
             parent: Option<&str>,
         ) -> ServerResult<DeleteOutcome> {
+            let slow = self.slow_delete_ms.load(Ordering::SeqCst);
+            if slow > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(slow)).await;
+            }
             // The same failures as `delete`: a resource is removed by either.
             self.step()?;
             if self.refuse_delete_of.lock().unwrap().as_deref() == Some(iri) {
@@ -3655,7 +3688,9 @@ pub(crate) mod test_store {
             if slow > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(slow)).await;
             }
-            if self.fail_fence.load(Ordering::SeqCst) {
+            if self.fail_fence.load(Ordering::SeqCst)
+                || self.fail_next_fence.swap(false, Ordering::SeqCst)
+            {
                 return Err(ServerError::Storage("the store cannot be reached".into()));
             }
             let write = self.unsettled.lock().unwrap().get(fence.nonce()).cloned();
