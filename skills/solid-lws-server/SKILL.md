@@ -168,7 +168,7 @@ socket closes when the client
 closes it, on the revocation close (`1008`), or on a `1011`: a backlog overflow,
 a timer check that cannot be made, or a reconcile after a dropped notification.
 `NotificationMetrics` counts overflow closes and their skipped events only after confirmed
-read access. This includes `RECONCILE` after a lag check pre-empted by a tick that confirms
+read access. This includes `RECONCILE` after a lag check preempted by a tick that confirms
 read access; a completed denied or undecided lag check does not count toward either counter.
 A `REVOKED` or undecided timer close does not count toward either overflow counter.
 Pings are answered while a check is in progress. The receive token gates
