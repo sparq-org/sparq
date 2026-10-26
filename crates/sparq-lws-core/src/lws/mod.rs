@@ -27,6 +27,7 @@
 
 pub mod access;
 pub mod authz_server;
+mod discovery;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;
@@ -1124,13 +1125,18 @@ impl<S: Store + 'static> LwsState<S> {
             .map(|_| ())
     }
 
-    /// A 401 with the Bearer challenge naming this authorization server and realm, and the storage
-    /// link (section 9.2).
+    /// A 401 with RFC 9728 metadata, the transitional issuer, realm, and storage link.
+    /// Pass an error only when a presented access token was rejected.
     pub fn challenge(&self, error: Option<&str>) -> Response {
+        let metadata = match discovery::prm_url(&self.cfg.storage()) {
+            Ok(url) => url,
+            Err(_) => return problem(StatusCode::INTERNAL_SERVER_ERROR, None),
+        };
         let mut c = format!(
-            "Bearer as_uri=\"{}\", realm=\"{}\"",
-            self.cfg.issuer(),
-            self.cfg.realm()
+            "Bearer resource_metadata=\"{}\", realm=\"{}\", as_uri=\"{}\"",
+            metadata,
+            self.cfg.realm(),
+            self.cfg.issuer()
         );
         if let Some(e) = error {
             c.push_str(&format!(", error=\"{e}\""));
@@ -2538,6 +2544,9 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         return authz_server::handle(state, &req).await;
     }
     if path.starts_with("/.well-known/") {
+        if discovery::prm_url(&state.cfg.storage()).is_ok_and(|url| url.path() == path) {
+            return discovery::handle(state, &req);
+        }
         return problem(StatusCode::NOT_FOUND, None);
     }
     let agent = match tokens::authenticate(state, &req) {
