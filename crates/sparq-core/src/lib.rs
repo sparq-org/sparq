@@ -2575,7 +2575,7 @@ impl Graph {
         // (sq-ycle) AFTER the per-graph WALs are replayed (above + per named graph in
         // `open_named`), redo any committed parent-level transaction frame, idempotently. A
         // multi-op UPDATE body's resolved per-slot quad-delta is one atomic `txn.log` frame; if a
-        // crash interrupted materialisation after that single fsync, the per-graph WALs hold only a
+        // crash interrupted materialisation after that journal commit, the per-graph WALs hold only a
         // PREFIX of the body — replaying the frame heals the desync. Re-applying records the WALs
         // already materialised is a no-op: `apply_delta` replays with set semantics (re-inserting a
         // present triple / deleting an absent one changes nothing) and `ensure_named` is
@@ -2597,7 +2597,9 @@ impl Graph {
         // Every committed record is now durably in a per-graph WAL (fsync'd by `apply_delta`); only
         // NOW is it safe to truncate the journal that was the sole durable home of those records.
         let mut journal = TxnJournal::open(dir)?;
-        journal.truncate()?;
+        if journal.file.metadata()?.len() != 0 {
+            journal.truncate()?;
+        }
         g.txn = Some(journal);
         // Share the recovered tree state with every named child.
         g.share_tree();
@@ -7554,12 +7556,24 @@ fn open_log(path: &std::path::Path) -> std::io::Result<std::fs::File> {
         .truncate(false)
         .open(path)?;
     file.seek(std::io::SeekFrom::End(0))?;
-    // An interrupted open may have left an existing entry unsynced, so sync every open.
-    file.sync_all()?;
-    fault_point("log-file-synced", path)?;
-    fsync_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
-    fault_point("log-opened", path)?;
     Ok(file)
+}
+
+/// Makes the entry durable after the first frame's data sync, before acknowledging the append.
+#[cfg(feature = "mmap")]
+fn sync_log_entry(
+    file: &std::fs::File,
+    path: &std::path::Path,
+    needs_entry_sync: &mut bool,
+) -> std::io::Result<()> {
+    if *needs_entry_sync {
+        file.sync_all()?;
+        fault_point("log-file-synced", path)?;
+        fsync_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
+        fault_point("log-opened", path)?;
+        *needs_entry_sync = false;
+    }
+    Ok(())
 }
 
 /// Empties a log opened by [`open_log`] and puts the cursor back at its start, then syncs.
@@ -7592,6 +7606,7 @@ fn truncate_log(file: &mut std::fs::File) -> std::io::Result<()> {
 struct Wal {
     file: std::fs::File,
     dir: std::path::PathBuf,
+    needs_entry_sync: bool,
 }
 
 /// Test-only thread-local append faults and path-scoped file-sync faults.
@@ -7674,7 +7689,8 @@ impl Wal {
 
     fn open(dir: &std::path::Path) -> std::io::Result<Wal> {
         let file = open_log(&Self::path(dir))?;
-        Ok(Wal { file, dir: dir.to_path_buf() })
+        // Even an existing entry may come from an interrupted open, so the first append syncs it.
+        Ok(Wal { file, dir: dir.to_path_buf(), needs_entry_sync: true })
     }
 
     /// FNV-1a 64-bit checksum (no extra deps; deterministic across runs/platforms).
@@ -7731,7 +7747,8 @@ impl Wal {
           // write at the end, never over it.
         std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))?;
         self.file.write_all(&buf)?;
-        self.file.sync_data()
+        self.file.sync_data()?;
+        sync_log_entry(&self.file, &Self::path(&self.dir), &mut self.needs_entry_sync)
     }
 
     fn push_record(buf: &mut Vec<u8>, op: u8, t: &[Term; 3]) -> std::io::Result<()> {
@@ -8228,8 +8245,8 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 /// per-graph `wal.log`, the `named.bin` manifest), each fsync'd on its own. A crash between them
 /// leaves a PARTIAL durable write (parent containment present but child graph missing, or vice
 /// versa). This journal records the WHOLE resolved per-slot quad-delta of one `apply_effects` call
-/// as ONE framed, checksummed, single-`sync_data()` frame. That single fsync is THE commit point;
-/// the per-graph WAL appends still happen but are now materialisation, not the commit point.
+/// as ONE framed, checksummed frame. Its data sync, plus the first append's entry sync, must
+/// finish before commit is acknowledged; the per-graph WAL appends are then materialisation.
 ///
 /// On [`open`](Graph::open), AFTER the per-graph WALs are replayed, any committed `txn.log` frame
 /// is replayed idempotently and then the journal is truncated. (Copilot #135) The redo
@@ -8265,6 +8282,7 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    needs_entry_sync: bool,
     /// The store directory this journal belongs to — needed to announce the journal's format to
     /// older binaries (see [`TxnJournal::mark_store_format`]).
     dir: std::path::PathBuf,
@@ -8299,6 +8317,7 @@ impl TxnJournal {
         let file = open_log(&Self::path(dir))?;
         Ok(TxnJournal {
             file,
+            needs_entry_sync: true,
             dir: dir.to_path_buf(),
             poisoned: false,
             format_marked: false,
@@ -8342,9 +8361,10 @@ impl TxnJournal {
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
-    /// THE single commit point for one `apply_effects` body. A crash mid-append leaves an
-    /// uncommitted tail that [`replay`](Self::replay) discards entirely. An empty record set is a
-    /// no-op (an UPDATE that resolves to no data change carries no atomicity obligation).
+    /// the commit point for one `apply_effects` body, including entry sync on the first append.
+    /// A crash mid-append leaves an uncommitted tail that [`replay`](Self::replay) discards
+    /// entirely. An empty record set is a no-op (an UPDATE that resolves to no data change
+    /// carries no atomicity obligation).
     fn append(&mut self, records: &[TxnOp]) -> std::io::Result<()> {
         use std::io::Write;
         // A failed append may have left any part of its frame behind, a complete one included,
@@ -8423,7 +8443,10 @@ impl TxnJournal {
         }
         let written = std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))
             .and_then(|_| self.file.write_all(&buf))
-            .and_then(|()| self.file.sync_data());
+            .and_then(|()| self.file.sync_data())
+            .and_then(|()| {
+                sync_log_entry(&self.file, &Self::path(&self.dir), &mut self.needs_entry_sync)
+            });
         if written.is_err() {
             self.poisoned = true;
         }
@@ -16848,7 +16871,7 @@ mod tests {
     /// `txn.log` frame ALONE — with NO per-graph WAL materialisation at all — reconstructs the
     /// FULL all-or-nothing record set on `open`, across BOTH the default graph and a named graph
     /// (the PSS `INSERT DATA { GRAPH <r> ... ; GRAPH <parent> contains <r> }` shape). This is the
-    /// reliable simulation of "a crash after the single commit fsync but before materialisation":
+    /// reliable simulation of "a crash after the journal commit but before materialisation":
     /// the journal redo heals the desync. The journal is truncated afterwards.
     #[cfg(feature = "mmap")]
     #[test]
@@ -16917,7 +16940,7 @@ mod tests {
         Graph::load_str("<http://ex/base> <http://ex/p> <http://ex/o> .", "ntriples").unwrap().save(&dir).unwrap();
 
         // Two default-graph inserts committed to the journal with NO materialisation, then dropped
-        // — simulating a crash right after the single commit fsync, before any per-graph WAL write.
+        // — simulating a crash right after the journal commit, before any per-graph WAL write.
         let a = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
         let b = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
         let records: Vec<(bool, Option<Term>, [Term; 3])> = vec![(true, None, a.clone()), (true, None, b.clone())];
@@ -17014,7 +17037,7 @@ mod tests {
     }
 
     /// (sq-ycle) An UNCOMMITTED frame (no commit trailer written — the crash landed
-    /// before the single fsync completed the trailer) must apply NOTHING and leave the pre-body
+    /// before the complete trailer was synced) must apply NOTHING and leave the pre-body
     /// state intact; the torn tail is truncated.
     #[cfg(feature = "mmap")]
     #[test]

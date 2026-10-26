@@ -74,8 +74,33 @@ impl Drop for SyncTrace {
     }
 }
 
+fn assert_entry_synced(events: &[(String, std::path::PathBuf)], dir: &Path, log: &str) {
+    let path = dir.join(log);
+    let positions = |step: &str| {
+        events
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, p))| s == step && *p == path)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>()
+    };
+    let synced = positions("log-file-synced");
+    let ready = positions("log-opened");
+    assert_eq!(
+        synced.len(),
+        1,
+        "sync {path:?} before acknowledging its first append"
+    );
+    assert_eq!(ready.len(), 1);
+    assert!(synced[0] < ready[0]);
+    #[cfg(unix)]
+    assert!(events[synced[0] + 1..ready[0]]
+        .iter()
+        .any(|(step, p)| step == "dir-synced" && p == dir));
+}
+
 #[test]
-fn log_entries_are_synced_before_open_returns() {
+fn log_entries_are_synced_before_first_append_returns() {
     for replacement in ["fresh", "existing", "compact", "restore"] {
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("store");
@@ -84,9 +109,7 @@ fn log_entries_are_synced_before_open_returns() {
         root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
         let trace = SyncTrace::start();
         match replacement {
-            "compact" => {
-                root.compact().unwrap();
-            }
+            "compact" => root.compact().unwrap(),
             "restore" => {
                 let mut fresh = Graph::new();
                 fresh.ensure_named(&name("g0")).unwrap();
@@ -95,13 +118,9 @@ fn log_entries_are_synced_before_open_returns() {
                 root.restore_in_place(fresh).unwrap();
             }
             _ => {
+                root.compact().unwrap();
                 drop(root);
                 if replacement == "fresh" {
-                    // Fold acknowledged data before modeling missing log entries.
-                    let mut saved = Graph::open(&path).unwrap();
-                    saved.compact().unwrap();
-                    drop(saved);
-                    trace.take();
                     for slot in [path.clone(), path.join("named/0")] {
                         for log in ["wal.log", "txn.log"] {
                             std::fs::remove_file(slot.join(log)).unwrap();
@@ -111,94 +130,189 @@ fn log_entries_are_synced_before_open_returns() {
                 root = Graph::open(&path).unwrap();
             }
         }
-        let events = trace.take();
-        for slot in [path.clone(), path.join("named/0")] {
-            for log in ["wal.log", "txn.log"] {
-                let log_path = slot.join(log);
-                let mut previous = 0;
-                let mut opens = 0;
-                for (opened, _) in events
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (step, p))| step == "log-opened" && *p == log_path)
-                {
-                    opens += 1;
-                    let synced = events[previous..opened]
-                        .iter()
-                        .rposition(|(step, p)| step == "log-file-synced" && *p == log_path)
-                        .unwrap_or_else(|| panic!("{replacement}: {log_path:?} was not synced"))
-                        + previous;
-                    #[cfg(unix)]
-                    assert!(
-                        events[synced + 1..opened]
-                            .iter()
-                            .any(|(step, p)| step == "dir-synced" && *p == slot),
-                        "{replacement}: persist {log_path:?}'s entry before returning its handle"
-                    );
-                    #[cfg(not(unix))]
-                    let _ = synced;
-                    previous = opened + 1;
-                }
-                assert!(opens > 0, "{replacement}: {log_path:?} was not opened");
-            }
-        }
+        assert!(!trace
+            .take()
+            .iter()
+            .any(|(step, _)| step.starts_with("log-")));
         let update = [name("after-open"), name("p"), name("o")];
-        root.commit_txn(&[
-            (true, None, update.clone()),
-            (true, Some(name("g0")), update.clone()),
-        ])
-        .unwrap();
-        root.apply_delta(std::slice::from_ref(&update), &[])
-            .unwrap();
-        root.apply_delta_to_named(0, std::slice::from_ref(&update), &[])
-            .unwrap();
-        for slot in [path.clone(), path.join("named/0")] {
-            assert!(std::fs::metadata(slot.join("wal.log")).unwrap().len() > 0);
+        let later = [name("after-first-append"), name("p"), name("o")];
+        for child in [false, true] {
+            let slot = if child {
+                path.join("named/0")
+            } else {
+                path.clone()
+            };
+            let graph = if child {
+                &mut root.named[0].1
+            } else {
+                &mut root
+            };
+            // Empty writes and truncation must leave the first real append's sync pending.
+            graph.commit_txn(&[]).unwrap();
+            graph.apply_delta(&[], &[]).unwrap();
+            graph.clear_txn().unwrap();
+            graph.wal.log_mut().unwrap().truncate().unwrap();
+            trace.take();
+            graph.commit_txn(&[(true, None, update.clone())]).unwrap();
+            assert_entry_synced(&trace.take(), &slot, "txn.log");
+            graph
+                .apply_delta(std::slice::from_ref(&update), &[])
+                .unwrap();
+            assert_entry_synced(&trace.take(), &slot, "wal.log");
+            graph.clear_txn().unwrap();
+            graph.commit_txn(&[(true, None, later.clone())]).unwrap();
+            graph
+                .apply_delta(std::slice::from_ref(&later), &[])
+                .unwrap();
+            graph.clear_txn().unwrap();
+            assert!(!trace
+                .take()
+                .iter()
+                .any(|(step, _)| step.starts_with("log-")));
         }
-        assert!(std::fs::metadata(path.join("txn.log")).unwrap().len() > 0);
-        root.clear_txn().unwrap();
-        assert_eq!(std::fs::metadata(path.join("txn.log")).unwrap().len(), 0);
         drop(root);
         for _ in 0..2 {
             let reopened = Graph::open(&path).unwrap();
-            assert_triples(&reopened, &[triple(), update.clone()]);
+            assert_triples(&reopened, &[triple(), update.clone(), later.clone()]);
             assert_triples(
                 reopened.named_graph(&name("g0")).unwrap(),
-                &[triple(), update.clone()],
+                &[triple(), update.clone(), later.clone()],
             );
         }
     }
 }
 
 #[test]
-fn interrupted_replacement_log_creation_keeps_acknowledged_data() {
+fn interrupted_replacement_log_append_keeps_acknowledged_data() {
     for slot in ["", "named/0"] {
         for log in ["wal.log", "txn.log"] {
-            let tmp = tempdir().unwrap();
-            let path = tmp.path().join("store");
-            let mut root = store(&path, 1);
-            root.apply_delta(&[triple()], &[]).unwrap();
-            root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
-            let failed = path.join(slot).join(log);
-            let target = failed.clone();
-            fault::crash_at(move |step, p| step == "log-file-synced" && p == target);
-            let result = root.compact();
-            let hits = fault::disarm();
-            assert!(
-                result.is_err(),
-                "opening a replacement log must fail before use"
-            );
-            assert!(hits > 0, "log sync crash point was not reached");
-            drop(root);
-            // Model loss of a fresh log entry whose parent was not synced. Its base
-            // already holds every acknowledged update; no new append could succeed.
-            std::fs::remove_file(failed).unwrap();
-            for _ in 0..2 {
-                let reopened = Graph::open(&path).unwrap();
-                assert_triples(&reopened, &[triple()]);
-                assert_triples(reopened.named_graph(&name("g0")).unwrap(), &[triple()]);
+            for step in ["log-file-synced", "log-opened"] {
+                let tmp = tempdir().unwrap();
+                let path = tmp.path().join("store");
+                let mut root = store(&path, 1);
+                root.apply_delta(&[triple()], &[]).unwrap();
+                root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+                root.compact().unwrap();
+                let failed = path.join(slot).join(log);
+                let target = failed.clone();
+                let graph = if slot.is_empty() {
+                    &mut root
+                } else {
+                    &mut root.named[0].1
+                };
+                let update = [name("unacknowledged"), name("p"), name("o")];
+                fault::crash_at(move |s, p| s == step && p == target);
+                let result = if log == "wal.log" {
+                    graph.apply_delta(std::slice::from_ref(&update), &[])
+                } else {
+                    graph.commit_txn(&[(true, None, update.clone())])
+                };
+                let hits = fault::disarm();
+                assert!(
+                    result.is_err(),
+                    "first append must not be acknowledged after a sync error"
+                );
+                assert!(hits > 0, "log sync crash point was not reached");
+                let pending = if log == "wal.log" {
+                    graph.wal.log().unwrap().needs_entry_sync
+                } else {
+                    assert!(graph.txn.as_ref().unwrap().poisoned());
+                    graph.txn.as_ref().unwrap().needs_entry_sync
+                };
+                assert!(pending, "a failed entry sync must remain pending");
+                assert!(graph.apply_delta(&[triple()], &[]).is_err());
+                drop(root);
+                // Only model entry loss before the parent sync; afterwards its frame survives.
+                if step == "log-file-synced" {
+                    std::fs::remove_file(failed).unwrap();
+                }
+                let expected = |target| {
+                    if step == "log-opened" && slot == target {
+                        vec![triple(), update.clone()]
+                    } else {
+                        vec![triple()]
+                    }
+                };
+                for _ in 0..2 {
+                    let reopened = Graph::open(&path).unwrap();
+                    assert_triples(&reopened, &expected(""));
+                    assert_triples(
+                        reopened.named_graph(&name("g0")).unwrap(),
+                        &expected("named/0"),
+                    );
+                }
             }
         }
+    }
+}
+
+#[test]
+fn opening_a_clean_named_tree_issues_no_log_or_directory_syncs() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    let mut seed = Graph::new();
+    for i in 0..32 {
+        let child = seed.ensure_named(&name(&format!("g{i}"))).unwrap();
+        seed.named[child].1.ensure_named(&name("nested")).unwrap();
+    }
+    seed.save(&path).unwrap();
+    for _ in 0..2 {
+        let trace = SyncTrace::start();
+        let root = Graph::open(&path).unwrap();
+        assert_eq!(root.named.len(), 32);
+        let events = trace.take();
+        let syncs = events
+            .iter()
+            .filter(|(step, _)| {
+                matches!(
+                    step.as_str(),
+                    "log-file-synced"
+                        | "dir-synced"
+                        | "file-synced"
+                        | "journal-truncated"
+                        | "wal-truncate"
+                )
+            })
+            .count();
+        assert_eq!(syncs, 0, "a clean open must not sync: {events:?}");
+        drop(root);
+    }
+}
+
+#[test]
+fn recovery_syncs_redo_wal_entries_before_retiring_the_journal() {
+    for interrupted in [None, Some(""), Some("named/0")] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        let mut root = store(&path, 1);
+        root.commit_txn(&[(true, None, triple()), (true, Some(name("g0")), triple())])
+            .unwrap();
+        drop(root);
+        if let Some(slot) = interrupted {
+            let target = path.join(slot).join("wal.log");
+            let lost = target.clone();
+            fault::crash_at(move |step, p| step == "log-file-synced" && p == target);
+            assert!(Graph::open(&path).is_err());
+            assert!(fault::disarm() > 0);
+            assert!(std::fs::metadata(path.join("txn.log")).unwrap().len() > 0);
+            std::fs::remove_file(lost).unwrap();
+        }
+        let trace = SyncTrace::start();
+        let root = Graph::open(&path).unwrap();
+        let events = trace.take();
+        let retired = events
+            .iter()
+            .position(|(s, p)| s == "journal-truncated" && *p == path)
+            .unwrap();
+        for slot in [path.clone(), path.join("named/0")] {
+            assert_entry_synced(&events[..retired], &slot, "wal.log");
+        }
+        assert_triples(&root, &[triple()]);
+        assert_triples(&root.named[0].1, &[triple()]);
+        drop(root);
+        let reopened = Graph::open(&path).unwrap();
+        assert_triples(&reopened, &[triple()]);
+        assert_triples(&reopened.named[0].1, &[triple()]);
     }
 }
 
@@ -501,7 +615,17 @@ fn compact_reclaims_sparse_slots_without_any_overlay() {
                     "the complete tree has clean bases"
                 );
                 assert_eq!(level(&mut root, nested).next_slot, 8);
+                let trace = SyncTrace::start();
                 root.compact().unwrap();
+                assert!(trace
+                    .take()
+                    .iter()
+                    .any(|(step, p)| step == "rename" && *p == path));
+                root.compact().unwrap();
+                assert!(
+                    !trace.take().iter().any(|(step, _)| step == "rename"),
+                    "the second compact must not swap the base"
+                );
                 let manifest = read_named_manifest(&layer_path).unwrap().unwrap();
                 assert_eq!(
                     manifest.next_slot as usize, keep,
@@ -522,6 +646,12 @@ fn compact_reclaims_sparse_slots_without_any_overlay() {
                 drop(root);
                 for _ in 0..2 {
                     let mut reopened = Graph::open(&path).unwrap();
+                    trace.take();
+                    reopened.compact().unwrap();
+                    assert!(
+                        !trace.take().iter().any(|(step, _)| step == "rename"),
+                        "compaction must stay settled after reopening"
+                    );
                     let layer = level(&mut reopened, nested);
                     assert_eq!(layer.len(), usize::from(default_base));
                     assert_eq!(layer.named.len(), keep);
