@@ -29,14 +29,20 @@ store.delete(key)?;
 - Ordinary layout: `objects/<first hex pair>/<second hex pair>/<key>`; pooled
   layout: `pool/<first hex pair>/<key>`. Hex pairs come from the random key part.
 - An exclusive temporary file is written and synced before hard-link publication
-  without overwrite. Existing keys fail even when their bytes match. Created
-  fan-out directories and their parents are synced, as is the final parent after
-  publication. No process-wide mutex is used.
+  without overwrite. Existing keys fail even when their bytes match. Fan-out
+  directories and their parent entries are synced on first use per open store,
+  including pre-existing directories. A bitmap shared across clones records only
+  successful initialization; a per-store mutex serializes first use. Reopening
+  clears the bitmap. The final parent is synced after every publication.
 - Idempotent deletion syncs the containing directory after unlink. Keys must never
   be rewritten or reused, including after deletion. A failure after publication
   can leave an orphan; retry with a fresh key.
-- Listing returns keys with filesystem modification times and excludes `tmp/`.
-  The async adapter reports these as `Some(mtime)` with no generation witness.
+- Listing returns `Listing { blobs, foreign }` and excludes `tmp/`. `blobs` holds
+  keys with filesystem modification times. Invalid names, misplaced valid keys
+  and non-files are skipped and reported in `foreign`; unexpected fan-out
+  directories are reported without traversing them. Filesystem I/O errors still
+  propagate. The async adapter returns the blobs as `Some(mtime)` with no
+  generation witness and emits a warning for foreign entries once per listing.
 
 ## 📚 Learn more
 

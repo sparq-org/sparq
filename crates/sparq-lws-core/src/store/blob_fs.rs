@@ -65,9 +65,14 @@ impl BlobStore for FsBlobStore {
 
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
         blocking(self, move |store| {
-            store
-                .list()
-                .map(|blobs| blobs.into_iter().map(entry).collect())
+            let listing = store.list()?;
+            if !listing.foreign.is_empty() {
+                eprintln!(
+                    "  WARNING: filesystem blob listing skipped foreign entries: {:?}",
+                    listing.foreign
+                );
+            }
+            Ok(listing.blobs.into_iter().map(entry).collect())
         })
         .await
     }
@@ -125,6 +130,14 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn pooled_key_marker_matches_store_limits() {
+        assert_eq!(
+            sparq_lws_blob_fs::POOLED_BLOB_KEY_MARK,
+            crate::store::limits::POOLED_BLOB_KEY_MARK
+        );
     }
 
     #[tokio::test]
@@ -252,6 +265,10 @@ mod tests {
         assert_eq!(stats.last_modified, Some(SystemTime::UNIX_EPOCH));
         assert_eq!(stats.generation, None);
         fs::write(directory.0.join("tmp/unpublished"), b"in flight").unwrap();
+        let stray_file = directory.0.join("objects/01/23/.DS_Store");
+        fs::write(&stray_file, b"foreign").unwrap();
+        let stray_dir = directory.0.join("objects/01/23/stray-directory");
+        fs::create_dir(&stray_dir).unwrap();
         let options = ReconcileOptions {
             grace: Duration::from_secs(60),
             dry_run: false,
@@ -270,6 +287,8 @@ mod tests {
             b"live"[..]
         );
         assert!(directory.0.join("tmp/unpublished").is_file());
+        assert_eq!(fs::read(stray_file).unwrap(), b"foreign");
+        assert!(stray_dir.is_dir());
         assert_eq!(
             reconcile_orphans(&store.sparq, &store.blob, &options)
                 .await

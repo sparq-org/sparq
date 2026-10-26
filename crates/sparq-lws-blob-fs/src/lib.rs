@@ -11,6 +11,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 /// The marker for service-pool blob keys.
@@ -27,10 +28,61 @@ pub struct BlobEntry {
     pub generation: Option<u64>,
 }
 
+/// Published blobs and foreign filesystem entries skipped during listing.
+#[derive(Debug, Default)]
+pub struct Listing {
+    /// Blobs in their expected layout, sorted by key.
+    pub blobs: Vec<BlobEntry>,
+    /// Invalid names, misplaced keys and non-files, sorted by path.
+    /// Unexpected fan-out directories are reported without traversing them.
+    pub foreign: Vec<PathBuf>,
+}
+
+const OBJECT_LEAF_OFFSET: usize = 256;
+const POOL_DIRECTORY_OFFSET: usize = OBJECT_LEAF_OFFSET + 256 * 256;
+const FANOUT_DIRECTORIES: usize = POOL_DIRECTORY_OFFSET + 256;
+
+#[derive(Debug)]
+struct SyncedDirectories {
+    bits: Box<[AtomicU64]>,
+    initializing: Mutex<()>,
+}
+
+impl SyncedDirectories {
+    fn new() -> Self {
+        Self {
+            bits: (0..FANOUT_DIRECTORIES / 64)
+                .map(|_| AtomicU64::new(0))
+                .collect(),
+            initializing: Mutex::new(()),
+        }
+    }
+
+    fn ensure(&self, path: &Path, index: usize) -> io::Result<()> {
+        let word = &self.bits[index / 64];
+        let mask = 1 << (index % 64);
+        if word.load(Ordering::Acquire) & mask == 0 {
+            // Serialize only first use, then recheck for a concurrent initializer.
+            let _guard = self
+                .initializing
+                .lock()
+                .map_err(|_| io::Error::other("fan-out initialization lock poisoned"))?;
+            if word.load(Ordering::Acquire) & mask == 0 {
+                // AlreadyExists must still sync: another writer may have created
+                // the directory without making its parent entry durable.
+                ensure_dir(path)?;
+                word.fetch_or(mask, Ordering::Release);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A std-only blob store, independent of the server's async storage traits.
 #[derive(Debug, Clone)]
 pub struct FsBlobStore {
     root: PathBuf,
+    synced: Arc<SyncedDirectories>,
 }
 
 impl FsBlobStore {
@@ -53,7 +105,10 @@ impl FsBlobStore {
             }
         }
         sync_dir(&root.join("tmp"))?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            synced: Arc::new(SyncedDirectories::new()),
+        })
     }
 
     /// Create a blob. An existing key is an error, even when its bytes match.
@@ -62,16 +117,25 @@ impl FsBlobStore {
     /// The bytes are synced before a no-overwrite hard-link publication, and the
     /// final parent is synced before success. An error after publication can leave
     /// an orphan for reconciliation; callers must not retry with the same key.
+    /// Fan-out directories and their parent entries are synced on first use per
+    /// open store, shared across clones. Failed directory syncs are retried.
     pub fn put(&self, key: &str, body: &[u8]) -> io::Result<()> {
         let path = self.path(key)?;
         let parent = path.parent().expect("blob path has a parent");
-        // A concurrent writer may have created the first fan-out directory but
-        // not synced its entry yet. Establish that entry before the next level.
-        ensure_dir(parent.parent().expect("fan-out path has a parent"))?;
-        ensure_dir(parent)?;
+        let (random, pooled) = parse_key(key)?;
+        let first = usize::from_str_radix(&random[..2], 16).expect("validated hex pair");
+        if pooled {
+            self.synced.ensure(parent, POOL_DIRECTORY_OFFSET + first)?;
+        } else {
+            self.synced
+                .ensure(parent.parent().expect("fan-out path has a parent"), first)?;
+            let second = usize::from_str_radix(&random[2..4], 16).expect("validated hex pair");
+            self.synced
+                .ensure(parent, OBJECT_LEAF_OFFSET + first * 256 + second)?;
+        }
         let (temporary, mut file) = self.create_temporary()?;
         file.write_all(body)?;
-        file.sync_all()?;
+        sync_file(&file, &temporary.0)?;
         fs::hard_link(&temporary.0, &path)?;
         fs::remove_file(&temporary.0)?;
         sync_dir(parent)?;
@@ -113,14 +177,16 @@ impl FsBlobStore {
     }
 
     /// List published keys with modification times. Temporary writes are excluded.
-    /// Blobs concurrently removed while listing are skipped.
-    pub fn list(&self) -> io::Result<Vec<BlobEntry>> {
-        let mut entries = Vec::new();
+    /// Foreign entries are reported separately; blobs concurrently removed are skipped.
+    /// Filesystem I/O errors still propagate.
+    pub fn list(&self) -> io::Result<Listing> {
+        let mut listing = Listing::default();
         for (directory, depth) in [("objects", 2), ("pool", 1)] {
-            self.list_directory(&self.root.join(directory), depth, &mut entries)?;
+            self.list_directory(&self.root.join(directory), depth, &mut listing)?;
         }
-        entries.sort_by(|a, b| a.key.cmp(&b.key));
-        Ok(entries)
+        listing.blobs.sort_by(|a, b| a.key.cmp(&b.key));
+        listing.foreign.sort();
+        Ok(listing)
     }
 
     fn path(&self, key: &str) -> io::Result<PathBuf> {
@@ -158,23 +224,33 @@ impl FsBlobStore {
         &self,
         directory: &Path,
         depth: usize,
-        entries: &mut Vec<BlobEntry>,
+        listing: &mut Listing,
     ) -> io::Result<()> {
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
             let kind = entry.file_type()?;
-            if depth > 0 && kind.is_dir() {
-                self.list_directory(&entry.path(), depth - 1, entries)?;
+            let path = entry.path();
+            let name = entry.file_name();
+            if depth > 0
+                && kind.is_dir()
+                && name.to_str().is_some_and(|name| {
+                    name.len() == 2 && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                })
+            {
+                self.list_directory(&path, depth - 1, listing)?;
             } else if depth == 0 && kind.is_file() {
-                let key = entry.file_name();
-                let key = key.to_str().ok_or_else(invalid_key)?;
-                // Refuse a valid key stored in the wrong layout too.
-                if self.path(key)? != entry.path() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "misplaced blob"));
-                }
+                let Some(key) = name
+                    .to_str()
+                    .filter(|key| self.path(key).is_ok_and(|expected| expected == path))
+                else {
+                    listing.foreign.push(path);
+                    continue;
+                };
                 if let Some(blob) = self.stat(key)? {
-                    entries.push(blob);
+                    listing.blobs.push(blob);
                 }
+            } else {
+                listing.foreign.push(path);
             }
         }
         Ok(())
@@ -202,7 +278,13 @@ fn invalid_key() -> io::Error {
 }
 
 fn sync_dir(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
+    sync_file(&File::open(path)?, path)
+}
+
+fn sync_file(file: &File, _path: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    tests::before_sync(_path)?;
+    file.sync_all()
 }
 
 fn ensure_dir(path: &Path) -> io::Result<()> {
@@ -231,3 +313,6 @@ impl Drop for Temporary {
         let _ = fs::remove_file(&self.0);
     }
 }
+
+#[cfg(test)]
+mod tests;
