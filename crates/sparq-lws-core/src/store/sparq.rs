@@ -290,24 +290,20 @@ pub trait SparqClient: Send + Sync {
         meta: ResourceMeta,
     ) -> Result<(), SparqError>;
 
-    /// Commit a child record and containment together, returning the record it replaced.
+    /// Commit a child record and containment together, reporting the replaced record when supported.
     ///
-    /// The default reads the previous record before `create_child`; concurrent replacements
-    /// may leave an intermediate key for reconciliation, as with `replace_meta`. The in-memory
-    /// and embedded clients return the replaced record in the same index operation.
+    /// The default calls `create_child` and returns `None` without reading the previous record.
+    /// Clients without an override, such as the remote HTTP client, do not report the replaced
+    /// record; any superseded blob key is left to the reconciler. The in-memory and embedded
+    /// clients return the replaced record in the same index operation.
     async fn replace_child(
         &self,
         container: &str,
         child: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
-        let previous = match self.get_meta(child).await {
-            Ok(meta) => Some(meta),
-            Err(SparqError::NotFound) => None,
-            Err(e) => return Err(e),
-        };
         self.create_child(container, child, meta).await?;
-        Ok(previous)
+        Ok(None)
     }
 
     /// Remove `child` from `container`'s membership. Idempotent on an absent edge.

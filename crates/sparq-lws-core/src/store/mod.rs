@@ -990,7 +990,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
     ) -> ServerResult<ResourceMeta> {
         refuse_marker(&[Some(container), Some(child)])?;
         // Publish bytes before committing the child record and containment together. The
-        // index returns the record replaced by this commit so its bytes can be reclaimed.
+        // native indexes report the replaced record so its bytes can be reclaimed; remote
+        // clients leave any superseded key to the reconciler.
         let blob_key = Self::mint_blob_key(child)?;
         let etag = Self::etag_for(content_type, &body);
         self.blob.put(&blob_key, body).await.map_err(|e| match e {
