@@ -33,8 +33,8 @@
 # dispatch.rs):
 #   * VALUE-LANE members (the `filter_value_dl_*` family — those that bind the
 #     operand via the committed `value_component`) are LEGAL only against a method
-#     that committed a value handle: `dual-leaf` and the `value-only` research
-#     dial. ILLEGAL against `string-canonical` (no value handle — unprovable).
+#     that committed a value handle: `dual-leaf-v2` and the `value-only` research
+#     dial. V1 value members are refused by name; string-canonical has no handle.
 #   * [GPT-6] Successful-result result_v1_*, result_v2_*, and result_v3_* members admit string-canonical
 #     graphs only. Their complete-root authentication does not use the legacy
 #     lexical-handle dispatch rule or admit dual-leaf/value-only commitments.
@@ -126,7 +126,7 @@ METHODS = [
         "production_selectable": False,
         "removes_inv_vl": True,
         "note": "The FIRST dual-leaf version, SUPERSEDED by dual-leaf-v2. Still "
-        "recognised and verifiable, so its value lane stays structurally legal here, "
+        "recognised for legacy string-lane verification; value members are refused, "
         "but no longer selectable for new issuance: its value-lane constants are "
         "plain folds of the datatype bytes and its reserved no-value sentinel lies "
         "inside the reachable value-handle band, leaving the "
@@ -171,6 +171,7 @@ VALUE_LANE_PREFIX = "filter_value_dl_"
 # dispatch.rs `DispatchError`. Today no member is BOTH value-lane and an identity
 # op, so only IllegalPair arises among the committed members.
 REASON_ILLEGAL_PAIR = "IllegalPair"
+REASON_LEGACY_VALUE_MEMBER = "LegacyV1ValueMember"
 
 # [OPUS-5.5] zkp-15.1: successful-result versions admitted against string-canonical
 # only. Another `result_` member must not fall through to the string-lane rule,
@@ -206,11 +207,10 @@ def legality(method_key: str, lane: str, member: str = "") -> dict:
     elif member.startswith(("scan_k", "join_eq_na")):
         legal = method_key in ("string-canonical", "dual-leaf")
     elif lane == "value":
-        # value-lane: legal only where a value handle was committed. BOTH dual-leaf
-        # versions commit one, so both admit it — legality is about the leaf SHAPE,
-        # not about which version a new issuance may select (the separate
-        # `production_selectable` axis).
-        legal = method_key in ("dual-leaf", "dual-leaf-v2", "value-only")
+        # The V1 string-lane compatibility policy never admits value members.
+        if method_key == "dual-leaf":
+            return {"legal": False, "reason": REASON_LEGACY_VALUE_MEMBER}
+        legal = method_key in ("dual-leaf-v2", "value-only")
     else:
         # string-lane: legal where the string-canonical / lexical leaf is present.
         legal = method_key in ("string-canonical", "dual-leaf", "dual-leaf-v2")
@@ -273,7 +273,7 @@ def main() -> int:
         entry = {
             "value_lane_member": value_member,
             "value_lane_circuit_size": members[value_member],
-            "value_lane_method": "dual-leaf",
+            "value_lane_method": "dual-leaf-v2",
         }
         if string_member and string_member in members:
             entry["string_lane_member"] = string_member

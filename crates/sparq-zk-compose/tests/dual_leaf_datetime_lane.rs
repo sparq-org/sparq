@@ -502,17 +502,18 @@ fn cross_lane_operands_are_structurally_inexpressible() {
 // 6. Dispatch + wire format
 // =========================================================================
 
-/// The member is a VALUE-LANE member: legal only against a method that committed
-/// a value handle, fail-closed against `string-canonical` (which has none).
+/// V1 value dispatch is refused; V2 has a handle and string-canonical has none.
 #[test]
 fn datetime_lane_inherits_the_value_lane_dispatch_legality() {
-    assert_eq!(
+    assert!(matches!(
         resolve_circuit(
             CommitmentMethod::DualLeafV1,
             &CircuitId::FilterValueDlDateTime
         ),
-        Ok(CircuitId::FilterValueDlDateTime)
-    );
+        Err(DispatchError::LegacyV1ValueMember { .. })
+    ));
+    assert_eq!(resolve_circuit(CommitmentMethod::DualLeafV2, &CircuitId::FilterValueDlDateTime),
+        Ok(CircuitId::FilterValueDlDateTime));
     assert!(matches!(
         resolve_circuit(
             CommitmentMethod::StringCanonicalV1,

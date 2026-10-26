@@ -1719,7 +1719,7 @@ pub struct SubProof {
 /// # Canonical ordering (sq-y2wy)
 /// `binding_edges` is canonicalised by [`ProofManifest::canonicalize`] (applied
 /// before hashing/serialisation) to ascending `(from_proof, from_row, from_slot,
-/// to_proof)` — the field-declaration tuple, which is a TOTAL order over edges.
+/// to_proof, filter)` — the field-declaration tuple, which is a TOTAL order over edges.
 /// Each edge is SELF-CONTAINED (it carries its own scan/row/slot/filter indices),
 /// so reordering the edge VECTOR never invalidates those references: the verifier
 /// resolves every edge against `sub_proofs` by the edge's own indices, not by the
@@ -1736,6 +1736,11 @@ pub struct BindingEdge {
     pub from_slot: usize,
     /// Index into `sub_proofs` of the consuming filter proof.
     pub to_proof: usize,
+    /// Query FILTER conjunct index for value obligations; legacy edges omit it.
+    /// The diagnostic value predicate requires `Some(index)`. Existing accepting
+    /// paths do not use this field; the value-lane gate stays CLOSED.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<usize>,
 }
 
 /// A hidden cross-credential JOIN edge (sq-bwwl / sq-fi03,
@@ -3231,7 +3236,22 @@ mod canonical_edge_tests {
     }
 
     fn binding_edge(from_proof: usize, from_row: usize, from_slot: usize, to_proof: usize) -> BindingEdge {
-        BindingEdge { from_proof, from_row, from_slot, to_proof }
+        BindingEdge { filter: None, from_proof, from_row, from_slot, to_proof }
+    }
+
+    #[test]
+    fn binding_edge_filter_is_optional_and_part_of_the_canonical_order() {
+        let legacy = binding_edge(0, 0, 2, 1);
+        let wire = r#"{"from_proof":0,"from_row":0,"from_slot":2,"to_proof":1}"#;
+        assert_eq!(serde_json::from_str::<BindingEdge>(wire).unwrap(), legacy);
+        assert_eq!(serde_json::to_string(&legacy).unwrap(), wire);
+        let first = BindingEdge { filter: Some(0), ..legacy.clone() };
+        let second = BindingEdge { filter: Some(1), ..legacy.clone() };
+        let mut m = manifest_with_edges(vec![second.clone(), first.clone(), legacy.clone()], vec![]);
+        m.canonicalize();
+        assert_eq!(m.binding_edges, vec![legacy, first.clone(), second]);
+        let wire = serde_json::to_string(&first).unwrap();
+        assert_eq!(serde_json::from_str::<BindingEdge>(&wire).unwrap(), first);
     }
 
     fn join_edge(scan_a: usize, graph_a: usize, scan_b: usize, graph_b: usize, join_proof: usize) -> JoinEdge {
@@ -3239,7 +3259,7 @@ mod canonical_edge_tests {
     }
 
     /// `canonicalize` sorts `binding_edges` to ascending
-    /// `(from_proof, from_row, from_slot, to_proof)` regardless of insertion order,
+    /// `(from_proof, from_row, from_slot, to_proof, filter)` regardless of insertion order,
     /// and is idempotent.
     #[test]
     fn binding_edges_canonicalise_to_total_order() {
