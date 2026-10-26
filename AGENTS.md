@@ -155,6 +155,10 @@ new-crate completeness check, the public-API → skill check, the config-documen
 YOUR diff, plus a `guard-untested` check, and prints the two obligations no script can decide
 (mutate your headline guard; read your own prose against your own diff).
 
+The default diff source is committed changes. For uncommitted fixes, pass
+`--changed-files` and `--added-lines` inputs covering the merge base through the
+working tree, so the checks include those fixes as well as HEAD.
+
 The base gate is full-workspace `clippy -D warnings` plus `cargo test` (scope to the affected
 crates while iterating; the workspace-wide run catches feature-unification regressions). Also
 run `cargo doc --workspace --no-deps --all-features` with `RUSTDOCFLAGS="-D warnings"` — a

@@ -12,11 +12,19 @@ use solid_oidc_verifier::{
 use sparq_lws_core::{
     app::{build_router, AppState},
     auth::AuthContext,
+    error::ServerResult,
     ldp::handler::LdpState,
     lws::{self, LwsConfig, LWS_CONTEXT, LWS_JSON},
-    store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store},
+    store::{
+        CompositeStore, DeleteOutcome, InMemoryBlobStore, InMemorySparqClient, Resource,
+        ResourceMeta, Store, ValidatedChildIri,
+    },
 };
 use sparq_lws_ysync::{yrs, Limits};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{tungstenite::Message as Ws, MaybeTlsStream, WebSocketStream};
@@ -31,6 +39,128 @@ const READER: &str = "https://reader.example/#me";
 const ROOM: &str = "https://pod.example/room/";
 type Storage = lws::tracked::Tracked<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>;
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+#[derive(Default)]
+struct StorageGate {
+    listing: AtomicBool,
+    snapshot: AtomicBool,
+    flush: AtomicBool,
+    pause_flush: AtomicBool,
+    entered: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+}
+
+struct GatedStore {
+    inner: Storage,
+    gate: Arc<StorageGate>,
+}
+
+#[async_trait::async_trait]
+impl Store for GatedStore {
+    fn exclusive(&self) -> ServerResult<()> {
+        self.inner.exclusive()
+    }
+    fn raises_markers(&self) -> bool {
+        self.inner.raises_markers()
+    }
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        self.inner.read_marker(iri).await
+    }
+    fn lifecycle(&self) -> Option<Arc<sparq_lws_core::store::Lifecycle>> {
+        self.inner.lifecycle()
+    }
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        self.inner.raise_marker(iri, value).await
+    }
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> ServerResult<()> {
+        self.inner.reset_marker(iri, value, lease).await
+    }
+    async fn read(&self, iri: &str) -> ServerResult<Resource> {
+        self.inner.read(iri).await
+    }
+    async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+        self.inner.meta(iri).await
+    }
+    async fn exists(&self, iri: &str) -> ServerResult<bool> {
+        self.inner.exists(iri).await
+    }
+    async fn write(&self, iri: &str, body: Bytes, media: &str) -> ServerResult<ResourceMeta> {
+        self.inner.write(iri, body, media).await
+    }
+    async fn create_in_container(
+        &self,
+        room: &str,
+        child: &str,
+        body: Bytes,
+        media: &str,
+    ) -> ServerResult<ResourceMeta> {
+        if body.starts_with(b"JYU1") && self.gate.flush.load(Ordering::SeqCst) {
+            return Err(sparq_lws_core::error::ServerError::Storage(
+                "fixture failure".into(),
+            ));
+        }
+        if body.starts_with(b"JYU1") && self.gate.pause_flush.load(Ordering::SeqCst) {
+            self.gate.entered.notify_one();
+            self.gate.released.notified().await;
+        }
+        if body.starts_with(b"JYS1") && self.gate.snapshot.load(Ordering::SeqCst) {
+            self.gate.entered.notify_one();
+            self.gate.released.notified().await;
+        }
+        self.inner
+            .create_in_container(room, child, body, media)
+            .await
+    }
+    async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+        self.inner.delete(iri, parent).await
+    }
+    async fn delete_container_if_empty(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> ServerResult<DeleteOutcome> {
+        self.inner.delete_container_if_empty(iri, parent).await
+    }
+    async fn list_children(&self, iri: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+        self.inner.list_children(iri).await
+    }
+    async fn list_children_within(
+        &self,
+        iri: &str,
+        bytes: usize,
+    ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        if iri == ROOM && self.gate.listing.load(Ordering::SeqCst) {
+            self.gate.entered.notify_one();
+            self.gate.released.notified().await;
+        }
+        self.inner.list_children_within(iri, bytes).await
+    }
+    async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
+        self.inner.holds().await
+    }
+    async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+        self.inner.hold(iri, holder).await
+    }
+    async fn reinstate(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        held: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        self.inner.reinstate(iri, container, held).await
+    }
+    async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+        self.inner.release(held, holder).await
+    }
+    async fn finish_reclaims(&self) -> ServerResult<()> {
+        self.inner.finish_reclaims().await
+    }
+}
 
 struct Harness {
     app: axum::Router,
@@ -49,6 +179,39 @@ impl Drop for Harness {
 }
 
 impl Harness {
+    async fn gated(mode: bool, limits: Limits) -> (Self, Arc<StorageGate>) {
+        let mut h = Self::new(mode, limits.clone()).await;
+        h.server.abort();
+        let _ = (&mut h.server).await;
+        h.app = axum::Router::new();
+        let gate = Arc::new(StorageGate::default());
+        let store = GatedStore {
+            inner: h.store.clone(),
+            gate: gate.clone(),
+        };
+        let app = if let Some(cfg) = &h.lws {
+            lws::router(store, cfg.clone()).await.unwrap()
+        } else {
+            let config = VerifierConfig::new(vec![common::ISSUER.into()], common::BASE_URL);
+            let replay = InMemoryReplayStore::with_window(config.replay_ttl());
+            let verifier = Verifier::new(config, common::jwks_provider(&h.issuer), replay).unwrap();
+            let mut ldp = LdpState::new(store, common::BASE_URL);
+            ldp.crdt_limits = limits;
+            build_router(AppState::new(
+                AuthContext::new(verifier, common::BASE_URL),
+                ldp,
+            ))
+        };
+        h.server.abort();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        h.addr = listener.local_addr().unwrap();
+        h.app = app.clone();
+        h.server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (h, gate)
+    }
+
     async fn new(lws_mode: bool, limits: Limits) -> Self {
         Self::with_store(
             lws_mode,
@@ -208,6 +371,7 @@ impl Harness {
         let mut c = Client {
             ws: self.socket(&self.ticket(subject).await).await,
             doc: Doc::with_client_id(id),
+            awareness: Awareness::new(Doc::new()),
         };
         c.send(Message::Sync(
             SyncMessage::SyncStep1(StateVector::default()),
@@ -274,6 +438,7 @@ impl Harness {
 struct Client {
     ws: Socket,
     doc: Doc,
+    awareness: Awareness,
 }
 impl Client {
     async fn send(&mut self, message: Message) {
@@ -303,6 +468,9 @@ impl Client {
                                 .transact_mut()
                                 .apply_update(Update::decode_v1(u).unwrap())
                                 .unwrap();
+                        }
+                        Message::Awareness(update) => {
+                            self.awareness.apply_update(update.clone()).unwrap();
                         }
                         _ => {}
                     }
@@ -339,6 +507,38 @@ impl Client {
         .await
         .expect("content must converge");
     }
+    async fn wait_presence(&mut self, id: u64, present: bool) {
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                if self
+                    .awareness
+                    .state::<Value>(yrs::ClientID::new(id))
+                    .is_some()
+                    == present
+                {
+                    break;
+                }
+                self.receive().await;
+            }
+        })
+        .await
+        .expect("awareness client must observe the announced presence state");
+    }
+
+    async fn finish_close(&mut self) {
+        self.ws.close(None).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                if let Ws::Close(frame) = self.ws.next().await.unwrap().unwrap() {
+                    assert!(frame.is_none_or(|c| u16::from(c.code) == 1000));
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("normal closure must complete normally");
+    }
+
     async fn close_code(&mut self) -> u16 {
         loop {
             let frame = tokio::time::timeout(Duration::from_secs(4), self.ws.next())
@@ -411,25 +611,9 @@ async fn sq5(lws: bool) {
     viewer
         .send(Message::Awareness(presence.update().unwrap()))
         .await;
-    loop {
-        if let Message::Awareness(update) = a.receive().await {
-            if update.clients.values().any(|p| p.json.contains("viewer")) {
-                break;
-            }
-        }
-    }
+    a.wait_presence(33, true).await;
     viewer.ws.close(None).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if let Message::Awareness(update) = a.receive().await {
-                if update.clients.values().any(|p| p.json.as_ref() == "null") {
-                    break;
-                }
-            }
-        }
-    })
-    .await
-    .expect("closed viewer presence removed");
+    a.wait_presence(33, false).await;
     let mut viewer = h.client(READER, 4).await;
     viewer.edit("forbidden").await;
     assert_eq!(viewer.close_code().await, 4403);
@@ -491,11 +675,13 @@ async fn ticket_guards(mode: bool) {
     let mut c = Client {
         ws: h.socket(&ticket).await,
         doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
     };
     c.receive().await;
     let mut reused = Client {
         ws: h.socket(&ticket).await,
         doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
     };
     assert_eq!(reused.close_code().await, 4401);
     let wrong = h.ticket(OWNER).await.replace("room%2F", "other%2F");
@@ -503,6 +689,7 @@ async fn ticket_guards(mode: bool) {
     let mut wrong = Client {
         ws: h.socket(&wrong).await,
         doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
     };
     assert_eq!(wrong.close_code().await, 4401);
     let expired = h.ticket(OWNER).await;
@@ -512,6 +699,7 @@ async fn ticket_guards(mode: bool) {
     let mut expired = Client {
         ws: h.socket(&expired).await,
         doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
     };
     assert_eq!(expired.close_code().await, 4401);
     let denied = h
@@ -579,15 +767,16 @@ async fn logs_and_restart(mode: bool) {
     let latest = base
         .transact()
         .encode_state_as_update_v1(&StateVector::default());
-    for (name, ms, update) in [
-        ("000-new.ysnap", 200, &latest),
-        ("zzz-old.ysnap", 100, &old),
+    for (name, ms, nonce, update) in [
+        ("000-new.ysnap", 200, 2, &latest),
+        ("mmm-earlier.ysnap", 100, 3, &old),
+        ("zzz-old.ysnap", 200, 1, &old),
     ] {
         h.store
             .create_in_container(
                 ROOM,
                 &format!("{ROOM}{name}"),
-                Bytes::from(envelope(b"JYS1", ms, 1, update)),
+                Bytes::from(envelope(b"JYS1", ms, nonce, update)),
                 "application/octet-stream",
             )
             .await
@@ -676,6 +865,7 @@ async fn bounds(mode: bool) {
     let mut excess = Client {
         ws: h.socket(&h.ticket(WRITER).await).await,
         doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
     };
     assert_eq!(excess.close_code().await, 4429);
     h.store
@@ -697,6 +887,7 @@ async fn bounds(mode: bool) {
     let mut room_bound = Client {
         ws: h.socket(ticket["url"].as_str().unwrap()).await,
         doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
     };
     assert_eq!(room_bound.close_code().await, 4429);
     a.ws.send(Ws::Binary(vec![0u8; 300].into())).await.unwrap();
@@ -893,4 +1084,582 @@ async fn awareness_bound_solid() {
 #[tokio::test]
 async fn awareness_bound_lws() {
     awareness_bound(true).await;
+}
+
+async fn presence_churn(mode: bool) {
+    let h = Harness::new(
+        mode,
+        Limits {
+            awareness_clients: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    let mut observer = h.client(OWNER, 900).await;
+    for (id, clock) in [(901, 1), (901, 2), (902, 1)] {
+        let mut viewer = h.client(READER, id).await;
+        let mut awareness = Awareness::new(Doc::with_client_id(id));
+        for revision in 0..clock {
+            awareness
+                .set_local_state(json!({"name":"present", "revision":revision}))
+                .unwrap();
+        }
+        viewer
+            .send(Message::Awareness(awareness.update().unwrap()))
+            .await;
+        observer.wait_presence(id, true).await;
+        viewer.finish_close().await;
+        observer.wait_presence(id, false).await;
+    }
+}
+
+#[tokio::test]
+async fn presence_ids_released_and_clean_close_solid() {
+    presence_churn(false).await;
+}
+#[tokio::test]
+async fn presence_ids_released_and_clean_close_lws() {
+    presence_churn(true).await;
+}
+
+async fn ticket_body_limit(mode: bool) {
+    let h = Harness::new(mode, Limits::default()).await;
+    let chunks =
+        futures_util::stream::iter([Ok::<_, std::convert::Infallible>(Bytes::from(vec![
+            b' ';
+            8193
+        ]))])
+        .chain(futures_util::stream::pending());
+    let response = tokio::time::timeout(
+        Duration::from_secs(3),
+        h.call(
+            "POST",
+            h.tickets(),
+            OWNER,
+            "application/json",
+            Body::from_stream(chunks),
+        ),
+    )
+    .await
+    .expect("oversized ticket body must be refused before reading more chunks");
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn ticket_body_is_bounded_while_reading_solid() {
+    ticket_body_limit(false).await;
+}
+#[tokio::test]
+async fn ticket_body_is_bounded_while_reading_lws() {
+    ticket_body_limit(true).await;
+}
+
+async fn other_room_client(h: &Harness) -> Client {
+    const OTHER: &str = "https://pod.example/other/";
+    h.store
+        .write(OTHER, Bytes::new(), "text/turtle")
+        .await
+        .unwrap();
+    let response = h
+        .call(
+            "POST",
+            h.tickets(),
+            OWNER,
+            "application/json",
+            json!({"room":OTHER}).to_string(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+    let mut client = Client {
+        ws: h.socket(body["url"].as_str().unwrap()).await,
+        doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
+    };
+    tokio::time::timeout(Duration::from_secs(3), client.receive())
+        .await
+        .expect("storage work in another room must not block admission");
+    client
+}
+
+async fn load_isolation(mode: bool) {
+    let (h, gate) = Harness::gated(mode, Limits::default()).await;
+    gate.listing.store(true, Ordering::SeqCst);
+    let mut slow = Client {
+        ws: h.socket(&h.ticket(OWNER).await).await,
+        doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
+    };
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    let _other = other_room_client(&h).await;
+    gate.listing.store(false, Ordering::SeqCst);
+    gate.released.notify_one();
+    assert!(matches!(
+        slow.receive().await,
+        Message::Sync(SyncMessage::SyncStep1(_))
+    ));
+}
+
+#[tokio::test]
+async fn loading_does_not_block_other_rooms_solid() {
+    load_isolation(false).await;
+}
+#[tokio::test]
+async fn loading_does_not_block_other_rooms_lws() {
+    load_isolation(true).await;
+}
+
+async fn compaction_isolation(mode: bool) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            compact_after: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    gate.snapshot.store(true, Ordering::SeqCst);
+    let mut writer = h.client(OWNER, 1000).await;
+    writer.edit("saved").await;
+    tokio::time::timeout(Duration::from_secs(4), async {
+        while h.store.list_children(ROOM).await.unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    writer.finish_close().await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(61)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    let _other = other_room_client(&h).await;
+    gate.snapshot.store(false, Ordering::SeqCst);
+    gate.released.notify_one();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let files = h.store.list_children(ROOM).await.unwrap();
+            if files.len() == 1
+                && h.store
+                    .read(files[0].as_str())
+                    .await
+                    .unwrap()
+                    .body
+                    .starts_with(b"JYS1")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut rejoined = h.client(OWNER, 1001).await;
+    rejoined.until_text("saved").await;
+}
+
+#[tokio::test]
+async fn compaction_does_not_block_other_rooms_solid() {
+    compaction_isolation(false).await;
+}
+#[tokio::test]
+async fn compaction_does_not_block_other_rooms_lws() {
+    compaction_isolation(true).await;
+}
+
+async fn pending_capacity(mode: bool) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            max_log_files: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    gate.flush.store(true, Ordering::SeqCst);
+    let mut owner = h.client(OWNER, 1100).await;
+    let mut writer = h.client(WRITER, 1101).await;
+    owner.edit("accepted").await;
+    writer.until_text("accepted").await;
+    writer.edit("refused").await;
+    assert_eq!(writer.close_code().await, 4429);
+    assert!(h.store.list_children(ROOM).await.unwrap().is_empty());
+    let mut reader = h.client(READER, 1102).await;
+    reader.until_text("accepted").await;
+    assert_eq!(reader.vector(), owner.vector());
+    gate.flush.store(false, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(4), async {
+        while h.file_state().await.transact().state_vector() != owner.vector() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(h.store.list_children(ROOM).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn pending_authors_reserve_log_capacity_solid() {
+    pending_capacity(false).await;
+}
+#[tokio::test]
+async fn pending_authors_reserve_log_capacity_lws() {
+    pending_capacity(true).await;
+}
+
+async fn pending_snapshot(mode: bool) {
+    let (h, gate) = Harness::gated(mode, Limits::default()).await;
+    gate.flush.store(true, Ordering::SeqCst);
+    let mut owner = h.client(OWNER, 1200).await;
+    let mut writer = h.client(WRITER, 1201).await;
+    writer.edit("queued").await;
+    owner.until_text("queued").await;
+    let snapshot = Doc::with_client_id(1202);
+    snapshot
+        .get_or_insert_text("text")
+        .push(&mut snapshot.transact_mut(), "snapshot");
+    let update = snapshot
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    let cutoff = u64::MAX - 1;
+    let response = h
+        .call(
+            "POST",
+            "/room/",
+            OWNER,
+            "application/octet-stream",
+            envelope(b"JYS1", cutoff, 1, &update),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    while !owner.text().contains("snapshot") {
+        owner.receive().await;
+    }
+    gate.flush.store(false, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let doc = h.file_state().await;
+            if doc.transact().state_vector() == owner.vector() {
+                assert_eq!(
+                    doc.get_or_insert_text("text").get_string(&doc.transact()),
+                    owner.text()
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("queued update must remain replayable after the snapshot");
+    for file in h.store.list_children(ROOM).await.unwrap() {
+        let bytes = h.store.read(file.as_str()).await.unwrap().body;
+        if bytes.starts_with(b"JYU1") {
+            assert!(u64::from_be_bytes(bytes[4..12].try_into().unwrap()) >= cutoff);
+        }
+    }
+}
+
+#[tokio::test]
+async fn pending_updates_survive_new_snapshot_solid() {
+    pending_snapshot(false).await;
+}
+#[tokio::test]
+async fn pending_updates_survive_new_snapshot_lws() {
+    pending_snapshot(true).await;
+}
+
+async fn external_document_bound(mode: bool) {
+    let h = Harness::new(
+        mode,
+        Limits {
+            document_bytes: 128,
+            message_bytes: 4096,
+            ..Default::default()
+        },
+    )
+    .await;
+    let mut peer = h.client(OWNER, 1300).await;
+    let doc = Doc::with_client_id(1301);
+    doc.get_or_insert_text("text")
+        .push(&mut doc.transact_mut(), &"x".repeat(256));
+    let update = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    let response = h
+        .call(
+            "POST",
+            "/room/",
+            OWNER,
+            "application/octet-stream",
+            envelope(b"JYU1", 1, 1, &update),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(peer.close_code().await, 4413);
+}
+
+#[tokio::test]
+async fn external_log_bound_uses_size_close_code_solid() {
+    external_document_bound(false).await;
+}
+#[tokio::test]
+async fn external_log_bound_uses_size_close_code_lws() {
+    external_document_bound(true).await;
+}
+
+async fn overlapping_flush_capacity(mode: bool, capacity: usize) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            max_log_files: capacity,
+            ..Default::default()
+        },
+    )
+    .await;
+    gate.pause_flush.store(true, Ordering::SeqCst);
+    let mut writer = h.client(OWNER, 1400).await;
+    let mut reader = h.client(READER, 1401).await;
+    writer.edit("first").await;
+    reader.until_text("first").await;
+    tokio::time::timeout(Duration::from_secs(4), gate.entered.notified())
+        .await
+        .unwrap();
+    writer.edit("-second").await;
+    if capacity == 1 {
+        assert_eq!(writer.close_code().await, 4429);
+    } else {
+        reader.until_text("first-second").await;
+        assert!(
+            h.store.list_children(ROOM).await.unwrap().is_empty(),
+            "the second edit broadcasts while persistence remains blocked"
+        );
+    }
+    gate.pause_flush.store(false, Ordering::SeqCst);
+    gate.released.notify_one();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let doc = h.file_state().await;
+            if doc.transact().state_vector() == reader.vector() {
+                assert_eq!(
+                    doc.get_or_insert_text("text").get_string(&doc.transact()),
+                    if capacity == 1 {
+                        "first"
+                    } else {
+                        "first-second"
+                    }
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(h.store.list_children(ROOM).await.unwrap().len(), capacity);
+    let mut rejoined = h.client(OWNER, 1402).await;
+    rejoined
+        .until_text(if capacity == 1 {
+            "first"
+        } else {
+            "first-second"
+        })
+        .await;
+    assert_eq!(rejoined.vector(), reader.vector());
+}
+
+#[tokio::test]
+async fn in_progress_flush_reserves_capacity_solid() {
+    overlapping_flush_capacity(false, 1).await;
+}
+#[tokio::test]
+async fn in_progress_flush_reserves_capacity_lws() {
+    overlapping_flush_capacity(true, 1).await;
+}
+
+async fn minimal_writer_grants(mode: bool) {
+    let h = Harness::new(mode, Limits::default()).await;
+    restrict_writer(&h, true, true).await;
+    let mut observer = h.client(OWNER, 1500).await;
+    let mut writer = h.client(WRITER, 1501).await;
+    writer.edit("member creation is sufficient").await;
+    observer.until_text("member creation is sufficient").await;
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let doc = h.file_state().await;
+            if doc.transact().state_vector() == observer.vector() {
+                assert_eq!(
+                    doc.get_or_insert_text("text").get_string(&doc.transact()),
+                    observer.text()
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn read_and_append_grants_allow_edits_solid() {
+    minimal_writer_grants(false).await;
+}
+#[tokio::test]
+async fn read_and_create_grants_allow_edits_lws() {
+    minimal_writer_grants(true).await;
+}
+
+async fn failed_load_releases_room_slot(mode: bool) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            max_rooms: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    gate.listing.store(true, Ordering::SeqCst);
+    let mut slow = Client {
+        ws: h.socket(&h.ticket(OWNER).await).await,
+        doc: Doc::new(),
+        awareness: Awareness::new(Doc::new()),
+    };
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(11)).await;
+    tokio::time::resume();
+    assert_eq!(slow.close_code().await, 1011);
+    let _other = other_room_client(&h).await;
+}
+
+#[tokio::test]
+async fn failed_load_releases_reserved_slot_solid() {
+    failed_load_releases_room_slot(false).await;
+}
+#[tokio::test]
+async fn failed_load_releases_reserved_slot_lws() {
+    failed_load_releases_room_slot(true).await;
+}
+
+#[tokio::test]
+async fn in_progress_flush_allows_reserved_edits_solid() {
+    overlapping_flush_capacity(false, 2).await;
+}
+#[tokio::test]
+async fn in_progress_flush_allows_reserved_edits_lws() {
+    overlapping_flush_capacity(true, 2).await;
+}
+
+async fn unicode_roundtrip(mode: bool) {
+    let h = Harness::new(mode, Limits::default()).await;
+    let mut a = h.client(OWNER, 1600).await;
+    let mut b = h.client(WRITER, 1601).await;
+    a.edit("🙂-").await;
+    b.until_text("🙂-").await;
+    let suffix = "café".repeat(16);
+    b.edit(&suffix).await;
+    a.until_text(&format!("🙂-{suffix}")).await;
+    // Native text offsets are UTF-8 bytes; the encoded update retains Yjs UTF-16 clocks.
+    a.doc
+        .get_or_insert_text("text")
+        .remove_range(&mut a.doc.transact_mut(), 0, 4);
+    let update = a
+        .doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    a.send(Message::Sync(SyncMessage::Update(update))).await;
+    let expected = format!("-{suffix}");
+    b.until_text(&expected).await;
+    let vector = b.vector();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let doc = h.file_state().await;
+            if doc.transact().state_vector() == vector
+                && doc.get_or_insert_text("text").get_string(&doc.transact()) == expected
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    a.finish_close().await;
+    b.finish_close().await;
+    let store = h.store.clone();
+    drop((a, b, h));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let restart = Harness::with_store(mode, Limits::default(), store).await;
+    let mut rejoined = restart.client(OWNER, 1602).await;
+    rejoined.until_text(&expected).await;
+    assert_eq!(rejoined.vector(), vector);
+}
+
+#[tokio::test]
+async fn unicode_edits_delete_and_reload_solid() {
+    unicode_roundtrip(false).await;
+}
+#[tokio::test]
+async fn unicode_edits_delete_and_reload_lws() {
+    unicode_roundtrip(true).await;
+}
+
+async fn split_flush_reservation(mode: bool) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            max_log_files: 2,
+            ..Default::default()
+        },
+    )
+    .await;
+    gate.pause_flush.store(true, Ordering::SeqCst);
+    let mut first = h.client(OWNER, 1700).await;
+    let mut second = h.client(WRITER, 1701).await;
+    first.edit("first").await;
+    second.until_text("first").await;
+    tokio::time::timeout(Duration::from_secs(4), gate.entered.notified())
+        .await
+        .unwrap();
+    first.edit("-second").await;
+    second.until_text("first-second").await;
+    second.edit("-third").await;
+    assert_eq!(second.close_code().await, 4429);
+    gate.pause_flush.store(false, Ordering::SeqCst);
+    gate.released.notify_one();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let doc = h.file_state().await;
+            if doc.transact().state_vector() == first.vector() {
+                assert_eq!(
+                    doc.get_or_insert_text("text").get_string(&doc.transact()),
+                    "first-second"
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(h.store.list_children(ROOM).await.unwrap().len(), 2);
+    let mut rejoined = h.client(READER, 1702).await;
+    rejoined.until_text("first-second").await;
+    assert_eq!(rejoined.vector(), first.vector());
+}
+
+#[tokio::test]
+async fn split_flush_slot_is_reserved_from_other_authors_solid() {
+    split_flush_reservation(false).await;
+}
+#[tokio::test]
+async fn split_flush_slot_is_reserved_from_other_authors_lws() {
+    split_flush_reservation(true).await;
 }

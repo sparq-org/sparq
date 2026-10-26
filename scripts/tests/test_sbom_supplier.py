@@ -165,9 +165,10 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
             _generate_workspace_sbom()
             try:
                 judged = 0
-                for crate in ("sparq-server", "sparq-cli"):
+                for crate in ("sparq-server", "sparq-cli", "sparq-lws-ysync"):
                     src = REPO_ROOT / "crates" / crate / f"{crate}.cdx.json"
                     if not src.exists():
+                        self.assertNotEqual(crate, "sparq-lws-ysync", "relay SBOM must be generated")
                         continue
                     out = subprocess.run(
                         ["jq", "-f", str(normalize), str(src)],
@@ -185,6 +186,9 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
                     self.assertTrue(names <= {"crates.io", "Jesse Wright"},
                                     f"{crate}: unexpected supplier names {names}")
                     by_name = {c.get("name"): c for c in cargo}
+                    if crate == "sparq-lws-ysync":
+                        self.assertIn("smallstr", by_name, "the real relay graph must include its adapter")
+                        self.assertEqual(chk._supplier_name(by_name["smallstr"]), "Jesse Wright")
                     if "spargebra" in by_name:
                         # vendored [patch.crates-io] crate -> crates.io, NEVER the project.
                         self.assertEqual(
@@ -222,6 +226,9 @@ class TestDetachedSuppliers(unittest.TestCase):
             ("sparq_proved_evaluator_methods", "zk/sparql-evaluator/methods", "Jesse Wright"),
             ("ark-relations", "vendor/zk-sdk/ark-relations-0.5.1", "Jesse Wright"),
             ("spargebra", "vendor/spargebra", "crates.io"),
+            ("smallstr", "vendor/smallstr-shim", "Jesse Wright"),
+            ("unrelated", "vendor/smallstr-shim", "crates.io"),
+            ("smallstr", "vendor/smallstr-upstream", "crates.io"),
             ("unrelated", "zk/sparql-evaluator/model", None),
             ("sparq-proved-evaluator-model", "elsewhere/model", None),
             # The detached proof-methods workspace: members and binary targets.

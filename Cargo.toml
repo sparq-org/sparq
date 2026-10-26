@@ -47,7 +47,7 @@ default-members = [
 # (libFuzzer codegen), so it is excluded from the workspace to keep the STABLE
 # `cargo build`/`cargo test`/`clippy --workspace` gate from ever trying to compile it.
 # Build/run it only via `cargo +nightly fuzz run <target>` from `fuzz/`.
-exclude = ["vendor/spargebra", "vendor/spargebra-shim", "fuzz", "gui/src-tauri"]
+exclude = ["vendor/spargebra", "vendor/spargebra-shim", "vendor/smallstr-shim", "fuzz", "gui/src-tauri"]
 # `gui/src-tauri` (bead sq-2e93) is the Tauri 2 desktop GUI scaffold. It has its OWN
 # `[workspace]` table (a standalone crate root) AND is excluded here so Tauri's heavy,
 # webview-system-lib-dependent dependency tree (webkit2gtk / WebView2 / WKWebView) never
@@ -71,6 +71,8 @@ exclude = ["vendor/spargebra", "vendor/spargebra-shim", "fuzz", "gui/src-tauri"]
 # Third-party crates in the graph (oxigraph/spareval/sparopt via the bench + differential
 # harnesses) still name upstream `spargebra`; route them to the fork through a re-export shim.
 spargebra = { path = "vendor/spargebra-shim" }
+# The native collaboration dependency uses this narrow, standard-library-backed interface.
+smallstr = { path = "vendor/smallstr-shim" }
 
 [workspace.package]
 version = "0.1.6"

@@ -1,5 +1,7 @@
 # sparq-lws-ysync
 
+<!-- internal-stub -->
+
 Internal, unpublished Yjs relay shared by the native Solid and LWS servers.
 `yrs` supplies Yjs v1 update merging, state vectors and sync/awareness encoding.
 The crate has no HTTP framework dependency. `RoomStore` and `Authorizer` adapt

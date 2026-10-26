@@ -41,7 +41,7 @@ impl Fault {
 }
 
 pub(crate) struct Presence {
-    owner: Option<u64>,
+    owner: u64,
     entry: AwarenessUpdateEntry,
 }
 
@@ -154,7 +154,7 @@ impl Document {
                 return Err(Fault::Malformed);
             }
             if let Some(p) = self.presence.get(id) {
-                if p.owner.is_some_and(|owner| owner != peer) {
+                if p.owner != peer {
                     return Err(Fault::Forbidden);
                 }
                 size = size.saturating_sub(p.entry.json.len());
@@ -172,8 +172,7 @@ impl Document {
             });
             if accept {
                 clients.insert(id, entry.clone());
-                let owner = (entry.json.as_ref() != "null").then_some(peer);
-                self.presence.insert(id, Presence { owner, entry });
+                self.presence.insert(id, Presence { owner: peer, entry });
             }
         }
         Ok(Message::Awareness(AwarenessUpdate { clients }).encode_v1())
@@ -181,13 +180,16 @@ impl Document {
 
     pub fn leave(&mut self, peer: u64) -> Vec<u8> {
         let mut clients = HashMap::new();
-        for (id, p) in &mut self.presence {
-            if p.owner == Some(peer) {
-                p.owner = None;
-                p.entry.json = Arc::from("null");
-                clients.insert(*id, p.entry.clone());
+        self.presence.retain(|id, p| {
+            if p.owner == peer {
+                let mut entry = p.entry.clone();
+                entry.json = Arc::from("null");
+                clients.insert(*id, entry);
+                false
+            } else {
+                true
             }
-        }
+        });
         Message::Awareness(AwarenessUpdate { clients }).encode_v1()
     }
 }
