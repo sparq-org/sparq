@@ -11,8 +11,11 @@
 //! (`odrl_eval.rs`) still exercises the *stateless* `odrl:count` comparison unchanged.
 #![cfg(feature = "count-enforcement")]
 
+mod support;
+use support::{parse_policy_str};
+
 use sparq_policy::{
-    count_status, evaluate_and_exercise, parse_policy_str, ConsumeResult, CountKey, CountStatus,
+    count_status, evaluate_and_exercise, ConsumeResult, CountKey, CountStatus,
     InMemoryCounterStore, Request, UsageCounterStore,
 };
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -1,6 +1,9 @@
 //! Deterministic metamorphic tests for the evaluator's deny invariants.
 
-use sparq_policy::{evaluate, parse_policy_str, Request};
+mod support;
+use support::{parse_policy_str};
+
+use sparq_policy::{evaluate, Request};
 
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 const ACTIONS: [&str; 3] = ["read", "write", "display"];

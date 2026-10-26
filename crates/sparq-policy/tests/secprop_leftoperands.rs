@@ -10,13 +10,16 @@
 //! security-properties ontology. Flag for re-review when Fable returns.
 #![cfg(feature = "secprop-leftoperands")]
 
+mod support;
+use support::{parse_policy_str};
+
 use sparq_policy::secprop::{
     discharge_requirements, is_secprop_left_operand, over_dimension, Deontic, DischargeExpr,
     PROFILE_IRI, REQUIRES_ADVERSARY_MODEL, REQUIRES_ASSURANCE, REQUIRES_CORRUPTION_THRESHOLD,
     REQUIRES_UNLINKABILITY_SCOPE, SECPROP_LEFT_OPERANDS,
 };
 use sparq_policy::{
-    evaluate, parse_policy_str, Action, Constraint, Operator, Policy, Request, Rule, Value, ODRL_NS,
+    evaluate, Action, Constraint, Operator, Policy, Request, Rule, Value, ODRL_NS,
 };
 
 /// The recogniser + dimension map are wired through the public crate surface.

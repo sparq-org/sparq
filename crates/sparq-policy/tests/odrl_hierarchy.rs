@@ -14,8 +14,11 @@
 //! exact membership (fully backward compatible), and matching never widens access on an
 //! edge the request did not assert — a missing edge is fail-closed.
 
+mod support;
+use support::{parse_policy_str};
+
 use sparq_policy::{
-    evaluate, parse_policy_str, prohibition_status, spatial_status, ProhibitionStatus, Request,
+    evaluate, prohibition_status, spatial_status, ProhibitionStatus, Request,
     SpatialMatch, Value, ODRL_SPATIAL,
 };
 

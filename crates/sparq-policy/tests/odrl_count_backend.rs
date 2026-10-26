@@ -17,8 +17,11 @@
 //! Gated on `count-enforcement` (the whole feature).
 #![cfg(feature = "count-enforcement")]
 
+mod support;
+use support::{parse_policy_str};
+
 use sparq_policy::{
-    evaluate_and_exercise, parse_policy_str, AtomicCounterBackend, BackendCounterStore,
+    evaluate_and_exercise, AtomicCounterBackend, BackendCounterStore,
     BackendError, BackendOutcome, ConsumeResult, CountKey, Request, UsageCounterStore,
 };
 use std::collections::HashMap;
