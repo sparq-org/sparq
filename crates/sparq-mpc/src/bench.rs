@@ -56,8 +56,9 @@
 //! (`examples/mpc_bench_matrix.rs`) prints both the JSON and a human table.
 
 use crate::backend::{MaliciousSecurity, MpcBackend, OperatorClass, PreprocessingCost, TrustModel};
+use crate::batched::RowBinding;
 use crate::field::Fp;
-use crate::join::{HiddenKeyedRows, HiddenValueJoin};
+use crate::join::{BatchedHiddenInput, HiddenValueJoin};
 use crate::metrics::CommCounter;
 use crate::oblivious::{shuffle, sort_with_keys, SecretColumn};
 use crate::partial::{HolderId, MpcError};
@@ -511,17 +512,17 @@ pub fn check_aggregate(backend: &ShamirBackend, values: &[u64]) -> Result<u64, M
 pub fn check_hidden_join(backend: &ShamirBackend, scale: usize) -> Result<usize, MpcError> {
     // `scale` is an operator-chosen size and the harness runs the REAL protocol over
     // `scale x scale` pairs, so cap the cardinality before either table is built.
-    crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+    let bound = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
     let join = HiddenValueJoin::new(backend.clone());
     let left = synthetic_table(HolderId::new("left"), scale);
     let right = synthetic_table(HolderId::new("right"), scale);
-    let out = join.join(&left, &right)?;
+    let (out, _) = join.batched_join(&left, &right, bound)?;
     Ok(out.rows.len())
 }
 
 /// Build a `scale`-row hidden-keyed table with keys `0..scale` and a single
 /// disclosed payload column carrying the row index, for the join correctness gate.
-fn synthetic_table(holder: HolderId, scale: usize) -> HiddenKeyedRows {
+fn synthetic_table(holder: HolderId, scale: usize) -> BatchedHiddenInput {
     use oxrdf::{Literal, Term, Variable};
     let payload_vars = vec![Variable::new_unchecked("v")];
     let rows = (0..scale)
@@ -533,10 +534,13 @@ fn synthetic_table(holder: HolderId, scale: usize) -> HiddenKeyedRows {
             (key, payload)
         })
         .collect();
-    HiddenKeyedRows {
+    BatchedHiddenInput {
         holder,
         payload_vars,
         rows,
+        // Common disclosed group: retain the full candidate product while the
+        // equality keys stay separate. The harness supplies its checked bound.
+        binding: RowBinding::Keyed(vec!["candidate-group".to_string(); scale]),
     }
 }
 

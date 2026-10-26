@@ -94,6 +94,8 @@ pub trait GlobalJoin {
     /// performs full SPARQL compatible-mapping semantics over *all* shared
     /// columns (not just the planner-named key), so a malicious planner cannot
     /// induce a result that disagrees with PAG evaluation over the union.
+    /// Validate each partial's row arity and unique projected variables before
+    /// indexing any row, including when only one partial is supplied.
     fn join(&self, partials: &[PartialResult], plan: &JoinPlan) -> Result<PartialResult, MpcError>;
 }
 
@@ -152,6 +154,7 @@ impl GlobalJoin for DisclosedKeyJoin {
         // actually projected by every partial — a planner that names a key a
         // holder did not disclose must FAIL, not silently yield an empty join.
         for p in partials {
+            p.check_shape()?;
             if !p.vars.contains(&plan.join_var) {
                 return Err(MpcError::Protocol(format!(
                     "holder {} did not disclose the join key ?{} (vars: {})",
@@ -433,9 +436,9 @@ impl HiddenValueJoin {
     /// ## Leakage — the L2 match-graph leak (characterised, sq-4vgx)
     ///
     /// The match bit IS opened (the `m == 0?` test reconstructs `m`). For ONE pair
-    /// that single bit is the minimum a join must compute, but the all-pairs driver
-    /// [`Self::join`] calls this on EVERY `(i, j)`, so the party driving the opens
-    /// learns the **entire bipartite match graph** — exactly which left row matched
+    /// that single bit is the minimum a join must compute. Calling the primitive
+    /// on every `(i, j)` lets the party driving the opens observe each pair and
+    /// learn the **entire bipartite match graph** — exactly which left row matched
     /// which right row — even though the keys themselves stay hidden (`m` is a
     /// uniform nonzero for unequal keys, so neither key nor their difference leaks).
     /// That match graph reveals the join-key fan-out / multiplicity distribution (a
@@ -467,6 +470,7 @@ impl HiddenValueJoin {
     /// behind the same trait. For [`ShamirDealer`] that method *is* `share`, so the
     /// draws — and therefore the output — are unchanged; a source that cannot
     /// verifiably share a holder's own input (PRSS today) fails closed here.
+    #[cfg(test)]
     fn secure_equal(
         &self,
         source: &mut dyn DistributedRandomness,
@@ -499,7 +503,7 @@ impl HiddenValueJoin {
         Ok((n, t))
     }
 
-    /// The match-bit core of [`Self::secure_equal`], over keys that are ALREADY
+    /// The match-bit core of the scalar `secure_equal`, over keys that are ALREADY
     /// secret-shared. This is the entry point the batched join uses so the
     /// `BatchedShares` dealt up front by [`BatchedHiddenInput::shared_keys`] are the
     /// actual sharings compared — the keys are dealt ONCE, not re-shared per
@@ -552,7 +556,7 @@ impl HiddenValueJoin {
         Self::secure_equal_core(source, n, t, sa, sb)
     }
 
-    /// The masked-product equality core shared by [`Self::secure_equal`] and
+    /// The masked-product equality core shared by the scalar `secure_equal` and
     /// [`Self::secure_equal_shared`], over the source's already-validated
     /// `(n, t)` ([`Self::equality_params`]).
     fn secure_equal_core(
@@ -575,58 +579,6 @@ impl HiddenValueJoin {
         // Open m at degree 2t. m == 0  <=>  d == 0  <=>  a == b.
         let m = shamir::reconstruct_degree(&m_shares, 2 * t)?;
         Ok(m == Fp::zero())
-    }
-
-    /// Join two holders' hidden-keyed rows on the PRIVATE key, disclosing only
-    /// the payload columns of matching pairs. Output schema is
-    /// `left.payload_vars ++ right.payload_vars` (the key is NOT projected — it
-    /// stays hidden). Result is attributed to the synthetic federation holder and
-    /// canonicalised so the disclosed multiset is order-independent.
-    ///
-    /// ## Leakage — this is the CHEAP-but-LEAKY tier (L2 not closed; sq-4vgx)
-    ///
-    /// This all-pairs loop opens `secure_equal` for EVERY `(i, j)` pair, so
-    /// the party driving the opens learns the full **bipartite match graph** — which
-    /// left row matched which right row (leak **L2**; see `secure_equal` and
-    /// `research/mpc-sparql-capability-matrix.md` §5). The keys/values stay hidden,
-    /// but the match-graph fan-out fingerprints the hidden key distribution. The
-    /// output is also exactly the true match count (leak **L1**). Use this only when
-    /// the per-pair match structure is acceptable to reveal; for the oblivious
-    /// output use [`Self::batched_join`] (bounds L1/L2 of the result set) and for the
-    /// decision-time fix use [`Self::fully_oblivious_batched_join`] (the per-pair bit
-    /// is secret-shared, never opened). The L2 leak here is PINNED by
-    /// `secure_equal_leaks_full_bipartite_match_graph`.
-    pub fn join(
-        &self,
-        left: &HiddenKeyedRows,
-        right: &HiddenKeyedRows,
-    ) -> Result<PartialResult, MpcError> {
-        // Mint a fresh dealer (production: a fresh OS-seeded CSPRNG — sq-1vt) so
-        // this protocol run's masks are independent and unpredictable. The
-        // backend itself holds no live RNG state, so this never reuses a
-        // keystream across joins.
-        let mut dealer = self.backend.dealer();
-
-        let mut out_vars = left.payload_vars.clone();
-        out_vars.extend(right.payload_vars.iter().cloned());
-
-        let mut out_rows: Vec<Vec<Option<Term>>> = Vec::new();
-        // The all-pairs oblivious comparison (see struct doc on the cost / Q3).
-        for (lkey, lpay) in &left.rows {
-            for (rkey, rpay) in &right.rows {
-                if self.secure_equal(&mut dealer, *lkey, *rkey)? {
-                    let mut merged = lpay.clone();
-                    merged.extend(rpay.iter().cloned());
-                    out_rows.push(merged);
-                }
-            }
-        }
-        canonicalize_rows(&mut out_rows);
-        Ok(PartialResult {
-            holder: HolderId::new("federation"),
-            vars: out_vars,
-            rows: out_rows,
-        })
     }
 }
 
@@ -794,8 +746,8 @@ impl HiddenValueJoin {
     }
 
     /// **The batched hidden-value join (sq-khf9).** Join two holders' BATCHED
-    /// row-columns on a PRIVATE key, ranging over MANY rows per holder rather than
-    /// the single bag [`Self::join`] consumed, and route the result through the
+    /// row-columns on a PRIVATE key under an explicit candidate binding and public
+    /// bound, and route the result through the
     /// **oblivious output transform** ([`crate::oblivious_join`]) so the output
     /// cardinality (bounded to the public `bound` `B`) and ordering reveal nothing
     /// about WHICH rows matched.
@@ -848,8 +800,7 @@ impl HiddenValueJoin {
     ///   (bead sq-shk5).
     ///
     /// HONESTY (the gated half — NOT faked). The per-candidate match BIT is still
-    /// *opened* by `secure_equal` (the same L2-at-decision leak the scalar
-    /// [`Self::join`] has): deriving a SECRET-shared match bit from the keys WITHOUT
+    /// *opened* by `secure_equal_shared`: deriving a SECRET-shared match bit WITHOUT
     /// opening it needs a secure equality-to-shared-bit (bead sq-rrz4 on the
     /// degree-reduction round sq-dvuc), the gate `oblivious_join`'s hidden-key entry
     /// point names. So this closes the OUTPUT leaks (L1/L2 of the result set) but not
@@ -909,7 +860,7 @@ impl HiddenValueJoin {
         let n = self.backend.parties();
 
         // Output schema: left payload vars then right payload vars (the key is NOT
-        // projected — it stays hidden, exactly as the scalar HiddenValueJoin).
+        // projected — it stays hidden).
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
         let payload_arity = out_vars.len();
@@ -1650,12 +1601,16 @@ mod hidden_value_tests {
         holder: &str,
         payload_vars: &[&str],
         rows: &[(u64, Vec<Option<Term>>)],
-    ) -> HiddenKeyedRows {
-        HiddenKeyedRows {
-            holder: HolderId::new(holder),
-            payload_vars: payload_vars.iter().map(|v| var(v)).collect(),
-            rows: rows.iter().map(|(k, p)| (Fp::new(*k), p.clone())).collect(),
-        }
+    ) -> BatchedHiddenInput {
+        // A common public group admits every pair without disclosing the
+        // private equality key; the caller still supplies the candidate bound.
+        BatchedHiddenInput::new(
+            HolderId::new(holder),
+            payload_vars.iter().map(|v| var(v)).collect(),
+            rows.iter().map(|(k, p)| (Fp::new(*k), p.clone())).collect(),
+            RowBinding::Keyed(vec!["candidate-group".to_string(); rows.len()]),
+        )
+        .unwrap()
     }
 
     /// The reference PLAINTEXT inner join over the union: combine `(lpay ++ rpay)`
@@ -1709,7 +1664,7 @@ mod hidden_value_tests {
         // Seeded test backend for reproducibility; production uses the CSPRNG.
         let backend = ShamirBackend::new_seeded(3, 0xBEEF).unwrap();
         let join = HiddenValueJoin::new(backend);
-        let got = join.join(&left, &right).unwrap();
+        let (got, _) = join.batched_join(&left, &right, 9).unwrap();
 
         // Disclosed schema is (name, city) — the key is NOT projected.
         assert_eq!(got.vars, vec![var("name"), var("city")]);
@@ -1732,8 +1687,13 @@ mod hidden_value_tests {
         let r_rows = vec![(3u64, vec![lit("x")]), (4, vec![lit("y")])];
         let join = HiddenValueJoin::new(ShamirBackend::new_seeded(3, 7).unwrap());
         let got = join
-            .join(&keyed("L", &["l"], &l_rows), &keyed("R", &["r"], &r_rows))
-            .unwrap();
+            .batched_join(
+                &keyed("L", &["l"], &l_rows),
+                &keyed("R", &["r"], &r_rows),
+                4,
+            )
+            .unwrap()
+            .0;
         assert!(got.rows.is_empty());
         assert_eq!(
             multiset(&got.rows),
@@ -1754,8 +1714,13 @@ mod hidden_value_tests {
         let r_rows = vec![(42u64, vec![lit("R1")]), (42, vec![lit("R2")])];
         let join = HiddenValueJoin::new(ShamirBackend::new_seeded(3, 123).unwrap());
         let got = join
-            .join(&keyed("L", &["l"], &l_rows), &keyed("R", &["r"], &r_rows))
-            .unwrap();
+            .batched_join(
+                &keyed("L", &["l"], &l_rows),
+                &keyed("R", &["r"], &r_rows),
+                6,
+            )
+            .unwrap()
+            .0;
         assert_eq!(got.rows.len(), 4, "2x2 cartesian on key 42");
         assert_eq!(
             multiset(&got.rows),
@@ -1770,8 +1735,13 @@ mod hidden_value_tests {
         let r_rows: Vec<(u64, Vec<Option<Term>>)> = vec![];
         let join = HiddenValueJoin::new(ShamirBackend::new_seeded(3, 1).unwrap());
         let got = join
-            .join(&keyed("L", &["l"], &l_rows), &keyed("R", &["r"], &r_rows))
-            .unwrap();
+            .batched_join(
+                &keyed("L", &["l"], &l_rows),
+                &keyed("R", &["r"], &r_rows),
+                0,
+            )
+            .unwrap()
+            .0;
         assert!(got.rows.is_empty());
     }
 
@@ -1847,7 +1817,7 @@ mod hidden_value_tests {
     // ===================== sq-4vgx: PIN the L2 match-graph leak =====================
     //
     // The spike's deliverable: pin, with a test, exactly what the CHEAP-but-LEAKY
-    // scalar all-pairs path (`HiddenValueJoin::join` / `secure_equal`) reveals,
+    // scalar per-pair `secure_equal` calls disclose,
     // BEFORE any fix — so the privacy boundary between the leaky tier and the
     // oblivious tier (`fully_oblivious_batched_join`, sq-xhaw) is a regression-
     // guarded property, not just prose. These tests assert the leak EXISTS in the
@@ -1878,8 +1848,7 @@ mod hidden_value_tests {
         let join = HiddenValueJoin::new(ShamirBackend::new_seeded(5, 0x4F60).unwrap());
         let mut dealer = join.backend.dealer();
 
-        // Drive the opens exactly as `HiddenValueJoin::join` does — and record the
-        // per-pair verdict the driver observes.
+        // Call the scalar primitive per pair and record each opened verdict.
         let observed: Vec<Vec<bool>> = lkeys
             .iter()
             .map(|&lk| {
