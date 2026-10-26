@@ -73,9 +73,10 @@ static NOTIFICATION_METRICS: LazyLock<NotificationMetricCounters> =
 /// lifetime of the process and use relaxed atomic ordering because they are observability-only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NotificationMetrics {
-    /// Subscribers closed after falling behind the per-topic broadcast buffer.
+    /// Lagged subscribers closed with overflow or reconciliation after confirmed read access.
+    /// Revoked or undecided timer closes do not count, even after a pre-empted lag check.
     pub dropped_subscribers_total: u64,
-    /// Notification events skipped by lagged subscribers before they were closed.
+    /// Events skipped by lagged subscribers counted in `dropped_subscribers_total`.
     pub lagged_events_total: u64,
 }
 
@@ -137,6 +138,9 @@ pub struct NotifyState<S: Store> {
     /// Counts lag checks started by this state, independently of process-wide metrics.
     #[cfg(test)]
     lag_checks: Arc<AtomicU64>,
+    /// Overflow closes and skipped events for this state's sockets alone.
+    #[cfg(test)]
+    overflow_counts: Arc<NotificationMetricCounters>,
 }
 
 /// How often an open receive socket checks, on a timer of its own, that its subscriber may still
@@ -162,7 +166,26 @@ impl<S: Store> NotifyState<S> {
             recheck_now: Default::default(),
             #[cfg(test)]
             lag_checks: Default::default(),
+            #[cfg(test)]
+            overflow_counts: Arc::new(NotificationMetricCounters {
+                dropped_subscribers_total: AtomicU64::new(0),
+                lagged_events_total: AtomicU64::new(0),
+            }),
         }
+    }
+
+    fn count_lag_close(&self, skipped: u64) {
+        let count = |counters: &NotificationMetricCounters| {
+            counters
+                .dropped_subscribers_total
+                .fetch_add(1, Ordering::Relaxed);
+            counters
+                .lagged_events_total
+                .fetch_add(skipped, Ordering::Relaxed);
+        };
+        count(&NOTIFICATION_METRICS);
+        #[cfg(test)]
+        count(&self.overflow_counts);
     }
 
     /// The same state, with an open socket's access checked every `every` apart from events.
@@ -700,6 +723,7 @@ async fn stream_notifications<S: Store + 'static, W>(
     let mut check = no_check(&access);
     // Whether a notification (or an overflow) was dropped since the socket opened.
     let mut missed = false;
+    let mut preempted_lag = 0;
 
     loop {
         tokio::select! {
@@ -710,12 +734,7 @@ async fn stream_notifications<S: Store + 'static, W>(
             () = state.next_tick(&mut recheck), if !matches!(check, Some((_, Due::Tick))) => {
                 if let Some((_, due)) = check.take() {
                     if let Due::Lag(skipped) = due {
-                        NOTIFICATION_METRICS
-                            .dropped_subscribers_total
-                            .fetch_add(1, Ordering::Relaxed);
-                        NOTIFICATION_METRICS
-                            .lagged_events_total
-                            .fetch_add(skipped, Ordering::Relaxed);
+                        preempted_lag += skipped;
                     }
                     missed = true;
                 }
@@ -733,6 +752,9 @@ async fn stream_notifications<S: Store + 'static, W>(
                 let decided = decided.unwrap_or(ReadAccess::Undecided);
                 match (due, decided) {
                     (Due::Tick, ReadAccess::Allowed) if missed => {
+                        if preempted_lag > 0 {
+                            state.count_lag_close(preempted_lag);
+                        }
                         close(&mut socket, 1011, RECONCILE, every).await;
                         break;
                     }
@@ -751,19 +773,17 @@ async fn stream_notifications<S: Store + 'static, W>(
                     }
                     (Due::Event(body), ReadAccess::Allowed) => {
                         if !matches!(
-                            tokio::time::timeout(every, socket.send(Message::text(body.to_string()))).await,
+                            tokio::time::timeout(
+                                every,
+                                socket.send(Message::text(body.to_string()))
+                            ).await,
                             Ok(Ok(()))
                         ) {
                             break; // the client went away mid-send
                         }
                     }
                     (Due::Lag(skipped), ReadAccess::Allowed) => {
-                        NOTIFICATION_METRICS
-                            .dropped_subscribers_total
-                            .fetch_add(1, Ordering::Relaxed);
-                        NOTIFICATION_METRICS
-                            .lagged_events_total
-                            .fetch_add(skipped, Ordering::Relaxed);
+                        state.count_lag_close(skipped);
                         // "internal error" / server overload — client reconnects
                         close(&mut socket, 1011, OVERFLOW, every).await;
                         break;
@@ -1927,8 +1947,7 @@ mod tests {
     /// A due tick replaces an event or lag check, and the dropped work is reconciled.
     #[tokio::test(flavor = "current_thread")]
     async fn a_tick_preempts_event_and_lag_checks() {
-        for lag in [false, true] {
-            let before = NotificationMetrics::snapshot();
+        for (lag, revoked) in [(false, false), (true, false), (true, true)] {
             let (s, store) = faulting_state().await;
             let topic = format!("{BASE}/doc");
             let mut ws = open_for_bob(&s, &topic).await;
@@ -1956,17 +1975,32 @@ mod tests {
             .await
             .expect("event/lag check started");
             assert_eq!(s.lag_checks.load(Ordering::Relaxed), u64::from(lag));
+            if revoked {
+                revoke_bob(&s).await;
+            }
             s.tick_now();
             assert_eq!(
                 next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
-                Some(Err((1011, RECONCILE.to_string()))),
-                "lag={lag}"
+                Some(Err(if revoked {
+                    (1008, REVOKED.to_string())
+                } else {
+                    (1011, RECONCILE.to_string())
+                })),
+                "lag={lag}, revoked={revoked}"
             );
-            if lag {
-                let after = NotificationMetrics::snapshot();
-                assert!(after.dropped_subscribers_total > before.dropped_subscribers_total);
-                assert!(after.lagged_events_total > before.lagged_events_total);
-            }
+            let counted = u64::from(lag && !revoked);
+            assert_eq!(
+                s.overflow_counts
+                    .dropped_subscribers_total
+                    .load(Ordering::Relaxed),
+                counted
+            );
+            assert_eq!(
+                s.overflow_counts
+                    .lagged_events_total
+                    .load(Ordering::Relaxed),
+                counted
+            );
         }
     }
 

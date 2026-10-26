@@ -334,9 +334,9 @@ async fn a_snapshot_that_cannot_be_decoded_is_refused_rather_than_partly_applied
     );
 }
 
-/// Persistence reports the inner store's settlement budget and atomic marker capability.
+/// Persistence forwards call timeouts and refuses unsupported atomic markers.
 #[wasm_bindgen_test]
-fn persistence_preserves_store_capabilities() {
+async fn persistence_refuses_unjournaled_markers() {
     use async_trait::async_trait;
     use axum::body::Bytes;
     use sparq_lws_core::store::{DeleteOutcome, Resource, ResourceMeta, Store, ValidatedChildIri};
@@ -390,5 +390,6 @@ fn persistence_preserves_store_capabilities() {
     }
     let store = PersistentStore::new(CapableStore, Arc::new(Journal::new()));
     assert_eq!(store.call_timeout(), Duration::from_secs(17));
-    assert!(store.raises_markers());
+    assert!(!store.raises_markers());
+    assert!(store.raise_marker("urn:high-water", 100).await.is_err());
 }

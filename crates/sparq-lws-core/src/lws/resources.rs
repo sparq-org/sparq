@@ -766,15 +766,40 @@ pub(crate) async fn touch_container<S: Store + 'static>(state: &LwsState<S>, con
         return;
     }
     let deadline = super::records::deadline_after(super::records::LOCK_WAIT);
-    for record in owed {
-        // A failure leaves the intent, and the next start touches the container again.
-        if tokio::time::timeout_at(deadline, super::intents::clear(&state.store, &record, None))
-            .await
-            .is_err()
-        {
-            break;
+    let state = state.detached();
+    let clearing = tokio::spawn(async move {
+        let mut left = Vec::new();
+        for record in owed {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                left.push((record, None));
+                continue;
+            }
+            // Bound the fence wait, never the delete itself: cancelling a delete can lose
+            // its unsettled answer. Start no more deletes past the shared deadline.
+            match super::intents::clear(&state.store, &record, Some(remaining)).await {
+                Ok(()) => {}
+                Err(ServerError::Unsettled { fence, .. }) => left.push((record, Some(fence))),
+                Err(_) => left.push((record, None)),
+            }
         }
-    }
+        for (record, fence) in left {
+            if let Some(fence) = fence {
+                super::records::fence_in_background(&state.store, &fence).await;
+            }
+            super::put_back_until_done(
+                &super::Undo::Forget {
+                    record,
+                    iris: Vec::new(),
+                },
+                &state.store,
+            )
+            .await;
+        }
+    });
+    // Dropping a JoinHandle detaches its task: a delete in flight finishes and its
+    // unsettled answer is handled, even when the request's shared budget has expired.
+    let _ = tokio::time::timeout_at(deadline, clearing).await;
 }
 
 /// Release `locks`, held through a change to the container's listing, and touch the container

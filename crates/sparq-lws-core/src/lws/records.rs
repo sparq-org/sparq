@@ -345,7 +345,7 @@ where
                 state.settlements.spawn(async move {
                     let _held = (own, place, own_listing);
                     if let Some(fence) = unsettled {
-                        until_done(|| store.fence(&fence)).await;
+                        fence_in_background(&store, &fence).await;
                     }
                     if !until_done(|| still_listed(&store, &iri, &container)).await {
                         return;
@@ -636,7 +636,7 @@ where
             // and leaves the record in force, to be tried again.
             Err(fence) if by == Remover::Sweeper => {
                 if let Some(fence) = fence {
-                    until_done(|| state.store.fence(&fence)).await;
+                    fence_in_background(&state.store, &fence).await;
                 }
                 let listed = until_done(|| still_listed(&state.store, &iri, &container)).await;
                 Some(!listed)
@@ -1067,6 +1067,76 @@ mod tests {
         assert_eq!(*settled.lock().unwrap(), Some(false));
     }
 
+    /// A create retries a stalled fence, and registers only after a fence succeeds.
+    #[tokio::test(start_paused = true)]
+    async fn a_create_caps_its_first_background_fence() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, _) = listed_record(&state, "existing").await;
+        let iri = format!("{container}new");
+        let gate = shut();
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store.hang_fence.store(true, Ordering::SeqCst);
+        let registered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = registered.clone();
+        let result = create_record(
+            &state,
+            &container,
+            &iri,
+            Bytes::from_static(b"{}"),
+            None,
+            Listed::InContainer,
+            None,
+            None,
+            move |_| {
+                flag.store(true, Ordering::SeqCst);
+            },
+            std::future::ready(Ok(Some(()))),
+        )
+        .await;
+        assert_eq!(
+            result.err().unwrap().status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        gate.add_permits(1);
+        tokio::time::timeout(LOCK_WAIT, async {
+            while !store.exists(&iri).await.unwrap() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("late create landed");
+        tokio::time::sleep(LOCK_WAIT * 4).await;
+        assert!(
+            store.fences_tried.load(Ordering::SeqCst) > 1,
+            "first fence never retried"
+        );
+        assert!(
+            !registered.load(Ordering::SeqCst),
+            "unfenced record put in force"
+        );
+        assert!(state.locks.try_lock(&iri).is_none());
+        assert_eq!(state.settlements.pending(), 1);
+        let free_places = || {
+            let mut places = Vec::new();
+            while let Some(place) = state.settlements.reserve() {
+                places.push(place);
+            }
+            places.len()
+        };
+        assert_eq!(free_places(), MAX_SETTLING - 1);
+        store.hang_fence.store(false, Ordering::SeqCst);
+        tokio::time::timeout(LOCK_WAIT * 40, async {
+            while state.settlements.pending() != 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("settlement did not finish after the fence recovered");
+        assert!(registered.load(Ordering::SeqCst));
+        assert!(state.locks.try_lock(&iri).is_some());
+        assert_eq!(free_places(), MAX_SETTLING);
+    }
+
     /// A slow delete answer does not spend the fence's own request budget.
     #[tokio::test(start_paused = true)]
     async fn the_fence_budget_starts_at_the_delete_answer() {
@@ -1353,7 +1423,12 @@ mod tests {
             .await
             .expect("the request was held by a stalled fence")
             .expect("the step is left");
-        assert!(matches!(left.0.as_slice(), [Undo::Fence { .. }, Undo::Remove { .. }]));
+        assert!(matches!(
+            left.0.as_slice(),
+            [Undo::Fence { .. }, Undo::Remove { .. }]
+        ));
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), 1);
+        store.fences_tried.store(0, Ordering::SeqCst);
         // A fence step whose fence stalls is left to be set aside.
         let fence = || {
             vec![
@@ -1374,6 +1449,7 @@ mod tests {
             left.0.as_slice(),
             [Undo::Fence { .. }, Undo::Remove { .. }]
         ));
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), 1);
         // At start-up the fence is waited for as long as the store takes.
         *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
         assert!(tokio::time::timeout(
@@ -1382,6 +1458,26 @@ mod tests {
         )
         .await
         .is_err());
+    }
+
+    /// A quick fence failure gets the normal in-request retry budget.
+    #[tokio::test(start_paused = true)]
+    async fn a_quick_fence_error_is_retried_in_the_request() {
+        use super::super::Undo;
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, iri) = listed_record(&state, "r1").await;
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        let Err(crate::error::ServerError::Unsettled { fence, .. }) = store
+            .delete_container_if_empty(&iri, Some(&container))
+            .await
+        else {
+            panic!("expected an unsettled delete");
+        };
+        store.fail_next_fence.store(true, Ordering::SeqCst);
+        assert!(super::super::settle(&store, vec![Undo::Fence { fence }])
+            .await
+            .is_none());
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), 2);
     }
 
     /// Review of #7183: putting a change back in a request tried a removal whose delete failed

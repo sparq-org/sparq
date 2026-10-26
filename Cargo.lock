@@ -5354,6 +5354,7 @@ dependencies = [
  "http",
  "oxrdf 0.3.3",
  "sparq-lws-core",
+ "tokio",
  "tower",
  "wasm-bindgen",
  "wasm-bindgen-futures",

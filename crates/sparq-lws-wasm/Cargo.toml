@@ -36,6 +36,14 @@ getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 
+# Native tests exercise LwsState's admission of the persistence decorator. The host
+# library still has no request-core dependency outside its test build.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+async-trait = "0.1"
+axum = { version = "0.8", default-features = false }
+sparq-lws-core = { path = "../sparq-lws-core" }
+tokio = { version = "1", features = ["macros", "rt"] }
+
 [features]
 default = []
 # sq-r1ei8: the npm full-tier selector. The default-off adapter
