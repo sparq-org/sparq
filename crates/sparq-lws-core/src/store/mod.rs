@@ -560,6 +560,16 @@ fn held_record(blob_key: &str, holder: &str) -> String {
 }
 
 impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
+    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
+    /// plants to stand for an earlier, or a damaged, one.
+    #[cfg(test)]
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(value))
+            .await
+            .expect("planted");
+    }
+
     /// Build with the DEFAULT-ON body cache ([`DEFAULT_BODY_CACHE_BYTES`] budget) — mirroring the
     /// default-on `AclCache`. Use [`with_body_cache`](Self::with_body_cache) to size or disable it
     /// (`BodyCache::disabled()` ⇒ byte-identical pre-cache behaviour).
@@ -835,16 +845,6 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 // The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
-    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
-    /// plants to stand for an earlier, or a damaged, one.
-    #[cfg(test)]
-    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
-        self.sparq
-            .put_meta(iri, sparq::marker_meta(value))
-            .await
-            .expect("planted");
-    }
-
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
     pub fn in_memory_with_limits(limits: InMemoryStoreLimits) -> Self {
         Self::new(

@@ -254,6 +254,7 @@ where
     // Announced as it is put in force, wherever that happens (in the request's task, or in the
     // task that settles a write whose outcome was not known), so no record in force goes
     // unannounced, and none is announced that is not.
+    let principal = author.clone();
     let register = {
         let (container, iri) = (container.to_string(), iri.to_string());
         move |state: &LwsState<S>| {
@@ -268,7 +269,7 @@ where
         ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
         e => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string())),
     };
-    let Some(place) = state.settlements.reserve() else {
+    let Some(place) = state.settlements.reserve(principal.as_deref()) else {
         return Err(settlements_full());
     };
     let held = match held {
@@ -582,8 +583,8 @@ where
     F: std::future::Future<Output = Option<H>> + Send + 'static,
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
-    let place = match by {
-        Remover::Request => state.settlements.reserve(),
+    let place = match &by {
+        Remover::Request(principal) => state.settlements.reserve(principal.as_deref()),
         Remover::Sweeper => state.settlements.reserve_maintenance(),
     };
     let Some(place) = place else {
@@ -600,6 +601,7 @@ where
             Some(within_wait(state.locks.read(container)).await?)
         }
     };
+    let sweeper = by == Remover::Sweeper;
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
@@ -634,7 +636,7 @@ where
             // The sweeper's removal is settled here, within its deadline, holding what it holds:
             // given up past it, it is dropped with everything it holds (its place among them)
             // and leaves the record in force, to be tried again.
-            Err(fence) if by == Remover::Sweeper => {
+            Err(fence) if sweeper => {
                 if let Some(fence) = fence {
                     fence_in_background(&state.store, &fence).await;
                 }
@@ -700,7 +702,7 @@ where
         }
     };
     let done = match by {
-        Remover::Request => tokio::spawn(task)
+        Remover::Request(_) => tokio::spawn(task)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
         Remover::Sweeper => Ok(task.await),
@@ -719,11 +721,11 @@ pub(crate) fn at_once<H>(
 }
 
 /// Who removes a record ([`remove_record`]), and so how its steps run.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Remover {
     /// A request: the steps run in a task of their own, so a client that goes away cannot cut
     /// them short, in a place among those [`Settlements`] has for every change.
-    Request,
+    Request(Option<String>),
     /// The expiry sweeper (`notify::spawn_expiry_sweeper`): the steps run in its own task, which
     /// owns them and may give them up past a deadline (dropped, they leave the record as the
     /// store has it, in force or gone, and memory as it was, to be tried again), in a place
@@ -741,6 +743,9 @@ pub(crate) enum Remover {
 /// store that keeps failing cannot pile up settlement tasks, and the records and locks they hold.
 pub(crate) const MAX_SETTLING: usize = 256;
 
+/// Most record changes one subject (including the anonymous principal) may be settling.
+pub(crate) const MAX_SETTLING_PER_PRINCIPAL: usize = 16;
+
 /// How many of the expiry sweeper's removals may be in progress or being settled at once, in
 /// places of their own (see [`Remover::Sweeper`]).
 pub(crate) const MAINTENANCE_PLACES: usize = 16;
@@ -757,9 +762,32 @@ pub(crate) const MAINTENANCE_PLACES: usize = 16;
 /// way is left as the store has it, which the next start loads.
 pub(crate) struct Settlements {
     places: Arc<tokio::sync::Semaphore>,
+    principals: PrincipalCounts,
     /// The places reserved for the expiry sweeper's removals ([`Remover::Sweeper`]).
     maintenance: Arc<tokio::sync::Semaphore>,
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
+}
+
+type PrincipalCounts = Arc<std::sync::Mutex<std::collections::HashMap<Option<String>, usize>>>;
+
+/// Releases both the shared place and its principal's count on every exit path.
+pub(crate) struct SettlementPlace {
+    _place: tokio::sync::OwnedSemaphorePermit,
+    principal: Option<(PrincipalCounts, Option<String>)>,
+}
+
+impl Drop for SettlementPlace {
+    fn drop(&mut self) {
+        if let Some((counts, principal)) = &self.principal {
+            let mut counts = counts.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(count) = counts.get_mut(principal) {
+                *count -= 1;
+                if *count == 0 {
+                    counts.remove(principal);
+                }
+            }
+        }
+    }
 }
 
 impl Default for Settlements {
@@ -773,6 +801,7 @@ impl Settlements {
     pub(crate) fn with_capacity(places: usize) -> Self {
         Self {
             places: Arc::new(tokio::sync::Semaphore::new(places)),
+            principals: Default::default(),
             maintenance: Arc::new(tokio::sync::Semaphore::new(MAINTENANCE_PLACES)),
             tasks: Default::default(),
         }
@@ -781,8 +810,11 @@ impl Settlements {
     /// A place reserved for one of the expiry sweeper's removals: `None` when they are all
     /// taken. No request takes one, so however many changes requests have in progress, the
     /// sweeper keeps [`MAINTENANCE_PLACES`].
-    pub(crate) fn reserve_maintenance(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        self.maintenance.clone().try_acquire_owned().ok()
+    pub(crate) fn reserve_maintenance(&self) -> Option<SettlementPlace> {
+        Some(SettlementPlace {
+            _place: self.maintenance.clone().try_acquire_owned().ok()?,
+            principal: None,
+        })
     }
 
     /// How many places reserved for the sweeper are free (tests).
@@ -793,8 +825,18 @@ impl Settlements {
 
     /// A place for one record change, held until it is settled: `None` when there is none
     /// (answered with [`settlements_full`]).
-    pub(crate) fn reserve(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        self.places.clone().try_acquire_owned().ok()
+    pub(crate) fn reserve(&self, principal: Option<&str>) -> Option<SettlementPlace> {
+        let mut counts = self.principals.lock().unwrap_or_else(|e| e.into_inner());
+        let principal = principal.map(str::to_string);
+        if counts.get(&principal).copied().unwrap_or(0) >= MAX_SETTLING_PER_PRINCIPAL {
+            return None;
+        }
+        let place = self.places.clone().try_acquire_owned().ok()?;
+        *counts.entry(principal.clone()).or_default() += 1;
+        Some(SettlementPlace {
+            _place: place,
+            principal: Some((self.principals.clone(), principal)),
+        })
     }
 
     /// Run `settle` as a task the state owns.
@@ -836,8 +878,7 @@ pub(crate) fn announce_record<S: Store + 'static>(
         is_container: false,
         relation: Some((relation, container.to_string())),
     };
-    let state = state.detached();
-    tokio::spawn(async move { state.notify.announce_service(&state, event, author).await });
+    state.notify.announce_service(state, event, author);
 }
 
 #[cfg(test)]
@@ -910,7 +951,7 @@ mod tests {
             &iri,
             "record",
             Listed::InContainer,
-            Remover::Request,
+            Remover::Request(None),
             None,
             at_once(|| Some(())),
             move |_: &LwsState<_>, gone: bool, ()| {
@@ -977,7 +1018,7 @@ mod tests {
             iri,
             "record",
             Listed::InContainer,
-            Remover::Request,
+            Remover::Request(None),
             None,
             at_once(|| Some(())),
             move |_: &LwsState<_>, gone: bool, ()| {
@@ -1118,12 +1159,12 @@ mod tests {
         assert_eq!(state.settlements.pending(), 1);
         let free_places = || {
             let mut places = Vec::new();
-            while let Some(place) = state.settlements.reserve() {
+            while let Some(place) = state.settlements.reserve(None) {
                 places.push(place);
             }
             places.len()
         };
-        assert_eq!(free_places(), MAX_SETTLING - 1);
+        assert_eq!(free_places(), MAX_SETTLING_PER_PRINCIPAL - 1);
         store.hang_fence.store(false, Ordering::SeqCst);
         tokio::time::timeout(LOCK_WAIT * 40, async {
             while state.settlements.pending() != 0 {
@@ -1134,7 +1175,7 @@ mod tests {
         .expect("settlement did not finish after the fence recovered");
         assert!(registered.load(Ordering::SeqCst));
         assert!(state.locks.try_lock(&iri).is_some());
-        assert_eq!(free_places(), MAX_SETTLING);
+        assert_eq!(free_places(), MAX_SETTLING_PER_PRINCIPAL);
     }
 
     /// A slow delete answer does not spend the fence's own request budget.

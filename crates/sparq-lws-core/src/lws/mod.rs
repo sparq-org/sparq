@@ -1979,6 +1979,27 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         Ok(())
     }
 
+    /// The pre-removal access state already staged by this journal; no store calls.
+    pub(crate) fn snapshot(&self, iri: &str) -> access::Snapshot {
+        let meta = match self.staged.get(&meta_key(iri)) {
+            Some(Some(kept)) => match kept.body().and_then(|b| parse_meta(iri, b).ok()) {
+                Some(meta) => meta,
+                None => return access::Snapshot::unreadable(),
+            },
+            Some(None) => ResourceMeta::default(),
+            None => return access::Snapshot::unreadable(),
+        };
+        let format = if iri.ends_with('/') {
+            Some(LWS_JSON.to_string())
+        } else {
+            self.staged
+                .get(iri)
+                .and_then(|k| k.as_ref())
+                .map(|k| k.meta().content_type.clone())
+        };
+        access::Snapshot::from_parts(meta, format)
+    }
+
     /// What was stored at `key` before this step (staged now if it was not already).
     async fn prior(&mut self, key: &str) -> Result<Option<Kept>, crate::error::ServerError> {
         self.stage(key).await?;
@@ -2299,16 +2320,10 @@ pub(crate) enum QuotaFull {
 
 impl QuotaFull {
     pub(crate) fn response(&self, what: &str) -> Response {
-        match self {
-            QuotaFull::Author => problem(
-                StatusCode::TOO_MANY_REQUESTS,
-                Some(&format!("this agent holds as many {what} as it may")),
-            ),
-            QuotaFull::Total => problem(
-                StatusCode::INSUFFICIENT_STORAGE,
-                Some(&format!("the server holds as many {what} as it may")),
-            ),
-        }
+        problem(
+            StatusCode::TOO_MANY_REQUESTS,
+            Some(&format!("this agent may not hold more {what} now")),
+        )
     }
 }
 
@@ -3037,7 +3052,13 @@ pub(crate) mod test_store {
 
     #[derive(Clone)]
     pub struct FlakyStore {
-        inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
+        inner: Arc<
+            CompositeStore<
+                crate::store::counting::CountingSparqClient<InMemorySparqClient>,
+                InMemoryBlobStore,
+            >,
+        >,
+        pub counters: Arc<crate::store::counting::BackendCounters>,
         pub fail_delete: Arc<AtomicBool>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
@@ -3191,11 +3212,16 @@ pub(crate) mod test_store {
 
         /// Holding at most what `limits` allow.
         pub fn with_limits(limits: crate::store::InMemoryStoreLimits) -> Self {
+            let counters = crate::store::counting::BackendCounters::new();
             Self {
                 inner: Arc::new(CompositeStore::new(
-                    InMemorySparqClient::with_limits(limits),
+                    crate::store::counting::CountingSparqClient::new(
+                        InMemorySparqClient::with_limits(limits),
+                        counters.clone(),
+                    ),
                     InMemoryBlobStore::with_limits(limits),
                 )),
+                counters,
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
@@ -3905,6 +3931,47 @@ pub(crate) mod test_store {
             body: Bytes::from(body.to_string()),
             admission: None,
         }
+    }
+
+    /// Drive the live HTTP dispatch, including token authentication and body handling.
+    pub async fn call<S: Store + 'static>(
+        state: &super::LwsState<S>,
+        method: &str,
+        path: &str,
+        subject: Option<&str>,
+        body: &str,
+    ) -> axum::response::Response {
+        use tower::ServiceExt;
+        let mut req = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", super::LWS_JSON);
+        if let Some(subject) = subject {
+            let token = super::tokens::mint(
+                &state.cfg,
+                subject,
+                "https://app.example/",
+                &state.cfg.realm(),
+            );
+            req = req.header("authorization", format!("Bearer {token}"));
+        }
+        axum::Router::new()
+            .fallback(super::dispatch::<S>)
+            .with_state(state.clone())
+            .oneshot(req.body(axum::body::Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+
+    pub async fn response_bytes(
+        response: axum::response::Response,
+    ) -> (axum::http::StatusCode, axum::http::HeaderMap, Bytes) {
+        let (parts, body) = response.into_parts();
+        (
+            parts.status,
+            parts.headers,
+            axum::body::to_bytes(body, usize::MAX).await.unwrap(),
+        )
     }
 
     /// An open-mode state over a [`FlakyStore`].

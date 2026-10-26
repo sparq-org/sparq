@@ -16,7 +16,7 @@
 //! durable backend, and kept in memory for authorization.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use axum::http::{header, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -419,7 +419,7 @@ pub struct Record {
     pub author: Option<String>,
     pub etag: String,
     /// Stored, but not readable as a record at the start: it grants nothing and is served to
-    /// nobody, but is listed, counted against the request quota, and removed (its place freed)
+    /// nobody, but is listed and removed
     /// by the owner's DELETE of its IRI, as any record is.
     pub quarantined: bool,
 }
@@ -427,6 +427,7 @@ pub struct Record {
 /// The grants and requests of the storage, in memory and in the store.
 pub struct AccessStore {
     grants: RwLock<BTreeMap<String, Record>>,
+    policies: RwLock<Arc<[Policy]>>,
     requests: RwLock<BTreeMap<String, Record>>,
     /// The owner's inbox as last looked up, and when (see [`owner_inbox_cached`]).
     owner_inbox: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
@@ -453,18 +454,21 @@ impl AccessStore {
             quarantined: false,
         };
         self.grants.write().expect("lock").insert(id.into(), record);
+        self.bump(true);
     }
 
     /// Revoke the grant `id`, in memory only.
     #[cfg(test)]
     pub fn remove_grant_for_test(&self, id: &str) {
         self.grants.write().expect("lock").remove(id);
+        self.bump(true);
     }
 
     /// Holding no grant or request.
     pub(crate) fn empty() -> Self {
         Self {
             grants: RwLock::new(BTreeMap::new()),
+            policies: RwLock::new(Arc::from([])),
             requests: RwLock::new(BTreeMap::new()),
             owner_inbox: Default::default(),
             grants_etag: RwLock::new(new_etag()),
@@ -563,6 +567,7 @@ impl AccessStore {
                 me.map(grants).write().expect("lock").insert(id, record);
             }
         }
+        me.bump(true);
         // Grants have no quota on their number: only the owner makes them.
         if let Some(past) = me.requests_past_quota() {
             super::report_past_quota("access requests", &cfg.absolute(REQUESTS_PATH), &past);
@@ -575,8 +580,11 @@ impl AccessStore {
     pub(crate) fn requests_past_quota(&self) -> Option<String> {
         let requests = self.requests.read().expect("lock");
         self.request_quota.past(
-            requests.len(),
-            requests.values().map(|r| r.author.as_deref()),
+            requests.values().filter(|r| !r.quarantined).count(),
+            requests
+                .values()
+                .filter(|r| !r.quarantined)
+                .map(|r| r.author.as_deref()),
         )
     }
 
@@ -597,6 +605,14 @@ impl AccessStore {
     }
 
     fn bump(&self, grants: bool) {
+        if grants {
+            // Publish an immutable policy array when grants change, never on a content commit.
+            let grants = self.grants.read().expect("lock");
+            *self.policies.write().expect("lock") = grants
+                .values()
+                .flat_map(|r| r.policies.iter().cloned())
+                .collect();
+        }
         *(if grants {
             &self.grants_etag
         } else {
@@ -619,13 +635,8 @@ impl AccessStore {
     }
 
     /// Every policy of every grant, for an authorization decision.
-    pub fn grant_policies(&self) -> Vec<Policy> {
-        self.grants
-            .read()
-            .expect("lock")
-            .values()
-            .flat_map(|r| r.policies.clone())
-            .collect()
+    pub fn grant_policies(&self) -> Arc<[Policy]> {
+        self.policies.read().expect("lock").clone()
     }
 }
 
@@ -781,6 +792,11 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// A snapshot from metadata and format already held by the change, without a store read.
+    pub fn from_parts(meta: ResourceMeta, format: Option<String>) -> Self {
+        Self { meta, format }
+    }
+
     /// The state of the resource at `uri` now.
     pub async fn take<S: Store + 'static>(
         state: &LwsState<S>,
@@ -891,8 +907,9 @@ async fn decide<S: Store + 'static>(
     let candidates: Vec<Policy> = state
         .access
         .grant_policies()
-        .into_iter()
+        .iter()
         .filter(|p| p.applies(subject, action, uri))
+        .cloned()
         .collect();
     if candidates.is_empty() {
         return Ok(false);
@@ -937,42 +954,34 @@ fn grants_allow<'p>(
     candidates.any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
 }
 
-/// One resource's access for one action, read once and decided for many agents as [`allowed`]
-/// decides for one: a change's deliveries are each authorized against it, so the resource's
-/// metadata is read, and the grants scanned, once per change rather than once per subscriber.
-/// The grants are those in force when it is taken.
+/// One resource's access for one action, decided for many agents from the resource state and
+/// policies captured at commit. The notification task scans the grants once per change,
+/// without a store read, rather than once per subscriber.
 pub(crate) struct ResourceAccess {
+    meta: ResourceMeta,
     uri: String,
-    /// `None` when the metadata could not be read: past the owner, everyone is refused.
-    meta: Option<ResourceMeta>,
     /// The grant policies covering `uri` for the action, whoever they are assigned to.
     policies: Vec<Policy>,
-    /// The resource's format, looked up only when a policy may apply; `Err` when it could not be.
-    format: Result<Option<String>, ()>,
+    format: Option<String>,
 }
 
 impl ResourceAccess {
-    /// `uri`'s access for `action` as it stands now.
-    pub(crate) async fn take<S: Store + 'static>(
-        state: &LwsState<S>,
+    /// Access at commit, using the policies and resource state captured by the writer.
+    pub(crate) fn from_snapshot(
         action: Action,
         uri: &str,
+        snapshot: &Snapshot,
+        policies: &[Policy],
     ) -> Self {
-        let meta = state.resource_meta(uri).await.ok();
-        let policies = match &meta {
-            Some(m) if !m.pending => state.access.policies_covering(action, uri),
-            _ => Vec::new(),
-        };
-        let format = if policies.is_empty() {
-            Ok(None)
-        } else {
-            format_of(state, uri).await.map_err(|_| ())
-        };
         Self {
             uri: uri.to_string(),
-            meta,
-            policies,
-            format,
+            meta: snapshot.meta.clone(),
+            policies: policies
+                .iter()
+                .filter(|p| p.actions.contains(&action) && p.covers(uri))
+                .cloned()
+                .collect(),
+            format: snapshot.format.clone(),
         }
     }
 
@@ -981,9 +990,7 @@ impl ResourceAccess {
         if state.cfg.open || is_owner(state, agent) {
             return true;
         }
-        let Some(meta) = &self.meta else {
-            return false;
-        };
+        let meta = &self.meta;
         let subject = agent.subject.as_deref();
         if subject.is_some() && subject == meta.creator.as_deref() {
             return true;
@@ -999,10 +1006,7 @@ impl ResourceAccess {
         if candidates.peek().is_none() {
             return false;
         }
-        let Ok(format) = &self.format else {
-            return false;
-        };
-        grants_allow(candidates, agent, &self.uri, format.as_deref(), meta)
+        grants_allow(candidates, agent, &self.uri, self.format.as_deref(), meta)
     }
 }
 
@@ -1305,7 +1309,7 @@ pub async fn handle<S: Store + 'static>(
                 &iri,
                 what,
                 super::records::Listed::InContainer,
-                super::records::Remover::Request,
+                super::records::Remover::Request(agent.subject.clone()),
                 req.admission.clone(),
                 super::records::at_once(set_aside),
                 settle,
@@ -1421,9 +1425,9 @@ async fn create<S: Store + 'static>(
                 let requests = state.access.requests.read().expect("lock");
                 let mine = requests
                     .values()
-                    .filter(|r| r.author == agent.subject)
+                    .filter(|r| !r.quarantined && r.author == agent.subject)
                     .count();
-                (requests.len(), mine)
+                (requests.values().filter(|r| !r.quarantined).count(), mine)
             });
         match reserved {
             Ok(slot) => Some(slot),
@@ -1609,6 +1613,9 @@ pub fn inbox_of(doc: &Value, subject: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    mod capacity {
+        include!("access_capacity_tests.rs");
+    }
     use super::super::test_store;
     use super::super::LD_JSON;
     use super::*;
@@ -1976,7 +1983,7 @@ mod tests {
             handle(&state, &get, &anyone).await.status(),
             StatusCode::INTERNAL_SERVER_ERROR
         );
-        // Both requests still count: the quota is full two places early.
+        // Quarantined requests take no place from new requests.
         let mut created = 0;
         while post(
             &state,
@@ -1990,8 +1997,8 @@ mod tests {
         {
             created += 1;
         }
-        assert_eq!(created, MAX_REQUESTS - 2);
-        // The owner deletes them by IRI, which frees their places, and revokes the grant.
+        assert_eq!(created, MAX_REQUESTS);
+        // The owner deletes the quarantined records by IRI and revokes the grant.
         for iri in [&request, &garbled, &grant] {
             let delete = test_store::request(Method::DELETE, &path(iri), &[], "");
             assert_eq!(
@@ -2009,13 +2016,10 @@ mod tests {
             "https://late.example/#me".into(),
         )
         .await;
-        assert_eq!(resp.status(), StatusCode::CREATED);
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         // And none comes back.
         let state = restart(&store).await;
-        assert_eq!(
-            state.access.requests.read().unwrap().len(),
-            MAX_REQUESTS - 1
-        );
+        assert_eq!(state.access.requests.read().unwrap().len(), MAX_REQUESTS);
         assert!(state.access.grants.read().unwrap().is_empty());
     }
 
@@ -3553,8 +3557,12 @@ mod tests {
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
         *store.unsettle_creates.lock().unwrap() = Some(gate.clone());
         store.fail_fence.store(true, Ordering::SeqCst);
-        for _ in 0..super::super::records::MAX_SETTLING {
-            let r = handle(&state, &post(), &Agent::anonymous()).await;
+        for i in 0..super::super::records::MAX_SETTLING {
+            let principal = test_store::agent(&format!(
+                "https://settler{}.example/",
+                i / super::super::records::MAX_SETTLING_PER_PRINCIPAL
+            ));
+            let r = handle(&state, &post(), &principal).await;
             assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
         }
         assert_eq!(

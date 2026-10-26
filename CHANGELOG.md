@@ -180,6 +180,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- LWS subscription and access-request capacity bounds now return the same `429` response;
+  subscription pool refusals use that response too. Notification recipients are selected on
+  a task the write response never awaits, using the subscriptions, grants and resource state
+  captured at commit.
+
 - **sparq-core (BREAKING API):** `Graph::dict` and `Graph::store` are no longer public fields;
   read them with `Graph::dict()` / `Graph::store()`, and take the dictionary out with
   `Graph::into_dict()` (rebuild with `Graph::from_parts`). These openers and writers of a
@@ -814,6 +819,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- LWS quarantined access requests no longer take places from live requests; held-back and
+  quarantined subscriptions count only against the owner's total. Record settlements reserve
+  places per principal as well as against the shared bound.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a

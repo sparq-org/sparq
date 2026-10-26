@@ -389,26 +389,24 @@ because a remote write reported as failed may still commit later. Service-record
 and removals, forward resource removals, intent creates and a resource create's content
 write retain their fences (see below). HTTP index metadata/listing writes and the generic
 write adapter still need fencing support before this refusal can be lifted.
-Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
-that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
-(413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
-holds never makes it smaller, and the count behind a 429 is read from the requester's own
-records alone. The server holds at most 512 access requests and 512 subscriptions in all (507),
-the storage owner's subscriptions counted apart against 512 of its own. Those totals are
-resource bounds, not capacities: a 507 says the storage is full of subscriptions (or of access
-requests) **whoever filled it** — a newcomer holding none is refused the same. One subscriber
-cannot reach a total on its own, being held to 16.
+Anyone authenticated may hold at most 16 access requests and 16 subscriptions (the owner's
+subscriptions are counted separately), and each such request body is at most 16 KiB (413).
+Both the principal's bound and the storage-wide bound return the same `429`, headers and
+problem detail: "this agent may not hold more {what} now". A subscription create refused by
+the store's service pool returns that same answer. Every subscriber has its own capacity in
+full; quarantined or held-back subscriptions count only against the owner's total, and
+quarantined access requests take no place from live requests or their authors.
+Admission bounds are 512 live access requests and 512 non-owner subscriptions, with 512
+owner subscriptions counted separately.
+
 **Subscriptions have storage of their own.** In the in-memory store they are admitted against a
 service pool (`in_service_pool`, `InMemoryStoreLimits::max_pool_resource_count` and
-`max_pool_bytes`, sized for the 1,024 the notification service admits) and take nothing from the
-content ceilings (`max_resource_count`, `max_total_bytes`), so no number of subscriptions, from
-any number of identities, can make a write of content answer 507. A full pool refuses a
-subscription create (507) and nothing else. **Residual:** that 507 is an aggregate-occupancy
-signal — a requester well under its own 16 learns from it that the pool is full, which is
-something about how many subscriptions others hold. It is the occupancy of a bounded shared
-resource, as the access-request total is, and it carries no subscriber, topic or inbox; it is
-the signal a shared resource bound cannot avoid giving, kept to the subscription pool so it
-never reaches a content write.
+`max_pool_bytes`, sized for the notification service's bounds), and take nothing from the
+content ceilings (`max_resource_count`, `max_total_bytes`).
+**Residual:** `MAX_SUBSCRIPTIONS`, `MAX_REQUESTS`, the settlement places, `max_resource_count`
+and `max_total_bytes` are storage-wide. Others can fill a shared bound and cause a caller
+under its own limit to be refused. Subscription and access-request capacity refusals give
+the same answer as the caller's own limit; content ceilings keep the existing storage refusal.
 A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. Stored requests or subscriptions
 past these bounds at startup (stored
@@ -696,10 +694,14 @@ What the server exposes, all discoverable from the storage description
   being settled nor holds up other creates. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
-  way. At most 256 record changes are in progress or being settled at once; past that, a new
-  create or removal answers `503` with `Retry-After`. Residual: requests and the settling of
-  outcomes the store left unknown share those 256 places, so while many outcomes wait to be
-  settled (a store that keeps failing), any caller's create or removal can get that `503`. The tasks that settle them belong to the
+  way. At most 256 record changes are in progress or being settled at once, and at most 16
+  belong to one principal, identified by its subject (all anonymous requests are one principal).
+  Client changes use the requesting subject, including deletion of a quarantined record;
+  automatic cancellation after a failed delivery uses the subscriber's subject.
+  Both bounds answer the same `503` with `Retry-After`. A place releases both counts when the
+  change settles or is dropped. The expiry sweeper keeps its separate maintenance places.
+  Residual: the shared places can be filled by multiple principals, so a caller under its own
+  bound can still receive that same refusal. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
@@ -748,7 +750,7 @@ What the server exposes, all discoverable from the storage description
   the start that can fail has succeeded. A stored grant or request that cannot be read stops
   the start (a later start reads it again); one listed but gone is skipped; one whose stored
   body is not a record is quarantined at every start until the owner deletes it: it grants
-  nothing, is listed and counts against its quota, and answers `500` to a read.
+  nothing, is listed without taking a place from access requests, and answers `500` to a read.
   A new request notifies the owner's inbox when the owner's JSON(-LD) identity document
   names one. A new grant notifies the inboxes of the requests its assignees made themselves,
   as well as its own `inbox`.
@@ -777,12 +779,14 @@ What the server exposes, all discoverable from the storage description
   resource that is set aside, even one set aside while it waits, and checks its subscription
   again once it holds the lock. An Update is announced by the task that runs the write, so a
   client that goes away mid-write does not keep subscribers from hearing of it. Who hears of a
-  change is decided while the write's locks are still held, so a change that follows cannot hide
-  it. Creating or removing an access grant, an access request or a subscription is announced to
+  change depends on the subscriptions and grants in force at commit and the resource's
+  metadata and format then. The writer captures the event, registration sequence, shared policy
+  array and resource snapshot while holding its locks, without a store read or selection work.
+  Selection and authorization run on a spawned task that the response never awaits. Creating or removing an access grant, an access request or a subscription is announced to
   subscriptions to its own service container (not to one to the storage root): the owner and the
   record's author may hear of it. A stored subscription that cannot be read stops the start; one
   whose stored body is not a subscription is quarantined as access records are: listed to the
-  owner, counted against both totals, `500` to a read, removed by the owner's `DELETE` as any
+  owner, counted only against the owner's total, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
   not read is refused (`403`, or `401` anonymous) at once, whatever its state. Access is decided
@@ -797,16 +801,14 @@ What the server exposes, all discoverable from the storage description
   that fails counts nothing). The authorization for one change has no budget of its own (one
   party's subscriptions that may not read the resource could spend it before an authorized one is
   reached): the subscription totals cap it at one check per subscription in force (at most
-  1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
-  resource's access taken for the change, so its metadata is read and the grants are scanned
-  once per change. Taking a place in the delivery queue, parsing each inbox and running each
-  delivery leave the request's task before any of them is queued, on a task of their own
-  (`Notifier::send`), so a delivery target that never answers holds up neither that change nor
-  the next, and the request does not do the per-delivery work of however many subscriptions the
-  change has. When the runtime runs that task is the runtime's business: the deliveries are off
-  the request's task, which is not a promise that they happen after the response reaches the
-  client. Who hears of the change is still decided on the request's task, while its locks are
-  held.
+  1,024). Each decision uses the commit snapshot and grant policies shared by that change.
+  `Snapshot::from_parts(meta, format)` constructs that snapshot from state the change already
+  holds, and `AccessStore::grant_policies()` returns a shared `Arc<[Policy]>`, rebuilt when a
+  grant changes. Subscriptions registered after the commit are excluded; expired or withdrawn
+  subscriptions are excluded during selection. Selection, authorization, accounting, queue
+  admission and delivery run on the notification task (`Notifier::send`). A recursive delete
+  passes its committed changes to one task with one shared delivery bound. The response never
+  awaits that task. Scheduling may still run it before the response reaches the client.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`

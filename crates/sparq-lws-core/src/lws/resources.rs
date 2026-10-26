@@ -12,7 +12,7 @@ use bytes::Bytes;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use super::access::{format_rfc3339, parse_rfc3339, Action};
+use super::access::{self, format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
@@ -1964,16 +1964,19 @@ async fn create<S: Store + 'static>(
                 }
             };
             // What follows a commit follows it whether or not the client is still there: the
-            // container's bookkeeping and the Create notification. Who hears of it is decided
-            // with the locks still held, so no change that follows can hide the create; the locks
-            // then go (the touch takes the container's lock again) before anything is sent.
+            // container's bookkeeping and the Create notification. Capture the state under
+            // the locks; selection and delivery run on the notification task.
             let event = Event {
                 kind: "Create",
                 uri: child.clone(),
                 is_container,
                 relation: Some(("target", parent.clone())),
             };
-            let pending = state.notify.prepare(&state, &event).await;
+            let pending = state.notify.commit(
+                &state,
+                event,
+                access::Snapshot::from_parts(meta, Some(content_type)),
+            );
             touch_after(&state, locks, &parent).await;
             state.notify.send(&state, pending);
             Ok(created)
@@ -2404,8 +2407,8 @@ async fn stored_meta<S: Store + 'static>(
 /// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
 /// locks do not come back. What the writes changed (`after` says, from their outcome: a
 /// container whose listing changed, an event to announce) the task records once they are over:
-/// it decides who hears of the event with the locks held, then releases them, touches the
-/// container ([`touch_container`]) and sends the notifications, so a request that goes away once its writes have started can neither leave the
+/// it captures the commit state with the locks held, then releases them, touches the
+/// container ([`touch_container`]) and schedules notification selection, so a request that goes away once its writes have started can neither leave the
 /// container's date behind its listing nor keep subscribers from hearing of the change.
 async fn hold_locks<S, L, T, F, C>(
     state: &LwsState<S>,
@@ -2419,7 +2422,7 @@ where
     L: Send + 'static,
     T: Send + 'static,
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
-    C: FnOnce(&T) -> (Option<String>, Option<Event>) + Send + 'static,
+    C: FnOnce(&T) -> (Option<String>, Option<(Event, access::Snapshot)>) + Send + 'static,
 {
     let state = state.detached();
     tokio::spawn(async move {
@@ -2428,10 +2431,10 @@ where
             (out, None) => match after(&out) {
                 (None, None) => (out, Some(locks)),
                 (container, event) => {
-                    // Who hears of the change is decided while its locks are held: a later
-                    // write cannot then hide it from a subscriber who may read the result.
-                    let pending = match &event {
-                        Some(event) => state.notify.prepare(&state, event).await,
+                    // Capture commit state while its locks are held. Selection is scheduled
+                    // after releasing them and is never awaited by this task.
+                    let pending = match event {
+                        Some((event, snapshot)) => state.notify.commit(&state, event, snapshot),
                         None => Default::default(),
                     };
                     match container {
@@ -2452,7 +2455,12 @@ where
     .map_err(|e| ServerError::Storage(format!("the request failed: {e}")))
 }
 
-/// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, such that a
+enum ContentMetadata {
+    Replace(ResourceMeta, Option<ResourceMeta>),
+    Unchanged(ResourceMeta),
+}
+
+/// Write new content for `uri` and optionally replace its metadata, keeping the prior state so a
 /// failure (or the request being dropped) never leaves content visible under metadata that does
 /// not describe it: the types (and the creator) in the metadata are what grants rest on, so new
 /// content under old types, or old content under new ones, could reach readers neither state
@@ -2478,7 +2486,7 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
     uri: &str,
     body: Bytes,
     content_type: &str,
-    meta: Option<(ResourceMeta, Option<ResourceMeta>)>,
+    meta: ContentMetadata,
     admission: Option<crate::overload::AdmissionSlot>,
 ) -> (
     Result<crate::store::sparq::ResourceMeta, ServerError>,
@@ -2497,20 +2505,33 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
                 Ok(_) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
             )
     };
+    let (snapshot_meta, changed) = match meta {
+        ContentMetadata::Replace(mut new, old) => {
+            new.pending = false;
+            let changed = (old.clone().unwrap_or_default() != new).then(|| (new.clone(), old));
+            (new, changed)
+        }
+        ContentMetadata::Unchanged(meta) => (meta, None),
+    };
     // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
     // metadata was modified"); none of one that may not have happened.
     let update = {
+        let snapshot = access::Snapshot::from_parts(
+            snapshot_meta,
+            Some(
+                if uri.ends_with('/') {
+                    LWS_JSON
+                } else {
+                    content_type
+                }
+                .to_string(),
+            ),
+        );
         let uri = uri.to_string();
         move |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>| {
-            outcome.is_ok().then(|| updated(&uri))
+            outcome.is_ok().then(|| (updated(&uri), snapshot))
         }
     };
-    let changed = meta
-        .map(|(mut new, old)| {
-            new.pending = false;
-            (new, old)
-        })
-        .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
     // Metadata that could not be stored is refused before anything is written.
     if let Some(Err(e)) = changed.as_ref().map(|(new, _)| encode_meta(new)) {
         return (Err(e), Some(guard), true);
@@ -2680,7 +2701,7 @@ async fn update<S: Store + 'static>(
         uri,
         req.body.clone(),
         &content_type,
-        Some((rmeta, old_rmeta)),
+        ContentMetadata::Replace(rmeta, old_rmeta),
         req.admission.clone(),
     )
     .await;
@@ -3677,6 +3698,10 @@ async fn patch<S: Store + 'static>(
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
+    let rmeta = state.resource_meta(uri).await.unwrap_or(ResourceMeta {
+        pending: true,
+        ..ResourceMeta::default()
+    });
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -3686,7 +3711,7 @@ async fn patch<S: Store + 'static>(
         uri,
         Bytes::from(patched),
         &ct,
-        None,
+        ContentMetadata::Unchanged(rmeta),
         req.admission.clone(),
     )
     .await;
@@ -3818,13 +3843,9 @@ async fn delete<S: Store + 'static>(
                 let left = journal.rollback().await;
                 return ((Vec::new(), Err(e)), left);
             }
-            // Who hears of each removal is decided before the resources go, while who may read
-            // each can still be decided; the notifications go out only once the whole removal
-            // happened. A recursive delete removes every descendant, and each removal is a
-            // Delete of its own. They share the delivery queue's bound: what is prepared past it
-            // would be dropped when sent, and is not held while the removals run.
+            // Capture each resource's already-staged state before removal. Only a whole
+            // successful removal schedules selection, on one task sharing the queue bound.
             let mut notices = Vec::with_capacity(doomed.len());
-            let mut room = state.cfg.delivery.queue;
             // A linkset record a legacy edge makes a member is announced to nobody.
             for (gone, origin) in doomed
                 .iter()
@@ -3837,17 +3858,18 @@ async fn delete<S: Store + 'static>(
                     uri: gone,
                     relation: origin.map(|p| ("origin", p)),
                 };
-                let prepared = state.notify.prepare_at_most(&state, &event, room).await;
-                room = room.saturating_sub(prepared.len());
-                notices.push(prepared);
+                let snapshot = journal.snapshot(&event.uri);
+                notices.push((event, snapshot));
             }
             let (removed, outcome, left) = remove_staged(journal, &doomed).await;
             // Only a delete that happened whole is announced. One that failed was put back, or
             // what could not be is set aside, so nothing it touched is announced as gone.
             if outcome.is_ok() {
-                for pending in notices {
-                    state.notify.send(&state, pending);
-                }
+                let committed = notices
+                    .into_iter()
+                    .map(|(event, snapshot)| state.notify.commit(&state, event, snapshot))
+                    .collect();
+                state.notify.send_all(&state, committed);
             }
             ((removed, outcome), left)
         }
@@ -5131,12 +5153,23 @@ where
     };
     let parent = parent_of(uri, &state.cfg.storage());
     let event = updated(uri);
+    let snapshot = access::Snapshot::from_parts(
+        meta,
+        if uri.ends_with('/') {
+            Some(LWS_JSON.to_string())
+        } else {
+            format
+        },
+    );
     let after = move |w: &Result<(), ServerError>| {
         let landed = matches!(
             w,
             Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
         );
-        (parent.filter(|_| landed), w.is_ok().then_some(event))
+        (
+            parent.filter(|_| landed),
+            w.is_ok().then_some((event, snapshot)),
+        )
     };
     match hold_locks(state, locks, req.admission.clone(), after, write).await {
         Ok((Ok(()), _)) => {}
@@ -10318,6 +10351,13 @@ mod tests {
         // One member alone fits, and its delete is prepared.
         let r = delete("/e/m0", &[]).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while st.notify.prepared_for.load(Ordering::SeqCst) == prepared {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("successful delete was not selected");
         assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), prepared + 1);
     }
 
