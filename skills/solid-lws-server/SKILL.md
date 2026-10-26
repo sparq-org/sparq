@@ -117,6 +117,24 @@ They are refused on non-memory backends unless
 `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` is explicitly set. Use that escape hatch
 only for an ephemeral test instance.
 
+## Encryption at rest (in progress)
+
+`sparq-lws-crypt` is the native, unpublished P1-1 crate for key providers and the
+versioned `e1` blob envelope. It provides a local KEK provider with context-bound
+AES-256-GCM wrapping, zeroizing secret keys and a per-DEK seal counter. See its
+[format and API reference](../../crates/sparq-lws-crypt/README.md).
+Nothing is wired into the server yet; the blob-store decorator and environment
+configuration belong to P1-2 of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+
+Once integrated, blob encryption protects lost/stolen volumes and snapshots,
+cloud/backup operators with byte-plane access and no KMS grant, and storage admins
+without the KEK. It does not protect a root admin dumping process memory or reading
+the mmap'd index on the running host (P3 scope). The sparq index directory holds
+the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
+(EBS/Azure Disk/dm-crypt). Application-level index encryption is research
+([#2567](https://github.com/sparq-org/sparq/issues/2567)).
+ETags derive from plaintext, so equal bodies get equal ETags across pods.
+
 ## Authenticate requests
 
 Except for public reads and discovery/health routes, requests pass through
