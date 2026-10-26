@@ -3026,6 +3026,68 @@ fn distinct_pattern_vars_are_unaffected_by_the_repeated_slot_gate() {
         .expect("distinct subject/object variables impose no slot equality");
 }
 
+fn field_spelling_scans(second_object: &str) -> ProofManifest {
+    let graph_a = knows_graph("http://ex/alice", "http://ex/alice");
+    let graph_b = knows_graph("http://ex/alice", second_object);
+    let mut m = self_loop_manifest(&graph_a);
+    m.query = "SELECT ?v ?p WHERE { ?v ?p ?v }".into();
+    m.sub_proofs.clear();
+    m.commitment_attestations.clear();
+    for (graph, salt_byte) in [(&graph_a, 9u8), (&graph_b, 11u8)] {
+        let salt = salt_from_bytes(&[salt_byte; 32]);
+        let commitment = commit_triples(graph, salt).unwrap();
+        m.commitment_attestations.push(attest_with_salt(commitment.commitment, salt, &test_issuer_sk(1)));
+        let pattern = Pattern { s: Slot::Var, p: Slot::Var, o: Slot::Var };
+        let scan = build_scan(&[commitment], &pattern).unwrap();
+        m.sub_proofs.push(SubProof { inputs: scan.inputs, proof_hex: String::new() });
+    }
+    m
+}
+
+#[test]
+fn pattern_constant_spellings_compare_by_value() {
+    let honest = field_spelling_scans("http://ex/alice");
+    let run = |m: &ProofManifest| prefilter_manifest_structure(m, &trusted_k(&test_issuer_sk(1)), &fresh_policy());
+    run(&honest).expect("both scans satisfy the repeated variable");
+    let mut different = field_spelling_scans("http://ex/bob");
+    let check = |m: &ProofManifest| {
+        assert!(matches!(run(m), Err(CheckError::RepeatedSlotMismatch {
+            pattern: 0, proof: 1, row: 0, variable, slots: (0, 2),
+        }) if variable == "v"));
+    };
+    check(&different);
+    if let ProofInputs::Scan { pattern_const_enc, .. } = &mut different.sub_proofs[1].inputs {
+        pattern_const_enc[0] = FieldHex("0x00".into());
+    }
+    check(&different);
+}
+
+#[test]
+fn pattern_constant_spellings_keep_filter_obligations() {
+    let mut m = same_layout_manifest();
+    m.query = "SELECT ?x ?v WHERE { ?x <http://ex/age> ?v FILTER(?v >= 18) }".into();
+    m.attributions = vec![vec![0]];
+    m.join_obligations.clear();
+    let (scan, commitment, salt) = age_scan("http://ex/alice", 35, 11);
+    m.sub_proofs[1].inputs = scan;
+    m.commitment_attestations[1] = attest_with_salt(commitment, salt, &test_issuer_sk(1));
+    let filter = filter_over_slot(scan_row_slot(&m.sub_proofs[1].inputs, 0, 2));
+    m.sub_proofs.push(SubProof { inputs: filter, proof_hex: String::new() });
+    m.binding_edges.push(BindingEdge { filter: None, from_proof: 1, from_row: 0, from_slot: 2, to_proof: 3 });
+    let run = |m: &ProofManifest| prefilter_manifest_structure(m, &trusted_k(&test_issuer_sk(1)), &fresh_policy());
+    run(&m).expect("both scans carry the required true FILTER");
+    m.sub_proofs.pop();
+    m.binding_edges.pop();
+    let check = |m: &ProofManifest| {
+        assert!(matches!(run(m), Err(CheckError::UnboundFilter { variable }) if variable == "v"));
+    };
+    check(&m);
+    if let ProofInputs::Scan { pattern_const_enc, .. } = &mut m.sub_proofs[1].inputs {
+        pattern_const_enc[0] = FieldHex("0x00".into());
+    }
+    check(&m);
+}
+
 // --- explicit pattern→scan mapping (`manifest.pattern_scans`) -------------
 //
 // sq-q9r5e follow-up. The sq-q9r5e fix closed audit L-1 by demanding
@@ -7500,6 +7562,37 @@ fn entailment_owl_sameas_step_rejected_from_the_fixed_shape_path() {
             "an owl:sameAs derivation step must be EqualityReasoningUnsupported, got {other:?}"
         ),
     }
+}
+
+#[test]
+fn equality_predicate_spellings_have_the_same_refusal() {
+    let same = enc_iri(sparq_zk_compose::sameas::OWL_SAME_AS);
+    let modulus = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
+    let mut carry = 0;
+    let digits: Vec<u8> = same.0[2..].bytes().rev().zip(modulus.bytes().rev()).map(|(a, b)| {
+        let value = (a as char).to_digit(16).unwrap() + (b as char).to_digit(16).unwrap() + carry;
+        carry = value / 16;
+        char::from_digit(value % 16, 16).unwrap() as u8
+    }).collect();
+    assert_eq!(carry, 0);
+    let above = FieldHex(format!("0x{}", String::from_utf8(digits.into_iter().rev().collect()).unwrap()));
+    assert_eq!(above.to_field(), None);
+    for predicate in [same.clone(), FieldHex(same.0[2..].to_uppercase()), above] {
+        let step = DerivationStep {
+            rule: EntailmentRule::Rdfs7SubProperty,
+            antecedents: vec![
+                [enc_iri("http://ex/q"), enc_iri("http://www.w3.org/2000/01/rdf-schema#subPropertyOf"), predicate.clone()],
+                [enc_iri("http://ex/alice"), enc_iri("http://ex/q"), enc_iri("http://ex/bob")],
+            ],
+            derived: [enc_iri("http://ex/alice"), predicate, enc_iri("http://ex/bob")],
+        };
+        let m = entailment_manifest(EntailmentRegime::Rdfs, vec![step]);
+        assert!(matches!(run_entailment(&m, &EntailmentPolicy::simple_only().with_rdfs()),
+            Err(CheckError::EqualityReasoningUnsupported { step: 0 })));
+    }
+    let ordinary = entailment_manifest(EntailmentRegime::Rdfs, vec![rdfs9_step_for_fixture()]);
+    assert!(matches!(run_entailment(&ordinary, &EntailmentPolicy::simple_only().with_rdfs()),
+        Err(CheckError::UngroundedDerivationAntecedent { .. })));
 }
 
 /// sq-rsd3v.6 (the precision half): the guard must not over-fire. An ordinary

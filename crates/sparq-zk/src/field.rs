@@ -39,6 +39,25 @@ pub fn field_from_hex_str(s: &str) -> Option<Fr> {
     Some(field_from_hex(&padded))
 }
 
+/// Parses one to 64 hex nibbles, with an optional `0x` prefix, in either case.
+/// Returns `None` for malformed text or an integer at or above the modulus.
+/// Unlike [`field_from_hex_str`], this parser never reduces its input.
+pub fn field_from_hex_str_strict(s: &str) -> Option<Fr> {
+    let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    if s.is_empty() || s.len() > 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes = decode_hex(&format!("{s:0>64}"));
+    let mut integer = <Fr as PrimeField>::BigInt::default();
+    for (limb, chunk) in integer.as_mut().iter_mut().rev().zip(bytes.chunks_exact(8)) {
+        *limb = u64::from_be_bytes(chunk.try_into().ok()?);
+    }
+    if integer >= Fr::MODULUS {
+        return None;
+    }
+    Fr::from_bigint(integer)
+}
+
 /// 32-byte big-endian (left-zero-padded) representation of a field element —
 /// exactly one word of bb's `public_inputs` blob layout (each public input is a
 /// 32-byte BE field element, no length prefix; determined empirically against
@@ -78,6 +97,25 @@ fn decode_hex(hex: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_hex_parser_checks_range_and_spellings() {
+        let max = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000";
+        let modulus = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
+        let above = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000002";
+        assert_eq!(field_from_hex_str_strict(max), Some(-Fr::from(1u64)));
+        assert_eq!(field_from_hex_str_strict(modulus), None);
+        assert_eq!(field_from_hex_str_strict(above), None);
+        for text in ["aBc", "0x0ABC", "0Xabc"] {
+            assert_eq!(field_from_hex_str_strict(text), Some(Fr::from(0xabcu64)));
+        }
+        assert_eq!(field_from_hex_str_strict("0"), Some(Fr::from(0u64)));
+        for text in ["", "0x", "0xz", " 1", "1\n", "é", &"0".repeat(65)] {
+            assert_eq!(field_from_hex_str_strict(text), None, "{text:?}");
+        }
+        // The separate reducing parser retains its existing contract.
+        assert_eq!(field_from_hex_str(modulus), Some(Fr::from(0u64)));
+    }
 
     #[test]
     fn hex_round_trip() {

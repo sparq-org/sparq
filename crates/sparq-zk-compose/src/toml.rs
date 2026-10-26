@@ -119,8 +119,8 @@ impl std::fmt::Display for ProverTomlError {
 /// PURE LAYOUT, no checks: every caller validates first — the public renderers
 /// below, the `crate::legacy_v1` renderers and
 /// `crate::value_lane::ValueLaneProof::checked_prover_toml` all refuse a
-/// non-canonical `FieldHex` before calling this, so each interpolated string is
-/// `0x` plus 64 lowercase hex nibbles.
+/// malformed or out-of-range `FieldHex` before calling this. Rendering uses
+/// canonical field hex, so equivalent input spellings produce the same values.
 #[cfg(feature = "dual-leaf")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_value_dl_hook(
@@ -135,14 +135,14 @@ pub(crate) fn render_value_dl_hook(
     lexical_component: &FieldHex,
 ) -> String {
     let mut s = String::new();
-    s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
-    s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
+    s.push_str(&format!("challenge = \"{}\"\n", challenge.canonical()));
+    s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.canonical()));
     s.push_str(&format!("op = \"{}\"\n", op));
     s.push_str(&format!("{} = \"{}\"\n", bound_key, bound));
-    s.push_str(&format!("datatype_const = \"{}\"\n", datatype_const.0));
+    s.push_str(&format!("datatype_const = \"{}\"\n", datatype_const.canonical()));
     s.push_str(&format!("expected = {}\n", expected));
-    s.push_str(&format!("value_hook = \"{}\"\n", value_hook.0));
-    s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
+    s.push_str(&format!("value_hook = \"{}\"\n", value_hook.canonical()));
+    s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.canonical()));
     s
 }
 
@@ -166,16 +166,16 @@ pub(crate) fn render_value_dl_signed(
     witness: &crate::value_lane::SignedWitness,
 ) -> String {
     let mut s = String::new();
-    s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
-    s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
+    s.push_str(&format!("challenge = \"{}\"\n", challenge.canonical()));
+    s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.canonical()));
     s.push_str(&format!("op = \"{}\"\n", op));
     s.push_str(&format!("bound_neg = {}\n", bound_neg));
     s.push_str(&format!("{} = \"{}\"\n", bound_key, bound_mag));
-    s.push_str(&format!("datatype_const = \"{}\"\n", datatype_const.0));
+    s.push_str(&format!("datatype_const = \"{}\"\n", datatype_const.canonical()));
     s.push_str(&format!("expected = {}\n", expected));
     s.push_str(&format!("value_neg = {}\n", witness.value_neg));
-    s.push_str(&format!("value_hook_scaled = \"{}\"\n", witness.value_hook_scaled.0));
-    s.push_str(&format!("lexical_component = \"{}\"\n", witness.lexical_component.0));
+    s.push_str(&format!("value_hook_scaled = \"{}\"\n", witness.value_hook_scaled.canonical()));
+    s.push_str(&format!("lexical_component = \"{}\"\n", witness.lexical_component.canonical()));
     s
 }
 
@@ -189,7 +189,7 @@ pub(crate) enum RenderVersion {
 }
 
 /// The checks every value-lane renderer runs before rendering: every `FieldHex`
-/// it will write must be canonical, then the constant must ride `member` at the
+/// it will write must parse strictly, then the constant must ride `member` at the
 /// renderer's version.
 #[cfg(feature = "dual-leaf")]
 pub(crate) fn check_render(
@@ -315,9 +315,9 @@ pub(crate) fn render_signed_checked(
 /// Checked before any text is rendered, returning
 /// [`crate::dispatch::DispatchError`] and no `Prover.toml`:
 ///
-/// - every `FieldHex` argument must be the canonical `0x` + 64-lowercase-nibble
-///   rendering of its element (`DispatchError::NonCanonicalFieldHex`, naming the
-///   field);
+/// - every `FieldHex` argument must parse strictly as a field element
+///   (`DispatchError::NonCanonicalFieldHex`, naming the invalid field); valid
+///   spellings are rendered as canonical hex;
 /// - `datatype_const` must be a `DualLeafV2` constant of this member (the lane
 ///   allow-list). A `DualLeafV1` constant is refused here; an already-issued V1
 ///   graph is rendered by [`crate::legacy_v1::filter_value_dl_prover_toml`].
@@ -367,7 +367,7 @@ pub fn filter_value_dl_prover_toml(
 /// This renderer PINS `datatype_const` to
 /// [`crate::manifest::boolean_lane_const_v2`]`()` (the caller cannot pass another
 /// lane's constant by mistake) and takes `bound` as a `bool`, mapped to the hook
-/// `{0, 1}`. Every `FieldHex` argument must be canonical, as for
+/// `{0, 1}`. Every `FieldHex` argument must parse strictly, as for
 /// [`filter_value_dl_prover_toml`]. The `DualLeafV1` boolean lane — which shares
 /// the integer member — is
 /// [`crate::legacy_v1::filter_value_dl_boolean_prover_toml`].
@@ -408,7 +408,7 @@ pub fn filter_value_dl_bool_prover_toml(
 /// `b_bits` is the FILTER's constant double's bit pattern. The member
 /// canonicalises the IEEE bits IN-CIRCUIT (B4), so a `value_hook` for `-0.0` or a
 /// NaN binds the same leaf as its canonical form. Checked as
-/// [`filter_value_dl_prover_toml`] (canonical `FieldHex`, V2 constant of this
+/// [`filter_value_dl_prover_toml`] (strictly parsed `FieldHex`, V2 constant of this
 /// member); the V1 form is [`crate::legacy_v1::filter_value_dl_f64_prover_toml`].
 /// DOCUMENTED RISK: INV-VL downgrade (CR-G8 / sq-qhy4); NOT externally audited.
 #[cfg(feature = "dual-leaf")]
@@ -1388,8 +1388,7 @@ mod toml_glue_tests {
     // their member, with the FIELD-element private witnesses. These cover the
     // NON-cryptographic serialization plumbing only (NOT-yet-sound, sq-qhy4).
 
-    /// A CANONICAL `FieldHex` of a small element: the value-lane renderers
-    /// refuse any other spelling.
+    /// Canonical field hex of a small element for renderer layout controls.
     #[cfg(feature = "dual-leaf")]
     fn cfh(n: u64) -> FieldHex {
         FieldHex::from_field(&sparq_zk::field::Fr::from(n))

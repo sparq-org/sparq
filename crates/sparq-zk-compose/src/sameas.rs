@@ -66,7 +66,6 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::FieldHex;
-use crate::verifier::normalize_hex;
 
 /// The `owl:sameAs` IRI. Its term encoding is salt-independent (it is an IRI),
 /// so the verifier recomputes it exactly as it recomputes the RDFS vocabulary
@@ -165,12 +164,12 @@ impl CanonTable {
     /// Iteration order is deterministic (terms are visited in sorted encoding
     /// order), so the same committed edges always yield the same witness.
     pub fn from_committed_sameas(edges: &[[FieldHex; 2]]) -> Self {
-        // Adjacency over NORMALIZED encodings, plus the first-seen `FieldHex`
-        // spelling for each so the witness round-trips the manifest's form.
+        // Adjacency over canonical field keys, retaining each first-seen
+        // spelling in memory. Serialization emits canonical field hex.
         let mut adjacency: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut spelling: BTreeMap<String, FieldHex> = BTreeMap::new();
         for [a, b] in edges {
-            let (ka, kb) = (normalize_hex(&a.0), normalize_hex(&b.0));
+            let (ka, kb) = (a.canonical(), b.canonical());
             spelling.entry(ka.clone()).or_insert_with(|| a.clone());
             spelling.entry(kb.clone()).or_insert_with(|| b.clone());
             adjacency.entry(ka.clone()).or_default();
@@ -222,10 +221,10 @@ impl CanonTable {
     /// Sound only for a table that has passed [`CanonTable::check`]: reading a
     /// table nobody checked establishes nothing.
     pub fn canon(&self, term: &FieldHex) -> FieldHex {
-        let key = normalize_hex(&term.0);
+        let key = term.canonical();
         self.entries
             .iter()
-            .find(|e| normalize_hex(&e.member.0) == key)
+            .find(|e| e.member.canonical() == key)
             .map(|e| e.representative.clone())
             .unwrap_or_else(|| term.clone())
     }
@@ -248,18 +247,18 @@ impl CanonTable {
             .iter()
             .map(|t| {
                 [
-                    normalize_hex(&t[0].0),
-                    normalize_hex(&t[1].0),
-                    normalize_hex(&t[2].0),
+                    t[0].canonical(),
+                    t[1].canonical(),
+                    t[2].canonical(),
                 ]
             })
             .collect();
-        let same = normalize_hex(&sameas.0);
+        let same = sameas.canonical();
 
         // Distinct members (L3's precondition), checked first.
         let mut seen: BTreeSet<String> = BTreeSet::new();
         for (i, entry) in self.entries.iter().enumerate() {
-            if !seen.insert(normalize_hex(&entry.member.0)) {
+            if !seen.insert(entry.member.canonical()) {
                 return Err(CanonError::DuplicateMember { entry: i });
             }
         }
@@ -268,8 +267,8 @@ impl CanonTable {
             if entry.parent > i {
                 return Err(CanonError::ParentNotEarlier { entry: i });
             }
-            let member = normalize_hex(&entry.member.0);
-            let representative = normalize_hex(&entry.representative.0);
+            let member = entry.member.canonical();
+            let representative = entry.representative.canonical();
             if entry.parent == i {
                 // Root: represents itself, and has no edge to justify.
                 if representative != member {
@@ -278,10 +277,10 @@ impl CanonTable {
                 continue;
             }
             let parent = &self.entries[entry.parent];
-            if representative != normalize_hex(&parent.representative.0) {
+            if representative != parent.representative.canonical() {
                 return Err(CanonError::RepresentativeBreak { entry: i });
             }
-            let parent_member = normalize_hex(&parent.member.0);
+            let parent_member = parent.member.canonical();
             let forward = [member.clone(), same.clone(), parent_member.clone()];
             let backward = [parent_member, same.clone(), member];
             if !triples.contains(&forward) && !triples.contains(&backward) {
@@ -302,15 +301,18 @@ impl CanonTable {
     pub fn entails_row(&self, committed: &[[FieldHex; 3]], row: &[FieldHex; 3]) -> bool {
         let target: Vec<String> = row
             .iter()
-            .map(|t| normalize_hex(&self.canon(t).0))
+            .map(|t| self.canon(t).canonical())
             .collect();
         committed.iter().any(|base| {
             base.iter()
                 .zip(target.iter())
-                .all(|(b, want)| normalize_hex(&self.canon(b).0) == *want)
+                .all(|(b, want)| self.canon(b).canonical() == *want)
         })
     }
 }
+
+#[cfg(test)]
+use crate::verifier::normalize_hex;
 
 #[cfg(test)]
 mod tests {
@@ -503,16 +505,23 @@ mod tests {
 
     #[test]
     fn hex_spelling_does_not_change_the_verdict() {
+        assert_eq!(normalize_hex("0xZZ"), "0xzz");
+        let built = CanonTable::from_committed_sameas(&[
+            [fh("0xA1"), fh("00A2")],
+            [fh("a2"), fh("00a1")],
+        ]);
+        assert_eq!(built.entries.len(), 2);
+        assert_eq!(built.canon(&fh("0x00a2")), fh(A));
         // Encodings round-trip through the manifest as `0x`-prefixed hex; the
         // re-check normalizes exactly as `bind_entailment` does, so an
         // upper-case / unprefixed spelling is the same term.
         let table = CanonTable {
             entries: vec![
-                CanonEntry { member: fh("0xA1"), representative: fh("A1"), parent: 0 },
-                CanonEntry { member: fh("A2"), representative: fh("0xa1"), parent: 0 },
+                CanonEntry { member: fh("0x00A1"), representative: fh("00A1"), parent: 0 },
+                CanonEntry { member: fh("00A2"), representative: fh("0x00a1"), parent: 0 },
             ],
         };
-        assert_eq!(table.check(&committed(), &fh("41")), Ok(()));
+        assert_eq!(table.check(&committed(), &fh("0041")), Ok(()));
         assert_eq!(normalize_hex(&table.canon(&fh("0xa2")).0), normalize_hex(A));
     }
 

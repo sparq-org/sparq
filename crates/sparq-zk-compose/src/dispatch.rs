@@ -137,15 +137,10 @@ pub enum DispatchError {
     /// with the same rule the verifier's `derive_circuit_id` applies: the variant
     /// and the id must name the SAME member.
     ValueLaneVariantIdMismatch { circuit: String, variant: String },
-    /// A value-lane `FieldHex` whose TEXT is not the canonical rendering of the
-    /// field element it decodes to — an uppercase or `0x`-less spelling, a short
-    /// (leading-zeros-dropped) one, a 64-nibble value at or above the field
-    /// modulus, all of which `sparq_zk::field::field_from_hex_str` otherwise
-    /// accepts (it pads and reduces), or text that is not hex at all. Raised for
-    /// the public inputs of a value-lane `ProofInputs`, and — by the renderers
-    /// and the checked prove entry — for every `FieldHex` that is written into a
-    /// `Prover.toml` (the challenge and the private witnesses included). Carries
-    /// the offending field's name.
+    /// A malformed or out-of-range value-lane field input. The variant name is
+    /// retained for compatibility; valid hex spellings compare by field value.
+    /// Renderers also apply this check to challenges and private witnesses,
+    /// naming the offending field before writing a `Prover.toml`.
     NonCanonicalFieldHex { circuit: String, field: String },
     /// A `crate::legacy_v1` entry point was handed a lane constant that is not a
     /// `DualLeafV1` constant. The legacy names render and build V1 lanes only;
@@ -218,9 +213,8 @@ impl std::fmt::Display for DispatchError {
             ),
             DispatchError::NonCanonicalFieldHex { circuit, field } => write!(
                 f,
-                "non-canonical field hex in value-lane input {} of circuit {}: the text \
-                 is not the canonical 0x-prefixed 64-nibble lowercase rendering of the \
-                 field element it decodes to (fail-closed dispatch matrix)",
+                "invalid field hex in value-lane input {} of circuit {}: the text \
+                 is malformed or outside the field (fail-closed dispatch matrix)",
                 field, circuit
             ),
             DispatchError::NotALegacyV1LaneConst { circuit, lane } => write!(
@@ -602,11 +596,8 @@ fn value_lane_field_hexes(
 /// lane table `lane_table` (whose rows are tabulated in
 /// `research/zk-configurable-commitment-design.md` §3.1.1):
 ///
-/// 1. the text must be CANONICAL — exactly `sparq_zk::field::field_to_hex` of the
-///    element it decodes to — else [`DispatchError::NonCanonicalFieldHex`]. This
-///    is load-bearing: `sparq_zk::field::field_from_hex_str` accepts an
-///    uppercase, `0x`-less, short (left-padded) or at-or-above-modulus (reduced)
-///    spelling, so a TEXT comparison would let a re-spelled constant through;
+/// 1. the text must parse strictly as a field element, else
+///    [`DispatchError::NonCanonicalFieldHex`]; valid spellings compare by value;
 /// 2. the decoded element must have a row in the table, else
 ///    [`DispatchError::UnknownLaneConst`];
 /// 3. that row's member must be THIS member, else
@@ -646,7 +637,7 @@ pub fn check_lane_const_for_member(
 }
 
 /// The lane-table row of `datatype_const` on the value-lane member `circuit`:
-/// the text must be canonical, the decoded element must have a row, and that
+/// the text must parse strictly, the decoded element must have a row, and that
 /// row's member must be `circuit`. The shared first half of every lane decision.
 #[cfg(feature = "dual-leaf")]
 fn lane_row(
@@ -722,21 +713,15 @@ pub(crate) fn check_method_lane_version(
     }
 }
 
-/// Decode a `FieldHex` and accept it ONLY if its text is the canonical rendering
-/// of the decoded element (`0x` + 64 lowercase nibbles, no reduction applied).
-/// `None` for a malformed, re-spelled or at-or-above-modulus text. The same
-/// decoder serves the lane decision, the `ProofInputs`-level check, the
-/// renderers and the checked prove entry.
+/// Decode a field input strictly, accepting equivalent hex spellings by value.
+/// The same decoder serves lane decisions and checked rendering.
 #[cfg(feature = "dual-leaf")]
 pub(crate) fn canonical_field(h: &crate::manifest::FieldHex) -> Option<sparq_zk::field::Fr> {
-    let f = h.to_field()?;
-    (sparq_zk::field::field_to_hex(&f) == h.0).then_some(f)
+    h.to_field()
 }
 
-/// Refuse the first of `fields` whose text is not canonical, naming it. Every
-/// value-lane `FieldHex` that is written into a `Prover.toml` passes through
-/// here first, so the only text a renderer interpolates is `0x` followed by 64
-/// lowercase hex nibbles — nothing that could close a TOML string.
+/// Refuse the first malformed or out-of-range field, naming it. Strict hex
+/// parsing also excludes text that could close a rendered TOML string.
 #[cfg(feature = "dual-leaf")]
 pub(crate) fn require_canonical(
     circuit: &CircuitId,
@@ -775,11 +760,11 @@ pub fn check_lane_member_pairing(inputs: &ProofInputs) -> Result<(), DispatchErr
 /// 1. the VARIANT and the declared `id` must name the same member
 ///    ([`DispatchError::ValueLaneVariantIdMismatch`]);
 /// 2. the two `FieldHex` public inputs of a value-lane variant — `operand_enc`
-///    and `datatype_const` — must be canonically spelled
+///    and `datatype_const` — must parse strictly
 ///    ([`DispatchError::NonCanonicalFieldHex`]);
 /// 3. [`check_lane_const_for_member`] for the pairing itself.
 ///
-/// At this level the canonicality rule reaches exactly those two fields; the
+/// At this level strict field parsing reaches exactly those two fields; the
 /// renderers and the checked prove entry extend it to every `FieldHex` they
 /// write (challenge and private witnesses). A non-value-lane variant's
 /// `FieldHex` inputs are NOT checked (the existing fixtures spell them short).

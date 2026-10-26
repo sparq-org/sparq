@@ -337,19 +337,16 @@ impl DerivationStep {
     /// or be consumed through a predicate slot, which is exactly what this
     /// covers.
     ///
-    /// Encodings are compared NORMALIZED (the `crate::verifier` hex
-    /// normalization the grounding check uses). `is_well_formed` can compare
-    /// raw, because it only ever tests a prover encoding against a
-    /// verifier-computed canonical one and a spelling mismatch there REJECTS;
-    /// here a spelling mismatch would ACCEPT, so the safe direction is the
-    /// opposite one and normalization is load-bearing.
+    /// Predicate encodings compare by field element. An invalid predicate is
+    /// treated as mentioning equality so the fixed-shape path fails closed.
     // sq-rsd3v.6 (#3265): keep owl:sameAs off the fixed-shape path.
     pub fn mentions_equality_predicate(&self, owl_sameas: &FieldHex) -> bool {
         let same = crate::verifier::normalize_hex(&owl_sameas.0);
         self.antecedents
             .iter()
             .chain(std::iter::once(&self.derived))
-            .any(|t| crate::verifier::normalize_hex(&t[1].0) == same)
+            .any(|t| t[1].to_field().is_none()
+                || crate::verifier::normalize_hex(&t[1].0) == same)
     }
 }
 
@@ -600,6 +597,33 @@ mod tests {
             derived: [fh("0xaa"), fh("06"), fh("0xbb")],
         };
         assert!(step.mentions_equality_predicate(&fh(SAME)));
+    }
+
+    #[test]
+    fn equality_predicate_detection_is_spelling_independent() {
+        let ordinary = DerivationStep {
+            rule: EntailmentRule::Rdfs9SubClassType,
+            antecedents: vec![
+                [fh("0xaa"), fh(T), fh("0xc1")],
+                [fh("0xc1"), fh(SC), fh("0xc2")],
+            ],
+            derived: [fh("0xaa"), fh(T), fh("0xc2")],
+        };
+        assert!(wf(&ordinary));
+        assert!(!ordinary.mentions_equality_predicate(&fh(SAME)));
+        for text in [SAME, "06", "0x0006",
+            "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000007",
+            "invalid"] {
+            for predicate in 0..3 {
+                let mut step = ordinary.clone();
+                if predicate < 2 {
+                    step.antecedents[predicate][1] = fh(text);
+                } else {
+                    step.derived[1] = fh(text);
+                }
+                assert!(step.mentions_equality_predicate(&fh(SAME)), "{text}, {predicate}");
+            }
+        }
     }
 
     #[test]
