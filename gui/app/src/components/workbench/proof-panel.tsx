@@ -167,14 +167,27 @@ function ProofRow({
  * pane; ESC or the ✕ closes it.
  */
 export function ProofPanel({ target, onClose }: { target: ExplainTarget; onClose: () => void }) {
+  const { inferenceMode } = useEngine();
+  const [request, setRequest] = React.useState({ target, inferenceMode, version: 0 });
+  if (request.target !== target || request.inferenceMode !== inferenceMode) {
+    setRequest({ target, inferenceMode, version: request.version + 1 });
+  }
+  return (
+    <ProofPanelContent
+      key={request.version}
+      target={target}
+      onClose={onClose}
+    />
+  );
+}
+
+function ProofPanelContent({ target, onClose }: { target: ExplainTarget; onClose: () => void }) {
   const { explainWhy, inferenceMode } = useEngine();
   const [state, setState] = React.useState<PanelState>({ kind: "loading" });
   const [collapsed, setCollapsed] = React.useState<ReadonlySet<string>>(new Set());
 
   React.useEffect(() => {
     let stale = false;
-    setState({ kind: "loading" });
-    setCollapsed(new Set());
     explainWhy(target.s, target.p, target.o)
       .then((json) => {
         if (stale) return;

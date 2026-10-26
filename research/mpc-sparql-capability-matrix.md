@@ -493,6 +493,7 @@ and what each leaks.
   protection) into `HiddenValueJoin::batched_join` (sq-khf9) and
   `fully_oblivious_batched_join` (sq-xhaw): the revealed count is bounded to a public `B`. The
   ~linear sort-merge join (sq-ujz8) is the perf follow-up; the protection itself is wired.
+  `HiddenValueJoin::join` was removed; see `HiddenValueJoin::batched_join`.
 - **L2 per-pair match graph / fan-out** — each opened `m` in the legacy all-pairs loop reveals
   the match bit at `(i,j)`; the set of matches IS the bipartite match graph → join-key
   multiplicity distribution leaks (a strong fingerprint of the hidden key distribution).
@@ -591,6 +592,7 @@ sq-a6p1/sq-jnkm state:
   per-pair match bit is secret-shared and never opened, closing L2 at the decision). All correct
   and semi-honest; still `O(|L|·|R|)` all-pairs (the ~linear sort-merge sq-ujz8 is the perf
   follow-up, not a privacy one).
+  `HiddenValueJoin::join` was removed; see `HiddenValueJoin::batched_join`.
 - ORDER BY over **disclosed sort key** with secret payload — **BUILT** (Batcher network).
 - **[RECONCILED 2026-06-16] Bounded property paths over disclosed global-IRI keys** — **BUILT**
   (`bounded_path.rs`, `sq-py8h`).
