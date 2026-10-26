@@ -78,7 +78,7 @@ fn strid_orders_identically_to_eager_val_on_every_pair() {
     // else → the same eager Val cell the feature-off path uses (only the string arm is
     // lazy). Then assert lazy-vs-lazy == eager-vs-eager for EVERY ordered pair.
     let lazy_cell = |t: &Term, id: Id| -> SortCell {
-        if g.dict.plain_string_value(id).is_some() {
+        if g.dict().plain_string_value(id).is_some() {
             SortCell::StrId(id)
         } else {
             eager(t)
@@ -119,13 +119,13 @@ fn plain_string_value_matches_exactly_the_string_kind_set() {
         let is_plain_string = matches!(t, Term::Literal(l)
             if l.language().is_none() && l.datatype() == xsd::STRING);
         assert_eq!(
-            g.dict.plain_string_value(*id).is_some(),
+            g.dict().plain_string_value(*id).is_some(),
             is_plain_string,
             "plain_string_value eligibility mismatch for {t}"
         );
         if is_plain_string {
             if let Term::Literal(l) = t {
-                assert_eq!(g.dict.plain_string_value(*id), Some(l.value()), "value slice for {t}");
+                assert_eq!(g.dict().plain_string_value(*id), Some(l.value()), "value slice for {t}");
             }
         }
     }

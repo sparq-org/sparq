@@ -152,8 +152,8 @@ fn reparse_trap_passes_the_check_but_serves_the_wrong_vector() {
     // RE-PARSE the SAME RDF at a different thread count (the trap: NOT Graph::open).
     let g_reparsed = load_in_pool(&nt, 2);
     assert_eq!(
-        g_build.dict.len(),
-        g_reparsed.dict.len(),
+        g_build.dict().len(),
+        g_reparsed.dict().len(),
         "same term set, just permuted"
     );
 

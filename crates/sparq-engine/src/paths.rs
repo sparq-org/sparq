@@ -121,7 +121,7 @@ pub fn enumerate_paths(graph: &Graph, spec: &PathSpec) -> Result<Vec<PathSolutio
         .into_iter()
         .map(|ids| PathSolution {
             edges: vec![edge.clone(); ids.len() - 1],
-            nodes: ids.into_iter().map(|id| graph.dict.term(id)).collect(),
+            nodes: ids.into_iter().map(|id| graph.dict().term(id)).collect(),
         })
         .collect())
 }
@@ -134,11 +134,11 @@ fn edge_relation(graph: &Graph, via: &Via) -> Result<(Vec<(Id, Id)>, Term), Stri
                 return Ok((Vec::new(), edge));
             };
             let scan = graph
-                .store
+                .store()
                 .scan_perm(&[None, Some(via_id), None], Perm::Pso)
                 .or_else(|| {
                     graph
-                        .store
+                        .store()
                         .scan_perm(&[None, Some(via_id), None], Perm::Pos)
                 })
                 .expect("a predicate-leading permutation is always built");

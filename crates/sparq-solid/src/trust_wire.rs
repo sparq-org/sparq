@@ -104,8 +104,8 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if the N3 merge of the admitted facts with `abac_rule_n3`
-    /// fails to reason (a malformed rule). Admission itself never errors: a credential
+    /// Returns `Err` if a view write fails or the N3 merge of the admitted facts with
+    /// the ABAC rule fails to reason (a malformed rule). Admission itself never errors: a credential
     /// that fails any gate simply admits nothing (fail-closed, empty outcome).
     pub fn admit_trust_credential_and_materialize(
         &mut self,
@@ -128,6 +128,10 @@ impl PodStore {
     /// this installs an UNCONDITIONAL grant valid for the supplied `session` only. To
     /// populate a long-lived materialise-once view, use
     /// [`PodStore::admit_trust_credential_static`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reasoning fails or the authorization view cannot be written.
     pub fn admit_trust_credential_with_rule(
         &mut self,
         credential: &PresentedCredential,
@@ -141,7 +145,8 @@ impl PodStore {
         // A dropped view is not rebuilt by trust grants (see `PodStore::grant_view`).
         match self.grant_view() {
             Some(view) if !grants.is_empty() => {
-                install_auth_grants(view, &grants);
+                let result = install_auth_grants(view, &grants);
+                self.grant_write_result(result)?;
                 self.reindex_with(crate::ReindexScope::Full);
             }
             Some(_) => {}
@@ -182,7 +187,7 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if the N3 merge of the statically-admitted facts with
+    /// Returns `Err` if a view write fails, or the N3 merge of the statically-admitted facts with
     /// `abac_rule_n3` fails to reason (a malformed rule). Admission itself never errors:
     /// a credential that fails any static gate simply admits nothing (fail-closed).
     pub fn admit_trust_credential_static(
@@ -197,10 +202,12 @@ impl PodStore {
         let mut installed_count = 0usize;
         // A dropped view is not rebuilt by trust grants (see `PodStore::grant_view`).
         if let Some(view) = self.grant_view() {
-            for cg in &conditional_grants {
-                install_conditional_grant(view, target, cg);
+            let result = conditional_grants.iter().try_for_each(|cg| {
+                install_conditional_grant(view, target, cg)?;
                 installed_count += 1;
-            }
+                Ok(())
+            });
+            self.grant_write_result(result)?;
         }
         if installed_count > 0 {
             self.reindex_with(crate::ReindexScope::Full);
@@ -224,9 +231,9 @@ fn abac_rule_n3_for(_store: &PodStore) -> &'static str {
 /// de-duplicated — the same install discipline the ODRL bridge uses, kept local to
 /// the `trust-graph` feature so it composes with the unchanged materialiser without
 /// touching the ODRL path.
-fn install_auth_grants(graph: &mut Graph, grants: &[Triple]) {
+fn install_auth_grants(graph: &mut Graph, grants: &[Triple]) -> Result<(), String> {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    let mut terms: Vec<[Term; 3]> = match graph.named.iter().find(|(n, _)| *n == g_name) {
+    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
@@ -240,7 +247,7 @@ fn install_auth_grants(graph: &mut Graph, grants: &[Triple]) {
             terms.push(triple);
         }
     }
-    write_back_auth_terms(graph, &g_name, terms);
+    write_back_auth_terms(graph, &g_name, terms)
 }
 
 /// Install one `auth:ConditionalGrant` for a derived trust-graph grant, with its DYNAMIC
@@ -261,12 +268,12 @@ fn install_auth_grants(graph: &mut Graph, grants: &[Triple]) {
 /// - `auth:notAfter "<issued_at+freshWithin>"^^xsd:dateTime` — the freshness deadline,
 ///   re-checked against `Session.now` per request (the deferred DYNAMIC freshness check;
 ///   a lapsed credential denies *that request* without a re-materialise).
-fn install_conditional_grant(graph: &mut Graph, target: &NamedNode, cg: &ConditionalGrant) {
+fn install_conditional_grant(graph: &mut Graph, target: &NamedNode, cg: &ConditionalGrant) -> Result<(), String> {
     let Some(mode_iri) = mode_iri_for_auth_pred(cg.grant.predicate.as_str()) else {
-        return; // not an auth:read|write|append|control grant → nothing to install
+        return Ok(()); // not an auth:read|write|append|control grant → nothing to install
     };
     let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    let mut terms: Vec<[Term; 3]> = match graph.named.iter().find(|(n, _)| *n == g_name) {
+    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
@@ -335,23 +342,19 @@ fn install_conditional_grant(graph: &mut Graph, target: &NamedNode, cg: &Conditi
             terms.push(t);
         }
     }
-    write_back_auth_terms(graph, &g_name, terms);
+    write_back_auth_terms(graph, &g_name, terms)
 }
 
 /// Re-intern the `<urn:sparq:auth>` sub-graph from a flat term list and write it back
 /// (mirrors `install_auth_view`). Shared by the unconditional + conditional installers.
-fn write_back_auth_terms(graph: &mut Graph, g_name: &Term, terms: Vec<[Term; 3]>) {
+fn write_back_auth_terms(graph: &mut Graph, g_name: &Term, terms: Vec<[Term; 3]>) -> Result<(), String> {
     let mut dict = sparq_core::dict::Dict::new();
     let ids: Vec<[sparq_core::dict::Id; 3]> = terms
         .iter()
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
         .collect();
     let sub = Graph::from_parts(dict, ids);
-    if let Some(slot) = graph.named.iter_mut().find(|(n, _)| n == g_name) {
-        slot.1 = sub;
-    } else {
-        graph.named.push((g_name.clone(), sub));
-    }
+    crate::loader::install_named_view(graph, g_name.clone(), sub)
 }
 
 /// Map a derived `auth:read|write|append|control` predicate IRI to its `acl:` mode IRI
@@ -368,4 +371,3 @@ fn mode_iri_for_auth_pred(pred: &str) -> Option<&'static str> {
 }
 
 use sparq_core::civil::format_utc as unix_to_xsd_datetime;
-

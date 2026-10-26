@@ -243,11 +243,11 @@ impl<'g, K: PredicateFocus> TypedNode<'g, K> {
         let Some(predicate) = self.graph.id_of(&K::into_term(self.focus.clone())) else {
             return NodeSet::empty(self.graph);
         };
-        let scan = self.graph.store.scan(&[None, Some(predicate), None]);
+        let scan = self.graph.store().scan(&[None, Some(predicate), None]);
         let terms = scan
             .rows
             .iter()
-            .map(|row| self.graph.dict.term(scan.to_spo(row)[position]))
+            .map(|row| self.graph.dict().term(scan.to_spo(row)[position]))
             .collect();
         NodeSet::new(self.graph, terms)
     }

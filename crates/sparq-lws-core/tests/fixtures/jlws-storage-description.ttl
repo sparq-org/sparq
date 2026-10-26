@@ -1,0 +1,168 @@
+# Source: https://github.com/jeswr/lws-spec/blob/ffaea0497de41cd709a742e0c4a90831a500fd97/shapes/jlws-storage-description.ttl
+#
+# Normative SHACL shape for the JLWS **storage description** document conformance class
+# (index.html #discovery-model; statements JLWSC-DM-1..7 in index.statements.ttl).
+# Validates the RDF graph a conforming CID-shaped JSON-LD storage description means
+# under the normative contexts (#jsonld-context: CID terms -> the CID v1 context, i.e.
+# service/serviceEndpoint -> https://www.w3.org/ns/did#, verificationMethod/controller ->
+# https://w3id.org/security#; conformsTo -> dcterms:conformsTo).
+#
+# TARGETING: sh:targetClass jlws:Storage (never embedded in another document class —
+# the grant target matcher for a whole storage is the deliberately distinct
+# jlws:StorageResource, see #vocabulary) PLUS sh:targetSubjectsOf did:service, so a
+# storage description that omits its REQUIRED type (JLWSC-DM-2) is still selected —
+# every storage description carries service (JLWSC-DM-4) — and rejected.
+#
+# NOT graph-checkable (checked by the test-vector suite, discovery/*):
+#   - "whose serviceEndpoint is the document's own URL" (JLWSC-DM-4, second half):
+#     the document's own retrieval URL is not part of its graph; protocol-level check.
+#   - JLWSC-DM-5's "(REQUIRED for notification servers)": conditional on the party's
+#     conformance class (notification server), not on document content.
+#   - JLWSC-DM-6 (consumers MUST ignore unrecognised capability and service types):
+#     a consumer-behaviour rule; the shapes below are accordingly OPEN — unknown
+#     capability/service types validate.
+#   - JLWSC-DM-7 full CID validation ("The document MUST validate as a controlled
+#     identifier document when verificationMethod is present"): the machine-checkable
+#     CID core (each verification method is an IRI-identified node with type and
+#     exactly one controller — CID 1.0 §2.2) is encoded below; FULL CID-1.0 document
+#     validation (context ordering, key-material well-formedness) is delegated to a
+#     CID validator — flagged as a follow-up in the repo README.
+
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix jlws:    <https://w3id.org/jeswr/lws#> .
+@prefix jlwssh:  <https://jeswr.org/ns/jlws/shapes#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix did:     <https://www.w3.org/ns/did#> .
+@prefix sec:     <https://w3id.org/security#> .
+
+jlwssh:StorageDescriptionShape
+    a sh:NodeShape ;
+    rdfs:label "JLWS storage description"@en ;
+    rdfs:comment "Document conformance class: the self-describing storage description resource (index.html #discovery-model). Each constraint names its statement id."@en ;
+    rdfs:seeAlso <https://jeswr.github.io/lws-spec/index.statements.ttl#JLWSC-DM-1> ;
+    sh:targetClass jlws:Storage ;
+    sh:targetSubjectsOf did:service ;
+
+    # JLWSC-DM-1: "id — REQUIRED; the storage's URI". The subject is the id.
+    sh:nodeKind sh:IRI ;
+    sh:message "A storage description MUST carry id — the storage's URI (JLWSC-DM-1, #discovery-model)." ;
+
+    # JLWSC-DM-2: "type — REQUIRED; includes Storage". `includes` — other types MAY
+    # accompany it, hence sh:hasValue (open), not an exhaustive type check.
+    sh:property [
+        sh:path rdf:type ;
+        sh:hasValue jlws:Storage ;
+        sh:message "A storage description's type is REQUIRED and includes Storage (jlws:Storage) — JLWSC-DM-2 (#discovery-model)." ;
+    ] ;
+
+    # JLWSC-DM-3: "conformsTo — REQUIRED; an array of protocol version URIs the
+    # storage implements".
+    sh:property [
+        sh:path dcterms:conformsTo ;
+        sh:minCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "A storage description MUST carry conformsTo — at least one protocol version URI — JLWSC-DM-3 (#discovery-model)." ;
+    ] ;
+
+    # JLWSC-DM-4: "service — REQUIRED; a set of {id?, type, serviceEndpoint, …}
+    # entries, …" — every entry well-formed …
+    sh:property [
+        sh:path did:service ;
+        sh:minCount 1 ;
+        sh:node jlwssh:ServiceEntryShape ;
+        sh:message "A storage description MUST carry service — a set of {id?, type, serviceEndpoint, …} entries — JLWSC-DM-4 (#discovery-model)." ;
+    ] ;
+    # … "including one of type StorageDescription whose serviceEndpoint is the
+    # document's own URL" (the self-URL equality is protocol-level; see header).
+    sh:property [
+        sh:path did:service ;
+        sh:qualifiedValueShape [
+            sh:class jlws:StorageDescription ;
+            sh:property [ sh:path did:serviceEndpoint ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+        ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "The service set MUST include one entry of type StorageDescription with a serviceEndpoint (the document's own URL) — JLWSC-DM-4 (#discovery-model)." ;
+    ] ;
+
+    # JLWSC-DM-5 + JLWSC-DM-7 (partial — see header): verificationMethod is OPTIONAL;
+    # when present, each entry must be a well-formed CID verification method.
+    sh:property [
+        sh:path sec:verificationMethod ;
+        sh:node jlwssh:VerificationMethodShape ;
+        sh:message "Each verificationMethod entry must be a CID-1.0 verification method: an IRI-identified node with type and exactly one controller — JLWSC-DM-5/JLWSC-DM-7 (#discovery-model)." ;
+    ] ;
+
+    # Capability entries are "{id?, type, …} entries from #capability-registry or
+    # extension URIs" (#discovery-model): each supplied entry carries a type. The set
+    # stays OPEN per JLWSC-DM-6 (unknown types are valid).
+    sh:property [
+        sh:path jlws:capability ;
+        sh:node [
+            a sh:NodeShape ;
+            sh:property [ sh:path rdf:type ; sh:minCount 1 ] ;
+        ] ;
+        sh:message "Each capability entry must carry a type ({id?, type, …} — #discovery-model); unknown types remain valid (JLWSC-DM-6)." ;
+    ] .
+
+jlwssh:ServiceEntryShape
+    a sh:NodeShape ;
+    rdfs:label "JLWS storage-description service entry"@en ;
+    rdfs:comment "Not independently targeted: applied to did:service values by StorageDescriptionShape. Open to unknown service types per JLWSC-DM-6."@en ;
+
+    # JLWSC-DM-4's entry model {id?, type, serviceEndpoint, …}: type and
+    # serviceEndpoint per entry; id optional (blank-node entries permitted).
+    sh:property [
+        sh:path rdf:type ;
+        sh:minCount 1 ;
+        sh:message "Every service entry must carry a type ({id?, type, serviceEndpoint, …}) — JLWSC-DM-4 (#discovery-model)." ;
+    ] ;
+    sh:property [
+        sh:path did:serviceEndpoint ;
+        sh:minCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "Every service entry must carry a serviceEndpoint URI ({id?, type, serviceEndpoint, …}) — JLWSC-DM-4 (#discovery-model)." ;
+    ] ;
+
+    # #grant-endpoints (definitional prose, no BCP 14 keyword — same errata-candidate
+    # class the statement companion catalogues): access-document containers are
+    # "advertised in the storage description as services of type AccessRequestService
+    # and AccessGrantService …, each carrying conformsTo with THE profile URI" — the
+    # definite article names the JLWS strict-ODRL access profile
+    # (https://w3id.org/jeswr/lws/access-profile/odrl-1, the profile of #odrl-profile
+    # / JLWSC-ODRL-1). Hence sh:hasValue of that exact IRI, not merely some IRI: a
+    # service advertising the WRONG profile URI misadvertises its interface and is
+    # rejected. sh:hasValue (include) not equality — a service MAY additionally list
+    # a spec-version conformsTo, but MUST carry the access-profile URI.
+    sh:or (
+        [ sh:not [ sh:class jlws:AccessRequestService ] ]
+        [ sh:property [ sh:path dcterms:conformsTo ;
+            sh:hasValue <https://w3id.org/jeswr/lws/access-profile/odrl-1> ] ]
+    ) ;
+    sh:or (
+        [ sh:not [ sh:class jlws:AccessGrantService ] ]
+        [ sh:property [ sh:path dcterms:conformsTo ;
+            sh:hasValue <https://w3id.org/jeswr/lws/access-profile/odrl-1> ] ]
+    ) ;
+    sh:message "An AccessRequestService / AccessGrantService entry MUST carry conformsTo with the JLWS access-profile URI https://w3id.org/jeswr/lws/access-profile/odrl-1 (#grant-endpoints)." .
+
+jlwssh:VerificationMethodShape
+    a sh:NodeShape ;
+    rdfs:label "CID verification method (machine-checkable core)"@en ;
+    rdfs:comment "Not independently targeted: applied to sec:verificationMethod values by StorageDescriptionShape. Encodes the CID 1.0 §2.2 core JLWSC-DM-7 incorporates: id (IRI), type, exactly one controller."@en ;
+    sh:nodeKind sh:IRI ;
+    sh:message "A verification method must be identified by an IRI (its id) — JLWSC-DM-7 via CID 1.0 §2.2." ;
+    sh:property [
+        sh:path rdf:type ;
+        sh:minCount 1 ;
+        sh:message "A verification method must carry a type — JLWSC-DM-7 via CID 1.0 §2.2." ;
+    ] ;
+    sh:property [
+        sh:path sec:controller ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "A verification method must carry exactly one controller — JLWSC-DM-7 via CID 1.0 §2.2." ;
+    ] .

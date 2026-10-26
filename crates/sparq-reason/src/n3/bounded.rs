@@ -70,6 +70,39 @@ pub(crate) trait Sink {
     fn record(&self, why: &'static str);
 }
 
+/// Typed cause recorded beside a closure refusal message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CutKind {
+    TotalJoinRows,
+    JoinRows,
+    #[cfg(feature = "compiled-rules")]
+    Facts,
+    #[cfg(feature = "compiled-rules")]
+    Rounds,
+    TermBytes,
+    #[cfg(feature = "compiled-rules")]
+    Other,
+}
+
+/// Compose per-closure caps with the running ledger, enabling real join counting.
+#[cfg(feature = "compiled-rules")]
+pub(crate) fn metered_limits(mut limits: ClosureLimits, joins: usize, facts: usize) -> ClosureLimits {
+    limits.max_total_join_rows = limits.max_total_join_rows.min(joins).min(usize::MAX - 1);
+    limits.max_facts = limits.max_facts.min(facts);
+    limits
+}
+
+/// Render the caller's round refusal, even when the ledger narrowed its fact cap.
+/// The message includes both caller limits, even when only rounds caused the refusal.
+#[cfg(feature = "compiled-rules")]
+pub(crate) fn rounds_error(limits: ClosureLimits) -> String {
+    format!(
+        "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
+             the rules keep deriving new facts (raise ClosureLimits to allow more)",
+        limits.max_rounds, limits.max_facts
+    )
+}
+
 /// A run's cut record: the first reason any search of the run was cut short. Every part
 /// of one logical evaluation (nested closures, an explicit-strata pipeline, a query and
 /// the closure it projects over) records into the SAME handle, and it is never reset.
@@ -86,7 +119,7 @@ pub(crate) trait Sink {
 #[derive(Clone)]
 pub(crate) struct Truncation {
     cut: Rc<Cell<Option<&'static str>>>,
-    refusal: Rc<RefCell<Option<String>>>,
+    refusal: Rc<RefCell<Option<(CutKind, String)>>>,
     limits: ClosureLimits,
     /// Units of the run's stack allowance held by steps in progress ([`RUN_STACK`]).
     stack: Rc<Cell<usize>>,
@@ -121,13 +154,50 @@ impl Truncation {
     /// The error of the first term the run refused for its size, if any: every closure of
     /// the run that ends after it fails with it.
     pub(crate) fn refusal(&self) -> Option<String> {
-        self.refusal.borrow().clone()
+        self.refusal
+            .borrow()
+            .as_ref()
+            .map(|(_, message)| message.clone())
     }
 
     /// Refuse the run with `error` (the first refusal is kept) and record the cut.
-    fn refuse(&self, error: impl FnOnce() -> String) {
-        self.refusal.borrow_mut().get_or_insert_with(error);
+    fn refuse(&self, kind: CutKind, error: impl FnOnce() -> String) {
+        self.refusal
+            .borrow_mut()
+            .get_or_insert_with(|| (kind, error()));
         self.record(CLOSURE_CUT);
+    }
+}
+
+impl Truncation {
+    #[cfg(feature = "compiled-rules")]
+    pub(crate) fn kind(&self) -> Option<CutKind> {
+        self.refusal
+            .borrow()
+            .as_ref()
+            .map(|(kind, _)| *kind)
+            .or_else(|| self.cut.get().map(|_| CutKind::Other))
+    }
+
+    // The compiled adapter classifies ClosureRounds at its typed call sites;
+    // ClosureRounds itself remains shared with the text/counting engines.
+    #[cfg(feature = "compiled-rules")]
+    #[cold]
+    pub(crate) fn classify(&self, kind: CutKind, message: &str) {
+        self.refuse(kind, || message.to_owned());
+    }
+
+    #[cfg(feature = "compiled-rules")]
+    #[cold]
+    pub(crate) fn classify_round(&self, rounds: usize, message: &str) {
+        self.classify(
+            if rounds >= self.limits.max_rounds {
+                CutKind::Rounds
+            } else {
+                CutKind::Facts
+            },
+            message,
+        );
     }
 }
 
@@ -644,7 +714,10 @@ impl JoinWork {
             return true;
         }
         // Both allowances are charged, and neither is debited unless both cover `n`.
-        match (self.left.get().checked_sub(n), self.total_left.get().checked_sub(n)) {
+        match (
+            self.left.get().checked_sub(n),
+            self.total_left.get().checked_sub(n),
+        ) {
             (Some(left), Some(total_left)) => {
                 self.left.set(left);
                 self.total_left.set(total_left);
@@ -667,23 +740,30 @@ impl JoinWork {
         self.spent.set(true);
         let limit = self.limit;
         let total_limit = self.total_limit;
-        run.refuse(move || {
+        run.refuse(
             if total {
-                format!(
-                    "n3: {CLOSURE_CUT}: the closure's premise joins and rule firings would \
+                CutKind::TotalJoinRows
+            } else {
+                CutKind::JoinRows
+            },
+            move || {
+                if total {
+                    format!(
+                        "n3: {CLOSURE_CUT}: the closure's premise joins and rule firings would \
                      produce more than max_total_join_rows ({total_limit}) binding rows over \
                      all its rounds: the rules keep joining patterns whose matches multiply \
                      (raise ClosureLimits::max_total_join_rows to allow more)"
-                )
-            } else {
-                format!(
-                    "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
+                    )
+                } else {
+                    format!(
+                        "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
                      produce more than max_join_rows ({limit}) binding rows: the rules join \
                      patterns whose matches multiply (raise ClosureLimits::max_join_rows to \
                      allow more)"
-                )
-            }
-        });
+                    )
+                }
+            },
+        );
     }
 }
 
@@ -772,7 +852,7 @@ pub(crate) fn derived_term(
     if size <= limit {
         return Bounded::complete(false);
     }
-    run.refuse(|| {
+    run.refuse(CutKind::TermBytes, || {
         format!(
             "n3: {CLOSURE_CUT}: {what} would be a term of about {size} bytes, over \
              max_term_bytes ({limit}): the rules build ever larger terms (raise \
@@ -1599,7 +1679,7 @@ pub(crate) fn parse_n3_term(
         Err(ParseFailure::Resource(e)) => {
             cuts.record(e.why);
             if e.why == PARSE_TERM_CUT {
-                run.refuse(|| e.message);
+                run.refuse(CutKind::TermBytes, || e.message);
             }
             None
         }

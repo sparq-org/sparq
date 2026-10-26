@@ -336,7 +336,7 @@ fn group_value(graph: &Graph, id: Id, group: &PropertyGroup, cfg: &EntityTextCon
         let Some(pid) = graph.id_of(&Term::NamedNode(pred.clone())) else { continue };
         // (language rank, scan index, text) candidates from one contiguous SPO range.
         let mut cands: Vec<(usize, usize, String)> = Vec::new();
-        let scan = graph.store.scan(&[Some(id), Some(pid), None]);
+        let scan = graph.store().scan(&[Some(id), Some(pid), None]);
         for (i, row) in scan.rows.iter().enumerate() {
             let o = scan.to_spo(row)[2];
             let rendered = match group.kind {
@@ -371,10 +371,10 @@ fn group_value(graph: &Graph, id: Id, group: &PropertyGroup, cfg: &EntityTextCon
 fn literal_text(graph: &Graph, id: Id, languages: &[String]) -> Option<(usize, String)> {
     if dict::is_inline(id) {
         // Inline xsd:integer — decoded via the dictionary, never language-tagged.
-        let Term::Literal(l) = graph.dict.term(id) else { return None };
+        let Term::Literal(l) = graph.dict().term(id) else { return None };
         return Some((lang_rank(languages, None), l.value().to_string()));
     }
-    let TermParts::Lit { value, lang, .. } = graph.dict.term_parts(id) else { return None };
+    let TermParts::Lit { value, lang, .. } = graph.dict().term_parts(id) else { return None };
     let value = value.trim();
     if value.is_empty() {
         return None;
@@ -389,7 +389,7 @@ fn entity_label_text(graph: &Graph, id: Id, cfg: &EntityTextConfig) -> Option<(u
     if dict::is_inline(id) {
         return None;
     }
-    match graph.dict.term_parts(id) {
+    match graph.dict().term_parts(id) {
         TermParts::Iri { prefix, suffix } => {
             if let Some(label) = naming_label(graph, id, cfg) {
                 return Some((0, label));
@@ -409,7 +409,7 @@ fn naming_label(graph: &Graph, id: Id, cfg: &EntityTextConfig) -> Option<String>
     let mut best: Option<(usize, usize, String)> = None;
     for pred in &cfg.naming_predicates {
         let Some(pid) = graph.id_of(&Term::NamedNode(pred.clone())) else { continue };
-        let scan = graph.store.scan(&[Some(id), Some(pid), None]);
+        let scan = graph.store().scan(&[Some(id), Some(pid), None]);
         for (i, row) in scan.rows.iter().enumerate() {
             let o = scan.to_spo(row)[2];
             if let Some((rank, text)) = literal_text(graph, o, &cfg.languages) {
@@ -499,13 +499,13 @@ pub fn embed_entities(
         }
         for pred in &group.predicates {
             let Some(pid) = graph.id_of(&Term::NamedNode(pred.clone())) else { continue };
-            let scan = graph.store.scan(&[None, Some(pid), None]);
+            let scan = graph.store().scan(&[None, Some(pid), None]);
             for row in scan.rows.iter() {
                 let [s, _, _] = scan.to_spo(row);
                 if dict::is_inline(s) || seen.contains(&s) {
                     continue;
                 }
-                match graph.dict.term_parts(s) {
+                match graph.dict().term_parts(s) {
                     TermParts::Iri { .. } | TermParts::Blank(_) => {}
                     _ => continue, // only IRI / blank subjects are entities
                 }

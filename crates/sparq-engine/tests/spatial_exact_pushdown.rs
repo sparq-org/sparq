@@ -104,7 +104,7 @@ impl DiamondProvider {
             indexed.iter().map(|(v, x, y)| (wkt_term(v), *x, *y)).collect();
         let id_universe = id_level.then(|| {
             let ids: FxHashSet<Id> = points.iter().filter_map(|(t, _, _)| graph.id_of(t)).collect();
-            (std::ptr::from_ref(&graph.dict) as usize, Arc::new(ids))
+            (std::ptr::from_ref(graph.dict()) as usize, Arc::new(ids))
         });
         Self {
             points,

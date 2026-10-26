@@ -722,6 +722,10 @@ impl SolidMcpServer {
     /// (re-)materializing the authorization view under the configured model so the
     /// served view is never stale and always matches [`SolidServerConfig::acp`].
     ///
+    /// Directory-backed input retains its durable storage. SPARQL updates are journaled;
+    /// resource put/delete and container creation refuse directory-backed stores because
+    /// their slot replacement and rollback require an in-memory dataset.
+    ///
     /// # Errors
     ///
     /// Returns `Err` if that materialization fails.
@@ -999,7 +1003,7 @@ impl SolidMcpServer {
         let term = Term::NamedNode(name);
         self.store
             .graph()
-            .named
+            .named()
             .iter()
             .find(|(n, _)| *n == term)
             .map(|(_, g)| g)
@@ -1007,7 +1011,7 @@ impl SolidMcpServer {
 
     /// The index of the named-graph slot for `term`, if present.
     fn slot_index(&self, term: &Term) -> Option<usize> {
-        self.store.graph().named.iter().position(|(n, _)| n == term)
+        self.store.graph().named().iter().position(|(n, _)| n == term)
     }
 
     /// `resource_get`: serve one document from the shared dataset (draft §6.4), with
@@ -1116,7 +1120,7 @@ impl SolidMcpServer {
         // Pass 2: keep only those that are stored documents (one scan of the graph names).
         let mut members: Vec<Value> = Vec::with_capacity(candidates.len());
         if !candidates.is_empty() {
-            for (name, _) in &self.store.graph().named {
+            for (name, _) in self.store.graph().named() {
                 if let Term::NamedNode(m) = name {
                     if candidates.contains(m.as_str()) {
                         members.push(json!({
@@ -1339,7 +1343,7 @@ impl SolidMcpServer {
     /// the listing never errors and never hints that something was filtered.
     fn resources_list(&self) -> Value {
         let mut resources: Vec<Value> = Vec::new();
-        for (name, _) in &self.store.graph().named {
+        for (name, _) in self.store.graph().named() {
             let Term::NamedNode(node) = name else {
                 continue;
             };
@@ -1463,7 +1467,7 @@ impl SolidMcpServer {
                 return true;
             }
             let (acl, acr) = (format!("{iri}.acl"), format!("{iri}.acr"));
-            self.store.graph().named.iter().any(|(n, _)| {
+            self.store.graph().named().iter().any(|(n, _)| {
                 matches!(n, Term::NamedNode(nn) if nn.as_str() == acl || nn.as_str() == acr)
             })
         };
@@ -1508,10 +1512,19 @@ impl SolidMcpServer {
         Ok(())
     }
 
+    /// Slot replacement and rollback require a dataset without a durable root.
+    fn require_resource_slots(&self) -> Result<(), String> {
+        if self.store.graph().is_directory_backed() {
+            return Err("resource-slot tools (resource put/delete, container creation, and ACL slot edits) are unavailable on directory-backed stores; use SPARQL update for durable writes".into());
+        }
+        Ok(())
+    }
+
     /// `resource_put`: create/replace one document (LDP PUT). ACL documents route
     /// through the authoritative write-through; content documents are parse-first,
     /// containment-linked on create, and re-materialized with rollback-on-error.
     fn tool_resource_put(&mut self, args: &Value) -> Result<String, String> {
+        self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
         let content = arg_str(args, "content")?.to_string();
         let content_type = arg_str(args, "content_type")?.to_string();
@@ -1560,9 +1573,10 @@ impl SolidMcpServer {
         // Swap the document slot (capturing the prior content for rollback).
         let term = Term::NamedNode(name);
         let before = self.store.stored_graphs();
-        let prior = self.take_slot(&term);
+        self.store.graph().check_writable()?;
+        let prior = self.take_slot(&term)?;
         let existed = prior.is_some();
-        self.store.graph_unchecked_mut().named.push((term.clone(), new_graph));
+        self.store.graph_unchecked_mut().add_named(term.clone(), new_graph).expect("the dataset accepts writes (checked first) and the graph is in memory");
 
         // A CREATED document becomes a member of its parent containers (draft §7.3).
         let links = if existed {
@@ -1595,6 +1609,7 @@ impl SolidMcpServer {
     /// `resource_delete`: delete one document (LDP DELETE). Rejects non-empty
     /// containers; ACL documents route through the authoritative write-through.
     fn tool_resource_delete(&mut self, args: &Value) -> Result<String, String> {
+        self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
         let name = valid_target(&url)?;
 
@@ -1628,7 +1643,7 @@ impl SolidMcpServer {
             // A container: reject when any resource is stored below it (whatever its
             // containment listing says), or when that listing still names a member.
             let (acl, acr) = (format!("{url}.acl"), format!("{url}.acr"));
-            let has_member = self.store.graph().named.iter().any(|(n, _)| {
+            let has_member = self.store.graph().named().iter().any(|(n, _)| {
                 matches!(n, Term::NamedNode(n)
                     if n.as_str().len() > url.len()
                         && n.as_str().starts_with(url.as_str())
@@ -1646,16 +1661,13 @@ impl SolidMcpServer {
 
         // Remove the document and its parent's containment link (rollback-capable).
         let before = self.store.stored_graphs();
-        let prior = self.take_slot(&term).expect("slot checked above");
+        self.store.graph().check_writable()?;
+        let prior = self.take_slot(&term)?.expect("slot checked above");
         let removed_link = self.unlink_parent(&url);
         if let Err(e) = self.rematerialize_after(&before, &[]) {
             if let Some((pterm, t)) = &removed_link {
                 if let Some(i) = self.slot_index(pterm) {
-                    let _ = self.store.graph_unchecked_mut().named[i].1.insert_triple(
-                        t[0].clone(),
-                        t[1].clone(),
-                        t[2].clone(),
-                    );
+                    let _ = self.store.graph_unchecked_mut().apply_delta_to_named(i, &[[t[0].clone(), t[1].clone(), t[2].clone()]], &[]);
                 }
             }
             self.restore_slot(&term, Some(prior));
@@ -1668,6 +1680,7 @@ impl SolidMcpServer {
     /// `container_create`: create one empty, typed container and link it into its
     /// parent containers.
     fn tool_container_create(&mut self, args: &Value) -> Result<String, String> {
+        self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
         let name = valid_target(&url)?;
         if !url.ends_with('/') {
@@ -1681,7 +1694,8 @@ impl SolidMcpServer {
 
         let before = self.store.stored_graphs();
         let container = container_graph(&url)?;
-        self.store.graph_unchecked_mut().named.push((term.clone(), container));
+        self.store.graph().check_writable()?;
+        self.store.graph_unchecked_mut().add_named(term.clone(), container).expect("the dataset accepts writes (checked first) and the graph is in memory");
         let (created_graphs, added_links) = match self.link_containment(&url) {
             Ok(x) => x,
             Err(e) => {
@@ -1699,16 +1713,17 @@ impl SolidMcpServer {
     }
 
     /// Remove and return the named-graph slot for `term`, if present.
-    fn take_slot(&mut self, term: &Term) -> Option<Graph> {
-        let pos = self.slot_index(term)?;
-        Some(self.store.graph_unchecked_mut().named.swap_remove(pos).1)
+    /// `Err`, changing nothing, when it is a named graph of a directory-backed dataset's
+    /// store, or one follows it (those are never taken out or moved).
+    fn take_slot(&mut self, term: &Term) -> Result<Option<Graph>, String> {
+        self.store.graph_unchecked_mut().remove_named(term)
     }
 
     /// Put `prior` back into the slot for `term` (dropping whatever is there now).
     fn restore_slot(&mut self, term: &Term, prior: Option<Graph>) {
         let _ = self.take_slot(term);
         if let Some(g) = prior {
-            self.store.graph_unchecked_mut().named.push((term.clone(), g));
+            self.store.graph_unchecked_mut().add_named(term.clone(), g).expect("the dataset accepts writes (checked first) and the graph is in memory");
         }
     }
 
@@ -1752,14 +1767,13 @@ impl SolidMcpServer {
                 None => {
                     self.store
                         .graph_unchecked_mut()
-                        .named
-                        .push((pterm.clone(), container_graph(&parent)?));
+                        .add_named(pterm.clone(), container_graph(&parent)?)?;
                     created.push(pterm.clone());
-                    self.store.graph().named.len() - 1
+                    self.store.graph().named().len() - 1
                 }
             };
             let q = format!("ASK {{ <{parent}> <{LDP_CONTAINS}> <{child}> }}");
-            let present = sparq_engine::ask(&self.store.graph().named[pos].1, &q)?;
+            let present = sparq_engine::ask(&self.store.graph().named()[pos].1, &q)?;
             if !present {
                 let cnode = NamedNode::new(child.as_str())
                     .map_err(|e| format!("invalid member IRI <{child}>: {e}"))?;
@@ -1768,11 +1782,7 @@ impl SolidMcpServer {
                     Term::NamedNode(contains.clone()),
                     Term::NamedNode(cnode),
                 ];
-                self.store.graph_unchecked_mut().named[pos].1.insert_triple(
-                    triple[0].clone(),
-                    triple[1].clone(),
-                    triple[2].clone(),
-                )?;
+                self.store.graph_unchecked_mut().apply_delta_to_named(pos, &[[triple[0].clone(), triple[1].clone(), triple[2].clone()]], &[])?;
                 added.push((pterm, triple));
             }
             child = parent;
@@ -1784,11 +1794,7 @@ impl SolidMcpServer {
     fn unlink_containment(&mut self, created: &[Term], added: &[AddedLink]) {
         for (pterm, t) in added.iter().rev() {
             if let Some(i) = self.slot_index(pterm) {
-                let _ = self.store.graph_unchecked_mut().named[i].1.remove_triple(
-                    t[0].clone(),
-                    t[1].clone(),
-                    t[2].clone(),
-                );
+                let _ = self.store.graph_unchecked_mut().apply_delta_to_named(i, &[], &[[t[0].clone(), t[1].clone(), t[2].clone()]]);
             }
         }
         for term in created.iter().rev() {
@@ -1803,7 +1809,7 @@ impl SolidMcpServer {
         let pterm = Term::NamedNode(NamedNode::new(parent.as_str()).ok()?);
         let pos = self.slot_index(&pterm)?;
         let q = format!("ASK {{ <{parent}> <{LDP_CONTAINS}> <{url}> }}");
-        if !sparq_engine::ask(&self.store.graph().named[pos].1, &q).unwrap_or(false) {
+        if !sparq_engine::ask(&self.store.graph().named()[pos].1, &q).unwrap_or(false) {
             return None;
         }
         let triple = [
@@ -1811,11 +1817,7 @@ impl SolidMcpServer {
             Term::NamedNode(NamedNode::new(LDP_CONTAINS).expect("valid constant IRI")),
             Term::NamedNode(NamedNode::new(url).ok()?),
         ];
-        let _ = self.store.graph_unchecked_mut().named[pos].1.remove_triple(
-            triple[0].clone(),
-            triple[1].clone(),
-            triple[2].clone(),
-        );
+        let _ = self.store.graph_unchecked_mut().apply_delta_to_named(pos, &[], &[[triple[0].clone(), triple[1].clone(), triple[2].clone()]]);
         Some((pterm, triple))
     }
 }
@@ -1995,7 +1997,7 @@ mod unit {
         let graph = server
             .store()
             .graph()
-            .named
+            .named()
             .iter()
             .find(|(name, _)| name.to_string() == "<https://pod.ex/profile>")
             .map(|(_, graph)| graph)
@@ -2033,6 +2035,67 @@ mod unit {
         assert_eq!(c.max_rows, Some(1_000_000));
         assert_eq!(c.server_name, "sparq-mcp-solid");
         assert!(c.agent.is_none() && c.client.is_none() && c.issuer.is_none() && c.now.is_none());
+    }
+
+    /// Updates retain their WAL; slot tools refuse before changing the dataset.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn directory_backed_updates_survive_reopen_and_slot_tools_refuse() {
+        let root =
+            std::env::temp_dir().join(format!("sparq-mcp-working-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("store");
+        let nq = r#"
+<https://pod.ex/> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/ldp#Container> <https://pod.ex/> .
+<https://pod.ex/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/.acl> .
+"#;
+        Graph::load_dataset(nq, "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let store = PodStore::new(Graph::open(&dir).unwrap());
+        let config = SolidServerConfig {
+            agent: Some("https://alice.ex/card#me".into()),
+            allow_update: true,
+            ..Default::default()
+        };
+        let mut server = SolidMcpServer::with_config(store, config).unwrap();
+        let response: Value = serde_json::from_str(&server.handle_message(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "update", "arguments": {"sparql":
+                "INSERT DATA { GRAPH <https://pod.ex/> { <https://pod.ex/#new> <https://ex.dev/p> \"saved\" } }"}}
+        }).to_string()).unwrap()).unwrap();
+        assert_eq!(response["result"]["isError"], false, "{response}");
+        let mut slot_responses = Vec::new();
+        for (tool, arguments) in [
+            ("resource_put", json!({"url": "https://pod.ex/note", "content": "", "content_type": "text/turtle"})),
+            ("resource_delete", json!({"url": "https://pod.ex/"})),
+            ("container_create", json!({"url": "https://pod.ex/created/"})),
+            ("resource_put", json!({"url": "https://pod.ex/.acl", "content": "", "content_type": "text/turtle"})),
+            ("resource_delete", json!({"url": "https://pod.ex/.acl"})),
+        ] {
+            let response: Value = serde_json::from_str(&server.handle_message(&json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments}
+            }).to_string()).unwrap()).unwrap();
+            slot_responses.push(response);
+        }
+        drop(server);
+        let graph = Graph::open(&dir).unwrap();
+        assert!(sparq_engine::ask(&graph,
+            "ASK { GRAPH <https://pod.ex/> { <https://pod.ex/#new> <https://ex.dev/p> \"saved\" } }").unwrap());
+        for response in slot_responses {
+            assert_eq!(response["result"]["isError"], true, "{response}");
+            assert!(response.to_string().contains("unavailable on directory-backed stores"), "{response}");
+        }
+        assert!(graph.named_graph(&Term::NamedNode(NamedNode::new_unchecked("https://pod.ex/created/"))).is_none());
+        drop(graph);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A two-principal pod: alice reads `pub/`, bob reads `priv/` — and neither can

@@ -457,7 +457,7 @@ fn subgraph_facts(
 
     let mut facts: Vec<GroundFact> = Vec::new();
     // One contiguous SPO range over the node's own triples (the node is the subject).
-    let scan = graph.store.scan(&[Some(id), None, None]);
+    let scan = graph.store().scan(&[Some(id), None, None]);
     for row in scan.rows.iter() {
         let [_, p, o] = scan.to_spo(row);
         let Some(predicate) = render_iri(graph, p) else {
@@ -536,10 +536,10 @@ fn minimal_types_of(graph: &Graph, id: Id) -> FxHashSet<String> {
         return FxHashSet::default();
     };
     let mut type_ids: Vec<Id> = Vec::new();
-    let scan = graph.store.scan(&[Some(id), Some(type_pid), None]);
+    let scan = graph.store().scan(&[Some(id), Some(type_pid), None]);
     for row in scan.rows.iter() {
         let [_, _, o] = scan.to_spo(row);
-        if !dict::is_inline(o) && matches!(graph.dict.term_parts(o), TermParts::Iri { .. }) {
+        if !dict::is_inline(o) && matches!(graph.dict().term_parts(o), TermParts::Iri { .. }) {
             type_ids.push(o);
         }
     }
@@ -576,7 +576,7 @@ fn superclasses_of(graph: &Graph, classes: &[Id]) -> FxHashMap<Id, FxHashSet<Id>
         let mut frontier = vec![c];
         // Bounded BFS over subClassOf; the visited guard makes a cycle terminate.
         while let Some(cur) = frontier.pop() {
-            let scan = graph.store.scan(&[Some(cur), Some(sco_pid), None]);
+            let scan = graph.store().scan(&[Some(cur), Some(sco_pid), None]);
             for row in scan.rows.iter() {
                 let [_, _, sup] = scan.to_spo(row);
                 if sup != cur && acc.insert(sup) {
@@ -602,7 +602,7 @@ fn superclasses_of(graph: &Graph, classes: &[Id]) -> FxHashMap<Id, FxHashSet<Id>
 /// ordering key is computed *after* reconciliation, so two commensurable quantities sort identically.
 fn typed_values(graph: &Graph, id: Id, reconcile: bool) -> Vec<TypedValue> {
     let mut out: Vec<(String, TypedValue)> = Vec::new();
-    let scan = graph.store.scan(&[Some(id), None, None]);
+    let scan = graph.store().scan(&[Some(id), None, None]);
     for row in scan.rows.iter() {
         let [_, p, o] = scan.to_spo(row);
         let Some(pred) = render_iri(graph, p) else {
@@ -622,7 +622,7 @@ fn typed_values(graph: &Graph, id: Id, reconcile: bool) -> Vec<TypedValue> {
                 // An IRI object → an enum member (the closed-world enum slot). Only entities, not
                 // structured quantity nodes already handled above.
                 if !dict::is_inline(o) {
-                    if let TermParts::Iri { .. } = graph.dict.term_parts(o) {
+                    if let TermParts::Iri { .. } = graph.dict().term_parts(o) {
                         let member = render_iri(graph, o).unwrap_or_default();
                         let label = enum_label(graph, o);
                         out.push((pred, TypedValue::Enum { member, label }));
@@ -643,7 +643,7 @@ fn typed_values(graph: &Graph, id: Id, reconcile: bool) -> Vec<TypedValue> {
 fn literal_typed_value(graph: &Graph, o: Id) -> Option<TypedValue> {
     if dict::is_inline(o) {
         // Inline-integer ids decode to an `xsd:integer` literal.
-        let oxrdf::Term::Literal(l) = graph.dict.term(o) else {
+        let oxrdf::Term::Literal(l) = graph.dict().term(o) else {
             return None;
         };
         let value = numeric_value(l.value())?;
@@ -656,7 +656,7 @@ fn literal_typed_value(graph: &Graph, o: Id) -> Option<TypedValue> {
         value,
         datatype,
         lang,
-    } = graph.dict.term_parts(o)
+    } = graph.dict().term_parts(o)
     else {
         return None;
     };
@@ -693,7 +693,7 @@ fn quantity_value(graph: &Graph, o: Id) -> Option<TypedValue> {
         return None;
     }
     if !matches!(
-        graph.dict.term_parts(o),
+        graph.dict().term_parts(o),
         TermParts::Iri { .. } | TermParts::Blank(_)
     ) {
         return None;
@@ -742,18 +742,18 @@ fn canonical_unit_iri(kind: QuantityKind) -> String {
 /// The first numeric object of `(subject, predicate)`, parsed to `f64`, or `None`.
 fn first_numeric(graph: &Graph, subject: Id, predicate: &str) -> Option<f64> {
     let pid = graph.id_of(&named(predicate))?;
-    let scan = graph.store.scan(&[Some(subject), Some(pid), None]);
+    let scan = graph.store().scan(&[Some(subject), Some(pid), None]);
     for row in scan.rows.iter() {
         let [_, _, o] = scan.to_spo(row);
         if dict::is_inline(o) {
-            if let oxrdf::Term::Literal(l) = graph.dict.term(o) {
+            if let oxrdf::Term::Literal(l) = graph.dict().term(o) {
                 if let Some(v) = numeric_value(l.value()) {
                     return Some(v);
                 }
             }
             continue;
         }
-        if let TermParts::Lit { value, .. } = graph.dict.term_parts(o) {
+        if let TermParts::Lit { value, .. } = graph.dict().term_parts(o) {
             if let Some(v) = numeric_value(value) {
                 return Some(v);
             }
@@ -765,10 +765,10 @@ fn first_numeric(graph: &Graph, subject: Id, predicate: &str) -> Option<f64> {
 /// The first IRI object of `(subject, predicate)` rendered to text, or `None`.
 fn first_iri_object(graph: &Graph, subject: Id, predicate: &str) -> Option<String> {
     let pid = graph.id_of(&named(predicate))?;
-    let scan = graph.store.scan(&[Some(subject), Some(pid), None]);
+    let scan = graph.store().scan(&[Some(subject), Some(pid), None]);
     for row in scan.rows.iter() {
         let [_, _, o] = scan.to_spo(row);
-        if !dict::is_inline(o) && matches!(graph.dict.term_parts(o), TermParts::Iri { .. }) {
+        if !dict::is_inline(o) && matches!(graph.dict().term_parts(o), TermParts::Iri { .. }) {
             return render_iri(graph, o);
         }
     }
@@ -884,7 +884,7 @@ pub fn sketch_predicate(
     let Some(pid) = graph.id_of(&named(predicate)) else {
         return Ok(None);
     };
-    let scan = graph.store.scan(&[Some(id), Some(pid), None]);
+    let scan = graph.store().scan(&[Some(id), Some(pid), None]);
     let mut contributions: Vec<([Id; 3], Vec<f32>)> = Vec::new();
     for row in scan.rows.iter() {
         let spo = scan.to_spo(row);
@@ -907,7 +907,7 @@ fn render_iri(graph: &Graph, id: Id) -> Option<String> {
     if dict::is_inline(id) {
         return None;
     }
-    match graph.dict.term_parts(id) {
+    match graph.dict().term_parts(id) {
         TermParts::Iri { prefix, suffix } => Some(format!("{}{}", prefix, suffix)),
         _ => None,
     }
@@ -918,11 +918,11 @@ fn render_iri(graph: &Graph, id: Id) -> Option<String> {
 /// Inline integers decode to their lexical value.
 fn render_object(graph: &Graph, id: Id) -> (String, bool) {
     if dict::is_inline(id) {
-        if let oxrdf::Term::Literal(l) = graph.dict.term(id) {
+        if let oxrdf::Term::Literal(l) = graph.dict().term(id) {
             return (l.value().to_string(), true);
         }
     }
-    match graph.dict.term_parts(id) {
+    match graph.dict().term_parts(id) {
         TermParts::Iri { prefix, suffix } => (format!("{}{}", prefix, suffix), false),
         TermParts::Lit { value, .. } => (value.to_string(), true),
         TermParts::Blank(b) => (format!("_:{}", b), false),
@@ -930,7 +930,7 @@ fn render_object(graph: &Graph, id: Id) -> (String, bool) {
         // NL-string / subgraph-text grounding whose object is an RDF 1.2 quoted triple. The dict
         // reconstructs the (nested, depth-capped) term and oxrdf's `Display` renders the RDF 1.2
         // `<<( s p o )>>` triple-term syntax.
-        TermParts::Triple(_) => (graph.dict.term(id).to_string(), false),
+        TermParts::Triple(_) => (graph.dict().term(id).to_string(), false),
     }
 }
 
@@ -942,10 +942,10 @@ fn enum_label(graph: &Graph, id: Id) -> Option<String> {
         "http://www.w3.org/2004/02/skos/core#prefLabel",
     ] {
         if let Some(pid) = graph.id_of(&named(pred)) {
-            let scan = graph.store.scan(&[Some(id), Some(pid), None]);
+            let scan = graph.store().scan(&[Some(id), Some(pid), None]);
             for row in scan.rows.iter() {
                 let [_, _, o] = scan.to_spo(row);
-                if let TermParts::Lit { value, .. } = graph.dict.term_parts(o) {
+                if let TermParts::Lit { value, .. } = graph.dict().term_parts(o) {
                     let v = value.trim();
                     if !v.is_empty() {
                         return Some(v.to_string());
@@ -1048,7 +1048,7 @@ ex:other a ex:Car ;
         let bolt = g.id_of(&iri("http://ex/bolt")).unwrap();
         for f in &facts {
             let pid = g.id_of(&named(&f.predicate)).expect("predicate in graph");
-            let scan = g.store.scan(&[Some(bolt), Some(pid), None]);
+            let scan = g.store().scan(&[Some(bolt), Some(pid), None]);
             let hit = scan.rows.iter().any(|row| {
                 let [_, _, o] = scan.to_spo(row);
                 let (txt, _) = render_object(&g, o);
@@ -1571,7 +1571,7 @@ ex:e-speed qudt:numericValue "300"^^xsd:decimal ; qudt:unit unit:KiloM-PER-HR .
         let quoted: Vec<_> = g
             .iter_ids()
             .map(|[_, _, o]| o)
-            .filter(|&o| matches!(g.dict.term_parts(o), TermParts::Triple(_)))
+            .filter(|&o| matches!(g.dict().term_parts(o), TermParts::Triple(_)))
             .collect();
         // Two quoted OBJECTS are asserted (flat + nested-outer); the nested-inner term is a
         // component of the outer one and reachable only through its rendering (checked below).

@@ -18,6 +18,45 @@ use sparq_lws_core::store::{
     BlobEntry, BlobError, BlobStore, InMemorySparqClient, ResourceMeta, SparqClient, DEFAULT_GRACE,
 };
 
+#[cfg(feature = "embedded-sparq")]
+#[tokio::test]
+async fn shared_embedded_delete_is_one_atomic_job_and_returns_the_overwritten_key() {
+    use sparq_lws_core::store::embedded::EmbeddedSparqClient;
+
+    let client = EmbeddedSparqClient::in_memory().unwrap();
+    let shared = SharedStore::new(client.clone());
+    let parent = "https://pod.example/c/";
+    let child = "https://pod.example/c/item";
+    let meta = |key: &str| ResourceMeta {
+        content_type: "text/plain".into(),
+        blob_key: key.into(),
+        etag: format!("\"{key}\""),
+        last_modified: None,
+    };
+    shared.put_meta(parent, meta("parent")).await.unwrap();
+    shared
+        .create_child(parent, child, meta("old"))
+        .await
+        .unwrap();
+    shared.replace_meta(child, meta("latest")).await.unwrap();
+    assert_eq!(shared.list_children(parent).await.unwrap(), [child]);
+    let before = client.engine_round_trips();
+    assert_eq!(
+        shared.delete_resource(child, Some(parent)).await.unwrap(),
+        Some("latest".into())
+    );
+    assert_eq!(
+        client.engine_round_trips() - before,
+        1,
+        "one indivisible actor job"
+    );
+    assert!(matches!(
+        shared.get_meta(child).await,
+        Err(sparq_lws_core::store::SparqError::NotFound)
+    ));
+    assert!(shared.list_children(parent).await.unwrap().is_empty());
+}
+
 #[derive(Clone)]
 struct TestBlob {
     body: Bytes,

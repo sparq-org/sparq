@@ -96,8 +96,8 @@ pub enum CommitmentMethod {
     /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement, on
     /// the HOST side; the in-circuit half has shipped as the `zk/dual-leaf-v2` Noir
     /// library plus the band and `LANG_NONE` checks applied at the witnessed
-    /// component sites of the `scan_v2dl_*` / `join_eq_v2dl_*` members, which no
-    /// `CircuitId` names and so no verify path selects),
+    /// component sites of the `scan_v2dl_*` / `join_eq_v2dl_*` members, selected
+    /// by dedicated `CircuitId` variants only for this method),
     /// and a bit-domain boolean member. The dual-leaf method a NEW issuance
     /// selects ([`Self::is_production_selectable`] is `true` only for this one,
     /// of the two dual-leaf versions). It carries exactly the same INV-VL

@@ -4,10 +4,12 @@
 //! # ⚠️ THE VALUE-LANE VERIFIER GATES ARE CLOSED
 //! Nothing in this module opens one. `verifier::prefilter_manifest_structure`
 //! still refuses every value-lane sub-proof outright at stage 0
-//! (`CheckError::ValueLaneSubProofNotAccepted`), the stage-2 binding-edge
+//! (`CheckError::ValueLaneSubProofNotAccepted`, or `LegacyV1ValueMember` for V1), the stage-2 binding-edge
 //! operand match still admits only the `filter_int` family, and
 //! `filter_edge_true` is untouched. A pin computed here decides nothing, matches
-//! no obligation edge and discharges no query FILTER. What this module is, is
+//! no accepting obligation edge and discharges no query FILTER. The test report
+//! uses `value_obligation::discharge` for structural diagnostic coverage only.
+//! What this module is, is
 //! the INPUT those gates will need: the question "given an authenticated
 //! commitment method and the typed FILTER the query spells, what exactly would a
 //! value-lane sub-proof's public inputs have to be?", answered in one place so
@@ -428,8 +430,8 @@ pub fn check_value_lane_pin(
 
     if presented.member != expected.member {
         return Err(PinError::MemberMismatch {
-            expected: expected.member.package(),
-            presented: presented.member.package(),
+            expected: expected.member.label(),
+            presented: presented.member.label(),
         });
     }
 
@@ -642,57 +644,18 @@ fn presented_lane(inputs: &ProofInputs) -> Option<PresentedLane<'_>> {
     }
 }
 
-/// One `(value-lane sub-proof, typed query FILTER)` pin outcome.
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ValueLanePin {
-    /// Index into `manifest.sub_proofs`.
-    pub(crate) proof: usize,
-    /// Index into the query's typed FILTER list.
-    pub(crate) filter: usize,
-    /// Whether the pin holds, or why it does not.
-    pub(crate) outcome: Result<(), PinError>,
-}
-
-/// Pin every value-lane sub-proof of `manifest` against every typed FILTER its
-/// query imposes, and report each outcome.
-///
-/// # ⚠️ NOT A VERIFIER
-/// This is a test and diagnostic seam. It accepts nothing and refuses nothing:
-/// it returns a list of outcomes and makes no decision about the manifest. In
-/// particular it does NOT establish that a sub-proof whose pin holds is the one
-/// answering that FILTER — there is no obligation edge from a value-lane
-/// sub-proof to a query FILTER in this verifier, and the gate that would create
-/// one is CLOSED. A manifest every one of whose pins holds is still refused by
-/// `verifier::prefilter_manifest_structure` with
-/// `CheckError::ValueLaneSubProofNotAccepted`, and a test asserts exactly that.
-///
-/// It runs the issuer-attestation stage alone to learn the authenticated methods
-/// (the full pre-filter would refuse the manifest at stage 0 before reaching
-/// it), then one `scan_method` call, then one pin per pair.
+/// Report the value-lane obligation model, not yet accepting.
+/// The value-lane gate stays CLOSED even when this diagnostic succeeds.
 #[cfg(test)]
 pub(crate) fn value_lane_pin_report(
     manifest: &ProofManifest,
     key_set: &crate::verifier::KeySet,
-) -> Result<Vec<ValueLanePin>, crate::verifier::CheckError> {
-    let methods = crate::verifier::authenticated_methods_for(manifest, key_set)?;
-    let filters = sparq_zk::verify::fragment_typed_filters(&manifest.query)
-        .map_err(crate::verifier::CheckError::Sparqzk)?;
-    let method = scan_method(manifest, &methods);
-    let mut out = Vec::new();
-    for (pi, sp) in manifest.sub_proofs.iter().enumerate() {
-        if presented_lane(&sp.inputs).is_none() {
-            continue;
-        }
-        for (fi, filter) in filters.iter().enumerate() {
-            let outcome = match &method {
-                Ok(m) => check_value_lane_pin(*m, filter, &sp.inputs),
-                Err(e) => Err(e.clone()),
-            };
-            out.push(ValueLanePin { proof: pi, filter: fi, outcome });
-        }
-    }
-    Ok(out)
+) -> Result<crate::value_obligation::DischargeMap, crate::value_obligation::ObligationError> {
+    use crate::value_obligation::{derive, discharge, ObligationError};
+    let methods = crate::verifier::authenticated_methods_for(manifest, key_set)
+        .map_err(|e| ObligationError::InvalidScan { reason: e.to_string() })?;
+    let obligations = derive(manifest, &methods)?;
+    discharge(manifest, &methods, &obligations)
 }
 
 #[cfg(test)]
@@ -1103,32 +1066,17 @@ mod tests {
 
     // ---------------- helpers ----------------
 
-    /// The REPORT pairs each value-lane sub-proof with each typed FILTER and
-    /// records the outcome. With no attestation at all, every commitment is
-    /// unbound, so every pin is `MethodNotBound` — the fail-closed answer.
     #[test]
-    fn the_pin_report_pairs_every_sub_proof_with_every_filter() {
-        let inputs = int_inputs(FilterOp::Ge, 18, dual_leaf_v2::integer_lane_const(), true);
-        let query = "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer> && ?o < \"99\"^^<http://www.w3.org/2001/XMLSchema#integer>) }";
-        let json = format!(
-            "{{\"type\":\"urn:sparq:zk:ProofManifest\",\"query\":{},\"attributions\":[],\"entailment_regime\":\"simple\",\"binding\":{{\"mode\":\"challenge\",\"challenge\":\"0x2a\"}},\"sub_proofs\":[{{\"inputs\":{},\"proof_hex\":\"\"}}]}}",
-            serde_json::to_string(query).unwrap(),
-            serde_json::to_string(&inputs).unwrap()
-        );
-        let m = ProofManifest::from_json(&json).expect("the minimal manifest parses");
-        let report = value_lane_pin_report(&m, &KeySet::empty()).expect("the report runs");
-        // One value-lane sub-proof x two FILTER conjuncts.
-        assert_eq!(report.len(), 2);
-        for pin in &report {
-            assert_eq!(pin.proof, 0);
-            assert_eq!(
-                pin.outcome,
-                Err(PinError::MethodNotBound),
-                "with no attestation, no method is authenticated"
-            );
-        }
-        assert_eq!(report[0].filter, 0);
-        assert_eq!(report[1].filter, 1);
+    fn the_pin_report_requires_query_derived_scan_obligations() {
+        let query = "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= 18) }";
+        let m: ProofManifest = serde_json::from_value(serde_json::json!({
+            "type": "urn:sparq:zk:ProofManifest", "query": query,
+            "attributions": [], "entailment_regime": "simple",
+            "binding": {"mode": "challenge", "challenge": "0x2a"},
+            "sub_proofs": [{"inputs": int_inputs(FilterOp::Ge, 18, dual_leaf_v2::integer_lane_const(), true)}]
+        })).unwrap();
+        assert_eq!(value_lane_pin_report(&m, &KeySet::empty()),
+            Err(crate::value_obligation::ObligationError::EdgeMismatch));
     }
 
     #[test]

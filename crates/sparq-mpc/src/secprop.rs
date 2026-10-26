@@ -224,13 +224,17 @@ mod tests {
         // Turtle allows is seen.
         let g = sparq_core::Graph::load_str(annotations_n3(), "turtle").expect("graph parses");
         let pat: sparq_core::store::Pattern = [None, None, None];
-        let scan = g.store.scan(&pat);
+        let scan = g.store().scan(&pat);
         let triples: Vec<[Term; 3]> = scan
             .rows
             .iter()
             .map(|r| {
                 let t = scan.to_spo(r);
-                [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])]
+                [
+                    g.dict().term(t[0]),
+                    g.dict().term(t[1]),
+                    g.dict().term(t[2]),
+                ]
             })
             .collect();
         let has_property = format!("{}hasProperty", sparq_secprop_vocab::SEC_PROP_NS);

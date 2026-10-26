@@ -196,5 +196,5 @@ fn literal_write_graph_is_rejected_before_a_graph_is_created() {
             rejected
         );
     }
-    assert!(graph.named.is_empty());
+    assert!(graph.named().is_empty());
 }

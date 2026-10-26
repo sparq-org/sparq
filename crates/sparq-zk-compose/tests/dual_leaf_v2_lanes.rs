@@ -210,7 +210,7 @@ fn v2_boolean_witnesses_rebind_to_the_committed_operand_enc() {
 
         // The V2 lane targets its OWN compiled member.
         assert_eq!(p.id, &CircuitId::FilterValueDlBool);
-        assert_eq!(p.id.package(), "filter_value_dl_bool");
+        assert_eq!(p.id.package().unwrap(), "filter_value_dl_bool");
 
         // The public anchor is the committed dual leaf.
         assert_eq!(fr(p.operand_enc), committed.leaf());
@@ -490,11 +490,9 @@ fn non_canonical_and_non_boolean_literals_are_fail_closed_at_the_v2_builder() {
 }
 
 /// The dedicated member sits on the value lane of the fail-closed
-/// `(method × circuit)` legality matrix: the dual-leaf methods admit it, and a
+/// `(method × circuit)` legality matrix: V2 admits it, and a
 /// `string-canonical` graph — which committed no value handle at all — refuses it.
-/// The matrix is COARSE (per lane, not per scheme version); which VERSION's lane a
-/// proof is on is carried by the public `datatype_const`, which the separation
-/// tests above pin.
+/// V1 value members have an explicit refusal independently of method policy.
 #[test]
 fn the_v2_boolean_member_inherits_the_value_lane_dispatch_legality() {
     let id = CircuitId::FilterValueDlBool;
@@ -504,7 +502,7 @@ fn the_v2_boolean_member_inherits_the_value_lane_dispatch_legality() {
     );
     assert_eq!(
         resolve_circuit(CommitmentMethod::DualLeafV1, &id),
-        Ok(id.clone())
+        Err(DispatchError::LegacyV1ValueMember { circuit: id.package().unwrap() })
     );
     assert!(matches!(
         resolve_circuit(CommitmentMethod::StringCanonicalV1, &id),
@@ -1123,11 +1121,10 @@ fn the_sign_folded_members_cannot_express_an_out_of_band_handle() {
 // 8. The issuance boundary and the lane↔member pairing
 // =========================================================================
 
-/// A FRESH proof may not be routed under the superseded V1 method, while
-/// re-verifying an already-issued one still resolves — the two uses differ only
-/// by the `MethodUse` the caller writes down.
+/// Fresh V1 issuance and legacy V1 value members have separate named refusals.
+/// V2 remains the positive control for each value member.
 #[test]
-fn routing_a_fresh_proof_under_v1_is_refused_and_a_legacy_one_resolves() {
+fn fresh_and_legacy_v1_value_routing_have_named_refusals() {
     for id in [CircuitId::FilterValueDl, CircuitId::FilterValueDlBool] {
         let err = resolve_circuit_for_use(
             CommitmentMethod::DualLeafV1,
@@ -1140,14 +1137,14 @@ fn routing_a_fresh_proof_under_v1_is_refused_and_a_legacy_one_resolves() {
             DispatchError::MethodNotSelectableForIssuance { .. }
         ));
         assert!(err.to_string().contains(CommitmentMethod::DualLeafV1.scheme_iri()));
-        // The legacy use is the plain legality matrix, unchanged.
+        // Legacy use cannot admit a V1 value member.
         assert_eq!(
             resolve_circuit_for_use(
                 CommitmentMethod::DualLeafV1,
                 &id,
                 MethodUse::LegacyAlreadyIssued
             ),
-            resolve_circuit(CommitmentMethod::DualLeafV1, &id)
+            Err(DispatchError::LegacyV1ValueMember { circuit: id.package().unwrap() })
         );
         // And V2 is selectable for new issuance.
         assert_eq!(
@@ -1158,12 +1155,10 @@ fn routing_a_fresh_proof_under_v1_is_refused_and_a_legacy_one_resolves() {
 }
 
 /// A V1 boolean filter is built only by its LEGACY name, and the checked prove
-/// entry decides what it may be proved under: a `DualLeafV1` method for an
-/// already-issued graph and nothing else. Every other `(method, use)` combination
-/// is a typed refusal, each from a different check — so deleting any one of the
-/// four checks turns one row of this table green.
+/// entry refuses every method/use combination, including an already-issued V1
+/// graph. The ordinary V2 builder remains the honest control.
 #[test]
-fn a_v1_boolean_filter_needs_its_legacy_name_and_a_v1_legacy_prove() {
+fn a_v1_boolean_filter_has_a_legacy_builder_but_no_checked_prove() {
     let lit = typed("true", XSD_BOOLEAN);
     let built = build_filter_value_dl_boolean(&lit, FilterOp::Eq, true)
         .expect("the legacy name builds a V1 boolean proof");
@@ -1176,7 +1171,10 @@ fn a_v1_boolean_filter_needs_its_legacy_name_and_a_v1_legacy_prove() {
     assert_eq!(proof.lane(), ValueLane::Integer);
     let c = challenge_one();
     let at = |m, u| proof.checked_prover_toml(m, u, &c);
-    assert!(at(CommitmentMethod::DualLeafV1, MethodUse::LegacyAlreadyIssued).is_ok());
+    assert!(matches!(
+        at(CommitmentMethod::DualLeafV1, MethodUse::LegacyAlreadyIssued),
+        Err(DispatchError::LegacyV1ValueMember { .. })
+    ));
     assert!(matches!(
         at(CommitmentMethod::DualLeafV1, MethodUse::NewIssuance),
         Err(DispatchError::MethodNotSelectableForIssuance { .. })
@@ -1193,7 +1191,7 @@ fn a_v1_boolean_filter_needs_its_legacy_name_and_a_v1_legacy_prove() {
         at(CommitmentMethod::StringCanonicalV1, MethodUse::LegacyAlreadyIssued),
         Err(DispatchError::IllegalPair { .. })
     ));
-    // ...and the mirror: a V2 lane under the V1 method is a version mismatch.
+    // A V2 lane under the V1 method is refused at dispatch before version checks.
     let v2_proof = v2.lane_proof().unwrap();
     assert!(v2_proof
         .checked_prover_toml(CommitmentMethod::DualLeafV2, MethodUse::NewIssuance, &c)
@@ -1204,7 +1202,7 @@ fn a_v1_boolean_filter_needs_its_legacy_name_and_a_v1_legacy_prove() {
             MethodUse::LegacyAlreadyIssued,
             &c
         ),
-        Err(DispatchError::MethodLaneVersionMismatch { .. })
+        Err(DispatchError::LegacyV1ValueMember { .. })
     ));
 }
 
@@ -2000,13 +1998,13 @@ fn every_lane_constant_member_cell_is_decided_by_the_allow_list() {
                 MethodUse::LegacyAlreadyIssued,
             );
             if member == owner {
-                assert_eq!(legacy, Ok(()), "{} must ride {}", label, member.package());
+                assert_eq!(legacy, Ok(()), "{} must ride {}", label, member.package().unwrap());
             } else {
                 assert!(
                     matches!(legacy, Err(DispatchError::LaneMemberMismatch { .. })),
                     "{} on {} must be a lane/member refusal, got {:?}",
                     label,
-                    member.package(),
+                    member.package().unwrap(),
                     legacy
                 );
             }
@@ -2248,7 +2246,7 @@ fn check_every_encodable_decimal_scale_rides_the_decimal_member() {
                     Err(DispatchError::UnknownLaneConst { .. })
                 ),
                 "an unencodable scale must be unknown on {}",
-                member.package()
+                member.package().unwrap()
             );
         }
     }
@@ -2307,7 +2305,7 @@ fn an_unknown_constant_is_refused_on_every_member() {
                     matches!(r, Err(DispatchError::UnknownLaneConst { .. })),
                     "{} on {} must be an unknown-constant refusal, got {:?}",
                     label,
-                    member.package(),
+                    member.package().unwrap(),
                     r
                 );
             }

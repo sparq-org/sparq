@@ -564,7 +564,7 @@ fn stats_counts_only_the_documents_the_session_may_read() {
     let whole_pod: u64 = alice
         .store()
         .graph()
-        .named
+        .named()
         .iter()
         .filter(|(name, _)| !name.to_string().starts_with("<urn:sparq:"))
         .map(|(_, g)| g.len() as u64)
@@ -2025,7 +2025,7 @@ fn acp_a_container_with_a_graph_below_it_is_not_deleted() {
     let listed = s
         .store()
         .graph()
-        .named
+        .named()
         .iter()
         .any(|(n, _)| n.to_string() == "<https://pod.ex/docs/c/>");
     assert!(listed, "/docs/c/ is still stored");

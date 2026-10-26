@@ -426,7 +426,7 @@ fn new_owl_inconsistencies(
 /// / `differentFrom` / cardinality-0 clash detection lives in OWL, so the closure surfaces an
 /// *entailed* clash (e.g. via `subClassOf` to a disjoint class), not only asserted ones.
 fn closure_inconsistencies(data: &Graph, profile: Profile) -> Vec<String> {
-    let mut dict = data.dict.clone();
+    let mut dict = data.dict().clone();
     let mut triples: Vec<[Id; 3]> = data.iter_ids().collect();
     sparq_reason::materialize(profile, &mut dict, &mut triples);
     sparq_reason::inconsistencies(&dict, &triples)
@@ -436,7 +436,7 @@ fn closure_inconsistencies(data: &Graph, profile: Profile) -> Vec<String> {
 /// The ids are already interned in `data`'s dictionary (the caller checked), so the augmented
 /// graph reuses the same dictionary and simply adds the triple.
 fn augment(data: &Graph, subject: Id, predicate: Id, object: Id) -> Result<Graph, String> {
-    let dict: Dict = data.dict.clone();
+    let dict: Dict = data.dict().clone();
     let mut triples: Vec<[Id; 3]> = data.iter_ids().collect();
     triples.push([subject, predicate, object]);
     Ok(Graph::from_parts(dict, triples))
@@ -451,13 +451,13 @@ fn graph_has_id(graph: &Graph, id: Id) -> bool {
     // A round-trip through the dictionary: the id resolves to a term that re-interns to the same
     // id. `lookup` returns NO_ID for an absent term, and a fabricated out-of-range id resolves to
     // a term that does NOT re-look-up to the same id, so it is rejected.
-    let term = graph.dict.term(id);
-    graph.dict.lookup(&term) == id
+    let term = graph.dict().term(id);
+    graph.dict().lookup(&term) == id
 }
 
 /// Whether `graph` already asserts the exact triple `(s, p, o)`.
 fn graph_contains(graph: &Graph, s: Id, p: Id, o: Id) -> bool {
-    let scan = graph.store.scan(&[Some(s), Some(p), Some(o)]);
+    let scan = graph.store().scan(&[Some(s), Some(p), Some(o)]);
     scan.rows.iter().any(|row| {
         let [rs, rp, ro] = scan.to_spo(row);
         rs == s && rp == p && ro == o

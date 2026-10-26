@@ -1084,7 +1084,7 @@ impl DiskAnnIndex {
             .into_iter()
             .filter(|&(n, _)| n != id)
             .take(k)
-            .map(|(n, s)| (graph.dict.term(n), s))
+            .map(|(n, s)| (graph.dict().term(n), s))
             .collect()
     }
 

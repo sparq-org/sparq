@@ -71,10 +71,10 @@ fn out(s: &PodStore) -> String {
 fn wonly_len(s: &PodStore) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/wonly"));
     s.graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| *n == term)
-        .map(|(_, g)| g.store.scan(&[None, None, None]).rows.len())
+        .map(|(_, g)| g.store().scan(&[None, None, None]).rows.len())
         .unwrap_or(0)
 }
 
@@ -228,12 +228,12 @@ fn unreadable_graphs_are_never_evaluated() {
 /// Every named graph's contents, for comparing a store before and after an update.
 fn snapshot(s: &PodStore) -> std::collections::BTreeMap<String, String> {
     s.graph()
-        .named
+        .named()
         .iter()
         .filter(|(n, _)| !n.to_string().contains("urn:sparq:"))
         .map(|(n, g)| {
             let mut rows: Vec<String> = g
-                .store
+                .store()
                 .scan(&[None, None, None])
                 .rows
                 .iter()
@@ -433,11 +433,11 @@ fn in_memory_multi_operation_requests_are_all_or_nothing() {
     assert!(text.contains("multi") && text.contains("var"), "{text}");
 }
 
-/// An in-memory dataset holding one durable named graph counts as directory-backed: a
-/// multi-operation request with a variable target is refused there with the same error, and
-/// nothing is applied in memory or on disk.
+/// A durable graph never becomes a named graph of an in-memory dataset (its updates are
+/// logged in its own store, under its own lock): the dataset is left as it was, and so is the
+/// disk.
 #[test]
-fn a_durable_named_graph_keeps_the_single_operation_rule() {
+fn a_durable_graph_cannot_join_an_in_memory_dataset() {
     let dir = std::env::temp_dir().join(format!("sparq_update_scope_mixed_{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
     Graph::load_str("<urn:o> <urn:p> \"out\" .", "ntriples")
@@ -445,26 +445,22 @@ fn a_durable_named_graph_keeps_the_single_operation_rule() {
         .save(&dir)
         .expect("saves");
     let mut g = Graph::load_dataset(&small_dataset(), "nquads").expect("loads");
-    let out_graph = g
-        .named
+    let name = g
+        .named()
         .iter()
-        .position(|(n, _)| n.to_string() == "<https://pod.ex/out>")
-        .expect("out exists");
-    g.named[out_graph].1 = Graph::open(&dir).expect("opens");
-    let mut s = PodStore::new(g);
-    s.materialize_wac().expect("wac");
-    let before = snapshot(&s);
-    let e = s
-        .update_as(
-            &bob(),
-            "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
-             INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
-        )
-        .expect_err("a durable named graph makes the store directory-backed");
-    assert!(e.contains("directory-backed store"), "{e}");
-    assert_eq!(snapshot(&s), before, "memory changed");
-    drop(s);
-    let back = Graph::open(&dir).expect("reopens");
+        .find(|(n, _)| n.to_string() == "<https://pod.ex/out>")
+        .expect("out exists")
+        .0
+        .clone();
+    let before = g.named_graph(&name).expect("out").len();
+    let Err(e) = g.set_named(name.clone(), Graph::open(&dir).expect("opens")) else {
+        panic!("a durable graph joined an in-memory dataset");
+    };
+    assert!(e.contains("directory-backed"), "{e}");
+    assert!(!g.is_directory_backed());
+    assert_eq!(g.named_graph(&name).expect("out").len(), before, "memory changed");
+    let back = Graph::open(&dir).expect("reopens: the refused graph was dropped with its lock");
     assert_eq!(back.len(), 1, "disk changed");
+    drop(back);
     std::fs::remove_dir_all(&dir).ok();
 }

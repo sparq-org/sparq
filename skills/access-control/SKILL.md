@@ -30,6 +30,16 @@ document scopes distinct and identities stable when unrelated documents are put
 or deleted, even if named-graph positions change. The source documents retain
 their blank nodes; these IRIs appear in the reasoning input and authorization view.
 
+On a directory-backed dataset, authorization materialization creates `<urn:sparq:auth>`
+with `ensure_named` and logs only the inserted and deleted triples relative to the
+previous view. An unchanged view adds no WAL frames. Absent reserved slots are not dropped.
+The dataset retains its durable root and named-graph manifest across repeated rebuilds.
+`PodStore::new` removes reserved input graphs through durable drops when possible;
+if removal cannot complete, it serves a fork as before.
+`put_acl`/`delete_acl` and their ACP variants refuse directory-backed stores because
+slot replacement and rollback require an in-memory dataset. Use the session-checked
+SPARQL update methods for durable rule edits.
+
 ## What this is — and is NOT (read first)
 
 This is an **architecture / research-track** layer, not a deployable Solid server.
@@ -488,7 +498,14 @@ Materialize the authorization view from the access-control documents, then enfor
   does NOT authenticate — it takes an already-resolved session, exactly as this library does. The
   `decide` `scope` is the ACL-*document* discovery scope, while whether a grant within that ACL
   applies is the verdict the oracle computes.
-- `store.materialize_odrl_permission(&Policy, &Request) -> BridgeOutcome` — **opt-in**
+ODRL materialization and refresh methods (including free bridge functions and
+`BridgeLedger::refresh`) return `Result<_, String>`. Propagate storage failures with
+`?`: on a failed derived-view write, `PodStore` disables authorization until a static
+materialization succeeds. Trust admission methods return view-write failures through
+their existing `Result` and disable the view in the same way. Policy refusals remain
+successful results carrying `BridgeOutcome.refused`; they are distinct from I/O errors.
+
+- `store.materialize_odrl_permission(&Policy, &Request) -> Result<BridgeOutcome, String>` — **opt-in**
   (`odrl-bridge` feature, OFF by default; sq-h3uk): run the `sparq-policy` ODRL
   evaluator and, on a *definite Permit*, materialize the equivalent `principal auth:<mode>
   graph` grant into the auth view, then reindex — so this same enforcement path applies it.
@@ -505,13 +522,13 @@ Materialize the authorization view from the access-control documents, then enfor
 - **Loud refusal of an unimplementable `odrl:conflict` strategy** (sq-ihqbl): the bridge
   implements only `odrl:conflict odrl:prohibit` (deny-overrides). A policy declaring `odrl:perm`,
   `odrl:invalid` **with** a detected conflict, or an unknown strategy IRI is **REFUSED** — every
-  `materialize_odrl_*` entry materializes nothing and returns `BridgeOutcome { refused: true, .. }`
+  `materialize_odrl_*` entry materializes nothing and returns `Ok(BridgeOutcome { refused: true, .. })`
   with a `REFUSED (odrl:conflict): …` reason, rather than silently coercing it into deny-overrides.
   An unset `odrl:conflict` operates under `prohibit` (not refused) — sparq's own fail-closed default, a
   **deliberate divergence** from the ODRL 2.2 IM default of `invalid`, not a spec default the bridge is
   following (the ODRL Formal Semantics CG report supplies no conflict default either — its
   conflict-resolution machinery is explicitly pending). See the `usage-control-policy` skill.
-- `store.materialize_odrl_permission_conditional(&Policy, &Request) -> BridgeOutcome` —
+- `store.materialize_odrl_permission_conditional(&Policy, &Request) -> Result<BridgeOutcome, String>` —
   **opt-in** (`odrl-bridge`): the same one-shot grant as `materialize_odrl_permission`. It
   no longer persists recipient/assignee/`dateTime` constraints as re-checked
   `auth:ConditionalGrant` heads, which could grant a session `decide` denies; a
@@ -922,6 +939,16 @@ against the aggregate `max_input_bytes` before it is made — so the enumeration
 pod costs at most the input budget, whatever shape its names have. Past any of the three the
 whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
 `InputBytes` for the aggregate), fail-closed, with nothing installed.
+
+The store's provenance pruning owns container strings and uses the same three caps, with
+its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`
+and update provenance staging) instead borrows names from the before-store or edit events,
+and borrows container prefixes as subslices. Only **added** names face the per-name length
+and depth caps, before their chains are walked. Replay charges no aggregate input bytes;
+materialization charges the resulting store once. **Removals and clears are never refused**
+by replay, including stored names beyond the current caps. A pod can therefore remove an
+over-cap name after lowering its budget. A refused addition leaves the installed view in
+place and grants nothing to the refused resource.
 
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
 a bridged ODRL policy's five strata could each spend the full allowance. Each closure now

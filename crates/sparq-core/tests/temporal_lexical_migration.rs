@@ -42,7 +42,7 @@ fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
 fn dump(graph: &Graph) -> Vec<[String; 3]> {
     let mut rows: Vec<_> = graph
         .iter_ids()
-        .map(|row| row.map(|id| graph.dict.term(id).to_string()))
+        .map(|row| row.map(|id| graph.dict().term(id).to_string()))
         .collect();
     rows.sort();
     rows
@@ -93,7 +93,7 @@ fn stale_temporal_v2_cells_never_override_strict_lexical_validity() {
             for (index, id) in bad_ids.into_iter().enumerate() {
                 let offset = (id as usize - 1) * 8;
                 stale[offset..offset + 8].copy_from_slice(&1_709_164_800_f64.to_le_bytes());
-                stale[graph.dict.len() * 8 + id as usize - 1] = if index == 2 {
+                stale[graph.dict().len() * 8 + id as usize - 1] = if index == 2 {
                     4
                 } else if index == 1 {
                     1

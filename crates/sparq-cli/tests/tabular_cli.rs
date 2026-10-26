@@ -422,4 +422,22 @@ fn errors_are_loud_and_typed() {
     let (code, _, err) = run3(&["tabular", s(&csv), "--mapping", s(&sql_map), "--out", s(&dir.join("z.nt"))]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("rr:sqlQuery"), "{err}");
+
+    // A failed run (the ragged file failed while streaming) leaves no unfinished output.
+    let left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains("sparq-tmp") || n == "x.nt")
+        .collect();
+    assert!(left.is_empty(), "a failed run left {left:?}");
+
+    // An output path inside a graph store (or a name one reserves) is a usage error (exit 2),
+    // refused before any input is read.
+    let store = dir.join("store");
+    let (code, _, err) = run3(&["save", s(&write(&dir, "d.nt", "<http://e/s> <http://e/p> <http://e/o> .\n")), "ntriples", s(&store)]);
+    assert_eq!(code, 0, "{err}");
+    for out in [store.join("out.nt"), dir.join("store.lock")] {
+        let (code, _, err) = run3(&["tabular", s(&csv), "--out", s(&out)]);
+        assert_eq!(code, 2, "{}: {err}", out.display());
+    }
 }

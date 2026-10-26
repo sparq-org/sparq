@@ -180,7 +180,9 @@ hand-typed that could drift:
 - The **legality** axis mirrors the fail-closed dispatch rule
   (`crates/sparq-zk-compose/src/dispatch.rs`, `resolve_circuit`, sq-cfmv): value-lane
   members (`filter_value_dl_*`) are legal only against a method that committed a
-  value handle (`dual-leaf` / the `value-only` research dial); string-lane members
+  value handle (`dual-leaf-v2` / the `value-only` research dial). V1 value members
+  return `LegacyV1ValueMember`, including legacy use. The value-lane gate stays
+  CLOSED. String-lane members
   (scan, join, path, revoke, issuer, holder, the blake3-token `filter_*` lanes) are
   legal against `string-canonical` / `dual-leaf` but not `value-only`.
   [OPUS-5.5] Successful-result members (`result_v1_*` through `result_v4_*`) are

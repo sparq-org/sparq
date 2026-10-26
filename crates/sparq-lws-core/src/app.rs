@@ -12,8 +12,8 @@
 //! ## Overload protection (admission control + timeout) — the layer ORDER is security-critical
 //! [`build_router_with_overload`] wraps the application routes with two overload layers (the
 //! [`crate::overload`] backpressure layer):
-//! - the **admission-control** middleware ([`crate::overload::admission_middleware`]) is the
-//!   **OUTERMOST** layer — it sheds excess load (503 + jittered `Retry-After`) BEFORE auth/WAC/storage
+//! - the **admission-control** middleware ([`crate::overload::admission_middleware`]) runs
+//!   **outside auth** — it sheds excess load (503 + jittered `Retry-After`) BEFORE auth/WAC/storage
 //!   ever run, so a shed request can never bypass authorization (it gets strictly LESS than it would
 //!   otherwise — a 503), and the expensive DPoP crypto is never spent on a request about to be
 //!   rejected; and
@@ -67,7 +67,7 @@ pub struct OverloadConfig {
     /// The per-request timeout (504 on expiry). `None` ⇒ no timeout layer.
     pub request_timeout: Option<Duration>,
     /// The pre-crypto per-IP rate limiter (429 before auth/crypto on a per-source flood). `None` ⇒ no
-    /// rate-limit layer (the `off` sentinel). When present it is the OUTERMOST application layer — see
+    /// rate-limit layer (the `off` sentinel). When present it is the outermost rejecting layer — see
     /// [`build_router_with_overload`].
     pub rate_limiter: Option<RateLimiter>,
     /// The maximum request-body size in bytes (a body over this ⇒ 413). An explicit, audited,
@@ -159,7 +159,29 @@ where
     // relying on axum's implicit default (which a dependency bump could silently change). The binary's
     // [`build_router_with_overload`] applies the CONFIGURABLE value instead. Health routes are merged
     // OUTSIDE the layer (they carry no body).
-    build_app_routes(state)
+    build_app_routes(state, crate::describe::ServiceCatalog::default())
+        .layer(crate::body_limit::layer(
+            crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+        ))
+        .merge(health_routes())
+}
+
+/// Build the Solid router with entries for additional routes mounted by the caller.
+///
+/// The caller must mount every endpoint registered in `catalog` on the returned router.
+///
+/// # Panics
+/// Panics if the static storage description cannot be rendered.
+pub fn build_router_with_catalog<J, R, S>(
+    state: AppState<J, R, S>,
+    catalog: crate::describe::ServiceCatalog,
+) -> Router
+where
+    J: JwksProvider + Send + Sync + 'static,
+    R: ReplayStore + Send + Sync + 'static,
+    S: Store + 'static,
+{
+    build_app_routes(state, catalog)
         .layer(crate::body_limit::layer(
             crate::body_limit::DEFAULT_MAX_BODY_BYTES,
         ))
@@ -167,7 +189,7 @@ where
 }
 
 /// Build the router WITH overload protection (the binary's path): admission control (load shedding)
-/// as the OUTERMOST layer + an optional request timeout just inside it, wrapping the application
+/// outside auth + an optional request timeout just inside it, wrapping the application
 /// routes — but NOT the health routes, which are merged OUTSIDE the layers so a load balancer's
 /// readiness probe is never shed/timed-out. See the module's "Overload protection" note for why the
 /// layer order is security-critical (a shed request 503s before auth/WAC/storage — never a bypass).
@@ -180,13 +202,18 @@ where
     R: ReplayStore + Send + Sync + 'static,
     S: Store + 'static,
 {
-    with_overload_layers(build_app_routes(state), overload)
+    with_overload_layers(
+        build_app_routes(state, crate::describe::ServiceCatalog::default()),
+        overload,
+    )
 }
 
 /// Wrap application routes in the overload stack — body ceiling, request timeout, admission
 /// control, and the pre-crypto per-IP rate limiter, in that order from the inside out — and merge
 /// the health routes OUTSIDE it. Shared by the Solid router ([`build_router_with_overload`]) and the
 /// Linked Web Storage router, so both protocol surfaces carry the same DoS protections.
+/// A decorate-only CORS layer outside the stack makes rejections readable by browser clients;
+/// preflight handling stays inside the stack and remains subject to admission and rate limits.
 ///
 /// The body-limit layer sets the `DefaultBodyLimit` that axum's extractors read; a handler that
 /// reads the body itself (the LWS dispatcher) must apply `overload.body_limit_bytes` on its own.
@@ -221,8 +248,8 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
         admission_middleware,
     ));
 
-    // OUTERMOST: the pre-crypto per-IP rate limiter. Applied LAST, so (axum applies layers bottom-up)
-    // it is the OUTERMOST application layer — it runs FIRST on every request, BEFORE admission control,
+    // OUTERMOST REJECTING LAYER: the pre-crypto per-IP rate limiter. Applied after admission, so
+    // it is outside the other rejecting layers and runs before admission control,
     // auth, WAC, and the expensive DPoP crypto. A per-source flood gets a cheap 429 and NEVER reaches
     // the verifier, so attacker traffic cannot make every bogus proof pay the ES256 verify cost.
     //
@@ -238,6 +265,11 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
         ));
     }
 
+    // Response decoration must surround every rejecting layer, but must never answer a preflight.
+    app = app.layer(axum::middleware::from_fn(
+        crate::ldp::cors::cors_response_middleware,
+    ));
+
     // Health routes are OUTSIDE the overload + rate-limit layers (merged last) — never shed, timed-out,
     // or rate-limited.
     app.merge(health_routes())
@@ -245,7 +277,10 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
 
 /// The application routes (LDP + notifications), WITHOUT the overload layers or the health routes —
 /// the shared core of [`build_router`] and [`build_router_with_overload`].
-fn build_app_routes<J, R, S>(state: AppState<J, R, S>) -> Router
+fn build_app_routes<J, R, S>(
+    state: AppState<J, R, S>,
+    mut catalog: crate::describe::ServiceCatalog,
+) -> Router
 where
     J: JwksProvider + Send + Sync + 'static,
     R: ReplayStore + Send + Sync + 'static,
@@ -265,7 +300,24 @@ where
     // registered via `…/receive` is on the same registry the LDP emit path fans to), the base URL,
     // AND the store + parsed-ACL cache — the last of which is what lets the subscribe/receive seams
     // run the SAME per-resource WAC check as a GET of the topic.
-    let notify_state = Arc::new(NotifyState::new(ldp.clone()));
+    use crate::describe::{capability, entry, SSD};
+    let base = ldp.base_url().trim_end_matches('/');
+    let storage = format!("{base}/");
+    catalog.service(entry("storage-root", "StorageRoot", storage));
+    catalog.service(entry(
+        "storage-description",
+        "StorageDescription",
+        format!("{base}{WELL_KNOWN_SOLID_PATH}"),
+    ));
+    catalog.capability(capability(
+        &format!("{SSD}AccessControl"),
+        serde_json::json!({
+            "model": {"@id": format!("{SSD}WAC")}
+        }),
+    ));
+    catalog.capability(capability(&format!("{SSD}PatchSupport"), serde_json::json!({
+        "format": [{"source": "text/turtle", "patchType": crate::ldp::handler::ACCEPT_PATCH_TYPES.split(',').map(str::trim).collect::<Vec<_>>()}]
+    })));
 
     // The full LDP method set, shared by the wildcard `/{*path}` route AND the explicit `/` (root)
     // route. The `/{*path}` wildcard does NOT match the empty path, so the storage root needs its own
@@ -316,10 +368,70 @@ where
         ))
         // OUTERMOST: CORS (preflight short-circuit + the Access-Control-* headers on every response).
         .layer(axum::middleware::from_fn(cors_middleware));
-    #[cfg(feature = "sparql-endpoint")]
     let protected = protected.with_state(ldp.clone());
-    #[cfg(not(feature = "sparql-endpoint"))]
-    let protected = protected.with_state(ldp);
+
+    let mut router = Router::new();
+
+    // sq-r1ei8: the query surface is a distinct protected route so
+    // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.
+    // It still uses the identical authentication and CORS layers, and its
+    // handler performs WAC independently for every assembled resource.
+    #[cfg(feature = "sparql-endpoint")]
+    {
+        let mut query = entry(
+            "sparql",
+            &format!("{SSD}SparqlQueryService"),
+            format!("{base}/sparql"),
+        );
+        query.extras.insert(
+            "conformsTo".into(),
+            serde_json::json!([
+                "https://jeswr.github.io/solid-specs/specs/access-controlled-query/"
+            ]),
+        );
+        catalog.service(query);
+        let sparql = Router::new()
+            .route(
+                "/sparql",
+                get(crate::sparql_endpoint::get_handler::<S>)
+                    .post(crate::sparql_endpoint::post_handler::<S>),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                auth.clone(),
+                auth_middleware::<J, R>,
+            ))
+            .layer(axum::middleware::from_fn(cors_middleware))
+            .with_state(ldp.clone());
+        router = router.merge(sparql);
+    }
+
+    let mut notification = entry(
+        "notifications",
+        &format!("{SSD}SolidNotificationService"),
+        format!("{base}{SUBSCRIPTION_PATH}"),
+    );
+    notification.extras.insert(
+        format!("{}channelType", crate::describe::SSD),
+        serde_json::json!({"@id": crate::notifications::ws::WEBSOCKET_CHANNEL_2023_TYPE}),
+    );
+    catalog.service(notification);
+    let endpoint = catalog
+        .services()
+        .iter()
+        .find(|service| service.type_term == format!("{SSD}SparqlQueryService"))
+        .map(|service| {
+            axum::http::HeaderValue::from_str(&format!(
+                "<{}>; rel=\"{}\"",
+                service.endpoint,
+                crate::describe::SPARQL_ENDPOINT
+            ))
+            .expect("valid mounted endpoint")
+        });
+    let protected = protected.layer(axum::middleware::from_fn_with_state(
+        endpoint,
+        crate::describe::root_discovery,
+    ));
+    let notify_state = Arc::new(NotifyState::with_catalog(ldp.clone(), catalog));
 
     // The AUTH-GATED subscribe route: behind the SAME DPoP middleware so the handler sees a
     // VerifiedToken (fail-closed on anonymous).
@@ -338,28 +450,7 @@ where
         .route(WELL_KNOWN_SOLID_PATH, get(storage_description_handler::<S>))
         .with_state(notify_state);
 
-    let mut router = Router::new().merge(subscribe).merge(public_notify);
-
-    // sq-r1ei8: the query surface is a distinct protected route so
-    // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.
-    // It still uses the identical authentication and CORS layers, and its
-    // handler performs WAC independently for every assembled resource.
-    #[cfg(feature = "sparql-endpoint")]
-    {
-        let sparql = Router::new()
-            .route(
-                "/sparql",
-                get(crate::sparql_endpoint::get_handler::<S>)
-                    .post(crate::sparql_endpoint::post_handler::<S>),
-            )
-            .layer(axum::middleware::from_fn_with_state(
-                auth.clone(),
-                auth_middleware::<J, R>,
-            ))
-            .layer(axum::middleware::from_fn(cors_middleware))
-            .with_state(ldp.clone());
-        router = router.merge(sparql);
-    }
+    router = router.merge(subscribe).merge(public_notify);
 
     // PoP Tier 2 (DPoP-SK, `SOLID_SERVER_DPOP_SK`) — the session establishment/termination
     // endpoint, mounted ONLY when the tier is enabled so a flag-off build's route table (and the

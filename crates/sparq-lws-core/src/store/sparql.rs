@@ -655,6 +655,25 @@ pub fn update_delete_resource(resource: &str) -> Result<String, BuildError> {
     Ok(format!("DROP SILENT GRAPH {g}", g = iri(resource)?))
 }
 
+/// Build a resource deletion and parent detach for one captured transaction.
+///
+/// The embedded client captures the entire request and commits its effects once.
+///
+/// # Errors
+///
+/// Rejects invalid resource or parent IRIs before any mutation.
+#[cfg(any(all(feature = "embedded-sparq", not(target_arch = "wasm32")), test))]
+pub(super) fn update_delete_resource_with_parent(
+    resource: &str,
+    parent: Option<&str>,
+) -> Result<String, BuildError> {
+    let delete = update_delete_resource(resource)?;
+    match parent {
+        Some(parent) => Ok(format!("{}; {delete}", update_remove_child(parent, resource)?)),
+        None => Ok(delete),
+    }
+}
+
 /// UPDATE: ATOMICALLY delete a container's whole graph ONLY IF it exists AND is empty (no
 /// `ldp:contains` member), AND detach it from its parent's containment, AND write a per-operation
 /// **delete marker** — ALL in ONE operation so the caller can confirm the outcome race-free.
@@ -930,6 +949,28 @@ fn validate_lang(lang: &str) -> Result<&str, BuildError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_with_parent_validates_both_iris_and_reuses_the_delete_builders() {
+        let child = "https://pod.example/c/item";
+        let parent = "https://pod.example/c/";
+        assert_eq!(
+            update_delete_resource_with_parent(child, None).unwrap(),
+            update_delete_resource(child).unwrap()
+        );
+        assert_eq!(
+            update_delete_resource_with_parent(child, Some(parent)).unwrap(),
+            format!("{}; {}", update_remove_child(parent, child).unwrap(), update_delete_resource(child).unwrap())
+        );
+        assert_eq!(
+            update_delete_resource_with_parent("bad>iri", None),
+            Err(BuildError::InvalidIri)
+        );
+        assert_eq!(
+            update_delete_resource_with_parent(child, Some("bad>iri")),
+            Err(BuildError::InvalidIri)
+        );
+    }
 
     #[test]
     fn iri_rejects_injection_delimiters() {

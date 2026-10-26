@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
+  open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
+  `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
+  build or compaction of the same store fails at once (`WouldBlock`) instead of corrupting it;
+  `Graph::open_read_only` opens share the lock with each other. A store whose parent directory
+  is not writable (a mount root, say) still opens, writable or read-only, held by its inside
+  lock alone; a compaction, vacuum or restore there (they rename the directory) is refused with
+  an error naming the parent. Compaction and restore swaps stage the new base under a recorded
+  staging name, recover an interrupted swap at once, and roll back on a failure; a swap that
+  can neither complete nor roll back freezes the graph: `Graph::is_frozen` reports it, every
+  write is refused, and the embedded LWS store and the Python `Graph` (`frozen` property) report
+  it as an error instead of serving it. New: `Graph::open_read_only`, `Graph::restore_in_place`,
+  `Graph::is_backed_by`, `Graph::check_writable`, `Graph::is_frozen`, `Graph::into_dict`, and
+  `dir_lock::{store_root, is_inside_store, is_reserved_store_path}`.
+- **sparq-cli:** output files (`--out`, `reason`, tabular conversions) are written under a fresh
+  name beside the target and renamed into place; an output path that names a store, a path
+  inside one or a reserved name (lock files, in any letter case) is refused (exit 2), and a
+  symbolic link is followed to the file it names, which is the file replaced.
+- **sparq-zk-compose (`dual-leaf`):** complete dispatch coverage for the V2 component-witnessed
+  scan `(1,16,4)` and join `(16,16)` members with dedicated `CircuitId` variants.
+  V2 ids are legal only under `DualLeafV2`. Checked constructors, serde and package-name
+  parsing refuse uncompiled V2 shapes. Canonical VK selection uses the dedicated packages.
+  Extended-fragment and value-FILTER refusals remain closed. Experimental and unaudited.
+
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
   `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
@@ -156,6 +180,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-core (BREAKING API):** `Graph::dict` and `Graph::store` are no longer public fields;
+  read them with `Graph::dict()` / `Graph::store()`, and take the dictionary out with
+  `Graph::into_dict()` (rebuild with `Graph::from_parts`). These openers and writers of a
+  store's files became crate-internal, so a store's files are reachable only through the
+  locked `Graph`: `Dict::{save, save_mmap, open_mmap, fork}`, `TripleStore::{open, save,
+  save_compressed, save_pred_stats, fork}`, `compress::CompressedPermWriter::{create, create_with,
+  finish}`, and `extsort::{spill_run, kway_merge, kway_merge_compressed, external_sort,
+  external_sort_compressed, map_perm}`. Migration: open, save and build through `Graph`
+  (`Graph::open`, `Graph::save`, `Graph::build_external*`), fork through `Graph::fork`, and restore an
+  open store with `Graph::restore_in_place` (`Graph::restore_into_durable` refuses a directory a
+  graph is open from).
+- **Breaking — sparq-zk-compose:** `CircuitId::package()` now returns
+  `Result<String, CircuitIdError>`. `ProofManifest::to_json()` and
+  `FragmentManifest::to_json()` now return `Result<String, serde_json::Error>`;
+  hand-built uncompiled V2 ids return an error instead of panicking.
+  With `dual-leaf`, opaque scan/join ids are refused under `DualLeafV2`;
+  use the dedicated V2 component-witnessed ids instead.
+- **sparq-zk-compose (`dual-leaf`):** restore the explicit `admit_unbound()` downgrade:
+  all-Unbound sub-proofs resolve as `StringCanonicalV1`, matching pattern encoding.
+  Opaque scans/joins remain legal; mixed Unbound + Bound sub-proofs remain refused.
+  Under `admit_unbound` the commitment is ASSUMED string-canonical; nothing checks it.
+  The downgrade is sound only if the issuer signed unbound messages over
+  string-canonical commitments alone. A dual-leaf commitment signed unbound cannot
+  use the V2 members, and its opaque presentations are not sound.
+  Orphan sub-proofs still require method-independent members.
+
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
   that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
@@ -166,7 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `commit_a`/`commit_b`, and a `Filter*` member inherits the method of the source scan of every
   validated binding edge that binds it; all of them must agree. The declared id is resolved through the
   `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
-  `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
+  `dual-leaf`) and only the resolved member is used. Five new fail-closed refusals:
   `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
   `CheckError::SubProofMethodUnresolved` (no single method could be derived — differing methods
   across bound commitments, a mixture of attested and unattested ones, an unparseable bound
@@ -175,14 +225,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ABSENT from the authenticated map, so nothing was authenticated for it at all),
   `CheckError::AuxiliaryMemberIdInSubProof` (a manifest sub-proof declares an id that belongs to
   one of the auxiliary bb roles below) and `CheckError::MemberNotForFixedRole`. Absence from the
-  authenticated map is NOT read as `Unbound`: it is refused by name. A sub-proof all of whose
-  bound commitments authenticated no method has no method to resolve against, so its declared
-  member is NOT echoed back either — it is held to the same method-independence rule as a
-  sub-proof bound to no commitment at all (legal under every admissible method, where
-  `MethodPolicy::widest_admissible()` names that set), which refuses a value-lane member and
-  admits a string-lane one. Under the default `MethodPolicy` an unbound attestation is refused
-  upstream, so that case is reachable only under the written-down `admit_unbound()` downgrade. A
-  sub-proof bound to a commitment covered only by a hidden-issuer
+  authenticated map is NOT read as `Unbound`: it is refused by name. Under the explicit
+  `admit_unbound()` downgrade, a sub-proof all of whose
+  bound commitments authenticate as Unbound resolves as `StringCanonicalV1`:
+  opaque scan/join members remain legal. Under `admit_unbound` the commitment is
+  ASSUMED string-canonical; nothing checks it. The downgrade is sound only if the
+  issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
+  commitment signed unbound cannot use the V2 members, and its opaque presentations
+  are not sound. Under the default policy,
+  unbound attestations are refused upstream. Orphan sub-proofs alone require
+  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
@@ -199,7 +251,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
   decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
   `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
-  state. Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
+  state. Of the five refusals above, the first four compile only with `dual-leaf`;
+  `CheckError::MemberNotForFixedRole` is UNCONDITIONAL, as are `FixedMemberRole` and the
+  per-role `fixed_member` selection path that raises it, which run in every feature state.
+  Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
   achieved.
 
 - **sparq-zk-compose:** the hidden-join gate's ENDPOINT half now runs in BOTH stage-1 regimes.
@@ -214,11 +269,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names commitments other than its endpoint scans' is now refused
   (`CheckError::JoinCommitmentMismatch`) instead of standing as a prover-declared linkage, and a
   hidden join one of whose endpoints is a bounded-path (`PathReach`) sub-proof rather than a
-  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's verdicts
-  are unchanged — it already ran the whole gate. In BOTH regimes and in EVERY feature state, a
+  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's ENDPOINT
+  verdicts are unchanged — it already ran that half of the gate — but see the coverage rule
+  below, which is new in both regimes. In BOTH regimes and in EVERY feature state, a
   `JoinEq` sub-proof that no `JoinEdge` names is now refused
   (`CheckError::JoinProofNotBoundToAnEdge`): its `commit_a`/`commit_b` were free of the manifest's
   declared linkage, and no later gate read them. Adds refusals and no acceptance.
+
+- **sparq-zk-compose (opt-in `extended-fragment`):** the extended-fragment verifier now REFUSES
+  the query/presentation shapes it does not discharge, instead of accepting them.
+  (1) A query one of whose re-derived branches carries a `FILTER` is refused by the routing gate
+  (`FragmentDispatchError::FilterNotDischarged { branch, filters }`): the flat FILTER obligation
+  lives in `bind_query_correctness`, which this regime skips, and nothing on this path reads
+  `FragmentBranch::filters`, so an accepted presentation would have answered the query as though
+  the FILTER were absent. Checked over EVERY branch, attributed or not; the branch-local typed
+  FILTER obligation that would lift it does not exist yet.
+  (2) A `VALUES` cell now constrains its variable whether or not that variable is PROJECTED:
+  `bind_fragment_join_coherence` merges every selected non-`UNDEF` cell — re-encoded by the
+  verifier from the query text, never a prover encoding — into the branch coherence map before
+  the atoms are read, so the scan slot or `PathReach` endpoint carrying the variable must equal
+  it. `bind_fragment_solution` still binds only the PROJECTED cells, having no disclosed term for
+  the rest; before the merge an unprojected `VALUES` variable entered no map at all. Two blocks
+  pinning one variable to disagreeing cells is `FragmentJoinError::ValuesCellIncoherent`, a cell
+  the verifier cannot re-encode is `ValuesCellUnencodable`, and an atom disagreeing with a seeded
+  cell is `Incoherent` against that atom.
+  (3) The branch coherence maps refuse a DISAGREEING duplicate rather than overwriting it, so a
+  variable occurring twice in ONE atom is compared: a path whose subject and object are the same
+  variable (`ASK { ?x <p>+ ?x }`) must carry `src_enc` equal to `dst_enc`, and the two slots of a
+  self-joining BGP atom must agree in the selected row.
+  (4) `verify_fragment_manifest` refuses a presentation carrying NO `BranchWitness`
+  (`CheckError::FragmentNoBranchWitness`): every branch-local layer iterates the witnesses, so an
+  empty vector left all four of them with nothing to check and the accept would have rested on the
+  crypto stage alone. `dispatch_fragment`'s per-branch ROUTING stays a deliberate no-op over such a
+  manifest, since it is also used over stage-1-style presentations; its query-hygiene, FILTER
+  and id checks still run.
+  (5) A disclosed binding must be BOUND BY THE ATTRIBUTED BRANCH, projected, and unique.
+  `bind_fragment_solution` and `bind_fragment_scans` build the re-encoded disclosed map through one
+  shared admissibility rule: a branch binds the variables of its pattern `SlotPattern::Var` slots,
+  its `path_reach` subject/object positions, and the `VALUES` columns whose SELECTED row carries a
+  non-`UNDEF` cell. A disclosed variable outside that set is refused
+  (`FragmentSolutionError::SolutionVariableNotBoundByBranch`) — previously a solution could carry a
+  variable the attributed branch binds nowhere (the other arm of a `UNION`, a branch with no atoms,
+  or a `VALUES` column selected at an `UNDEF` row) and every obligation over it was simply absent.
+  A variable the query does not project is refused (`SolutionVariableNotProjected`), and a second
+  binding of one variable is refused (`DuplicateSolutionVariable`) instead of silently replacing the
+  first, which went unchecked.
+  (6) A `VALUES` cell is encoded under the commitment method the branch's scans AUTHENTICATE:
+  `bind_fragment_join_coherence` now takes `&AuthenticatedMethods`, resolves one pattern-constant
+  encoder across the branch's scans and encodes each seeded cell with `encode_pattern_slot` under
+  it, so the cell is comparable to the slots and endpoints it constrains under the authenticated
+  method rather than under string-canonical always. A branch whose scans resolve no single method,
+  or disagree, is refused (`FragmentJoinError::ValuesMethodUnresolved`). This is a breaking change
+  to that function's signature; it is `pub` behind the opt-in feature and has no callers outside
+  the crate's own verifier path.
+  (7) The lane has ONE encoding policy. `verify_fragment_manifest` reads the authenticated-method
+  map BEFORE the first layer that re-encodes a disclosed term and refuses a presentation referring
+  to a commitment that authenticated any method other than
+  `sparq_zk::commit::CommitmentMethod::StringCanonicalV1`
+  (`CheckError::FragmentUnsupportedCommitmentMethod`; a method-UNATTESTED commitment is admitted,
+  its pattern encoder being the same one). The layers re-encode a disclosed term with `encode_term`
+  — string-canonical — and compare the result against disclosed scan-row slots and `PathReach`
+  endpoint encodings, which is coherent only under that method; under another, an HONEST
+  presentation would be refused for an encoding mismatch and nothing would be admitted, so the
+  combination is refused by name instead. This is a bound on the lane, not a property established
+  about any proof, and one coherent policy across all four surfaces is the deferred follow-up. Two
+  consequences of reading the map earlier: an unattested or revoked commitment is now reported
+  before the disclosed-solution layer rather than after it (both refusals, same accept set), and
+  `bind_fragment_join_coherence` stays method-aware for the `VALUES` seed even though the lane
+  admits only the one method.
+  All of these ADD refusals and open nothing. The feature is OFF by default, so no default-build
+  verdict changes with them, and no new dependency is added. Research grade, NOT externally audited
+  (`sq-qhy4`). No soundness or privacy claim.
+  <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
+
+- **sparq-zk-compose (extended-fragment):** a scan attributed to a branch witness must disclose
+  at least one ACTIVE row (`FragmentScanError::NoActiveRow`). The scan circuit admits an empty
+  result, and a fully ground pattern binds no variable, so the ground-pattern shortcut in
+  `bind_fragment_scans` previously accepted a branch over a triple the graph lacks (for example
+  `ASK { <a> <p> <b> }`, or a `VALUES`-supplied answer beside a ground pattern). The check now runs
+  ahead of that shortcut for every attributed scan. A standalone empty scan proof is unaffected.
+  Adds a refusal and opens nothing.
+
+- **sparq-zk:** every query extractor refuses a solution SLICE (`LIMIT` and/or `OFFSET`) at any
+  depth, under one shared reason, instead of descending through it: `verify::fragment_query`'s
+  top-level modifier peel and its subquery arm, and the flat `verify::fragment_patterns`,
+  `verify::fragment_filters` and `verify::fragment_expr_trees` walkers. A proof of this design
+  states that a disclosed solution is a MEMBER of the query's answer, and a slice makes that
+  unprovable from the disclosed data in both directions: a positive `OFFSET` can empty a
+  non-empty answer (`SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has no solutions at all),
+  `LIMIT 0` always empties it, and a `LIMIT` smaller than the answer selects an
+  implementation-nondeterministic subset. Peeling the modifier off therefore proved membership in
+  the UNSLICED answer and accepted a solution the query text excludes. `DISTINCT` / `REDUCED` are
+  still peeled. `sparq_zk_compose::planner` already refused to PLAN a sliced query, so no honest
+  consumer in the estate asks for one. Adds refusals and opens nothing.
+
+- **sparq-zk-compose:** stage 2g′ (`bind_join_endpoints`) collects the covered join-proof indices
+  in the SAME pass that validates the declared edges, so the coverage rule is a set lookup per
+  sub-proof rather than a re-walk of `join_edges` for each one, and the `JoinEq` arm of the
+  per-sub-proof member resolution reads a per-manifest index of validated endpoints
+  (`JoinEndpointIndex`, built once) rather than re-validating the matching edges for every
+  sub-proof it is asked about. Both vectors are prover-controlled, so neither product is a cost a
+  presentation can choose any more. No verdict changes: the same edges are validated and the same
+  endpoints are read.
 
 - **sparq-lws-core (notifications):** subscription expiry is decided against a durable
   high-water time stored in the index, so a restart with the clock stepped back does not revive
@@ -232,11 +384,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
   which, while the state is built, removes every subscription with an `expires` and then stores
   the clock.
-  An `LwsState` now holds a lease per store handle (shared by every clone of its store and by
-  any `Tracked` wrapper of one) while it lives: a second `LwsState` built over a clone or a
-  wrapper of a running one's store is refused, so a state that replaces another must be built
-  after the old one is dropped. A store opened again separately over the same backend has a lease
-  of its own. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
+  An `LwsState` now holds a lease per store handle (shared by every clone of its store,
+  `LwsState::store`, and by any `Tracked` wrapper of one) while it lives: a second `LwsState`
+  built over a clone or a wrapper of a running state's store is refused, so a state that replaces
+  another must be built after the old one is dropped. A store that keeps no lease of its own
+  (`Store::lifecycle` is `None`, as for a plain `CompositeStore`) gets a new one in each
+  `LwsState::new`, so two states built over clones of one such store each get their own lease;
+  a store opened again separately over the same backend has a lease of its own too. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
   store's lease and no longer accepts one from the caller, and the store's generic mutators refuse
   an IRI shaped like the stored time, which changes only through `raise_marker` and
   `reset_marker`.
@@ -661,11 +815,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
+  while a request waits on it tries each step up to three times, each attempt waiting for a
+  fence two seconds at most (counted from the store's answer); a step whose write failed
+  unsettled and whose fence has not succeeded is set aside, its fence first, and never tried
+  again before that fence succeeds, in the request or in the background (the background
+  put-back and the start-up settling still wait as long as the store takes). A removal whose
+  fence lands with the record still stored is answered at once from the listing; one whose
+  outcome cannot be read after its fence stays out of force and is settled in the background.
+  A journal's commit fences an unsettled clearing of its intent before reading the intent. A service-container
+  create whose precondition compares no state (a bare `If-Match: *`) takes the container shared,
+  as an unconditional create does, so it no longer waits on a removal being settled or holds up
+  other creates. A background fence's attempts are capped at the store's own call timeout
+  (`Store::call_timeout`, new, defaulting to `STORE_CALL_TIMEOUT`; the `http` index reports the
+  timeout it was built with), clamped to between two seconds and one hour per attempt.
+  Forward removals and intent creates keep their unsettled fences through rollback and commit.
+  A settled removal whose outcome cannot be read stays out of force until the listing answers.
+  A WebSocket socket closes `1011` for the client to reconcile at the
+  next point where the subscriber may read the topic after any notification was dropped
+  (whether it could not be read or its check could not be made), instead of delivering later
+  ones; a receive token has at most one socket open at a time (a second connect gets `401`); pings
+  are answered while an access check runs. A due tick takes priority over inbound frames and
+  queued notifications, pre-empts a running notification or lag check and notes it as missed:
+  a reader gets `RECONCILE` for either dropped check, rather than `OVERFLOW` for a dropped lag
+  check. Within two periods of losing Read the socket closes: `1008` for a confirmed denial,
+  or `1011` if the timer check is undecided. Each check has at most one period; a slower check
+  counts as undecided and the client must resubscribe. An LDP write also refuses a dot segment around a
+  %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is,
+  whatever metadata the change kept.
+
 - **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
   subscriber's current access. A WebSocket notification the subscriber may no longer read is
   not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the
   socket (1008) once read access is gone; a check that cannot be made closes it `1011` (on the
-  timer) or holds the notification back and asks a subscriber that may read to reconcile
+  timer) or drops the notification and asks a subscriber that may read to reconcile
   (`1011`) at the next tick. The receive token gates connecting only: an open socket is not
   closed when it expires, and an expired token never connects again in the process. A webhook
   subscription decides access before asking whether its topic exists, and a topic being created

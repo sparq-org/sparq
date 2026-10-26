@@ -52,7 +52,7 @@ fn native_filter_proof_captures_into_manifest() {
     let out = scratch("filter_d1");
     let art = prover.prove_in(&id, &toml, &out, "capture_d1").expect("prove succeeds");
 
-    let sp = CapturedSubProof::from_artifacts(id.package(), "5 < 10 over a hidden integer", &art)
+    let sp = CapturedSubProof::from_artifacts(id.package().unwrap(), "5 < 10 over a hidden integer", &art)
         .expect("packages the native artifacts");
     assert!(!sp.proof.is_empty(), "the captured proof carries the real transcript bytes");
     assert!(
