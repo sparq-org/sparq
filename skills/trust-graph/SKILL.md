@@ -34,6 +34,10 @@ pre-processing: it produces the `Vec<TrustRule>` that the **UNCHANGED** admissio
                                   (pod wiring: sparq-solid `trust-graph`, default-OFF)
 ```
 
+Both `admit` and `admit_static` preserve first-seen output order while deduplicating facts
+with a hash set. `AdmittedFact` and `StaticAdmittedFact` implement `Hash` consistently with
+`Eq`, including issuer and, for static facts, holder and freshness deadline.
+
 ## What this is — and is NOT (honest scope, read first)
 
 - **RESEARCH prototype, default-OFF.** Every flag involved is opt-in and **default-OFF**
