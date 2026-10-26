@@ -411,7 +411,7 @@ pub(crate) struct ListingLocks {
 enum ListingGuard {
     // Held for as long as the guard is; never read.
     Alone(#[allow(dead_code)] resources::IriGuard),
-    Shared(#[allow(dead_code)] tokio::sync::OwnedRwLockReadGuard<()>),
+    Shared(#[allow(dead_code)] resources::IriReadGuard),
 }
 
 impl ListingGuard {

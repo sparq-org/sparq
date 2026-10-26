@@ -714,7 +714,7 @@ fn resource_links<S: Store>(
 async fn listing_guard<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
-) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, Response> {
+) -> Result<Option<IriReadGuard>, Response> {
     let Some(parent) = parent_of(uri, &state.cfg.storage()) else {
         return Ok(None);
     };
@@ -1420,6 +1420,19 @@ pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::Servic
         }
         catalog.service(service);
     }
+    #[cfg(feature = "sparql-endpoint")]
+    {
+        let mut service = entry(
+            "sparql",
+            &format!("{SSD}SparqlQueryService"),
+            cfg.absolute(super::sparql::PATH),
+        );
+        service.extras.insert(
+            "conformsTo".into(),
+            json!(["https://jeswr.github.io/solid-specs/specs/access-controlled-query/"]),
+        );
+        catalog.service(service);
+    }
     // Advertise concrete JSON types served here. The PATCH parser also accepts
     // other structured JSON suffix types on data documents.
     catalog.capability(capability(
@@ -2047,6 +2060,8 @@ async fn current<S: Store + 'static>(
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
 pub struct IriLocks {
+    #[cfg(feature = "sparql-endpoint")]
+    pub(crate) snapshot: std::sync::Arc<super::snapshot::Snapshot>,
     map: std::sync::Mutex<LockMap>,
     /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
     /// many set-aside changes are to it.
@@ -2101,6 +2116,14 @@ impl Drop for Watch<'_> {
 }
 
 impl IriLocks {
+    #[cfg(feature = "sparql-endpoint")]
+    pub(super) fn with_snapshot(snapshot: std::sync::Arc<super::snapshot::Snapshot>) -> Self {
+        Self {
+            snapshot,
+            ..Default::default()
+        }
+    }
+
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
     /// IRI first, ties in byte order (`lock_order`), so a child always before its container and
     /// never the other way, and two writers cannot deadlock.
@@ -2110,28 +2133,54 @@ impl IriLocks {
     /// set aside with its locks), so nobody waits on a lock a recovery holds; and `None` when it
     /// was set aside by the time the lock is had.
     pub async fn lock(&self, iri: &str) -> Option<IriGuard> {
-        self.visibly(iri, self.mutex(iri).write_owned()).await
+        #[cfg(feature = "sparql-endpoint")]
+        let generation = self.snapshot.mutate().await;
+        let guard = self.visibly(iri, self.mutex(iri).write_owned()).await?;
+        #[cfg(feature = "sparql-endpoint")]
+        let guard = IriGuard {
+            _resource: guard,
+            _generation: generation,
+        };
+        Some(guard)
     }
 
     /// Wait for and take the shared lock of `iri` (while it is visible, as [`IriLocks::lock`]): a
     /// read holds it from its permission check through the representation it serves, so no
     /// write lands in between. Readers share it; a reader holds no other lock, so it cannot take
     /// part in a deadlock.
-    pub async fn read(&self, iri: &str) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        self.visibly(iri, self.mutex(iri).read_owned()).await
+    pub async fn read(&self, iri: &str) -> Option<IriReadGuard> {
+        let guard = self.visibly(iri, self.mutex(iri).read_owned()).await?;
+        #[cfg(feature = "sparql-endpoint")]
+        let guard = IriReadGuard {
+            _resource: guard,
+            _generation: None,
+        };
+        Some(guard)
     }
 
     /// Take the lock of `iri` if it is free and visible, without waiting: the one way to take a
     /// lock out of `lock_order`, since it cannot deadlock.
     pub fn try_lock(&self, iri: &str) -> Option<IriGuard> {
+        #[cfg(feature = "sparql-endpoint")]
+        let generation = self.snapshot.try_mutate()?;
         let guard = self.mutex(iri).try_write_owned().ok()?;
+        #[cfg(feature = "sparql-endpoint")]
+        let guard = IriGuard {
+            _resource: guard,
+            _generation: generation,
+        };
         self.visible(iri).then_some(guard)
     }
 
     /// Take the shared lock of `iri` if no change to it is in flight and it is visible, without
     /// waiting.
-    pub fn try_read(&self, iri: &str) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+    pub fn try_read(&self, iri: &str) -> Option<IriReadGuard> {
         let guard = self.mutex(iri).try_read_owned().ok()?;
+        #[cfg(feature = "sparql-endpoint")]
+        let guard = IriReadGuard {
+            _resource: guard,
+            _generation: None,
+        };
         self.visible(iri).then_some(guard)
     }
 
@@ -3862,7 +3911,37 @@ async fn subtree<S: Store + 'static>(
 }
 
 /// The exclusive lock of one IRI (see [`IriLocks`]).
+#[cfg(not(feature = "sparql-endpoint"))]
 pub type IriGuard = tokio::sync::OwnedRwLockWriteGuard<()>;
+
+/// A resource write and its storage-wide mutation lease, retained together through recovery.
+#[cfg(feature = "sparql-endpoint")]
+pub struct IriGuard {
+    _resource: tokio::sync::OwnedRwLockWriteGuard<()>,
+    _generation: super::snapshot::Lease,
+}
+
+/// A shared resource lock, optionally retaining a downgraded mutation's generation lease.
+#[cfg(feature = "sparql-endpoint")]
+pub struct IriReadGuard {
+    _resource: tokio::sync::OwnedRwLockReadGuard<()>,
+    _generation: Option<super::snapshot::Lease>,
+}
+
+/// A shared resource lock when the query generation barrier is compiled out.
+#[cfg(not(feature = "sparql-endpoint"))]
+pub type IriReadGuard = tokio::sync::OwnedRwLockReadGuard<()>;
+
+#[cfg(feature = "sparql-endpoint")]
+impl IriGuard {
+    /// Downgrade the resource lock while retaining its mutation generation lease.
+    pub fn downgrade(self) -> IriReadGuard {
+        IriReadGuard {
+            _resource: self._resource.downgrade(),
+            _generation: Some(self._generation),
+        }
+    }
+}
 
 /// Lock `uri` and everything under it, in `lock_order`, and return the guards with the subtree
 /// (as [`subtree`] lists it) that holds while they are held. The subtree is listed, locked, and

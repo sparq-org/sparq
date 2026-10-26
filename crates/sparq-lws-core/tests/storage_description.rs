@@ -238,7 +238,12 @@ async fn lws_public_catalog_and_shape() {
     assert!(!String::from_utf8_lossy(&body).contains("MoveResource"));
     assert_eq!(
         doc,
-        serde_json::from_slice::<Value>(&fixture("lws.jsonld")).unwrap()
+        serde_json::from_slice::<Value>(&fixture(if cfg!(feature = "sparql-endpoint") {
+            "lws.jsonld"
+        } else {
+            "lws-no-sparql.jsonld"
+        }))
+        .unwrap()
     );
     let open = lws(ServiceCatalog::default(), true).await;
     assert_eq!(
@@ -780,4 +785,12 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
         headers["accept-patch"],
         "text/n3, application/sparql-update"
     );
+}
+
+#[cfg(not(feature = "sparql-endpoint"))]
+#[tokio::test]
+async fn lws_query_route_is_absent_without_its_feature() {
+    let app = lws(ServiceCatalog::default(), true).await;
+    let (status, _, _) = call(&app, "GET", "/.lws/sparql?query=ASK%7B%7D", &[], "").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

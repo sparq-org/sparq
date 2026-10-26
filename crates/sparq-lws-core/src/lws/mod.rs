@@ -34,6 +34,10 @@ pub use sparq_lws_authn::jose;
 pub mod notify;
 mod records;
 pub mod resources;
+#[cfg(feature = "sparql-endpoint")]
+mod snapshot;
+#[cfg(feature = "sparql-endpoint")]
+mod sparql;
 pub mod tokens;
 pub mod tracked;
 
@@ -91,6 +95,16 @@ pub struct LwsConfig {
     pub open: bool,
     /// Members per page of a container listing.
     pub page_size: usize,
+    /// Maximum readable resources assembled by one LWS SPARQL query (default: 10,000).
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_max_resources: usize,
+    /// Maximum RDF representation bytes parsed by one LWS SPARQL query (default: 64 MiB).
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_max_bytes: usize,
+    /// Query deadline including snapshot wait and assembly; `None` disables it.
+    /// Defaults to `SOLID_SERVER_REQUEST_TIMEOUT_SECS` (30 seconds, 0 disables).
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_timeout: Option<std::time::Duration>,
     /// Signs the access tokens the authorization server issues.
     pub as_key: jose::EcKey,
     /// The authorization server's previous signing key, after a rotation: published in the JWKS,
@@ -242,6 +256,12 @@ impl LwsConfig {
             owner: None,
             open: false,
             page_size: 100,
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_max_resources: 10_000,
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_max_bytes: 64 * 1024 * 1024,
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_timeout: crate::overload::request_timeout_from_env(),
             as_key: jose::EcKey::generate_thumbprinted(),
             as_previous_key: None,
             notify_key: jose::EcKey::generate("notify-key"),
@@ -304,6 +324,15 @@ impl LwsConfig {
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
         cfg.max_body = crate::body_limit::max_body_bytes_from_env();
+        #[cfg(feature = "sparql-endpoint")]
+        {
+            if let Ok(value) = std::env::var("SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES") {
+                cfg.sparql_max_resources = value.parse().unwrap_or(cfg.sparql_max_resources);
+            }
+            if let Ok(value) = std::env::var("SOLID_SERVER_LWS_SPARQL_MAX_BYTES") {
+                cfg.sparql_max_bytes = value.parse().unwrap_or(cfg.sparql_max_bytes);
+            }
+        }
         let var = |k: &str| {
             std::env::var(k)
                 .ok()
@@ -757,6 +786,12 @@ impl<S: Store + 'static> LwsState<S> {
         let (owner, closed) = tokio::sync::watch::channel(());
         let mut catalog = resources::service_catalog(&cfg);
         catalog.extend(additional);
+        #[cfg(feature = "sparql-endpoint")]
+        let locks = Arc::new(resources::IriLocks::with_snapshot(
+            store.generations().snapshot.clone(),
+        ));
+        #[cfg(not(feature = "sparql-endpoint"))]
+        let locks = Default::default();
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
@@ -766,7 +801,7 @@ impl<S: Store + 'static> LwsState<S> {
                 access,
                 notify,
                 http,
-                locks: Default::default(),
+                locks,
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
                 owed_touches: Default::default(),
@@ -2553,6 +2588,10 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    #[cfg(feature = "sparql-endpoint")]
+    if path == sparql::PATH {
+        return sparql::handle(state, &req, &agent).await;
+    }
     if path.starts_with(SUBSCRIPTIONS_PATH) {
         return notify::handle(state, &req, &agent).await;
     }

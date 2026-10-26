@@ -342,10 +342,16 @@ the catalog (currently webhooks). Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
-## Query readable RDF with `/sparql`
+## Query readable resources with SPARQL
 
-The default `sparql-endpoint` feature exposes authenticated `GET` and `POST`
-SPARQL Protocol query operations:
+The default `sparql-endpoint` feature exposes `GET` and `POST` SPARQL Protocol
+query operations at `/sparql` in Solid mode and `/.lws/sparql` in LWS mode.
+Each mode uses its normal request authentication. The feature also registers a
+`SparqlQueryService` with the mounted URL in the storage description; disabling
+it removes both the route and its catalog entry. In LWS mode `/sparql` remains
+available as an ordinary resource name.
+
+For Solid mode:
 
 ```sh
 curl -G https://solid.example/sparql \
@@ -370,6 +376,47 @@ persists the query fails with `503` and `Retry-After` rather than silently
 dropping that graph. Protocol `default-graph-uri` and `named-graph-uri` parameters may
 select from that authorized dataset; they cannot make an unreadable resource
 visible.
+
+In LWS mode, use a storage-issued Bearer token:
+
+```sh
+curl -G https://lws.example/.lws/sparql \
+  -H 'Authorization: Bearer ACCESS_TOKEN' \
+  --data-urlencode 'query=SELECT ?g { GRAPH ?g {} }'
+```
+
+LWS assembles one named graph per readable data resource or container, using
+live owner, creator and ODRL-grant decisions on every request. Grant constraints
+use the token's client ID, the current time, and the resource's format and types.
+The protocol defines no purpose carrier, so purpose-constrained grants do not
+admit resources. Revocations apply on the next request. Internal `/.lws/` records,
+`/.well-known/` records and `.meta` linksets never enter the dataset. Non-RDF data,
+unparseable RDF and containers contribute empty named graphs, so `GRAPH ?g {}`
+can enumerate them. Resource read or authorization failures omit the resource
+without exposing its diagnostics.
+
+The default graph is empty in both modes. To use the authorized union, supply
+`FROM <http://www.w3.org/ns/solid/sparql#union-default-graph>` or that IRI as
+`default-graph-uri`. Blank nodes remain document-scoped. Explicit dataset
+selection never fetches or admits resources outside the authorized view.
+
+LWS holds one storage-wide read generation through enumeration, authorization
+and evaluation; mutation leases follow writes and rollback work. For embedded callers, with the
+feature enabled, `lws::resources::IriLocks` returns `IriGuard` and `IriReadGuard`;
+`IriGuard::downgrade` retains the mutation lease until the shared guard drops.
+Its configuration
+fields are `LwsConfig::sparql_max_resources` (default 10,000 readable resources)
+and `sparql_max_bytes` (default 64 MiB of RDF representation bytes parsed).
+`SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES` and `SOLID_SERVER_LWS_SPARQL_MAX_BYTES`
+override those defaults at boot; invalid values retain the defaults and zero
+permits no resources or RDF bytes, respectively. Exceeding a ceiling returns
+`507` or `413` with `application/problem+json`, never a truncated dataset.
+Unreadable resources do not count toward these ceilings.
+`LwsConfig::sparql_timeout` covers snapshot waiting, assembly and evaluation:
+it defaults to `SOLID_SERVER_REQUEST_TIMEOUT_SECS` (30 seconds; `0` disables),
+and expiry returns `504` problem details. LWS update bindings return `405`.
+The query forms, dataset parameters, Accept negotiation and result serialization
+share the Solid protocol implementation, including its v1 `DESCRIBE` rejection.
 
 ## Run the LWS 1.0 protocol (`SOLID_SERVER_PROTOCOL=lws`)
 

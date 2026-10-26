@@ -70,8 +70,10 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   compaction is local and context-free — nothing fetched).
 - **Access control** — WAC (`acl:`) evaluated against the SPARQ-authoritative
   store, with an ACL decision cache; public-read fast path.
-- **WAC-scoped query endpoint** — default-on, query-only
-  `GET`/`POST /sparql` for SELECT, ASK, and CONSTRUCT. Each request rebuilds a
+- **Access-controlled query endpoints** — default-on, query-only
+  `GET`/`POST /sparql` in Solid mode and `/.lws/sparql` in LWS mode, for SELECT,
+  ASK, and CONSTRUCT. Solid uses WAC; LWS uses its live owner/creator/grant rules.
+  Each request rebuilds a
   named-graph-per-readable-resource dataset; the default graph is empty and
   unreadable or uncertain resources never reach the query engine.
 - **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
@@ -90,8 +92,9 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
     `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only
-    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
+  - `sparql-endpoint` (**default-on**, sq-r1ei8) — query-only `/sparql` in Solid
+    mode and `/.lws/sparql` in LWS mode, with matching catalog entries; the internal
+    Store methods LDP/WAC use are independent of it.
   - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
     (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
   - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve

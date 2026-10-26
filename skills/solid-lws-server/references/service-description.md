@@ -53,7 +53,9 @@ not serve `application/lws+cid`.
 
 LWS retains its root, authorization server, grants, requests, notifications, type
 index and type search entries, and adds `lws:StorageDescription` pointing at the
-storage URI. `conformsTo` names `https://www.w3.org/TR/lws10-core/`. Its first two
+storage URI. With `sparql-endpoint`, it also registers `ssd:SparqlQueryService`
+at `/.lws/sparql`, carrying the ACQ profile. The reserved service path leaves
+`/sparql` available for client resources. `conformsTo` names `https://www.w3.org/TR/lws10-core/`. Its first two
 contexts stay CID v1 then LWS v1; the third is an inline extension mapping, with
 no extension context URL to retrieve. `ssd:PatchSupport.mediaType` maps
 `application/json`, `application/ld+json`, and `application/linkset+json` to `["application/json-patch+json"]`. This applies to data documents and

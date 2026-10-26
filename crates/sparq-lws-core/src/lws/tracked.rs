@@ -37,6 +37,8 @@ fn slot(uri: &str) -> usize {
 /// The snapshot counters of the resources a [`Tracked`] store holds.
 pub struct Generations {
     root: String,
+    #[cfg(feature = "sparql-endpoint")]
+    pub(crate) snapshot: std::sync::Arc<super::snapshot::Snapshot>,
     generations: [AtomicU64; SLOTS],
     in_flight: [AtomicU64; SLOTS],
 }
@@ -45,6 +47,8 @@ impl Generations {
     fn new(root: String) -> Self {
         Self {
             root,
+            #[cfg(feature = "sparql-endpoint")]
+            snapshot: Default::default(),
             generations: std::array::from_fn(|_| Default::default()),
             in_flight: std::array::from_fn(|_| Default::default()),
         }
@@ -185,6 +189,8 @@ impl<S: Store> Store for Tracked<S> {
         body: Bytes,
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&[iri]);
         self.inner.write(iri, body, content_type).await
     }
@@ -196,6 +202,8 @@ impl<S: Store> Store for Tracked<S> {
         body: Bytes,
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&[container, child]);
         self.inner
             .create_in_container(container, child, body, content_type)
@@ -210,6 +218,8 @@ impl<S: Store> Store for Tracked<S> {
         meta: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&keys);
         self.inner.restore(iri, container, body, meta).await
     }
@@ -225,6 +235,8 @@ impl<S: Store> Store for Tracked<S> {
         held: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&keys);
         self.inner.reinstate(iri, container, held).await
     }
@@ -247,6 +259,8 @@ impl<S: Store> Store for Tracked<S> {
 
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&keys);
         self.inner.delete(iri, parent).await
     }
@@ -257,6 +271,8 @@ impl<S: Store> Store for Tracked<S> {
         parent: Option<&str>,
     ) -> ServerResult<DeleteOutcome> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&keys);
         self.inner.delete_container_if_empty(iri, parent).await
     }
@@ -266,6 +282,8 @@ impl<S: Store> Store for Tracked<S> {
     /// write changes (the fence carries it, so nothing is kept per unsettled write).
     async fn fence(&self, fence: &Fence) -> ServerResult<()> {
         let keys: Vec<&str> = fence.touches().iter().map(String::as_str).collect();
+        #[cfg(feature = "sparql-endpoint")]
+        let _generation = self.gens.snapshot.mutate().await;
         let _m = self.gens.mutating(&keys);
         self.inner.fence(fence).await
     }
