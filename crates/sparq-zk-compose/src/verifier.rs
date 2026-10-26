@@ -1607,17 +1607,16 @@ pub enum CheckError {
     /// authenticated. `reason` says which case it was — see `fold_bound_methods`,
     /// which raises them: an unparseable bound commitment, two bound commitments
     /// authenticating DIFFERENT methods, or a bound commitment authenticating a
-    /// method beside one authenticating none. `resolve_member_for_sub_proof` also
-    /// raises it for an ORPHAN sub-proof — bound to no committed graph — when its member is
-    /// not legal under every ADMISSIBLE method, so no method-independent member
-    /// exists to select.
+    /// method beside one authenticating none. Under `dual-leaf`,
+    /// `resolve_member_for_sub_proof` also raises it for an ORPHAN sub-proof —
+    /// bound to no committed graph — when its member is not legal under every
+    /// ADMISSIBLE method, so no method-independent member exists to select.
     ///
-    /// BEHAVIOUR CHANGE (opt-in, `dual-leaf` only — see the variant's `cfg`): a
-    /// manifest whose sub-proof binds commitments that authenticated DIFFERENT
-    /// methods, or a mixture of attested and unattested ones, used to be accepted
-    /// and is now refused. An edge-less FILTER over a member legal under every
-    /// admissible method still verifies.
-    #[cfg(feature = "dual-leaf")]
+    /// Hardening: method-fold refusals apply in every build. A sub-proof bound
+    /// to commitments authenticating different methods, or a mixture of bound
+    /// and explicitly unbound methods, is refused. Under `dual-leaf`, an orphan
+    /// also requires a member legal under every admissible method. An edge-less
+    /// FILTER over such a member still verifies.
     SubProofMethodUnresolved { proof: String, reason: String },
 
     /// A commitment a sub-proof is bound to has NO entry in the
@@ -1626,13 +1625,11 @@ pub enum CheckError {
     ///
     /// This is NOT the same fact as an explicit [`AuthenticatedMethod::Unbound`]
     /// entry. An `Unbound` entry means an attestation over that commitment
-    /// verified and attested no method; an ABSENT entry means the attestation
-    /// gate never saw the commitment at all, because nothing in the manifest ties
-    /// it to a credential (stage 2d walks the SCAN- and PATH-referenced
-    /// commitments). Reading absence as `Unbound` let a sub-proof be verified
-    /// against commitments no issuer attested, so absence is refused by name.
+    /// verified and attested no method; an ABSENT entry establishes neither a
+    /// method nor an explicit method-unbound attestation. Every bound commitment
+    /// requires an entry, including those inherited through binding edges or
+    /// validated join endpoints, so absence is refused by name.
     /// `commitment` is the canonical commitment hex.
-    #[cfg(feature = "dual-leaf")]
     SubProofCommitmentNotAuthenticated { proof: String, commitment: String },
 
     /// A `JoinEq` sub-proof that NO declared [`crate::manifest::JoinEdge`] names.
@@ -2374,7 +2371,6 @@ impl std::fmt::Display for CheckError {
                  verified under a key selected from the declared circuit id alone",
                 proof, circuit, method_iri
             ),
-            #[cfg(feature = "dual-leaf")]
             CheckError::SubProofMethodUnresolved { proof, reason } => write!(
                 f,
                 "{}: no single authenticated commitment method could be derived for \
@@ -2382,7 +2378,6 @@ impl std::fmt::Display for CheckError {
                  one — {} (refused fail-closed)",
                 proof, reason
             ),
-            #[cfg(feature = "dual-leaf")]
             CheckError::SubProofCommitmentNotAuthenticated { proof, commitment } => write!(
                 f,
                 "{}: the commitment {} it is bound to has no entry in the \
@@ -5748,11 +5743,7 @@ impl FixedMemberRole {
         }
     }
 
-    /// Every role, so a caller can quantify over them.
-    ///
-    /// Only the `dual-leaf` per-sub-proof resolution reads it, so it is compiled
-    /// with that feature.
-    #[cfg(feature = "dual-leaf")]
+    /// Every role, so per-sub-proof resolution can quantify over them in every build.
     const ALL: [FixedMemberRole; 5] = [
         FixedMemberRole::HiddenRevocation,
         FixedMemberRole::FullyHiddenRevocation,
@@ -5764,7 +5755,6 @@ impl FixedMemberRole {
     /// The role whose family `id` belongs to, if any — the test a sub-proof's
     /// declared id is held to, since no auxiliary member may ever be selected for
     /// one.
-    #[cfg(feature = "dual-leaf")]
     fn owning(id: &CircuitId) -> Option<FixedMemberRole> {
         FixedMemberRole::ALL.into_iter().find(|r| r.owns(id))
     }
@@ -5819,7 +5809,6 @@ fn fixed_member(role: FixedMemberRole, id: CircuitId) -> Result<CircuitId, Check
 /// against a method only a prover's declaration asserts — and the post-pass that
 /// re-runs the resolution afterwards checks the member it names equals the one
 /// the verification key was selected for, rather than assuming it.
-#[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MethodStage {
     /// Before `bind_hidden_issuer_attestations`: a hidden-only commitment's
@@ -5831,7 +5820,6 @@ enum MethodStage {
 }
 
 /// What a sub-proof's bound commitments jointly authenticate.
-#[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubProofMethod {
     /// One agreed method, or string-canonical for explicitly all-Unbound attestations.
@@ -5840,7 +5828,8 @@ enum SubProofMethod {
     /// candidate at this stage.
     Deferred,
     /// The sub-proof is bound to NO committed graph at all, so no method can be
-    /// derived for it. [`resolve_member_for_sub_proof`] admits it only if its
+    /// derived for it. Without `dual-leaf`, the declared member is retained.
+    /// Under `dual-leaf`, [`resolve_member_for_sub_proof`] admits it only if its
     /// member is legal under every ADMISSIBLE method — the methods
     /// `MethodPolicy::widest_admissible` admits, which is narrower than every
     /// RECOGNISED method (the `value-only` research dial is recognised and
@@ -5862,18 +5851,17 @@ enum SubProofMethod {
 /// Only edges that VALIDATE ([`validate_join_edge`]) are recorded, which is what
 /// keeps the entry a validated endpoint rather than a prover-declared one: an
 /// edge that does not validate contributes nothing, and a join proof it was the
-/// only edge for ends up with an EMPTY entry — the orphan case, admitted only
-/// where the member is method-independent. (Such a manifest is separately refused
+/// only edge for ends up with an EMPTY entry — the orphan case. Without
+/// `dual-leaf`, an orphan retains its declared member; with that feature it
+/// requires a method-independent member. Such a manifest is separately refused
 /// by stage 2g′, which runs over the same edges and fails on the first that does
-/// not validate.)
-#[cfg(feature = "dual-leaf")]
+/// not validate.
 struct JoinEndpointIndex {
     /// `join_proof` index -> the validated endpoint commitments of every edge
     /// naming it, in edge order (`(a, b)` per edge).
     by_join: std::collections::BTreeMap<usize, Vec<FieldHex>>,
 }
 
-#[cfg(feature = "dual-leaf")]
 impl JoinEndpointIndex {
     /// One pass over `manifest.join_edges`, validating each edge exactly once.
     fn build(manifest: &ProofManifest) -> Self {
@@ -5935,8 +5923,8 @@ impl JoinEndpointIndex {
 ///
 /// An EMPTY result is an ORPHAN sub-proof — one bound to no committed graph at
 /// all, so no method can be derived for it. [`resolve_member_for_sub_proof`]
-/// admits it only where the member is legal under every admissible method.
-#[cfg(feature = "dual-leaf")]
+/// retains its declared member without `dual-leaf`; with that feature it admits
+/// the orphan only where the member is legal under every admissible method.
 fn bound_commitments(
     manifest: &ProofManifest,
     proof: usize,
@@ -5946,13 +5934,13 @@ fn bound_commitments(
         return Vec::new();
     };
     match &sp.inputs {
-        ProofInputs::Scan { commitments, .. } => commitments.clone(),
+        ProofInputs::Scan { commitments, .. } => return commitments.clone(),
         #[cfg(feature = "extended-fragment")]
-        ProofInputs::PathReach { commitments, .. } => commitments.clone(),
+        ProofInputs::PathReach { commitments, .. } => return commitments.clone(),
         // The VALIDATED endpoints of every edge that covers this join proof —
         // never its own prover-declared `commit_a`/`commit_b`. Read from the
         // index, which validated each edge ONCE for the whole manifest.
-        ProofInputs::JoinEq { .. } => joins.endpoints_of(proof),
+        ProofInputs::JoinEq { .. } => return joins.endpoints_of(proof),
         // Every remaining variant is a FILTER member, which binds to committed
         // data only through a binding edge. Listed exhaustively rather than with a
         // wildcard, so a NEW `ProofInputs` variant has to state its own relation
@@ -5960,33 +5948,32 @@ fn bound_commitments(
         ProofInputs::FilterInt { .. }
         | ProofInputs::FilterF64 { .. }
         | ProofInputs::FilterSignedInt { .. }
-        | ProofInputs::FilterDecimal { .. }
-        | ProofInputs::FilterValueDl { .. }
+        | ProofInputs::FilterDecimal { .. } => {}
+        #[cfg(feature = "dual-leaf")]
+        ProofInputs::FilterValueDl { .. }
         | ProofInputs::FilterValueDlF64 { .. }
         | ProofInputs::FilterValueDlDecimal { .. }
         | ProofInputs::FilterValueDlDateTime { .. }
-        | ProofInputs::FilterValueDlBool { .. } => {
-            let mut out: Vec<FieldHex> = Vec::new();
-            for edge in &manifest.binding_edges {
-                if edge.to_proof != proof {
-                    continue;
-                }
-                let Some(from) = manifest.sub_proofs.get(edge.from_proof) else {
-                    continue;
-                };
-                if let ProofInputs::Scan { commitments, .. } = &from.inputs {
-                    out.extend(commitments.iter().cloned());
-                }
-            }
-            out
+        | ProofInputs::FilterValueDlBool { .. } => {}
+    }
+    let mut out: Vec<FieldHex> = Vec::new();
+    for edge in &manifest.binding_edges {
+        if edge.to_proof != proof {
+            continue;
+        }
+        let Some(from) = manifest.sub_proofs.get(edge.from_proof) else {
+            continue;
+        };
+        if let ProofInputs::Scan { commitments, .. } = &from.inputs {
+            out.extend(commitments.iter().cloned());
         }
     }
+    out
 }
 
 /// The commitments a manifest covers by a HIDDEN-issuer proof and by NO clear
 /// attestation — the ones whose map entry is still a candidate until
 /// `bind_hidden_issuer_attestations` has run.
-#[cfg(feature = "dual-leaf")]
 fn hidden_only_commitments(
     manifest: &ProofManifest,
     trusted_key_set: &KeySet,
@@ -6031,7 +6018,6 @@ fn hidden_only_commitments(
 /// Returns [`SubProofMethod::Deferred`] at [`MethodStage::BeforeHiddenIssuer`]
 /// when any bound commitment is hidden-only, so no candidate method is read as
 /// authenticated before the gate that binds a proof to it.
-#[cfg(feature = "dual-leaf")]
 fn fold_bound_methods(
     label: &str,
     bound: &[FieldHex],
@@ -6057,12 +6043,10 @@ fn fold_bound_methods(
         if stage == MethodStage::BeforeHiddenIssuer && hidden_only.contains(&key) {
             return Ok(SubProofMethod::Deferred);
         }
-        // Hardening: a commitment ABSENT from the map is NOT the same fact as an
-        // explicit `Unbound` entry, and reading absence as `Unbound` let a
-        // sub-proof be verified against a commitment no attestation gate ever
-        // saw. Stage 2d walks the SCAN- and PATH-referenced commitments, so a
-        // commitment reachable only from a join proof's public inputs gets no
-        // entry at all. Refused by name.
+        // Every bound commitment must retain the map coverage established by the
+        // attestation gate, including inherited FILTER commitments and validated
+        // JOIN endpoints. An ABSENT entry is distinct from an explicit `Unbound`
+        // entry and is refused by name.
         let Some(&authenticated) = methods.get(&key) else {
             return Err(CheckError::SubProofCommitmentNotAuthenticated {
                 proof: label.to_string(),
@@ -6128,9 +6112,12 @@ fn method_independent_member(
     Ok(id.clone())
 }
 
-/// Resolve the member a sub-proof's verification key will be selected for THROUGH
-/// the `(commitment-method × circuit)` dispatch matrix, against the ONE
-/// authenticated commitment method of the commitments that sub-proof is bound to.
+/// Fold the authenticated methods of a sub-proof's bound commitments in every
+/// build, then resolve the member its verification key will be selected for.
+/// Under `dual-leaf`, the ONE agreed method selects through the
+/// `(commitment-method × circuit)` dispatch matrix. Without that feature, the
+/// pre-filter has already refused methods without a pattern encoder, and the
+/// declared member is retained after the fold succeeds.
 ///
 /// `Ok(Some(member))` is the member to select the key for — the caller uses THAT
 /// and never the declared id. `Ok(None)` is a deferral (see [`MethodStage`]): the
@@ -6155,7 +6142,8 @@ fn method_independent_member(
 /// [`CheckError::SubProofCommitmentNotAuthenticated`].
 ///
 /// # The rule for an ORPHAN sub-proof
-/// A sub-proof bound to NO committed graph has no method to resolve against. It
+/// Without `dual-leaf`, an orphan retains its declared member. Under `dual-leaf`,
+/// a sub-proof bound to NO committed graph has no method to resolve against. It
 /// is admitted ONLY where the matrix's answer does not depend on the method: the
 /// member must be legal under every ADMISSIBLE method — those some
 /// [`MethodPolicy`] admits ([`MethodPolicy::widest_admissible`]), since stage 2d
@@ -6175,7 +6163,6 @@ fn method_independent_member(
 /// AUXILIARY gate's member out of a sub-proof: `CircuitId::HolderPok` is legal
 /// under every admissible method too. That is refused separately, up front, as
 /// [`CheckError::AuxiliaryMemberIdInSubProof`].
-#[cfg(feature = "dual-leaf")]
 fn resolve_member_for_sub_proof(
     manifest: &ProofManifest,
     proof: usize,
@@ -6203,10 +6190,12 @@ fn resolve_member_for_sub_proof(
     match fold_bound_methods(&label, &bound, methods, hidden_only, stage)? {
         SubProofMethod::Deferred => Ok(None),
         // An orphan supplies no method input to the matrix.
+        #[cfg(feature = "dual-leaf")]
         SubProofMethod::NoCommitment => {
             method_independent_member(&label, id, "it is bound to no committed graph")
                 .map(Some)
         }
+        #[cfg(feature = "dual-leaf")]
         SubProofMethod::One(method) => {
             let resolved = crate::dispatch::resolve_circuit(method, id).map_err(|_| {
                 let method_iri = if bound.iter().any(|c| {
@@ -6225,6 +6214,8 @@ fn resolve_member_for_sub_proof(
             })?;
             Ok(Some(resolved))
         }
+        #[cfg(not(feature = "dual-leaf"))]
+        SubProofMethod::NoCommitment | SubProofMethod::One(_) => Ok(Some(id.clone())),
     }
 }
 
@@ -6713,9 +6704,8 @@ struct ValidatedJoinEdge {
     /// these, so a consumer that resolves anything from the join's endpoints reads
     /// these rather than the prover-declared public inputs.
     ///
-    /// `bound_commitments` — the only reader — is `dual-leaf`-gated, so with that
-    /// feature OFF the endpoints are validated and then discarded.
-    #[cfg_attr(not(feature = "dual-leaf"), allow(dead_code))]
+    /// `JoinEndpointIndex` records these for `bound_commitments`, so method
+    /// folding reads validated endpoints in every build.
     endpoints: (FieldHex, FieldHex),
     /// The join proof's hiding `join_commitment` (a per-presentation value
     /// commitment, NOT a committed graph).
@@ -8071,18 +8061,14 @@ fn verify_manifest_impl(
     // — the ones whose authenticated-method entry is still a CANDIDATE until
     // `bind_hidden_issuer_attestations` has bound a proof to it. Sub-proofs bound
     // to one of these defer their member resolution to after that gate.
-    #[cfg(feature = "dual-leaf")]
     let hidden_only = hidden_only_commitments(manifest, trusted_key_set);
     // The validated join endpoints, resolved ONCE for the whole manifest rather
     // than per sub-proof asked about (see `JoinEndpointIndex`).
-    #[cfg(feature = "dual-leaf")]
     let join_endpoints = JoinEndpointIndex::build(manifest);
-    #[cfg(feature = "dual-leaf")]
     let mut deferred_members: Vec<usize> = Vec::new();
 
     // Resolve every structural pairing before examining detached proof bytes.
     // Hidden-only methods still defer until their issuer proof authenticates them.
-    #[cfg(feature = "dual-leaf")]
     let resolved_members: Vec<Option<CircuitId>> = manifest.sub_proofs.iter().enumerate()
         .map(|(i, sp)| {
             let resolved = resolve_member_for_sub_proof(
@@ -8117,7 +8103,6 @@ fn verify_manifest_impl(
 
         // Select only the structurally resolved member's canonical VK.
         let id = sp.inputs.circuit_id();
-        #[cfg(feature = "dual-leaf")]
         let id = resolved_members[i].as_ref().unwrap_or(id);
         let sub_work = work_dir.join(format!("sub{i}"));
         let canonical_vk = prover
@@ -8188,7 +8173,6 @@ fn verify_manifest_impl(
     // deferral is never an acceptance: a sub-proof is accepted only once this pass
     // has resolved its member, and this pass cannot defer (only
     // `BeforeHiddenIssuer` can).
-    #[cfg(feature = "dual-leaf")]
     for i in deferred_members {
         let Some(sp) = manifest.sub_proofs.get(i) else {
             continue;
@@ -17351,5 +17335,384 @@ mod member_from_authenticated_method_tests {
                 );
             }
         }
+    }
+}
+
+// Matrix-free method-fold regression tests run in the default build too.
+#[cfg(test)]
+mod unconditional_method_fold_tests {
+    use super::*;
+    use crate::driver::ProofArtifacts;
+    use crate::manifest::{BindingEdge, FilterOp, SubProof};
+    use sparq_zk::commit::CommitmentMethod;
+
+    const CANON: AuthenticatedMethod =
+        AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1);
+
+    fn fh(n: u64) -> FieldHex {
+        FieldHex::from_field(&Fr::from(n))
+    }
+
+    fn methods(entries: &[(u64, AuthenticatedMethod)]) -> AuthenticatedMethods {
+        entries.iter().map(|(n, m)| (fh(*n).0, *m)).collect()
+    }
+
+    fn manifest(commitments: Vec<FieldHex>) -> ProofManifest {
+        let k = commitments.len() as u32;
+        ProofManifest {
+            r#type: "urn:sparq:zk:ProofManifest".into(),
+            query: "SELECT * WHERE { ?s ?p ?o }".into(),
+            issuers: vec![],
+            key_set: vec![],
+            commitment_attestations: vec![],
+            attributions: vec![vec![]],
+            pattern_scans: vec![],
+            join_obligations: vec![],
+            entailment_regime: EntailmentRegime::Simple,
+            derivation_steps: vec![],
+            binding: BindingMode::Challenge { challenge: fh(42) },
+            revocation: None,
+            status_snapshots: vec![],
+            sub_proofs: vec![SubProof {
+                inputs: ProofInputs::Scan {
+                    id: CircuitId::Scan { k, n: 16, r: 4 },
+                    commitments,
+                    attribution: vec![false; k as usize],
+                    pattern_is_const: [false; 3],
+                    pattern_const_enc: std::array::from_fn(|_| FieldHex("0x0".into())),
+                    rows: vec![],
+                    row_count: 0,
+                },
+                proof_hex: String::new(),
+            }],
+            binding_edges: vec![],
+            join_edges: vec![],
+            hidden_revocation: None,
+            hidden_issuer_attestations: vec![],
+            holder_pok_proofs: vec![],
+            holder_set_proofs: vec![],
+            fully_hidden_revocation: None,
+        }
+    }
+
+    fn resolve(
+        m: &ProofManifest,
+        proof: usize,
+        methods: &AuthenticatedMethods,
+        hidden: &BTreeSet<String>,
+        stage: MethodStage,
+    ) -> Result<Option<CircuitId>, CheckError> {
+        resolve_member_for_sub_proof(
+            m, proof, m.sub_proofs[proof].inputs.circuit_id(), methods, hidden, stage,
+            &JoinEndpointIndex::build(m),
+        )
+    }
+
+    #[test]
+    fn binding_and_join_commitments_require_map_entries_in_every_build() {
+        let mut m = manifest(vec![fh(100), fh(200)]);
+        let operand = crate::build::encode_int_literal(5);
+        if let ProofInputs::Scan { rows, row_count, attribution, .. } = &mut m.sub_proofs[0].inputs {
+            *rows = vec![[fh(1), fh(2), operand.clone()]];
+            *row_count = 1;
+            *attribution = vec![true, false];
+        }
+        m.sub_proofs.push(SubProof {
+            inputs: ProofInputs::FilterInt {
+                id: CircuitId::FilterInt { d: 1 },
+                operand_enc: operand.clone(),
+                op: FilterOp::Gt,
+                bound: 1,
+                expected: true,
+            },
+            proof_hex: String::new(),
+        });
+        m.binding_edges.push(BindingEdge {
+            filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1,
+        });
+        assert_eq!(scan_binding_cell(&m.sub_proofs[0].inputs, 0, 2), Some(&operand));
+        m.sub_proofs.push(SubProof {
+            inputs: ProofInputs::JoinEq {
+                id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
+                commit_a: fh(100), commit_b: fh(200), join_commitment: fh(300),
+                slot_a: 2, slot_b: 2,
+            },
+            proof_hex: String::new(),
+        });
+        m.join_edges.push(crate::manifest::JoinEdge {
+            scan_a: 0, graph_a: 0, scan_b: 0, graph_b: 1, join_proof: 2,
+        });
+        bind_join_endpoints(&m).expect("the join's endpoint linkage validates");
+        for proof in [0, 1, 2] {
+            for stage in [MethodStage::BeforeHiddenIssuer, MethodStage::AfterHiddenIssuer] {
+                let error = resolve(&m, proof, &methods(&[(100, CANON)]), &BTreeSet::new(), stage)
+                    .expect_err("a bound commitment absent from the map must be refused");
+                assert!(matches!(&error,
+                    CheckError::SubProofCommitmentNotAuthenticated { proof: label, commitment }
+                        if label == &format!("sub_proofs[{proof}]") && commitment == &fh(200).0
+                ), "{error}");
+                assert!(error.to_string().contains("authenticated-method map"));
+                assert_eq!(
+                    resolve(&m, proof, &methods(&[(100, CANON), (200, CANON)]), &BTreeSet::new(), stage)
+                        .expect("attested commitments resolve at the same stage"),
+                    Some(m.sub_proofs[proof].inputs.circuit_id().clone()),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn disagreeing_recognised_methods_are_refused_in_every_build() {
+        // Both methods are recognised in a default build. Construct the map
+        // directly: its pre-filter refuses dual-leaf encoding without dual-leaf.
+        let m = manifest(vec![fh(100), fh(200)]);
+        for entries in [
+            [(100, CANON), (200, AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV2))],
+            [(100, AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV2)), (200, CANON)],
+            [(100, CANON), (200, AuthenticatedMethod::Unbound)],
+            [(100, AuthenticatedMethod::Unbound), (200, CANON)],
+        ] {
+            let error = resolve(&m, 0, &methods(&entries), &BTreeSet::new(), MethodStage::BeforeHiddenIssuer)
+                .expect_err("disagreeing authenticated methods must be refused");
+            assert!(matches!(&error,
+                CheckError::SubProofMethodUnresolved { proof, reason }
+                    if proof == "sub_proofs[0]" && reason.contains("different commitment methods")
+            ), "{error}");
+            assert!(error.to_string().contains("no single authenticated commitment method"));
+        }
+        for agreed in [CANON, AuthenticatedMethod::Unbound] {
+            assert_eq!(
+                resolve(&m, 0, &methods(&[(100, agreed), (200, agreed)]), &BTreeSet::new(), MethodStage::BeforeHiddenIssuer)
+                    .expect("agreeing entries resolve"),
+                Some(m.sub_proofs[0].inputs.circuit_id().clone()),
+            );
+        }
+    }
+
+    #[test]
+    fn hidden_only_commitments_defer_then_resolve_or_refuse_in_every_build() {
+        let m = manifest(vec![fh(100), fh(200)]);
+        let hidden = BTreeSet::from([fh(100).0]);
+        for entries in [
+            methods(&[(100, CANON), (200, CANON)]),
+            methods(&[(100, CANON), (200, AuthenticatedMethod::Unbound)]),
+            methods(&[(200, CANON)]),
+        ] {
+            assert_eq!(resolve(&m, 0, &entries, &hidden, MethodStage::BeforeHiddenIssuer)
+                .expect("hidden-only candidates defer without being read"), None);
+        }
+        assert_eq!(
+            resolve(&m, 0, &methods(&[(100, CANON), (200, CANON)]), &hidden, MethodStage::AfterHiddenIssuer)
+                .expect("agreeing entries resolve after the hidden-issuer gate"),
+            Some(m.sub_proofs[0].inputs.circuit_id().clone()),
+        );
+        assert!(matches!(
+            resolve(&m, 0, &methods(&[(100, CANON), (200, AuthenticatedMethod::Unbound)]), &hidden, MethodStage::AfterHiddenIssuer),
+            Err(CheckError::SubProofMethodUnresolved { proof, reason })
+                if proof == "sub_proofs[0]" && reason.contains("different commitment methods")
+        ));
+        assert!(matches!(
+            resolve(&m, 0, &methods(&[(200, CANON)]), &hidden, MethodStage::AfterHiddenIssuer),
+            Err(CheckError::SubProofCommitmentNotAuthenticated { proof, commitment })
+                if proof == "sub_proofs[0]" && commitment == fh(100).0
+        ));
+    }
+
+    fn attested_manifest(hidden: bool, unbound: bool) -> (ProofManifest, KeySet, RevocationPolicy) {
+        use crate::manifest::{HiddenIssuerAttestation, StatusListSnapshot};
+        use sparq_zk::sig::{SecretKey, public_key_to_hex};
+        let mut m = manifest(vec![fh(100), fh(200)]);
+        m.attributions = vec![vec![0, 1]];
+        m.revocation = Some(test_revocation());
+        let sk = SecretKey::from_seed(1);
+        let keys = KeySet::from_hex_keys([public_key_to_hex(&sk.public_key())])
+            .with_hidden_issuer_depth(4)
+            .with_method_policy(MethodPolicy::current().admit_unbound());
+        let status = status_ref_digest(
+            &status_list_id_to_field(TEST_STATUS_LIST), TEST_STATUS_INDEX, TEST_STATUS_VERSION,
+        );
+        let mut clear = test_attestation(Fr::from(200u64), Fr::from(12u64), &sk);
+        if unbound {
+            clear.signature = sk.sign_commitment_with_status(&Fr::from(200u64), &Fr::from(12u64), &status);
+        }
+        m.commitment_attestations.push(clear);
+        if hidden {
+            let message = sparq_zk::sig::presentation_message_with_status_and_scheme(
+                &Fr::from(100u64), &Fr::from(11u64), &status,
+                &sparq_zk::sig::scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()),
+            );
+            let root = keys.hidden_issuer_root(4).unwrap();
+            let public_inputs = [Fr::from(42u64), message, root].iter()
+                .flat_map(field_to_be_bytes_32).collect();
+            m.hidden_issuer_attestations.push(HiddenIssuerAttestation {
+                commitment: fh(100), depth: 4, key_set_root: FieldHex::from_field(&root),
+                message: FieldHex::from_field(&message), salt: Some(fh(11)),
+                proof_hex: encode_artifacts(&ProofArtifacts { proof: vec![1], public_inputs, vk: vec![] }),
+            });
+        } else {
+            m.commitment_attestations.push(test_attestation(Fr::from(100u64), Fr::from(11u64), &sk));
+        }
+        let policy = RevocationPolicy::accept_version(TEST_STATUS_VERSION).with_snapshots([
+            StatusListSnapshot {
+                status_list: TEST_STATUS_LIST.into(), version: TEST_STATUS_VERSION, bits: vec![0; 2],
+            },
+        ]);
+        (m, keys, policy)
+    }
+
+    fn verify(m: &ProofManifest, keys: &KeySet, policy: &RevocationPolicy, root: &Path) -> Result<(), CheckError> {
+        verify_manifest(
+            m, &CircuitProver::new(root), &root.join("verify"), keys, policy,
+            &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(),
+            &EntailmentPolicy::simple_only(), &VerifierNonce::from_hex("0x2a").unwrap(),
+            &InMemorySeenNonces::new(),
+        )
+    }
+
+    #[test]
+    fn the_default_prepass_precedes_proof_bytes_but_follows_structural_errors() {
+        let (mut m, keys, policy) = attested_manifest(false, true);
+        let result = verify(&m, &keys, &policy, Path::new("unused"));
+        assert!(matches!(result, Err(CheckError::SubProofMethodUnresolved { .. })), "{result:?}");
+        let (control, keys, policy) = attested_manifest(false, false);
+        assert!(matches!(verify(&control, &keys, &policy, Path::new("unused")),
+            Err(CheckError::MissingProof { proof: 0 })));
+        if let ProofInputs::Scan { id, .. } = &mut m.sub_proofs[0].inputs {
+            *id = CircuitId::Scan { k: 1, n: 16, r: 4 };
+        }
+        assert!(matches!(verify(&m, &keys, &policy, Path::new("unused")),
+            Err(CheckError::CircuitIdMismatch { proof: 0, .. })));
+    }
+
+    #[test]
+    fn non_fold_refusals_keep_their_existing_order() {
+        let (control, keys, policy) = attested_manifest(false, false);
+        prefilter_manifest_structure_impl(&control, &keys, &policy, false)
+            .expect("the agreeing control passes every pre-filter gate");
+        assert!(matches!(verify(&control, &keys, &policy, Path::new("unused")),
+            Err(CheckError::MissingProof { proof: 0 })));
+
+        let mut absent = control.clone();
+        absent.commitment_attestations.retain(|a| a.commitment != fh(100));
+        assert!(matches!(verify(&absent, &keys, &policy, Path::new("unused")),
+            Err(CheckError::UnattestedCommitment { proof: 0, commitment }) if commitment == fh(100).0));
+
+        let mut wrong_nonce = control.clone();
+        wrong_nonce.binding = BindingMode::Challenge { challenge: fh(43) };
+        assert!(matches!(verify(&wrong_nonce, &keys, &policy, Path::new("unused")),
+            Err(CheckError::NonceBindingMismatch)));
+
+        // The intact artifact decodes and matches the independently declared
+        // statement. Each negative changes only its proof-byte envelope.
+        let public_inputs = reconstruct_public_inputs(&control.sub_proofs[0].inputs, &fh(42), 0).unwrap();
+        let artifact = ProofArtifacts { proof: vec![1], public_inputs, vk: vec![] };
+        let encoded = encode_artifacts(&artifact);
+        let decoded = decode_artifacts(&hex_decode(&encoded).unwrap()).expect("the control artifact decodes");
+        assert_eq!(decoded.public_inputs, artifact.public_inputs);
+        for malformed in ["not-hex", "00"] {
+            let mut m = control.clone();
+            m.sub_proofs[0].proof_hex = malformed.into();
+            assert!(matches!(verify(&m, &keys, &policy, Path::new("unused")),
+                Err(CheckError::MalformedProof { proof: 0 })));
+        }
+        let mut wrong_inputs = control;
+        let mut altered = artifact;
+        altered.public_inputs[31] ^= 1;
+        wrong_inputs.sub_proofs[0].proof_hex = encode_artifacts(&altered);
+        assert!(matches!(verify(&wrong_inputs, &keys, &policy, Path::new("unused")),
+            Err(CheckError::PublicInputMismatch { proof: 0 })));
+    }
+
+    // The child has a private PATH containing ONLY the two refusing-by-default
+    // tool stubs. No test changes the parent process environment or invokes the
+    // real toolchain. This checks host ordering, not cryptographic evidence.
+    #[cfg(unix)]
+    #[test]
+    fn the_verifier_runs_the_deferred_postpass_in_every_build() {
+        use std::os::unix::fs::PermissionsExt;
+        const ROOT_ENV: &str = "SPARQ_METHOD_FOLD_TEST_ROOT";
+        if let Some(root) = std::env::var_os(ROOT_ENV) {
+            let root = std::path::PathBuf::from(root);
+            assert_eq!(std::env::var_os("PATH"), Some(root.join("bin").into_os_string()),
+                "the child may only run with its private stub PATH");
+            for unbound in [false, true] {
+                let (mut m, keys, policy) = attested_manifest(true, unbound);
+                let pre = prefilter_manifest_structure_impl(&m, &keys, &policy, false)
+                    .expect("both cases pass the existing structural gates");
+                let hidden = hidden_only_commitments(&m, &keys);
+                assert_eq!(hidden, BTreeSet::from([fh(100).0]));
+                assert_eq!(resolve(&m, 0, &pre.methods, &hidden, MethodStage::BeforeHiddenIssuer)
+                    .expect("both cases defer"), None);
+                m.sub_proofs[0].proof_hex = encode_artifacts(&ProofArtifacts {
+                    proof: vec![1], vk: vec![],
+                    public_inputs: reconstruct_public_inputs(&m.sub_proofs[0].inputs, &fh(42), 0).unwrap(),
+                });
+                let mut malformed_hidden = m.clone();
+                malformed_hidden.hidden_issuer_attestations[0].proof_hex.clear();
+                assert!(matches!(verify(&malformed_hidden, &keys, &policy, &root),
+                    Err(CheckError::HiddenIssuerMalformedProof)),
+                    "hidden-issuer proof errors must precede any deferred fold refusal");
+                assert_eq!(std::fs::read_to_string(root.join("calls")).unwrap().lines().collect::<Vec<_>>(),
+                    ["write_vk", "verify"]);
+                std::fs::remove_file(root.join("calls")).unwrap();
+                let result = verify(&m, &keys, &policy, &root);
+                if unbound {
+                    assert!(matches!(&result, Err(CheckError::SubProofMethodUnresolved { proof, reason })
+                        if proof == "sub_proofs[0]" && reason.contains("different commitment methods")),
+                        "the verifier must refuse disagreement after the hidden-issuer gate: {result:?}");
+                } else {
+                    result.expect("agreeing hidden and clear methods pass every host gate with stubbed crypto");
+                }
+                let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+                assert_eq!(calls.lines().collect::<Vec<_>>(), ["write_vk", "verify", "write_vk", "verify"]);
+                std::fs::remove_file(root.join("calls")).unwrap();
+                if !unbound {
+                    let (inputs, _) = crate::build::build_filter_int(
+                        crate::build::encode_int_literal(5), 5, FilterOp::Gt, 1, true,
+                    ).expect("an honest string-canonical FILTER builds");
+                    let public_inputs = reconstruct_public_inputs(&inputs, &fh(42), 1).unwrap();
+                    m.sub_proofs.push(SubProof {
+                        inputs,
+                        proof_hex: encode_artifacts(&ProofArtifacts { proof: vec![1], public_inputs, vk: vec![] }),
+                    });
+                    verify(&m, &keys, &policy, &root)
+                        .expect("an edge-less string-canonical FILTER retains its existing host acceptance");
+                    assert_eq!(std::fs::read_to_string(root.join("calls")).unwrap().lines().collect::<Vec<_>>(),
+                        ["write_vk", "verify", "write_vk", "verify", "write_vk", "verify"]);
+                    std::fs::remove_file(root.join("calls")).unwrap();
+                }
+            }
+            return;
+        }
+        struct Temp(std::path::PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let temp = Temp(std::env::temp_dir().join(format!("sparq_method_fold_{}", std::process::id())));
+        let bin = temp.0.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let nargo = "#!/bin/sh\n[ \"$#\" = 3 ] && [ \"$1\" = compile ] && [ \"$2\" = --package ] || exit 91\nprintf '{}' > \"target/$3.json\"\n";
+        let bb = r#"#!/bin/sh
+case "$1" in
+  write_vk)
+    [ "$#" = 7 ] && [ "$2" = -b ] && [ "$4" = -o ] && [ "$6" = -t ] || exit 92
+    printf 'test-key' > "$5/vk" ;;
+  verify)
+    [ "$#" = 9 ] && [ "$2" = -p ] && [ "$4" = -i ] && [ "$6" = -k ] && [ "$8" = -t ] || exit 93 ;;
+  *) exit 94 ;;
+esac
+printf '%s\n' "$1" >> "$SPARQ_METHOD_FOLD_TEST_ROOT/calls"
+"#;
+        for (name, script) in [("nargo", nargo), ("bb", bb)] {
+            let path = bin.join(name);
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "verifier::unconditional_method_fold_tests::the_verifier_runs_the_deferred_postpass_in_every_build", "--nocapture"])
+            .env("PATH", &bin).env(ROOT_ENV, &temp.0).output().unwrap();
+        assert!(output.status.success(), "{}\n{}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
     }
 }
