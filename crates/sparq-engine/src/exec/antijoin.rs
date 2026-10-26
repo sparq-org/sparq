@@ -362,24 +362,37 @@ pub(super) fn try_theta_antijoin(
         let members = &groups[key];
         let ri0 = members[0];
 
-        // Seed iff every correlation value in this group is an IRI (`=` IS term
-        // identity for IRIs). A literal value routes to the cold `B` + value `=` recheck.
+        // Seed only exact term correlations. Literal `=` still needs the cold
+        // value recheck; sameTerm can also seed blank nodes and literals by id.
         let mut smap: FxHashMap<Variable, oxrdf::NamedNode> = FxHashMap::default();
+        let mut terms: FxHashMap<Variable, Term> = FxHashMap::default();
         let mut all_iri = true;
+        let mut all_exact = true;
         for c in &correlations {
-            match term_of(graph, local, left_b.rows[ri0][c.left_col]) {
-                Some(Term::NamedNode(n)) => {
+            let term = term_of(graph, local, left_b.rows[ri0][c.left_col]);
+            all_exact &= corr_id_probeable(c.kind, term.as_ref());
+            let Some(term) = term else {
+                all_iri = false;
+                break;
+            };
+            if let Some(previous) = terms.insert(c.inner_var.clone(), term.clone()) {
+                all_exact &= previous == term;
+            }
+            match term {
+                Term::NamedNode(n) => {
                     smap.insert(c.inner_var.clone(), n);
                 }
-                _ => {
-                    all_iri = false;
-                    break;
-                }
+                _ => all_iri = false,
             }
         }
-        let (b_prime, seeded) = if all_iri {
+        let (b_prime, seeded) = if all_iri && all_exact {
             match subst_pattern(right, &smap) {
                 Some(subst) => (eval_graph_pattern(graph, local, &subst)?, true),
+                None => (eval_graph_pattern(graph, local, right)?, false),
+            }
+        } else if all_exact && !local.substitute_exists_domains {
+            match eval_term_seeded_bgp(graph, right, &terms)? {
+                Some(bindings) => (bindings, true),
                 None => (eval_graph_pattern(graph, local, right)?, false),
             }
         } else {
@@ -389,9 +402,8 @@ pub(super) fn try_theta_antijoin(
         fired = true;
 
         let (mut out_src, tmp_vars) = merged_row_plan(&out_vars, &left_b, &b_prime);
-        // When seeded, `?inner` was folded to a constant inside `B`, so `b_prime` no
-        // longer binds it — re-materialise its id so a residual referencing `?inner`
-        // still sees the seeded value on the merged row.
+        // IRI substitution folds `?inner` out of B: re-materialise its id for
+        // residual expressions. Id-seeded BGPs already retain these columns.
         if seeded {
             for c in &correlations {
                 if let Some(nn) = smap.get(&c.inner_var) {
