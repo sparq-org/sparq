@@ -154,7 +154,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(store.read(iri).await.unwrap().body, b"first"[..]);
-        assert!(BlobStore::exists(&store.blob, &first.blob_key)
+        assert!(BlobStore::exists(&*store.blob, &first.blob_key)
             .await
             .unwrap());
         let held = store.hold(iri, "urn:test:holder").await.unwrap().unwrap();
@@ -165,31 +165,31 @@ mod tests {
         assert_ne!(first.blob_key, second.blob_key);
         assert_eq!(store.read(iri).await.unwrap().body, b"second"[..]);
         assert_eq!(
-            BlobStore::get(&store.blob, &first.blob_key).await.unwrap(),
+            BlobStore::get(&*store.blob, &first.blob_key).await.unwrap(),
             b"first"[..]
         );
         store.release(&held, "urn:test:holder").await.unwrap();
         // Releasing the last hold drives CompositeStore::reclaim_blob through the adapter.
-        assert!(!BlobStore::exists(&store.blob, &first.blob_key)
+        assert!(!BlobStore::exists(&*store.blob, &first.blob_key)
             .await
             .unwrap());
         let third = store
             .write(iri, Bytes::from_static(b"third"), "text/plain")
             .await
             .unwrap();
-        assert!(!BlobStore::exists(&store.blob, &second.blob_key)
+        assert!(!BlobStore::exists(&*store.blob, &second.blob_key)
             .await
             .unwrap());
         store.delete(iri, None).await.unwrap();
         assert!(!store.exists(iri).await.unwrap());
-        assert!(!BlobStore::exists(&store.blob, &third.blob_key)
+        assert!(!BlobStore::exists(&*store.blob, &third.blob_key)
             .await
             .unwrap());
         store
             .delete(crate::store::HELD_CONTAINER, None)
             .await
             .unwrap();
-        assert!(BlobStore::list(&store.blob).await.unwrap().is_empty());
+        assert!(BlobStore::list(&*store.blob).await.unwrap().is_empty());
 
         let pooled = store
             .write(
@@ -211,7 +211,7 @@ mod tests {
             .join(&random[..2])
             .join(&pooled.blob_key)
             .is_file());
-        let blobs = BlobStore::list(&store.blob).await.unwrap();
+        let blobs = BlobStore::list(&*store.blob).await.unwrap();
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].key, pooled.blob_key);
         assert!(blobs[0].last_modified.is_some());
@@ -219,6 +219,9 @@ mod tests {
         // The same index and a new adapter must read bytes from disk, without the body cache.
         let CompositeStore { sparq, blob, .. } = store;
         drop(blob);
+        let sparq = std::sync::Arc::try_unwrap(sparq)
+            .ok()
+            .expect("sole index handle");
         let reopened = CompositeStore::with_body_cache(
             sparq,
             FsBlobStore::open(&directory.0).unwrap(),
@@ -251,7 +254,7 @@ mod tests {
             .await
             .unwrap();
         let orphan = "b1-0123456789abcdef0123456789abcdef";
-        BlobStore::put(&store.blob, orphan, Bytes::from_static(b"orphan"))
+        BlobStore::put(&*store.blob, orphan, Bytes::from_static(b"orphan"))
             .await
             .unwrap();
         // Fix only the orphan's age, avoiding sleeps or reliance on clock precision.
@@ -261,7 +264,7 @@ mod tests {
             .unwrap();
         file.set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
             .unwrap();
-        let stats = BlobStore::stat(&store.blob, orphan).await.unwrap().unwrap();
+        let stats = BlobStore::stat(&*store.blob, orphan).await.unwrap().unwrap();
         assert_eq!(stats.last_modified, Some(SystemTime::UNIX_EPOCH));
         assert_eq!(stats.generation, None);
         fs::write(directory.0.join("tmp/unpublished"), b"in flight").unwrap();
@@ -273,7 +276,7 @@ mod tests {
             grace: Duration::from_secs(60),
             dry_run: false,
         };
-        let report = reconcile_orphans(&store.sparq, &store.blob, &options)
+        let report = reconcile_orphans(&*store.sparq, &*store.blob, &options)
             .await
             .unwrap();
         assert_eq!(report.scanned, 2);
@@ -281,16 +284,16 @@ mod tests {
         assert_eq!(report.orphaned, 1);
         assert_eq!(report.deleted, 1);
         assert_eq!(report.delete_errors, 0);
-        assert!(!BlobStore::exists(&store.blob, orphan).await.unwrap());
+        assert!(!BlobStore::exists(&*store.blob, orphan).await.unwrap());
         assert_eq!(
-            BlobStore::get(&store.blob, &live.blob_key).await.unwrap(),
+            BlobStore::get(&*store.blob, &live.blob_key).await.unwrap(),
             b"live"[..]
         );
         assert!(directory.0.join("tmp/unpublished").is_file());
         assert_eq!(fs::read(stray_file).unwrap(), b"foreign");
         assert!(stray_dir.is_dir());
         assert_eq!(
-            reconcile_orphans(&store.sparq, &store.blob, &options)
+            reconcile_orphans(&*store.sparq, &*store.blob, &options)
                 .await
                 .unwrap()
                 .deleted,
