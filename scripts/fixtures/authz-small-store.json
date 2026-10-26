@@ -1,0 +1,31 @@
+{
+  "dataset": "<https://pod.ex/n1> <urn:p> <urn:o> <https://pod.ex/n1> .\n<https://pod.ex/.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .\n<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .\n<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n",
+  "mode": "read",
+  "resource": "https://pod.ex/n1",
+  "session": {
+    "agent": "https://alice.ex/card#me"
+  },
+  "trust": {
+    "agentIri": "https://alice.ex/card#me",
+    "certifications": [],
+    "credentials": [
+      {
+        "graphNquads": "<https://alice.ex/card#me> <urn:claim> \"0\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+        "issuedAtUnixSecs": 100,
+        "issuerSignatureHex": "f6268143951c1ba20ab53152722b6a485a731ceb09e0b2f05fe9e9e253762a012cf51339dc768b87f8b11bf3b228b15fee9032a16054e894e006b0e7e9f89901",
+        "revoked": false,
+        "saltHex": "0707070707070707070707070707070707070707070707070707070707070707"
+      }
+    ],
+    "nowUnixSecs": 100,
+    "rules": [
+      {
+        "freshWithinSecs": 100,
+        "issuerKeyHex": "fe4026828f9a6806c21b9fe1c2da77eb4313a17c582376468b497d30e3c90092",
+        "scopeIri": "https://pod.ex/",
+        "shapePredicateIri": "urn:claim",
+        "source": "urn:issuer"
+      }
+    ]
+  }
+}

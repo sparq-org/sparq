@@ -17,6 +17,9 @@ loaders live in `sparq-core`; the binary HDT archive format (including content-s
 > formatter) and JSON-LD (`graph_to_jsonld_pretty`); the N-Triples writer (`triples_to_ntriples`)
 > is always on. See recipe 6.
 
+Native parallel builds derive small-store permutation indexes serially to avoid worker-pool
+handoffs. Larger stores retain parallel derivation; index contents are independent of scheduling.
+
 ## Literal validity and cache eligibility
 
 RDF ingestion preserves ill-typed literals. To check numeric datatype

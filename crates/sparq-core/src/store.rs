@@ -479,7 +479,7 @@ fn radix_sort_rows_by_col0(v: &mut Vec<[Id; 3]>) {
 /// re-map plus a stable sort on its new leading column alone ([`radix_sort_rows_by_col0`]).
 ///
 /// Pairs within a wave are independent (their sources are all already materialised) and so
-/// run concurrently; the waves themselves are ordered. Depth is 2 derivations, so the
+/// may run concurrently; the waves themselves are ordered. Depth is 2 derivations, so the
 /// critical path is `full-sort + 2 single-column sorts` rather than six full sorts.
 ///
 /// Every pair must satisfy the derivability invariant asserted in
@@ -497,10 +497,18 @@ const DERIVE_PLAN: &[&[(Perm, Perm)]] = &[
 #[cfg(any(target_arch = "wasm32", feature = "compact-index"))]
 const DERIVE_PLAN: &[&[(Perm, Perm)]] = &[&[(Perm::Spo, Perm::Osp)], &[(Perm::Osp, Perm::Pos)]];
 
+/// Row cutoff for deriving permutation waves without a pool handoff.
+///
+/// Recalibrate with the ignored `measure_serial_vs_parallel_perms` store-build benchmark,
+/// sweeping row counts and worker counts with interleaved pairs and an identical-arm control.
+#[cfg(any(feature = "parallel", test))]
+const SERIAL_PERM_ROWS: usize = 1536;
+
 impl TripleStore {
     /// Builds the [`BUILT`] permutation indexes from canonical s,p,o triples (all
-    /// six by default; just SPO/POS/OSP under `compact-index`). SPO is sorted (in
-    /// parallel) and deduplicated first; the rest are independent and built concurrently.
+    /// six by default; just SPO/POS/OSP under `compact-index`). SPO is sorted and
+    /// deduplicated first; the rest derive in ordered waves. With the `parallel` feature,
+    /// larger stores use parallel work within each wave.
     pub fn from_triples(triples: Vec<[Id; 3]>) -> Self {
         let perms = Self::build_raw_perms(triples);
         let pred_stats = Self::compute_pred_stats(&perms);
@@ -534,7 +542,8 @@ impl TripleStore {
 
     /// Builds the [`BUILT`] raw permutation indexes from canonical [s,p,o] triples (all six
     /// by default; just SPO/POS/OSP under `compact-index`). Two `cfg`-selected bodies — the
-    /// PARALLEL build runs each [`DERIVE_PLAN`] wave concurrently, the NO-THREADS build runs
+    /// PARALLEL build runs large [`DERIVE_PLAN`] waves concurrently and small stores serially;
+    /// the NO-THREADS build runs
     /// the same plan in order — kept as separate `fn` definitions so the wasm codegen carries
     /// no rayon shape at all.
     ///
@@ -603,15 +612,20 @@ impl TripleStore {
         // construction (an ExactSize map-collect, then a same-length radix double-buffer).
         triples.shrink_to_fit();
 
+        let serial = triples.len() < SERIAL_PERM_ROWS;
         let mut perms: [PermData; 6] = std::array::from_fn(|_| PermData::default());
         perms[Perm::Spo as usize] = PermData::Owned(triples);
         for wave in DERIVE_PLAN {
-            // Sources are materialised by an earlier wave, so the pairs inside a wave are
-            // independent and derive concurrently.
-            let built: Vec<(Perm, Vec<[Id; 3]>)> = wave
-                .par_iter()
-                .map(|&(src, dst)| (dst, Self::derive_perm(perms[src as usize].as_slice(), src, dst)))
-                .collect();
+            // Sources are materialised by an earlier wave. Small stores avoid the pool
+            // handoff; larger stores overlap the independent pairs within each wave.
+            let derive = |&(src, dst): &(Perm, Perm)| {
+                (dst, Self::derive_perm(perms[src as usize].as_slice(), src, dst))
+            };
+            let built: Vec<(Perm, Vec<[Id; 3]>)> = if serial {
+                wave.iter().map(derive).collect()
+            } else {
+                wave.par_iter().map(derive).collect()
+            };
             for (p, v) in built {
                 perms[p as usize] = PermData::Owned(v);
             }
@@ -1301,6 +1315,17 @@ mod tests {
     /// of the store). Runs across both index sets (`compact-index` builds three perms).
     #[test]
     fn from_triples_perms_match_reference_sort() {
+        for n in [SERIAL_PERM_ROWS - 1, SERIAL_PERM_ROWS] {
+            let triples: Vec<[Id; 3]> = (0..n as Id).rev().map(|i| [i, i % 17, i % 257]).collect();
+            let store = TripleStore::from_triples(triples.clone());
+            assert_eq!(store.len(), n, "boundary input must remain unique after dedup");
+            for &perm in BUILT {
+                let order = perm.order();
+                let mut want: Vec<_> = triples.iter().map(|t| [t[order[0]], t[order[1]], t[order[2]]]).collect();
+                want.sort_unstable();
+                assert_eq!(store.perms[perm as usize].as_slice(), want, "boundary {n}, {perm:?}");
+            }
+        }
         let mut st = 0xC0FFEEu32;
         let mut rng = || {
             st ^= st << 13;
@@ -1404,6 +1429,15 @@ mod tests {
     /// and the id-space boundaries.
     #[test]
     fn derived_perms_match_radix_all_build() {
+        for n in [SERIAL_PERM_ROWS - 1, SERIAL_PERM_ROWS] {
+            let triples: Vec<[Id; 3]> = (0..n as Id).rev().map(|i| [i, i % 17, i % 257]).collect();
+            let want = build_raw_perms_radix_all(&triples);
+            let store = TripleStore::from_triples(triples);
+            assert_eq!(store.len(), n, "boundary input must remain unique after dedup");
+            for (perm, rows) in want {
+                assert_eq!(store.perms[perm as usize].as_slice(), rows, "boundary {n}, {perm:?}");
+            }
+        }
         let mut st = 0x5EEDBEEFu32;
         let mut rng = || {
             st ^= st << 13;
@@ -1446,6 +1480,88 @@ mod tests {
                         &want_rows[..],
                         "derived {perm:?} differs from the independent full-radix build (shape {si}/{pi}/{oi}, n={n})"
                     );
+                }
+            }
+        }
+    }
+
+    /// Recalibrates the small-store schedule outside the Rayon pool, like a blocking caller.
+    /// Run in release mode with a fixed worker count and no concurrent builds. CSV samples
+    /// include interleaved schedule pairs and identical-parallel-arm controls; bootstrap the
+    /// paired ratios before changing the cutoff. Timing is advisory, never an assertion.
+    #[cfg(feature = "parallel")]
+    #[test]
+    #[ignore = "timing measurement; run explicitly with a fixed Rayon worker count"]
+    fn measure_serial_vs_parallel_perms() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn build(mut triples: Vec<[Id; 3]>, serial: bool) -> [PermData; 6] {
+            radix_sort_rows(&mut triples);
+            triples.dedup();
+            triples.shrink_to_fit();
+            let mut perms = std::array::from_fn(|_| PermData::default());
+            perms[Perm::Spo as usize] = PermData::Owned(triples);
+            for wave in DERIVE_PLAN {
+                let derive = |&(src, dst): &(Perm, Perm)| {
+                    (dst, TripleStore::derive_perm(perms[src as usize].as_slice(), src, dst))
+                };
+                let built: Vec<_> = if serial {
+                    wave.iter().map(derive).collect()
+                } else {
+                    wave.par_iter().map(derive).collect()
+                };
+                for (p, v) in built {
+                    perms[p as usize] = PermData::Owned(v);
+                }
+            }
+            perms
+        }
+
+        fn time(rows: &[[Id; 3]], serial: bool, batch: usize) -> f64 {
+            let mut elapsed = std::time::Duration::ZERO;
+            for _ in 0..batch {
+                let input = rows.to_vec();
+                let start = Instant::now();
+                let result = black_box(build(black_box(input), serial));
+                elapsed += start.elapsed();
+                drop(result);
+            }
+            elapsed.as_secs_f64() / batch as f64
+        }
+
+        for n in [10usize, 100, 1_000, 1_536, 2_048, 3_072, 4_096, 16_384, 65_536] {
+            let mut state = 0xA5A5_1234u32;
+            let mut rng = || {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state
+            };
+            let rows: Vec<[Id; 3]> = (0..n)
+                .map(|_| [1 + rng() % (n as u32).max(2), 1 + rng() % 60, rng()])
+                .collect();
+            let serial = build(rows.clone(), true);
+            let parallel = build(rows.clone(), false);
+            let shipped = TripleStore::build_raw_perms(rows.clone());
+            for &p in BUILT {
+                assert_eq!(serial[p as usize].as_slice(), parallel[p as usize].as_slice());
+                assert_eq!(shipped[p as usize].as_slice(), parallel[p as usize].as_slice());
+            }
+            let batch = (100_000 / n).clamp(2, 100);
+            for _ in 0..10 {
+                black_box(time(&rows, true, batch));
+                black_box(time(&rows, false, batch));
+            }
+            for pair in 0..40 {
+                for control in [false, true] {
+                    let (a, b) = if pair % 2 == 0 {
+                        (time(&rows, false, batch), time(&rows, !control, batch))
+                    } else {
+                        let b = time(&rows, !control, batch);
+                        (time(&rows, false, batch), b)
+                    };
+                    println!("schedule_csv,{n},{pair},{control},{a:.9},{b:.9}");
                 }
             }
         }
