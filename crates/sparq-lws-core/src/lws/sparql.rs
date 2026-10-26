@@ -2,15 +2,28 @@
 
 use super::{access::Action, method_not_allowed, problem, Agent, LwsRequest, LwsState};
 use crate::error::ServerError;
-use crate::ldp::content::{classify, parse_to_triples};
+use crate::ldp::content::{classify, parse_to_triples, RdfFormat};
 use crate::sparql_protocol::{self as protocol, AuthorizedDataset};
 use crate::store::Store;
 use axum::http::{header, Method, StatusCode};
 use axum::response::Response;
+use bytes::Bytes;
 use oxrdf::NamedNode;
 use std::collections::BTreeSet;
 
 pub(super) const PATH: &str = "/.lws/sparql";
+
+struct Document {
+    scope: usize,
+    name: NamedNode,
+    format: RdfFormat,
+    body: Bytes,
+}
+
+struct AssembledView {
+    graph_names: Vec<String>,
+    documents: Vec<Document>,
+}
 
 #[cfg(test)]
 pub(super) struct EvaluationGate {
@@ -25,6 +38,9 @@ impl EvaluationGate {
         let _ = self.release.recv_timeout(std::time::Duration::from_secs(5));
     }
 }
+
+#[cfg(test)]
+pub(super) type ParsingGate = EvaluationGate;
 
 pub(super) async fn handle<S: Store + 'static>(
     state: &LwsState<S>,
@@ -76,7 +92,7 @@ pub(super) async fn handle<S: Store + 'static>(
                 let snapshot = state.store.snapshot(barrier).await?;
                 let assembled = assemble(state, agent, deadline).await;
                 let unchanged = snapshot.unchanged();
-                // Evaluation uses only owned data. Release admission immediately after
+                // Parsing and evaluation use only owned data. Release admission after
                 // validating assembly, including when this attempt returned an error.
                 drop(snapshot);
                 unchanged.then_some(assembled)
@@ -101,14 +117,21 @@ pub(super) async fn handle<S: Store + 'static>(
                 tokio::task::yield_now().await;
                 continue;
             };
-            let dataset = match assembled {
-                Ok(dataset) => dataset,
+            let view = match assembled {
+                Ok(view) => view,
                 Err(response) => return response,
             };
             let headers = req.headers.clone();
             #[cfg(test)]
+            let parsing = state.sparql_parsing.lock().unwrap().take();
+            #[cfg(test)]
             let evaluation = state.sparql_evaluation.lock().unwrap().take();
             let answer = tokio::task::spawn_blocking(move || {
+                #[cfg(test)]
+                if let Some(gate) = parsing {
+                    gate.wait();
+                }
+                let dataset = parse_view(view)?;
                 #[cfg(test)]
                 if let Some(gate) = evaluation {
                     gate.wait();
@@ -159,15 +182,14 @@ async fn assemble<S: Store + 'static>(
     state: &LwsState<S>,
     agent: &Agent,
     deadline: Option<std::time::Instant>,
-) -> Result<AuthorizedDataset, Response> {
+) -> Result<AssembledView, Response> {
     let root = state.cfg.storage();
     let mut queue = vec![root.clone()];
     let mut seen = BTreeSet::new();
     let mut names = Vec::new();
-    let mut nquads = String::new();
-    let mut parsed_bytes = 0usize;
+    let mut documents = Vec::new();
+    let mut rdf_bytes = 0usize;
     while let Some(uri) = queue.pop() {
-        tokio::task::yield_now().await;
         if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             return Err(problem(StatusCode::GATEWAY_TIMEOUT, None));
         }
@@ -203,7 +225,7 @@ async fn assemble<S: Store + 'static>(
         if !uri.ends_with('/') {
             if let Ok(format) = classify(Some(&meta.content_type)) {
                 // Account only authorized RDF, including malformed documents, before parsing.
-                let remaining = state.cfg.sparql_max_bytes.saturating_sub(parsed_bytes);
+                let remaining = state.cfg.sparql_max_bytes.saturating_sub(rdf_bytes);
                 let Ok(body) = state.store.read_at(&uri, &meta).await else {
                     continue;
                 };
@@ -213,7 +235,7 @@ async fn assemble<S: Store + 'static>(
                         Some("query RDF byte limit exceeded"),
                     ));
                 }
-                parsed_bytes += body.len();
+                rdf_bytes += body.len();
                 document = Some((format, body));
             }
         }
@@ -224,23 +246,37 @@ async fn assemble<S: Store + 'static>(
             ));
         }
         let scope = names.len();
-        names.push(uri.clone());
+        names.push(uri);
         if let Some((format, body)) = document {
-            nquads = tokio::task::spawn_blocking(move || {
-                let triples = parse_to_triples(format, &body, &uri).unwrap_or_default();
-                for triple in protocol::scope_blank_nodes(triples, scope) {
-                    protocol::write_quad(&mut nquads, &triple, &name);
-                }
-                nquads
-            })
-            .await
-            .map_err(|_| problem(StatusCode::INTERNAL_SERVER_ERROR, None))?;
+            documents.push(Document {
+                scope,
+                name,
+                format,
+                body,
+            });
         }
     }
-    tokio::task::spawn_blocking(move || protocol::dataset(&nquads, names))
-        .await
-        .map_err(|_| problem(StatusCode::INTERNAL_SERVER_ERROR, None))?
-        .map_err(protocol_error)
+    Ok(AssembledView {
+        graph_names: names,
+        documents,
+    })
+}
+
+fn parse_view(view: AssembledView) -> Result<AuthorizedDataset, ServerError> {
+    let mut nquads = String::new();
+    for Document {
+        scope,
+        name,
+        format,
+        body,
+    } in view.documents
+    {
+        let triples = parse_to_triples(format, &body, name.as_str()).unwrap_or_default();
+        for triple in protocol::scope_blank_nodes(triples, scope) {
+            protocol::write_quad(&mut nquads, &triple, &name);
+        }
+    }
+    protocol::dataset(&nquads, view.graph_names)
 }
 
 #[cfg(test)]
@@ -483,17 +519,31 @@ mod tests {
 
     #[tokio::test]
     async fn evaluation_releases_admission_and_keeps_its_assembled_view() {
+        assert_write_during_cpu_work(false).await;
+    }
+
+    #[tokio::test]
+    async fn parsing_releases_admission_and_keeps_its_assembled_view() {
+        assert_write_during_cpu_work(true).await;
+    }
+
+    async fn assert_write_during_cpu_work(parsing: bool) {
         let (state, app) = fixture(Duration::from_secs(4)).await;
         let entered = Arc::new(Semaphore::new(0));
         let (release, receiver) = std::sync::mpsc::channel();
-        *state.sparql_evaluation.lock().unwrap() = Some(EvaluationGate {
+        let gate = EvaluationGate {
             entered: entered.clone(),
             release: receiver,
-        });
+        };
+        if parsing {
+            *state.sparql_parsing.lock().unwrap() = Some(gate);
+        } else {
+            *state.sparql_evaluation.lock().unwrap() = Some(gate);
+        }
         let reading = query_under_barrier(&state, app.clone()).await;
         tokio::time::timeout(Duration::from_secs(1), entered.acquire())
             .await
-            .expect("evaluation must reach the blocking pool")
+            .expect("CPU work must reach the blocking pool")
             .unwrap()
             .forget();
         let written = tokio::time::timeout(
@@ -508,7 +558,7 @@ mod tests {
             ),
         )
         .await
-        .expect("evaluation must not hold writer admission");
+        .expect("CPU work must not hold writer admission");
         assert!(written.status().is_success());
         assert!(!reading.is_finished());
         release.send(()).unwrap();
@@ -606,6 +656,63 @@ mod tests {
             assert_eq!(
                 super::super::snapshot::parse_barrier_budget(ms).unwrap(),
                 Duration::from_millis(ms.parse().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn empty_barrier_environment_uses_the_default() {
+        const KEY: &str = "SOLID_SERVER_LWS_SPARQL_BARRIER_MS";
+        const CASE: &str = "SPARQ_TEST_BARRIER_ENV_CASE";
+        if let Ok(case) = std::env::var(CASE) {
+            let cfg = LwsConfig::from_env(BASE);
+            match case.as_str() {
+                "unset" | "empty" | "whitespace" => {
+                    assert_eq!(
+                        cfg.unwrap().sparql_barrier_budget,
+                        Duration::from_millis(500)
+                    );
+                }
+                "custom" => {
+                    assert_eq!(
+                        cfg.unwrap().sparql_barrier_budget,
+                        Duration::from_millis(125)
+                    );
+                }
+                "zero" => assert!(cfg.expect_err("zero must still be refused").contains(KEY)),
+                _ => panic!("unknown environment case"),
+            }
+            return;
+        }
+        // Each configuration is read in a separate process, leaving concurrent tests alone.
+        for (case, value) in [
+            ("unset", None),
+            ("empty", Some("")),
+            ("whitespace", Some(" \t ")),
+            ("custom", Some(" 125 ")),
+            ("zero", Some("0")),
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("SOLID_SERVER_") {
+                    child.env_remove(key);
+                }
+            }
+            child
+                .args([
+                    "--exact",
+                    "lws::sparql::tests::empty_barrier_environment_uses_the_default",
+                ])
+                .env(CASE, case);
+            if let Some(value) = value {
+                child.env(KEY, value);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
             );
         }
     }

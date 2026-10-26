@@ -384,11 +384,8 @@ impl LwsConfig {
                 "SOLID_SERVER_LWS_SPARQL_MAX_BYTES",
                 &mut cfg.sparql_max_bytes,
             )?;
-            if let Some(ms) = std::env::var_os("SOLID_SERVER_LWS_SPARQL_BARRIER_MS") {
-                let ms = ms
-                    .to_str()
-                    .ok_or("SOLID_SERVER_LWS_SPARQL_BARRIER_MS must be a positive integer")?;
-                cfg.sparql_barrier_budget = snapshot::parse_barrier_budget(ms.trim())?;
+            if let Some(ms) = var("SOLID_SERVER_LWS_SPARQL_BARRIER_MS") {
+                cfg.sparql_barrier_budget = snapshot::parse_barrier_budget(&ms)?;
             }
         }
         positive("SOLID_SERVER_LWS_DELIVERY_QUEUE", &mut cfg.delivery.queue)?;
@@ -713,6 +710,8 @@ pub struct Inner<S: Store> {
     dropped_releases: std::sync::atomic::AtomicU64,
     #[cfg(all(test, feature = "sparql-endpoint"))]
     sparql_evaluation: std::sync::Mutex<Option<sparql::EvaluationGate>>,
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    sparql_parsing: std::sync::Mutex<Option<sparql::ParsingGate>>,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -835,6 +834,8 @@ impl<S: Store + 'static> LwsState<S> {
                 dropped_releases: Default::default(),
                 #[cfg(all(test, feature = "sparql-endpoint"))]
                 sparql_evaluation: Default::default(),
+                #[cfg(all(test, feature = "sparql-endpoint"))]
+                sparql_parsing: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
