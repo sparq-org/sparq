@@ -138,9 +138,6 @@ export async function startSolidServer(options = {}) {
     const { startNativeServer } = await import('./native.js');
     return startNativeServer(options, { normalizePort, normalizeBaseUrl });
   }
-  if (options.data !== undefined) {
-    throw new TypeError('data requires --native or --protocol lws');
-  }
   if (options.signal !== undefined) {
     throw new TypeError('signal requires --native or --protocol lws');
   }

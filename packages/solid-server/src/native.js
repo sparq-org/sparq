@@ -27,9 +27,6 @@ export async function startNativeServer(options, { normalizePort, normalizeBaseU
   if (options.ownerWebid !== undefined || options.oidc !== undefined) {
     throw new TypeError('native mode uses SOLID_SERVER_* authentication settings; ownerWebid and oidc are wasm host options');
   }
-  if (options.data !== undefined && (typeof options.data !== 'string' || !options.data.trim())) {
-    throw new TypeError('data must be a non-empty directory path');
-  }
   if (options.signal !== undefined && !(options.signal instanceof AbortSignal)) {
     throw new TypeError('signal must be an AbortSignal');
   }
@@ -45,10 +42,6 @@ export async function startNativeServer(options, { normalizePort, normalizeBaseU
     SOLID_SERVER_READY_STDOUT: '1',
     PSS_SPARQ_BACKEND: process.env.PSS_SPARQ_BACKEND ?? 'memory',
   };
-  if (options.data !== undefined) {
-    env.PSS_SPARQ_BACKEND = 'embedded';
-    env.SOLID_SERVER_SPARQ_DIR = options.data;
-  }
   const child = spawn(binary, [], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let stderr = '';
   child.stderr.on('data', (chunk) => {

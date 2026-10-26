@@ -14,8 +14,6 @@ export interface SolidServerOptions {
   protocol?: 'solid' | 'lws';
   /** Use the native server for Solid, including WebSocketChannel2023 notifications. */
   native?: boolean;
-  /** Native embedded snapshot directory, subject to the binary's backend checks. */
-  data?: string;
   /** Native mode: abort startup or stop the child with a bounded shutdown. */
   signal?: AbortSignal;
 }

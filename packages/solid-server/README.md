@@ -69,11 +69,9 @@ that package. Installed package versions must match the host. The CLI forwards
 SIGINT/SIGTERM, bounds shutdown, and exits with the native process.
 
 Native mode binds loopback and maps `--port` to `SOLID_SERVER_BIND`, and
-`--base-url` to `SOLID_SERVER_BASE_URL`. It inherits the other documented native
-environment settings, with `PSS_SPARQ_BACKEND=memory` as the default. `--data
-<dir>` maps to `PSS_SPARQ_BACKEND=embedded` and `SOLID_SERVER_SPARQ_DIR`; the
-current native binary refuses this durable configuration until its durable
-blob backend is available. It does not turn ephemeral storage into persistence.
+`--base-url` to `SOLID_SERVER_BASE_URL`, with memory as the native default.
+Users can pass the binary's documented `SOLID_SERVER_*` and `PSS_SPARQ_*`
+settings through the environment.
 
 The Node API mirrors the CLI:
 
@@ -89,6 +87,8 @@ const nativeServer = await startSolidServer({
 ```
 
 The default Solid mode continues to return the existing Node `http.Server`.
+Its CLI closes gracefully on the first SIGINT/SIGTERM; a second signal exits
+immediately with the corresponding signal exit status.
 Native callers can supply an `AbortSignal` through `signal` to cancel startup or
 stop the child later. The launcher waits for the child's bound-listener report,
 including its actual ephemeral port and transport scheme.

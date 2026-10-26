@@ -46,10 +46,10 @@ Default Solid mode returns the existing Node server. Native mode
 uses the native authentication settings below; wasm `ownerWebid`/`oidc` options
 are rejected. `--port` sets `SOLID_SERVER_BIND=127.0.0.1:<port>`;
 `--base-url` sets `SOLID_SERVER_BASE_URL`. Other native environment settings are
-inherited. `PSS_SPARQ_BACKEND` defaults to `memory`. `--data <dir>` (API: `data`)
-sets `PSS_SPARQ_BACKEND=embedded` and `SOLID_SERVER_SPARQ_DIR=<dir>`; the current
-binary's startup checks refuse this durable configuration pending the durable
-blob backend. Use the default ephemeral backend for local development.
+inherited. `PSS_SPARQ_BACKEND` defaults to `memory`; use the default ephemeral
+backend for local development. In the default wasm mode, the CLI closes
+gracefully on the first SIGINT/SIGTERM and exits immediately on a second signal
+with the corresponding signal exit status.
 
 `SOLID_SERVER_READY_STDOUT` defaults to unset. At `1`, the native binary emits
 one flushed JSON line on stdout after binding its TCP listener:

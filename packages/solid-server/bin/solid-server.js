@@ -13,11 +13,9 @@ async function main() {
 
   let server;
   let pendingSignal;
+  const native = parsed.options.native || parsed.options.protocol === 'lws';
   const controller = new AbortController();
-  const shutdown = (signal) => {
-    pendingSignal = signal;
-    controller.abort(signal);
-    if (!server) return;
+  const close = (signal) => {
     if (server.child) {
       void server.closeAsync(signal);
     } else {
@@ -27,6 +25,14 @@ async function main() {
       });
     }
   };
+  const shutdown = (signal) => {
+    if (!native && pendingSignal) {
+      process.exit(128 + constants.signals[signal]);
+    }
+    pendingSignal = signal;
+    controller.abort(signal);
+    if (server) close(signal);
+  };
   const onInt = () => shutdown('SIGINT');
   const onTerm = () => shutdown('SIGTERM');
   process.on('SIGINT', onInt);
@@ -34,7 +40,7 @@ async function main() {
   try {
     server = await startSolidServer({
       ...parsed.options,
-      ...((parsed.options.native || parsed.options.protocol === 'lws') ? { signal: controller.signal } : {}),
+      ...(native ? { signal: controller.signal } : {}),
     });
   } catch (error) {
     process.off('SIGINT', onInt);
@@ -44,7 +50,7 @@ async function main() {
     }
     throw error;
   }
-  if (pendingSignal) shutdown(pendingSignal);
+  if (pendingSignal) close(pendingSignal);
   const address = server.address();
   if (!address || typeof address === 'string') {
     throw new Error('listener did not expose a TCP address');

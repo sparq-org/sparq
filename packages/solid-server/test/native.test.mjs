@@ -145,8 +145,6 @@ test('native API and CLI select LWS, serve CRUD, and forward SIGTERM', { skip: !
   await assert.rejects(startSolidServer({ native: true, port: server.address().port }), /Address already in use|EADDRINUSE/);
   await assert.rejects(startSolidServer({ native: true, ownerWebid: 'https://example.test/alice' }), /wasm host options/);
   await assert.rejects(startSolidServer({ native: true, oidc: true }), /wasm host options/);
-  await assert.rejects(startSolidServer({ native: true, data: '' }), /non-empty directory/);
-  await assert.rejects(startSolidServer({ native: true, port: 0, baseUrl: 'http://127.0.0.1', data: join(dir, 'data') }), /requires a durable blob/);
   assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/`)).status, 200);
   await server.closeAsync();
 });
