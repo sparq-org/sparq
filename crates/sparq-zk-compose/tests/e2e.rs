@@ -179,6 +179,7 @@ fn attest(commitment: Fr, sk: &SecretKey) -> CommitmentAttestation {
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
+        // Legacy unbound attestation fixture retained for negative tests.
         signature: sk.sign_commitment(&commitment), // codex #4: deterministic nonce
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: None, // audit #9: salt-unbound legacy attestation
@@ -4542,6 +4543,7 @@ fn revocation_status_unbound_attestation_rejected() {
     // Re-sign salt-only so the (now status-unbound) attestation is otherwise
     // internally valid — proving the REJECT is the missing status binding, not a
     // bad signature.
+    // Legacy unbound attestation fixture retained for negative tests.
     att.signature = sk.sign_commitment_with_salt(&c, &salt);
     m.commitment_attestations.push(att);
     m.key_set.push(public_key_to_hex(&sk.public_key()));
@@ -6234,6 +6236,7 @@ fn prove_hidden_issuer(
     } else {
         (
             hi_message_unbound(commitment, salt),
+            // Legacy unbound attestation fixture retained for negative tests.
             signer_sk.sign_commitment_with_status(commitment, salt, &status_ref),
         )
     };
@@ -7359,6 +7362,7 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
     );
     let mut clear = attest_with_salt(c_clear.commitment, salt_clear, &signer);
     clear.signature =
+        // Legacy unbound attestation fixture retained for negative tests.
         signer.sign_commitment_with_status(&c_clear.commitment, &salt_clear, &status_ref);
 
     let mut manifest = ProofManifest {
