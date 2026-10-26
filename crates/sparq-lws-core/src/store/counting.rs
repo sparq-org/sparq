@@ -406,6 +406,20 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.create_child(container, child, meta).await
     }
 
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        let _g = self.counters.op_guard();
+        // Model the HTTP default's previous-record SELECT and guarded create, while
+        // preserving the inner client's atomic replacement.
+        self.counters.count_queries(2);
+        self.counters.count_update();
+        self.inner.replace_child(container, child, meta).await
+    }
+
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_update();

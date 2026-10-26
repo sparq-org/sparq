@@ -282,14 +282,33 @@ pub trait SparqClient: Send + Sync {
     /// versa), so no removal-based compensation is needed and a concurrent same-IRI creator cannot
     /// observe — or have removed — a half-built containment. (The live impl is one SPARQL UPDATE with
     /// a `container`-EXISTS guard that inserts both triples.) The blob bytes are written by the caller
-    /// BEFORE this call; if this fails (missing container), those bytes are orphaned and GC'd by the
-    /// reconciler — the same crash-consistency model as [`SparqClient::put_meta`].
+    /// BEFORE this call; the caller reclaims them if the commit fails with a settled outcome.
     async fn create_child(
         &self,
         container: &str,
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError>;
+
+    /// Commit a child record and containment together, returning the record it replaced.
+    ///
+    /// The default reads the previous record before `create_child`; concurrent replacements
+    /// may leave an intermediate key for reconciliation, as with `replace_meta`. The in-memory
+    /// and embedded clients return the replaced record in the same index operation.
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        let previous = match self.get_meta(child).await {
+            Ok(meta) => Some(meta),
+            Err(SparqError::NotFound) => None,
+            Err(e) => return Err(e),
+        };
+        self.create_child(container, child, meta).await?;
+        Ok(previous)
+    }
 
     /// Remove `child` from `container`'s membership. Idempotent on an absent edge.
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError>;
@@ -782,6 +801,15 @@ impl SparqClient for InMemorySparqClient {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
+        self.replace_child(container, child, meta).await.map(|_| ())
+    }
+
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
         let mut guard = self
             .inner
             .lock()
@@ -793,12 +821,12 @@ impl SparqClient for InMemorySparqClient {
             return Err(SparqError::NotFound);
         }
         self.admit_resource(&guard, child)?;
-        guard.meta.insert(child.to_string(), meta);
+        let previous = guard.meta.insert(child.to_string(), meta);
         let entry = guard.children.entry(container.to_string()).or_default();
         if !entry.iter().any(|c| c == child) {
             entry.push(child.to_string());
         }
-        Ok(())
+        Ok(previous)
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {

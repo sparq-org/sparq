@@ -220,16 +220,8 @@ async fn put_overwrite_k3_counts() {
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }
 
-/// **PUT create (k = 3 from the parent, warm).** The existence-non-disclosure V1 closure
-/// (`research/lws-design-records.md` §6) makes a PUT-create authorize the TARGET's own effective
-/// ACL (`acl:Write`, inherited via `acl:default`) — a PLANNED walk (plan + re-confirm = 2) — BEFORE
-/// probing existence, so create and overwrite are indistinguishable to an under-authorized
-/// requester. It THEN also authorizes container-modification `acl:Append` on the nearest EXISTING
-/// ancestor container (`/alice/c/`), a SECOND planned walk (found by upward existence probes) — two
-/// DISTINCT ACL resolutions (the target's inherited grant vs the container's own `acl:accessTo`),
-/// the same two-walk shape DELETE has always had. MEASURED before → after the planned-walk
-/// optimization was 12 → 11 for main's create (which authorized ONLY the parent); the integrated V1
-/// path adds the target-`acl:Write` planned walk (+2), for 13 total.
+/// **PUT create into a present parent.** Both authorization walks use the read plan.
+/// The child replacement also reads the previous metadata before its guarded create.
 #[tokio::test]
 async fn put_create_k3_counts() {
     let h = Harness::new().await;
@@ -245,17 +237,16 @@ async fn put_create_k3_counts() {
         .await;
     assert_eq!(resp.status(), StatusCode::CREATED, "create 201");
     assert_eq!(
-        d.sparql_queries, 13,
-        "PUT create = planned TARGET-Write walk (V1 closure: 2) + existence meta + nearest-ancestor probe + planned container-modification walk (parent Append: 2) + slash probe + ensure-ancestors + create: {d:?}"
+        d.sparql_queries, 14,
+        "PUT create = planned authorization walks + existence and ancestor probes + previous metadata + guarded create: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one body write: {d:?}");
     assert_eq!(d.sparql_updates, 1, "the create transaction: {d:?}");
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }
 
-/// **POST create into `/alice/c/` (warm).** The container's write-authz walk is PLANNED
-/// (plan + re-confirm — was the sequential 3 probes: c/.acl, alice/.acl, /.acl ✓). MEASURED
-/// before → after: 6 → 5.
+/// **POST create into a present parent.** The container authorization uses the read plan;
+/// child replacement reads the previous metadata before its guarded create.
 #[tokio::test]
 async fn post_create_counts() {
     let h = Harness::new().await;
@@ -266,8 +257,8 @@ async fn post_create_counts() {
         .await;
     assert_eq!(resp.status(), StatusCode::CREATED, "post 201");
     assert_eq!(
-        d.sparql_queries, 5,
-        "POST = planned container walk (2, was sequential 3) + container-shape/existence + slug probes + create (was 6): {d:?}"
+        d.sparql_queries, 6,
+        "POST = planned container walk + shape/existence and slug probes + previous metadata + guarded create: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one body write: {d:?}");
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
