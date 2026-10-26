@@ -126,11 +126,10 @@ export function HttpServerWalkthrough() {
 
   React.useEffect(() => {
     if (!playing) return;
-    if (step >= SUBSCRIPTION_TRANSCRIPT.length) {
-      setPlaying(false);
-      return;
-    }
-    const t = setTimeout(() => setStep((s) => s + 1), 850);
+    const t = setTimeout(() => {
+      setStep(step + 1);
+      if (step + 1 >= SUBSCRIPTION_TRANSCRIPT.length) setPlaying(false);
+    }, 850);
     return () => clearTimeout(t);
   }, [playing, step]);
 
