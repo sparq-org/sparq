@@ -97,6 +97,9 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// panicking job (the `Mutex`-poisoning analogue) or the thread could not be kept alive.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped (a prior engine op panicked)";
 
+/// Published only after the saved graph and its directory entries have been synced.
+const INIT_COMPLETE: &str = "init-complete";
+
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
 /// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
 /// internally), so the channel stays monomorphic across every differently-typed engine call.
@@ -224,17 +227,36 @@ impl EmbeddedSparqClient {
     /// Open an existing directory-backed graph, replaying its write-ahead log.
     ///
     /// Unlike [`Self::open_or_create`], this never initializes an empty directory.
+    /// A missing initialization marker completes the durability barriers before serving jobs.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
+        // Validate the store and recover any interrupted compaction swap first. The graph
+        // stays private until bootstrap recovery has synced it and published its marker.
         let graph = Graph::open(dir).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
         })?;
+        let io_error =
+            |e| SparqError::Backend(format!("fatal: graph init({}) failed: {e}", dir.display()));
+        if !dir.join(INIT_COMPLETE).try_exists().map_err(io_error)? {
+            // After a restart, existing ancestors may still have unsynced entries from
+            // create_dir_all. Their original creation boundary is no longer knowable,
+            // so conservatively sync every ancestor through the filesystem root.
+            let absolute = std::path::absolute(dir).map_err(io_error)?;
+            let ancestors: Vec<_> = absolute
+                .ancestors()
+                .take_while(|path| path.parent().is_some())
+                .map(Path::to_path_buf)
+                .collect();
+            finish_bootstrap(dir, &ancestors).map_err(io_error)?;
+        }
         Self::over(graph)
     }
 
     /// Open an existing graph or initialize an empty directory with a durable graph.
     ///
     /// An existing `dict-meta.bin` or legacy `dict.bin` selects [`Self::open`], including
-    /// its corruption errors. A directory containing only a regular `LOCK` file counts as
+    /// its corruption errors and interrupted bootstrap recovery. Initialization publishes
+    /// an `init-complete` marker only after syncing the saved graph and directory entries.
+    /// A directory containing only a regular `LOCK` file counts as
     /// empty; other non-empty directories are refused without overwriting their contents.
     /// Callers must arrange exclusive access, with a lock outside the graph directory:
     /// compaction replaces that directory. Mutations commit through the directory-backed
@@ -290,7 +312,7 @@ impl EmbeddedSparqClient {
             .map_err(|e| engine_err("empty graph init", e))?
             .save(dir)
             .map_err(io_error)?;
-        sync_bootstrap(dir, &created_dirs).map_err(io_error)?;
+        finish_bootstrap(dir, &created_dirs).map_err(io_error)?;
         Self::open(dir)
     }
 
@@ -422,45 +444,59 @@ impl EmbeddedSparqClient {
     }
 }
 
-/// Make an empty graph's bootstrap durable after `Graph::save` has only flushed its files.
+/// Publish initialization only after the saved files and directory entries are durable.
+/// An interruption before publication leaves no marker, so `open` repeats the sync barriers.
+fn finish_bootstrap(dir: &Path, created_dirs: &[std::path::PathBuf]) -> std::io::Result<()> {
+    sync_bootstrap(dir, created_dirs)?;
+    let path = dir.join(INIT_COMPLETE);
+    std::fs::write(&path, b"1\n")?;
+    sync_bootstrap_file(&path)?;
+    fsync_dir(dir)
+}
+
+/// Make a saved graph's bootstrap durable after `Graph::save` has only flushed its files.
 /// Sync every regular file, then the graph directory, then the parent of each directory
 /// created by `create_dir_all`, deepest first through the first pre-existing ancestor.
-/// Bootstrap has no named-graph subtree; callers supply the missing directories recorded
-/// before creation. Windows skips directory syncing but still syncs every regular file.
+/// Recurse through named graphs too: older stores and compaction images lack the marker.
+/// Callers supply the missing directories recorded before creation, or every ancestor on
+/// retry. Windows skips directory syncing but still syncs every regular file.
 /// Propagate every open/fsync error instead of acknowledging durability.
 fn sync_bootstrap(dir: &Path, created_dirs: &[std::path::PathBuf]) -> std::io::Result<()> {
-    let sync = |path: &Path| -> std::io::Result<()> {
-        // Windows FlushFileBuffers requires a handle opened with write access.
-        std::fs::OpenOptions::new()
-            .read(true)
-            .write(cfg!(windows))
-            .open(path)?
-            .sync_all()?;
-        // Observe successful sync calls in unit tests without replacing the real I/O.
-        #[cfg(test)]
-        tests::BOOTSTRAP_SYNCS.with_borrow_mut(|paths| paths.push(path.to_path_buf()));
-        Ok(())
-    };
-    let sync_dir = |path: &Path| -> std::io::Result<()> {
-        fsync_dir(path)?;
-        #[cfg(all(test, not(windows)))]
-        tests::BOOTSTRAP_SYNCS.with_borrow_mut(|paths| paths.push(path.to_path_buf()));
-        Ok(())
-    };
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
-        if entry.file_type()?.is_file() {
-            sync(&entry.path())?;
+        let kind = entry.file_type()?;
+        if kind.is_file() {
+            sync_bootstrap_file(&entry.path())?;
+        } else if kind.is_dir() {
+            sync_bootstrap(&entry.path(), &[])?;
         }
     }
-    sync_dir(dir)?;
+    fsync_dir(dir)?;
     for created in created_dirs {
         let parent = created
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        sync_dir(parent)?;
+        fsync_dir(parent)?;
     }
+    Ok(())
+}
+
+fn sync_bootstrap_file(path: &Path) -> std::io::Result<()> {
+    // Windows FlushFileBuffers requires a handle opened with write access.
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(cfg!(windows))
+        .open(path)?
+        .sync_all()?;
+    // Observe successful sync calls without replacing the real I/O.
+    #[cfg(test)]
+    tests::BOOTSTRAP_SYNCS.with_borrow_mut(|paths| {
+        paths.push((
+            path.to_path_buf(),
+            path.parent().unwrap().join(INIT_COMPLETE).exists(),
+        ))
+    });
     Ok(())
 }
 
@@ -473,7 +509,11 @@ fn fsync_dir(_dir: &Path) -> std::io::Result<()> {
 
 #[cfg(not(windows))]
 fn fsync_dir(dir: &Path) -> std::io::Result<()> {
-    std::fs::File::open(dir)?.sync_all()
+    std::fs::File::open(dir)?.sync_all()?;
+    #[cfg(test)]
+    tests::BOOTSTRAP_SYNCS
+        .with_borrow_mut(|paths| paths.push((dir.to_path_buf(), dir.join(INIT_COMPLETE).exists())));
+    Ok(())
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -1004,7 +1044,7 @@ mod tests {
     use super::*;
 
     std::thread_local! {
-        pub(super) static BOOTSTRAP_SYNCS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+        pub(super) static BOOTSTRAP_SYNCS: std::cell::RefCell<Vec<(std::path::PathBuf, bool)>> =
             const { std::cell::RefCell::new(Vec::new()) };
     }
 
@@ -1280,6 +1320,33 @@ mod tests {
         }
     }
 
+    /// Assert publication follows every bootstrap barrier, then return those earlier syncs.
+    fn bootstrap_syncs_before_publication(dir: &Path) -> Vec<std::path::PathBuf> {
+        let synced = BOOTSTRAP_SYNCS.with_borrow_mut(std::mem::take);
+        let publication_len = if cfg!(windows) { 1 } else { 2 };
+        assert!(
+            synced.len() >= publication_len,
+            "initialization must be published"
+        );
+        let (barriers, publication) = synced.split_at(synced.len() - publication_len);
+        assert_eq!(publication[0], (dir.join("init-complete"), true));
+        if !cfg!(windows) {
+            assert_eq!(publication[1], (dir.to_path_buf(), true));
+        }
+        assert_eq!(std::fs::read(dir.join("init-complete")).unwrap(), b"1\n");
+        barriers
+            .iter()
+            .map(|(path, marker_visible)| {
+                assert!(
+                    !marker_visible,
+                    "marker must not precede sync of {}",
+                    path.display()
+                );
+                path.clone()
+            })
+            .collect()
+    }
+
     #[cfg(windows)]
     #[test]
     fn fsync_dir_is_a_noop_on_windows() {
@@ -1318,7 +1385,7 @@ mod tests {
             }
             BOOTSTRAP_SYNCS.with_borrow_mut(Vec::clear);
             let c = EmbeddedSparqClient::open_or_create(&dir).unwrap();
-            let synced = BOOTSTRAP_SYNCS.with_borrow_mut(std::mem::take);
+            let synced = bootstrap_syncs_before_publication(&dir);
             let file_count = base_files.len() + usize::from(dir.ends_with("locked"));
             let synced_files: std::collections::HashSet<_> = synced[..file_count]
                 .iter()
@@ -1352,6 +1419,105 @@ mod tests {
             }
             drop(c);
         }
+    }
+
+    #[test]
+    fn open_retries_interrupted_bootstrap_before_serving_jobs() {
+        block_on(async {
+            for open in [
+                EmbeddedSparqClient::open,
+                EmbeddedSparqClient::open_or_create,
+            ] {
+                let root = TestDir::new();
+                let dir = root.0.join("new/ancestors/graph");
+                // Stop exactly after Graph::save, before sync_bootstrap or publication.
+                Graph::load_str("", "ntriples").unwrap().save(&dir).unwrap();
+                assert!(dir.join("dict-meta.bin").is_file());
+                assert!(!dir.join("init-complete").exists());
+                BOOTSTRAP_SYNCS.with_borrow_mut(Vec::clear);
+                let c = open(&dir).unwrap();
+                let synced = bootstrap_syncs_before_publication(&dir);
+                let files: std::collections::HashSet<_> = std::fs::read_dir(&dir)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .filter(|path| path.file_name().unwrap() != "init-complete")
+                    .collect();
+                assert_eq!(
+                    synced[..files.len()]
+                        .iter()
+                        .cloned()
+                        .collect::<std::collections::HashSet<_>>(),
+                    files
+                );
+                let dirs: Vec<_> = if cfg!(windows) {
+                    vec![]
+                } else {
+                    dir.ancestors().map(Path::to_path_buf).collect()
+                };
+                assert_eq!(
+                    synced[files.len()..],
+                    dirs,
+                    "retry must sync even ancestors that now exist"
+                );
+
+                let iri = "http://pod/alice/doc";
+                let expected = meta("text/plain", "blob-1", "\"e1\"");
+                c.put_meta(iri, expected.clone()).await.unwrap();
+                drop(c);
+                BOOTSTRAP_SYNCS.with_borrow_mut(Vec::clear);
+                let reopened = open(&dir).unwrap();
+                assert!(
+                    BOOTSTRAP_SYNCS.with_borrow(|paths| paths.is_empty()),
+                    "a published store needs no bootstrap retry"
+                );
+                assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+            }
+        });
+    }
+
+    #[test]
+    fn open_syncs_unmarked_named_graph_trees_without_overwriting_them() {
+        block_on(async {
+            let root = TestDir::new();
+            let dir = root.0.join("graph");
+            let iri = "http://pod/alice/doc";
+            let expected = meta("text/plain", "blob-1", "\"e1\"");
+            let c = client();
+            c.put_meta(iri, expected.clone()).await.unwrap();
+            c.save(&dir).await.unwrap();
+            drop(c);
+
+            BOOTSTRAP_SYNCS.with_borrow_mut(Vec::clear);
+            let reopened = EmbeddedSparqClient::open(&dir).unwrap();
+            let synced = bootstrap_syncs_before_publication(&dir);
+            let named = dir.join("named/0");
+            for entry in std::fs::read_dir(&named).unwrap() {
+                let path = entry.unwrap().path();
+                assert!(
+                    synced.contains(&path),
+                    "sync named graph file {}",
+                    path.display()
+                );
+                if !cfg!(windows) {
+                    assert!(
+                        synced.iter().position(|p| p == &path)
+                            < synced.iter().position(|p| p == &named)
+                    );
+                }
+            }
+            if !cfg!(windows) {
+                for (child, parent) in [
+                    (&named, dir.join("named")),
+                    (&dir.join("named"), dir.clone()),
+                ] {
+                    assert!(
+                        synced.iter().position(|p| p == child).unwrap()
+                            < synced.iter().position(|p| p == &parent).unwrap()
+                    );
+                }
+            }
+            assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+        });
     }
 
     #[test]

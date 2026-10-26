@@ -80,7 +80,10 @@ Set `PSS_SPARQ_BACKEND` to one of:
 Rust callers use `store::EmbeddedSparqClient::open_or_create(&dir)` for bootstrap,
 or `open(&dir)` to require an existing graph. Bootstrap fsyncs the saved base files,
 the graph directory, then each newly created directory's parent through the first
-pre-existing ancestor before opening the store. Power-loss durability cannot be
+pre-existing ancestor, then writes and fsyncs `init-complete` and its directory.
+Both open paths repeat the saved-tree sync and sync all ancestors if that marker
+is absent, completing an interrupted bootstrap before serving any jobs. Existing
+unmarked stores retain their data, including named graphs. Power-loss durability cannot be
 tested in-process. Mutators evaluate on a private fork,
 then commit resolved effects to the original graph through one fsync'd `txn.log`
 frame before materializing per-graph WALs. Successful writes survive reopening

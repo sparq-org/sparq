@@ -94,6 +94,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 ## Embedded index lifecycle
 
 `EmbeddedSparqClient::open_or_create` bootstraps or reopens `SOLID_SERVER_SPARQ_DIR`; strict `open` requires a store. Foreign non-empty directories are refused.
+Bootstrap publishes an fsync'd `init-complete` marker after syncing the saved graph and directory entries. Both open paths finish these barriers, including every ancestor, when the marker is absent, before serving jobs.
 Mutators evaluate on a private fork and commit resolved effects through one fsync'd `txn.log` frame and per-graph WALs.
 Successful writes survive reopening without compaction; a post-commit failure requires reopening for journal recovery. `save` remains a test snapshot helper.
 After SIGINT/SIGTERM drains listeners, directory-backed shutdown awaits actor compaction for up to 30 seconds, logging
