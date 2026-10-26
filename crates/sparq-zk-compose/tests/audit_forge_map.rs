@@ -925,9 +925,12 @@ fn composed_manifest(
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove to forge a genuine-proof-over-different-statement (#1)"]
 fn finding_01_public_input_statement_substitution_rejected() {
-    if !support::require_toolchain("finding_01_public_input_statement_substitution_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "finding_01_public_input_statement_substitution_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "f01_scan");
@@ -941,6 +944,7 @@ fn finding_01_public_input_statement_substitution_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("#1: statement substitution must be PublicInputMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// #2 (CRITICAL) — bb verify uses the verifier-recomputed CANONICAL vk, never the
@@ -957,9 +961,12 @@ fn finding_01_public_input_statement_substitution_rejected() {
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove/verify to exercise the canonical-vk path (#2)"]
 fn finding_02_canonical_vk_used_not_prover_vk() {
-    if !support::require_toolchain("finding_02_canonical_vk_used_not_prover_vk", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "finding_02_canonical_vk_used_not_prover_vk",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "f02_scan");
@@ -970,6 +977,7 @@ fn finding_02_canonical_vk_used_not_prover_vk() {
         "#2: an honest composed manifest must verify through the verifier-recomputed canonical vk \
          (the prover-supplied vk is never trusted)",
     );
+    support::complete(live);
 }
 
 /// #7 (bb variant) — a GENUINE filter proof over a DIFFERENT operand than the
@@ -983,9 +991,12 @@ fn finding_02_canonical_vk_used_not_prover_vk() {
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove to forge a genuine filter proof over a substituted operand (#7)"]
 fn finding_07_operand_substitution_bb_rejected() {
-    if !support::require_toolchain("finding_07_operand_substitution_bb_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "finding_07_operand_substitution_bb_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "f07bb_scan");
@@ -1001,6 +1012,7 @@ fn finding_07_operand_substitution_bb_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("#7 (bb): a substituted operand must be PublicInputMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// #11 (bb variant) — the n-relabel forge: a proof made against the `n=64` scan
@@ -1017,9 +1029,9 @@ fn finding_07_operand_substitution_bb_rejected() {
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove against the scan_k2_n64_r8 member to forge the n-relabel (#11 bb variant)"]
 fn finding_11_n_relabel_bb_rejected() {
-    if !support::require_toolchain("finding_11_n_relabel_bb_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("finding_11_n_relabel_bb_rejected", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let sk = test_issuer_sk(1);
@@ -1104,4 +1116,5 @@ fn finding_11_n_relabel_bb_rejected() {
              (ProofRejected / PublicInputMismatch), got {other:?}"
         ),
     }
+    support::complete(live);
 }

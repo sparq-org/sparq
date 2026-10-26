@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
+  removal alongside triple changes, with ordered replay and support for the previous journal
+  format. Hardens named-graph layout recovery alongside directory ownership support:
+  stable manifest slots, checked allocation and cleanup, complete durability barriers, and
+  shared write refusal after indeterminate log writes. Removing a child from the attached
+  in-memory set no longer removes its on-disk manifest entry; durable drop methods change the
+  persisted set. Read-only opens leave undeclared slots alone; writable cleanup failures warn
+  with the affected path. Cleanup follows opening the complete declared tree and preserves
+  separate stores and held descendant locks. Journal format upgrades use durable file
+  publication. Invalid declared layouts leave slots intact, and linked named-graph
+  containers are refused before cleanup or batch-drop publication.
 - **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
   open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
   `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
@@ -244,8 +255,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
   commitment signed unbound cannot use the V2 members, and its opaque presentations
   are not sound. Under the default policy,
-  unbound attestations are refused upstream. Orphan sub-proofs alone require
-  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
+  unbound attestations are refused upstream. Under `dual-leaf`, orphan sub-proofs require
+  method-independent members; without it, they retain their declared member.
+  A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
@@ -258,13 +270,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose methods disagree on the pattern-constant ENCODER, so what is newly refused there is the
   pairing of a method-UNBOUND commitment with a `StringCanonicalV1` one, which share one encoder.
   A `Filter*` and a `JoinEq` had no such check. An edge-less FILTER over a member legal under
-  every admissible method still verifies. **Scope:** the member resolution and all of its
-  refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
-  decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
-  `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
-  state. Of the five refusals above, the first four compile only with `dual-leaf`;
-  `CheckError::MemberNotForFixedRole` is UNCONDITIONAL, as are `FixedMemberRole` and the
-  per-role `fixed_member` selection path that raises it, which run in every feature state.
+  every admissible method still verifies. **Scope:** method folding and both resolution
+  passes now run in every build. The dispatch matrix and `MemberNotLegalForMethod` remain
+  behind the OFF-by-default `dual-leaf` feature. Without it, a successful fold retains the
+  declared member under the existing method-policy and encoder checks. The other four
+  refusals above, the stage 2g′ endpoint gate, `CheckError::JoinProofNotBoundToAnEdge`,
+  `FixedMemberRole` and its per-role selection path are unconditional.
   Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
   achieved.
 
@@ -536,6 +547,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but the cut it is refused with may change from `backward proof-node limit exceeded` to a
   forward-closure limit. Wherever both the old and the new behaviour answer, the answers are
   identical; no run that previously answered is now refused.
+
+- **sparq-core (`sq-ycle`):** hardens named-graph layout recovery. Stable manifest slots,
+  checked allocation and removal, complete file-sync barriers, and ordered journal replay
+  integrate with exclusive directory locks and role markers. Read-only opens do no cleanup.
+  Whole-tree compaction keeps the existing rollback and frozen-view recovery behavior.
+  Layout-generation lookups follow path ancestors; ordinary slot records do not scan the log.
+  Dictionary metadata and named manifests write version 2 while reading version 1. A legacy
+  single-file dictionary must be re-saved before atomic UPDATE journaling. Preserve a backup
+  if an older executable must remain usable.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that
@@ -846,6 +866,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its fast path returns false. Raw index mutations refuse service-marker operands; marker resets
   require a lifecycle guard.
 
+- **sparq-zk-compose:** hardening: method-fold refusals now apply in every build.
+  Default builds now return `SubProofCommitmentNotAuthenticated` for a bound
+  commitment absent from the authenticated-method map, and `SubProofMethodUnresolved`
+  when bound commitments disagree or deferred resolution cannot complete after the
+  hidden-issuer gate. The `dual-leaf` dispatch matrix remains opt-in.
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a
   fence two seconds at most (counted from the store's answer); a step whose write failed
