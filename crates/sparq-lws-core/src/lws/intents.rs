@@ -568,6 +568,44 @@ mod tests {
         assert!(st.store.exists(&record).await.unwrap());
     }
 
+    /// Owed intents beyond the request's budget are cleared without another touch or start.
+    #[tokio::test(start_paused = true)]
+    async fn owed_intents_are_all_cleared_after_the_request_budget() {
+        let (st, store, _, _) = typed_doc().await;
+        let root = st.cfg.storage();
+        let mut records = Vec::new();
+        for _ in 0..20 {
+            let record = mint(&root);
+            super::store(&st, &record, false, &[], std::slice::from_ref(&root))
+                .await
+                .unwrap();
+            st.owe_touch(&root, record.clone());
+            records.push(record);
+        }
+        store.slow_delete_ms.store(300, Ordering::SeqCst);
+        let began = tokio::time::Instant::now();
+        resources::touch_container(&st, &root).await;
+        assert!(began.elapsed() <= super::super::records::LOCK_WAIT);
+        assert!(
+            intents_left(&st).await > 0,
+            "the request drained the whole batch"
+        );
+        assert!(
+            st.take_owed_touches(&root).is_empty(),
+            "clearing must not re-owe a touch"
+        );
+        tokio::time::timeout(Duration::from_secs(7), async {
+            while intents_left(&st).await != 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("remaining intents were left until restart");
+        for record in records {
+            assert!(!st.store.exists(&record).await.unwrap());
+        }
+    }
+
     /// A change whose process stops part way (its journal is dropped mid-change, never put
     /// back nor kept) is put back when the server starts again, validators included, and its
     /// intent goes.

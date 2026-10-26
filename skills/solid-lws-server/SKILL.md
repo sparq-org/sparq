@@ -58,6 +58,17 @@ Terminate TLS at a trusted reverse proxy, or set both
 Setting only one makes startup fail. See `skills/http3-server/SKILL.md` for the
 default-off `http3` feature and `skills/helm-deploy/SKILL.md` for Kubernetes.
 
+## Browser clients
+
+Both protocol modes reflect the request's `Origin` with credentials enabled and
+`Vary: Origin`. Browser scripts can read `Link`, `ETag`, `Location`,
+`WWW-Authenticate`, `Accept-Patch`, `Allow`, `Retry-After`, and `Preference-Applied`
+(the LWS linkset preference response), alongside the existing content and discovery
+headers. The expose list is explicit, with no wildcard. Overload responses carry
+the same CORS headers; preflights still pass rate limiting and admission control.
+Preflights echo requested headers, or advertise a default set including `Depth`.
+LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
+
 ## Choose a data backend
 
 Set `PSS_SPARQ_BACKEND` to one of:
@@ -154,11 +165,14 @@ access: one it may no longer read is dropped (not sent, and it neither closes th
 socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
 closes the socket within two periods of losing Read: `1008` for a confirmed
 denial, or `1011` if the timer check is undecided. Each check has at most one
-period; a slower check counts as undecided and the client must resubscribe.
+period; a slower check counts as undecided and the client must resubscribe. Sending
+a notification or close frame has one further period at most before the connection ends.
 A due tick takes priority over inbound frames and queued notifications and
 pre-empts a running notification or lag check, noting it as missed. A reader
 whose notification check spans a tick gets a reconcile close; a dropped lag
-check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). The
+check also gets a reconcile close (`RECONCILE`, rather than `OVERFLOW`). A tick that
+becomes ready while a finished but unpolled Event decision waits drops that decision,
+and the reader gets `RECONCILE`. The
 timing of a revocation close follows the timer, even while the client floods frames. A check that cannot
 be made (a backend fault) is no denial: on the timer it closes the socket
 (`1011`); a notification whose check cannot be made is dropped. A dropped
@@ -173,6 +187,10 @@ close, that the topic changed while it could not read it (not what changed). A
 socket closes when the client
 closes it, on the revocation close (`1008`), or on a `1011`: a backlog overflow,
 a timer check that cannot be made, or a reconcile after a dropped notification.
+`NotificationMetrics` counts overflow closes and their skipped events only after confirmed
+read access. This includes `RECONCILE` after a lag check preempted by a tick that confirms
+read access; a completed denied or undecided lag check does not count toward either counter.
+A `REVOKED` or undecided timer close does not count toward either overflow counter.
 Pings are answered while a check is in progress. The receive token gates
 connecting only: its 5-minute window is for connecting and reconnecting, and a
 socket opened within it stays open until one of those closes. A token has at most
@@ -315,6 +333,27 @@ An unknown `Accept` media type falls back to the Solid default
 `406 Not Acceptable`. Non-RDF resources preserve their binary media type and
 support byte-range reads.
 
+## Discover deployed services and capabilities
+
+Both modes expose a public catalog built with their mounted routes. The Solid router
+renders both description formats and their ETags at construction; a rendering failure
+prevents startup. Requests reuse the cached representation. Solid serves
+`/.well-known/solid` as JSON-LD by default (`Accept: */*` included) or Turtle with
+`Accept: text/turtle`; unsupported types, including `application/lws+cid`, get `406`.
+JSON-LD keeps the compact `notificationChannel` discovery array and names the
+notifications context first, followed by inline extension mappings.
+Both representations carry `Vary: Accept` and representation ETags with conditional
+GET/HEAD support. The SPARQL service and root GET/HEAD discovery link appear only
+with `sparql-endpoint`, independent of the requester's readable resources.
+
+LWS serves its CID description at `/` with `Accept: application/lws+cid`, preserving
+its verification key and validators. It includes the storage-description service,
+protocol conformance URI, JSON Patch formats and recursive deletion; `MoveResource`
+is absent because `up` is server-managed. Notification subscription types come from
+the catalog (currently webhooks). Draft extension terms use an inline context.
+See [catalog entries and embedding](references/service-description.md) for the
+RDF terms, media maps and the `describe::ServiceCatalog` registration API.
+
 ## Query readable RDF with `/sparql`
 
 The default `sparql-endpoint` feature exposes authenticated `GET` and `POST`
@@ -408,7 +447,9 @@ one IRI, the first marker stored; any other IRI of that shape takes room in the 
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
 the process; the directory-backed embedded index journals each raise before acknowledging it.
 Restoring an independent snapshot taken before a raise restores the earlier mark and loses
-expiries decided after that snapshot. A listing,
+expiries decided after that snapshot. The wasm adapter's `PersistentStore` reports no
+atomic-marker capability: its snapshot journal does not yet preserve marker mutations or forward
+the lifecycle lease, so `LwsState::new` refuses it before reading or writing. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -507,7 +548,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
 | `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK` | `1` runs the notification recovery once at start, before anything is served: every stored subscription with an expiry is removed, then the clock is stored as the notification high water (the start fails, the mark unchanged, while one is left). For a mark stored while the clock had jumped forward; correct the clock first and unset it afterwards. |
-| `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
+| `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes), and issue HTTP/WS notification capability URLs. Test-suite use only. |
 | `SOLID_SERVER_LWS_AUTHN` | Comma-separated authentication suites to offer, of `ssi` (did:key and controlled identifiers), `openid` (OpenID Connect) and `saml` (SAML 2.0). Unset, every suite built in is offered (SAML when `SOLID_SERVER_LWS_SAML_IDPS_FILE` is set). A name that is no suite or that the build does not hold, `saml` without its identity providers, and a suite's own variable set while that suite is left out each stop the start. |
 | `SOLID_SERVER_LWS_SAML_IDPS_FILE` | A JSON object of trusted SAML identity provider entity ids to their signing keys (PEM certificate, PEM public key, or public JWK); offers the SAML 2.0 suite. Needs a build with `--features authn-saml`; set without it, or with `SOLID_SERVER_LWS_AUTHN` leaving `saml` out, the server refuses to start. A key that cannot be read also stops the start. |
 | `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS` | Comma-separated OpenID Provider issuers (exactly as their ID Tokens' `iss`, which must equal the discovery document's `issuer`) whose identities get the reserved half of the DPoP replay cache. Every other provider shares the other half, each provider and each identity held to its own share, so open registration elsewhere cannot lock out these providers' users. Needs the `authn-openid` feature (on by default); set without it, or with `SOLID_SERVER_LWS_AUTHN` leaving `openid` out, the server refuses to start. |
@@ -612,7 +653,25 @@ What the server exposes, all discoverable from the storage description
   suite takes), `LwsConfig::suites` lists them, and the metadata lists their token and
   identifier types. `SOLID_SERVER_LWS_AUTHN` picks among the suites built in.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
-  gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
+  gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", realm="…", as_uri="…"`.
+  RFC 9728 discovery is public at `<base>/.well-known/oauth-protected-resource`,
+  obtained by inserting the well-known path before the storage root path. Only that
+  computed path is served; other suffixes return `404`. GET and HEAD return JSON
+  with an ETag and `Cache-Control: public, max-age=300`; `If-None-Match` revalidates it.
+  The document has `resource` and `jlws_storage_description` equal to `<base>/`,
+  `authorization_servers: ["<base>"]` (exactly the AS metadata issuer, without a
+  trailing slash), and `bearer_methods_supported: ["header"]`. It omits `resource_name`
+  and DPoP algorithm metadata: storage access uses bearer tokens; a DPoP proof on the
+  subject-token exchange is a separate operation. AS metadata is also available at
+  `/.well-known/oauth-authorization-server`. Both AS aliases and the protected resource
+  metadata support CORS fetches without credentials. The storage-description pointer
+  serves the existing CID with `Accept: application/lws+cid`.
+  Every LWS challenge keeps the `Link` with `rel="https://www.w3.org/ns/lws#storage"`.
+  The first auth parameter is `resource_metadata`; `realm` equals the storage root and
+  access-token audience, and `as_uri` is retained for transitioning clients. An anonymous
+  challenge has no `error`; a rejected bearer token adds `error="invalid_token"`.
+  For child resource requests, validate containment within the PRM's storage-root
+  `resource`, rather than string equality with the child's URL.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
   `/.lws/requests/`. Documents need an `@context` that includes
   `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
@@ -671,12 +730,19 @@ What the server exposes, all discoverable from the storage description
   Putting a change back while a request waits on it (its own rollback or commit, with its locks
   held) tries each step up to three times with short growing waits between, each attempt
   waiting for a fence two seconds at most (counted from the store's answer to the write it
-  fences); a step whose write failed unsettled and whose fence has not succeeded is never tried
+  fences). A `Fence` step whose deadline expires is left at once; quick errors get the normal
+  retries; a step whose write failed unsettled and whose fence has not succeeded is never tried
   again in the request: it is set aside with the rest, its fence first, and the set-aside (which
   holds the locks) fences it before putting the step back, so a write that arrives late can no
   longer undo what was put back since. The background put-back of a set-aside change, and the
-  settling of intents at start-up, wait for a fence as the store's call allows; background
-  retries use the same capped per-attempt budget. Both fence a step's unsettled write before
+  settling of intents at start-up, differ in their waits: start-up waits as the store's call
+  allows; every background fence call uses a capped per-attempt budget, including the first call.
+  After a container touch lands, owed intents are cleared under a shared two-second fence
+  budget. At the deadline the request returns while a detached task holding only the store
+  finishes any in-flight delete and clears remaining records with capped fence attempts,
+  without retaining the state or its lifecycle lease or owing another touch. A touch with no
+  owed intents starts no clearing task.
+  Both fence a step's unsettled write before
   trying the step again. Forward removals and intent creates retain their fences in the
   journal: rollback fences before recreation or Forget, and commit fences before changing
   the intent. A removal whose fence lands but
@@ -694,6 +760,16 @@ What the server exposes, all discoverable from the storage description
   A new request notifies the owner's inbox when the owner's JSON(-LD) identity document
   names one. A new grant notifies the inboxes of the requests its assignees made themselves,
   as well as its own `inbox`.
+- **SSE and WebSocket notifications** share `/.lws/subscriptions/` with webhooks.
+  POST `SseSubscription` or `WebSocketSubscription` with `topic` and optional `expires`.
+  Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
+  WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
+  DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
+  SSE retention is bounded by event count, age and serialized body bytes, with
+  Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
+  without holding the registration gate; webhooks enter their delivery queue independently
+  of stream publication. See the [stream bindings reference](references/notification-streams.md)
+  for connection limits, expiry defaults, control events, record compatibility and examples.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
   key in the storage description's `verificationMethod`. The signature covers `@method`,
   `@scheme`, `@authority`, `@path`, `@query` (so a notification for an inbox with a query is not

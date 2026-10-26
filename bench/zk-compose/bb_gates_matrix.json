@@ -18,7 +18,7 @@
       "iri": "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1",
       "production_selectable": false,
       "removes_inv_vl": true,
-      "note": "The FIRST dual-leaf version, SUPERSEDED by dual-leaf-v2. Still recognised and verifiable, so its value lane stays structurally legal here, but no longer selectable for new issuance: its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, leaving the research/zk-field-native-encoding.md section 14.1 reserved-tag requirement unmet. REMOVES INV-VL (value<->lexical agreement becomes trusted-issuer-honesty; CR-G8 / sq-qhy4). Opt-in (`dual-leaf` feature)."
+      "note": "The FIRST dual-leaf version, SUPERSEDED by dual-leaf-v2. Still recognised for legacy string-lane verification; value members are refused, but no longer selectable for new issuance: its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, leaving the research/zk-field-native-encoding.md section 14.1 reserved-tag requirement unmet. REMOVES INV-VL (value<->lexical agreement becomes trusted-issuer-honesty; CR-G8 / sq-qhy4). Opt-in (`dual-leaf` feature)."
     },
     {
       "key": "dual-leaf-v2",
@@ -274,7 +274,8 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
-          "legal": true
+          "legal": false,
+          "reason": "LegacyV1ValueMember"
         },
         "dual-leaf-v2": {
           "legal": true
@@ -293,7 +294,8 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
-          "legal": true
+          "legal": false,
+          "reason": "LegacyV1ValueMember"
         },
         "dual-leaf-v2": {
           "legal": true
@@ -312,7 +314,8 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
-          "legal": true
+          "legal": false,
+          "reason": "LegacyV1ValueMember"
         },
         "dual-leaf-v2": {
           "legal": true
@@ -331,7 +334,8 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
-          "legal": true
+          "legal": false,
+          "reason": "LegacyV1ValueMember"
         },
         "dual-leaf-v2": {
           "legal": true
@@ -350,7 +354,8 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
-          "legal": true
+          "legal": false,
+          "reason": "LegacyV1ValueMember"
         },
         "dual-leaf-v2": {
           "legal": true
@@ -1532,7 +1537,7 @@
     "integer": {
       "value_lane_member": "filter_value_dl_int",
       "value_lane_circuit_size": 3033,
-      "value_lane_method": "dual-leaf",
+      "value_lane_method": "dual-leaf-v2",
       "string_lane_member": "filter_int_d2",
       "string_lane_circuit_size": 17416,
       "string_lane_method": "string-canonical",
@@ -1541,7 +1546,7 @@
     "double": {
       "value_lane_member": "filter_value_dl_f64",
       "value_lane_circuit_size": 4502,
-      "value_lane_method": "dual-leaf",
+      "value_lane_method": "dual-leaf-v2",
       "string_lane_member": "filter_f64_d2",
       "string_lane_circuit_size": 17416,
       "string_lane_method": "string-canonical",
@@ -1550,24 +1555,24 @@
     "decimal": {
       "value_lane_member": "filter_value_dl_decimal",
       "value_lane_circuit_size": 3070,
-      "value_lane_method": "dual-leaf"
+      "value_lane_method": "dual-leaf-v2"
     },
     "datetime": {
       "value_lane_member": "filter_value_dl_datetime",
       "value_lane_circuit_size": 3070,
-      "value_lane_method": "dual-leaf"
+      "value_lane_method": "dual-leaf-v2"
     },
     "boolean": {
       "value_lane_member": "filter_value_dl_bool",
       "value_lane_circuit_size": 3032,
-      "value_lane_method": "dual-leaf"
+      "value_lane_method": "dual-leaf-v2"
     }
   },
   "summary": {
     "circuits": 74,
     "methods": 4,
     "configs": 296,
-    "legal_configs": 138,
-    "illegal_configs": 158
+    "legal_configs": 133,
+    "illegal_configs": 163
   }
 }

@@ -19,7 +19,7 @@
 //!
 //! ## Discovery (per the Solid Notifications Protocol)
 //! A client finds the channel two ways, both implemented here:
-//! 1. the `/.well-known/solid` storage description lists the `notificationChannel` subscription
+//! 1. the `/.well-known/solid` storage description lists the notification subscription
 //!    service + its supported `channelType`, and
 //! 2. [`link_headers`] returns the `Link` rels (`describedby` + `solid:storageDescription`) the LDP
 //!    GET/HEAD handler can attach so a client can `HEAD` a resource and discover the same service.
@@ -73,9 +73,11 @@ static NOTIFICATION_METRICS: LazyLock<NotificationMetricCounters> =
 /// lifetime of the process and use relaxed atomic ordering because they are observability-only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NotificationMetrics {
-    /// Subscribers closed after falling behind the per-topic broadcast buffer.
+    /// Overflow closes after confirmed read access, including reconciliation when a tick
+    /// pre-empts a lag check and confirms read access.
+    /// Revoked or undecided timer closes do not count, even after a pre-empted lag check.
     pub dropped_subscribers_total: u64,
-    /// Notification events skipped by lagged subscribers before they were closed.
+    /// Events skipped by lagged subscribers counted in `dropped_subscribers_total`.
     pub lagged_events_total: u64,
 }
 
@@ -125,6 +127,10 @@ fn authorization_unavailable() -> Response {
 pub struct NotifyState<S: Store> {
     pub hub: NotificationHub,
     pub base_url: String,
+    /// The services mounted by this host, snapshotted in the description at construction.
+    pub catalog: crate::describe::ServiceCatalog,
+    description_jsonld: CachedDescription,
+    description_turtle: CachedDescription,
     /// The LDP state — the store + ACL cache the [`WacAuthorizer`] reads `.acl` resources through.
     ldp: Arc<LdpState<S>>,
     /// How often an open socket's subscriber is checked for read access apart from any event
@@ -136,6 +142,12 @@ pub struct NotifyState<S: Store> {
     recheck_now: Arc<tokio::sync::Notify>,
     #[cfg(test)]
     recheck_ticks: std::sync::atomic::AtomicUsize,
+    /// Counts lag checks started by this state, independently of process-wide metrics.
+    #[cfg(test)]
+    lag_checks: Arc<AtomicU64>,
+    /// Overflow closes and skipped events for this state's sockets alone.
+    #[cfg(test)]
+    overflow_counts: Arc<NotificationMetricCounters>,
 }
 
 /// How often an open receive socket checks, on a timer of its own, that its subscriber may still
@@ -147,12 +159,55 @@ pub struct NotifyState<S: Store> {
 /// may not read.
 pub const ACCESS_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// One representation of the static storage description, rendered before serving requests.
+struct CachedDescription {
+    body: bytes::Bytes,
+    etag: axum::http::HeaderValue,
+}
+
+impl CachedDescription {
+    fn render(
+        catalog: &crate::describe::ServiceCatalog,
+        storage: &str,
+        format: crate::ldp::content::RdfFormat,
+    ) -> Result<Self, crate::error::ServerError> {
+        use sha2::{Digest, Sha256};
+        let body = bytes::Bytes::from(catalog.solid(storage, format)?);
+        let etag = format!(
+            "\"sd-{}\"",
+            crate::lws::jose::b64url(&Sha256::digest(&body))
+        )
+        .parse()
+        .expect("valid description ETag");
+        Ok(Self { body, etag })
+    }
+}
+
 impl<S: Store> NotifyState<S> {
     /// Derive the notification state from the LDP state: the hub and base URL are TAKEN from it
     /// (single-sourced), so a subscriber registered via `…/receive` is on the same registry the LDP
     /// emit path fans to and the advertised URLs match the LDP layer's own base.
+    ///
+    /// # Panics
+    /// Panics if the static storage description cannot be rendered.
     pub fn new(ldp: Arc<LdpState<S>>) -> Self {
+        Self::with_catalog(ldp, crate::describe::ServiceCatalog::default())
+    }
+
+    pub(crate) fn with_catalog(
+        ldp: Arc<LdpState<S>>,
+        catalog: crate::describe::ServiceCatalog,
+    ) -> Self {
+        use crate::ldp::content::RdfFormat;
+        let storage = format!("{}/", ldp.base_url().trim_end_matches('/'));
+        let description_jsonld = CachedDescription::render(&catalog, &storage, RdfFormat::JsonLd)
+            .expect("render static JSON-LD storage description before boot");
+        let description_turtle = CachedDescription::render(&catalog, &storage, RdfFormat::Turtle)
+            .expect("render static Turtle storage description before boot");
         Self {
+            catalog,
+            description_jsonld,
+            description_turtle,
             hub: ldp.notifications.clone(),
             base_url: ldp.base_url().to_string(),
             ldp,
@@ -161,7 +216,28 @@ impl<S: Store> NotifyState<S> {
             recheck_now: Default::default(),
             #[cfg(test)]
             recheck_ticks: Default::default(),
+            #[cfg(test)]
+            lag_checks: Default::default(),
+            #[cfg(test)]
+            overflow_counts: Arc::new(NotificationMetricCounters {
+                dropped_subscribers_total: AtomicU64::new(0),
+                lagged_events_total: AtomicU64::new(0),
+            }),
         }
+    }
+
+    fn count_lag_close(&self, skipped: u64) {
+        let count = |counters: &NotificationMetricCounters| {
+            counters
+                .dropped_subscribers_total
+                .fetch_add(1, Ordering::Relaxed);
+            counters
+                .lagged_events_total
+                .fetch_add(skipped, Ordering::Relaxed);
+        };
+        count(&NOTIFICATION_METRICS);
+        #[cfg(test)]
+        count(&self.overflow_counts);
     }
 
     /// The same state, with an open socket's access checked every `every` apart from events.
@@ -259,6 +335,7 @@ impl<S: Store> NotifyState<S> {
     }
 
     /// The absolute subscription-service URL (the POST target).
+    #[cfg(test)]
     fn subscription_service_url(&self) -> String {
         format!("{}{SUBSCRIPTION_PATH}", self.base_url.trim_end_matches('/'))
     }
@@ -590,13 +667,20 @@ impl NotificationSocket for WebSocket {
 }
 
 /// Send a close frame (best effort: the client may be gone already).
-async fn close<W: NotificationSocket>(socket: &mut W, code: u16, reason: &'static str) {
-    let _ = socket
-        .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+async fn close<W: NotificationSocket>(
+    socket: &mut W,
+    code: u16,
+    reason: &'static str,
+    every: std::time::Duration,
+) {
+    let _ = tokio::time::timeout(
+        every,
+        socket.send(Message::Close(Some(axum::extract::ws::CloseFrame {
             code,
             reason: reason.into(),
-        })))
-        .await;
+        }))),
+    )
+    .await;
 }
 
 /// The close reason once the subscriber may no longer read the topic.
@@ -651,7 +735,8 @@ fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
 ///   notifications, dropping any running Event or Lag check and noting it as missed. Within
 ///   two periods of losing Read the socket closes: 1008 for a confirmed denial, or 1011 if
 ///   the timer check is undecided. Each check has at most one period; a slower check counts
-///   as undecided and the client must resubscribe.
+///   as undecided and the client must resubscribe. Sending a notification or close frame
+///   has one further period at most before the connection task ends.
 /// - A check that cannot be made is neither a grant nor a denial. On the timer it closes the
 ///   socket (1011).
 /// - A notification (or an overflow) that is dropped, because the subscriber may not read it or
@@ -660,8 +745,9 @@ fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
 ///   client to reconcile, instead of delivering: nothing is sent after a gap without saying so,
 ///   and a subscriber whose Read was restored before the next tick is still told it missed
 ///   something. An Event check spanning a tick therefore asks a reader to reconcile; a
-///   dropped Lag check does too (RECONCILE, rather than OVERFLOW). A subscriber that may not
-///   read the topic at that point gets the revocation close
+///   dropped Lag check does too (RECONCILE, rather than OVERFLOW). A tick that becomes ready
+///   while a finished but unpolled Event decision waits drops it too, and a reader gets RECONCILE.
+///   A subscriber that may not read the topic at that point gets the revocation close
 ///   (1008) on the timer and is never told.
 async fn stream_notifications<S: Store + 'static, W>(
     mut socket: W,
@@ -690,6 +776,7 @@ async fn stream_notifications<S: Store + 'static, W>(
     let mut check = no_check(&access);
     // Whether a notification (or an overflow) was dropped since the socket opened.
     let mut missed = false;
+    let mut preempted_lag = 0;
 
     loop {
         tokio::select! {
@@ -700,7 +787,10 @@ async fn stream_notifications<S: Store + 'static, W>(
             () = state.next_tick(&mut recheck), if !matches!(check, Some((_, Due::Tick))) => {
                 #[cfg(test)]
                 state.recheck_ticks.fetch_add(1, Ordering::SeqCst);
-                if check.take().is_some() {
+                if let Some((_, due)) = check.take() {
+                    if let Due::Lag(skipped) = due {
+                        preempted_lag += skipped;
+                    }
                     missed = true;
                 }
                 check = Some((access(), Due::Tick));
@@ -717,36 +807,40 @@ async fn stream_notifications<S: Store + 'static, W>(
                 let decided = decided.unwrap_or(ReadAccess::Undecided);
                 match (due, decided) {
                     (Due::Tick, ReadAccess::Allowed) if missed => {
-                        close(&mut socket, 1011, RECONCILE).await;
+                        if preempted_lag > 0 {
+                            state.count_lag_close(preempted_lag);
+                        }
+                        close(&mut socket, 1011, RECONCILE, every).await;
                         break;
                     }
                     (Due::Tick, ReadAccess::Allowed) => {}
                     (Due::Tick, ReadAccess::Denied) => {
-                        close(&mut socket, 1008, REVOKED).await;
+                        close(&mut socket, 1008, REVOKED, every).await;
                         break;
                     }
                     (Due::Tick, ReadAccess::Undecided) => {
-                        close(&mut socket, 1011, UNDECIDED).await;
+                        close(&mut socket, 1011, UNDECIDED, every).await;
                         break;
                     }
                     (Due::Event(_), ReadAccess::Allowed) if missed => {
-                        close(&mut socket, 1011, RECONCILE).await;
+                        close(&mut socket, 1011, RECONCILE, every).await;
                         break;
                     }
                     (Due::Event(body), ReadAccess::Allowed) => {
-                        if socket.send(Message::text(body.to_string())).await.is_err() {
+                        if !matches!(
+                            tokio::time::timeout(
+                                every,
+                                socket.send(Message::text(body.to_string()))
+                            ).await,
+                            Ok(Ok(()))
+                        ) {
                             break; // the client went away mid-send
                         }
                     }
                     (Due::Lag(skipped), ReadAccess::Allowed) => {
-                        NOTIFICATION_METRICS
-                            .dropped_subscribers_total
-                            .fetch_add(1, Ordering::Relaxed);
-                        NOTIFICATION_METRICS
-                            .lagged_events_total
-                            .fetch_add(skipped, Ordering::Relaxed);
+                        state.count_lag_close(skipped);
                         // "internal error" / server overload — client reconnects
-                        close(&mut socket, 1011, OVERFLOW).await;
+                        close(&mut socket, 1011, OVERFLOW, every).await;
                         break;
                     }
                     // Dropped, and noted: the next point where the subscriber may read the
@@ -774,6 +868,8 @@ async fn stream_notifications<S: Store + 'static, W>(
                     // to reconcile by closing — it should re-subscribe + re-read (missed-update
                     // safety) — once it is known that it may read what it missed.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        #[cfg(test)]
+                        state.lag_checks.fetch_add(1, Ordering::Relaxed);
                         check = Some((access(), Due::Lag(skipped)));
                     }
                     // The sender was dropped (the topic channel went away) — nothing more will arrive.
@@ -794,24 +890,60 @@ async fn stream_notifications<S: Store + 'static, W>(
 /// storage description).
 pub async fn storage_description_handler<S: Store>(
     State(state): State<Arc<NotifyState<S>>>,
+    headers: HeaderMap,
 ) -> Response {
-    let body = json!({
-        "@context": [NOTIFICATIONS_CONTEXT, AS2_CONTEXT],
-        "notificationChannel": [
-            {
-                "id": state.subscription_service_url(),
-                "channelType": WEBSOCKET_CHANNEL_2023_TYPE,
-                // The subscription service: POST a channel request here to obtain a `receiveFrom` URL.
-                "subscriptionService": state.subscription_service_url(),
-            }
-        ],
-    });
-    (
-        StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/ld+json")],
-        body.to_string(),
-    )
-        .into_response()
+    use crate::lws::resources::negotiate;
+    let Some(media) = negotiate(
+        headers
+            .get(axum::http::header::ACCEPT)
+            .and_then(|v| v.to_str().ok()),
+        &["application/ld+json", "text/turtle"],
+    ) else {
+        return (
+            StatusCode::NOT_ACCEPTABLE,
+            [(axum::http::header::VARY, "Accept")],
+        )
+            .into_response();
+    };
+    let description = if media == "text/turtle" {
+        &state.description_turtle
+    } else {
+        &state.description_jsonld
+    };
+    let etag = description.etag.to_str().expect("valid description ETag");
+    use crate::ldp::conditional::{
+        evaluate_read, evaluate_read_guard, Precondition, ReadPrecondition,
+    };
+    let if_match = crate::entity_tag::field(&headers, axum::http::header::IF_MATCH);
+    let if_none_match = crate::entity_tag::field(&headers, axum::http::header::IF_NONE_MATCH);
+    let status =
+        if evaluate_read_guard(if_match.as_deref(), None, etag, None) == Precondition::Failed {
+            StatusCode::PRECONDITION_FAILED
+        } else if evaluate_read(if_none_match.as_deref(), None, etag, None)
+            == ReadPrecondition::NotModified
+        {
+            StatusCode::NOT_MODIFIED
+        } else {
+            StatusCode::OK
+        };
+    let body = if status == StatusCode::OK {
+        description.body.clone()
+    } else {
+        bytes::Bytes::new()
+    };
+    let mut response = (status, body).into_response();
+    response
+        .headers_mut()
+        .insert(axum::http::header::ETAG, description.etag.clone());
+    for (name, value) in [
+        (axum::http::header::CONTENT_TYPE, media.as_str()),
+        (axum::http::header::VARY, "Accept"),
+    ] {
+        response
+            .headers_mut()
+            .insert(name, value.parse().expect("valid description header"));
+    }
+    response
 }
 
 /// The discovery `Link` header VALUES the LDP GET/HEAD handler can attach to a resource response so a
@@ -1424,10 +1556,44 @@ mod tests {
 
     #[tokio::test]
     async fn storage_description_advertises_subscription_service() {
-        let resp = storage_description_handler(State(state())).await;
+        use tower::ServiceExt;
+        let mut state = state();
+        let mut service = crate::describe::entry(
+            "notifications",
+            &format!("{}SolidNotificationService", crate::describe::SSD),
+            state.subscription_service_url(),
+        );
+        service.extras.insert(
+            format!("{}channelType", crate::describe::SSD),
+            json!({"@id": WEBSOCKET_CHANNEL_2023_TYPE}),
+        );
+        Arc::get_mut(&mut state).unwrap().catalog.service(service);
+        let state = Arc::new(NotifyState::with_catalog(
+            state.ldp.clone(),
+            state.catalog.clone(),
+        ));
+        let app = axum::Router::new()
+            .route(
+                SUBSCRIPTION_PATH,
+                axum::routing::post(subscribe_handler::<TestStore>),
+            )
+            .route(
+                WELL_KNOWN_SOLID_PATH,
+                axum::routing::get(storage_description_handler::<TestStore>),
+            )
+            .with_state(state);
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(WELL_KNOWN_SOLID_PATH)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_to_string(resp).await;
-        assert!(body.contains("notificationChannel"), "{body}");
+        assert!(body.contains("SolidNotificationService"), "{body}");
         assert!(body.contains(WEBSOCKET_CHANNEL_2023_TYPE), "{body}");
         assert!(
             body.contains("https://pod.example/.notifications/WebSocketChannel2023/"),
@@ -1906,7 +2072,7 @@ mod tests {
     /// A due tick replaces an event or lag check, and the dropped work is reconciled.
     #[tokio::test(flavor = "current_thread")]
     async fn a_tick_preempts_event_and_lag_checks() {
-        for lag in [false, true] {
+        for (lag, revoked) in [(false, false), (true, false), (true, true)] {
             let (s, store) = faulting_state().await;
             let topic = format!("{BASE}/doc");
             let mut ws = open_for_bob(&s, &topic).await;
@@ -1917,11 +2083,15 @@ mod tests {
             } else {
                 1
             };
-            for _ in 0..count {
-                s.hub
-                    .notify(&topic, crate::notifications::ActivityType::Update, None)
-                    .await;
-            }
+            // Fill the buffer before the connection task can consume it.
+            tokio::task::unconstrained(async {
+                for _ in 0..count {
+                    s.hub
+                        .notify(&topic, crate::notifications::ActivityType::Update, None)
+                        .await;
+                }
+            })
+            .await;
             tokio::time::timeout(std::time::Duration::from_secs(2), async {
                 while store.hold_next_meta.lock().unwrap().is_some() {
                     tokio::task::yield_now().await;
@@ -1929,11 +2099,87 @@ mod tests {
             })
             .await
             .expect("event/lag check started");
+            assert_eq!(s.lag_checks.load(Ordering::Relaxed), u64::from(lag));
+            if revoked {
+                revoke_bob(&s).await;
+            }
             s.tick_now();
             assert_eq!(
                 next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
-                Some(Err((1011, RECONCILE.to_string()))),
-                "lag={lag}"
+                Some(Err(if revoked {
+                    (1008, REVOKED.to_string())
+                } else {
+                    (1011, RECONCILE.to_string())
+                })),
+                "lag={lag}, revoked={revoked}"
+            );
+            let counted = u64::from(lag && !revoked);
+            assert_eq!(
+                s.overflow_counts
+                    .dropped_subscribers_total
+                    .load(Ordering::Relaxed),
+                counted
+            );
+            assert_eq!(
+                s.overflow_counts
+                    .lagged_events_total
+                    .load(Ordering::Relaxed),
+                counted
+            );
+        }
+    }
+
+    /// A completed denied or undecided lag check reconciles later without overflow counts.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_completed_unreadable_lag_check_is_not_counted_as_overflow() {
+        for denied in [false, true] {
+            let (s, store) = faulting_state().await;
+            let topic = format!("{BASE}/doc");
+            let mut ws = open_for_bob(&s, &topic).await;
+            if denied {
+                revoke_bob(&s).await;
+            } else {
+                store.fail_meta.store(true, Ordering::SeqCst);
+            }
+            // Overflow before the socket task can consume the first event.
+            tokio::task::unconstrained(async {
+                for _ in 0..super::super::TOPIC_BUFFER + 1 {
+                    s.hub
+                        .notify(&topic, crate::notifications::ActivityType::Update, None)
+                        .await;
+                }
+            })
+            .await;
+            assert_eq!(next_frame(&mut ws, QUIET).await, None);
+            assert_eq!(s.lag_checks.load(Ordering::Relaxed), 1);
+            store.fail_meta.store(false, Ordering::SeqCst);
+            if denied {
+                s.ldp
+                    .store
+                    .write(
+                        &format!("{BASE}/.acl"),
+                        Bytes::from(acl_with_reader(ALICE, Some(BOB))),
+                        "text/turtle",
+                    )
+                    .await
+                    .expect("restore root acl");
+            }
+            s.tick_now();
+            assert_eq!(
+                next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
+                Some(Err((1011, RECONCILE.to_string())))
+            );
+            assert_eq!(
+                s.overflow_counts
+                    .dropped_subscribers_total
+                    .load(Ordering::Relaxed),
+                0
+            );
+            assert_eq!(
+                s.overflow_counts
+                    .lagged_events_total
+                    .load(Ordering::Relaxed),
+                0
             );
         }
     }
@@ -2010,6 +2256,68 @@ mod tests {
         assert!(matches!(sent.lock().unwrap().as_slice(),
                          [Message::Close(Some(frame))] if frame.code == 1008 && frame.reason == REVOKED),
                 "a ready frame backlog starved the timer or its decision");
+    }
+
+    /// A peer that never drains sends cannot retain a revoked connection.
+    #[tokio::test(start_paused = true)]
+    async fn a_nonreading_revoked_socket_ends_within_three_periods() {
+        struct StalledSocket {
+            ready: Arc<tokio::sync::Semaphore>,
+            sending: Arc<tokio::sync::Semaphore>,
+        }
+        impl NotificationSocket for StalledSocket {
+            async fn recv(&mut self) -> Option<Result<Message, axum::Error>> {
+                self.ready.add_permits(1);
+                std::future::pending().await
+            }
+            async fn send(&mut self, _: Message) -> Result<(), axum::Error> {
+                self.sending.add_permits(1);
+                std::future::pending().await
+            }
+        }
+        for event in [false, true] {
+            let every = std::time::Duration::from_millis(100);
+            let s = state_with_reader(every).await;
+            let topic = format!("{BASE}/doc");
+            let token = s.hub.mint_receive_token(BOB, &topic).await;
+            let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
+            let ready = Arc::new(tokio::sync::Semaphore::new(0));
+            let sending = Arc::new(tokio::sync::Semaphore::new(0));
+            let task = tokio::spawn(stream_notifications(
+                StalledSocket {
+                    ready: ready.clone(),
+                    sending: sending.clone(),
+                },
+                s.clone(),
+                topic.clone(),
+                BOB.to_string(),
+                None,
+                claim,
+            ));
+            ready.acquire().await.unwrap().forget();
+            if event {
+                s.hub
+                    .notify(&topic, crate::notifications::ActivityType::Update, None)
+                    .await;
+                sending.acquire().await.unwrap().forget();
+            }
+            revoke_bob(&s).await;
+            tokio::time::timeout(every * 3 + std::time::Duration::from_millis(1), task)
+                .await
+                .expect("a stalled send retained the revoked connection")
+                .unwrap();
+            assert!(
+                s.hub.claim_receive_socket(&token, &topic).await.is_some(),
+                "connection claim released"
+            );
+            if !event {
+                assert_eq!(
+                    sending.available_permits(),
+                    1,
+                    "revocation reached the close send"
+                );
+            }
+        }
     }
 
     /// Inbound frames cannot starve the timer or its completed access decision.

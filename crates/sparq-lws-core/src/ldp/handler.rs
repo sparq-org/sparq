@@ -124,8 +124,9 @@ static HV_ALLOW: LazyLock<HeaderValue> =
     LazyLock::new(|| HeaderValue::from_static("OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH"));
 static HV_ACCEPT_POST: LazyLock<HeaderValue> =
     LazyLock::new(|| HeaderValue::from_static("text/turtle, application/ld+json"));
+pub(crate) const ACCEPT_PATCH_TYPES: &str = "text/n3, application/sparql-update";
 static HV_ACCEPT_PATCH: LazyLock<HeaderValue> =
-    LazyLock::new(|| HeaderValue::from_static("text/n3, application/sparql-update"));
+    LazyLock::new(|| HeaderValue::from_static(ACCEPT_PATCH_TYPES));
 
 /// Build a `NamedNode` from a COMPILE-TIME-CONSTANT IRI without the per-call RFC-3987 re-parse.
 /// Confined to the five `*_IRI` server constants above (validated once, at first use). The

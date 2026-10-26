@@ -20,7 +20,7 @@
 //! such an `await`, so per-operation JS round-trips are not available behind this trait.
 //!
 //! What *is* available is the same trait used as a decorator. `PersistentStore` wraps any
-//! `Store`, forwards every method verbatim, and records each
+//! `Store`, forwards resource methods, and records each
 //! mutation that **succeeded** into a [`Journal`]. The host reads the journal as bytes
 //! ([`Journal::encode`]) whenever it likes, writes those bytes wherever it keeps state, and on the
 //! next boot hands them back; `replay` applies them to a fresh in-memory pod. Persistence policy
@@ -405,10 +405,9 @@ impl<'a> Reader<'a> {
     }
 }
 
-// The `Store` decorator and its replay live behind the same cfg as the rest of the adapter: the
-// `sparq-lws-core` dependency is declared only for `wasm32`. Everything above is
-// target-independent and covered by ordinary `cargo test`.
-#[cfg(target_arch = "wasm32")]
+// The decorator is built for wasm and native unit tests; normal host builds keep only
+// the target-independent journal format above.
+#[cfg(any(target_arch = "wasm32", test))]
 mod wasm_store {
     use std::sync::Arc;
 
@@ -425,7 +424,9 @@ mod wasm_store {
     ///
     /// Reads are pass-through, including the `read_plan`/`read_at` overrides, so wrapping a
     /// [`CompositeStore`](sparq_lws_core::store::CompositeStore) keeps its single-round-trip read
-    /// path rather than falling back to the trait's per-IRI defaults.
+    /// path rather than falling back to the trait's per-IRI defaults. The reported call timeout
+    /// comes from the inner store. Atomic markers are unsupported until marker mutations and
+    /// the lifecycle lease can be forwarded and preserved by the snapshot journal.
     pub struct PersistentStore<S: Store> {
         inner: S,
         journal: Arc<Journal>,
@@ -442,6 +443,10 @@ mod wasm_store {
     impl<S: Store> Store for PersistentStore<S> {
         fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
             self.inner.lifecycle()
+        }
+
+        fn call_timeout(&self) -> std::time::Duration {
+            self.inner.call_timeout()
         }
 
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
@@ -593,12 +598,38 @@ mod wasm_store {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub use wasm_store::{replay, PersistentStore, ReplayError};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A persistence wrapper is refused before startup can write unsupported markers.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn persistent_store_is_refused_before_lws_startup_mutates_it() {
+        use sparq_lws_core::lws::{LwsConfig, LwsState};
+        use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store};
+        use std::sync::Arc;
+
+        let journal = Arc::new(Journal::new());
+        let inner = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        assert!(inner.raises_markers());
+        let store = PersistentStore::new(inner, journal.clone());
+        let error = LwsState::new(store, LwsConfig::new("https://pod.example"))
+            .await
+            .err()
+            .expect("unsupported markers must refuse startup");
+        // Either refusal is made before any read or write: the exclusive-index check runs
+        // first, then the atomic-marker check.
+        assert!(
+            error.contains("raises a stored time atomically")
+                || error.contains("may be written by other processes too"),
+            "{error}"
+        );
+        assert!(decode(&journal.encode()).unwrap().is_empty());
+    }
 
     fn write(iri: &str, body: &str) -> Mutation {
         Mutation::Write {
