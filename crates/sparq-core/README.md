@@ -34,19 +34,19 @@ subtype facets on the raw RDF lexical form, independently of finite arithmetic
 capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
 representation and the existing NaN sentinel; larger literals can remain valid.
 
-`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
-keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
 Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
 `numerics.bin`/`temporals.bin` and both v2 caches, rebuilding in memory while
 preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bin`; missing or
 wrong-sized current files also trigger rebuilds.
-
 Legacy opens cost a dictionary scan and cache allocation until migrated with
 `Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
 Versions mark semantic compatibility, not integrity; the trusted-storage contract
-still applies. A directory has one writable holder at a time (`dir_lock`; `Graph::open_read_only` shares it among readers); a second holder gets `WouldBlock`. A store's files are reached only through its `Graph`, whose mapped parts carry the lock. Ownership is per root and checked when a directory is claimed; concurrently creating nested stores is unsupported, and the checks are advisory (no defence against racing the filesystem). Details: [data-formats guide](../../skills/data-formats/SKILL.md).
+still applies. A directory has one writable holder (`dir_lock`); read-only opens share it among
+readers. A second conflicting holder gets `WouldBlock`. Named graphs use manifest-recorded slots; create and drop change only their own entries. Removing a child from memory keeps its persisted entry. Writable opens validate the layout before cleaning undeclared slots; read-only opens leave them alone. Saves, builds and manifest publication sync root files and caches.
+Ownership checks are advisory; concurrently creating nested stores or racing filesystem changes is unsupported. See the [data-formats guide](../../skills/data-formats/SKILL.md).
 
 ## ✨ Features
 

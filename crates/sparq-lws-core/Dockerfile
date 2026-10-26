@@ -19,8 +19,21 @@ COPY . .
 
 # cargo-auditable's own lockfile pins its install; the workspace build separately
 # uses the committed Cargo.lock and the crate's default feature set.
-RUN cargo install --locked cargo-auditable
-RUN cargo auditable build --release --locked -p sparq-lws-core ${CARGO_FLAGS}
+# An optional build_ca secret supplies a trusted CA bundle for proxied builds:
+# docker build --secret id=build_ca,src=/path/to/ca-bundle.crt ...
+# The certificate is mounted only for these commands and never enters an image layer.
+RUN --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/build_ca ]; then \
+      export SSL_CERT_FILE=/run/secrets/build_ca CURL_CA_BUNDLE=/run/secrets/build_ca \
+        CARGO_HTTP_CAINFO=/run/secrets/build_ca GIT_SSL_CAINFO=/run/secrets/build_ca RUSTUP_USE_CURL=1; \
+    fi; \
+    cargo install --locked --jobs 2 cargo-auditable
+RUN --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/build_ca ]; then \
+      export SSL_CERT_FILE=/run/secrets/build_ca CURL_CA_BUNDLE=/run/secrets/build_ca \
+        CARGO_HTTP_CAINFO=/run/secrets/build_ca GIT_SSL_CAINFO=/run/secrets/build_ca RUSTUP_USE_CURL=1; \
+    fi; \
+    cargo auditable build --release --locked --jobs 2 -p sparq-lws-core ${CARGO_FLAGS}
 
 # Distroless has no mkdir; copy an empty mount point with the runtime ownership.
 RUN mkdir /data

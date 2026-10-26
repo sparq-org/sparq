@@ -1,7 +1,7 @@
 # sparq Helm chart (`deploy/helm/sparq/`)
 
 Helm chart for **sparq-server** (W3C SPARQL 1.1 Protocol HTTP server) and
-**sparq-lws-core** (native Solid/LWS server, activates once sq-lmz40 ships).
+**sparq-lws-core** (native Solid/LWS server).
 Part of the cloud-deploy epic sq-3vjdr; see
 `research/cloud-deploy-architecture.md` for the full design record.
 
@@ -48,7 +48,7 @@ curl -H "Authorization: Bearer <your-token>" \
      http://localhost:3030/sparql
 ```
 
-## Quick install (lws — activates once sq-lmz40 ships)
+## Quick install (lws)
 
 ```sh
 # lws is fail-closed: anonymous mutation rejected, DPoP required, HTTPS-only WebIDs.
@@ -108,8 +108,8 @@ chart sets `SOLID_SERVER_DATA_DIR=/data` and uses `Recreate` to stop the previou
 pod before opening the same data directory. Persistence remains disabled by default.
 
 Reuse the top-level `persistence` values for either server; there is no separate
-`lws.persistence` block. For a durable LWS image containing the #7188 P0-A/P0-B
-storage wiring, add these values to the LWS configuration above:
+`lws.persistence` block. Add these values to the LWS configuration above to
+persist the embedded index, filesystem blobs, and format marker together:
 
 ```yaml
 server: lws

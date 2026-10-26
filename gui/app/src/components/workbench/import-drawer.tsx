@@ -226,8 +226,12 @@ function ImportDrawer({
   const [pasteText, setPasteText] = React.useState<string>("");
   const [pasteFormat, setPasteFormat] = React.useState<string>("turtle");
 
-  // Reset transient state whenever the drawer is (re)opened.
-  React.useEffect(() => {
+  // Reset transient state whenever the drawer is (re)opened; keep the shared inputs.
+  const [previousOpen, setPreviousOpen] = React.useState(open);
+  const [previousNative, setPreviousNative] = React.useState(native);
+  if (previousOpen !== open || previousNative !== native) {
+    setPreviousOpen(open);
+    setPreviousNative(native);
     if (open) {
       setFeedback(null);
       setBusy(false);
@@ -237,7 +241,7 @@ function ImportDrawer({
       setWebRejected([]);
       setFileStatuses({});
     }
-  }, [open, native]);
+  }
 
   // ── Single-file finish helper (URL / Paste) ────────────────────────────────────────────────
 

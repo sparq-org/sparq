@@ -73,12 +73,14 @@ docker run -d \
   -p "127.0.0.1:${PORT}:3000" \
   "${IMAGE}" >/dev/null
 
-container_pid="$(docker inspect --format '{{.State.Pid}}' "${NAME}")"
-runtime_uid="$(awk '/^Uid:/ { print $2; exit }' "/proc/${container_pid}/status")"
-if [ -z "${runtime_uid}" ] || [ "${runtime_uid}" = "0" ]; then
-  echo "!! container process is running as uid ${runtime_uid:-<unknown>}" >&2
-  exit 1
-fi
+# Ask the daemon for the live UID; the client may use a different PID namespace.
+runtime_uid="$(docker top "${NAME}" -eo pid,uid | awk 'NR == 2 { print $2; exit }')"
+case "${runtime_uid}" in
+  ""|0|*[!0-9]*)
+    echo "!! container process is running as uid ${runtime_uid:-<unknown>}" >&2
+    exit 1
+    ;;
+esac
 echo ">> process uid ${runtime_uid} is non-root"
 
 wait_for_health() {

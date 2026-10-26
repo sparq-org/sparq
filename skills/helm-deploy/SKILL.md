@@ -1,13 +1,13 @@
 ---
 name: helm-deploy
-description: Deploy sparq-server or configure the planned native sparq-lws-core deployment on Kubernetes with the in-repo Helm chart or plain quickstart manifest. Use when installing, configuring, exposing, upgrading, or validating deploy/helm/sparq, including existing-Secret auth, ingress-nginx TLS, selector-dependent images/ports/probes, persistent data, and single-replica safety constraints.
+description: Deploy sparq-server or the native sparq-lws-core server on Kubernetes with the in-repo Helm chart or plain quickstart manifest. Use when installing, configuring, exposing, upgrading, or validating deploy/helm/sparq, including existing-Secret auth, ingress-nginx TLS, selector-dependent images/ports/probes, persistent data, and single-replica safety constraints.
 ---
 
 # Deploy sparq with Helm
 
 > Verified against `deploy/helm/sparq` on 2026-07-15. The chart targets
 > Kubernetes 1.20 or later and does not build images. The `sparq-server` GHCR image
-> is published; the LWS selector becomes runnable only after sq-lmz40 publishes its image.
+> is published; choose a release tag containing native data-directory support for LWS.
 
 ## Preserve the security boundary
 
@@ -74,7 +74,7 @@ and create a controller-specific HTTPS-only route to the `ClusterIP` Service.
 
 ## Install LWS
 
-Use this path only after sq-lmz40 publishes `ghcr.io/sparq-org/sparq-lws-core`.
+Use the native `ghcr.io/sparq-org/sparq-lws-core` image with its default features.
 Supply HTTPS URLs for the public base URL and trusted OIDC issuer. Selecting
 `server=lws` automatically selects `ghcr.io/sparq-org/sparq-lws-core`, port
 3000, `SOLID_SERVER_BIND=0.0.0.0:3000`, `/livez`, and `/readyz`.
@@ -100,8 +100,8 @@ raising `replicaCount`.
 
 - Set `persistence.enabled=true` to create a PVC mounted at `/data`, or also set
   `persistence.existingClaim` to use a pre-provisioned PVC.
-- For LWS, use an image containing #7188 P0-A/P0-B. The shared top-level
-  `persistence` block also sets `SOLID_SERVER_DATA_DIR=/data` and `Recreate` so
+- For LWS, the shared top-level `persistence` block also sets
+  `SOLID_SERVER_DATA_DIR=/data` and `Recreate` so
   upgrades stop the old pod before opening the same index. The environment
   variable is unset and storage stays in-memory when persistence is disabled.
 - LWS requires `persistence.accessMode=ReadWriteOnce` and a filesystem on a block
