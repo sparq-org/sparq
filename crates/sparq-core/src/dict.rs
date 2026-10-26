@@ -51,9 +51,13 @@ const INLINE_MAX: u32 = (1 << 30) - 1;
 // persistence paths, which are cfg'd out of the default feature set.
 #[allow(dead_code)]
 pub(crate) const DICT_META_MAGIC: u32 = 0x31_56_4D_44; // b"DMV1" little-endian
-/// Bump when the on-disk meta layout changes incompatibly.
+/// Version of the dictionary metadata written alongside operation journals.
 #[allow(dead_code)]
-pub(crate) const DICT_META_VERSION: u32 = 1;
+pub(crate) const DICT_META_VERSION: u32 = 2;
+
+/// Metadata versions accepted by this build; version 1 is upgraded on journal append.
+#[allow(dead_code)]
+pub(crate) const DICT_META_VERSIONS_READ: [u32; 2] = [1, DICT_META_VERSION];
 
 /// If a literal `value`/`datatype` is a canonical non-negative `xsd:integer` in
 /// range, its inline id. Only the canonical lexical form (no leading zeros / sign)
@@ -2222,11 +2226,11 @@ impl Dict {
             ));
         }
         let version = read_u32(&mut r)?;
-        if version != DICT_META_VERSION {
+        if !DICT_META_VERSIONS_READ.contains(&version) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "dict-meta.bin format version {version} is not supported (this build expects {DICT_META_VERSION}); rebuild the store"
+                    "dict-meta.bin format version {version} is not supported (this build reads {DICT_META_VERSIONS_READ:?}); rebuild the store"
                 ),
             ));
         }

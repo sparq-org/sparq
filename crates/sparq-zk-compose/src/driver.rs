@@ -216,6 +216,17 @@ impl CircuitProver {
         }
     }
 
+    // Scope stub lookup to this instance's subprocesses, without changing the
+    // test process environment or affecting concurrently running live tests.
+    #[cfg(test)]
+    pub(crate) fn with_test_command_env<T>(
+        &self,
+        env: std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>,
+        run: impl FnOnce() -> T,
+    ) -> T {
+        test_command_environment::scope(self, env, run)
+    }
+
     /// Enable bounded local driver timings without modifying proof statements.
     ///
     /// Disabled by default: no clock or collector is used until opted in.
@@ -251,6 +262,8 @@ impl CircuitProver {
         tool: &str,
         cmd: &mut Command,
     ) -> Result<(), DriverError> {
+        #[cfg(test)]
+        test_command_environment::apply(self, cmd);
         let timer = self.timer(stage);
         run(tool, cmd)?;
         timer.finish(DriverStageOutcome::Success, None);
@@ -448,15 +461,17 @@ impl CircuitProver {
         // afterwards as the unsatisfiability signal.
         let _ = std::fs::remove_file(&witness_path);
         let timer = self.timer(DriverStage::NargoExecute);
-        let out = Command::new("nargo")
-            .arg("execute")
+        let mut command = Command::new("nargo");
+        command.arg("execute")
             .arg(witness_name)
             .arg("--package")
             .arg(pkg)
             .arg("--prover-name")
             .arg(prover_name)
-            .current_dir(&self.compose_dir)
-            .output()
+            .current_dir(&self.compose_dir);
+        #[cfg(test)]
+        test_command_environment::apply(self, &mut command);
+        let out = command.output()
             .map_err(|source| DriverError::Spawn {
                 tool: "nargo".into(),
                 source,
@@ -707,8 +722,8 @@ impl CircuitProver {
         std::fs::write(&vk_p, vk)?;
 
         let timer = self.timer(DriverStage::BbVerify);
-        let out = Command::new("bb")
-            .arg("verify")
+        let mut command = Command::new("bb");
+        command.arg("verify")
             .arg("-p")
             .arg(&proof_p)
             .arg("-i")
@@ -716,8 +731,10 @@ impl CircuitProver {
             .arg("-k")
             .arg(&vk_p)
             .arg("-t")
-            .arg(&self.target)
-            .output()
+            .arg(&self.target);
+        #[cfg(test)]
+        test_command_environment::apply(self, &mut command);
+        let out = command.output()
             .map_err(|source| DriverError::Spawn {
                 tool: "bb".into(),
                 source,
@@ -746,6 +763,45 @@ impl CircuitProver {
     }
 }
 
+// Test-only, scoped to one borrowed prover on the current test thread. The
+// pointer is an identity token only; it is never dereferenced. The borrow keeps
+// the prover in place for the scope, and Drop restores nested scopes on panic.
+#[cfg(test)]
+mod test_command_environment {
+    use super::{CircuitProver, Command};
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+    use std::ffi::OsString;
+
+    type Environment = BTreeMap<OsString, OsString>;
+    type ScopedEnvironment = Option<(*const CircuitProver, Environment)>;
+    thread_local! {
+        static CURRENT: RefCell<ScopedEnvironment> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn scope<T>(prover: &CircuitProver, env: Environment, run: impl FnOnce() -> T) -> T {
+        struct Restore(ScopedEnvironment);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                CURRENT.with(|slot| { slot.replace(self.0.take()); });
+            }
+        }
+        let previous = CURRENT.with(|slot| slot.replace(Some((prover, env))));
+        let _restore = Restore(previous);
+        run()
+    }
+
+    pub(super) fn apply(prover: &CircuitProver, command: &mut Command) {
+        CURRENT.with(|slot| {
+            if let Some((owner, env)) = slot.borrow().as_ref() {
+                if std::ptr::eq(*owner, prover) {
+                    command.envs(env);
+                }
+            }
+        });
+    }
+}
+
 fn run(tool: &str, cmd: &mut Command) -> Result<(), DriverError> {
     let out = cmd.output().map_err(|source| DriverError::Spawn {
         tool: tool.into(),
@@ -769,6 +825,39 @@ fn run(tool: &str, cmd: &mut Command) -> Result<(), DriverError> {
 #[cfg(test)]
 mod driver_glue_tests {
     use super::*;
+
+    #[test]
+    fn test_command_environment_is_scoped_and_restored() {
+        use std::collections::BTreeMap;
+        use std::ffi::OsString;
+        fn env(value: &str) -> BTreeMap<OsString, OsString> {
+            BTreeMap::from([("SPARQ_STUB_SCOPE".into(), value.into())])
+        }
+        fn configured(prover: &CircuitProver) -> BTreeMap<OsString, OsString> {
+            let mut command = Command::new("/usr/bin/true");
+            test_command_environment::apply(prover, &mut command);
+            command.get_envs().map(|(k, v)| (k.to_owned(), v.unwrap().to_owned())).collect()
+        }
+        let prover = CircuitProver::new("stub-scope");
+        let other = CircuitProver::new("stub-scope");
+        assert!(configured(&prover).is_empty());
+        prover.with_test_command_env(env("outer"), || {
+            assert_eq!(configured(&prover), env("outer"));
+            assert!(configured(&other).is_empty());
+            std::thread::scope(|scope| {
+                scope.spawn(|| assert!(configured(&prover).is_empty())).join().unwrap();
+            });
+            prover.with_test_command_env(env("inner"), || {
+                assert_eq!(configured(&prover), env("inner"));
+            });
+            assert_eq!(configured(&prover), env("outer"));
+            std::panic::catch_unwind(|| {
+                prover.with_test_command_env(env("panic"), || panic!("restore the outer environment"));
+            }).expect_err("the scoped panic must propagate");
+            assert_eq!(configured(&prover), env("outer"));
+        });
+        assert!(configured(&prover).is_empty());
+    }
 
     #[test]
     fn concurrent_verification_workspaces_never_share_artifact_paths() {
@@ -951,12 +1040,12 @@ mod driver_glue_tests {
     #[test]
     #[ignore = "requires pinned nargo; stresses shared compiler cache and immutable snapshots"]
     fn real_concurrent_compile_returns_immutable_complete_acir() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "real_concurrent_compile_returns_immutable_complete_acir",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         let id = CircuitId::FilterInt { d: 1 };
         let prover = CircuitProver::from_crate_root();
         let expected = std::fs::read(prover.compile(&id).unwrap()).unwrap();
@@ -984,6 +1073,7 @@ mod driver_glue_tests {
                 job.join().unwrap();
             }
         });
+        crate::support::complete(live);
     }
 
     /// A name no executable on a sane PATH resolves to — drives the `Spawn` arm

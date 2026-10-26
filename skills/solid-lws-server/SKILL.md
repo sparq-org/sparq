@@ -1,6 +1,6 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint, or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query readable resources through `/sparql` (Solid) or `/.lws/sparql` (LWS), or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
 license: MIT
 metadata:
   version: "0.1.0"
@@ -29,8 +29,10 @@ cargo run -p sparq-lws-core
 It listens on `127.0.0.1:3000` and uses `http://localhost:3000` as its public
 base URL unless configured otherwise. The default Cargo features are:
 
+- `blob-fs`, the native filesystem `BlobStore` adapter (excluded on wasm32).
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
-- `sparql-endpoint`, which mounts the query-only `/sparql` route.
+- `sparql-endpoint`, which mounts the query-only `/sparql` route in Solid mode
+  and `/.lws/sparql` in LWS mode, with a `SparqlQueryService` catalog entry.
 - `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
   authentication suites (§ *Run the LWS 1.0 protocol* below). `authn-saml` is off.
 
@@ -130,9 +132,48 @@ Set `PSS_SPARQ_BACKEND` to one of:
   writes and the generic write adapter still need fencing support, so the native LWS
   server refuses this backend (below).
 
-The native binary currently uses an in-memory blob backend. A durable/shared
-RDF index therefore does not by itself make resource bodies durable; do not
-present the native image as a durable production data service.
+### Native data-directory boot
+
+`SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
+implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
+The default native build opens the filesystem blob store after acquiring the
+index lock. Builds without `embedded-sparq` or `blob-fs` refuse data-directory boot.
+Without a data directory, the native binary uses in-memory blobs.
+
+| Variable | Meaning |
+|---|---|
+| `SOLID_SERVER_DATA_DIR` | Data root (default unset); opens a durable embedded index and filesystem blobs. |
+| `SOLID_SERVER_SPARQ_DIR` | Legacy existing index snapshot (default unset); retains the durable-index/in-memory-blob refusal. A directory-backed index opened through this path also compacts on graceful shutdown. |
+| `SOLID_SERVER_WAIT_FOR_LOCK_SECS` | Non-negative integer seconds to retry the data-directory index lock (default `0`). |
+| `SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY` | `1` permits only the durable-blob/ephemeral-index mismatch (default unset). |
+
+See [native storage](references/native-storage.md) for the `format.json` contract,
+`EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
+
+### Filesystem blobs in library integrations
+
+The default-on native `blob-fs` feature implements `BlobStore` for
+`store::blob_fs::FsBlobStore`, re-exported from the std-only
+[`sparq-lws-blob-fs`](../../crates/sparq-lws-blob-fs/README.md) crate. It is absent
+on wasm32 and with `--no-default-features`. Acquire the exclusive data-directory
+lock before `FsBlobStore::open(root)` and retain it through all handles and pending
+operations: open sweeps `tmp/`. The caller must control this directory.
+
+Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
+is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
+use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
+rewritten or reused, even after deletion; composite writes mint opaque keys with
+no resource IRI embedded. Existing keys fail. The filesystem must support hard
+links and directory sync. Fan-out initialization is synced on first use per open
+store and shared across clones; reopening clears that record. The standalone
+`list()` returns `Listing { blobs, foreign }`, excluding `tmp/`. Invalid names,
+misplaced keys and non-files are reported as foreign entries. The async adapter
+warns once per listing and returns the valid blobs, so foreign entries do not
+stop reconciliation. Filesystem I/O errors still propagate. Blobs report
+`Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
+under the unique-key contract. `delete_if_unchanged` returns an error without a generation
+witness. See the crate README for layout and sync semantics. The native binary
+uses this store for `SOLID_SERVER_DATA_DIR` boot (above).
 
 The seed variables are test-only:
 
@@ -143,6 +184,24 @@ The seed variables are test-only:
 They are refused on non-memory backends unless
 `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` is explicitly set. Use that escape hatch
 only for an ephemeral test instance.
+
+## Encryption at rest (in progress)
+
+`sparq-lws-crypt` is the native, unpublished P1-1 crate for key providers and the
+versioned `e1` blob envelope. It provides a local KEK provider with context-bound
+AES-256-GCM wrapping, zeroizing secret keys and a per-DEK seal counter. See its
+[format and API reference](../../crates/sparq-lws-crypt/README.md).
+Nothing is wired into the server yet; the blob-store decorator and environment
+configuration belong to P1-2 of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+
+Once integrated, blob encryption protects lost/stolen volumes and snapshots,
+cloud/backup operators with byte-plane access and no KMS grant, and storage admins
+without the KEK. It does not protect a root admin dumping process memory or reading
+the mmap'd index on the running host (P3 scope). The sparq index directory holds
+the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
+(EBS/Azure Disk/dm-crypt). Application-level index encryption is research
+([#2567](https://github.com/sparq-org/sparq/issues/2567)).
+ETags derive from plaintext, so equal bodies get equal ETags across pods.
 
 ## Authenticate requests
 
@@ -376,34 +435,29 @@ the catalog (currently webhooks). Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
-## Query readable RDF with `/sparql`
+## Query readable resources
 
-The default `sparql-endpoint` feature exposes authenticated `GET` and `POST`
-SPARQL Protocol query operations:
+The default `sparql-endpoint` feature exposes SPARQL Protocol `GET` and `POST`
+query operations at `/sparql` in Solid mode and `/.lws/sparql` in LWS mode.
+Each request builds a fresh dataset from resources the caller may read under
+that mode's access rules. The default graph is empty; the
+`http://www.w3.org/ns/solid/sparql#union-default-graph` opt-in selects their union.
+Protocol dataset parameters select only from this view. `SELECT` and `ASK`
+return SPARQL Results JSON; `CONSTRUCT` returns N-Triples. LWS also accepts
+`DESCRIBE` as N-Triples. Solid retains its existing rejection of `DESCRIBE`.
+LWS includes readable containers and non-RDF or malformed RDF resources as
+empty named graphs, so `GRAPH ?g {}` lists them. Service records and linksets
+are absent. LWS Update forms receive `405`. Under sustained writes, queries switch from
+optimistic attempts to a fair assembly barrier. The barrier covers enumeration,
+authorization and reads; parsing, dataset construction and evaluation run in
+one blocking task after release. `LwsConfig::sparql_barrier_budget`
+defaults to 500 ms for waiting and reads together; set it with
+`SOLID_SERVER_LWS_SPARQL_BARRIER_MS`. Exhaustion returns `503` problem details
+with `Retry-After`. Independent mutations retain shared leases.
+Recovery publishes restored resource visibility through the same generation gate.
 
-```sh
-curl -G https://solid.example/sparql \
-  -H 'Authorization: DPoP ACCESS_TOKEN' \
-  -H 'DPoP: FRESH_REQUEST_BOUND_PROOF' \
-  -H 'Accept: application/sparql-results+json' \
-  --data-urlencode 'query=SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }'
-```
-
-For `POST`, send either `application/sparql-query` or
-`application/x-www-form-urlencoded`. The v1 route supports `SELECT`, `ASK`,
-and `CONSTRUCT`; it rejects `DESCRIBE` and SPARQL Update. `SELECT` and `ASK`
-return `application/sparql-results+json`; `CONSTRUCT` returns
-`application/n-triples`.
-
-The endpoint assembles one named graph per RDF resource that the caller may
-read under WAC. The default graph is empty. Failed enumeration,
-authorization, body reads, or RDF parsing exclude a resource in the safe
-direction. A resource rewritten concurrently (its body reclaimed between
-authorization and read) is re-planned and re-authorized instead; if the race
-persists the query fails with `503` and `Retry-After` rather than silently
-dropping that graph. Protocol `default-graph-uri` and `named-graph-uri` parameters may
-select from that authorized dataset; they cannot make an unreadable resource
-visible.
+See [query requests, access context and bounds](references/query.md) for examples,
+Solid behavior, LWS snapshot semantics, and configuration defaults.
 
 ## Run the LWS 1.0 protocol (`SOLID_SERVER_PROTOCOL=lws`)
 
@@ -561,6 +615,9 @@ cargo run -p sparq-lws-core
 |---|---|
 | `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
+| `SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES` | Positive integer; default 10000. With `sparql-endpoint`, bounds readable resources assembled by one LWS query; exceeding it returns `507` with problem details. |
+| `SOLID_SERVER_LWS_SPARQL_MAX_BYTES` | Positive integer bytes; default 67108864 (64 MiB). With `sparql-endpoint`, bounds authorized RDF bytes passed to parsers per LWS query; exceeding it returns `413` with problem details. |
+| `SOLID_SERVER_LWS_SPARQL_BARRIER_MS` | Positive integer milliseconds; default 500. Empty means unset. With `sparql-endpoint`, bounds the combined query barrier wait, enumeration, authorization and reads. Expiry releases the barrier and returns `503` problem details with `Retry-After`. Must be less than the mutation admission wait (2000 ms), otherwise startup fails. |
 | `SOLID_SERVER_LWS_PAGE_SIZE` | Container and type-search page size (default 100). |
 | `SOLID_SERVER_LWS_AS_KEY_FILE`, `SOLID_SERVER_LWS_NOTIFY_KEY_FILE` | P-256 private JWKs for access tokens and webhook signatures. A missing file is created with a fresh key (mode 0600); a generated access-token key's `kid` is its RFC 7638 thumbprint (the webhook key's is `notify-key`). Without a file a key lives only for the process. |
 | `SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE` | Key rotation: the P-256 JWK (public or private; only the public part is used) the access-token key replaced. It must exist and be a different key from the current one. Keys generated by older builds all carry `kid` `lws-as-1`; when both keys do, the current key goes by its thumbprint instead and the previous key keeps `lws-as-1`, so its tokens still verify. Startup still fails when both files hold the same key, or when the kids collide even after that. It is published in the JWKS, and tokens whose `kid` names it still validate until they expire. To rotate, move the old key file here and point `SOLID_SERVER_LWS_AS_KEY_FILE` at a new path; drop this variable once the token lifetime has passed. |

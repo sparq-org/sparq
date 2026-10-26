@@ -26,7 +26,7 @@
 //!   matched rows then reveal only a padded prefix, so the per-pair match graph
 //!   (leak L2, §4.1) is destroyed before anything opens.
 //! - **~linear joins** — ORQ-style sort-merge join-aggregation (bead sq-ujz8),
-//!   replacing the current `O(|L|·|R|)` all-pairs [`crate::join::HiddenValueJoin`].
+//!   reducing the candidate equality work of [`crate::join::HiddenValueJoin::batched_join`].
 //!
 //! Those downstream operators are tracked as their own beads — this module is the
 //! *substrate* they build on, not the operators themselves: see **sq-ujz8**

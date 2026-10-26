@@ -58,7 +58,6 @@ import {
 } from "@/lib/sparq-wasm";
 import { classifyQueryForm } from "@/lib/repl-dataset";
 import {
-  SAMPLE_CREDENTIALS,
   SAMPLE_QUERIES,
   VC_FORMAT_OPTIONS,
   vcFormatFromName,
@@ -133,7 +132,6 @@ export function VerifiableCredentials() {
   const [creds, setCreds] = React.useState<ImportedCredential[]>([]);
   const [query, setQuery] = React.useState<string>(SAMPLE_QUERIES[0].sparql);
   const [state, setState] = React.useState<QueryState>({ kind: "idle" });
-  const [seeded, setSeeded] = React.useState(false);
 
   // Parse one RDF/JSON-LD document into an ephemeral store and derive its per-VC facts. Throws
   // a clear Error on a parse failure so the caller can surface it (and abort the import).
@@ -160,28 +158,13 @@ export function VerifiableCredentials() {
     [],
   );
 
-  // Seed the two sample credentials on first mount so the surface shows it working before the
-  // user imports their own. Best-effort: a wasm load hiccup leaves the list empty (the import
-  // affordances still work), it never throws into render.
+  // Warm the external engine without importing anything. The original seed effect
+  // cancelled itself when its flag changed, so the list started empty on mount.
   React.useEffect(() => {
-    if (seeded) return;
-    let cancelled = false;
-    setSeeded(true);
-    (async () => {
-      const out: ImportedCredential[] = [];
-      for (const s of SAMPLE_CREDENTIALS) {
-        try {
-          out.push(await describe(s.label, s.source, s.format, "sample"));
-        } catch {
-          // Skip a sample that fails to parse; the rest still seed.
-        }
-      }
-      if (!cancelled) setCreds(out);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [seeded, describe]);
+    void loadSparq().catch(() => {
+      // A failed warm-up is retried by the first user import.
+    });
+  }, []);
 
   // Add a document to the credentials list (parsing + introspection happen here). Rejects a
   // JWT-shaped envelope with an explanation rather than mis-parsing it as RDF.

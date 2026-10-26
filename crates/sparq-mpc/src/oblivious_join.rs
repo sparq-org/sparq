@@ -2341,8 +2341,8 @@ fn shuffle_with_payloads(
 /// This wraps [`oblivious_set_output`] into the [`PartialResult`] shape the rest of
 /// the crate uses, so a federation can run a private-key SET join whose OUTPUT is
 /// oblivious (L1 bounded to `B`, L2 destroyed) without touching
-/// [`crate::join::HiddenValueJoin`]'s leaky per-pair open path. The output schema
-/// is `out_vars`; the disclosed result is the [`OutputSlot::Row`]s with dummies
+/// [`crate::join::HiddenValueJoin::batched_join`]'s per-candidate masked-product
+/// opens. The output schema is `out_vars`; the disclosed result is the [`OutputSlot::Row`]s with dummies
 /// filtered, attributed to the synthetic `federation` holder, in canonical order.
 ///
 /// HONESTY: this is the sound path because the match bits are public (decided

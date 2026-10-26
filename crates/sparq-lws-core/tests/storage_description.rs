@@ -238,7 +238,12 @@ async fn lws_public_catalog_and_shape() {
     assert!(!String::from_utf8_lossy(&body).contains("MoveResource"));
     assert_eq!(
         doc,
-        serde_json::from_slice::<Value>(&fixture("lws.jsonld")).unwrap()
+        serde_json::from_slice::<Value>(&fixture(if cfg!(feature = "sparql-endpoint") {
+            "lws.jsonld"
+        } else {
+            "lws-no-sparql.jsonld"
+        }))
+        .unwrap()
     );
     let open = lws(ServiceCatalog::default(), true).await;
     assert_eq!(
@@ -261,13 +266,20 @@ async fn lws_public_catalog_and_shape() {
             "WebSocketSubscription"
         ])
     );
-    for absent in ["SparqlQueryService", "CrdtSyncService"] {
-        assert!(!doc["service"]
+    assert_eq!(
+        doc["service"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|s| s["type"] == format!("{SSD}{absent}")));
-    }
+            .any(|s| s["type"] == format!("{SSD}SparqlQueryService")
+                && s["serviceEndpoint"] == "https://pod.example/.lws/sparql"),
+        cfg!(feature = "sparql-endpoint")
+    );
+    assert!(!doc["service"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["type"] == format!("{SSD}CrdtSyncService")));
     let expanded = triples(
         RdfFormat::JsonLd,
         &serde_json::to_vec(&offline(doc)).unwrap(),
@@ -783,5 +795,19 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
     assert_eq!(
         headers["accept-patch"],
         "text/n3, application/sparql-update"
+    );
+}
+
+#[tokio::test]
+async fn lws_query_route_is_mounted_with_its_catalog_entry() {
+    let app = lws(ServiceCatalog::default(), true).await;
+    let (status, _, _) = call(&app, "GET", "/.lws/sparql?query=ASK%7B%7D", &[], "").await;
+    assert_eq!(
+        status,
+        if cfg!(feature = "sparql-endpoint") {
+            StatusCode::OK
+        } else {
+            StatusCode::NOT_FOUND
+        }
     );
 }

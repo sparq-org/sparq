@@ -139,9 +139,11 @@ function SelectTable({
     () => createPageCache(table, pageSize, 2),
     [table, pageSize],
   );
-  React.useEffect(() => {
+  const [previousCache, setPreviousCache] = React.useState(cache);
+  if (previousCache !== cache) {
+    setPreviousCache(cache);
     setPage(0);
-  }, [cache]);
+  }
 
   // [FABLE-5] sq-ixc3.20 — a SELECT row is a solution, not inherently a triple; it earns
   // the why() affordance ONLY when its first three bound terms ARE a triple the active
@@ -658,10 +660,10 @@ export function QueryWorkbench() {
   // before). `workspace` starts null (restore is async); we seed the editor from it once, on the
   // first restore AND on every workspace-id change, and write the text back (debounced) below.
   const { workspace, setEditorQuery, recordUpdateSnapshot } = useWorkspace();
-  const [query, setQuery] = React.useState(DEFAULT_QUERY);
+  const [query, setQuery] = React.useState(workspace?.editor.query ?? DEFAULT_QUERY);
   // The id of the workspace whose editor text is currently loaded — guards the write-back from
   // firing (and clobbering the saved query) before the restore has hydrated the editor.
-  const loadedWsRef = React.useRef<string | null>(null);
+  const [loadedWorkspaceId, setLoadedWorkspaceId] = React.useState(workspace?.id ?? null);
   const [outcome, setOutcome] = React.useState<QueryOutcome | null>(null);
   const [view, setView] = React.useState<ResultView>("table");
   const [running, setRunning] = React.useState(false);
@@ -683,33 +685,30 @@ export function QueryWorkbench() {
   }, [inferenceMode, inferenceStatus, entailedTripleKeys]);
 
   // A regime change invalidates an open proof (it was derived under the previous regime).
-  React.useEffect(() => {
+  const [previousInferenceMode, setPreviousInferenceMode] = React.useState(inferenceMode);
+  if (previousInferenceMode !== inferenceMode) {
+    setPreviousInferenceMode(inferenceMode);
     setExplainTarget(null);
-  }, [inferenceMode]);
+  }
 
   const recordRecent = React.useCallback((q: string) => {
     setRecentQueries((prev) => pushRecentQuery(prev, q, Date.now()));
   }, []);
 
-  // [OPUS-4.8] sq-lcd6e — hydrate the editor from the restored / switched workspace's saved query.
-  // Runs once per workspace id (never re-clobbering the user's in-progress edits within a session).
-  React.useEffect(() => {
-    if (!workspace) return;
-    if (loadedWsRef.current === workspace.id) return;
-    loadedWsRef.current = workspace.id;
+  // Hydrate once per workspace id, preserving in-progress edits within the same workspace.
+  if (workspace && loadedWorkspaceId !== workspace.id) {
+    setLoadedWorkspaceId(workspace.id);
     setQuery(workspace.editor.query);
-  }, [workspace]);
+  }
 
-  // [OPUS-4.8] sq-lcd6e — write the editor text back to the workspace (debounced) so it persists.
-  // Guarded on `loadedWsRef` so the initial DEFAULT_QUERY never overwrites a saved query before
-  // the restore above has run.
+  // Write back only after restore has hydrated the editor, so the default cannot overwrite it.
   React.useEffect(() => {
-    if (loadedWsRef.current === null) return;
+    if (loadedWorkspaceId === null) return;
     const handle = setTimeout(() => {
       void setEditorQuery(query);
     }, 400);
     return () => clearTimeout(handle);
-  }, [query, setEditorQuery]);
+  }, [loadedWorkspaceId, query, setEditorQuery]);
 
   // [OPUS-4.8] sq-ixc3.10/.12 — the SINGLE run path: plain run, EXPLAIN (plan only), or EXPLAIN
   // ANALYZE (plan + run), each surfaced as a { kind } outcome through the same RunResult pipeline.
@@ -768,7 +767,7 @@ export function QueryWorkbench() {
   // palette verb focuses the Query tab first (so the result lands where the user looks), then acts.
   const paletteCommands = React.useMemo<PaletteCommand[]>(() => {
     const focusQuery = () => workbench?.openTool("query");
-    const cmds: PaletteCommand[] = [
+    return [
       {
         id: "query.run",
         group: "Actions",
@@ -808,22 +807,21 @@ export function QueryWorkbench() {
           void onRun("analyze");
         },
       },
+      ...recentQueries.map((r): PaletteCommand => {
+        const preview = previewQuery(r.query);
+        return {
+          id: `query.recent.${r.ranAt}`,
+          group: "Recent queries",
+          title: preview,
+          keywords: ["recent", "history", "query", preview],
+          icon: History,
+          run: () => {
+            focusQuery();
+            setQuery(r.query);
+          },
+        };
+      }),
     ];
-    for (const r of recentQueries) {
-      const preview = previewQuery(r.query);
-      cmds.push({
-        id: `query.recent.${r.ranAt}`,
-        group: "Recent queries",
-        title: preview,
-        keywords: ["recent", "history", "query", preview],
-        icon: History,
-        run: () => {
-          focusQuery();
-          setQuery(r.query);
-        },
-      });
-    }
-    return cmds;
   }, [ready, running, recentQueries, onRun, workbench]);
 
   useRegisterPaletteCommands("query", paletteCommands);
