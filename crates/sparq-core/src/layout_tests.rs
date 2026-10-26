@@ -61,20 +61,22 @@ fn detached_child_survives_sibling_create_and_drop() {
 fn stale_child_drop_changes_only_the_attached_set() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("store");
-    let mut root = store(&path, 3);
+    let mut root = store(&path, 4);
     let (_, stale) = root.named.remove(1);
     root.drop_named_durable(&name("g0")).unwrap();
     root.apply_delta(&[triple()], &[]).unwrap();
     root.compact().unwrap();
-    // A whole-store rewrite assigns the survivor to a fresh positional slot.
+    // The rewrite assigns g3 to slot 1, which the detached handle previously held.
     root.named.push((name("old"), stale));
     assert!(root.drop_named_durable(&name("old")).unwrap());
-    let i = root.ensure_named(&name("g2")).unwrap();
+    let i = root.ensure_named(&name("g3")).unwrap();
     root.apply_delta_to_named(i, &[triple()], &[]).unwrap();
     drop(root);
     let reopened = Graph::open(&path).unwrap();
-    assert_eq!(reopened.named_graph(&name("g2")).unwrap().len(), 1);
+    assert_eq!(reopened.named_graph(&name("g3")).unwrap().len(), 1);
+    assert_eq!(reopened.named_graph(&name("g2")).unwrap().len(), 0);
     assert!(path.join("named/0").is_dir());
+    assert!(path.join("named/1").is_dir());
 }
 
 #[test]
@@ -102,7 +104,7 @@ fn duplicate_check_includes_the_dropped_child() {
         Graph::open_dir(&path.join("named/1"), root.lock.clone(), true, Role::Child).unwrap();
     alias.tree = root.tree.clone();
     alias.generation = root.generation;
-    root.named.push((name("alias"), alias));
+    root.named.push((name("g1"), alias));
     assert!(root.drop_named_durable(&name("g1")).is_err());
     assert!(path.join("named/1").is_dir());
     assert_eq!(
@@ -128,6 +130,28 @@ fn invalid_declared_layout_leaves_all_slots_intact() {
         before
     );
     assert!(path.join("named/0").is_dir());
+}
+
+#[test]
+fn declared_slots_require_real_child_directories_before_cleanup() {
+    for file in [false, true] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        drop(store(&path, 2));
+        let slot = path.join("named/1");
+        if file {
+            std::fs::remove_dir_all(&slot).unwrap();
+            std::fs::write(&slot, b"preserve").unwrap();
+        } else {
+            write_store_marker(&slot, Role::Root).unwrap();
+        }
+        let orphan = path.join("named/9");
+        std::fs::create_dir(&orphan).unwrap();
+        std::fs::write(orphan.join("preserve"), b"preserve").unwrap();
+        assert!(Graph::open(&path).is_err());
+        assert_eq!(std::fs::read(orphan.join("preserve")).unwrap(), b"preserve");
+        assert!(path.join("named/0").is_dir());
+    }
 }
 
 #[cfg(unix)]
@@ -430,8 +454,14 @@ fn slot_records_are_retained_until_a_tree_swap() {
             tree.record_replacement(&Path::new("store/named").join(i.to_string()));
         }
         assert_eq!(layout_cost::counts().1, count);
+        assert_eq!(
+            layout_cost::counts().2,
+            0,
+            "slot records must not scan the log"
+        );
         assert_eq!(tree.layout.lock().unwrap().replaced.len(), count);
         tree.record_tree_replacement(Path::new("store"));
+        assert_eq!(layout_cost::counts().2, count + 1);
         assert_eq!(tree.layout.lock().unwrap().replaced.len(), 1);
     }
 }

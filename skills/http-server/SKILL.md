@@ -1969,7 +1969,8 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   moving durable children and refuse inserting in-memory children into a directory-backed root.
   A stale child may be removed from memory without changing the current directories.
 - **Writable opens validate before cleanup.** Every declared slot must be a real directory of
-  the correct role; linked `named/` containers are refused. Only a writable opener holding the
+  the correct role; an invalid declared layout leaves the slots intact. Linked `named/`
+  containers are refused before cleanup or a DROP ALL manifest commit. Only a writable opener holding the
   exclusive store lock cleans undeclared slots. Cleanup failures leave the slot in place and
   emit a warning naming its path. Read-only opens perform no sweep. A whole-store rewrite
   (save, compaction or vacuum) produces a fresh layout.

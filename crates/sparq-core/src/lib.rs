@@ -4536,6 +4536,7 @@ impl Graph {
     /// Fold this graph's structural-fork layers — the dictionary extension into a fresh frozen
     /// base (so the NEXT fork is O(1) again) and the forked caches flat, ids unchanged
     /// throughout. A no-op on a never-forked graph.
+    #[cfg(feature = "mmap")]
     fn fold_forked_layers(&mut self) {
         if self.dict.is_forked() {
             self.dict = self.dict.compacted();
@@ -5697,6 +5698,7 @@ mod layout_cost {
     thread_local! {
         static DUPLICATES: Cell<usize> = const { Cell::new(0) };
         static REPLACEMENTS: Cell<usize> = const { Cell::new(0) };
+        static PRUNED: Cell<usize> = const { Cell::new(0) };
     }
     #[derive(Default)]
     pub(super) struct CountHashes;
@@ -5723,12 +5725,20 @@ mod layout_cost {
     pub(super) fn replacement() {
         REPLACEMENTS.with(|c| c.set(c.get() + 1));
     }
+    pub(super) fn prune_visit() {
+        PRUNED.with(|c| c.set(c.get() + 1));
+    }
     pub(super) fn reset() {
         DUPLICATES.with(|c| c.set(0));
         REPLACEMENTS.with(|c| c.set(0));
+        PRUNED.with(|c| c.set(0));
     }
-    pub(super) fn counts() -> (usize, usize) {
-        (DUPLICATES.with(Cell::get), REPLACEMENTS.with(Cell::get))
+    pub(super) fn counts() -> (usize, usize, usize) {
+        (
+            DUPLICATES.with(Cell::get),
+            REPLACEMENTS.with(Cell::get),
+            PRUNED.with(Cell::get),
+        )
     }
 }
 
@@ -6748,31 +6758,6 @@ fn staging_sibling(dir: &std::path::Path, suffix: &str) -> std::path::PathBuf {
     name.push(".");
     name.push(suffix);
     dir.with_file_name(name)
-}
-
-/// Finds a staging suffix in a directory name using native path units.
-#[cfg(all(test, feature = "mmap"))]
-fn reserved_staging_suffix(dir: &std::path::Path) -> Option<&'static str> {
-    let name = dir.file_name()?;
-    #[cfg(unix)]
-    let units: Vec<u32> = {
-        use std::os::unix::ffi::OsStrExt;
-        name.as_bytes().iter().map(|&b| u32::from(b)).collect()
-    };
-    #[cfg(windows)]
-    let units: Vec<u32> = {
-        use std::os::windows::ffi::OsStrExt;
-        name.encode_wide().map(u32::from).collect()
-    };
-    #[cfg(not(any(unix, windows)))]
-    let units: Vec<u32> = name.to_string_lossy().chars().map(u32::from).collect();
-    STAGING_SUFFIXES.into_iter().find(|suffix| {
-        // `.<suffix>` must be a proper tail: a store called exactly `.compact-old` keeps its name.
-        let tail: Vec<u32> = std::iter::once(u32::from(b'.'))
-            .chain(suffix.bytes().map(u32::from))
-            .collect();
-        units.len() > tail.len() && units[units.len() - tail.len()..] == tail[..]
-    })
 }
 
 /// Finds an unreplayed transaction journal in this graph tree.
@@ -7810,7 +7795,7 @@ impl WriteState {
 /// Shared durable-write and layout state for this graph tree.
 #[cfg(feature = "mmap")]
 struct TreeState {
-    /// Set by [`Graph::poison_txn`] and by a failed journal append; cleared only by reopening.
+    /// Set by [`Graph::poison_txn`] and durable I/O failures; cleared only by reopening.
     /// Atomic so a `&Graph` shared across threads can read it.
     poisoned: std::sync::atomic::AtomicBool,
     /// Replacement generations indexed by directory path.
@@ -7829,6 +7814,17 @@ struct TreeState {
 struct LayoutLog {
     generation: u64,
     replaced: std::collections::HashMap<std::path::PathBuf, u64>,
+}
+
+#[cfg(feature = "mmap")]
+impl LayoutLog {
+    fn prune_descendants(&mut self, dir: &std::path::Path) {
+        self.replaced.retain(|path, _| {
+            #[cfg(test)]
+            layout_cost::prune_visit();
+            path == dir || !path.starts_with(dir)
+        });
+    }
 }
 
 #[cfg(feature = "mmap")]
@@ -7866,8 +7862,7 @@ impl TreeState {
     fn record_tree_replacement(&self, dir: &std::path::Path) -> u64 {
         let generation = self.record_replacement(dir);
         let mut log = self.layout.lock().unwrap_or_else(|e| e.into_inner());
-        log.replaced
-            .retain(|path, _| path == dir || !path.starts_with(dir));
+        log.prune_descendants(dir);
         generation
     }
 
@@ -14840,27 +14835,30 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Reserved staging suffixes are checked using native path units.
+    /// Staging provenance distinguishes stores even when their names are not UTF-8.
     #[cfg(all(feature = "mmap", unix))]
     #[test]
-    fn a_non_utf8_store_name_ending_in_a_staging_suffix_is_refused() {
+    fn non_utf8_store_names_use_recorded_staging_provenance() {
         use std::os::unix::ffi::OsStrExt;
         let base = txn_tmp_dir("nonutf8");
         std::fs::remove_dir_all(&base).ok();
         std::fs::create_dir_all(&base).unwrap();
         let name = std::ffi::OsStr::from_bytes(b"bad\xff.compact-old");
         let dir = base.join(name);
-        assert_eq!(
-            reserved_staging_suffix(&dir),
-            Some("compact-old"),
-            "the suffix is seen through the invalid UTF-8"
-        );
-        let err = Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nquads")
+        Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nquads")
             .unwrap()
             .save(&dir)
-            .expect_err("a reserved staging name is refused as a store");
-        assert!(!err.to_string().is_empty());
-        assert!(!dir.join("dict-meta.bin").exists());
+            .unwrap();
+        assert_eq!(Graph::open(&dir).unwrap().len(), 1);
+        let id = read_marker(&dir).unwrap().unwrap().id.unwrap();
+        mark_staging(&dir, "compact-old", &id).unwrap();
+        let before = std::fs::read(dir.join("dict-meta.bin")).unwrap();
+        let err = Graph::open(&dir)
+            .err()
+            .expect("recorded staging is refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(dir.join(STAGING_MARKER).is_file());
+        assert_eq!(std::fs::read(dir.join("dict-meta.bin")).unwrap(), before);
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -15651,7 +15649,7 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// Store destinations ending in reserved staging suffixes are refused.
+    /// Staging provenance distinguishes ordinary stores from recorded staging directories.
     #[cfg(feature = "mmap")]
     #[test]
     fn staging_provenance_distinguishes_stores_from_recorded_staging() {

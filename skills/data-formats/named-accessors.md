@@ -37,6 +37,9 @@ attachment does not remove its declaration on disk; use durable drop methods to 
 persisted set. The public accessors refuse moving durable children. Writable opens validate all
 declared slots before cleaning undeclared slots under the exclusive directory lock. Read-only
 opens leave undeclared slots alone. A cleanup warning names any undeclared slot left in place.
+An invalid declared layout refuses the open before cleanup removes any slot. A linked `named/`
+container is refused. Layout invalidation records accumulate between whole-tree rewrites;
+ordinary slot removals do not scan those records, and a whole-tree swap prunes them.
 
 With `mmap`, `TxnOp::Insert { slot, triple }`, `Delete { slot, triple }`, `Create(name)` and
 `Drop(name)` are the ordered journal vocabulary. `slot: None` names the default graph;

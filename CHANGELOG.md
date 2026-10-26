@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared write refusal after indeterminate log writes. Removing a child from the attached
   in-memory set no longer removes its on-disk manifest entry; durable drop methods change the
   persisted set. Read-only opens leave undeclared slots alone; writable cleanup failures warn
-  with the affected path.
+  with the affected path. Invalid declared layouts leave slots intact, and linked named-graph
+  containers are refused before cleanup or batch-drop publication.
 - **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
   open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
   `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
