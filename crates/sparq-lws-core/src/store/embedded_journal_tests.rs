@@ -870,3 +870,95 @@ async fn failed_saves_remove_only_empty_directories_they_created() {
     assert!(!dir.0.join("new").exists());
     assert_eq!(std::fs::read(blocker).unwrap(), b"existing");
 }
+
+#[tokio::test]
+async fn resource_removal_preserves_unrelated_graph_files() {
+    // Each entry point removes the same record; none needs to republish another graph's files.
+    for operation in ["metadata", "resource", "member"] {
+        let dir = Directory::empty();
+        let c = dir.open();
+        c.put_meta(PARENT, meta("parent")).await.unwrap();
+        c.create_child(PARENT, CHILD, meta("child")).await.unwrap();
+        c.actor.call(|graph| commit(graph,
+            &format!("INSERT DATA {{ GRAPH <{CHILD}> {{ <urn:subject> <urn:predicate> <urn:object> }} }}"),
+            "seed resource statements")).await.unwrap();
+        let sibling = "https://pod.example/unrelated";
+        c.put_meta(sibling, meta("sibling")).await.unwrap();
+        let slot = c
+            .actor
+            .call(move |graph| {
+                Ok(graph
+                    .named()
+                    .iter()
+                    .position(|(name, _)| {
+                        name == &oxrdf::Term::NamedNode(oxrdf::NamedNode::new(sibling).unwrap())
+                    })
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        let files = dir.0.join("named").join(slot.to_string());
+        let snapshot = || -> Option<std::collections::BTreeMap<String, Vec<u8>>> {
+            std::fs::read_dir(&files)
+                .ok()?
+                .map(|entry| {
+                    let entry = entry.ok()?;
+                    Some((
+                        entry.file_name().to_str()?.to_string(),
+                        std::fs::read(entry.path()).ok()?,
+                    ))
+                })
+                .collect()
+        };
+        let before = snapshot().expect("unrelated graph's files");
+        assert!(before.get("wal.log").is_some_and(|bytes| !bytes.is_empty()));
+        match operation {
+            "metadata" => c.delete_meta(CHILD).await.unwrap(),
+            "resource" => {
+                assert_eq!(
+                    c.delete_resource(CHILD, None).await.unwrap(),
+                    Some("child".into())
+                );
+            }
+            "member" => {
+                assert_eq!(
+                    c.delete_resource(CHILD, Some(PARENT)).await.unwrap(),
+                    Some("child".into())
+                );
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            snapshot(),
+            Some(before),
+            "unrelated graph changed after {operation}"
+        );
+        assert!(!c.exists(CHILD).await.unwrap());
+        assert!(
+            c.actor
+                .call(|graph| Ok(graph
+                    .named_graph(&oxrdf::Term::NamedNode(
+                        oxrdf::NamedNode::new(CHILD).unwrap()
+                    ))
+                    .is_none_or(Graph::is_empty)))
+                .await
+                .unwrap(),
+            "resource statements remain after {operation}"
+        );
+        assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
+        drop(c);
+        let c = dir.open();
+        assert!(
+            !c.exists(CHILD).await.unwrap(),
+            "removed record stays absent after {operation}"
+        );
+        assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
+        if operation == "member" {
+            assert!(c.list_children(PARENT).await.unwrap().is_empty());
+        }
+        c.create_child(PARENT, CHILD, meta("recreated"))
+            .await
+            .unwrap();
+        assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("recreated"));
+    }
+}

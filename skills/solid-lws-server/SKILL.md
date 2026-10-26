@@ -1096,6 +1096,12 @@ reconstructed from the code and cites it line by line; it also maps the source-r
 
 ## Operational checks and boundaries
 
+The embedded index removes a resource by clearing its graph statements and detaching its
+parent membership in one captured transaction. Empty internal graph slots may remain; they
+contain no resource record and do not appear in listings. Removing a resource does not
+republish the other resources' graph files. This applies to internal metadata and intent
+records as well as data resources.
+
 - `GET /livez` and `GET /readyz` are unauthenticated probes.
 - Do not expose the development seed modes or loopback auth escape hatch in
   production.
