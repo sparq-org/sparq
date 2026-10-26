@@ -44,6 +44,13 @@ To run a heavy suite on a branch before merging, dispatch it on that branch, e.g
 `gh workflow run ci.yml --ref <branch>`. **Add the `bench` label to a PR to run
 Benchmarks against `main`.**
 
+Only `bench.yml` subscribes to PR label events (additions only). An unrelated label
+skips its jobs and uses a unique concurrency group so it cannot cancel a benchmark
+run. The heavy suites (`ci.yml`, `feature-matrix.yml`, `fuzz.yml` and
+`vectorized-feature-off.yml`) have no PR trigger; use dispatch or their scheduled
+runs, where configured. None of these jobs is required, so skipped runs cannot
+shadow the required `ci-fast` check.
+
 Lightweight path-filtered PR workflows (docs-quality, js, python, gui, actionlint, …)
 still run on pull requests where their paths change; they report but do not block.
 The heavier ones (js, python, gui, the zk lanes, site e2e/visual, lws, notation3tests,

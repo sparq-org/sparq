@@ -8,6 +8,8 @@ use std::process::Command;
 fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
     assert_boundary("wasm");
     assert_boundary("wasm,crypt");
+    assert_boundary("wasm,blob-fs");
+    assert_boundary("wasm,crypt,blob-fs");
 }
 
 fn assert_boundary(features: &str) {
@@ -54,6 +56,7 @@ fn assert_boundary(features: &str) {
         "sparq-lws-crypt",
         "sparq-core",
         "sparq-engine",
+        "sparq-lws-blob-fs",
         "tokio v",
     ] {
         assert!(

@@ -1068,10 +1068,7 @@ struct Http {
     client: common::KeyKit,
 }
 impl Http {
-    async fn new(store: Encrypted) -> Self {
-        use solid_oidc_verifier::{
-            config::VerifierConfig, replay::InMemoryReplayStore, verifier::Verifier,
-        };
+    async fn new<S: Store + 'static>(store: S) -> Self {
         store
             .write("https://pod.example/", Bytes::new(), "text/turtle")
             .await
@@ -1081,6 +1078,12 @@ impl Http {
             .write("https://pod.example/.acl", acl.into(), "text/turtle")
             .await
             .unwrap();
+        Self::from_store(store)
+    }
+    fn from_store<S: Store + 'static>(store: S) -> Self {
+        use solid_oidc_verifier::{
+            config::VerifierConfig, replay::InMemoryReplayStore, verifier::Verifier,
+        };
         let issuer = common::KeyKit::generate();
         let client = common::KeyKit::generate();
         let config = VerifierConfig::new(vec![common::ISSUER.into()], common::BASE_URL);
@@ -1119,6 +1122,146 @@ impl Http {
             .unwrap();
         self.app.clone().oneshot(request).await.unwrap()
     }
+}
+
+#[cfg(all(feature = "blob-fs", feature = "embedded-sparq"))]
+#[tokio::test]
+async fn filesystem_http_round_trip_encrypts_disk_bytes_and_reopens_every_resource() {
+    use crate::store::{blob_fs::FsBlobStore, EmbeddedSparqClient};
+    use axum::{body::to_bytes, http::StatusCode};
+
+    struct Directory(std::path::PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    let mut suffix = [0; 16];
+    getrandom::getrandom(&mut suffix).unwrap();
+    // A private directory gives this test exclusive ownership through both opens.
+    let directory =
+        Directory(std::env::temp_dir().join(format!("lws-encrypted-filesystem-{}", hex(&suffix))));
+    let index_dir = directory.0.join("index");
+    let blob_dir = directory.0.join("blobs");
+    sparq_core::Graph::load_str("", "ntriples")
+        .unwrap()
+        .save(&index_dir)
+        .unwrap();
+    let store = CompositeStore::with_body_cache(
+        EmbeddedSparqClient::open(&index_dir).unwrap(),
+        FsBlobStore::open(&blob_dir).unwrap(),
+        BodyCache::disabled(),
+    )
+    .encrypt_blobs(provider(0x41), CryptScheme::Solid, CryptOptions::default())
+    .await
+    .unwrap();
+    let pooled_iri = "https://pod.example/.lws/subscriptions/private";
+    let pooled_body = b"private subscription bytes";
+    store
+        .write(pooled_iri, Bytes::from_static(pooled_body), "text/plain")
+        .await
+        .unwrap();
+    let pooled_meta = store.meta(pooled_iri).await.unwrap().unwrap();
+    let blobs = store.blob.inner.clone();
+    let index = store.sparq.clone();
+    let http = Http::new(store).await;
+    let bodies = [
+        ("/alice", BODY),
+        ("/bob", b"a different pod's resource\0bytes".as_slice()),
+    ];
+    for (path, body) in bodies {
+        let response = http
+            .call(
+                "PUT",
+                path,
+                "application/octet-stream",
+                std::str::from_utf8(body).unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let etag = response.headers()["etag"].clone();
+        let meta = index
+            .get_meta(&format!("{}{path}", common::BASE_URL))
+            .await
+            .unwrap();
+        let plain = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let expected = plain
+            .write(
+                &format!("{}{path}", common::BASE_URL),
+                Bytes::copy_from_slice(body),
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+        assert_eq!(meta.etag, expected.etag);
+        assert_eq!(etag.to_str().unwrap(), expected.etag);
+        let response = http.call("GET", path, "application/octet-stream", "").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["etag"], etag);
+        assert_eq!(to_bytes(response.into_body(), 100000).await.unwrap(), body);
+    }
+    let mut snapshots = Vec::new();
+    for path in ["/", "/.acl", "/alice", "/bob"] {
+        let response = http.call("GET", path, "text/turtle", "").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let etag = response.headers()["etag"].clone();
+        let body = to_bytes(response.into_body(), 100000).await.unwrap();
+        snapshots.push((path, etag, body));
+    }
+    let listing = blobs.list().unwrap();
+    assert!(listing.foreign.is_empty());
+    assert_eq!(listing.blobs.len(), snapshots.len() + 1);
+    for entry in &listing.blobs {
+        let (random, path) = if let Some(key) = entry.key.strip_prefix("$pool$b1-") {
+            (key, blob_dir.join("pool"))
+        } else {
+            (
+                entry.key.strip_prefix("b1-").unwrap(),
+                blob_dir.join("objects"),
+            )
+        };
+        let path = path.join(&random[..2]);
+        let path = if entry.key.starts_with("$pool$") {
+            path
+        } else {
+            path.join(&random[2..4])
+        };
+        let raw = std::fs::read(path.join(&entry.key)).unwrap();
+        assert!(raw.starts_with(b"SQLB"), "{} must be encrypted", entry.key);
+        for plaintext in [
+            BODY,
+            pooled_body.as_slice(),
+            common::WEBID.as_bytes(),
+            bodies[1].1,
+        ] {
+            assert!(!raw
+                .windows(plaintext.len())
+                .any(|window| window == plaintext));
+        }
+    }
+    // Drop the router, all index/blob handles, provider and DEK caches before reopening.
+    drop(http);
+    drop(index);
+    drop(blobs);
+    let store = CompositeStore::with_body_cache(
+        EmbeddedSparqClient::open(&index_dir).unwrap(),
+        FsBlobStore::open(&blob_dir).unwrap(),
+        BodyCache::disabled(),
+    )
+    .encrypt_blobs(provider(0x41), CryptScheme::Solid, CryptOptions::default())
+    .await
+    .unwrap();
+    let pooled = store.read(pooled_iri).await.unwrap();
+    assert_eq!(pooled.body, pooled_body[..]);
+    assert_eq!(pooled.meta, pooled_meta);
+    let http = Http::from_store(store);
+    for (path, etag, body) in snapshots {
+        let response = http.call("GET", path, "text/turtle", "").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["etag"], etag);
+        assert_eq!(to_bytes(response.into_body(), 100000).await.unwrap(), body);
+    }
+    drop(http);
 }
 
 #[tokio::test]

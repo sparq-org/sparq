@@ -3,8 +3,8 @@
 //!
 //! Per the architecture, `object_store`/S3 is **backup-only** for resource bytes: SPARQ is the
 //! authoritative index, and the blob store holds a durable copy of the bytes keyed by an opaque
-//! `s3Key`. This module defines the [`BlobStore`] trait and an in-memory test impl. The real
-//! `object_store`-backed impl (S3 / Local) is an M2 adapter behind the same trait.
+//! `s3Key`. This module defines the [`BlobStore`] trait and an in-memory test impl.
+//! The native `blob-fs` feature provides a filesystem implementation in `super::blob_fs`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -73,6 +73,13 @@ pub struct BlobEntry {
 
 /// The byte store: a key/value store of resource bodies, keyed by an opaque storage key.
 ///
+/// Callers must mint a unique key for every write and never rewrite or reuse it,
+/// even after deletion. An overwrite of a resource points its index row at a fresh
+/// key. Backends without a generation witness may therefore delete unconditionally:
+/// an obsolete key can never become the key of a later write. The filesystem
+/// backend enforces create-only publication; the in-memory test double also permits
+/// rewrites to exercise defensive generation checks.
+///
 /// M2: an `object_store`-backed impl (`object_store::aws::AmazonS3` / `LocalFileSystem`) plugs in
 /// here, using `PutMode::Create`/`Update` for the S3 If-None-Match/If-Match CAS (spike §6).
 #[async_trait]
@@ -86,7 +93,7 @@ pub trait BlobStore: Send + Sync {
         self.get(key).await
     }
 
-    /// Write (create-or-replace) the bytes for a storage key.
+    /// Write bytes under a fresh key. Rewriting or reusing a key violates the caller contract.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
 
     /// Write resource bytes for a pod. Ordinary backends ignore the scope.
@@ -113,8 +120,7 @@ pub trait BlobStore: Send + Sync {
     /// M2-next (the `object_store` adapter): implement via `object_store::ObjectStore::list` — its
     /// `ObjectMeta` carries `location` (→ `key`) + `last_modified` (a `chrono::DateTime<Utc>` → map to
     /// [`SystemTime`]), so the real S3/Local backend reports a real timestamp and the grace window
-    /// works against true object age. Until that adapter lands the in-memory double below is the only
-    /// impl.
+    /// works against true object age. The native filesystem adapter reports file modification times.
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError>;
 
     /// Re-read ONE key's current state (its present `last_modified`), or `None` if the key no longer
