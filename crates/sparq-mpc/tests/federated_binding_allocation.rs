@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sparq_mpc::federated_binding::{
     BindingError, FederatedStatement, FieldWord, HolderSegment, ValidityWindow, VerifierChallenge,
-    MAX_HOLDER_ROW_CAPACITY, MAX_PUBLIC_INPUT_BYTES, WORD_BYTES,
+    MAX_HOLDER_ROW_CAPACITY, WORD_BYTES,
 };
 use sparq_mpc::partial::HolderId;
 
@@ -107,7 +107,10 @@ fn capacity_and_length_refusals_do_not_allocate_public_input_buffers() {
     )
     .unwrap();
     let expected = statement.public_input_word_count() * WORD_BYTES;
-    assert_eq!(expected, MAX_PUBLIC_INPUT_BYTES);
+    assert_eq!(
+        expected,
+        (5 + 4 + 1 + 3 * MAX_HOLDER_ROW_CAPACITY as usize + 1) * WORD_BYTES,
+    );
 
     for proof in [&[][..], &[0][..], &[0; WORD_BYTES][..]] {
         let (refused, peak) = with_peak(|| statement.bind_public_inputs(proof));
