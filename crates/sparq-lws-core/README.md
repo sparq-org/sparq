@@ -78,7 +78,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   unreadable or uncertain resources never reach the query engine.
 - **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
   tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
-- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the in-process engine (compiled by default, selected by `PSS_SPARQ_BACKEND=embedded` or `SOLID_SERVER_DATA_DIR`), opt-in live SPARQ HTTP client, `object_store`, and a filesystem blob adapter with immutable opaque keys. An unconfigured boot uses the in-memory double.
+- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the default-enabled in-process engine (`PSS_SPARQ_BACKEND=embedded` or `SOLID_SERVER_DATA_DIR`), opt-in live SPARQ HTTP client, and filesystem blobs with immutable opaque keys. An unconfigured boot uses the in-memory double.
 - **Notification observability** — process-wide backlog-overflow totals
   are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and
   receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
@@ -91,8 +91,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
     `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only
-    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
+  - `sparql-endpoint` (**default-on**, sq-r1ei8) — query-only endpoints: `/sparql`
+    under WAC in Solid mode and `/.lws/sparql` under LWS Read rules; internal Store methods remain independent.
   - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
     (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
   - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve

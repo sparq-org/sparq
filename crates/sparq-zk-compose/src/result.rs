@@ -2351,12 +2351,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; proves a retained legacy member and verifies it through verify_result"]
     fn result_real_legacy_member_verifies_only_under_the_written_down_downgrade() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_real_legacy_member_verifies_only_under_the_written_down_downgrade",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let (credentials, policy, nonce, rows) = fixture();
         let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
@@ -2403,6 +2403,7 @@ mod tests {
         )
         .expect("the written-down downgrade verifies already-issued legacy material");
         assert_eq!(verified.rows, rows);
+        crate::support::complete(live);
     }
 
     /// `challenge` carries no arithmetic constraint of its own, so the host pins
@@ -2821,12 +2822,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb plus a new SPARQ_PUBLIC_PATTERN_EVIDENCE directory"]
     fn result_real_public_pattern_k1_k2_proofs_and_verifier_controls() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_real_public_pattern_k1_k2_proofs_and_verifier_controls",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let evidence = public_pattern_evidence_dir();
         let (credentials, policy, nonce, _) = fixture();
@@ -2973,18 +2974,19 @@ mod tests {
             &serde_json::to_vec_pretty(&summary).unwrap(),
         );
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(live);
     }
 
     /// beadzkp-15.1: version-four witness mutations reach their intended constraints.
     #[test]
     #[ignore = "requires pinned nargo; version-four constraint execution"]
     fn result_relation_public_pattern_rejects_tampered_retained_witnesses() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_relation_public_pattern_rejects_tampered_retained_witnesses",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let (credentials, policy, nonce, _) = fixture();
         let rows = vec![BTreeMap::from([(
@@ -3063,6 +3065,7 @@ mod tests {
                 Ok(_) => panic!("{name}: tampered witness satisfied the relation"),
             }
         }
+        crate::support::complete(live);
     }
 
     #[test]
@@ -3172,12 +3175,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; proves optimized witness selection reaches K1"]
     fn result_real_joint_optimization_reaches_one_credential_member() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_real_joint_optimization_reaches_one_credential_member",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let (credentials, policy, nonce, rows) = shared_alternative_fixture();
         let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
@@ -3202,7 +3205,7 @@ mod tests {
             "name".into(),
             disclosed(&Term::Literal(Literal::new_simple_literal("Mallory"))).unwrap(),
         );
-        assert!(verify_result(
+        let rejected = verify_result(
             QUERY,
             &tampered,
             &policy,
@@ -3210,9 +3213,13 @@ mod tests {
             &InMemorySeenNonces::default(),
             &driver,
             &dir
-        )
-        .is_err());
+        );
+        assert!(
+            matches!(&rejected, Err(ResultError::Rejected(reason)) if reason == "cryptographic proof rejected"),
+            "tampered released row must fail proof verification, got {rejected:?}"
+        );
         let _ = std::fs::remove_dir_all(dir);
+        crate::support::complete(live);
     }
 
     fn prepared() -> PreparedResult {
@@ -3697,12 +3704,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo; run explicitly in zk-toolchain lane"]
     fn result_relation_rejects_tampered_private_witnesses() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_relation_rejects_tampered_private_witnesses",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let p = prepared();
         let driver = CircuitProver::from_crate_root();
@@ -3710,30 +3717,37 @@ mod tests {
         let mutations = [
             (
                 "signature",
+                "schnorr verification equation failed",
                 alter_input(&p.toml, "signatures", |v| v[0][2] = json!("0x01")),
             ),
             (
                 "status",
+                "challenge reduction not bound to its preimage",
                 alter_input(&p.toml, "status_indices", |v| v[0] = json!("0x05")),
             ),
             (
                 "joined_value",
+                "joined variable mismatch",
                 alter_input(&p.toml, "values", |v| v[0][2] = json!("0x01")),
             ),
             (
                 "hidden_integer",
+                "operand encoding mismatch",
                 alter_input(&p.toml, "filter_values", |v| v[0][0] = json!(12)),
             ),
             (
                 "blank_type",
+                "selected blank or unsupported term",
                 alter_input(&p.toml, "selected_types", |v| v[0][0][0] = json!(3)),
             ),
             (
                 "padding_leaf",
+                "selected padding leaf",
                 alter_input(&p.toml, "selected_leaves", |v| v[0][0] = json!(15)),
             ),
             (
                 "issuer_identity",
+                "identity issuer key rejected",
                 alter_input(&p.toml, "issuer_keys", |v| {
                     v[0][0] = json!("0x00");
                     v[0][1] = json!("0x01");
@@ -3741,28 +3755,38 @@ mod tests {
             ),
             (
                 "status_policy",
+                "credential status outside verifier policy",
                 alter_input(&p.toml, "accepted_root", |v| *v = json!("0x01")),
             ),
         ];
-        for (name, inputs) in mutations {
+        // The honest witness of the same package proves first, so a refusal below
+        // is about the mutated input and not this package or toolchain.
+        driver
+            .private_package_witness(p.package, &p.toml, "result_tamper_honest")
+            .expect("the honest witness satisfies the relation");
+        for (name, expected, inputs) in mutations {
             let tag = format!("result_tamper_{name}");
-            let result = driver.private_package_witness(p.package, &inputs, &tag);
-            assert!(
-                result.is_err(),
-                "malicious witness {name} unexpectedly satisfied the circuit"
-            );
+            match driver.private_package_witness(p.package, &inputs, &tag) {
+                Err(DriverError::Tool { tool, stderr }) => assert!(
+                    tool.starts_with("nargo") && stderr.contains(expected),
+                    "{name}: expected `{expected}`, got `{tool}`:\n{stderr}"
+                ),
+                Err(other) => panic!("{name}: infrastructure failure, not a constraint: {other}"),
+                Ok(_) => panic!("malicious witness {name} unexpectedly satisfied the circuit"),
+            }
         }
+        crate::support::complete(live);
     }
 
     #[test]
     #[ignore = "requires pinned nargo and bb; validates every public capacity/member combination"]
     fn result_real_capacity_and_predicate_member_matrix() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_real_capacity_and_predicate_member_matrix",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let (credentials, policy, nonce, _) = fixture();
         let hidden_query =
@@ -3822,6 +3846,7 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(live);
     }
 
     #[test]
@@ -3846,12 +3871,11 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; checks signed-TOML and full-u64 boundaries"]
     fn result_real_full_u64_filter_bounds() {
-        if !crate::support::require_toolchain(
-            "result_real_full_u64_filter_bounds",
-            &["nargo", "bb"],
-        ) {
+        let Some(live) =
+            crate::support::gate("result_real_full_u64_filter_bounds", &["nargo", "bb"])
+        else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let (credentials, policy, nonce, _) = fixture();
         let rows = vec![BTreeMap::from([(
@@ -3886,18 +3910,18 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(live);
     }
 
     /// Every expanded wrapper executes; representative full proofs cover each new status depth.
     #[test]
     #[ignore = "requires pinned nargo and bb; full-u64/status-capacity matrix and adversarial proofs"]
     fn result_real_expanded_capacity_matrix() {
-        if !crate::support::require_toolchain(
-            "result_real_expanded_capacity_matrix",
-            &["nargo", "bb"],
-        ) {
+        let Some(live) =
+            crate::support::gate("result_real_expanded_capacity_matrix", &["nargo", "bb"])
+        else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         let dir =
@@ -4024,17 +4048,18 @@ mod tests {
         }
         assert_eq!(exercised.len(), 14);
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(live);
     }
 
     #[test]
     #[ignore = "requires pinned nargo; private full-u64 boundary execution independent of host admission"]
     fn result_relation_executes_full_width_private_boundaries() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_relation_executes_full_width_private_boundaries",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         let query = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 0) }";
@@ -4056,17 +4081,18 @@ mod tests {
                 .private_package_witness(p.package, &p.toml, "private_u64_boundary")
                 .is_ok());
         }
+        crate::support::complete(live);
     }
 
     #[test]
     #[ignore = "requires pinned nargo; expanded tiny-profile witness narrowing must not wrap"]
     fn result_relation_tiny_capacity_rejects_wrapping_private_values() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_relation_tiny_capacity_rejects_wrapping_private_values",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         let query = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 0) }";
@@ -4095,22 +4121,30 @@ mod tests {
                 // 298 truncated to u8 is 42, so deleting the pre-cast guard would accept
                 // this malicious private value while the signed lexical token stays 42.
                 let malicious = alter_input(&p.toml, "filter_values", |v| v[0][0] = json!(298));
-                assert!(driver
-                    .private_package_witness(p.package, &malicious, "tiny_wrap")
-                    .is_err());
+                match driver.private_package_witness(p.package, &malicious, "tiny_wrap") {
+                    Err(DriverError::Tool { tool, stderr }) => assert!(
+                        tool == "nargo execute"
+                            && stderr.contains("integer exceeds successful-result lane"),
+                        "{package}: wrapping value must fail before its u8 cast, got {tool}: {stderr}",
+                        package = p.package,
+                    ),
+                    Err(other) => panic!("expected the tiny-integer capacity diagnostic, got {other:?}"),
+                    Ok(_) => panic!("a wrapping tiny-integer value produced a witness"),
+                }
             }
         }
+        crate::support::complete(live);
     }
 
     #[test]
     #[ignore = "requires pinned nargo and bb; preserves actual baseline v1 verification keys"]
     fn result_legacy_v1_keys_match_pinned_foundation_keys() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_legacy_v1_keys_match_pinned_foundation_keys",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         // Expected bytes were built from the independent foundation713 archive.
         pinned_toolchain().unwrap();
         let expected: Value = serde_json::from_str(include_str!(
@@ -4129,17 +4163,18 @@ mod tests {
         }
         assert_eq!(expected["members"].as_object().unwrap().len(), 4);
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(live);
     }
 
     #[test]
     #[ignore = "requires pinned nargo and bb; genuine expanded tiny and predicate-free proofs"]
     fn result_real_proofs_cover_expanded_tiny_and_predicate_free_public_abis() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "result_real_proofs_cover_expanded_tiny_and_predicate_free_public_abis",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         // These are genuine proofs, separately counted from wrapper executions.
         pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
@@ -4188,6 +4223,7 @@ mod tests {
             assert_eq!(&checked.rows, &rows);
         }
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(live);
     }
 
     /// Full proofs anchor ABI reconstruction, proof mode, independent policy and request binding.
@@ -4419,5 +4455,6 @@ mod tests {
         )
         .is_err());
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(gate);
     }
 }

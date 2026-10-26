@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**119 `unsafe` sites** across 11 crates (the other crates contain no first-party `unsafe`).
+**126 `unsafe` sites** across 12 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -133,7 +133,7 @@ Recurring invariant shorthands used below:
 The extra row was a stale duplicate: `VectorStore::open` and `DiskAnnIndex::open` used to each
 carry their own `Mmap::map`, and sq-98c unified both behind the single `store::open_backing`
 helper + the `Bytes` backing enum, so the `.spqv` and `.spqg` loaders now share **one** map site
-(`store.rs:285`). On `wasm32` (memmap2 target-gated out) `open_backing` takes the owned
+(`store.rs:291`). On `wasm32` (memmap2 target-gated out) `open_backing` takes the owned
 `AlignedBytes` branch instead, which contains no `unsafe` of its own. Every file:line below was
 re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 
@@ -221,7 +221,7 @@ pointer cleanup. [GPT-5.6]
 | `src/exec/budget.rs:423` | `NonNull::as_ref` in `budget::exhausted` | live, aligned `AtomicBool` from `Arc::as_ref` | the installing thread holds `Guard<'a>` until the query returns, then clears the pointer before the borrowed budget may drop. Direct and cross-thread cancellation tests cover this poll. |
 
 (sq-my8wd.4.) The other 4 sites live entirely in one integration test,
-`tests/service_stream_bounded.rs`, which pins the DoS-relevant invariant of streaming
+`tests/federation_features/service_stream_bounded.rs`, which pins the DoS-relevant invariant of streaming
 SERVICE consumption: a large/duplicate-heavy remote SPARQL result must be consumed in
 memory **O(body)**, not O(parsed DOM + a term-level relation copy) — the old
 collect-everything path amplified a remote result into a multiple of its wire size. The
@@ -311,6 +311,28 @@ forward-to-`System` argument, enforced by the file-local
 | `tests/auth_resource_enumeration_memory.rs:69` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :62. |
 | `tests/auth_resource_enumeration_memory.rs:71` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
 
+### `sparq-mpc` — 7 sites (test-only counting global allocator)
+
+The library remains `#![forbid(unsafe_code)]`. All seven sites are confined to
+`tests/federated_binding_allocation.rs`, a separate integration test binary that
+measures capacity and proof-length refusals and observes an explicit reconstruction
+as a positive control. Each allocation operation forwards identical arguments to
+`System`; the wrapper only checks pointer nullness and updates atomic live/peak byte
+counters. It never retains or dereferences a pointer. The file-local
+`clippy::undocumented_unsafe_blocks` lint requires a `// SAFETY:` comment for each
+block and implementation. Miri does not model this `System` global allocator;
+the forwarding argument and the allocation guard test cover this test-only seam.
+
+| File:line | Kind | Invariant relied on | Why sound / how bounded |
+|---|---|---|---|
+| `tests/federated_binding_allocation.rs:32` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | Identical arguments and returned pointers; only atomic counters are added. |
+| `tests/federated_binding_allocation.rs:34` | `unsafe fn alloc` | caller's layout contract forwarded | The inner call at :36 uses the unchanged layout. |
+| `tests/federated_binding_allocation.rs:36` | `System.alloc(layout)` | valid allocation layout | The returned pointer is only null-checked before counting the requested bytes. |
+| `tests/federated_binding_allocation.rs:44` | `unsafe fn dealloc` | matching pointer and layout from this allocator | All allocations also use `System`; the arguments are forwarded unchanged. |
+| `tests/federated_binding_allocation.rs:46` | `System.dealloc(ptr, layout)` | caller's deallocation contract | No pointer access or layout modification is added. |
+| `tests/federated_binding_allocation.rs:51` | `unsafe fn realloc` | caller's pointer/layout/new-size contract | The inner call at :53 forwards all three arguments unchanged. |
+| `tests/federated_binding_allocation.rs:53` | `System.realloc(ptr, layout, new_size)` | caller's reallocation contract | A null result preserves the old live-byte count; success updates only the size delta. |
+
 ### `sparq-lws-core` — 12 sites (example- and test-only counting global allocators) [FABLE-5]
 
 (sq-gg0qq.2 — crate imported whole from jeswr/solid-server-rs.) The **library and the
@@ -385,11 +407,11 @@ standard toolchain. Miri does not model a `#[global_allocator]` that calls `Syst
 
 ## NEEDS-REVIEW
 
-**None.** Every one of the 119 sites now carries a literal `// SAFETY:` comment
+**None.** Every one of the 126 sites now carries a literal `// SAFETY:` comment
 immediately preceding the `unsafe` block/impl, mechanically enforced by
 `clippy::undocumented_unsafe_blocks` (MS-G2 closed, sq-8wbn, [OPUS-4.8]) — set
 at crate root on unsafe-bearing libraries (including `sparq-lws-wasm`, sq-wubkf)
-and file-local on the `sparq-engine`, `sparq-reason` and `sparq-solid`
+and file-local on the `sparq-engine`, `sparq-reason`, `sparq-solid` and `sparq-mpc`
 integration tests and the `sparq-lws-core` example files that carry counting
 allocators. The 6 sites that
 previously relied on an adjacent block comment — the two `unsafe impl Send`/`Sync for
