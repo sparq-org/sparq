@@ -326,7 +326,7 @@ pub fn admit_static(
                 continue;
             }
             // §2.3.2 statement-type scoping via the SHACL shape (STATIC).
-            if false && !shape.admits(t) {
+            if !shape.admits(t) {
                 continue;
             }
             // The bound holder is the credential subject — pinned into the grant's
