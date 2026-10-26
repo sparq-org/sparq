@@ -152,10 +152,17 @@ inventories non-test raw signer calls with counted certification exceptions;
 - **Running the LIVE test suites.** The integration suites in `crates/sparq-zk-compose/tests/`
   split into a structural half (no external tooling) and a LIVE half that shells out to a real
   `nargo execute` and/or `bb prove`/`bb verify`. The LIVE half shares one gate
-  (`tests/support/mod.rs`, `require_toolchain`) which **fails the test** when `nargo`/`bb` are
+  (`tests/support/mod.rs`, `support::gate`) which **fails the test** when `nargo`/`bb` are
   missing, naming the missing tool — a toolchain-free run can no longer report `ok` for a body
   that never executed. Put the tools on `PATH` to run them (in a cloud container they are
   installed outside `PATH`: `export PATH=$PATH:/root/.nargo/bin:/root/.bb`).
+  A live test owns the returned token and consumes it with `support::complete(token)`
+  as its last statement after all assertions (before a tail `Ok(())`, if present).
+  The job ledger requires `enter <file>:<line>` and `complete <file>:<line>` for each
+  expected gate site. It records a set of sites, so any completed corpus job satisfies
+  the adapter's shared `run_job` key; `bench/zk-bindings/run.py` grades every corpus
+  job, and a campaign failure still fails its step. Native adapter jobs require no
+  external tools; other tiers require the pinned toolchain, including version checks.
   - `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN` (default: unset) — set to a non-empty value other than
     `0` to declare a lane deliberately toolchain-free. Each live test then prints
     `SKIP <test>: …` to stderr and returns instead of failing (nextest hides that line for a
