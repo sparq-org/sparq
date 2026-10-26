@@ -133,11 +133,14 @@ fn cross_process_never_overgrants() {
     std::fs::create_dir_all(&dir).unwrap();
     let exe = std::env::current_exe().expect("test binary path");
 
+    // The same fixture also runs inside the parser differential module.
+    let worker_path = format!("{}::cross_process_worker_entry", module_path!());
+    let worker_name = worker_path.split_once("::").expect("worker path").1;
     let mut children = Vec::new();
     for _ in 0..WORKERS {
         let child = std::process::Command::new(&exe)
             // Run ONLY the worker entry test in the child, quietly.
-            .args(["--exact", "cross_process_worker_entry", "--nocapture"])
+            .args(["--exact", worker_name, "--nocapture"])
             .env(WORKER_DIR, &dir)
             .env(WORKER_LIMIT, LIMIT.to_string())
             .env(WORKER_ATTEMPTS, ATTEMPTS_PER_WORKER.to_string())
