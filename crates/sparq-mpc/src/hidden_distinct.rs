@@ -305,7 +305,7 @@ fn const_sharing(n: usize, c: Fp) -> Vec<Share> {
 /// Fail-closed parameter checks: `n >= 2t+1` (the conditional swap / AND / compare
 /// all need the degree-reduction headroom), `N` within [`MAX_DISTINCT_ROWS`],
 /// `bound >= N` (never truncate a distinct pair), and every key `< 2^COMPARE_BITS`.
-/// All PUBLIC / statically checkable before any crypto runs.
+/// Public shape checks precede the data-dependent key-range check; all precede draws.
 fn check_params(
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],
@@ -519,8 +519,6 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
     widths: PayloadWidths,
     bound: usize,
 ) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
-    require_source_matches(source, backend)?;
-    check_params(backend, pairs, bound)?;
     // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
     // candidate is built or a share drawn: the padded bound, the payload arity (2 —
     // the two endpoint terms), the compute-party count, and — only if the caller
@@ -534,6 +532,9 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
         backend.parties(),
         backend.threshold(),
     )?;
+
+    require_source_matches(source, backend)?;
+    check_params(backend, pairs, bound)?;
     let (candidates, sort_ce, adj_eq) = build_distinct_candidates(backend, source, pairs)?;
     let (slots, _out_cost) =
         oblivious_set_output_through(source, backend, &candidates, widths, bound)?;
@@ -590,19 +591,29 @@ fn distinct_oblivious_with(
     widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    check_params(backend, pairs, bound)?;
-    // The stage's PUBLIC-ONLY caps before the build and before the dealer is
-    // minted. A DERIVED width is itself resolved at the stage, over the candidates
-    // it packs.
+    distinct_hidden_pairs_oblivious_through(&mut backend.dealer(), backend, pairs, widths, bound)
+}
+
+fn distinct_hidden_pairs_oblivious_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    pairs: &[SecretEndpointPair],
+    widths: PayloadWidths,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    // Public caps precede candidate construction and every draw on this source.
+    // A derived width is resolved at the output stage, over its candidates.
     crate::oblivious_join::check_output_entry_caps(
         &widths,
         bound,
         backend.parties(),
         backend.threshold(),
     )?;
-    let mut dealer = backend.dealer();
-    let (candidates, _ce, _eq) = build_distinct_candidates(backend, &mut dealer, pairs)?;
-    oblivious_set_output_through(&mut dealer, backend, &candidates, widths, bound)
+
+    require_source_matches(source, backend)?;
+    check_params(backend, pairs, bound)?;
+    let (candidates, _ce, _eq) = build_distinct_candidates(backend, source, pairs)?;
+    oblivious_set_output_through(source, backend, &candidates, widths, bound)
 }
 
 #[cfg(test)]

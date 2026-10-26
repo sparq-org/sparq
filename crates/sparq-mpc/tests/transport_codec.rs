@@ -645,7 +645,9 @@ fn an_over_cap_outbound_frame_is_refused_before_it_is_serialised() {
     };
 
     let at_cap = Message::Shares((0..fits as u64).map(share).collect());
-    let frame = at_cap.encode().expect("the largest framable message encodes");
+    let frame = at_cap
+        .encode()
+        .expect("the largest framable message encodes");
     assert!(frame.len() - 4 <= MAX_FRAME_BYTES);
 
     let over = Message::Shares((0..=fits as u64).map(share).collect());

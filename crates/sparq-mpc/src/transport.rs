@@ -1463,6 +1463,18 @@ mod tests {
         assert_eq!(initial_body_capacity(RECV_CHUNK_BYTES), RECV_CHUNK_BYTES);
     }
 
+    /// Observe the actual receive buffer before any body arrives. Testing the
+    /// capacity helper alone would miss a caller that reserved the full length.
+    #[test]
+    fn recv_reserves_one_chunk_when_only_a_header_arrives() {
+        LAST_BODY_PEAK.with(|c| c.set(0));
+        let mut chan = Channel::new(std::io::Cursor::new(
+            (MAX_FRAME_BYTES as u32).to_be_bytes().to_vec(),
+        ));
+        assert!(chan.recv().is_err(), "the promised body is absent");
+        assert_eq!(LAST_BODY_PEAK.with(|c| c.get()), RECV_CHUNK_BYTES);
+    }
+
     /// The body buffer never exceeds TWICE the bytes that have arrived (nor the
     /// declared length), at the real `recv` call site.
     ///
@@ -1683,7 +1695,10 @@ mod tests {
             );
             assert_eq!(cell.result, expected_plain);
             // The transport actually moved bytes and drove rounds.
-            assert!(cell.total_bytes().unwrap() > 0, "n={n}: bytes must cross the wire");
+            assert!(
+                cell.total_bytes().unwrap() > 0,
+                "n={n}: bytes must cross the wire"
+            );
             assert_eq!(cell.rounds, 2);
             assert_eq!(cell.parties, n);
         }

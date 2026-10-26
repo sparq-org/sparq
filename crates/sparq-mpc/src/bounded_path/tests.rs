@@ -668,8 +668,13 @@ fn per_hop_projection_matches_the_naive_fold_at_small_lengths() {
         let edges = disclosed_edges(docs);
         for len in 1..=8usize {
             let chain: Vec<NamedNode> = (0..len).map(|_| nn("http://ex/p")).collect();
-            let shipped =
-                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap().0, &s, &o);
+            let shipped = dedup_endpoint_pairs(
+                eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new())
+                    .unwrap()
+                    .0,
+                &s,
+                &o,
+            );
             let naive = naive_fixed_chain(&edges, &chain, &s, &o);
             assert_eq!(
                 shipped.rows, naive.rows,
@@ -696,16 +701,28 @@ fn a_dense_graph_evaluates_at_the_hop_cap() {
         Variable::new_unchecked(OBJECT_VAR),
     );
     let short = dedup_endpoint_pairs(
-        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o, &mut PathFormBudget::new())
-            .unwrap()
-            .0,
+        eval_fixed_chain(
+            &edges,
+            &[nn("http://ex/p")],
+            &s,
+            &o,
+            &mut PathFormBudget::new(),
+        )
+        .unwrap()
+        .0,
         &s,
         &o,
     );
     assert_eq!(short.rows.len(), 4, "the dense 2-node graph has 4 pairs");
 
     let chain: Vec<NamedNode> = (0..MAX_UNROLL_HOPS).map(|_| nn("http://ex/p")).collect();
-    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap().0, &s, &o);
+    let long = dedup_endpoint_pairs(
+        eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new())
+            .unwrap()
+            .0,
+        &s,
+        &o,
+    );
     assert_eq!(
         long.rows, short.rows,
         "every length reaches the same four endpoint pairs on this graph"
@@ -2137,7 +2154,10 @@ fn the_form_shape_caps_are_pinned_by_value() {
     // admit for ONE part, so no single repetition those caps accept is refused
     // here; only composition can pass it.
     assert_eq!(MAX_PATH_FORM_WORK, 1 << 26);
-    assert_eq!(MAX_PATH_FORM_WORK, MAX_UNROLL_CHAINS * MAX_UNROLL_HOPS as u64);
+    assert_eq!(
+        MAX_PATH_FORM_WORK,
+        MAX_UNROLL_CHAINS * MAX_UNROLL_HOPS as u64
+    );
     assert_eq!(MAX_PATH_FORM_JOIN_WORK, 1 << 31);
 }
 
@@ -2309,7 +2329,8 @@ fn a_hub_join_is_charged_from_its_closed_form_before_it_is_built() {
     let right = edges.relation_for(&nn("http://ex/p"), &mid, &o);
     let projected = projected_join_rows(&left, &right, &mid).unwrap();
     assert_eq!(
-        projected, N * N,
+        projected,
+        N * N,
         "the hub key carries N in-edges against N out-edges; every other key \
          matches on one side only"
     );

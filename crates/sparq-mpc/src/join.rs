@@ -780,7 +780,6 @@ impl BatchedHiddenInput {
         self.shared_keys_through(dealer, n)
     }
 
-
     /// [`Self::shared_keys`] over any randomness source: one
     /// [`DistributedRandomness::vss_own_input`] per row, in row order, each refused
     /// unless it is the canonical sharing for the caller's (already validated)
@@ -815,11 +814,7 @@ impl HiddenValueJoin {
     /// are decided at the stage, over the rows it packs — which is this crate's
     /// long-standing draw schedule. An entry check that guessed a width from the
     /// batches' widest term refused runs the stage itself accepts.
-    fn preflight_output_shape(
-        &self,
-        arity: usize,
-        bound: usize,
-    ) -> Result<(), MpcError> {
+    fn preflight_output_shape(&self, arity: usize, bound: usize) -> Result<(), MpcError> {
         oblivious_join::check_output_entry_caps(
             &oblivious_join::PayloadWidths::derived(arity),
             bound,
@@ -964,6 +959,12 @@ impl HiddenValueJoin {
         // shuffle network from `bound`. So the candidate CARDINALITY is counted
         // without materialising the pairs, and `B` must be within the cap and cover
         // it (see `candidate_pair_count`).
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
         let n = self.backend.parties();
@@ -973,9 +974,6 @@ impl HiddenValueJoin {
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
         let payload_arity = out_vars.len();
-        // The output stage's public-shape caps and its width pass, before the key
-        // sharings below draw anything.
-        self.preflight_output_shape(payload_arity, bound)?;
 
         // (1) Secret-share each holder's private key column as a BatchedShares (the
         // sq-dwb5 primitive): each row's key gets its OWN fresh degree-`t` masking
@@ -1131,15 +1129,18 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Validated before any draw or allocation, as in `batched_join_through`.
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
 
         // Output schema: left payload vars then right payload vars (key NOT projected).
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
-        // The output stage's public-shape caps and its width pass, before
-        // `fully_oblivious_candidates` draws an equality bit per pair.
-        self.preflight_output_shape(out_vars.len(), bound)?;
         let candidates = self.fully_oblivious_candidates(source, left, right)?;
 
         // (3) Route through the oblivious output transform with the SECRET-SHARED

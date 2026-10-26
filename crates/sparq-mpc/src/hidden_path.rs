@@ -230,15 +230,12 @@ fn chain_out_vars() -> Vec<Variable> {
 /// ## What this module's caps do and do not bound
 ///
 /// Every cap HERE bounds a COUNT: the hop count, the enumerated tuple count, the
-/// candidate count and the output bound `B`. The WIDTHS are bounded by the output
-/// stage's own caps, which this operator applies at its ENTRY: the payload arity
-/// ([`crate::oblivious_join::MAX_PAYLOAD_ARITY`]), the per-term serialized byte
-/// width ([`crate::oblivious_join::MAX_PAYLOAD_TERM_BYTES`]), the uniform per-slot
-/// limb count ([`crate::oblivious_join::MAX_SLOT_LIMBS`]), the compute-party count
-/// ([`crate::oblivious_join::MAX_OUTPUT_PARTIES`]) and their aggregate product
-/// ([`crate::oblivious_join::MAX_SLOT_WORK`]) — see
-/// `crate::oblivious_join::check_output_public_shape`, called before this
-/// operator builds a candidate or draws a share.
+/// candidate count and the output bound `B`. Entries check the output stage's
+/// public bound, arity and party caps before building candidates or drawing.
+/// Declared widths also permit entry checks of the per-term ceiling, uniform
+/// limb count and aggregate slot work. Derived widths and data-dependent term
+/// fit checks are resolved at the output stage, after the operator's own draws.
+/// See [`crate::oblivious_join::PayloadWidths`].
 ///
 /// What is NOT bounded: whole-operator resource planning — dealer batches,
 /// aggregate sharing, session traffic and deadlines — is follow-up work, and no
@@ -913,8 +910,23 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the widths, the declared width, its limb count and the aggregate slot work.
+    // In the default derived mode the width is a function of the candidates' own
+    // rows, so it and its caps are decided at the stage, which is where this crate
+    // has always decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
+
+    require_source_matches(source, backend)?;
+
     // BOTH halves of the bound contract are settled before any draw, and the PUBLIC
     // half is tried first: a `B` at or above `public_candidate_pair_bound` is
     // accepted on the edge count and `k` alone, and the data-dependent projection
@@ -933,19 +945,6 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
         bound,
         public_candidate_pair_bound(edges.len(), k)?,
         || projected_candidate_count(edges, k),
-    )?;
-    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
-    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
-    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
-    // the widths, the declared width, its limb count and the aggregate slot work.
-    // In the default derived mode the width is a function of the candidates' own
-    // rows, so it and its caps are decided at the stage, which is where this crate
-    // has always decided them.
-    crate::oblivious_join::check_output_entry_caps(
-        &widths,
-        bound,
-        backend.parties(),
-        backend.threshold(),
     )?;
     let candidates = build_candidates(backend, source, edges, k)?;
     // Route through the slot-returning path. The stage re-checks the bound against
@@ -1661,8 +1660,23 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    require_source_matches(source, backend)?;
     check_bounded_params(backend, edges, form)?;
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the widths, the declared width, its limb count and the aggregate slot work.
+    // In the default derived mode the width is a function of the candidates' own
+    // rows, so it and its caps are decided at the stage, which is where this crate
+    // has always decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
+
+    require_source_matches(source, backend)?;
+
     // Both halves of the bound contract before any draw, public half first, exactly
     // as in the exactly-k entry: a `B` at or above `public_bounded_candidate_pair_bound`
     // is accepted on the edge count and the form's public min/max alone, and the
@@ -1676,19 +1690,6 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
         bound,
         public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), form)?,
         || projected_bounded_candidate_count(edges, form),
-    )?;
-    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
-    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
-    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
-    // the widths, the declared width, its limb count and the aggregate slot work.
-    // In the default derived mode the width is a function of the candidates' own
-    // rows, so it and its caps are decided at the stage, which is where this crate
-    // has always decided them.
-    crate::oblivious_join::check_output_entry_caps(
-        &widths,
-        bound,
-        backend.parties(),
-        backend.threshold(),
     )?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
     oblivious_set_output_through(source, backend, &candidates, widths, bound)

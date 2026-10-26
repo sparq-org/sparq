@@ -70,18 +70,18 @@
 //! rows are already in the caller's memory before this module is entered, so
 //! charging a hop's edge list made the budget refuse forms whose own working set
 //! is small. A hop borrows the edge relation rather than copying it
-//! ([`DisclosedEdges::relation_ref`]).
+//! (`DisclosedEdges::relation_ref`).
 //!
 //! The charged figure is therefore not the peak ALLOCATION: a join's output, the
-//! projection taken from it and the dedup key set can be alive together, and the
-//! dedup keys are not charged at all, so the true peak is a small constant
-//! multiple (about three) of the charged row count. The budget is a bound on that
-//! multiple, not an accounting of it.
+//! temporary `project_endpoints` copy taken under its charge and the dedup key
+//! set can be alive together. Those temporary projection copies and dedup keys
+//! are uncharged separately, so the true peak is a small multiple of the charged
+//! row count. Final endpoint projections receive their own charge.
 //!
 //! The cumulative work counter is checked as work is charged, so a single charge
 //! is refused before its rows are built, but CPU already spent on earlier charges
-//! in the same operator is not refundable — the counter bounds the total, it does
-//! not pre-empt.
+//! in the same operator is not refundable. Substantial CPU can run before this
+//! cumulative ceiling refuses; it does not pre-empt earlier work.
 //!
 //! That is the scope: WHOLE-OPERATOR resource planning — the `PartialResult`
 //! clones a caller makes around this call, a federation's own buffers, dealer
@@ -321,11 +321,11 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// exist, not after.
 ///
 /// A hop's own EDGE ROWS are deliberately NOT charged. A hop borrows the disclosed
-/// edge relation ([`DisclosedEdges::relation_ref`]) instead of copying it, and
+/// edge relation (`DisclosedEdges::relation_ref`) instead of copying it, and
 /// where a copy is still unavoidable — the first hop's accumulator seed — the rows
 /// it copies are already in the caller's memory before this module is entered.
-/// Charging them made the budget refuse single-predicate forms over edge sets that
-/// the operator evaluates in about a second.
+/// Charging them made the budget refuse single-predicate forms over edge sets
+/// whose endpoint projection fits the live budget.
 ///
 /// ## What it bounds, honestly
 ///
@@ -334,11 +334,10 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// chain starts, and what stays charged for the rest of the evaluation is the
 /// deduped union, which holds the answer's rows and at most `|V|²` of them.
 ///
-/// It is NOT an accounting of peak ALLOCATION. A join's output, the projection
-/// taken from it and the per-hop dedup's key set can be alive at the same moment,
-/// and the dedup keys are not charged at all, so the real peak is a small constant
-/// multiple — about three — of the charged figure. What this cap bounds is that
-/// multiple.
+/// Temporary `project_endpoints` copies taken under a join's charge and dedup
+/// keys are uncharged separately. They may coexist with the join output, so the
+/// true peak is a small multiple of the charged rows. Final endpoint projections
+/// receive their own charge; this is a LIVE row bound, not an allocation tally.
 ///
 /// Because charges are released, this budget says nothing about how much WORK a
 /// form may schedule — a million chains that each fit in it would each be
@@ -362,8 +361,10 @@ pub const MAX_PATH_FORM_ROWS: usize = 1 << 24; // 16_777_216
 /// an unbounded amount of CPU: this module's unroll is crypto-free, so what the
 /// counter bounds is join and projection work, not protocol rounds.
 /// This budget is the one that bounds that. It sums every row charge the
-/// evaluation makes — hop edge relations, join outputs and the reflexive diagonal
-/// — and never releases any of them.
+/// evaluation makes — join outputs, final endpoint projections and the reflexive
+/// diagonal — and never releases any of them. Hop edge relations are uncharged.
+/// Substantial CPU can run before the cumulative ceiling refuses a later charge;
+/// it does not pre-empt work already done.
 ///
 /// The unit is CHARGED ROW-STEPS, the same unit [`MAX_PATH_FORM_ROWS`] counts,
 /// summed over time rather than held at once. It is not comparable with
@@ -485,7 +486,7 @@ pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
 
 /// [`check_form_shape`] with work already charged against the budget — the way the
 /// tests reach [`MAX_PATH_FORM_WORK`] exactly without building a form of a quarter
-/// of a billion parts. It bypasses nothing: the same walk, the same per-repetition
+/// of a billion parts. It uses the same walk and the same per-repetition
 /// caps and the same `work > MAX_PATH_FORM_WORK` decision against the same
 /// constant.
 pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64, MpcError> {
@@ -532,8 +533,8 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
                 // CHARGE BEFORE PUSHING: every part costs at least its own `+ 1`,
                 // so a Sequence of a billion parts must be refused on the count it
                 // declares, not after the worklist has grown to hold them all.
-                let declared = u64::try_from(parts.len())
-                    .map_err(|_| form_work_overflow("the part count"))?;
+                let declared =
+                    u64::try_from(parts.len()).map_err(|_| form_work_overflow("the part count"))?;
                 work = work
                     .checked_add(declared)
                     .ok_or_else(|| form_work_overflow("the part count"))?;
@@ -620,9 +621,8 @@ impl PathFormBudget {
     }
 
     /// A budget that already holds `charged` RETAINED rows — the way the tests
-    /// reach the cap without materialising `MAX_PATH_FORM_ROWS` rows. It bypasses
-    /// nothing: [`Self::charge`] is still the only thing that decides, against the
-    /// same constant, from the same call sites.
+    /// reach the cap without materialising `MAX_PATH_FORM_ROWS` rows.
+    /// [`Self::charge`] uses the same constant and call sites.
     #[cfg(test)]
     fn with_charged(charged: usize) -> Self {
         PathFormBudget {
@@ -635,8 +635,7 @@ impl PathFormBudget {
 
     /// A budget that has already done `work` row-steps — the way the tests reach
     /// the cumulative work budget without doing `MAX_PATH_FORM_JOIN_WORK` of it.
-    /// It bypasses nothing: [`Self::charge`] is still the only thing that decides,
-    /// against the same constant, from the same call sites.
+    /// [`Self::charge`] uses the same constant and call sites.
     #[cfg(test)]
     fn with_work(work: u64) -> Self {
         PathFormBudget {
@@ -1188,7 +1187,8 @@ fn eval_with_budget(
     // counter for the whole evaluation, so every nested sequence gets its own
     // intermediate-variable namespace (see `eval_sequence`).
     let mut scope = 0usize;
-    let (relation, charge) = eval_form_relation(edges, form, &subject, &object, &mut scope, budget)?;
+    let (relation, charge) =
+        eval_form_relation(edges, form, &subject, &object, &mut scope, budget)?;
     let out = dedup_endpoint_pairs(relation, &subject, &object);
     // The relation the dedup shrank is dropped, and the result leaves this budget's
     // scope, so the whole-form charge is released here.
@@ -1405,17 +1405,14 @@ fn projected_join_rows(
     join_var: &Variable,
 ) -> Result<usize, MpcError> {
     let key_of = |part: &PartialResult| -> Result<usize, MpcError> {
-        part.vars
-            .iter()
-            .position(|v| v == join_var)
-            .ok_or_else(|| {
-                MpcError::Protocol(format!(
-                    "projected_join_rows: relation does not project the join key ?{} \
+        part.vars.iter().position(|v| v == join_var).ok_or_else(|| {
+            MpcError::Protocol(format!(
+                "projected_join_rows: relation does not project the join key ?{} \
                      (vars: {:?}) — internal unroll invariant violated",
-                    join_var.as_str(),
-                    part.vars
-                ))
-            })
+                join_var.as_str(),
+                part.vars
+            ))
+        })
     };
     let (li, ri) = (key_of(left)?, key_of(right)?);
 
@@ -1429,11 +1426,13 @@ fn projected_join_rows(
         }
     }
 
-    let overflow = || MpcError::Protocol(format!(
-        "bounded path form: the row count of a join on ?{} overflows a usize — refusing \
+    let overflow = || {
+        MpcError::Protocol(format!(
+            "bounded path form: the row count of a join on ?{} overflows a usize — refusing \
          before the join is built",
-        join_var.as_str()
-    ));
+            join_var.as_str()
+        ))
+    };
     let mut total = 0usize;
     let mut right_unbound = 0usize;
     for row in &right.rows {
@@ -1474,26 +1473,12 @@ fn precharged_join(
 ) -> Result<(PartialResult, usize), MpcError> {
     let charged = projected_join_rows(left, right, &plan.join_var)?;
     budget.charge(charged)?;
-    let joined = build_join(left, right, plan)?;
-    Ok((joined, charged))
-}
-
-/// Build one disclosed-key join, counting it the instant it RETURNS — ahead of the
-/// `?` — so a join that RAN is counted whether or not it then failed.
-///
-/// The counter is what the precharge tests read to show that a refused plan built
-/// NO join. Counting on the success path only, or counting at the call site after
-/// the `?`, would read zero for a join that ran and then errored, which is exactly
-/// the case those tests exist to rule out.
-fn build_join(
-    left: &PartialResult,
-    right: &PartialResult,
-    plan: &JoinPlan,
-) -> Result<PartialResult, MpcError> {
     let built = DisclosedKeyJoin::new().join_pair(left, right, plan);
+    // Count the returned join before any later refusal, including its own error.
     #[cfg(test)]
     JOINS_BUILT.with(|c| c.set(c.get() + 1));
-    built
+    let joined = built?;
+    Ok((joined, charged))
 }
 
 #[cfg(test)]
@@ -1597,10 +1582,7 @@ fn eval_fixed_chain(
         let (joined, join_charge) = precharged_join(budget, &acc, next, &plan)?;
         // Project onto `(subject, reached)` and put `reached` back on the canonical
         // edge-subject name, ready for the next hop's borrowed relation.
-        let projected = rename_far_endpoint(
-            project_endpoints(&joined, subject, &edge_o)?,
-            &edge_s,
-        );
+        let projected = rename_far_endpoint(project_endpoints(&joined, subject, &edge_o)?, &edge_s);
         let reduced = dedup_endpoint_pairs(projected, subject, &edge_s);
         // Everything this hop materialised is now dropped — the accumulator it
         // replaced and the join's own output — and what survives is `reduced`,
