@@ -379,6 +379,9 @@ impl<S: SparqClient> RawSeamCounter<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.inner.exclusive()
+    }
     fn raises_markers(&self) -> bool {
         self.inner.raises_markers()
     }

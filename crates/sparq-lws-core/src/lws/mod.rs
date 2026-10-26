@@ -3865,8 +3865,13 @@ pub(crate) mod test_store {
     }
 
     /// Wait for detached maintenance tasks to release a stopped service's lease.
-    pub async fn wait_for_stop(store: &FlakyStore) {
-        store.lifecycle().wait_for_release().await;
+    pub async fn wait_for_stop(store: &FlakyStore, caller: &str) {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            store.lifecycle().wait_for_release(caller),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{caller}: timed out waiting for the stopped service"));
     }
 
     #[tokio::test(start_paused = true)]
@@ -3877,7 +3882,7 @@ pub(crate) mod test_store {
         let ((), (), ()) = tokio::join!(
             biased;
             async {
-                wait_for_stop(&store).await;
+                wait_for_stop(&store, "wait_for_stop_waits_for_the_actual_lease_release").await;
                 assert!(
                     released.load(std::sync::atomic::Ordering::Acquire),
                     "the stop waiter returned before the lease was released"
@@ -4439,7 +4444,7 @@ mod tests {
             .unwrap();
         let cfg = state.cfg.clone();
         drop(state);
-        test_store::wait_for_stop(&store).await;
+        test_store::wait_for_stop(&store, "every_removal_takes_one_step").await;
         notify::Notifier::load(&store, &cfg).await.unwrap();
         assert!(!store.exists(&at).await.unwrap());
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);

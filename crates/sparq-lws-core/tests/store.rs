@@ -1012,6 +1012,9 @@ struct StaleOnceSparq {
 
 #[async_trait]
 impl SparqClient for StaleOnceSparq {
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.inner.exclusive()
+    }
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         if let Some(stale) = self.stale.lock().unwrap().take() {
             return Ok(stale);

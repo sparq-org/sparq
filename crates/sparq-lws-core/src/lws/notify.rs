@@ -3193,7 +3193,11 @@ mod tests {
         let cfg = state.cfg.clone();
         drop(sweeper);
         drop(state);
-        test_store::wait_for_stop(&store).await;
+        test_store::wait_for_stop(
+            &store,
+            "nothing_shows_an_expiry_until_stored_and_a_restart_may_revive_it_as_documented",
+        )
+        .await;
         let restarted = Notifier::load(&store, &cfg).await.unwrap();
         assert!(restarted.is_live("c"));
     }
@@ -3886,6 +3890,11 @@ mod tests {
         };
         assert!(why.contains("another LWS service"), "{why}");
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &_store,
+            "a_second_state_over_a_running_ones_store_is_refused",
+        )
+        .await;
         let state = LwsState::new(backend, cfg).await.unwrap();
         assert!(state.notify.lease().is_some());
     }
@@ -4143,6 +4152,11 @@ mod tests {
         // Once the running state is gone, a wrapper of its store may be served.
         let backend = state.store.clone();
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &_store,
+            "a_state_over_a_wrapper_of_a_running_ones_store_is_refused",
+        )
+        .await;
         let state = LwsState::new(Tracked::new(backend, root), cfg)
             .await
             .unwrap();
@@ -6288,6 +6302,11 @@ mod tests {
         }
         let cfg = state.cfg.clone();
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more",
+        )
+        .await;
         let state = LwsState::new(store.clone(), cfg).await.unwrap();
         assert_eq!(
             state.notify.subs.read().unwrap().len(),
@@ -6395,7 +6414,7 @@ mod tests {
         }
         let cfg = state.cfg.clone();
         drop(state);
-        test_store::wait_for_stop(&store).await;
+        test_store::wait_for_stop(&store, "state_with_other_subscribers").await;
         let state = LwsState::new(store, cfg).await.unwrap();
         (state, topic, ours)
     }

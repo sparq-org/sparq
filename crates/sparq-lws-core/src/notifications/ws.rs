@@ -134,6 +134,8 @@ pub struct NotifyState<S: Store> {
     /// with it, so its phase is theirs).
     #[cfg(test)]
     recheck_now: Arc<tokio::sync::Notify>,
+    #[cfg(test)]
+    recheck_ticks: std::sync::atomic::AtomicUsize,
 }
 
 /// How often an open receive socket checks, on a timer of its own, that its subscriber may still
@@ -157,6 +159,8 @@ impl<S: Store> NotifyState<S> {
             access_recheck: ACCESS_RECHECK,
             #[cfg(test)]
             recheck_now: Default::default(),
+            #[cfg(test)]
+            recheck_ticks: Default::default(),
         }
     }
 
@@ -694,6 +698,8 @@ async fn stream_notifications<S: Store + 'static, W>(
             // A due tick pre-empts an event/lag check. A timer check already running
             // finishes (or times out) before another tick starts.
             () = state.next_tick(&mut recheck), if !matches!(check, Some((_, Due::Tick))) => {
+                #[cfg(test)]
+                state.recheck_ticks.fetch_add(1, Ordering::SeqCst);
                 if check.take().is_some() {
                     missed = true;
                 }
@@ -2029,7 +2035,8 @@ mod tests {
             }
         });
         revoke_bob(&s).await;
-        let close = tokio::time::timeout(every * 2, async {
+        let at_revoke = s.recheck_ticks.load(Ordering::SeqCst);
+        let close = tokio::time::timeout(std::time::Duration::from_secs(30), async {
             while let Some(frame) = rx.next().await {
                 if let M::Close(Some(frame)) = frame.unwrap() {
                     return frame;
@@ -2038,7 +2045,11 @@ mod tests {
             panic!("socket ended without a close");
         })
         .await
-        .expect("frame flood delayed the revocation close");
+        .expect("a_revoked_subscriber_flooding_frames_is_closed_within_two_periods hung");
+        assert!(
+            s.recheck_ticks.load(Ordering::SeqCst) - at_revoke < 2,
+            "frame flood delayed the revocation close by two timer ticks"
+        );
         flood.abort();
         assert_eq!(u16::from(close.code), 1008);
         assert_eq!(close.reason, REVOKED);

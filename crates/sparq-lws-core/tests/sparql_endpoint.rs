@@ -575,6 +575,9 @@ struct ChurningSparq {
 
 #[async_trait::async_trait]
 impl SparqClient for ChurningSparq {
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.inner.exclusive()
+    }
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         let mut meta = self.inner.get_meta(iri).await?;
         if iri == self.churn_iri && self.churn.load(std::sync::atomic::Ordering::SeqCst) {

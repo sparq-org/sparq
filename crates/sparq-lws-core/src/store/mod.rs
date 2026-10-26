@@ -64,16 +64,20 @@ impl Lifecycle {
 
     /// Wait until the stopped service has released its lease.
     #[cfg(test)]
-    pub(crate) async fn wait_for_release(self: &std::sync::Arc<Self>) {
-        loop {
-            let released = self.released.notified();
-            tokio::pin!(released);
-            released.as_mut().enable();
-            if self.acquire().is_some() {
-                return;
+    pub(crate) async fn wait_for_release(self: &std::sync::Arc<Self>, caller: &str) {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let released = self.released.notified();
+                tokio::pin!(released);
+                released.as_mut().enable();
+                if self.acquire().is_some() {
+                    return;
+                }
+                released.await;
             }
-            released.await;
-        }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{caller}: timed out waiting for the lifecycle lease release"));
     }
 }
 
@@ -1766,6 +1770,9 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for PutBackFirst {
+        fn exclusive(&self) -> Result<(), SparqError> {
+            self.inner.exclusive()
+        }
         async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
             self.inner.get_meta(iri).await
         }
@@ -2034,6 +2041,9 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for FailsDetaching {
+        fn exclusive(&self) -> Result<(), SparqError> {
+            self.inner.exclusive()
+        }
         async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
             self.inner.get_meta(iri).await
         }
@@ -2402,7 +2412,10 @@ mod tests {
         );
         assert!(counters.take_methods().is_empty());
         drop(first);
-        store.lifecycle().wait_for_release().await;
+        store
+            .lifecycle()
+            .wait_for_release("two_states_over_one_composite_store_are_refused")
+            .await;
         assert!(crate::lws::LwsState::new(store, cfg).await.is_ok());
     }
 }

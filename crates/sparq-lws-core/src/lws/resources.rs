@@ -251,6 +251,7 @@ async fn authorize_unlocked<S: Store + 'static>(
 /// budget. Read is decided with absent metadata, even if a create has written partial metadata
 /// or an orphan linkset names the caller as creator. The same decision applies after a concurrent
 /// removal, including under the delete lock. Public Delete grants apply before a challenge.
+/// A set-aside parent returns 503 for both present and absent children.
 /// Residual: a set-aside change to a previously present resource answers 503; pending metadata on
 /// a present resource, or a Delete policy constrained by type or format, can also differ from
 /// absence: those constraints are the caller's policy.
@@ -261,10 +262,19 @@ async fn absent<S: Store + 'static>(
     agent: &Agent,
     method: &Method,
 ) -> Response {
+    let data_delete = method == Method::DELETE && !uri.ends_with('/');
+    if !data_delete && state.needs_auth(agent) {
+        return state.challenge(None);
+    }
     let allowed = super::access::allowed_absent(state, action, uri, agent).await;
-    if method == Method::DELETE && !uri.ends_with('/') && matches!(allowed, Ok(true)) {
+    if data_delete && matches!(allowed, Ok(true)) {
         match super::access::allowed_absent(state, Action::Read, uri, agent).await {
             Ok(false) => {
+                if parent_of(uri, &state.cfg.storage())
+                    .is_some_and(|parent| !state.visible(&parent))
+                {
+                    return set_aside_meanwhile();
+                }
                 return full(state, method)
                     .unwrap_or_else(|| StatusCode::NO_CONTENT.into_response())
             }
@@ -540,11 +550,12 @@ pub(crate) fn compares_state(headers: &HeaderMap, dated: bool) -> bool {
             .is_some())
 }
 
-/// Whether the request names a precondition requiring Read, including a bare `*`.
-pub(crate) fn names_precondition(headers: &HeaderMap, dated: bool) -> bool {
-    headers.contains_key(header::IF_MATCH)
-        || headers.contains_key(header::IF_NONE_MATCH)
-        || (dated && compares_state(headers, true))
+/// Whether a precondition requires Read: tags and applicable dates, plus bare `*` on DELETE.
+pub(crate) fn names_precondition(req: &LwsRequest, dated: bool) -> bool {
+    compares_state(&req.headers, dated)
+        || (req.method == Method::DELETE
+            && (req.headers.contains_key(header::IF_MATCH)
+                || req.headers.contains_key(header::IF_NONE_MATCH)))
 }
 
 /// A write's preconditions are answered only to a caller that may read what they compare
@@ -557,7 +568,7 @@ async fn precondition_read_check<S: Store + 'static>(
     agent: &Agent,
     dated: bool,
 ) -> Result<(), Response> {
-    if names_precondition(&req.headers, dated) {
+    if names_precondition(req, dated) {
         return recheck(state, Action::Read, uri, agent).await;
     }
     Ok(())
@@ -588,7 +599,7 @@ async fn unread_precondition<S: Store + 'static>(
     let reads = req.method == Method::PATCH
         || req.method == Method::PUT
         || (req.method == Method::DELETE && uri.ends_with('/'));
-    if !writes || (!reads && !names_precondition(&req.headers, dated)) {
+    if !writes || (!reads && !names_precondition(req, dated)) {
         return None;
     }
     if req.method == Method::POST
@@ -1707,7 +1718,7 @@ async fn create<S: Store + 'static>(
             None => return set_aside_meanwhile(),
         }
     };
-    if names_precondition(&req.headers, true)
+    if names_precondition(req, true)
         && !(parent == state.cfg.storage() && serves_description(req.header(header::ACCEPT)))
     {
         if let Err(r) = recheck(state, Action::Read, parent, agent).await {
@@ -6622,7 +6633,7 @@ mod tests {
 
     /// A write's precondition that compares the target's state tells the writer how a
     /// representation compares; one that may not read it is refused instead, whatever the outcome
-    /// would have been. A bare `*` requires Read too.
+    /// would have been. A bare `*` requires Read on DELETE only.
     #[tokio::test]
     async fn a_precondition_on_state_needs_read() {
         let mut cfg = super::super::LwsConfig::new(BASE);
@@ -13299,7 +13310,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bare_star_on_an_lws_resource_needs_read() {
+    async fn a_bare_star_on_an_lws_delete_needs_read() {
         use super::super::test_store as ts;
         let (state, store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
@@ -13323,8 +13334,8 @@ mod tests {
             .await
             .unwrap();
         for (method, paths, field) in [
-            (Method::POST, ["/c/", "/missing/"], "if-none-match"),
             (Method::DELETE, ["/there", "/missing"], "if-match"),
+            (Method::DELETE, ["/there", "/missing"], "if-none-match"),
         ] {
             let mut answers = Vec::new();
             for path in paths {
@@ -13365,6 +13376,95 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn lws_bare_star_post_works_without_read() {
+        use super::super::test_store as ts;
+        let (state, _store) = ts::counting_state(100).await;
+        let root = state.cfg.storage();
+        let writer = ts::agent("https://writer.example/#me");
+        state.access.put_grant_for_test(
+            "writer",
+            super::super::access::policies(
+                &json!([{
+                    "type": ["AccessPolicy"], "action": ["create"], "assignee": writer.subject
+                }]),
+                &root,
+            )
+            .unwrap(),
+        );
+        let container = format!("{root}c/");
+        state.store.write(&container, Bytes::new(), LWS_JSON).await.unwrap();
+        assert!(!state.check(Action::Read, &container, &writer).await.unwrap());
+        for (field, path, expected) in [
+            ("if-match", "/c/", StatusCode::CREATED),
+            ("if-none-match", "/c/", StatusCode::PRECONDITION_FAILED),
+            ("if-match", "/missing/", StatusCode::NOT_FOUND),
+            ("if-none-match", "/missing/", StatusCode::NOT_FOUND),
+        ] {
+            let response = handle(
+                &state,
+                &ts::request(
+                    Method::POST,
+                    path,
+                    &[(field, "*"), ("content-type", "text/plain")],
+                    "x",
+                ),
+                &writer,
+            )
+            .await;
+            assert_eq!(response.status(), expected, "{field} {path}");
+        }
+        assert_eq!(state.store.list_children(&container).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn nonreader_delete_under_a_set_aside_parent_answers_uniformly() {
+        use super::super::{test_store as ts, Prior};
+        for public in [false, true] {
+            let (state, _store) = ts::counting_state(100).await;
+            let root = state.cfg.storage();
+            let writer = if public {
+                Agent::anonymous()
+            } else {
+                ts::agent("https://writer.example/#me")
+            };
+            let assignee = if public {
+                json!(super::super::FOAF_AGENT)
+            } else {
+                json!(writer.subject)
+            };
+            let policy = json!({
+                "type": ["AccessPolicy"], "action": ["delete"], "assignee": assignee
+            });
+            state.access.put_grant_for_test(
+                "writer",
+                super::super::access::policies(&json!([policy]), &root).unwrap(),
+            );
+            let there = ts::data(&state, "there").await;
+            state.locks.hide(
+                std::slice::from_ref(&root),
+                std::collections::HashMap::from([(
+                    root.clone(),
+                    Prior { existed: Some(true), ..Default::default() },
+                )]),
+            );
+            let mut answers = Vec::new();
+            for path in ["/there", "/missing"] {
+                let response = handle(
+                    &state,
+                    &ts::request(Method::DELETE, path, &[], ""),
+                    &writer,
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+                answers.push(delete_answer(response).await);
+            }
+            assert_eq!(answers[0], answers[1]);
+            assert!(state.store.exists(&there).await.unwrap());
+            state.locks.show(std::slice::from_ref(&root));
+        }
     }
 
     #[tokio::test]
@@ -13431,7 +13531,9 @@ mod tests {
             let (state, store) = ts::counting_state(100).await;
             let root = state.cfg.storage();
             let writer = ts::agent("https://writer.example/#me");
-            let mut policies = json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject}]);
+            let mut policies = json!([{
+                "type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject
+            }]);
             if kind != "creator" {
                 policies.as_array_mut().unwrap().push(json!({
                     "type": ["AccessPolicy"], "action": ["read"], "assignee": writer.subject,
@@ -13556,9 +13658,16 @@ mod tests {
         let (state, _store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
         let writer = ts::agent("https://writer.example/#me");
-        state.access.put_grant_for_test("writer", super::super::access::policies(
-            &json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject}]), &root
-        ).unwrap());
+        state.access.put_grant_for_test(
+            "writer",
+            super::super::access::policies(
+                &json!([{
+                    "type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject
+                }]),
+                &root,
+            )
+            .unwrap(),
+        );
         let there = ts::data(&state, "there").await;
         state.locks.hide(
             std::slice::from_ref(&there),
@@ -13599,7 +13708,10 @@ mod tests {
                 state.access.put_grant_for_test("reader", super::super::access::policies(&json!([
                     {"type": ["AccessPolicy"], "action": ["read"], "assignee": caller.subject},
                     {"type": ["AccessPolicy"], "action": ["delete"], "assignee": caller.subject,
-                     "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": "https://example/T"}]}
+                     "constraint": [{
+                         "leftOperand": "type", "operator": "eq",
+                         "rightOperand": "https://example/T"
+                     }]}
                 ]), &root).unwrap());
             }
             let there = state.cfg.absolute("/there");
@@ -13627,7 +13739,11 @@ mod tests {
             let guard = state.locks.lock(&there).await.unwrap();
             let response = delete(&state, &request, &caller, &there);
             tokio::pin!(response);
-            tokio::select! { biased; _ = &mut response => panic!("delete did not wait"), () = async {} => {} }
+            tokio::select! {
+                biased;
+                _ = &mut response => panic!("delete did not wait"),
+                () = async {} => {}
+            }
             state.store.delete(&there, Some(&root)).await.unwrap();
             // An orphan record must not turn absence into a metadata parse error.
             state
@@ -13775,7 +13891,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bare_star_create_rechecks_read_after_waiting_for_the_lock() {
+    async fn a_tagged_create_rechecks_read_after_waiting_for_the_lock() {
         use super::super::test_store as ts;
         let (state, _store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
@@ -13797,7 +13913,7 @@ mod tests {
             Method::POST,
             "/",
             &[
-                ("if-match", "*"),
+                ("if-match", "\"tag\""),
                 ("content-type", "text/plain"),
                 ("accept", "text/turtle"),
             ],

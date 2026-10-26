@@ -390,7 +390,7 @@ mod tests {
 
     /// The server started again over the same store, as after a process stop.
     async fn restart(store: &FlakyStore) -> LwsState<FlakyStore> {
-        super::super::test_store::wait_for_stop(store).await;
+        super::super::test_store::wait_for_stop(store, "restart").await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
@@ -700,7 +700,7 @@ mod tests {
     }
 
     async fn start(store: &FlakyStore) -> Result<LwsState<FlakyStore>, String> {
-        super::super::test_store::wait_for_stop(store).await;
+        super::super::test_store::wait_for_stop(store, "start").await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         LwsState::new(store.clone(), cfg).await
@@ -800,7 +800,11 @@ mod tests {
         let mut cfg = LwsConfig::new("http://localhost:3001");
         cfg.open = true;
         drop(st);
-        super::super::test_store::wait_for_stop(&store).await;
+        super::super::test_store::wait_for_stop(
+            &store,
+            "a_start_leaves_another_storages_holds",
+        )
+        .await;
         let other = LwsState::new(store.clone(), cfg).await.expect("starts");
         assert_eq!(
             other.store.holds().await.unwrap().len(),
@@ -1318,9 +1322,17 @@ mod tests {
             .await
             .unwrap();
         drop(st);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "a_start_that_fails_leaves_nothing_running",
+        )
+        .await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
-        assert!(LwsState::new(store.clone(), cfg).await.is_err());
+        let Err(why) = LwsState::new(store.clone(), cfg).await else {
+            panic!("the malformed intent did not stop the start");
+        };
+        assert!(why.contains("intent") && why.contains("expected"), "{why}");
         // The unreadable intent is repaired; the store is well; the next start puts `/d` back,
         // and a write after it stands, however long a task of the failed start might wait.
         clear(&store, &bad, None).await.unwrap();
@@ -1373,7 +1385,11 @@ mod tests {
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         drop(st);
-        super::super::test_store::wait_for_stop(&store).await;
+        super::super::test_store::wait_for_stop(
+            &store,
+            "an_unreadable_intent_stops_the_start",
+        )
+        .await;
         let err = LwsState::new(store.clone(), cfg)
             .await
             .err()

@@ -845,13 +845,14 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. Any `If-Match` or `If-None-Match` field, including a bare `*`,
-  requires Read on a resource. The Read check comes before authorization waits, existence,
-  metadata and format lookups. `If-Unmodified-Since` requires Read when the route evaluates
-  the date. A bare `*` can still avoid generating a listing after Read is granted. Service
-  containers (grants, requests and subscriptions) retain their existence-only `*` handling.
-  A conditional `POST` to the storage
-  root compares its public storage description, which needs no Read. A data `PUT`'s, or any
+  outcome would have been. A bare `*` requires Read on LWS resource `DELETE` only;
+  `POST` with `If-Match: *` or `If-None-Match: *` works without Read, since even an
+  unconditional create discloses whether its container exists. Tags and applicable dates
+  still require Read on every method. The Read check comes before authorization waits,
+  existence, metadata and format lookups. A bare `*` can avoid generating a listing.
+  Service containers (grants, requests and subscriptions) retain their existence-only `*`
+  handling. A conditional `POST` to the storage root compares its public storage
+  description, which needs no Read, when `Accept` selects the description. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
   that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
   follow from what is stored needs Read as well as Modify (or Delete): a `PUT` replacing a data
@@ -871,7 +872,8 @@ What the server exposes, all discoverable from the storage description
 - Resource-linkset `OPTIONS` returns a fixed `204`; unsupported methods such as `POST` and
   `DELETE` return `405`. Both answer before authorization, existence checks, preconditions,
   or set-aside checks, with fixed `Allow`, `Accept-Patch`, and anchor `Link` headers and no
-  backend reads.
+  backend reads. This also changes readers' answers: an absent target previously answered
+  `404`, and a set-aside target `503`, for `OPTIONS`.
 - Unconditional LWS data-resource `DELETE` by a caller whose unconstrained Delete grant applies
   but who lacks Read answers `204` for settled present and absent targets, and for an absent prior
   during an in-flight or set-aside create. This includes anonymous callers with a public Delete
@@ -881,7 +883,8 @@ What the server exposes, all discoverable from the storage description
   decision too: type-constrained Delete grants are refused and callers needing authentication
   are challenged without reading orphan metadata. A full set-aside budget instead returns `503` with
   `Retry-After`. A set-aside change to a previously present resource still returns `503` to an
-  authorized caller. An absent delete changes and announces nothing. An authenticated caller
+  authorized caller. A set-aside parent container returns `503` for both a present and an
+  absent child. An absent delete changes and announces nothing. An authenticated caller
   allowed both Delete and Read for absence retains `404`. Container deletion still requires Read. Residual: pending metadata
   on a present resource or Delete grants constrained by type or format can produce different
   answers from absence; those constraints are the caller's requested policy.

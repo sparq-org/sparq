@@ -666,8 +666,6 @@ pub async fn allowed<S: Store + 'static>(
             creator: Option<String>,
             #[serde(default, rename = "pending")]
             _pending: bool,
-            #[serde(flatten)]
-            _rest: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
         }
         let meta: Creator = match state.store.read(&super::meta_key(uri)).await {
             Ok(r) => serde_json::from_slice(&r.body).map_err(|e| {
@@ -1950,11 +1948,24 @@ mod tests {
             .to_string();
         // A read that fails stops the start, whichever record it is.
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "records_that_cannot_be_read_are_quarantined_until_deleted",
+        )
+        .await;
         for iri in [&request, &grant] {
             *store.fail_read_of_any.lock().unwrap() = vec![iri.clone()];
             let mut cfg = LwsConfig::new("http://localhost:3000");
             cfg.open = true;
-            assert!(LwsState::new(store.clone(), cfg).await.is_err(), "{iri}");
+            let Err(why) = LwsState::new(store.clone(), cfg).await else {
+                panic!("{iri}: the injected read failure did not stop the start");
+            };
+            assert!(why.contains("disk on fire"), "{iri}: {why}");
+            super::super::test_store::wait_for_stop(
+                &store,
+                "records_that_cannot_be_read_are_quarantined_until_deleted",
+            )
+            .await;
         }
         store.fail_read_of_any.lock().unwrap().clear();
         let state = restart(&store).await;
@@ -2811,6 +2822,11 @@ mod tests {
         }
         let cfg = state.cfg.clone();
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "requests_stored_past_their_quota_are_kept_reported_and_admit_no_more",
+        )
+        .await;
         let state = LwsState::new(store.clone(), cfg).await.unwrap();
         assert_eq!(
             state.access.requests.read().unwrap().len(),
@@ -2954,7 +2970,7 @@ mod tests {
 
     /// The server started again over `store`, as after a process stop.
     async fn restart(store: &test_store::FlakyStore) -> LwsState<test_store::FlakyStore> {
-        super::super::test_store::wait_for_stop(store).await;
+        super::super::test_store::wait_for_stop(store, "restart").await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
@@ -3971,9 +3987,17 @@ mod tests {
         let requests = state.cfg.absolute(REQUESTS_PATH);
         *store.fail_exists_of.lock().unwrap() = Some(requests.clone());
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "a_start_that_fails_loading_requests_leaves_nothing_running",
+        )
+        .await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
-        assert!(LwsState::new(store.clone(), cfg).await.is_err());
+        let Err(why) = LwsState::new(store.clone(), cfg).await else {
+            panic!("the injected existence failure did not stop the start");
+        };
+        assert!(why.contains("disk on fire"), "{why}");
         // Nothing of the failed start keeps trying to put `/d` back.
         let tried = store.restores.load(std::sync::atomic::Ordering::SeqCst);
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
