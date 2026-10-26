@@ -225,8 +225,9 @@ impl Drop for SaveDirectories {
 /// The actor thread's body: run jobs one at a time until the channel closes.
 ///
 /// A panicking job POISONS the actor — it is caught (so the panic never unwinds out of the thread
-/// and is never silently swallowed either), then the loop BREAKS, dropping the receiver. That makes
-/// every subsequent `send` fail, so all later calls get the fail-closed [`ACTOR_STOPPED`] error.
+/// and is never silently swallowed either), then the loop breaks and closes the receiver. Queued
+/// jobs are dropped, including sends already in flight, so all waiting and later callers receive
+/// the fail-closed [`ACTOR_STOPPED`] error.
 /// This deliberately reproduces the previous slice's `Mutex` poisoning: a panic mid-update may have
 /// left the `Graph` half-mutated, so the fail-closed posture is to serve nothing further rather than
 /// hand out reads of a torn index. An indeterminate commit stops the actor the same way.
@@ -245,6 +246,12 @@ fn actor_loop(graph: Graph, mut rx: mpsc::UnboundedReceiver<Job>) {
         if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut graph))).is_err() || graph.stopped {
             break;
         }
+    }
+    rx.close();
+    // Receive until all sends admitted before close have finished pushing. Dropping the
+    // receiver alone can miss an in-flight send and leave its reply sender alive forever.
+    while let Some(job) = rx.blocking_recv() {
+        drop(job);
     }
 }
 

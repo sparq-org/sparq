@@ -722,17 +722,14 @@ impl SolidMcpServer {
     /// (re-)materializing the authorization view under the configured model so the
     /// served view is never stale and always matches [`SolidServerConfig::acp`].
     ///
-    /// Directory-backed input is served through an in-memory fork. Resource slot swaps and
-    /// their rollback operate on that working copy; persist it separately with `Graph::save`.
+    /// Directory-backed input retains its durable storage. SPARQL updates are journaled;
+    /// resource put/delete and container creation refuse directory-backed stores because
+    /// their slot replacement and rollback require an in-memory dataset.
     ///
     /// # Errors
     ///
     /// Returns `Err` if that materialization fails.
-    pub fn with_config(mut store: PodStore, config: SolidServerConfig) -> Result<Self, String> {
-        if store.graph().is_directory_backed() {
-            let fork = store.graph().fork();
-            *store.graph_unchecked_mut() = fork;
-        }
+    pub fn with_config(store: PodStore, config: SolidServerConfig) -> Result<Self, String> {
         let mut server = SolidMcpServer {
             store,
             config,
@@ -1515,10 +1512,19 @@ impl SolidMcpServer {
         Ok(())
     }
 
+    /// Slot replacement and rollback require a dataset without a durable root.
+    fn require_resource_slots(&self) -> Result<(), String> {
+        if self.store.graph().is_directory_backed() {
+            return Err("resource-slot tools (resource put/delete, container creation, and ACL slot edits) are unavailable on directory-backed stores; use SPARQL update for durable writes".into());
+        }
+        Ok(())
+    }
+
     /// `resource_put`: create/replace one document (LDP PUT). ACL documents route
     /// through the authoritative write-through; content documents are parse-first,
     /// containment-linked on create, and re-materialized with rollback-on-error.
     fn tool_resource_put(&mut self, args: &Value) -> Result<String, String> {
+        self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
         let content = arg_str(args, "content")?.to_string();
         let content_type = arg_str(args, "content_type")?.to_string();
@@ -1603,6 +1609,7 @@ impl SolidMcpServer {
     /// `resource_delete`: delete one document (LDP DELETE). Rejects non-empty
     /// containers; ACL documents route through the authoritative write-through.
     fn tool_resource_delete(&mut self, args: &Value) -> Result<String, String> {
+        self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
         let name = valid_target(&url)?;
 
@@ -1673,6 +1680,7 @@ impl SolidMcpServer {
     /// `container_create`: create one empty, typed container and link it into its
     /// parent containers.
     fn tool_container_create(&mut self, args: &Value) -> Result<String, String> {
+        self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
         let name = valid_target(&url)?;
         if !url.ends_with('/') {
@@ -2029,10 +2037,10 @@ mod unit {
         assert!(c.agent.is_none() && c.client.is_none() && c.issuer.is_none() && c.now.is_none());
     }
 
-    /// Durable input supplies a working copy for resource, containment and rollback edits.
+    /// Updates retain their WAL; slot tools refuse before changing the dataset.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn directory_backed_input_uses_a_working_copy_for_resource_slots() {
+    fn directory_backed_updates_survive_reopen_and_slot_tools_refuse() {
         let root =
             std::env::temp_dir().join(format!("sparq-mcp-working-copy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -2057,35 +2065,36 @@ mod unit {
             ..Default::default()
         };
         let mut server = SolidMcpServer::with_config(store, config).unwrap();
-        assert!(!server.store().graph().is_directory_backed());
-        for value in ["first", "second"] {
-            server.tool_resource_put(&json!({
-                "url": "https://pod.ex/fresh/note",
-                "content": format!("<https://pod.ex/fresh/note#it> <https://ex.dev/p> \"{value}\" ."),
-                "content_type": "text/turtle"
-            })).unwrap();
+        let response: Value = serde_json::from_str(&server.handle_message(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "update", "arguments": {"sparql":
+                "INSERT DATA { GRAPH <https://pod.ex/> { <https://pod.ex/#new> <https://ex.dev/p> \"saved\" } }"}}
+        }).to_string()).unwrap()).unwrap();
+        assert_eq!(response["result"]["isError"], false, "{response}");
+        let mut slot_responses = Vec::new();
+        for (tool, arguments) in [
+            ("resource_put", json!({"url": "https://pod.ex/note", "content": "", "content_type": "text/turtle"})),
+            ("resource_delete", json!({"url": "https://pod.ex/"})),
+            ("container_create", json!({"url": "https://pod.ex/created/"})),
+            ("resource_put", json!({"url": "https://pod.ex/.acl", "content": "", "content_type": "text/turtle"})),
+            ("resource_delete", json!({"url": "https://pod.ex/.acl"})),
+        ] {
+            let response: Value = serde_json::from_str(&server.handle_message(&json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments}
+            }).to_string()).unwrap()).unwrap();
+            slot_responses.push(response);
         }
-        server
-            .tool_container_create(&json!({"url": "https://pod.ex/created/"}))
-            .unwrap();
-        let name = Term::NamedNode(NamedNode::new_unchecked("https://pod.ex/fresh/note"));
-        let prior = server.take_slot(&name).unwrap();
-        server.restore_slot(&name, prior);
-        assert!(server.store().graph().named_graph(&name).is_some());
-        assert!(server
-            .slot_index(&Term::NamedNode(NamedNode::new_unchecked(
-                "https://pod.ex/fresh/"
-            )))
-            .is_some());
         drop(server);
-        let mut graph = Graph::open(&dir).unwrap();
-        assert!(graph.named_graph(&name).is_none());
-        assert_eq!(graph.named().len(), 2);
-        let slot = graph.ensure_named(&name).unwrap();
-        graph.apply_delta_to_named(slot, &[], &[]).unwrap();
-        graph.compact().unwrap();
+        let graph = Graph::open(&dir).unwrap();
+        assert!(sparq_engine::ask(&graph,
+            "ASK { GRAPH <https://pod.ex/> { <https://pod.ex/#new> <https://ex.dev/p> \"saved\" } }").unwrap());
+        for response in slot_responses {
+            assert_eq!(response["result"]["isError"], true, "{response}");
+            assert!(response.to_string().contains("unavailable on directory-backed stores"), "{response}");
+        }
+        assert!(graph.named_graph(&Term::NamedNode(NamedNode::new_unchecked("https://pod.ex/created/"))).is_none());
         drop(graph);
-        assert!(Graph::open(&dir).unwrap().named_graph(&name).is_some());
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -79,7 +79,7 @@ fn rust_auth_set(s: &Scenario) -> AuthSet {
     }
     // Exercise the REAL bridge: materialize both sides into a fresh dataset's auth view.
     let mut graph = Graph::new();
-    let outcome = materialize_policy(&mut graph, &policy, &req);
+    let outcome = materialize_policy(&mut graph, &policy, &req).unwrap();
     let mut set: AuthSet = Vec::new();
     if let Some(t) = outcome.grant_triple {
         set.push(t);

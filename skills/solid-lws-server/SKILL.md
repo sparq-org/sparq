@@ -75,7 +75,9 @@ Set `PSS_SPARQ_BACKEND` to one of:
   save alias are removed when empty on compaction or failure. A frozen graph,
   path resolution or snapshot/compaction I/O failure, unavailable compaction (including
   a missing outside lock or poisoned transaction journal), or stopped actor returns a
-  backend error. Dropping the last client joins its actor thread, releasing the directory
+  backend error. After an indeterminate commit or job panic, the actor closes its queue and
+  drops pending jobs, including sends already in flight; their callers receive the stopped-actor
+  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
   lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
   writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set

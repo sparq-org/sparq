@@ -2313,6 +2313,7 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
     // One index rebuild for the whole request, however many targets it evaluates.
     if store
         .materialize_odrl_policy_for_each(&policy, &requests)
+        .map_err(|_| json_error(StatusCode::SERVICE_UNAVAILABLE, "authorization view write failed"))?
         .iter()
         .any(|o| o.refused)
     {

@@ -44,7 +44,7 @@ fn req(action_local: &str, party: &str, at: Option<&str>) -> Request {
 fn rust_outcome(policy_ttl: &str, request: &Request) -> sparq_solid::odrl_bridge::BridgeOutcome {
     let policy = parse_policy_str(policy_ttl, "turtle").expect("policy parses");
     let mut graph = Graph::new();
-    materialize_policy(&mut graph, &policy, request)
+    materialize_policy(&mut graph, &policy, request).unwrap()
 }
 
 // ── Defect 1: the two-operand expired permission ─────────────────────────────

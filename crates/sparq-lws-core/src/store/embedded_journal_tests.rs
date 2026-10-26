@@ -511,6 +511,73 @@ async fn indeterminate_commit_stops_reads_writes_and_snapshots() {
     assert!(!dir.open().exists(CHILD).await.unwrap());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn concurrent_calls_during_actor_shutdown_all_resolve() {
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    let dir = Directory::empty();
+    for round in 0..200 {
+        let c = dir.open();
+        let start = Arc::new(tokio::sync::Notify::new());
+        let ready = Arc::new(tokio::sync::Barrier::new(65));
+        let mut callers = tokio::task::JoinSet::new();
+        for _ in 0..64 {
+            let c = c.clone();
+            let start = Arc::clone(&start);
+            let ready = Arc::clone(&ready);
+            callers.spawn(async move {
+                // Register before the stop job wakes every contender at once.
+                let notified = start.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                ready.wait().await;
+                notified.await;
+                timeout(Duration::from_secs(5), async {
+                    for _ in 0..8 {
+                        let error = c.exists(CHILD).await.unwrap_err();
+                        assert!(matches!(error, SparqError::Backend(ref e) if e == ACTOR_STOPPED));
+                    }
+                })
+                .await
+                .expect("a shutdown caller did not receive ACTOR_STOPPED");
+            });
+        }
+        ready.wait().await;
+        let error = timeout(
+            Duration::from_secs(5),
+            c.dispatch(move |g| {
+                g.apply_failure = Some(sparq_engine::ApplyError {
+                    applied: true,
+                    message: "injected shutdown".into(),
+                });
+                let result = commit(g, "INSERT DATA { <urn:s> <urn:p> <urn:o> }", "shutdown");
+                // Release callers after stopped is set, racing the reply and receiver shutdown.
+                start.notify_waiters();
+                result
+            }),
+        )
+        .await
+        .expect("stop reply timed out")
+        .unwrap_err();
+        assert!(matches!(error, SparqError::Backend(ref e) if e.contains("indeterminate")));
+        while let Some(result) = callers.join_next().await {
+            result.unwrap_or_else(|error| panic!("shutdown round {round}: {error}"));
+        }
+        // The last-client drop joins the actor; it must not wait for an unserved job.
+        // A separate thread lets the timeout fail without blocking runtime shutdown.
+        let (joined_tx, joined_rx) = oneshot::channel();
+        std::thread::spawn(move || {
+            drop(c);
+            let _ = joined_tx.send(());
+        });
+        timeout(Duration::from_secs(5), joined_rx)
+            .await
+            .expect("actor join timed out")
+            .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn materialization_failure_stops_the_actor_and_reopens_the_committed_frame() {
     let dir = Directory::empty();

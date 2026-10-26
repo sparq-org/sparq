@@ -616,3 +616,25 @@ fn read_only_replays_pending_logs_without_changing_their_bytes() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// Repeated root staging refusals leave both the base and logged deltas recoverable.
+#[test]
+fn refused_root_swap_twice_preserves_all_data_on_reopen() {
+    let root = scratch("root-staging-twice");
+    let dir = root.join("g");
+    let mut g = open_with_logged_update(&dir);
+    let new = is(&staging_path(&dir, "compact-new"));
+    fault::fail_every(move |step, p| step == "create" && new(p));
+    for _ in 0..2 {
+        assert!(g.compact().is_err());
+        assert!(!g.is_frozen());
+        assert!(has(&g, "a") && has(&g, "a2"));
+        assert!(has(sub(&g, "g0"), "b2"));
+    }
+    assert_eq!(fault::disarm(), 2, "both root staging attempts must fail");
+    g.apply_delta(&[triple("after-refusals")], &[]).unwrap();
+    drop(g);
+    assert_intact(&dir);
+    assert!(has(&Graph::open(&dir).unwrap(), "after-refusals"));
+    std::fs::remove_dir_all(root).unwrap();
+}

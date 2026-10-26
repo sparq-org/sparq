@@ -678,7 +678,7 @@ fn prepare_auth_view(graph: &mut Graph) -> Result<(), String> {
         })
         .collect();
     for name in reserved {
-        graph.drop_named_durable(&name)?;
+        crate::loader::drop_named_view(graph, &name)?;
     }
     Ok(())
 }

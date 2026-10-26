@@ -420,7 +420,7 @@ pub(crate) fn strip_reserved_graphs(graph: &mut Graph) -> Result<(), String> {
             })
             .collect();
         for name in reserved {
-            graph.drop_named_durable(&name)?;
+            drop_named_view(graph, &name)?;
         }
         return Ok(());
     }
@@ -430,12 +430,49 @@ pub(crate) fn strip_reserved_graphs(graph: &mut Graph) -> Result<(), String> {
     })
 }
 
+/// Remove a view only when its slot exists; a durable drop rewrites surviving slots.
+pub(crate) fn drop_named_view(graph: &mut Graph, name: &Term) -> Result<(), String> {
+    if graph.named_graph(name).is_none() {
+        return Ok(());
+    }
+    view_write_fault()?;
+    if graph.is_directory_backed() {
+        while graph.named_graph(name).is_some() {
+            graph.drop_named_durable(name)?;
+        }
+        Ok(())
+    } else {
+        graph.retain_named(|n, _| n != name)
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static FAIL_VIEW_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static FAIL_ALL_VIEW_WRITES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[inline]
+fn view_write_fault() -> Result<(), String> {
+    #[cfg(test)]
+    if FAIL_VIEW_WRITE.replace(false) || FAIL_ALL_VIEW_WRITES.get() {
+        return Err("injected authorization view write failure".into());
+    }
+    Ok(())
+}
+
 /// Install a named view through logged writes when the dataset has a durable root.
 pub(crate) fn install_named_view(graph: &mut Graph, name: Term, view: Graph) -> Result<(), String> {
     if graph.is_directory_backed() {
-        let inserts = graph_triples(&view);
         let slot = graph.ensure_named(&name)?;
-        let deletes = graph_triples(&graph.named()[slot].1);
+        let old: FxHashSet<_> = graph_triples(&graph.named()[slot].1).into_iter().collect();
+        let new: FxHashSet<_> = graph_triples(&view).into_iter().collect();
+        let inserts: Vec<_> = new.difference(&old).cloned().collect();
+        let deletes: Vec<_> = old.difference(&new).cloned().collect();
+        if inserts.is_empty() && deletes.is_empty() {
+            return Ok(());
+        }
+        view_write_fault()?;
         graph.apply_delta_to_named(slot, &inserts, &deletes)
     } else {
         graph.set_named(name, view).map(|_| ())

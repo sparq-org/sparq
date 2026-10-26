@@ -287,6 +287,11 @@ impl AclIndex {
         AclIndex { control, materialized }
     }
 
+    /// A dropped view stays unavailable even if storage refused to remove its slot.
+    pub(crate) fn mark_unmaterialized(&mut self) {
+        self.materialized = false;
+    }
+
     /// The control-document IRI governing `resource`, if one exists in the dataset
     /// (`<resource>.acl` / `<resource>.acr`).
     fn own_acl(&self, resource: &str) -> Option<String> {

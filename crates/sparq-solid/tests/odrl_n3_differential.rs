@@ -56,7 +56,7 @@ fn rust_set(policy_ttl: &str, action_local: &str, party: &str, at: Option<&str>)
         req = req.at(t);
     }
     let mut graph = Graph::new();
-    let outcome = materialize_policy(&mut graph, &policy, &req);
+    let outcome = materialize_policy(&mut graph, &policy, &req).unwrap();
     let mut set = AuthSet::new();
     if let Some(t) = outcome.grant_triple {
         set.push(t);
@@ -901,7 +901,7 @@ fn assert_not_more_permissive(
     };
 
     let mut rust_graph = Graph::new();
-    let rust = materialize_policy(&mut rust_graph, &policy, &request);
+    let rust = materialize_policy(&mut rust_graph, &policy, &request).unwrap();
     if rust.refused {
         cov.rust_refused += 1;
     }

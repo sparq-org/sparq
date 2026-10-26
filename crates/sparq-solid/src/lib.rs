@@ -213,10 +213,6 @@ fn wrap_read(sparql: &str) -> Result<String, String> {
 pub struct StoredGraphs(FxHashSet<String>);
 
 
-/// Context for bridge and trust view installation on a writable dataset.
-#[cfg(any(feature = "odrl-bridge", feature = "trust-graph"))]
-pub(crate) const WRITABLE: &str = "the auth view update completed on the writable dataset";
-
 /// A pod dataset + its materialized auth view + the per-session graph-set cache.
 ///
 /// The central type of this crate: wrap a loaded dataset with [`PodStore::new`],
@@ -659,7 +655,7 @@ impl PodStore {
         self.view_dropped = false;
         self.acp_uses_provenance = false;
         self.installed_acp = Some(false);
-        self.reconcile_bridged_after_static();
+        self.reconcile_bridged_after_static()?;
         self.reindex_with(scope);
         Ok(stats)
     }
@@ -673,17 +669,18 @@ impl PodStore {
     /// (the baseline is the static view verbatim). No-op without the `odrl-bridge`
     /// feature, or when no grants were ever bridged.
     #[cfg(feature = "odrl-bridge")]
-    fn reconcile_bridged_after_static(&mut self) {
+    fn reconcile_bridged_after_static(&mut self) -> Result<(), String> {
         self.bridge_ledger.capture_static_baseline(&self.graph);
         // refresh() rebuilds from the just-captured baseline and replays the ledger. A static
         // materialization clears the drop first, so this always runs.
-        let _ = self.refresh_bridged();
+        self.refresh_bridged()?;
+        Ok(())
     }
 
     /// No-op stub when the bridge is compiled out — the core build has no bridged state.
     #[cfg(not(feature = "odrl-bridge"))]
     #[inline]
-    fn reconcile_bridged_after_static(&mut self) {}
+    fn reconcile_bridged_after_static(&mut self) -> Result<(), String> { Ok(()) }
 
     /// (Re-)materialize the ACP auth view from the `.acr` graphs.
     ///
@@ -1127,7 +1124,7 @@ impl PodStore {
         self.installed_acp = Some(true);
         self.record_static_coverage();
         self.view_dropped = false;
-        self.reconcile_bridged_after_static();
+        self.reconcile_bridged_after_static()?;
         self.reindex_with(scope);
         Ok(stats)
     }
@@ -1155,7 +1152,11 @@ impl PodStore {
     /// by the next decision and no stale ACL discovery survives.
     fn reindex_with(&mut self, scope: ReindexScope) {
         let old_auth = Arc::clone(&self.auth);
-        let new_auth = Arc::new(AuthIndex::from_graph(&self.graph));
+        let new_auth = Arc::new(if self.view_dropped {
+            AuthIndex::default()
+        } else {
+            AuthIndex::from_graph(&self.graph)
+        });
         self.auth = Arc::clone(&new_auth);
         self.epoch += 1;
         match scope {
@@ -1211,7 +1212,13 @@ impl PodStore {
     /// [`PodStore::resolve_acl`] so a decision is a point lookup, not a per-call whole-store
     /// scan. `reindex` empties the cell, so this can never outlive an ACL change.
     fn acl_index(&self) -> &decide::AclIndex {
-        self.acl_index.get_or_init(|| decide::AclIndex::build(&self.graph))
+        self.acl_index.get_or_init(|| {
+            let mut index = decide::AclIndex::build(&self.graph);
+            if self.view_dropped {
+                index.mark_unmaterialized();
+            }
+            index
+        })
     }
 
     /// The sorted named-graph set this session may access in `mode`
@@ -2400,9 +2407,21 @@ impl PodStore {
     /// Rebuild the bridged grants from the ledger's baseline, as [`PodStore::grant_view`]
     /// allows: `None` (nothing touched) while the view is dropped, else the number retracted.
     #[cfg(feature = "odrl-bridge")]
-    fn refresh_bridged(&mut self) -> Option<usize> {
-        let Self { graph, bridge_ledger, view_dropped, .. } = self;
-        (!*view_dropped).then(|| bridge_ledger.refresh(graph))
+    fn refresh_bridged(&mut self) -> Result<Option<usize>, String> {
+        if !self.may_install_grants() {
+            return Ok(None);
+        }
+        let result = self.bridge_ledger.refresh(&mut self.graph);
+        self.grant_write_result(result).map(Some)
+    }
+
+    /// A failed derived-view write can leave a partial view; disable it before returning.
+    #[cfg(any(feature = "odrl-bridge", feature = "trust-graph"))]
+    pub(crate) fn grant_write_result<T>(&mut self, result: Result<T, String>) -> Result<T, String> {
+        if result.is_err() {
+            self.drop_auth_view();
+        }
+        result
     }
 
     /// sq-h3uk — evaluate an ODRL `policy` against `request` and, on a
@@ -2432,22 +2451,26 @@ impl PodStore {
     /// from the embedding application: the store never reads them from pod content, so pass
     /// only a policy the application itself vetted.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_permission(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::materialize_permission(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted {
             // Track for refresh/retraction (sq-dpk4), then rebuild index + drop cache.
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Permission);
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-w693 — evaluate an ODRL `policy`'s prohibitions against `request`
@@ -2465,21 +2488,25 @@ impl PodStore {
     /// without a concrete party/target materializes NOTHING and leaves the auth view
     /// (and session index) untouched.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_prohibition(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::materialize_prohibition(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Prohibition);
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-w693 — materialize **both** sides of an ODRL `policy` for
@@ -2492,37 +2519,45 @@ impl PodStore {
     /// enforcement time (deny-overrides — the session layer subtracts `∪ deny` from
     /// `∪ allow`). Each side is independently fail-closed.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_policy(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::materialize_policy(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted || outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Policy);
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// [`PodStore::materialize_odrl_policy`] for every request in `requests`, writing the
     /// auth view and rebuilding the session index once for the whole batch instead of
     /// once per request. Outcomes are parallel to `requests`.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_policy_for_each(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         requests: &[sparq_policy::Request],
-    ) -> Vec<odrl_bridge::BridgeOutcome> {
+    ) -> Result<Vec<odrl_bridge::BridgeOutcome>, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return vec![odrl_bridge::BridgeOutcome::default(); requests.len()];
+            return Ok(vec![odrl_bridge::BridgeOutcome::default(); requests.len()]);
         };
         let outcomes = odrl_bridge::materialize_policy_for_each(view, policy, requests);
+        let outcomes = self.grant_write_result(outcomes)?;
         let materialized: Vec<&sparq_policy::Request> = requests
             .iter()
             .zip(&outcomes)
@@ -2534,7 +2569,7 @@ impl PodStore {
                 .record_each(policy, materialized, odrl_bridge::BridgeKind::Policy);
             self.reindex_with(ReindexScope::Full);
         }
-        outcomes
+        Ok(outcomes)
     }
 
     /// How many times the authorization index has been rebuilt since this store was
@@ -2549,17 +2584,21 @@ impl PodStore {
     /// recipient/assignee/dateTime constraints as re-checked condition heads; see
     /// [`odrl_bridge::materialize_permission_conditional`].
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_permission_conditional(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome =
             odrl_bridge::materialize_permission_conditional(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted {
             self.bridge_ledger.record(
                 policy,
@@ -2568,7 +2607,7 @@ impl PodStore {
             );
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-4r70 — the deny dual of
@@ -2580,17 +2619,21 @@ impl PodStore {
     /// **overrides** any allow for the same target and mode (deny-overrides). See
     /// [`odrl_bridge::materialize_prohibition_conditional`] for the full rationale.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_prohibition_conditional(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome =
             odrl_bridge::materialize_prohibition_conditional(view, policy, request);
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.prohibited {
             self.bridge_ledger.record(
                 policy,
@@ -2599,7 +2642,7 @@ impl PodStore {
             );
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// Bridge a permission through the count-aware decision: evaluate `policy` against
@@ -2627,15 +2670,18 @@ impl PodStore {
     /// or a request without a concrete party/target materializes NOTHING. Only present
     /// under the `count-enforcement` feature.
     #[cfg(feature = "count-enforcement")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn materialize_odrl_permission_counted(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
-    ) -> odrl_bridge::BridgeOutcome {
+    ) -> Result<odrl_bridge::BridgeOutcome, String> {
         // A dropped view is not rebuilt by bridging onto it.
         let Some(view) = self.grant_view() else {
-            return odrl_bridge::BridgeOutcome::default();
+            return Ok(odrl_bridge::BridgeOutcome::default());
         };
         let outcome = odrl_bridge::count::materialize_permission_counted(
             view,
@@ -2643,6 +2689,7 @@ impl PodStore {
             request,
             store.as_ref(),
         );
+        let outcome = self.grant_write_result(outcome)?;
         if outcome.granted {
             // Remember the store so refresh can re-check the budget (read-only), then
             // track the counted grant for refresh/retraction, then rebuild the index.
@@ -2655,7 +2702,7 @@ impl PodStore {
             );
             self.reindex_with(ReindexScope::Full);
         }
-        outcome
+        Ok(outcome)
     }
 
     /// sq-dpk4 — re-evaluate **every bridged ODRL grant** this store is
@@ -2693,13 +2740,16 @@ impl PodStore {
     ///   replays the policy AS TRACKED — to refresh against a mutated policy, call the
     ///   bridge entry point again with the new policy first.
     #[cfg(feature = "odrl-bridge")]
-    pub fn refresh_odrl_grants(&mut self) -> usize {
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
+    pub fn refresh_odrl_grants(&mut self) -> Result<usize, String> {
         // A dropped view is not rebuilt from the baseline captured before the drop.
-        let Some(retracted) = self.refresh_bridged() else {
-            return 0;
+        let Some(retracted) = self.refresh_bridged()? else {
+            return Ok(0);
         };
         self.reindex_with(ReindexScope::Full);
-        retracted
+        Ok(retracted)
     }
 
     /// sq-dpk4 — refresh the bridged grant for one slot against an **updated**
@@ -2721,18 +2771,21 @@ impl PodStore {
     /// Fail-closed exactly as [`PodStore::refresh_odrl_grants`]: a now-Deny / lapsed /
     /// withdrawn / now-prohibited re-evaluation loses access, static grants are untouched.
     #[cfg(feature = "odrl-bridge")]
+    /// # Errors
+    ///
+    /// Returns a storage error if the authorization view cannot be written.
     pub fn refresh_odrl_grant(
         &mut self,
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         kind: odrl_bridge::BridgeKind,
-    ) -> (bool, usize) {
+    ) -> Result<(bool, usize), String> {
         let matched = self.bridge_ledger.update(policy, request, kind);
-        let Some(retracted) = self.refresh_bridged() else {
-            return (matched, 0);
+        let Some(retracted) = self.refresh_bridged()? else {
+            return Ok((matched, 0));
         };
         self.reindex_with(ReindexScope::Full);
-        (matched, retracted)
+        Ok((matched, retracted))
     }
 
     /// Attach an ODRL `policy` that is evaluated per request for the accessing session
@@ -2797,6 +2850,9 @@ mod dropped_view_tests;
 mod update_path_tests;
 
 #[cfg(test)]
+mod storage_view_tests;
+
+#[cfg(test)]
 mod scoped_cache_tests {
     //! sq-b7k7u (issue #1571) — WHITE-BOX proof that a scoped ACL write invalidates
     //! ONLY the written pod's session-cache slice, keeping every other pod's slice warm, and
@@ -2840,7 +2896,7 @@ mod scoped_cache_tests {
         assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
         store.drop_auth_view();
         assert!(store.accessible(&alice, Mode::Read).is_empty());
-        assert_eq!(store.refresh_odrl_grants(), 0);
+        assert_eq!(store.refresh_odrl_grants().unwrap(), 0);
         assert!(store.accessible(&alice, Mode::Read).is_empty(), "the refresh resurrected the view");
         assert!(!store.may_install_grants());
         // A static materialization rebuilds the view, and grant sources resume.
