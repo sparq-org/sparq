@@ -3849,16 +3849,32 @@ pub(crate) mod test_store {
 
     /// Wait for detached maintenance tasks to release a stopped service's lease.
     pub async fn wait_for_stop(store: &FlakyStore) {
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if store.lifecycle().acquire().is_some() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the previous service still holds its lease");
+        store.lifecycle().wait_for_release().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_stop_waits_for_the_actual_lease_release() {
+        let store = FlakyStore::new();
+        let lease = store.lifecycle().acquire().unwrap();
+        let released = std::sync::atomic::AtomicBool::new(false);
+        let ((), (), ()) = tokio::join!(
+            biased;
+            async {
+                wait_for_stop(&store).await;
+                assert!(
+                    released.load(std::sync::atomic::Ordering::Acquire),
+                    "the stop waiter returned before the lease was released"
+                );
+            },
+            async {
+                // The release timer also ensures the timer driver observes the old deadline.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                drop(lease);
+                released.store(true, std::sync::atomic::Ordering::Release);
+            },
+            tokio::time::advance(std::time::Duration::from_secs(3)),
+        );
+        assert!(store.lifecycle().acquire().is_some());
     }
 
     /// A closed state measuring both backend seams, including reads inside CompositeStore.

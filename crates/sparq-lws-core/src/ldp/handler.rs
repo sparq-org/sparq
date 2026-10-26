@@ -620,12 +620,14 @@ impl<S: Store> LdpState<S> {
     /// target (reading an `.acl`'s representation is itself a Control operation; `Control` does NOT imply
     /// `Read`, so the read-mode for an `.acl` is Control, not Read — else a Control-only holder, who IS
     /// entitled to the `.acl`'s ETag, would be wrongly denied a conditional `.acl` write). When the
-    /// request carries ANY conditional precondition AND the (already-authorized) requester's granted
+    /// request carries a conditional precondition other than a bare `*` AND the (already-authorized) requester's granted
     /// modes do NOT include that read-mode, return the requester's DENIAL code (401 anonymous / 403
     /// authenticated) INSTEAD of evaluating the precondition — so the conditional outcome reveals
     /// nothing. A requester WITHOUT a conditional header is unaffected (no validator is consulted on
     /// their path), and a requester who holds the read-mode keeps full conditional semantics. `granted`
     /// is the mode set the write authorization already returned (no extra ACL resolution).
+    /// Bare `*` is exempt: unconditional LDP PUT and DELETE already disclose existence, and
+    /// `If-None-Match: *` preserves a writer's ability to create without overwriting.
     fn guard_conditional_requires_read(
         &self,
         target_iri: &str,
@@ -633,8 +635,17 @@ impl<S: Store> LdpState<S> {
         granted: &std::collections::BTreeSet<AccessMode>,
         token: &VerifiedToken,
     ) -> Result<(), ServerError> {
-        let has_etag_conditional = headers.contains_key(header::IF_MATCH)
-            || headers.contains_key(header::IF_NONE_MATCH)
+        let names_tag = |name| {
+            headers.contains_key(&name)
+                && !crate::entity_tag::field(headers, name).is_some_and(|value| {
+                    matches!(
+                        crate::entity_tag::TagList::parse(&value),
+                        Ok(crate::entity_tag::TagList::Any)
+                    )
+                })
+        };
+        let has_etag_conditional = names_tag(header::IF_MATCH)
+            || names_tag(header::IF_NONE_MATCH)
             || (!target_iri.ends_with('/')
                 && conditional::unmodified_since_applies(
                     crate::entity_tag::field(headers, header::IF_MATCH).as_deref(),
@@ -7689,75 +7700,42 @@ mod tests {
         Arc::new(LdpState::new(store, "https://pod.example"))
     }
 
-    /// A bare star must not disclose existence to a writer without Read.
+    /// LDP preserves existence-only preconditions for writers without Read.
     #[tokio::test]
-    async fn a_bare_star_precondition_needs_read() {
+    async fn ldp_bare_star_preconditions_work_without_read() {
         let state = store_bob_default_write_no_read_container().await;
-        let before = state
-            .store
-            .read("https://pod.example/alice/c/existing")
-            .await
-            .unwrap()
-            .body;
-        for path in ["/alice/c/existing", "/alice/c/fresh"] {
-            for verb in ["PUT", "DELETE"] {
-                let mut headers = turtle_headers();
-                headers.insert(
-                    if verb == "PUT" {
-                        header::IF_NONE_MATCH
-                    } else {
-                        header::IF_MATCH
-                    },
-                    HeaderValue::from_static("*"),
-                );
-                let response = if verb == "PUT" {
-                    put_handler(
-                        State(state.clone()),
-                        Extension(bob()),
-                        path.parse().unwrap(),
-                        headers,
-                        request_body_bytes(),
-                    )
-                    .await
-                } else {
-                    delete_handler(
-                        State(state.clone()),
-                        Extension(bob()),
-                        path.parse().unwrap(),
-                        headers,
-                    )
-                    .await
-                };
-                assert_eq!(observe(response).await.status, 403, "{verb} {path}");
-            }
-        }
-        assert_eq!(
-            state
-                .store
-                .read("https://pod.example/alice/c/existing")
-                .await
-                .unwrap()
-                .body,
-            before
-        );
-        assert!(!state
-            .store
-            .exists("https://pod.example/alice/c/fresh")
-            .await
-            .unwrap());
         for (path, expected) in [("/alice/c/existing", 412), ("/alice/c/fresh", 201)] {
             let mut headers = turtle_headers();
             headers.insert(header::IF_NONE_MATCH, HeaderValue::from_static("*"));
             let response = put_handler(
                 State(state.clone()),
-                Extension(owner_token()),
+                Extension(bob()),
                 path.parse().unwrap(),
                 headers,
                 request_body_bytes(),
             )
             .await;
-            assert_eq!(observe(response).await.status, expected);
+            assert_eq!(observe(response).await.status, expected, "{path}");
         }
+        let mut headers = turtle_headers();
+        headers.insert(header::IF_MATCH, HeaderValue::from_static("*"));
+        let response = put_handler(
+            State(state.clone()),
+            Extension(bob()),
+            "/alice/c/existing".parse().unwrap(),
+            headers.clone(),
+            request_body_bytes(),
+        )
+        .await;
+        assert_eq!(observe(response).await.status, 204);
+        let response = delete_handler(
+            State(state.clone()),
+            Extension(bob()),
+            "/alice/c/existing".parse().unwrap(),
+            headers,
+        )
+        .await;
+        assert_eq!(observe(response).await.status, 204);
     }
 
     #[tokio::test]

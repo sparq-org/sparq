@@ -162,9 +162,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **sparq-lws-core:** resource writes require Read for every `If-Match` or
+- **sparq-lws-core:** LWS resource writes require Read for every `If-Match` or
   `If-None-Match` field, including bare `*`. LWS service containers retain their
-  existence-only handling. `Store::lifecycle` is required and returns `Arc<Lifecycle>`;
+  existence-only handling. Conditional POST to the storage root's public description
+  needs no Read.
+- **Breaking — sparq-lws-core:** `Store::lifecycle` is required and returns `Arc<Lifecycle>`;
   `CompositeStore` clones share it. `SparqClient::reset_marker` requires a lifecycle guard;
   wrappers must forward it, or a marker reset is refused by the trait default.
 - **Breaking — sparq-zk-compose:** `CircuitId::package()` now returns
@@ -794,13 +796,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
   subscription lookups clone only owned records. An unconditional LWS data DELETE allowed by an
   unconstrained Delete grant without Read returns `204` for settled present or absent targets,
-  and for an absent prior during in-flight or set-aside creates; a full set-aside budget returns
+  and for an absent prior during in-flight or set-aside creates, including anonymous callers
+  with public Delete grants. Read on an absent target is decided without stored metadata,
+  including partial create metadata and orphan creator records. Concurrent removals use the
+  settled-absent decision, including under the delete lock; a full set-aside budget returns
   `503` with `Retry-After`. A set-aside change to a previously present resource retains `503`.
   An absent delete changes and announces nothing. Pending metadata on a present resource and
   type- or format-constrained Delete grants remain residual differences from absence.
-  Unsupported resource-linkset methods return `405` before backend reads, with `Allow`,
-  `Accept-Patch` and the anchor `Link`. Anonymous grant denials skip metadata reads, creator-only checks ignore
-  unrelated metadata, and raw index mutations refuse service-marker operands; marker resets
+  Resource-linkset OPTIONS returns fixed `204`; unsupported methods return `405`, both before
+  backend reads, with `Allow`, `Accept-Patch` and the anchor `Link`. Anonymous grant denials skip
+  metadata reads. The `allowed()` fast path returns false for a non-creator even when unrelated
+  fields such as `links` are malformed. Raw index mutations refuse service-marker operands; marker resets
   require a lifecycle guard.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back

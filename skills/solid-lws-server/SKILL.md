@@ -239,8 +239,11 @@ curl -i -X POST \
 collision-resistant child IRI below a container, `PATCH` accepts supported
 Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
-conditional mutations. Every `If-Match` or `If-None-Match` field, including a bare `*`,
+conditional mutations. A concrete tag in `If-Match` or `If-None-Match`
 requires the target's read permission (`Control` for an ACL document).
+LDP exempts bare `*`: writers without Read can use `If-None-Match: *` to create
+without overwriting, or `If-Match: *` to require an existing target. Unconditional
+LDP PUT and DELETE already disclose existence through their status codes.
 `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
@@ -845,20 +848,27 @@ What the server exposes, all discoverable from the storage description
 - `SparqClient` wrappers must forward `reset_marker` with its lifecycle guard. The trait default
   refuses marker resets; generic `delete_resource` refuses marker operands, including the parent,
   before any backend call.
-- Unsupported resource-linkset methods return `405` before authorization, existence checks,
-  preconditions, or set-aside checks. The response includes the fixed `Allow`, `Accept-Patch`,
-  and `Link` with `rel="anchor"` headers without backend reads.
+- Resource-linkset `OPTIONS` returns a fixed `204`; unsupported methods such as `POST` and
+  `DELETE` return `405`. Both answer before authorization, existence checks, preconditions,
+  or set-aside checks, with fixed `Allow`, `Accept-Patch`, and anchor `Link` headers and no
+  backend reads.
 - Unconditional LWS data-resource `DELETE` by a caller whose unconstrained Delete grant applies
   but who lacks Read answers `204` for settled present and absent targets, and for an absent prior
-  during an in-flight or set-aside create. A full set-aside budget instead returns `503` with
+  during an in-flight or set-aside create. This includes anonymous callers with a public Delete
+  grant, before any authentication challenge. Read for an absent URI uses no stored metadata,
+  so partial creates and orphan creator metadata cannot turn that `204` into `404`.
+  A concurrent removal, including after the delete lock is taken, uses the settled-absent
+  decision too: type-constrained Delete grants are refused and callers needing authentication
+  are challenged without reading orphan metadata. A full set-aside budget instead returns `503` with
   `Retry-After`. A set-aside change to a previously present resource still returns `503` to an
-  authorized caller. An absent delete changes and announces nothing. A caller with Read retains
-  `404` for an absent target. Container deletion still requires Read. Residual: pending metadata
+  authorized caller. An absent delete changes and announces nothing. An authenticated caller
+  allowed both Delete and Read for absence retains `404`. Container deletion still requires Read. Residual: pending metadata
   on a present resource or Delete grants constrained by type or format can produce different
   answers from absence; those constraints are the caller's requested policy.
 - Authorization computes applicable grant policies in memory first. With no applicable policy,
   an anonymous caller is denied without reading resource metadata. An authenticated caller's
-  creator check parses only creator and pending; full metadata is parsed only for a policy.
+  creator check parses only creator and pending; without creator access it returns false even
+  when unrelated metadata fields are malformed. Full metadata is parsed only for a policy.
   Residual backend work: an absent creator record costs one index lookup, while a present
   `.meta` record can also fetch its bytes. Keeping creator in the index row is deferred.
 - Conformance-pinned residuals remain explicit:

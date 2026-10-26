@@ -46,6 +46,8 @@ use oxrdf::NamedNode;
 #[derive(Debug, Default)]
 pub struct Lifecycle {
     held: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    released: tokio::sync::Notify,
 }
 
 impl Lifecycle {
@@ -58,6 +60,20 @@ impl Lifecycle {
             .map(|_| LifecycleGuard {
                 lease: self.clone(),
             })
+    }
+
+    /// Wait until the stopped service has released its lease.
+    #[cfg(test)]
+    pub(crate) async fn wait_for_release(self: &std::sync::Arc<Self>) {
+        loop {
+            let released = self.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+            if self.acquire().is_some() {
+                return;
+            }
+            released.await;
+        }
     }
 }
 
@@ -73,6 +89,8 @@ impl Drop for LifecycleGuard {
         self.lease
             .held
             .store(false, std::sync::atomic::Ordering::Release);
+        #[cfg(test)]
+        self.lease.released.notify_waiters();
     }
 }
 
@@ -2369,7 +2387,7 @@ mod tests {
         );
         assert!(counters.take_methods().is_empty());
         drop(first);
-        tokio::task::yield_now().await;
+        store.lifecycle().wait_for_release().await;
         assert!(crate::lws::LwsState::new(store, cfg).await.is_ok());
     }
 }
