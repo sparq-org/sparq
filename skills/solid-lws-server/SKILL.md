@@ -310,6 +310,27 @@ An unknown `Accept` media type falls back to the Solid default
 `406 Not Acceptable`. Non-RDF resources preserve their binary media type and
 support byte-range reads.
 
+## Discover deployed services and capabilities
+
+Both modes expose a public catalog built with their mounted routes. The Solid router
+renders both description formats and their ETags at construction; a rendering failure
+prevents startup. Requests reuse the cached representation. Solid serves
+`/.well-known/solid` as JSON-LD by default (`Accept: */*` included) or Turtle with
+`Accept: text/turtle`; unsupported types, including `application/lws+cid`, get `406`.
+JSON-LD keeps the compact `notificationChannel` discovery array and names the
+notifications context first, followed by inline extension mappings.
+Both representations carry `Vary: Accept` and representation ETags with conditional
+GET/HEAD support. The SPARQL service and root GET/HEAD discovery link appear only
+with `sparql-endpoint`, independent of the requester's readable resources.
+
+LWS serves its CID description at `/` with `Accept: application/lws+cid`, preserving
+its verification key and validators. It includes the storage-description service,
+protocol conformance URI, JSON Patch formats and recursive deletion; `MoveResource`
+is absent because `up` is server-managed. Notification subscription types come from
+the catalog (currently webhooks). Draft extension terms use an inline context.
+See [catalog entries and embedding](references/service-description.md) for the
+RDF terms, media maps and the `describe::ServiceCatalog` registration API.
+
 ## Query readable RDF with `/sparql`
 
 The default `sparql-endpoint` feature exposes authenticated `GET` and `POST`

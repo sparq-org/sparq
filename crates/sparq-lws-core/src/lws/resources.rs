@@ -818,7 +818,7 @@ fn parse_accept(accept: &str) -> Vec<crate::accept::MediaRange<'_>> {
 
 /// The best of `offered` for `accept` (earlier offers win ties); the first offer when Accept is
 /// absent; `None` when nothing offered is acceptable.
-pub(super) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String> {
+pub(crate) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String> {
     let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
         return offered.first().map(|s| s.to_string());
     };
@@ -1365,44 +1365,83 @@ async fn listing<S: Store + 'static>(
     resp
 }
 
-/// The storage description: a controlled identifier document extended with the LWS vocabulary,
-/// naming the storage and its services, and publishing the key notifications are signed with.
+/// Register the services enabled together by the LWS dispatcher.
+pub(crate) fn service_catalog(cfg: &super::LwsConfig) -> crate::describe::ServiceCatalog {
+    use crate::describe::{capability, entry, ServiceCatalog, SSD};
+    let storage = cfg.storage();
+    let mut catalog = ServiceCatalog::default();
+    for (fragment, ty, endpoint) in [
+        ("storage-root", "StorageRoot", storage.clone()),
+        ("storage-description", "StorageDescription", storage),
+        (
+            "authorization-server",
+            "AuthorizationServer",
+            cfg.issuer().to_string(),
+        ),
+        (
+            "access-grants",
+            "AccessGrantService",
+            cfg.absolute(GRANTS_PATH),
+        ),
+        (
+            "access-requests",
+            "AccessRequestService",
+            cfg.absolute(REQUESTS_PATH),
+        ),
+        (
+            "notifications",
+            "NotificationService",
+            cfg.absolute(SUBSCRIPTIONS_PATH),
+        ),
+        (
+            "type-index",
+            "TypeIndexService",
+            cfg.absolute(TYPE_INDEX_PATH),
+        ),
+        (
+            "type-search",
+            "TypeSearchService",
+            cfg.absolute(TYPE_SEARCH_PATH),
+        ),
+    ] {
+        let mut service = entry(fragment, ty, endpoint);
+        if matches!(ty, "AccessGrantService" | "AccessRequestService") {
+            service.extras.insert(
+                "conformsTo".into(),
+                json!([format!("{LWS_NS}AccessProfile")]),
+            );
+        }
+        if ty == "NotificationService" {
+            service
+                .extras
+                .insert("subscriptionType".into(), json!(["WebhookSubscription"]));
+        }
+        catalog.service(service);
+    }
+    // Advertise concrete JSON types served here. The PATCH parser also accepts
+    // other structured JSON suffix types on data documents.
+    catalog.capability(capability(
+        &format!("{SSD}PatchSupport"),
+        json!({"mediaType": {
+            JSON: [ACCEPT_PATCH], LD_JSON: [ACCEPT_PATCH], LINKSET_JSON: [ACCEPT_PATCH]
+        }}),
+    ));
+    catalog.capability(capability(&format!("{SSD}RecursiveDelete"), json!({})));
+    catalog
+}
+
+/// Describe the mounted services and capabilities, including the webhook verification key.
 pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
     let storage = cfg.storage();
-    let service = |frag: &str, ty: &str, endpoint: String| json!({"id": format!("{storage}#{frag}"), "type": ty, "serviceEndpoint": endpoint});
-    let mut grants = service(
-        "access-grants",
-        "AccessGrantService",
-        cfg.absolute(GRANTS_PATH),
-    );
-    grants["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
-    let mut requests = service(
-        "access-requests",
-        "AccessRequestService",
-        cfg.absolute(REQUESTS_PATH),
-    );
-    requests["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
-    let mut notifications = service(
-        "notifications",
-        "NotificationService",
-        cfg.absolute(SUBSCRIPTIONS_PATH),
-    );
-    notifications["subscriptionType"] = json!(["WebhookSubscription"]);
     let key_id = format!("{storage}#{}", cfg.notify_key.kid());
     json!({
-        "@context": [CID_CONTEXT, LWS_CONTEXT],
+        "@context": [CID_CONTEXT, LWS_CONTEXT, crate::describe::extension_context()],
         "id": storage,
         "type": "Storage",
-        "service": [
-            service("storage-root", "StorageRoot", storage.clone()),
-            service("authorization-server", "AuthorizationServer", cfg.issuer().to_string()),
-            grants,
-            requests,
-            notifications,
-            service("type-index", "TypeIndexService", cfg.absolute(TYPE_INDEX_PATH)),
-            service("type-search", "TypeSearchService", cfg.absolute(TYPE_SEARCH_PATH)),
-        ],
+        "conformsTo": [crate::describe::LWS_CORE_SPEC],
+        "service": state.catalog.services_json(&storage),
+        "capability": state.catalog.capabilities_json(),
         "verificationMethod": [{
             "id": key_id,
             "type": "JsonWebKey",
