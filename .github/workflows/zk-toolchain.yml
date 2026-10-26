@@ -541,16 +541,16 @@ jobs:
             hidden_issuer_in_set_verifies_and_key_is_private \
             hidden_issuer_only_verifies_with_clear_key_absent \
             hidden_issuer_only_message_is_held_to_the_method_policy \
-            v2_members::live_v2_scan_verifies_end_to_end \
-            v2_members::live_v2_join_verifies_end_to_end \
-            v2_members::live_v2_scan_cross_vk_is_refused \
-            v2_members::live_v2_join_cross_vk_is_refused \
-            v2_members::live_opaque_scan_cross_v2_vk_is_refused; do
+            v2_members_live::live_v2_scan_verifies_end_to_end \
+            v2_members_live::live_v2_join_verifies_end_to_end \
+            v2_members_live::live_v2_scan_cross_vk_is_refused \
+            v2_members_live::live_v2_join_cross_vk_is_refused \
+            v2_members_live::live_opaque_scan_cross_v2_vk_is_refused; do
             echo "::group::$t"
             cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
               -- --ignored --exact --test-threads=1 "$t" 2>&1 | tee "/tmp/dl-e2e-$t.log"
             echo "::endgroup::"
-            if ! grep -qE '^test result: ok\. 1 passed' "/tmp/dl-e2e-$t.log"; then
+            if ! grep -qE '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;' "/tmp/dl-e2e-$t.log"; then
               echo "FAIL: $t did not run as exactly one passing test under --features dual-leaf" >&2
               exit 1
             fi

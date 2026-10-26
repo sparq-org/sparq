@@ -7418,3 +7418,60 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
 #[cfg(feature = "dual-leaf")]
 #[path = "support/v2_members.rs"]
 mod v2_members;
+
+// Keep live gate call sites in this Cargo test target for the ledger inventory.
+#[cfg(feature = "dual-leaf")]
+mod v2_members_live {
+    use super::v2_members::{check, cross_vk, fixture, prove_all, scan_toml};
+    use super::*;
+
+    #[test]
+    #[ignore = "real V2 scan proof and full manifest verification"]
+    fn live_v2_scan_verifies_end_to_end() {
+        if !support::require_toolchain("live_v2_scan_verifies_end_to_end", &["nargo", "bb"]) { return; }
+        let (mut m, graphs) = fixture(true, false);
+        prove_all(&mut m, &graphs, false, "live_v2_scan");
+        check(&m, "live_v2_scan_verify").expect("honest V2 scan verifies end to end");
+    }
+
+    #[test]
+    #[ignore = "real V2 scan and join proofs and full manifest verification"]
+    fn live_v2_join_verifies_end_to_end() {
+        if !support::require_toolchain("live_v2_join_verifies_end_to_end", &["nargo", "bb"]) { return; }
+        let (mut m, graphs) = fixture(true, true);
+        prove_all(&mut m, &graphs, true, "live_v2_join");
+        check(&m, "live_v2_join_verify").expect("honest V2 join verifies end to end");
+    }
+
+    #[test]
+    #[ignore = "real V2 scan proof checked directly against the opaque member VK"]
+    fn live_v2_scan_cross_vk_is_refused() {
+        if !support::require_toolchain("live_v2_scan_cross_vk_is_refused", &["nargo", "bb"]) { return; }
+        cross_vk(true);
+    }
+
+    #[test]
+    #[ignore = "real V2 join proof checked directly against the opaque member VK"]
+    fn live_v2_join_cross_vk_is_refused() {
+        if !support::require_toolchain("live_v2_join_cross_vk_is_refused", &["nargo", "bb"]) { return; }
+        cross_vk(false);
+    }
+
+    #[test]
+    #[ignore = "real opaque scan over V2 encodings checked against the V2 member VK"]
+    fn live_opaque_scan_cross_v2_vk_is_refused() {
+        if !support::require_toolchain("live_opaque_scan_cross_v2_vk_is_refused", &["nargo", "bb"]) { return; }
+        let (m, graphs) = fixture(true, false);
+        let p = CircuitProver::from_crate_root();
+        let opaque = CircuitId::Scan { k: 1, n: 16, r: 4 };
+        let art = p.prove_in(&opaque, &scan_toml(&graphs[0], &m.sub_proofs[0].inputs, false),
+            &scratch("opaque_over_v2"), "opaque_over_v2").unwrap();
+        let honest_vk = p.canonical_vk(&opaque, &scratch("opaque_v2_control_vk")).unwrap();
+        assert!(p.verify_with(&art.proof, &art.public_inputs, &honest_vk,
+            &scratch("opaque_v2_control")).unwrap(), "honest opaque VK verifies this proof");
+        let wrong_vk = p.canonical_vk(&CircuitId::scan_v2_dl(1, 16, 4).unwrap(),
+            &scratch("opaque_v2_wrong_vk")).unwrap();
+        assert!(!p.verify_with(&art.proof, &art.public_inputs, &wrong_vk,
+            &scratch("opaque_v2_wrong")).unwrap(), "bb must refuse the V2 VK for an opaque proof");
+    }
+}

@@ -4,7 +4,7 @@ use serde::Serialize;
 use sparq_zk::commit::CommitmentMethod;
 use sparq_zk::field::field_from_hash_bytes;
 
-struct Graph {
+pub(super) struct Graph {
     commitment: FieldHex,
     salt: Fr,
     enc: [FieldHex; 3],
@@ -70,7 +70,7 @@ fn put(out: &mut String, key: &str, value: &impl Serialize) {
     out.push_str(&format!("{key} = {}\n", serde_json::to_string(value).unwrap()));
 }
 
-fn scan_toml(g: &Graph, inputs: &ProofInputs, components: bool) -> String {
+pub(super) fn scan_toml(g: &Graph, inputs: &ProofInputs, components: bool) -> String {
     let ProofInputs::Scan { commitments, pattern_is_const, pattern_const_enc, rows,
         row_count, attribution, .. } = inputs else { unreachable!() };
     let mut out = String::new();
@@ -106,7 +106,7 @@ fn join_toml(a: &Graph, b: &Graph, inputs: &ProofInputs) -> String {
     out
 }
 
-fn fixture(v2: bool, join: bool) -> (ProofManifest, Vec<Graph>) {
+pub(super) fn fixture(v2: bool, join: bool) -> (ProofManifest, Vec<Graph>) {
     let mut graphs = vec![Graph::new(v2, "http://ex/p", 7)];
     if join { graphs.push(Graph::new(v2, "http://ex/q", 8)); }
     let mut m = sample_manifest();
@@ -143,7 +143,7 @@ fn fixture(v2: bool, join: bool) -> (ProofManifest, Vec<Graph>) {
     (m, graphs)
 }
 
-fn check(m: &ProofManifest, tag: &str) -> Result<(), CheckError> {
+pub(super) fn check(m: &ProofManifest, tag: &str) -> Result<(), CheckError> {
     verify_manifest(m, &CircuitProver::from_crate_root(), &scratch(tag),
         &trusted_k(&test_issuer_sk(1)), &fresh_policy(), &HolderRegistry::empty(),
         &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(),
@@ -209,7 +209,7 @@ fn v2_opaque_renderer_requires_component_witnesses() {
         &[1], &[vec![graphs[0].enc.clone()]], &[], None, None).is_ok());
 }
 
-fn prove_all(m: &mut ProofManifest, graphs: &[Graph], join: bool, tag: &str) {
+pub(super) fn prove_all(m: &mut ProofManifest, graphs: &[Graph], join: bool, tag: &str) {
     let p = CircuitProver::from_crate_root();
     for (i, g) in graphs.iter().enumerate() {
         let inputs = &m.sub_proofs[i].inputs;
@@ -225,25 +225,7 @@ fn prove_all(m: &mut ProofManifest, graphs: &[Graph], join: bool, tag: &str) {
     }
 }
 
-#[test]
-#[ignore = "real V2 scan proof and full manifest verification"]
-fn live_v2_scan_verifies_end_to_end() {
-    if !support::require_toolchain("live_v2_scan_verifies_end_to_end", &["nargo", "bb"]) { return; }
-    let (mut m, graphs) = fixture(true, false);
-    prove_all(&mut m, &graphs, false, "live_v2_scan");
-    check(&m, "live_v2_scan_verify").expect("honest V2 scan verifies end to end");
-}
-
-#[test]
-#[ignore = "real V2 scan and join proofs and full manifest verification"]
-fn live_v2_join_verifies_end_to_end() {
-    if !support::require_toolchain("live_v2_join_verifies_end_to_end", &["nargo", "bb"]) { return; }
-    let (mut m, graphs) = fixture(true, true);
-    prove_all(&mut m, &graphs, true, "live_v2_join");
-    check(&m, "live_v2_join_verify").expect("honest V2 join verifies end to end");
-}
-
-fn cross_vk(scan: bool) {
+pub(super) fn cross_vk(scan: bool) {
     let (m, graphs) = fixture(true, !scan);
     let p = CircuitProver::from_crate_root();
     let index = if scan { 0 } else { 2 };
@@ -261,36 +243,4 @@ fn cross_vk(scan: bool) {
     // Direct driver call deliberately bypasses method/member structural dispatch.
     assert!(!p.verify_with(&art.proof, &art.public_inputs, &wrong_vk,
         &scratch(&format!("{tag}_wrong"))).unwrap(), "bb must refuse the cross-member VK");
-}
-
-#[test]
-#[ignore = "real V2 scan proof checked directly against the opaque member VK"]
-fn live_v2_scan_cross_vk_is_refused() {
-    if !support::require_toolchain("live_v2_scan_cross_vk_is_refused", &["nargo", "bb"]) { return; }
-    cross_vk(true);
-}
-
-#[test]
-#[ignore = "real V2 join proof checked directly against the opaque member VK"]
-fn live_v2_join_cross_vk_is_refused() {
-    if !support::require_toolchain("live_v2_join_cross_vk_is_refused", &["nargo", "bb"]) { return; }
-    cross_vk(false);
-}
-
-#[test]
-#[ignore = "real opaque scan over V2 encodings checked against the V2 member VK"]
-fn live_opaque_scan_cross_v2_vk_is_refused() {
-    if !support::require_toolchain("live_opaque_scan_cross_v2_vk_is_refused", &["nargo", "bb"]) { return; }
-    let (m, graphs) = fixture(true, false);
-    let p = CircuitProver::from_crate_root();
-    let opaque = CircuitId::Scan { k: 1, n: 16, r: 4 };
-    let art = p.prove_in(&opaque, &scan_toml(&graphs[0], &m.sub_proofs[0].inputs, false),
-        &scratch("opaque_over_v2"), "opaque_over_v2").unwrap();
-    let honest_vk = p.canonical_vk(&opaque, &scratch("opaque_v2_control_vk")).unwrap();
-    assert!(p.verify_with(&art.proof, &art.public_inputs, &honest_vk,
-        &scratch("opaque_v2_control")).unwrap(), "honest opaque VK verifies this proof");
-    let wrong_vk = p.canonical_vk(&CircuitId::scan_v2_dl(1, 16, 4).unwrap(),
-        &scratch("opaque_v2_wrong_vk")).unwrap();
-    assert!(!p.verify_with(&art.proof, &art.public_inputs, &wrong_vk,
-        &scratch("opaque_v2_wrong")).unwrap(), "bb must refuse the V2 VK for an opaque proof");
 }
