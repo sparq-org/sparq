@@ -53,16 +53,10 @@
 //! registry, the manifest declares no id for them, and they read revocation and
 //! key/holder-set roots rather than a committed graph's leaf shape.
 //!
-//! What that wiring does NOT do is open anything. The resolver echoes a legal
-//! pair, so no accepted manifest's key selection changes; and in this build every
-//! `(admissible method × member)` pair that can REACH the selection site is
-//! already legal, because a value-lane sub-proof is refused at stage 0 of
-//! `prefilter_manifest_structure` and the `value-only` method is admitted by no
-//! `MethodPolicy`. So the matrix refusal is a standing gate that becomes
-//! load-bearing when either of those is relaxed (the value-lane query binding is
-//! sq-j506), not a verdict change today. The per-sub-proof METHOD derivation
-//! around it does add reachable refusals — a sub-proof whose bound commitments
-//! authenticated different methods, or a mixture of attested and unattested ones.
+//! V2 scan/join dispatch uses dedicated component-witnessed members, legal
+//! only under `DualLeafV2`. Opaque scan/join ids are legal under string-canonical
+//! and legacy `DualLeafV1`, and refused under V2. Neither family is method-independent.
+//! This leaves stage 0's value-lane refusals and the value-FILTER gates closed.
 //!
 //! The LANE↔MEMBER check is different in exactly this respect: it needs no method
 //! input, because it decides from the `ProofInputs` alone. It therefore DOES run
@@ -88,6 +82,8 @@ use sparq_zk::commit::{CommitmentMethod, MethodNotSelectable, MethodUse};
 /// refusal — the resolver never falls through to a default circuit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchError {
+    /// The id has no compiled V2 member.
+    UncompiledCircuit(crate::manifest::CircuitIdError),
     /// The circuit family is not legal for the commitment method: e.g. a
     /// value-bearing `FilterValueDl` member against a `string-canonical` graph
     /// (which committed no value handle), or a blake3-token FILTER against a
@@ -167,6 +163,7 @@ pub enum DispatchError {
 impl std::fmt::Display for DispatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DispatchError::UncompiledCircuit(e) => write!(f, "{e}"),
             DispatchError::IllegalPair { method_iri, circuit } => write!(
                 f,
                 "illegal (commitment-method, circuit) pair: circuit {} is not legal \
@@ -278,15 +275,13 @@ fn is_value_lane_member(id: &CircuitId) -> bool {
 /// member (reject-list (v)). The other FILTER families are value-comparison, not
 /// identity, members.
 fn is_identity_op_member(id: &CircuitId) -> bool {
-    matches!(id, CircuitId::Scan { .. } | CircuitId::JoinEq { .. })
+    matches!(id, CircuitId::Scan { .. } | CircuitId::JoinEq { .. }
+        | CircuitId::ScanV2Dl { .. } | CircuitId::JoinEqV2Dl { .. })
 }
 
-/// Whether the BLAKE3-TOKEN (string-canonical) FILTER / identity members are
-/// legal against `method`. They read the full string-canonical leaf, so they are
-/// legal for `string-canonical` AND for BOTH `dual-leaf` versions (whose
-/// `lexical_component` preserves term identity), but NOT for `value-only` (which dropped the lexical
-/// handle entirely, so a token-binding member is unprovable / an identity op is
-/// unanswerable).
+/// Whether a token FILTER or method-independent auxiliary member may use
+/// `method`. Scan/join identity members have their own explicit pairing below.
+/// A value-only commitment supplies no lexical handle.
 fn string_lane_legal(method: CommitmentMethod) -> bool {
     match method {
         CommitmentMethod::StringCanonicalV1
@@ -342,12 +337,23 @@ pub fn resolve_circuit(
     method: CommitmentMethod,
     id: &CircuitId,
 ) -> Result<CircuitId, DispatchError> {
+    id.validate().map_err(DispatchError::UncompiledCircuit)?;
     // (3) reject-list (v): an identity op must never be a value-lane member.
     if is_value_lane_member(id) && is_identity_op_member(id) {
-        return Err(DispatchError::IdentityOpAtValueLane { circuit: id.package() });
+        return Err(DispatchError::IdentityOpAtValueLane { circuit: id.label() });
     }
 
-    let legal = if is_value_lane_member(id) {
+    let legal = if matches!(id, CircuitId::ScanV2Dl { .. } | CircuitId::JoinEqV2Dl { .. }) {
+        method == CommitmentMethod::DualLeafV2
+    } else if matches!(id, CircuitId::Scan { .. } | CircuitId::JoinEq { .. }) {
+        // Legacy opaque members remain available for already-issued V1 graphs.
+        match method {
+            CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1 => true,
+            CommitmentMethod::DualLeafV2 => false,
+            #[cfg(feature = "commitment-value-only")]
+            CommitmentMethod::ValueOnlyV1 => false,
+        }
+    } else if is_value_lane_member(id) {
         // (1) value-lane: legal only where a value handle was committed.
         value_lane_legal(method)
     } else {
@@ -361,7 +367,7 @@ pub fn resolve_circuit(
     } else {
         Err(DispatchError::IllegalPair {
             method_iri: method.scheme_iri().to_string(),
-            circuit: id.package(),
+            circuit: id.label(),
         })
     }
 }
@@ -387,7 +393,7 @@ pub fn resolve_circuit_for_use(
 fn not_selectable(e: &MethodNotSelectable, id: &CircuitId) -> DispatchError {
     DispatchError::MethodNotSelectableForIssuance {
         method_iri: e.scheme_iri().to_string(),
-        circuit: id.package(),
+        circuit: id.label(),
     }
 }
 
@@ -617,7 +623,7 @@ pub fn check_lane_const_for_member(
     let row = lane_row(circuit, datatype_const)?;
     if row.legacy_v1 && use_ == MethodUse::NewIssuance {
         return Err(DispatchError::LegacyLaneConstForIssuance {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         });
     }
@@ -634,16 +640,16 @@ fn lane_row(
 ) -> Result<&'static LaneRow, DispatchError> {
     let decoded = canonical_field(datatype_const).ok_or_else(|| {
         DispatchError::NonCanonicalFieldHex {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             field: "datatype_const".to_string(),
         }
     })?;
     let Some(row) = lane_table().iter().find(|r| r.constant == decoded) else {
-        return Err(DispatchError::UnknownLaneConst { circuit: circuit.package() });
+        return Err(DispatchError::UnknownLaneConst { circuit: circuit.label() });
     };
     if &row.member != circuit {
         return Err(DispatchError::LaneMemberMismatch {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         });
     }
@@ -662,7 +668,7 @@ pub(crate) fn check_legacy_v1_lane_const(
     let row = lane_row(circuit, datatype_const)?;
     if !row.legacy_v1 {
         return Err(DispatchError::NotALegacyV1LaneConst {
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         });
     }
@@ -695,7 +701,7 @@ pub(crate) fn check_method_lane_version(
     } else {
         Err(DispatchError::MethodLaneVersionMismatch {
             method_iri: method.scheme_iri().to_string(),
-            circuit: circuit.package(),
+            circuit: circuit.label(),
             lane: row.lane.clone(),
         })
     }
@@ -724,7 +730,7 @@ pub(crate) fn require_canonical(
     for (name, h) in fields {
         if canonical_field(h).is_none() {
             return Err(DispatchError::NonCanonicalFieldHex {
-                circuit: circuit.package(),
+                circuit: circuit.label(),
                 field: (*name).to_string(),
             });
         }
@@ -790,7 +796,7 @@ pub fn check_lane_member_pairing_for_use(
         Some(lane) => {
             if crate::value_lane::derive_value_lane_member(inputs).is_none() {
                 return Err(DispatchError::ValueLaneVariantIdMismatch {
-                    circuit: declared.package(),
+                    circuit: declared.label(),
                     variant: lane.variant_name().to_string(),
                 });
             }
@@ -798,7 +804,7 @@ pub fn check_lane_member_pairing_for_use(
         None => {
             if is_value_lane_member(declared) {
                 return Err(DispatchError::ValueLaneVariantIdMismatch {
-                    circuit: declared.package(),
+                    circuit: declared.label(),
                     variant: non_value_lane_variant_name(inputs).to_string(),
                 });
             }
@@ -880,12 +886,12 @@ mod tests {
                 resolve_circuit(CommitmentMethod::DualLeafV2, &id),
                 Ok(id.clone()),
                 "{} must be legal against dual-leaf v2",
-                id.package()
+                id.label()
             );
             assert!(
                 resolve_circuit(CommitmentMethod::DualLeafV1, &id).is_ok(),
                 "{} must stay legal against dual-leaf v1 (already-issued graphs)",
-                id.package()
+                id.label()
             );
             // And neither version's value lane is legal against string-canonical.
             assert!(matches!(
@@ -893,11 +899,11 @@ mod tests {
                 Err(DispatchError::IllegalPair { .. })
             ));
         }
-        // The string lane stays legal for V2 too (the lexical component is kept).
+        // Token FILTER legality is unchanged; V2 scans use the dedicated member.
         assert!(resolve_circuit(CommitmentMethod::DualLeafV2, &CircuitId::FilterInt { d: 2 }).is_ok());
         assert!(resolve_circuit(
             CommitmentMethod::DualLeafV2,
-            &CircuitId::Scan { k: 1, n: 16, r: 4 }
+            &CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 }
         )
         .is_ok());
         // V2's recorded scheme IRI routes through the IRI entry too.
@@ -1048,6 +1054,8 @@ mod tests {
             CircuitId::FilterValueDlDateTime,
             CircuitId::FilterValueDlBool,
             CircuitId::JoinEq { n_a: 16, n_b: 16 },
+            CircuitId::ScanV2Dl { k: 1, n: 16, r: 4 },
+            CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 },
         ];
         for m in &methods {
             for c in &circuits {
@@ -1055,9 +1063,18 @@ mod tests {
                 // Each result is a clean Ok or a typed error; the value member is
                 // legal iff the method committed a value handle, and conversely.
                 // (A fail-closed refusal is the other valid, non-panicking outcome.)
-                if let Ok(id) = r {
-                    assert_eq!(&id, c, "resolver must echo the validated id");
-                }
+                let expected = match c {
+                    CircuitId::ScanV2Dl { .. } | CircuitId::JoinEqV2Dl { .. } =>
+                        *m == CommitmentMethod::DualLeafV2,
+                    CircuitId::Scan { .. } | CircuitId::JoinEq { .. } =>
+                        matches!(m, CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1),
+                    _ => value_lane_legal(*m),
+                };
+                let expected = if matches!(c, CircuitId::FilterInt { .. }) {
+                    string_lane_legal(*m)
+                } else { expected };
+                assert_eq!(r.is_ok(), expected, "{m:?} × {c:?}");
+                if let Ok(id) = r { assert_eq!(&id, c); }
             }
         }
     }
