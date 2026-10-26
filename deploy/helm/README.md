@@ -88,7 +88,11 @@ Secret value or editable credential placeholder.
 | `service.port` | server port | Optional cluster-internal Service port override |
 | `ingress.enabled` | `false` | Enable the ingress-nginx Ingress; host and TLS values then become required |
 | `ingress.tls.enabled` | `false` | Must be `true` whenever the Ingress is enabled |
-| `persistence.enabled` | `false` | PVC for `/data` (sparq-server dataset) |
+| `persistence.enabled` | `false` | PVC at `/data` for either server; LWS sets `SOLID_SERVER_DATA_DIR=/data` and uses `Recreate` |
+| `persistence.existingClaim` | `""` | Existing PVC to mount instead of creating one; requires `persistence.enabled=true` |
+| `persistence.storageClass` | `""` | Cluster default; for LWS choose a block volume (EBS, PD, Azure Disk), never EFS, Azure Files, or NFS |
+| `persistence.accessMode` | `ReadWriteOnce` | Required for LWS; the index needs file locking and fsync semantics on a block volume filesystem |
+| `persistence.size` | `10Gi` | Requested capacity when creating a PVC |
 | `lws.trustedIssuer` | `""` | **Required** for `server=lws` — OIDC IdP URL |
 | `lws.baseUrl` | `""` | **Required** for `server=lws` — public https base URL |
 
@@ -97,17 +101,39 @@ Full value reference: `deploy/helm/sparq/values.yaml`.
 ## Replica safety
 
 [GPT-5.6] The chart rejects `replicaCount` values other than one. `sparq-server`
-has an independent writable in-memory store per pod. The planned canonical LWS
-image does not compile its opt-in Redis replay backend, and the current LWS data
-path has no shared durable blob store, so a Redis URL alone would not make
-multiple replicas consistent.
+has an independent writable in-memory store per pod. The LWS index and blob
+store are single-instance; Redis replay protection alone does not make them safe
+to share across replicas. With `server=lws` and `persistence.enabled=true`, the
+chart sets `SOLID_SERVER_DATA_DIR=/data` and uses `Recreate` to stop the previous
+pod before opening the same data directory. Persistence remains disabled by default.
+
+Reuse the top-level `persistence` values for either server; there is no separate
+`lws.persistence` block. For a durable LWS image containing the #7188 P0-A/P0-B
+storage wiring, add these values to the LWS configuration above:
+
+```yaml
+server: lws
+replicaCount: 1
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  # storageClass: <your block-volume StorageClass>
+  # existingClaim: <your pre-provisioned block-volume PVC>
+```
+
+The index requires a filesystem on a **block volume** (EBS, PD, Azure Disk).
+**Network filesystems (EFS, Azure Files, NFS) are unsupported** because file
+locking and fsync semantics are part of the storage contract. `ReadWriteOnce`
+alone does not establish the filesystem type; verify the StorageClass and any
+existing claim. Keep one replica and **stop the server before backing up** the
+whole volume, including `index/`, `blobs/`, and `format.json` (backup procedure: P0-8 of issue #7188).
 
 ## CI validation
 
 `helm lint`, adversarial `helm template` cases, and strict `kubeconform` validation
 are run in `.github/workflows/deploy-lint.yml` on every change to `deploy/helm/**`.
 The schema checks the selector, HTTPS URLs, TLS settings, Secret refs,
-Service exposure, and LWS replay-store requirement before Kubernetes sees a
+Service exposure, and single-replica LWS storage settings before Kubernetes sees a
 manifest. The workflow is separate from the native Rust engine gate (`ci-fast`).
 
 To run locally:

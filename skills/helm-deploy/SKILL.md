@@ -22,8 +22,8 @@ Treat these as invariants:
 - Use `/health` on port 3030 for `sparq-server`; use `/livez` and `/readyz` on
   port 3000 for `lws`.
 - Run exactly one replica of either server. `sparq-server` has an
-  unreplicated writable in-memory store. The planned canonical LWS image lacks
-  its opt-in Redis replay backend, and Redis alone would not provide a shared blob store.
+  unreplicated writable in-memory store. The LWS index and blob store are
+  single-instance; Redis replay protection does not make their directory safe to share.
 
 The `sparq-server` image is open by default at the image layer because it bakes
 `SPARQ_ALLOW_REMOTE=1`. The chart refuses to render that server without an auth
@@ -100,7 +100,17 @@ raising `replicaCount`.
 
 - Set `persistence.enabled=true` to create a PVC mounted at `/data`, or also set
   `persistence.existingClaim` to use a pre-provisioned PVC.
-- With the read-only root filesystem, give `--persist` a subdirectory of the
+- For LWS, use an image containing #7188 P0-A/P0-B. The shared top-level
+  `persistence` block also sets `SOLID_SERVER_DATA_DIR=/data` and `Recreate` so
+  upgrades stop the old pod before opening the same index. The environment
+  variable is unset and storage stays in-memory when persistence is disabled.
+- LWS requires `persistence.accessMode=ReadWriteOnce` and a filesystem on a block
+  volume (EBS, PD, Azure Disk). Network filesystems (EFS, Azure Files, NFS) are
+  unsupported because the index depends on file locking and fsync semantics.
+  Verify the StorageClass or existing claim; the access mode alone is insufficient.
+  Stop the single replica before backing up all of `index/`, `blobs/`, and
+  `format.json` (backup procedure: #7188 P0-8).
+- For `sparq-server`, with the read-only root filesystem, give `--persist` a subdirectory of the
   volume (`/data/store`): a compaction or restore renames the store directory and
   needs the lock file beside it, so with `--persist /data` (lock file in `/`) the
   server starts, but `/admin/compact` and durable restores are refused.

@@ -103,9 +103,35 @@ Set `PSS_SPARQ_BACKEND` to one of:
   writes and the generic write adapter still need fencing support, so the native LWS
   server refuses this backend (below).
 
-The native binary currently uses an in-memory blob backend. A durable/shared
-RDF index therefore does not by itself make resource bodies durable; do not
-present the native image as a durable production data service.
+Without `SOLID_SERVER_DATA_DIR`, the native blob backend is in-memory; an index
+alone is insufficient to preserve resource bodies across restart.
+
+### Running durably in a container
+
+Use an image containing the #7188 P0-A/P0-B durable storage wiring:
+
+```sh
+docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
+  -v data:/data -e SOLID_SERVER_DATA_DIR=/data \
+  -e SOLID_SERVER_BASE_URL=https://solid.example \
+  -e SOLID_SERVER_TRUSTED_ISSUER=https://idp.example \
+  ghcr.io/sparq-org/sparq-lws-core:X.Y.Z
+```
+
+`SOLID_SERVER_DATA_DIR` is unset by default (in-memory). Setting it implies the
+embedded backend: `<dir>/index`, `<dir>/blobs`, and `<dir>/format.json` hold the
+index, resource bodies, and format metadata together. The image's empty `/data`
+is owned by `65532:65532`; a fresh named volume inherits that ownership.
+
+For Helm set `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and
+`persistence.accessMode=ReadWriteOnce`; optionally choose `persistence.storageClass`
+or `persistence.existingClaim`. The shared top-level persistence block mounts
+`/data`, sets the environment variable, and uses `Recreate` for upgrades.
+
+Use a filesystem on a **block volume** (EBS, PD, Azure Disk), never a network
+filesystem (EFS, Azure Files, NFS): the index relies on file locking and fsync
+semantics. Keep **one replica**; this is a single-instance index and blob store.
+**Stop the server before backing up** the whole volume (backup procedure: #7188 P0-8).
 
 The seed variables are test-only:
 

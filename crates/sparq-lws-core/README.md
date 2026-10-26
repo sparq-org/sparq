@@ -3,14 +3,9 @@
 
 > **EXPERIMENTAL** — a parallel-track Rust implementation of a Solid/LDP (Linked Web
 > Storage) server. It does **not** replace the TypeScript prod-solid-server. Imported
-> whole from [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs)
-> (rev `1e555b10`); the 3-way lws-core / lws / solid-server split is a later bead.
+> whole from [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs) (rev `1e555b10`); the 3-way lws-core / lws / solid-server split is a later bead.
 
-A Solid/LDP server core: SPARQ-authoritative for RDF and access control (WAC),
-`object_store`/S3 backup-only for bytes. Solid-OIDC + DPoP auth (via the pinned
-[solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier)), tiered
-proof-of-possession (mTLS cert-bound tokens, DPoP-SK), notifications
-(WebSocketChannel2023), and a DoS-hardened hyper/axum transport.
+A Solid/LDP server core: SPARQ-authoritative for RDF and access control (WAC), `object_store`/S3 backup-only for bytes. Solid-OIDC + DPoP auth (via the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier)), tiered proof-of-possession (mTLS cert-bound tokens, DPoP-SK), notifications (WebSocketChannel2023), and a DoS-hardened hyper/axum transport.
 
 ## 🚀 Quickstart
 
@@ -33,11 +28,7 @@ The binary is configured entirely by `SOLID_SERVER_*` / `PSS_*` env variables (b
 
 <!-- sq-lmz40: native image contract; distinct from the wasm/npm development host. -->
 
-Release tags publish `ghcr.io/sparq-org/sparq-lws-core` as a multi-arch image
-(`linux/amd64` + `linux/arm64`); pin an immutable `X.Y.Z` tag (also `X.Y` / `latest`).
-It binds `0.0.0.0:3000` via `SOLID_SERVER_BIND`, runs as uid/gid **65532** (non-root),
-serves unauthenticated `GET /livez` + `GET /readyz` probes, and enables **no** auth
-bypass or dev escape hatch — all other `SOLID_SERVER_*` / `PSS_*` settings pass through.
+Release tags publish `ghcr.io/sparq-org/sparq-lws-core` as a multi-arch image (`linux/amd64` + `linux/arm64`); pin an immutable `X.Y.Z` tag (also `X.Y` / `latest`). It binds `0.0.0.0:3000` via `SOLID_SERVER_BIND`, runs as uid/gid **65532** (non-root), serves unauthenticated `GET /livez` + `GET /readyz` probes, and enables **no** auth bypass or dev escape hatch — all other `SOLID_SERVER_*` / `PSS_*` settings pass through.
 
 ```bash
 VERSION=0.1.0   # the release to deploy
@@ -50,17 +41,27 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 **Required production configuration:**
 
 - **Base URL:** `SOLID_SERVER_BASE_URL` = the public `https://` origin (set `SOLID_SERVER_AUDIENCE` only if the token audience differs).
-- **TLS:** terminate at a trusted proxy (keep the container port private), or mount PEMs
-  and set both `SOLID_SERVER_TLS_CERT` + `SOLID_SERVER_TLS_KEY` (setting one fails boot;
-  uid 65532 must read them).
-- **Auth:** `SOLID_SERVER_TRUSTED_ISSUER` = the production Solid-OIDC issuer. DPoP,
-  HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on
-  by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or
-  `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
-- **Storage:** review `PSS_SPARQ_BACKEND` — its default `memory` (and `embedded` without
-  `SOLID_SERVER_SPARQ_DIR`) is **ephemeral**, and the native binary has only an in-memory
-  blob backend, so this image is **not for durable production data** yet. The `http` and
-  `redis-replay` backends need opt-in compile-time features.
+- **TLS:** terminate at a trusted proxy (keep the container port private), or mount PEMs and set both `SOLID_SERVER_TLS_CERT` + `SOLID_SERVER_TLS_KEY` (setting one fails boot; uid 65532 must read them).
+- **Auth:** `SOLID_SERVER_TRUSTED_ISSUER` = the production Solid-OIDC issuer. DPoP, HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
+- **Storage:** the default is **in-memory**. Mounting `/data` alone does not enable persistence; use the durable storage contract below. The `http` and `redis-replay` backends need opt-in compile-time features.
+
+### Running durably in a container
+
+Use an image containing the #7188 P0-A/P0-B durable storage wiring:
+
+```sh
+docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
+  -v data:/data -e SOLID_SERVER_DATA_DIR=/data \
+  -e SOLID_SERVER_BASE_URL=https://solid.example \
+  -e SOLID_SERVER_TRUSTED_ISSUER=https://idp.example/realms/solid \
+  "ghcr.io/sparq-org/sparq-lws-core:${VERSION}"
+```
+
+`SOLID_SERVER_DATA_DIR` is unset by default. Setting it selects the embedded backend and places the index at `/data/index`, blobs at `/data/blobs`, and format metadata at `/data/format.json`. The image ships an empty `/data` owned by `65532:65532`; a fresh named Docker volume inherits that ownership.
+
+For Helm, use `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and `persistence.accessMode=ReadWriteOnce`; optionally set `persistence.storageClass` or `persistence.existingClaim`. These shared top-level values mount `/data`, set the environment variable, and select `Recreate` for upgrades.
+
+Use a filesystem on a **block volume** (EBS, PD, Azure Disk). Network filesystems (EFS, Azure Files, NFS) are unsupported because the index needs file locking and fsync semantics. Run **one replica**; the index and blob store are single-instance. **Stop the server before backing up** the entire volume (backup procedure: #7188 P0-8).
 
 ## ✨ Features
 
@@ -77,8 +78,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 - **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
   tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
 - **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the in-process
-  engine (compiled by default, but selected only by `PSS_SPARQ_BACKEND=embedded` — the
-  boot default stays the in-memory double), opt-in live SPARQ HTTP client, `object_store`.
+  engine (compiled by default; select it with `PSS_SPARQ_BACKEND=embedded` or
+  `SOLID_SERVER_DATA_DIR` — the boot default stays in-memory), opt-in live SPARQ HTTP client, `object_store`.
 - **Notification observability** — process-wide backlog-overflow totals
   are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and
   receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
@@ -112,8 +113,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 - Specification estate (what this crate is pinned to, and what is still UNRESOLVED — issue #4971): the crate-level rustdoc, `cargo doc -p sparq-lws-core --open`.
 - Normative specs — the spec is the contract, not this implementation: [DPoP-SK](https://jeswr.github.io/dpop-sk-spec/), implemented here in `src/pop/sk/` against that profile (its Appendix-A worked example runs as a test vector); and the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier), which owns baseline (cache-miss) Solid-OIDC token + DPoP proof verification. On a verified-token-cache hit `src/auth_cache.rs` re-verifies the fresh proof locally — signature, `htm`/`htu`/`iat`, `ath`, `jti` replay, `cnf.jkt` binding — built from the verifier's own public primitives and its shared replay store, so that path is security-sensitive code to audit here.
 - Solid CTH conformance: [`conformance/`](./conformance) — opt-in lane; the score is generated + ratcheted, never committed prose (sq-gg0qq.7).
-- Related crates: [`sparq-solid`](../sparq-solid) (Solid protocol pieces),
-  [`sparq-server`](../sparq-server) (the SPARQL endpoint it can delegate to).
+- Related crates: [`sparq-solid`](../sparq-solid) (Solid protocol pieces), [`sparq-server`](../sparq-server) (the SPARQL endpoint it can delegate to).
 
 ## License
 

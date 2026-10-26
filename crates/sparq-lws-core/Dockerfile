@@ -22,17 +22,25 @@ COPY . .
 RUN cargo install --locked cargo-auditable
 RUN cargo auditable build --release --locked -p sparq-lws-core ${CARGO_FLAGS}
 
+# Distroless has no mkdir; copy an empty mount point with the runtime ownership.
+RUN mkdir /data
+
 # -------- runtime --------
 # Tag: gcr.io/distroless/cc-debian12:nonroot
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e
 
 LABEL org.opencontainers.image.title="sparq-lws-core" \
-      org.opencontainers.image.description="Native experimental Solid/LDP server backed by the sparq RDF engine" \
+      org.opencontainers.image.description="Native experimental Solid/LDP server; opt in to single-instance persistence with a /data volume and SOLID_SERVER_DATA_DIR=/data" \
       org.opencontainers.image.source="https://github.com/sparq-org/sparq" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0" \
       org.opencontainers.image.documentation="https://github.com/sparq-org/sparq/tree/main/crates/sparq-lws-core#readme"
 
 COPY --from=builder /build/target/release/sparq-lws-core /usr/local/bin/sparq-lws-core
+COPY --from=builder --chown=65532:65532 /data /data
+
+# A fresh named volume inherits this ownership. Storage stays in-memory unless
+# the operator also sets SOLID_SERVER_DATA_DIR=/data.
+VOLUME ["/data"]
 
 # The distroless nonroot identity is uid/gid 65532. Declare it explicitly so
 # neither a base-image metadata change nor a caller's assumption can make the

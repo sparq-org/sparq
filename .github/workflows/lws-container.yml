@@ -5,6 +5,13 @@ on:
   push:
     tags:
       - "v*"
+  # Draft-tier CI: the smoke job skips draft heads and runs when the PR is marked ready.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/sparq-lws-core/**"
+      - ".github/workflows/lws-container.yml"
+      - ".dockerignore"
   # Publish the LWS image on demand WITHOUT cutting a full `v*` release
   # (that tag also fires release.yml). A manual run tags only `:latest` (the semver
   # tags below require a git tag) — exactly what the deploy templates + demo reference.
@@ -14,14 +21,12 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    name: smoke + scan + publish LWS container
+  smoke:
+    name: smoke + scan LWS container
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - name: Check out release tag
+      - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Buildx for native gate
@@ -42,7 +47,7 @@ jobs:
           provenance: false
           sbom: false
 
-      - name: Smoke native image (health, fail-closed mutation, non-root)
+      - name: Smoke native image (health, auth, non-root, durable restart)
         env:
           LWS_CONTAINER_SKIP_BUILD: "1"
         run: crates/sparq-lws-core/tests/container-smoke.sh sparq-lws-core:smoke 3000
@@ -58,6 +63,21 @@ jobs:
           severity: HIGH,CRITICAL
           vuln-type: os,library
           trivyignores: .trivyignore
+
+  publish:
+    name: publish LWS container
+    needs: smoke
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Buildx for publication
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Only after the native artifact passes smoke + vulnerability gates do we
       # enable emulation, authenticate, and publish the multi-arch image index.

@@ -1,5 +1,5 @@
-{{- if and (eq .Values.server "sparq-server") .Values.persistence.enabled (not .Values.persistence.existingClaim) -}}
-# PersistentVolumeClaim for /data (dataset storage) — sparq-server only
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) -}}
+# PersistentVolumeClaim for /data (dataset storage)
 # [OPUS-4.8] sq-0d744
 # [GPT-5.6] R9: sparq-server is open-by-default at the image layer; this chart
 # gates it with SPARQ_AUTH_TOKEN from an existing Secret. Do not remove that wiring.

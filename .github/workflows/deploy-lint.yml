@@ -137,6 +137,21 @@ jobs:
             --set persistence.enabled=true \
             > /tmp/sparq-server-pvc-rendered.yaml
 
+          helm template sparq-lws ./deploy/helm/sparq \
+            --set server=lws \
+            --set lws.trustedIssuer=https://solidcommunity.net \
+            --set lws.baseUrl=https://lws.example.com \
+            --set persistence.enabled=true \
+            > /tmp/lws-pvc-rendered.yaml
+
+          helm template sparq-lws ./deploy/helm/sparq \
+            --set server=lws \
+            --set lws.trustedIssuer=https://solidcommunity.net \
+            --set lws.baseUrl=https://lws.example.com \
+            --set persistence.enabled=true \
+            --set persistence.existingClaim=lws-existing-data \
+            > /tmp/lws-existing-claim-rendered.yaml
+
       - name: Assert rendered security and runtime contracts
         run: |
           set -euo pipefail
@@ -162,11 +177,36 @@ jobs:
           grep -q 'path: /livez' /tmp/lws-rendered.yaml
           grep -q 'path: /readyz' /tmp/lws-rendered.yaml
 
+          # Persistence is opt-in; the default LWS pod has no durable wiring.
+          if grep -Eq 'kind: PersistentVolumeClaim|mountPath: /data|SOLID_SERVER_DATA_DIR|strategy:|persistentVolumeClaim:' /tmp/lws-rendered.yaml; then
+            echo "ERROR: ephemeral LWS unexpectedly enables persistence." >&2
+            exit 1
+          fi
+
+          grep -q '^kind: PersistentVolumeClaim$' /tmp/lws-pvc-rendered.yaml
+          grep -q 'name: sparq-lws-data' /tmp/lws-pvc-rendered.yaml
+          grep -q 'claimName: "sparq-lws-data"' /tmp/lws-pvc-rendered.yaml
+          grep -q '"ReadWriteOnce"' /tmp/lws-pvc-rendered.yaml
+          for manifest in /tmp/lws-pvc-rendered.yaml /tmp/lws-existing-claim-rendered.yaml; do
+            grep -A1 'name: data$' "${manifest}" | grep -q 'mountPath: /data'
+            grep -A1 'name: SOLID_SERVER_DATA_DIR$' "${manifest}" | grep -q 'value: "/data"'
+            grep -A1 '^  strategy:$' "${manifest}" | grep -q 'type: Recreate'
+            grep -q 'fsGroup: 65532' "${manifest}"
+            grep -q 'readOnlyRootFilesystem: true' "${manifest}"
+          done
+          grep -q 'claimName: "lws-existing-data"' /tmp/lws-existing-claim-rendered.yaml
+          if grep -q '^kind: PersistentVolumeClaim$' /tmp/lws-existing-claim-rendered.yaml; then
+            echo "ERROR: existingClaim must not create another PVC." >&2
+            exit 1
+          fi
+
           if grep -q '^kind: Secret$' \
                /tmp/sparq-server-rendered.yaml \
                /tmp/sparq-server-ingress-rendered.yaml \
                /tmp/sparq-server-pvc-rendered.yaml \
-               /tmp/lws-rendered.yaml; then
+               /tmp/lws-rendered.yaml \
+               /tmp/lws-pvc-rendered.yaml \
+               /tmp/lws-existing-claim-rendered.yaml; then
             echo "ERROR: rendered chart must not create a Secret (R4)." >&2
             exit 1
           fi
@@ -206,7 +246,11 @@ jobs:
           assert_fails --set server=lws \
             --set lws.trustedIssuer=https://solidcommunity.net \
             --set lws.baseUrl=https://lws.example.com \
-            --set persistence.enabled=true
+            --set persistence.enabled=true --set persistence.accessMode=ReadWriteMany
+          assert_fails --set server=lws \
+            --set lws.trustedIssuer=https://solidcommunity.net \
+            --set lws.baseUrl=https://lws.example.com \
+            --set persistence.enabled=true --set persistence.accessMode=ReadOnlyMany
 
       - name: Strict Kubernetes schema validation
         run: |
@@ -217,4 +261,6 @@ jobs:
             /tmp/sparq-server-ingress-rendered.yaml \
             /tmp/sparq-server-pvc-rendered.yaml \
             /tmp/lws-rendered.yaml \
+            /tmp/lws-pvc-rendered.yaml \
+            /tmp/lws-existing-claim-rendered.yaml \
             deploy/helm/quickstart/sparq-server-quickstart.yaml
