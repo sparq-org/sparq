@@ -243,6 +243,7 @@ fn gate_count_regression() {
         "circuit gate-count REGRESSION(s) detected (silent bloat — re-baseline only if INTENTIONAL):\n{}",
         regressions.join("\n")
     );
+    support::complete(gate);
 }
 
 /// Belt-and-braces: the snapshot must cover every compiled member directory under
