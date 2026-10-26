@@ -812,10 +812,11 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
-    /// Maximum potential rule/credential pairs in a trust block.
+    /// Maximum combined signature-verification budget in a trust block.
     ///
-    /// Default: 4096. Depth-one certifications each count as one potential rule.
-    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits no pairs.
+    /// Default: 4096. Counts certifications plus potential rule/credential pairs;
+    /// depth-one certifications each also count as one potential rule in those pairs.
+    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits neither certifications nor pairs.
     /// Exceeding it refuses the whole block with 403 before signature verification.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
