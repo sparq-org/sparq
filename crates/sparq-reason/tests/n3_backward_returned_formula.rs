@@ -16,7 +16,7 @@
 //! this change does not touch the shape, and otherwise the value the proof demonstrably
 //! bound, named in each test.
 
-use sparq_reason::n3::reason_n3_terms;
+use sparq_reason::n3::{reason_n3_terms, Term};
 
 const P: &str = "@prefix : <http://ex/>. \
                  @prefix log: <http://www.w3.org/2000/10/swap/log#>. \
@@ -27,10 +27,13 @@ const P: &str = "@prefix : <http://ex/>. \
 fn out(body: &str) -> Vec<String> {
     let src = format!("{P}{body}");
     let c = reason_n3_terms(&src, None).unwrap_or_else(|e| panic!("{src}\n{e}"));
+    for fact in &c.derived {
+        assert!(!format!("{fact:?}").contains("__bp."), "local pattern name leaked: {fact:?}");
+    }
     let mut v: Vec<String> = c
         .facts
         .iter()
-        .filter(|t| format!("{:?}", t[0]).contains("/out"))
+        .filter(|t| matches!(&t[0], Term::Iri(iri) if iri == "http://ex/out"))
         .map(|t| format!("{:?} {:?}", t[1], t[2]))
         .collect();
     v.sort();
@@ -322,8 +325,8 @@ fn an_inline_clause_is_not_spliced_with_a_formula_bound_beside_it() {
 
 /// A binding whose values share subterms is a DAG, and resolving a variable INTO its value
 /// builds that DAG's unfolding, which is exponential in its depth: thirteen links of
-/// `( { ?v<n> ?v<n> ?v<n> } ) list:member ?v<n-1>` is tens of megabytes from a few hundred
-/// bytes of N3. Untrusted input reaches this, so the size is computed from the borrowed terms
+/// `( { ?v<n> ?v<n> ?v<n> } ) list:member ?v<n-1>` can grow exponentially from a small
+/// N3 document. Untrusted input reaches this, so the size is computed from the borrowed terms
 /// first and the run is REFUSED past its term-size limit rather than building the term.
 ///
 /// The assertion is on the refusal, not on a time or a memory figure, so it cannot be flaky.
@@ -337,7 +340,8 @@ fn a_dag_shaped_binding_is_refused_rather_than_unfolded() {
          {{ :q :pat {{ ?v1 :r :z }} }} <= {{ {links}( :z ) list:member ?v14 }}.\n\
          {{ :q :pat ?f }} => {{ :out :got ?f }}."
     ));
-    assert!(e.contains("term"), "a term-size refusal, not {e}");
+    assert!(e.contains("max_term_bytes"), "a term-size refusal, not {e}");
+    assert!(!e.contains("term-depth"), "size must not be reported as depth: {e}");
     // Four links unfold small enough to answer, so the refusal above is the SIZE limit and
     // not this shape being rejected outright.
     let short = (2..=5)
@@ -848,4 +852,212 @@ fn a_variable_written_in_data_is_not_resolved_from_the_proofs_binding() {
     // for both spellings. Resolved from the binding the clause would be `{ :a :p :b }` only.
     assert_eq!(out(&fa("?y")), fired(), "forAllIn, `?y`");
     assert_eq!(out(&fa("?q")), fired(), "forAllIn, `?q`");
+}
+
+// ------------------------------------------------------- review round 5
+
+fn containment_twins(pattern: &str, last: &str) -> String {
+    format!(
+        "{pattern}\n\
+         :k :scope1 {{ :v0 :inner :A }}. :k :scope2 {{ :v0 :inner :B }}.\n\
+         {{ ?q :odd true }} <= {{ :k :pat ?f . :k :scope1 ?s1 . :k :scope2 ?s2 . \
+         ?s1 log:includes ?f . ?s2 log:{last} ?f }}.\n\
+         {{ :g :odd true }} => {{ :out :backward :yes }}.\n\
+         {{ :k :pat ?f . :k :scope1 ?s1 . :k :scope2 ?s2 . \
+         ?s1 log:includes ?f . ?s2 log:{last} ?f }} => {{ :out :forward :yes }}."
+    )
+}
+
+const RETURNED_PATTERN: &str = ":s0 :p :v0.\n\
+    { ?x :has { ?y :inner ?z } } <= { ?x :p ?y }.\n\
+    { :s0 :has ?f } => { :k :pat ?f }.";
+
+#[test]
+fn a_finished_producers_pattern_does_not_carry_a_containment_binding() {
+    assert_eq!(
+        out(&containment_twins(RETURNED_PATTERN, "notIncludes")),
+        none()
+    );
+}
+
+#[test]
+fn a_finished_producers_pattern_matches_each_containment_afresh() {
+    assert_eq!(
+        out(&containment_twins(RETURNED_PATTERN, "includes")),
+        vec![
+            "Iri(\"http://ex/backward\") Iri(\"http://ex/yes\")",
+            "Iri(\"http://ex/forward\") Iri(\"http://ex/yes\")",
+        ]
+    );
+}
+
+#[test]
+fn source_minted_spellings_are_free_in_each_arriving_pattern() {
+    for spelling in ["?z", "?__bw1_z", "?__bwfoo"] {
+        let pattern = format!(":k :pat {{ :v0 :inner {spelling} }}.");
+        assert_eq!(
+            out(&containment_twins(&pattern, "notIncludes")),
+            none(),
+            "{spelling}"
+        );
+        assert_eq!(
+            out(&containment_twins(&pattern, "includes")),
+            vec![
+                "Iri(\"http://ex/backward\") Iri(\"http://ex/yes\")",
+                "Iri(\"http://ex/forward\") Iri(\"http://ex/yes\")",
+            ],
+            "{spelling}"
+        );
+        // Keep the producer boundary in the forward twin: the caller's binding
+        // must not instantiate a free variable in the producer's arriving template.
+        let data =
+            format!(":cfg :args ( ( ?x {spelling} ) {{ ?x :type :T }} ). :pick :one :bound.");
+        let premise = ":cfg :args (?tp ?c) . ( ?tp ?c ?l ) log:collectAllIn { :a :type :T }";
+        let head = ":m :m { :w :w ?l }";
+        let caller = format!("{{ :pick :one {spelling} . :m :m ?f }} => {{ :out :got ?f }}.");
+        let got = out(&format!("{data} {{ {head} }} <= {{ {premise} }}. {caller}"));
+        let forward = out(&format!("{data} {{ {premise} }} => {{ {head} }}. {caller}"));
+        assert_eq!(
+            got,
+            one(&format!(
+                "Iri(\"http://ex/got\") Formula([[Iri(\"http://ex/w\"), Iri(\"http://ex/w\"), \
+             List([List([Iri(\"http://ex/a\"), Var(\"{}\")])])]])",
+                &spelling[1..]
+            )),
+            "{spelling}: a caller's unrelated binding stays outside the template"
+        );
+        assert_eq!(
+            got, forward,
+            "{spelling}: the forward twin preserves the same free name"
+        );
+    }
+}
+
+#[test]
+fn aggregation_outputs_restore_the_arriving_templates_free_names() {
+    for (template, expected) in [
+        ("(?x ?z)", "List([Iri(\"http://ex/a\"), Var(\"z\")])"),
+        (
+            "{ :u :v ?z }",
+            "Formula([[Iri(\"http://ex/u\"), Iri(\"http://ex/v\"), Var(\"z\")]])",
+        ),
+        (
+            "<< :u :v ?z >>",
+            "Triple([Iri(\"http://ex/u\"), Iri(\"http://ex/v\"), Var(\"z\")])",
+        ),
+    ] {
+        let data = format!(":cfg :args ( {template} {{ ?x :type :T }} ). :a :type :T.");
+        let premise = ":cfg :args (?tp ?c) . ( ?tp ?c ?l ) log:collectAllIn { :a :type :T }";
+        let backward = out(&format!(
+            "{data}\n{{ :m :m {{ :w :w ?l }} }} <= {{ {premise} }}.\n\
+             {{ :m :m ?f }} => {{ :out :got ?f }}."
+        ));
+        let forward = out(&format!(
+            "{data}\n{{ {premise} }} => {{ :out :got {{ :w :w ?l }} }}."
+        ));
+        assert_eq!(
+            backward,
+            one(&format!(
+                "Iri(\"http://ex/got\") Formula([[Iri(\"http://ex/w\"), Iri(\"http://ex/w\"), List([{expected}])]])"
+            )),
+            "{template}"
+        );
+        assert_eq!(backward, forward, "{template}: exact forward parity");
+    }
+}
+
+fn nested_lists(depth: usize, leaf: &str) -> String {
+    format!("{}{}{}", "( ".repeat(depth), leaf, " )".repeat(depth))
+}
+
+#[test]
+fn a_returned_formula_with_depth_62_data_is_resolved() {
+    let data = nested_lists(62, ":c");
+    let got = out(&format!(
+        ":seed :value {data}.\n\
+         {{ :a :cl ?f }} <= {{ :seed :value ?x . \
+         ( {{ :w :p {{ :k :k ?x }} }} ) list:member ?f }}.\n\
+         {{ :a :cl ?f }} => {{ :out :got ?f }}."
+    ));
+    let expected = format!(
+        "{}Iri(\"http://ex/c\"){}",
+        "List([".repeat(62),
+        "])".repeat(62)
+    );
+    assert_eq!(
+        got,
+        one(&format!(
+            "Iri(\"http://ex/got\") Formula([[Iri(\"http://ex/w\"), Iri(\"http://ex/p\"), \
+         Formula([[Iri(\"http://ex/k\"), Iri(\"http://ex/k\"), {expected}]])]])"
+        ))
+    );
+}
+
+#[test]
+fn a_resolved_term_past_the_term_depth_limit_reports_depth() {
+    let data = nested_lists(62, ":c");
+    let inner = nested_lists(40, "?x");
+    let outer = nested_lists(30, "?x");
+    let e = err(&format!(
+        ":seed :value {data}.\n\
+         {{ :a :first {{ :k :k {inner} }} }} <= {{ :seed :value ?x }}.\n\
+         {{ :a :cl {{ :w :p {outer} }} }} <= {{ :a :first ?x }}.\n\
+         {{ ( :hit {{ :a :cl ?f }} ?l ) log:collectAllIn ?scope }} => {{ :out :got ?l }}."
+    ));
+    assert!(e.contains("term-depth limit"), "{e}");
+    assert!(
+        !e.contains("max_term_bytes"),
+        "depth must not be reported as size: {e}"
+    );
+}
+
+#[test]
+fn a_live_application_id_does_not_own_unminted_source_names() {
+    let doc = |variable: &str, backward: bool| {
+        let data = format!(
+            ":seed :value :g. :cfg :pat {{ :v0 :inner {variable} }}. :k :s1 {{ :v0 :inner :A }}. :k :s2 {{ :v0 :inner :B }}."
+        );
+        let head = "?q :odd { :tag :v ?z }";
+        let body = ":seed :value ?q . :cfg :pat ?f . :k :s1 ?s1 . :k :s2 ?s2 . ?s1 log:includes ?f . ?s2 log:includes ?f";
+        let rule = if backward {
+            format!("{{{head}}} <= {{{body}}}.")
+        } else {
+            format!("{{{body}}} => {{{head}}}.")
+        };
+        format!("{data}{rule} {{ :g :odd ?r }} => {{ :trace :got ?r . :out :fired :yes }}.")
+    };
+    let baseline = reason_n3_terms(&format!("{P}{}", doc("?x", true)), None).unwrap();
+    let formula = baseline
+        .facts
+        .iter()
+        .find_map(|t| {
+            if t[0] == Term::Iri("http://ex/trace".into()) {
+                Some(&t[2])
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let Term::Formula(ts) = formula else {
+        panic!("{formula:?}")
+    };
+    let Term::Var(name) = &ts[0][2] else {
+        panic!("{formula:?}")
+    };
+    let (application, _) = name.strip_prefix("__bw").unwrap().split_once('_').unwrap();
+    assert_eq!(out(&doc("?x", true)), fired(), "the ordinary pattern is matched afresh");
+    for forged in [format!("?__bw0{application}_z"), format!("?__bw{application}_not_written")] {
+        let b = out(&doc(&forged, true));
+        let f = out(&doc(&forged, false));
+        assert_eq!(f, fired());
+        assert_eq!(b, f, "source spelling {forged}");
+    }
+}
+
+#[test]
+fn only_the_exact_output_subject_is_compared() {
+    assert_eq!(
+        out(":outer :p :hidden. :out :p :visible."),
+        one("Iri(\"http://ex/p\") Iri(\"http://ex/visible\")")
+    );
 }

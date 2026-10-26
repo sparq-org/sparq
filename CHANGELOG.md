@@ -702,6 +702,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choice of variable name. Only the names the ENGINE minted are resolved — a backward
   application's `__bw<fold>_` renaming, and the `__bp.` names of an outer atom — which is what
   keeps a clause the rule built out of its own text sharing with the rule that wrote it.
+  A free minted name stays shared only if its canonical prefix names a live application
+  whose rule actually renamed that variable. Names from completed producers, padded IDs
+  and other source spellings are renamed apart for each containment match. These free
+  names cannot read unrelated caller bindings during preparation. Aggregation outputs
+  restore their original names, so no local `__bp.` name enters a derived fact. Scoped
+  operators read the registered ancestry, keeping ordinary proof paths to one fingerprint.
 
   Stopping at the value is also what keeps a quoted formula OPAQUE. A clause written inline is
   never spliced with the formula a variable beside it is bound to: a stored formula put into
@@ -731,11 +737,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   position written `{ :a :q ?x }` derived `{ :a :q :c }`. Both now derive the value.
 
   A binding whose values share subterms is a DAG, and resolving into it builds that DAG's
-  UNFOLDING, which is exponential in its depth — thirteen links of
-  `( { ?v<n> ?v<n> ?v<n> } ) list:member ?v<n-1>` reach tens of megabytes from a few hundred
-  bytes of N3. The size is therefore computed from the borrowed terms BEFORE the term is
-  built, in time linear in the DAG, and the run is refused past its term-size limit; a descent
-  that runs out of depth is refused rather than returning a quietly truncated term. Ordinary
+  UNFOLDING, which can grow exponentially from a small N3 document. The size is computed
+  from borrowed terms before building, memoized by address and remaining depth and alias
+  allowances. Oversized terms are refused on size; structural nesting uses the run's
+  term-depth allowance, while alias fuel counts binding hops only. A depth cut follows
+  the existing depth-limit path rather than reporting a fictitious term size. Ordinary
   substitution is unchanged — a quoted formula is a value, and a formula a caller passes in
   still comes back as the caller wrote it.
 
