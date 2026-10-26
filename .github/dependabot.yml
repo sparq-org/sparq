@@ -134,10 +134,9 @@ updates:
           - minor
           - patch
     ignore:
-      # site/ is on Next 16 + the ESLint CLI and its React Compiler lint rules are clean.
-      # gui/app still uses Next 15: eslint 10 breaks its `next lint` because
-      # eslint-config-next 15 fails to load ("Failed to patch ESLint because the calling
-      # module was not recognized"). Keep the major hold until gui/app migrates too.
+      # Both site/ and gui/app are on Next 16 and the ESLint CLI. The major hold stays
+      # until gui/app's React Compiler lint overrides are removed too (#6986), so an
+      # eslint major lands on two apps that lint clean.
       # Only version updates are held; security updates still come through.
       - dependency-name: "eslint"
         update-types:
