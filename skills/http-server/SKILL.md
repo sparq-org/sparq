@@ -1491,8 +1491,11 @@ second, with the count shed since the preceding warning.
   `AppState` keyed by **serving lineage, generation and requested view kind** (WAC, ACP or
   inferred). Concurrent misses for one key share one build; waiters claim no pool slots.
   Selecting a new generation or lineage drops superseded slots; restore clears the cache.
-  The three kinds have independent slots. A successful view or an `AuthAllowance` refusal
-  (including `Deadline`) remains cached for that key. The native materialization budget
+  The three kinds have independent slots. Warm hits use a shared cache read lock and
+  an `Arc` clone; only misses take the write lock and re-check the key. Successful views
+  and deterministic count/size allowance refusals remain cached for that key.
+  `AuthAllowance::Deadline` depends on host load: current waiters receive the refusal,
+  the slot is cleared, and the next request rebuilds the same generation. The native materialization budget
   `AuthBudget::max_materialize_time` defaults to five seconds (`None` disables it;
   wasm32 ignores it). Coarse checks cover input assembly and stratum boundaries;
   expiration is a fail-closed `503`, logged as `max_materialize_time`, with no partial

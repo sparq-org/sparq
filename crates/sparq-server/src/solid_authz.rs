@@ -357,7 +357,8 @@ pub(crate) struct CachedAuthView {
 }
 
 /// The shared outcome survives cancellation of the handler that installed this slot.
-/// Only successful views and typed allowance refusals remain in the cache.
+/// Only successful views and deterministic count/size refusals remain in the cache.
+/// Deadline refusals depend on host load and leave the key retryable.
 struct AuthViewSlot {
     outcome: tokio::sync::watch::Sender<Option<ServerViewResult>>,
 }
@@ -378,7 +379,8 @@ fn view_slot(requested: Option<AuthView>) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ServerViewError {
     /// The N3 materialisation failed — an operational, retryable condition (503). Fail-closed:
-    /// no request is answered from a partial view. Typed allowance refusals are cached.
+    /// no request is answered from a partial view. Deterministic count/size refusals are
+    /// cached; Deadline and unclassified refusals retry on the next request.
     ///
     /// Carries the materialisation's allowance/budget kind when it had one
     /// ([`sparq_solid::auth_allowance_refusal`]) so the server can LOG which limit the store's
@@ -761,7 +763,7 @@ fn infer_view(dataset: &str) -> AuthView {
 // writer needs no knowledge of the auth view at all.
 //
 // FAIL-CLOSED, same contract as the stateless lane: a materialisation failure is a retryable 503
-// and caches only typed allowance refusals; under `odrl-authz` an ODRL-carrying server
+// and caches only deterministic count/size allowance refusals; under `odrl-authz` an ODRL-carrying server
 // store is REFUSED (dropping a prohibition would be fail-OPEN); under `solid-authz-trust` a `"trust"` block, which decides
 // over its own body-derived store, is refused in this lane.
 
@@ -940,12 +942,39 @@ async fn server_store(
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, Response> {
     let index = view_slot(requested_view);
+    {
+        // Warm lookups share the read lock. Restore needs the write lock, so pinning
+        // the core and generation here is serialized with the serving-lineage swap.
+        let cache = state
+            .authz_view_cache()
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        #[cfg(feature = "backup")]
+        let core = state.authz_core();
+        #[cfg(feature = "backup")]
+        let pinned = core.ring.current();
+        #[cfg(not(feature = "backup"))]
+        let pinned = state.current();
+        if let Some(cached) = cache.as_ref() {
+            #[cfg(feature = "backup")]
+            let same_lineage = Arc::ptr_eq(&cached.core, &core);
+            #[cfg(not(feature = "backup"))]
+            let same_lineage = true;
+            if same_lineage && cached.generation == pinned.number() {
+                if let Some(slot) = &cached.slots[index] {
+                    if let Some(outcome) = &*slot.outcome.borrow() {
+                        return outcome.clone().map_err(server_view_error_response);
+                    }
+                }
+            }
+        }
+    }
     let slot;
     #[cfg(feature = "backup")]
     let core;
     {
-        // Restore takes this same lock when swapping the core. Pin and select the slot
-        // under it, so even an async-side warm hit belongs to the serving lineage.
+        // A miss re-pins and re-checks under the write lock: another request or restore
+        // may have changed the entry after the shared lookup.
         let mut cache = state
             .authz_view_cache()
             .write()
@@ -1016,7 +1045,21 @@ async fn server_store(
                     outcome
                 };
                 // Transient failures reach current waiters but leave the key retryable.
-                let retain = matches!(outcome, Ok(_) | Err(ServerViewError::Materialize(Some(_))));
+                let retain = matches!(
+                    outcome,
+                    Ok(_)
+                        | Err(ServerViewError::Materialize(Some(
+                            AuthAllowance::TotalJoinRows
+                                | AuthAllowance::JoinRows
+                                | AuthAllowance::RoundsOrFacts
+                                | AuthAllowance::TermBytes
+                                | AuthAllowance::InputBytes
+                                | AuthAllowance::InputFacts
+                                | AuthAllowance::InputTermBytes
+                                | AuthAllowance::ResourceIri
+                                | AuthAllowance::DecisionWork
+                        )))
+                );
                 if !retain {
                     if let Some(cached) = cache.as_mut() {
                         if cached.slots[index]
@@ -3929,15 +3972,21 @@ mod build_pool_tests {
 
     #[tokio::test]
     async fn allowance_refusals_are_cached_for_the_generation() {
-        let st = state(1, 50);
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
         let mut budget = sparq_solid::default_auth_budget();
-        budget.max_materialize_time = Some(Duration::ZERO);
+        budget.max_input_facts = 0;
         *st.authz_build_pool().view_budget.lock().unwrap() = Some(budget);
         for _ in 0..3 {
             let response = server_store(&st, None)
                 .await
                 .err()
-                .expect("deadline refusal");
+                .expect("input-fact refusal");
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         }
         assert_eq!(st.authz_build_pool().admitted(), 1);
@@ -3956,9 +4005,77 @@ mod build_pool_tests {
         assert!(matches!(
             *outcome,
             Some(Err(ServerViewError::Materialize(Some(
-                AuthAllowance::Deadline
+                AuthAllowance::InputFacts
             ))))
         ));
+    }
+
+    #[test]
+    fn a_warm_server_view_completes_while_the_cache_is_read_locked() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let st = state(1, 50);
+        let warm = runtime.block_on(server_store(&st, None)).unwrap();
+        let guard = st.authz_view_cache().read().unwrap();
+        let worker_state = st.clone();
+        let handle = runtime.handle().clone();
+        let (done, completed) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            done.send(handle.block_on(server_store(&worker_state, None)))
+                .unwrap();
+        });
+        let outcome = completed.recv_timeout(Duration::from_secs(2));
+        // Release before asserting or joining so an exclusive-lock mutant can exit.
+        drop(guard);
+        worker.join().unwrap();
+        let again = outcome
+            .expect("a warm hit must not need the cache write lock")
+            .unwrap();
+        assert!(Arc::ptr_eq(&warm, &again));
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+    }
+
+    #[tokio::test]
+    async fn deadline_refusals_leave_the_generation_retryable() {
+        let st = state(1, 50);
+        let mut budget = sparq_solid::default_auth_budget();
+        budget.max_materialize_time = Some(Duration::ZERO);
+        *st.authz_build_pool().view_budget.lock().unwrap() = Some(budget);
+        for _ in 0..2 {
+            let response = server_store(&st, None)
+                .await
+                .err()
+                .expect("deadline refusal");
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+        assert_eq!(
+            st.authz_build_pool()
+                .view_builds
+                .load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+        assert_eq!(st.authz_build_pool().admitted(), 2);
+        assert!(st
+            .authz_view_cache()
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .slots[2]
+            .is_none());
+        budget.max_materialize_time = None;
+        *st.authz_build_pool().view_budget.lock().unwrap() = Some(budget);
+        server_store(&st, None)
+            .await
+            .expect("the same generation can recover");
+        assert_eq!(
+            st.authz_build_pool()
+                .view_builds
+                .load(std::sync::atomic::Ordering::SeqCst),
+            3
+        );
     }
 
     #[tokio::test]

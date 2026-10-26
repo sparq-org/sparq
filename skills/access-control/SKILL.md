@@ -921,7 +921,10 @@ at stratum boundaries, never per rule row. A running stratum can overrun the all
 the next boundary refuses before installation and preserves the view in force.
 `auth_allowance_refusal` returns `Some(AuthAllowance::Deadline)` with
 `limit_name() == "max_materialize_time"` and the usual refusal wording plus
-`[allowance=deadline]`. On wasm32 this field is ignored because there is no monotonic clock.
+`[allowance=deadline]`. Unlike count/size refusals, elapsed-time refusals depend on host
+load. Stateful server waiters share the current refusal, but it is not retained in the
+view cache: the next request retries without requiring a write or restore.
+On wasm32 this field is ignored because there is no monotonic clock.
 Configure it through the existing store budget, for example:
 
 ```rust
