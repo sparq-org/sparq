@@ -2466,7 +2466,8 @@ mod tests {
     async fn check_raw_mutators_refuse_a_marker(client: &impl SparqClient) {
         let refused = |r: Result<(), SparqError>| {
             assert!(
-                matches!(r, Err(SparqError::Backend(ref e)) if e == "service markers require the lifecycle lease"),
+                matches!(r, Err(SparqError::Backend(ref e))
+                    if e == "service markers require the lifecycle lease"),
                 "{r:?}"
             );
         };

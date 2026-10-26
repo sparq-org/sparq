@@ -270,13 +270,15 @@ async fn absent<S: Store + 'static>(
     if data_delete && matches!(allowed, Ok(true)) {
         match super::access::allowed_absent(state, Action::Read, uri, agent).await {
             Ok(false) => {
+                if let Some(response) = full(state, method) {
+                    return response;
+                }
                 if parent_of(uri, &state.cfg.storage())
                     .is_some_and(|parent| !state.visible(&parent))
                 {
                     return set_aside_meanwhile();
                 }
-                return full(state, method)
-                    .unwrap_or_else(|| StatusCode::NO_CONTENT.into_response())
+                return StatusCode::NO_CONTENT.into_response();
             }
             Ok(true) => {}
             Err(e) => return store_error(e),
@@ -550,12 +552,15 @@ pub(crate) fn compares_state(headers: &HeaderMap, dated: bool) -> bool {
             .is_some())
 }
 
-/// Whether a precondition requires Read: tags and applicable dates, plus bare `*` on DELETE.
+/// Whether a precondition requires Read: tags and applicable dates, plus any `If-None-Match`
+/// or non-wildcard `If-Match` on DELETE (even malformed or empty lists). Only a valid bare
+/// `If-Match: *` on a non-reader's data DELETE is treated as unconditional.
 pub(crate) fn names_precondition(req: &LwsRequest, dated: bool) -> bool {
     compares_state(&req.headers, dated)
         || (req.method == Method::DELETE
-            && (req.headers.contains_key(header::IF_MATCH)
-                || req.headers.contains_key(header::IF_NONE_MATCH)))
+            && (req.headers.contains_key(header::IF_NONE_MATCH)
+                || entity_tag::field(&req.headers, header::IF_MATCH)
+                    .is_some_and(|v| !matches!(TagList::parse(&v), Ok(TagList::Any)))))
 }
 
 /// A write's preconditions are answered only to a caller that may read what they compare
@@ -6714,13 +6719,14 @@ mod tests {
 
     /// A write's precondition that compares the target's state tells the writer how a
     /// representation compares; one that may not read it is refused instead, whatever the outcome
-    /// would have been. A bare `*` requires Read on DELETE only.
+    /// would have been. On DELETE, bare `If-None-Match: *` requires Read; `If-Match: *` does not.
     #[tokio::test]
     async fn a_precondition_on_state_needs_read() {
         let mut cfg = super::super::LwsConfig::new(BASE);
         cfg.owner = Some("https://owner.example/#me".into());
-        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
-        let st = LwsState::new(store, cfg).await.expect("state");
+        let store = super::super::test_store::FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        st.notify.pause_sweeper();
         let root = st.cfg.storage();
         let grant = |actions: Value, who: &str| {
             super::super::access::policies(
@@ -6886,8 +6892,25 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         // An out-of-range page cannot bypass the Read gate for a concrete tag either.
         let page = format!("{c}?page=99");
-        let status = send(dave.clone(), "POST", page, other()).await;
+        let status = send(dave.clone(), "POST", page.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        store.counters.take_methods();
+        let status = send(
+            dave.clone(),
+            "POST",
+            page,
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(
+            !store
+                .counters
+                .take_methods()
+                .keys()
+                .any(|name| name.contains("list_children")),
+            "an existence-only precondition must not read the listing"
+        );
         // `*` alongside a date the write compares is still a comparison.
         let status = send(
             dave.clone(),
@@ -7006,15 +7029,26 @@ mod tests {
                 assert_eq!(r.headers().contains_key("etag"), ok, "{path} {who:?}");
             }
         }
-        // A bare `*` requires Read on DELETE too.
-        let status = send(
-            dave.clone(),
-            "DELETE",
-            p.clone(),
-            vec![("if-match", "*".into())],
-        )
-        .await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "DELETE {status}");
+        // A non-reader's `If-Match: *` DELETE is unconditional, even for an absent target.
+        // `If-None-Match: *` still needs Read, whether the target exists or not.
+        for path in [p.clone(), "/nope".into()] {
+            let status = send(
+                dave.clone(),
+                "DELETE",
+                path.clone(),
+                vec![("if-none-match", "*".into())],
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "DELETE {path}");
+            let status = send(
+                dave.clone(),
+                "DELETE",
+                path.clone(),
+                vec![("if-match", "*".into())],
+            )
+            .await;
+            assert_eq!(status, StatusCode::NO_CONTENT, "DELETE {path}");
+        }
         // A `Slug` names the member only for a writer that may list the container: the name
         // would otherwise say whether one by that name is there.
         let named = |who: Agent| {
@@ -13502,7 +13536,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bare_star_on_an_lws_delete_needs_read() {
+    async fn lws_delete_if_match_star_is_unconditional_without_read() {
         use super::super::test_store as ts;
         let (state, store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
@@ -13525,49 +13559,168 @@ mod tests {
             .write(&format!("{root}c/"), Bytes::new(), LWS_JSON)
             .await
             .unwrap();
-        for (method, paths, field) in [
-            (Method::DELETE, ["/there", "/missing"], "if-match"),
-            (Method::DELETE, ["/there", "/missing"], "if-none-match"),
-        ] {
-            let mut answers = Vec::new();
-            for path in paths {
-                store.counters.take_methods();
-                let measured = store.counters.measure();
-                let response = handle(
-                    &state,
-                    &ts::request(
-                        method.clone(),
-                        path,
-                        &[(field, "*"), ("content-type", "text/plain")],
-                        "x",
-                    ),
-                    &writer,
-                )
-                .await;
-                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {path}");
-                let headers = response.headers().clone();
-                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-                    .await
-                    .unwrap();
-                answers.push((
-                    headers,
-                    body,
-                    measured.delta(),
-                    store.counters.take_methods(),
-                ));
-            }
-            assert_eq!(answers[0], answers[1], "{method}");
+        let mut answers = Vec::new();
+        for path in ["/there", "/missing"] {
+            store.counters.take_methods();
+            let measured = store.counters.measure();
+            let response = handle(
+                &state,
+                &ts::request(Method::DELETE, path, &[("if-none-match", "*")], ""),
+                &writer,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "DELETE {path}");
+            let headers = response.headers().clone();
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            answers.push((
+                headers,
+                body,
+                measured.delta(),
+                store.counters.take_methods(),
+            ));
         }
+        assert_eq!(answers[0], answers[1]);
         assert_eq!(
             state.store.read(&there).await.unwrap().body,
             Bytes::from_static(b"x")
         );
+        let mut answers = Vec::new();
+        for path in ["/there", "/missing"] {
+            let response = handle(
+                &state,
+                &ts::request(Method::DELETE, path, &[("if-match", "*")], ""),
+                &writer,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{path}");
+            answers.push(delete_answer(response).await);
+        }
+        assert_eq!(answers[0], answers[1]);
+        assert!(!state.store.exists(&there).await.unwrap());
         assert!(state
             .store
             .list_children(&format!("{root}c/"))
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn only_a_bare_if_match_star_exempts_a_nonreader_delete() {
+        use super::super::{test_store as ts, FOAF_AGENT};
+        let (state, store) = ts::counting_state(100).await;
+        let root = state.cfg.storage();
+        state.access.put_grant_for_test(
+            "public-delete",
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": ["delete"],
+                    "assignee": FOAF_AGENT}]),
+                &root,
+            )
+            .unwrap(),
+        );
+        let there = ts::data(&state, "there").await;
+        for caller in [Agent::anonymous(), ts::agent("https://writer.example/#me")] {
+            for headers in [
+                vec![("if-match", "*, \"tag\"")],
+                vec![("if-match", "*"), ("if-match", "\"tag\"")],
+                vec![("if-match", "*"), ("if-match", "*")],
+                vec![("if-match", "")],
+                vec![("if-match", " , ")],
+                vec![("if-match", "\"tag\"")],
+                vec![("if-none-match", "*")],
+                vec![("if-match", "*"), ("if-none-match", "*")],
+                vec![("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT")],
+            ] {
+                let mut answers = Vec::new();
+                for path in ["/there", "/missing"] {
+                    let uri = state.cfg.absolute(path);
+                    *store.trace.lock().unwrap() = Some(Vec::new());
+                    let response = handle(
+                        &state,
+                        &ts::request(Method::DELETE, path, &headers, ""),
+                        &caller,
+                    )
+                    .await;
+                    let trace = store.trace.lock().unwrap().take().unwrap();
+                    let answer = delete_answer(response).await;
+                    assert_eq!(
+                        answer.0,
+                        if caller.subject.is_none() {
+                            StatusCode::UNAUTHORIZED
+                        } else {
+                            StatusCode::FORBIDDEN
+                        },
+                        "{headers:?} {path}"
+                    );
+                    assert!(
+                        trace.iter().all(|call| call == &format!("read {}", meta_key(&uri))),
+                        "a denied precondition probed the target: {headers:?} {trace:?}"
+                    );
+                    answers.push(answer);
+                }
+                assert_eq!(answers[0], answers[1], "{headers:?}");
+            }
+        }
+        assert!(state.store.exists(&there).await.unwrap());
+        // If-Match takes precedence over dates. Even an old date must not restore an oracle.
+        for caller in [Agent::anonymous(), ts::agent("https://writer.example/#me")] {
+            for headers in [
+                vec![("if-match", "*")],
+                vec![("if-match", " \t* ")],
+                vec![
+                    ("if-match", "*"),
+                    ("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT"),
+                ],
+            ] {
+                ts::data(&state, "there").await;
+                let mut answers = Vec::new();
+                for path in ["/there", "/missing"] {
+                    let response = handle(
+                        &state,
+                        &ts::request(Method::DELETE, path, &headers, ""),
+                        &caller,
+                    )
+                    .await;
+                    let answer = delete_answer(response).await;
+                    assert_eq!(answer.0, StatusCode::NO_CONTENT, "{headers:?} {path}");
+                    answers.push(answer);
+                }
+                assert_eq!(answers[0], answers[1], "{headers:?}");
+                assert!(!state.store.exists(&there).await.unwrap());
+            }
+        }
+        // A reader keeps normal preconditions on present targets and 404 on absent ones.
+        for (headers, expected) in [
+            (vec![("if-match", "*")], StatusCode::NO_CONTENT),
+            (
+                vec![
+                    ("if-match", "*"),
+                    ("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT"),
+                ],
+                StatusCode::NO_CONTENT,
+            ),
+            (vec![("if-none-match", "*")], StatusCode::PRECONDITION_FAILED),
+            (vec![("if-match", "*, \"tag\"")], StatusCode::PRECONDITION_FAILED),
+            (vec![("if-match", "")], StatusCode::PRECONDITION_FAILED),
+            (
+                vec![("if-unmodified-since", "Sun, 06 Nov 1994 08:49:37 GMT")],
+                StatusCode::PRECONDITION_FAILED,
+            ),
+        ] {
+            ts::data(&state, "there").await;
+            for (path, status) in [("/there", expected), ("/missing", StatusCode::NOT_FOUND)] {
+                let response = handle(
+                    &state,
+                    &ts::request(Method::DELETE, path, &headers, ""),
+                    &ts::agent(ts::OWNER),
+                )
+                .await;
+                assert_eq!(response.status(), status, "reader {headers:?} {path}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -13665,17 +13818,19 @@ mod tests {
                 )]),
             );
             let mut answers = Vec::new();
-            for path in ["/there", "/missing"] {
-                let response = handle(
-                    &state,
-                    &ts::request(Method::DELETE, path, &[], ""),
-                    &writer,
-                )
-                .await;
-                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-                answers.push(delete_answer(response).await);
+            for headers in [vec![], vec![("if-match", "*")]] {
+                for path in ["/there", "/missing"] {
+                    let response = handle(
+                        &state,
+                        &ts::request(Method::DELETE, path, &headers, ""),
+                        &writer,
+                    )
+                    .await;
+                    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+                    answers.push(delete_answer(response).await);
+                }
             }
-            assert_eq!(answers[0], answers[1]);
+            assert!(answers.iter().all(|answer| answer == &answers[0]));
             assert!(state.store.exists(&there).await.unwrap());
             state.locks.show(std::slice::from_ref(&root));
         }
@@ -13740,6 +13895,12 @@ mod tests {
 
     #[tokio::test]
     async fn an_absent_delete_during_a_create_or_set_aside_announces_nothing() {
+        for headers in [vec![], vec![("if-match", "*")]] {
+            check_absent_delete_during_create(&headers).await;
+        }
+    }
+
+    async fn check_absent_delete_during_create(headers: &[(&str, &str)]) {
         use super::super::{test_store as ts, Prior};
         for kind in ["type", "format", "creator"] {
             let (state, store) = ts::counting_state(100).await;
@@ -13760,7 +13921,7 @@ mod tests {
                 super::super::access::policies(&policies, &root).unwrap(),
             );
             let there = ts::data(&state, "there").await;
-            let request = ts::request(Method::DELETE, "/there", &[], "");
+            let request = ts::request(Method::DELETE, "/there", headers, "");
             let expected = delete_answer(handle(&state, &request, &writer).await).await;
             assert_eq!(expected.0, StatusCode::NO_CONTENT);
             state
@@ -13818,6 +13979,12 @@ mod tests {
 
     #[tokio::test]
     async fn anonymous_public_delete_matches_present_on_every_absent_path() {
+        for headers in [vec![], vec![("if-match", "*")]] {
+            check_anonymous_absent_delete(&headers).await;
+        }
+    }
+
+    async fn check_anonymous_absent_delete(headers: &[(&str, &str)]) {
         use super::super::{test_store as ts, Prior, FOAF_AGENT};
         let (state, store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
@@ -13831,7 +13998,7 @@ mod tests {
         );
         let there = ts::data(&state, "there").await;
         let anonymous = Agent::anonymous();
-        let request = ts::request(Method::DELETE, "/there", &[], "");
+        let request = ts::request(Method::DELETE, "/there", headers, "");
         let expected = delete_answer(handle(&state, &request, &anonymous).await).await;
         assert_eq!(expected.0, StatusCode::NO_CONTENT);
         for path in ["settled", "in-flight", "set-aside", "delete"] {
@@ -13982,17 +14149,32 @@ mod tests {
 
     #[tokio::test]
     async fn an_absent_delete_observes_the_full_set_aside_budget() {
+        for public in [false, true] {
+            check_full_delete_budget(public).await;
+        }
+    }
+
+    async fn check_full_delete_budget(public: bool) {
         use super::super::test_store as ts;
         let (state, store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
-        let writer = ts::agent("https://writer.example/#me");
+        let writer = if public {
+            Agent::anonymous()
+        } else {
+            ts::agent("https://writer.example/#me")
+        };
+        let assignee = if public {
+            json!(super::super::FOAF_AGENT)
+        } else {
+            json!(writer.subject)
+        };
         state.access.put_grant_for_test(
             "writer",
             super::super::access::policies(
                 &json!([{
                     "type": ["AccessPolicy"],
                     "action": ["delete"],
-                    "assignee": writer.subject
+                    "assignee": assignee
                 }]),
                 &root,
             )
@@ -14007,16 +14189,35 @@ mod tests {
         let generation = state.generation(&root);
         let measured = store.counters.measure();
         let mut answers = Vec::new();
-        for path in ["/there", "/missing"] {
-            let answer = delete_answer(
-                handle(&state, &ts::request(Method::DELETE, path, &[], ""), &writer).await,
-            )
-            .await;
-            assert_eq!(answer.0, StatusCode::SERVICE_UNAVAILABLE);
-            assert!(answer.1.contains_key(header::RETRY_AFTER));
-            answers.push(answer);
+        for parent_set_aside in [false, true] {
+            if parent_set_aside {
+                state.locks.hide(
+                    std::slice::from_ref(&root),
+                    std::collections::HashMap::from([(
+                        root.clone(),
+                        super::super::Prior { existed: Some(true), ..Default::default() },
+                    )]),
+                );
+            }
+            for headers in [vec![], vec![("if-match", "*")]] {
+                for path in ["/there", "/missing"] {
+                    let answer = delete_answer(
+                        handle(
+                            &state,
+                            &ts::request(Method::DELETE, path, &headers, ""),
+                            &writer,
+                        )
+                        .await,
+                    )
+                    .await;
+                    assert_eq!(answer.0, StatusCode::SERVICE_UNAVAILABLE);
+                    assert!(answer.1.contains_key(header::RETRY_AFTER));
+                    answers.push(answer);
+                }
+            }
         }
-        assert_eq!(answers[0], answers[1]);
+        assert!(answers.iter().all(|answer| answer == &answers[0]));
+        state.locks.show(std::slice::from_ref(&root));
         assert_eq!(state.generation(&root), generation);
         assert_eq!(measured.delta().sparql_updates, 0);
         state
@@ -14026,6 +14227,12 @@ mod tests {
 
     #[tokio::test]
     async fn two_concurrent_deletes_without_read_answer_the_same() {
+        for headers in [vec![], vec![("if-match", "*")]] {
+            check_concurrent_nonreader_deletes(&headers).await;
+        }
+    }
+
+    async fn check_concurrent_nonreader_deletes(headers: &[(&str, &str)]) {
         use super::super::test_store as ts;
         let (state, _store) = ts::counting_state(100).await;
         let root = state.cfg.storage();
@@ -14044,7 +14251,7 @@ mod tests {
         );
         let there = ts::data(&state, "there").await;
         let guard = state.locks.lock(&there).await.unwrap();
-        let request = ts::request(Method::DELETE, "/there", &[], "");
+        let request = ts::request(Method::DELETE, "/there", headers, "");
         let first = handle(&state, &request, &writer);
         let second = handle(&state, &request, &writer);
         tokio::pin!(first, second);

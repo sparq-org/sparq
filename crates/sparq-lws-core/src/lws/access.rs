@@ -664,8 +664,6 @@ pub async fn allowed<S: Store + 'static>(
         struct Creator {
             #[serde(default)]
             creator: Option<String>,
-            #[serde(default, rename = "pending")]
-            _pending: bool,
         }
         let meta: Creator = match state.store.read(&super::meta_key(uri)).await {
             Ok(r) => serde_json::from_slice(&r.body).map_err(|e| {
@@ -678,7 +676,7 @@ pub async fn allowed<S: Store + 'static>(
         return Ok(meta.creator.as_deref() == Some(subject));
     }
     let meta = state.resource_meta(uri).await?;
-    decide(state, action, uri, agent, &meta, None).await
+    decide_grants(state, uri, agent, &meta, None, &candidates).await
 }
 
 /// Whether `agent` may learn that the set-aside resource at `uri` is set aside: never whether it
@@ -913,6 +911,19 @@ async fn decide<S: Store + 'static>(
         .into_iter()
         .filter(|p| p.applies(subject, action, uri))
         .collect();
+    decide_grants(state, uri, agent, meta, format, &candidates).await
+}
+
+/// Decide against the already filtered grants so `allowed` scans the grant policies once.
+async fn decide_grants<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+    agent: &Agent,
+    meta: &ResourceMeta,
+    format: Option<Option<String>>,
+    candidates: &[Policy],
+) -> Result<bool, ServerError> {
+    let subject = agent.subject.as_deref();
     if subject.is_some() && subject == meta.creator.as_deref() {
         return Ok(true);
     }
@@ -4178,7 +4189,7 @@ mod tests {
             .store
             .write(
                 &super::super::meta_key(&there),
-                Bytes::from_static(br#"{"creator":null,"links":false}"#),
+                Bytes::from_static(br#"{"creator":null,"pending":"invalid","links":false}"#),
                 "application/json",
             )
             .await
@@ -4194,7 +4205,7 @@ mod tests {
                 assert!(store.counters.take_methods().is_empty());
             }
         }
-        // With no applicable policy an authenticated caller needs only creator + pending;
+        // With no applicable policy an authenticated caller needs only creator;
         // unrelated fields are ignored even when they do not fit ResourceMeta.
         assert!(!allowed(
             &state,

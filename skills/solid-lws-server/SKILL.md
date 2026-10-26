@@ -474,9 +474,9 @@ one IRI, the first marker stored; any other IRI of that shape takes room in the 
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
 the process; the directory-backed embedded index journals each raise before acknowledging it.
 Restoring an independent snapshot taken before a raise restores the earlier mark and loses
-expiries decided after that snapshot. The wasm adapter's `PersistentStore` reports no
-atomic-marker capability: its snapshot journal does not yet preserve marker mutations or forward
-the lifecycle lease, so `LwsState::new` refuses it before reading or writing. A listing,
+expiries decided after that snapshot. The wasm adapter's `PersistentStore` does not claim
+`exclusive`, so `LwsState::new` refuses it before reading or writing. It forwards the lifecycle
+lease, but holds, restores and atomic markers are neither forwarded nor journaled. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -948,7 +948,10 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. A bare `*` requires Read on LWS resource `DELETE` only;
+  outcome would have been. On LWS resource `DELETE`, `If-None-Match: *` requires Read.
+  A non-reader's data `DELETE` with `If-Match: *` is treated as unconditional, answering `204`
+  for settled present and absent targets with the same full-budget and set-aside-parent checks.
+  Other `If-Match` values on `DELETE`, including malformed or empty lists, require Read too.
   `POST` with `If-Match: *` or `If-None-Match: *` works without Read, since even an
   unconditional create discloses whether its container exists. Tags and applicable dates
   still require Read on every method. The Read check comes before authorization waits,
@@ -994,7 +997,7 @@ What the server exposes, all discoverable from the storage description
   answers from absence; those constraints are the caller's requested policy.
 - Authorization computes applicable grant policies in memory first. With no applicable policy,
   an anonymous caller is denied without reading resource metadata. An authenticated caller's
-  creator check parses only creator and pending; without creator access it returns false even
+  creator check parses only creator; without creator access it returns false even
   when unrelated metadata fields are malformed. Full metadata is parsed only for a policy.
   Residual backend work: an absent creator record costs one index lookup, while a present
   `.meta` record can also fetch its bytes. Keeping creator in the index row is deferred.

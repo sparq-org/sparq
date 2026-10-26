@@ -631,8 +631,8 @@ impl InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         guard.meta.remove(iri);
-        // Parity with the live SPARQ path (`DROP SILENT GRAPH <iri>`): a resource's named graph holds
-        // BOTH its index record AND — if it is a container — its `ldp:contains` edges, so dropping the
+        // Parity with the live SPARQ path (`DROP SILENT GRAPH <iri>`): a resource's named graph
+        // holds BOTH its index record AND — for a container — its `ldp:contains` edges, so dropping
         // record drops the containment set too. Mirror that here by clearing `iri`'s own children
         // entry, so a delete-then-recreate of a container at the same IRI cannot inherit a stale
         // (empty-or-not) membership list. (The empty-container DELETE check has already run in the

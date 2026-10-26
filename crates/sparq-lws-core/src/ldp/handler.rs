@@ -7658,7 +7658,7 @@ mod tests {
     }
 
     // =====================================================================================
-    // Bare-star preconditions require Read just like named entity tags.
+    // LDP bare-star preconditions are exempt from the Read gate on named entity tags.
 
     /// `/alice/c/` + an existing member `/alice/c/existing`; the container `.acl` grants BOB `acl:default
     /// acl:Write` (inheritable member Write, NO Read) PLUS `acl:accessTo acl:Append` on the container

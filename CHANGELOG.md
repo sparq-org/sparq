@@ -180,8 +180,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **sparq-lws-core:** LWS resource DELETE requires Read for bare `If-Match: *` or
-  `If-None-Match: *`; POST with either bare `*` works without Read. Concrete tags and
+- **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
+  A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
+  and absent targets answer `204`, subject to the same full-budget and set-aside-parent checks.
+  Other `If-Match` values on DELETE, including malformed or empty lists, require Read too.
+  POST with either bare `*` works without Read. Concrete tags and
   applicable dates require Read on every method. LDP exempts bare `*`, and LWS service
   containers retain their existence-only handling. Conditional POST to the storage root
   needs no Read when `Accept` selects its public description.
@@ -830,7 +833,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with public Delete grants. Read on an absent target is decided without stored metadata,
   including partial create metadata and orphan creator records. Concurrent removals use the
   settled-absent decision, including under the delete lock; a full set-aside budget returns
-  `503` with `Retry-After`. A set-aside change to a previously present resource retains `503`.
+  `503` with `Retry-After`, before checking whether the parent is set aside.
+  A set-aside change to a previously present resource retains `503`.
   A set-aside parent container returns `503` for both present and absent children.
   An absent delete changes and announces nothing. Pending metadata on a present resource and
   type- or format-constrained Delete grants remain residual differences from absence.
@@ -838,8 +842,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both before backend reads, with `Allow`, `Accept-Patch` and the anchor `Link`. For readers too,
   OPTIONS now returns `204` where an absent target previously returned `404` and a set-aside
   target `503`. Anonymous grant denials skip metadata reads. For a non-creator, malformed
-  unrelated metadata fields such as `links` no longer make `allowed()` answer `500`; its fast
-  path returns false. Raw index mutations refuse service-marker operands; marker resets
+  unrelated metadata fields such as `links` or `pending` no longer make `allowed()` answer `500`;
+  its fast path returns false. Raw index mutations refuse service-marker operands; marker resets
   require a lifecycle guard.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back

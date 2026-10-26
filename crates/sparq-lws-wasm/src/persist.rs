@@ -425,8 +425,9 @@ mod wasm_store {
     /// Reads are pass-through, including the `read_plan`/`read_at` overrides, so wrapping a
     /// [`CompositeStore`](sparq_lws_core::store::CompositeStore) keeps its single-round-trip read
     /// path rather than falling back to the trait's per-IRI defaults. The reported call timeout
-    /// and lifecycle lease come from the inner store. Atomic markers remain unsupported because
-    /// the snapshot journal does not preserve marker mutations.
+    /// and lifecycle lease come from the inner store. This wrapper does not claim `exclusive`,
+    /// and LWS is refused over it: holds, restores and atomic markers are neither forwarded nor
+    /// journaled.
     pub struct PersistentStore<S: Store> {
         inner: S,
         journal: Arc<Journal>,
@@ -634,14 +635,9 @@ mod tests {
         let error = LwsState::new(store, LwsConfig::new("https://pod.example"))
             .await
             .err()
-            .expect("unsupported markers must refuse startup");
-        // Either refusal is made before any read or write: the exclusive-index check runs
-        // first, then the atomic-marker check.
-        assert!(
-            error.contains("raises a stored time atomically")
-                || error.contains("may be written by other processes too"),
-            "{error}"
-        );
+            .expect("a store without exclusive ownership must refuse startup");
+        // The exclusive-index check runs before the atomic-marker check or any read or write.
+        assert!(error.contains("may be written by other processes too"), "{error}");
         assert!(decode(&journal.encode()).unwrap().is_empty());
     }
 

@@ -917,6 +917,47 @@ async fn delete_deliveries_use_the_pre_delete_snapshot() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn nonreader_wildcard_deletes_announce_only_present_targets() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    h.state.access.put_grant_for_test(
+        "public-delete",
+        crate::lws::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["delete"],
+                "assignee": crate::lws::FOAF_AGENT}]),
+            &root,
+        )
+        .unwrap(),
+    );
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    let mut body = h.stream(&doc, None).await.into_body();
+    let slot = h.state.notify.streams.slot(subscription_id(&doc));
+    for caller in [None, Some(READER)] {
+        for headers in [vec![], vec![("if-match", "*")]] {
+            let target = h.create("deleted").await;
+            let created = frame(&mut body).await.unwrap();
+            assert_eq!(notification(&created).1["activity"]["type"], json!(["Create"]));
+            let response = h.call(Method::DELETE, &target, caller, &headers, "").await;
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let deleted = frame(&mut body).await.unwrap();
+            let (_, event) = notification(&deleted);
+            assert_eq!(event["activity"]["type"], json!(["Delete"]));
+            assert_eq!(event["activity"]["object"]["id"], target);
+            let seq = slot.channel.lock().unwrap().seq;
+            let response = h.call(Method::DELETE, &target, caller, &headers, "").await;
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            // A following create must be the very next event, with no absent-delete event.
+            let sentinel = h.create("sentinel").await;
+            let created = frame(&mut body).await.unwrap();
+            let (_, event) = notification(&created);
+            assert_eq!(event["activity"]["type"], json!(["Create"]));
+            assert_eq!(event["activity"]["object"]["id"], sentinel);
+            assert_eq!(slot.channel.lock().unwrap().seq, seq + 1);
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn count_retention_and_restart_reset_the_replay_cursor() {
     let h = Harness::new().await;
     let a = h.create("a").await;
@@ -940,8 +981,15 @@ async fn count_retention_and_restart_reset_the_replay_cursor() {
     drop(body);
     let store = (*h.state.store).clone();
     let cfg = h.state.cfg.clone();
+    // Detached maintenance can retain the lease after the last service handle is dropped.
+    let draining = h.state.detached();
+    let drain = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        drop(draining);
+    });
     drop(h);
-    settle().await;
+    test_store::wait_for_stop(&store, "count_retention_and_restart_reset_the_replay_cursor").await;
+    assert!(drain.is_finished(), "the detached task released its lease");
     let h = Harness::with_state(LwsState::new(store, cfg).await.unwrap());
     let mut body = h.stream(&doc, Some(&current_id)).await.into_body();
     assert_eq!(

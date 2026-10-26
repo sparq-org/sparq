@@ -73,6 +73,10 @@ impl<S: Store> Store for CountingStore<S> {
         self.inner.raises_markers()
     }
 
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        self.inner.read_marker(iri).await
+    }
+
     async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
         self.inner.raise_marker(iri, value).await
     }

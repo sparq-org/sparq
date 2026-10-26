@@ -997,6 +997,8 @@ fn hex_digit(n: u8) -> char {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+
     use super::*;
 
     use crate::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient};
@@ -2219,6 +2221,7 @@ mod tests {
     /// A finite, always-ready backlog avoids depending on TCP or cooperative I/O yielding.
     struct ReadyFrames {
         remaining: usize,
+        received: Arc<AtomicUsize>,
         sent: Arc<std::sync::Mutex<Vec<Message>>>,
     }
 
@@ -2228,6 +2231,7 @@ mod tests {
                 None
             } else {
                 self.remaining -= 1;
+                self.received.fetch_add(1, Ordering::SeqCst);
                 Some(Ok(Message::text("frame")))
             }
         }
@@ -2241,21 +2245,33 @@ mod tests {
     /// A ready timer and its decision outrank every frame in an already-buffered flood.
     #[tokio::test]
     async fn ready_frames_cannot_starve_a_revocation_close() {
-        let s = state_with_reader(BY_HAND).await;
-        let topic = format!("{BASE}/doc");
-        let token = s.hub.mint_receive_token(BOB, &topic).await;
-        let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
-        revoke_bob(&s).await;
-        s.tick_now();
-        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let socket = ReadyFrames {
-            remaining: 1024,
-            sent: sent.clone(),
-        };
-        stream_notifications(socket, s, topic, BOB.to_string(), None, claim).await;
-        assert!(matches!(sent.lock().unwrap().as_slice(),
-                         [Message::Close(Some(frame))] if frame.code == 1008 && frame.reason == REVOKED),
-                "a ready frame backlog starved the timer or its decision");
+        // Repeat with fresh sockets so an unbiased select cannot pass by choosing the timer
+        // and decision first by chance on one connection.
+        for _ in 0..32 {
+            let s = state_with_reader(BY_HAND).await;
+            let topic = format!("{BASE}/doc");
+            let token = s.hub.mint_receive_token(BOB, &topic).await;
+            let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
+            revoke_bob(&s).await;
+            s.tick_now();
+            let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let received = Arc::new(AtomicUsize::new(0));
+            let socket = ReadyFrames {
+                remaining: 1024,
+                received: received.clone(),
+                sent: sent.clone(),
+            };
+            stream_notifications(socket, s, topic, BOB.to_string(), None, claim).await;
+            assert!(matches!(sent.lock().unwrap().as_slice(),
+                             [Message::Close(Some(frame))]
+                                 if frame.code == 1008 && frame.reason == REVOKED),
+                    "a ready frame backlog starved the timer or its decision");
+            assert_eq!(
+                received.load(Ordering::SeqCst),
+                0,
+                "ready frames must not run before a ready timer and revocation decision"
+            );
+        }
     }
 
     /// A peer that never drains sends cannot retain a revoked connection.
@@ -2322,7 +2338,7 @@ mod tests {
 
     /// Inbound frames cannot starve the timer or its completed access decision.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_revoked_subscriber_flooding_frames_is_closed_within_two_periods() {
+    async fn a_revoked_subscriber_flooding_frames_is_closed_within_two_recheck_ticks() {
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message as M;
         let every = std::time::Duration::from_millis(500);
@@ -2353,7 +2369,7 @@ mod tests {
             panic!("socket ended without a close");
         })
         .await
-        .expect("a_revoked_subscriber_flooding_frames_is_closed_within_two_periods hung");
+        .expect("a_revoked_subscriber_flooding_frames_is_closed_within_two_recheck_ticks hung");
         assert!(
             s.recheck_ticks.load(Ordering::SeqCst) - at_revoke < 2,
             "frame flood delayed the revocation close by two timer ticks"
