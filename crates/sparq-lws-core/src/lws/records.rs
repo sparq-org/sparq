@@ -1220,7 +1220,7 @@ mod tests {
             let mut undo = Vec::new();
             if kind < 2 {
                 let Err(crate::error::ServerError::Unsettled { fence, .. }) =
-                    store.delete(&iri, Some(&container)).await
+                    store.delete_container_if_empty(&iri, Some(&container)).await
                 else {
                     panic!("expected an unsettled delete");
                 };
