@@ -99,7 +99,7 @@ fn a_formula_in_a_conclusion_carries_the_premises_binding() {
 
 /// A variable the proof did NOT bind stays a variable: `?z` is in the returned formula and
 /// in no premise, so there is nothing to instantiate it to, and it keeps the one
-/// `__bw<fold>_` name that makes this derivation's value its own. The sibling `?y` IS bound
+/// `__bw<fold>.` name that makes this derivation's value its own. The sibling `?y` IS bound
 /// and is instantiated, so the two halves of the same formula show both rules at once.
 #[test]
 fn an_unbound_variable_in_a_returned_formula_keeps_its_name() {
@@ -110,7 +110,7 @@ fn an_unbound_variable_in_a_returned_formula_keeps_its_name() {
     let row = &got[0];
     assert!(row.contains("Iri(\"http://ex/v\"), Iri(\"http://ex/inner\")"), "?y instantiated: {row}");
     assert_eq!(row.matches("Var(\"__bw").count(), 1, "?z, and only ?z, survives: {row}");
-    assert!(row.contains("_z\")"), "the surviving name is ?z's: {row}");
+    assert!(row.contains(".z\")"), "the surviving name is ?z's: {row}");
 }
 
 /// A quoted formula's OWN binder is not a variable any proof binds, so the instantiation
@@ -569,10 +569,8 @@ fn a_stored_scope_holding_a_variable_is_searched_as_it_stands() {
 
 // ------------------------------------------------------- no spelling is special
 
-/// Nothing reads a variable's NAME to decide a document's answer, so a document that spells
-/// a variable in the shape the chainer's own renaming uses (`?__bw<digits>_…`) is answered
-/// exactly as the same document with an ordinary name. A document is entitled to that
-/// spelling.
+/// A source variable spelled like the chainer's former renaming (`?__bw<digits>_…`)
+/// remains an ordinary free variable. Its former prefix must not affect the answer.
 #[test]
 fn a_document_that_spells_a_generated_name_is_answered_the_same() {
     let doc = |y: &str| {
@@ -1044,7 +1042,7 @@ fn a_live_application_id_does_not_own_unminted_source_names() {
     let Term::Var(name) = &ts[0][2] else {
         panic!("{formula:?}")
     };
-    let (application, _) = name.strip_prefix("__bw").unwrap().split_once('_').unwrap();
+    let (application, _) = name.strip_prefix("__bw").unwrap().split_once('.').unwrap();
     assert_eq!(out(&doc("?x", true)), fired(), "the ordinary pattern is matched afresh");
     for forged in [format!("?__bw0{application}_z"), format!("?__bw{application}_not_written")] {
         let b = out(&doc(&forged, true));
@@ -1059,5 +1057,153 @@ fn only_the_exact_output_subject_is_compared() {
     assert_eq!(
         out(":outer :p :hidden. :out :p :visible."),
         one("Iri(\"http://ex/p\") Iri(\"http://ex/visible\")")
+    );
+}
+
+// The source spelling is fixed independently of the prefix renderer. It is the
+// application identity for the goal below with the former prefix spelling.
+fn source_live_spelling_document(backward: bool, negative: bool) -> String {
+    let head = "?q :odd true";
+    let checks = if negative {
+        "?s2 log:notIncludes ?f"
+    } else {
+        "?s1 log:includes ?f . ?s2 log:includes ?f"
+    };
+    let premise = format!(":k :pat ?f . :k :scope1 ?s1 . :k :scope2 ?s2 . {checks}");
+    let rule = if backward {
+        format!("{{ {head} }} <= {{ {premise} }}")
+    } else {
+        format!("{{ {premise} }} => {{ :g :odd true }}")
+    };
+    format!(
+        ":k :pat {{ :v0 :inner ?__bw17571941353166498116_s1 }} .\n\
+         :k :scope1 {{ :v0 :inner :A }} . :k :scope2 {{ :v0 :inner :B }} .\n\
+         {rule} . {{ :g :odd true }} => {{ :out :fired :yes }} ."
+    )
+}
+
+#[test]
+fn a_source_variable_spelled_like_a_live_name_keeps_notincludes_false() {
+    let forward = out(&source_live_spelling_document(false, true));
+    assert_eq!(forward, none());
+    assert_eq!(out(&source_live_spelling_document(true, true)), forward);
+}
+
+#[test]
+fn a_source_variable_spelled_like_a_live_name_matches_each_scope() {
+    let forward = out(&source_live_spelling_document(false, false));
+    assert_eq!(forward, fired());
+    assert_eq!(out(&source_live_spelling_document(true, false)), forward);
+}
+
+fn returned_member_chain(links: usize, formula_links: usize) -> String {
+    let mut premise = String::new();
+    for i in 1..links {
+        let value = if i <= formula_links {
+            format!("{{ :n :n ?v{} }}", i + 1)
+        } else {
+            format!("?v{}", i + 1)
+        };
+        premise.push_str(&format!("( {value} ) list:member ?v{i} . "));
+    }
+    premise.push_str(&format!("( :z ) list:member ?v{links}"));
+    format!("{{ :q :pat ?v1 }} <= {{ {premise} }} . {{ :q :pat ?f }} => {{ :out :got ?f }} .")
+}
+
+fn assert_returned_member_chain(links: usize, formula_links: usize) {
+    let closure = reason_n3_terms(
+        &format!("{P}{}", returned_member_chain(links, formula_links)),
+        None,
+    )
+    .expect("the complete member chain answers");
+    let n = Term::Iri("http://ex/n".into());
+    let mut expected = Term::Iri("http://ex/z".into());
+    for _ in 0..formula_links {
+        expected = Term::Formula(vec![[n.clone(), n.clone(), expected]]);
+    }
+    assert_eq!(
+        closure.derived,
+        vec![[
+            Term::Iri("http://ex/out".into()),
+            Term::Iri("http://ex/got".into()),
+            expected
+        ]],
+        "every link must resolve to the final term"
+    );
+}
+
+#[test]
+fn a_returned_member_chain_of_70_links_is_fully_resolved() {
+    assert_returned_member_chain(70, 69);
+}
+
+#[test]
+fn a_returned_member_chain_of_200_links_within_term_depth_is_fully_resolved() {
+    // Keep structural nesting within its separate allowance while walking more links.
+    assert_returned_member_chain(200, 100);
+}
+
+#[test]
+fn a_returned_member_chain_at_the_term_depth_limit_is_fully_resolved() {
+    // The existing allowance is 128 containers: 129 members wrap :z in 128 formulas.
+    assert_returned_member_chain(129, 128);
+}
+
+#[test]
+fn a_positive_returned_member_chain_past_term_depth_is_refused() {
+    // Check the first disallowed depth as well as the brief's literal reproduction.
+    for links in [130, 200] {
+        let error = err(&returned_member_chain(links, links - 1));
+        assert!(error.contains("term-depth limit"), "{links} links: {error}");
+        assert!(!error.contains("max_term_bytes"), "{links} links: {error}");
+    }
+}
+
+#[test]
+fn exported_backward_names_round_trip_without_merging_source_names() {
+    use sparq_reason::n3::{parser, serialize};
+    let closure = reason_n3_terms(
+        &format!(
+            "{P}:s :p :v . {{ ?x :has {{ ?y :inner ?z }} }} <= {{ ?x :p ?y }} .\n\
+                  {{ :s :has ?f }} => {{ :out :got ?f }} ."
+        ),
+        None,
+    )
+    .unwrap();
+    let Term::Formula(ts) = &closure.derived[0][2] else {
+        panic!("{:?}", closure.derived)
+    };
+    let Term::Var(minted) = &ts[0][2] else {
+        panic!("{ts:?}")
+    };
+    assert!(parser::parse(&format!("{P}:s :p ?{minted} .")).is_err());
+    // Also reserve the display spelling in another statement of the document.
+    let source_name = minted.replace('.', "_");
+    let source = [
+        Term::Iri("http://ex/source".into()),
+        Term::Iri("http://ex/p".into()),
+        Term::Var(source_name.clone()),
+    ];
+    let text = serialize::serialize_facts(closure.derived.iter().chain(std::iter::once(&source)))
+        .expect("the exported closure round-trips");
+    let parsed = parser::parse(&text).expect("export parses");
+    let got = parsed
+        .facts
+        .iter()
+        .find(|t| t[0] == Term::Iri("http://ex/out".into()))
+        .unwrap();
+    let Term::Formula(ts) = &got[2] else {
+        panic!("{got:?}")
+    };
+    assert_eq!(ts[0][0], Term::Iri("http://ex/v".into()));
+    assert_eq!(ts[0][1], Term::Iri("http://ex/inner".into()));
+    let Term::Var(written) = &ts[0][2] else {
+        panic!("{ts:?}")
+    };
+    assert_ne!(written, &source_name, "the two variables stay distinct");
+    assert!(
+        parsed.facts.contains(&source),
+        "source variable kept: {:?}",
+        parsed.facts
     );
 }

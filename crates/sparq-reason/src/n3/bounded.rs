@@ -80,7 +80,6 @@ pub(crate) enum CutKind {
     #[cfg(feature = "compiled-rules")]
     Rounds,
     TermBytes,
-    #[cfg(feature = "compiled-rules")]
     Other,
 }
 
@@ -109,7 +108,8 @@ pub(crate) fn rounds_error(limits: ClosureLimits) -> String {
 /// The record also carries the run's [`ClosureLimits`], so every forward closure of the
 /// run (nested ones included) gets the allowance its entry point was given, the run's
 /// stack allowance ([`RUN_STACK`]), so one allowance is shared by every level, and the
-/// run's refusal: the error of the first term refused for its size ([`derived_term`]),
+/// run's refusal: the error of the first term refused for its size ([`derived_term`])
+/// or resolved depth ([`substitute_resolved`]),
 /// which fails every closure of the run that sees it.
 ///
 /// The fields are private and there is no `Default`: the only ways to make a fresh record
@@ -151,7 +151,7 @@ impl Truncation {
         self.cut.get()
     }
 
-    /// The error of the first term the run refused for its size, if any: every closure of
+    /// The error of the first term the run refused for its size or resolved depth: every closure of
     /// the run that ends after it fails with it.
     pub(crate) fn refusal(&self) -> Option<String> {
         self.refusal
@@ -1022,21 +1022,29 @@ fn resolved_bytes_deep<B: Subst + ?Sized>(
 }
 
 /// Resolve inside landed values, after checking both the unfolding's size and depth.
-/// Exhausted depth or alias fuel records the existing depth cut, never a fictitious size.
+/// `fuel` is the binding length plus one, enough for every acyclic binding path.
+/// Exhausted structural depth refuses the run explicitly, including positive-only rules.
 pub(crate) fn substitute_resolved<B: Subst + ?Sized>(
     t: &Term,
     b: &B,
+    fuel: usize,
     run: &Truncation,
 ) -> Option<Term> {
     let Some(bytes) = resolved_bytes_deep(
-        t, b, backward_depth(), run.term_depth.get(), &mut HashSet::new(), &mut HashMap::new(),
+        t,
+        b,
+        fuel,
+        run.term_depth.get(),
+        &mut HashSet::new(),
+        &mut HashMap::new(),
     ) else {
-        return settle(run, Bounded::cut(None, TERM_DEPTH_CUT));
+        run.refuse(CutKind::Other, || TERM_DEPTH_CUT.to_string());
+        return None;
     };
     if substituted_refused(run, bytes) {
         return None;
     }
-    Some(apply_resolved(t, b, backward_depth(), &mut HashSet::new()))
+    Some(apply_resolved(t, b, fuel, &mut HashSet::new()))
 }
 
 /// Backward goal `g` with every variable resolved to the END of its binding chain in `b`
@@ -1303,7 +1311,7 @@ fn apply_deep<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
 /// A term a substitution binds a variable to can itself hold variables the same substitution
 /// binds. [`apply_deep`] clones such a value and stops, which left them behind:
 /// `{ ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }` returned
-/// `{ { ?__bw<n>_y :q :r } :p :b }` with `?y` bound to its value all along (GH #6943).
+/// `{ { ?__bw<n>.y :q :r } :p :b }` with `?y` bound to its value all along (GH #6943).
 ///
 /// This is NOT what ordinary substitution should do — a quoted formula is a value, and a
 /// formula a caller passes in has to come back as the caller wrote it, which is why

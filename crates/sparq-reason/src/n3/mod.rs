@@ -3773,7 +3773,7 @@ fn backward_prove(
                         // that binds it, is dropped at the end of this loop, which left the
                         // value naming a variable nothing will ever bind (GH #6943 case 1:
                         // `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }`
-                        // proved for `:c` returned `{ ?__bw<n>_x :p :b }` where `?__bw<n>_x`
+                        // proved for `:c` returned `{ ?__bw<n>.x :p :b }` where `?__bw<n>.x`
                         // was bound to `:c`). Those variables are instantiated here, while
                         // `sol` still holds them, and ONLY those ([`Produced`]).
                         let val = match Produced::new(&sol, b, pat).resolve(val, &bw.truncated)
@@ -3887,9 +3887,8 @@ impl<'a> Produced<'a> {
     }
 
     /// `val` with every variable this view binds instantiated, inside quoted formulae too
-    /// ([`bounded::substitute_deep`], which sizes and charges the term it builds exactly as
-    /// every other substitution of the engine does). `None`, with the cut recorded, past
-    /// the run's term allowance.
+    /// ([`bounded::substitute_resolved`], which checks the resolved term's size and depth
+    /// before building it). `None`, with a refusal recorded, past the run's term allowance.
     ///
     /// It takes `val` by value and hands it straight back when nothing in it still needs
     /// instantiating, which is every value of an ordinary proof: the walk that decides
@@ -3903,7 +3902,7 @@ impl<'a> Produced<'a> {
             || !mentions_var(&val, &engine_var) || !self.unresolved(&val) {
             return Some(val);
         }
-        bounded::substitute_resolved(&val, self, run)
+        bounded::substitute_resolved(&val, self, self.sol.len() + 1, run)
     }
 
     /// Does `t` still hold a variable this view binds?
@@ -4035,17 +4034,12 @@ impl bounded::Subst for Produced<'_> {
 /// whole path above a node is accounted for by one word and nothing is re-encoded as the
 /// proof descends.
 ///
-/// The fingerprint renders as the one `__bw<n>_` chunk [`rename_vars`] prefixes, which is the
-/// format `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes
-/// — so no downstream consumer changes: spellability, the exact writers' backward-copy
-/// refusal and the display writers' renaming all see the same shape of name as before, and a
-/// name's LENGTH no longer grows with the depth of the proof that minted it. Two renamed
-/// names are equal only if their folds and the variables behind them are (the chunk's digits
-/// are read by maximal munch), and two folds are equal only if the keys behind them are
-/// ([`BwCtx::node`] fails the run otherwise). It does NOT make a renamed name distinct
-/// from a variable a document itself spells `__bw…`: that namespace is not reserved, so such
-/// a variable can still be captured, here as before this name was ([`rename_vars`] renames
-/// it like any other).
+/// The fingerprint renders as one `__bw<n>.` chunk, which [`rename_vars`] prefixes
+/// and `serialize::universal_base` reads back. The `.` cannot occur in a source variable
+/// name, so application variables have a separate spelling from document variables.
+/// A name's length does not grow with proof depth. Two renamed names are equal only if
+/// their folds and original variables are equal, and two folds are equal only if the keys
+/// behind them are ([`BwCtx::node`] fails the run otherwise).
 #[derive(Clone, Copy)]
 struct BwPath {
     /// The fingerprint of the proof-tree node this path names.
@@ -4083,21 +4077,21 @@ impl NodeKey {
     }
 }
 
-/// The buffer a node's renaming prefix `__bw<fold>_` is rendered into, on the STACK: the
-/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `_`, so it has a
+/// The buffer a node's renaming prefix `__bw<fold>.` is rendered into, on the STACK: the
+/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `.`, so it has a
 /// fixed upper bound and never needed a heap `String` of its own. One per candidate site on
 /// the backward path, where `format!` took an allocation and a free each time.
 ///
-/// It renders the same bytes as `format!("__bw{fold}_")`, which `rename_vars` prefixes and
+/// It renders the same bytes as `format!("__bw{fold}.")`, which `rename_vars` prefixes and
 /// `serialize::universal_base` reads back.
 struct BwPrefix([u8; 26]);
 
 impl BwPrefix {
     const EMPTY: BwPrefix = BwPrefix([0u8; 26]);
 
-    /// `__bw<fold>_`, borrowed from this buffer.
+    /// `__bw<fold>.`, borrowed from this buffer.
     fn render(&mut self, fold: u64) -> &str {
-        self.rendered(MINTED_VAR, b'_', fold)
+        self.rendered(MINTED_VAR, MINTED_VAR_SEPARATOR as u8, fold)
     }
 
     /// `__bp.<fold>.`, the prefix [`arrived`] renames an arriving formula's own free
@@ -4418,12 +4412,15 @@ const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are 
 
 /// The prefix a backward application mints its renamed variables with.
 const MINTED_VAR: &str = "__bw";
+/// The separator cannot occur in a source variable name.
+const MINTED_VAR_SEPARATOR: char = '.';
 
-/// The application identity and original name in an exact `__bw<digits>_` prefix.
+/// The application identity and original name in an exact `__bw<digits>.` prefix.
 fn minted_parts(v: &str) -> Option<(&str, &str)> {
-    let (digits, original) = v.strip_prefix(MINTED_VAR)?.split_once('_')?;
-    (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit()))
-        .then_some((digits, original))
+    let (digits, original) = v
+        .strip_prefix(MINTED_VAR)?
+        .split_once(MINTED_VAR_SEPARATOR)?;
+    (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())).then_some((digits, original))
 }
 
 fn minted_var(v: &str) -> bool {
@@ -4433,8 +4430,7 @@ fn minted_var(v: &str) -> bool {
 /// Keep a rule-built variable only while its application is on the live proof path.
 fn live_var(v: &str, bw: &BwCtx, path: BwPath) -> bool {
     let Some((digits, original)) = minted_parts(v) else { return false };
-    // A source spelling must be the exact prefix and a variable that application
-    // actually renamed, not merely a string carrying the same numeric identity.
+    // Require the canonical prefix and an original variable that application renamed.
     if (digits.len() > 1 && digits.starts_with('0')) || quoted_universal(original) {
         return false;
     }
@@ -8663,10 +8659,10 @@ mod tests {
         assert!(BwPath::at(outer).in_backward(&bw));
         assert!(BwPath::at(step).in_backward(&bw));
         let names = [
-            format!("__bw{outer}_x"),
-            format!("__bw{inner}_x"),
-            format!("__bw{sibling}_x"),
-            format!("__bw{step}_x"),
+            format!("__bw{outer}.x"),
+            format!("__bw{inner}.x"),
+            format!("__bw{sibling}.x"),
+            format!("__bw{step}.x"),
             "__bwfoo".into(),
             "__uf.0.http://ex/u".into(),
         ];
@@ -8690,10 +8686,12 @@ mod tests {
 
     #[test]
     fn minted_variables_require_digits_and_a_separator() {
-        for name in ["__bw1_z", "__bw0_x", "__bw99999999999999999999999_z"] {
+        for name in ["__bw1.z", "__bw0.x", "__bw99999999999999999999999.z"] {
             assert!(super::minted_var(name), "{name}");
         }
-        for name in ["__bwfoo", "__bw1", "__bw_x", "__bw-1_x", "__bw1x_z"] {
+        for name in [
+            "__bw1_z", "__bwfoo", "__bw1", "__bw.x", "__bw-1.x", "__bw1x.z",
+        ] {
             assert!(!super::minted_var(name), "{name}");
         }
     }
@@ -11534,13 +11532,13 @@ mod tests {
     #[test]
     fn the_substitution_answers_what_the_string_keyed_map_answered() {
         let mut r = rng(0x7080);
-        // Names that collide on prefixes, plus the long `__bw<fold>_` shape a backward
+        // Names that collide on prefixes, plus the long `__bw<fold>.` shape a backward
         // renaming actually produces, so the keys under test are the keys the engine uses.
         let names: Vec<String> = (0..12)
             .map(|i| match i % 4 {
                 0 => format!("x{i}"),
                 1 => format!("x{i}x"),
-                2 => format!("__bw1844674407370955161{i}_y"),
+                2 => format!("__bw1844674407370955161{i}.y"),
                 _ => format!("__up.{i}"),
             })
             .collect();
@@ -11737,7 +11735,7 @@ mod tests {
     /// talk its way into agreeing with itself.
     ///
     /// What they pin is exactly the part a representation change could move. A backward
-    /// renaming's `__bw<fold>_` name is a function of the goal with its variables resolved
+    /// renaming's `__bw<fold>.` name is a function of the goal with its variables resolved
     /// to the END of their binding chains, so it reads the substitution's whole contents;
     /// and a quoted formula is opaque to substitution, so that name survives into a derived
     /// fact, where it becomes part of the fact's term identity, its `why()` string and its
@@ -11770,20 +11768,20 @@ mod tests {
                 // The returned formula carries what the proof BOUND (`?y` = each subject's
                 // own object) and still names what it did not (`?z`, which no premise
                 // binds): GH #6943 case 1, `Produced`. The subject used to read
-                // `Var("__bw<n>_y")` here — a name whose only binding was dropped with the
+                // `Var("__bw<n>.y")` here — a name whose only binding was dropped with the
                 // proof's substitution — and that name, not `:v0`, was what the derived
                 // fact's identity, its `why()` and its `sparq-prov` IRI were built from.
                 // The renaming property this case is in the list for is untouched: one
-                // distinct `__bw<n>_` chunk per goal, in `?z`, which is still the
+                // distinct `__bw<n>.` chunk per goal, in `?z`, which is still the
                 // fingerprint of the derivation and nothing else.
                 "a renamed variable the proof bound, instantiated; one it did not, kept",
                 "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n:s2 :p :v2 .\n\
                  { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n",
                 "@prefix : <http://ex/> .\n{ ?x :p ?any . ?x :has ?f } => { ?x :vals ?f } .\n",
                 &[
-                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Iri("http://ex/v0"), Iri("http://ex/inner"), Var("__bw13293826320743913544_z")]])"#,
-                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Iri("http://ex/v1"), Iri("http://ex/inner"), Var("__bw14225706374877674727_z")]])"#,
-                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Iri("http://ex/v2"), Iri("http://ex/inner"), Var("__bw8776505594191193573_z")]])"#,
+                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Iri("http://ex/v0"), Iri("http://ex/inner"), Var("__bw13293826320743913544.z")]])"#,
+                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Iri("http://ex/v1"), Iri("http://ex/inner"), Var("__bw14225706374877674727.z")]])"#,
+                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Iri("http://ex/v2"), Iri("http://ex/inner"), Var("__bw8776505594191193573.z")]])"#,
                 ],
             ),
             (
@@ -11812,8 +11810,8 @@ mod tests {
                     // (`:v` / `:w`), its `?z` still the site's own fingerprint: the two
                     // rows this case is about stay two rows, and now differ in what was
                     // proved as well as in the name (GH #6943 case 1, `Produced`).
-                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/v"), Iri("http://ex/inner"), Var("__bw17784778144888223834_z")]])"#,
-                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/w"), Iri("http://ex/inner"), Var("__bw17784779244399852045_z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/v"), Iri("http://ex/inner"), Var("__bw17784778144888223834.z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/w"), Iri("http://ex/inner"), Var("__bw17784779244399852045.z")]])"#,
                 ],
             ),
             (
@@ -12059,8 +12057,8 @@ mod tests {
         }
     }
 
-    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
-    /// the one `__bw<n>_` chunk `serialize::universal_base` reads back and that every
+    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}.")` wrote. That rendering is
+    /// the one `__bw<n>.` chunk `serialize::universal_base` reads back and that every
     /// renamed variable carries, so a drift here would rename every standardize-apart
     /// space. Checked at the digit-count boundaries and at both extremes of a `u64`.
     #[test]
@@ -12075,7 +12073,7 @@ mod tests {
         }
         for f in folds {
             let mut pfx = BwPrefix::EMPTY;
-            assert_eq!(pfx.render(f), format!("__bw{f}_"), "BwPrefix::render({f})");
+            assert_eq!(pfx.render(f), format!("__bw{f}."), "BwPrefix::render({f})");
         }
     }
 
@@ -12278,7 +12276,7 @@ mod tests {
     fn backward_renaming_does_not_depend_on_traversal_order() {
         // GH #6844 item 2: a backward rule's conclusion can bind a goal variable to a
         // QUOTED FORMULA that still holds the rule's freshened variables, and that value
-        // reaches a derived fact — where the `__bw<n>_` name is part of the fact's term
+        // reaches a derived fact — where the `__bw<n>.` name is part of the fact's term
         // identity (its `term_key`, its `why()` string, its `sparq-prov` IRI). The name came
         // from a counter bumped once per rule application, and the applications here run one
         // per binding of the preceding conjunct, in the order the fact set yields them: so
@@ -12300,7 +12298,7 @@ mod tests {
         for (i, r) in runs.iter().enumerate().skip(1) {
             assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
         }
-        // The name is the derivation's own fingerprint and nothing else: one `__bw<n>_`
+        // The name is the derivation's own fingerprint and nothing else: one `__bw<n>.`
         // chunk, so its length does not grow with the depth of the proof that minted it.
         let names: Vec<&str> = runs[0]
             .iter()
@@ -12315,7 +12313,7 @@ mod tests {
             let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
             assert!(digits > 0, "{v}");
             assert!(
-                rest[digits..].starts_with("_z\")]])"),
+                rest[digits..].starts_with(".z\")]])"),
                 "one chunk, then the rule's own unbound variable, last in the row: {v}"
             );
         }

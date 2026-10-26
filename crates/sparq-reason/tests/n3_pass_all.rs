@@ -293,7 +293,7 @@ fn a_universal_compares_equal_to_one_parsed_from_a_literal_after_a_round_trip() 
 }
 
 /// GH #6701 review round 13 (HIGH): a backward-chaining query answer carries a FRESHENED
-/// universal (`__bw<n>___ua.<iri>`). N3 text can only spell it as `<iri>`, which reads
+/// universal (`__bw<n>.__ua.<iri>`). N3 text can only spell it as `<iri>`, which reads
 /// back as the universal itself — and `log:equalTo` tells the two apart, so writing it
 /// would change what a re-reasoned document derives. Every exact writer refuses it.
 #[test]

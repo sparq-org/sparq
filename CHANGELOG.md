@@ -856,11 +856,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds, and a name the goal itself writes, are the caller's to resolve and are left exactly
   as they are, so a formula a caller supplies and a formula read from the store come back as
   they went in. A variable no premise binds keeps its name, which is still the one
-  `__bw<fold>_` fingerprint of the derivation that makes the value its own. A quoted
-  formula's own `@forAll` binder is never bound by a proof, so it is untouched. Three pinned
-  expectations in the backward-naming tests move with this, all of the same shape and all
-  from a leaked name to the term the proof bound; forward rules, the containment operators
-  and every name the chainer mints are unchanged.
+  `__bw<fold>.` fingerprint of the derivation that makes the value its own. A quoted
+  formula's own `@forAll` binder is never bound by a proof, so it is untouched. Returned-formula
+  expectations pin the change from a leaked name to the term the proof bound. Backward names
+  use the internal `__bw<fold>.` prefix.
 
 - **sparq-reason (N3):** inside a backward (`<=`) proof, a clause, template or pattern that
   arrives through a VARIABLE — `log:collectAllIn`, `log:forAllIn`, `log:includes`,
@@ -883,8 +882,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formula's own variable and a caller's can be spelled the same, so looking one up would read
   whichever the document happened to spell, and the answer would turn on a caller's arbitrary
   choice of variable name. Only the names the ENGINE minted are resolved — a backward
-  application's `__bw<fold>_` renaming, and the `__bp.` names of an outer atom — which is what
+  application's `__bw<fold>.` renaming, and the `__bp.` names of an outer atom — which is what
   keeps a clause the rule built out of its own text sharing with the rule that wrote it.
+  The dot in the backward prefix cannot occur in a source variable name. Exact writers
+  give ordinary backward names legal, bijective spellings across the output document,
+  while retaining the existing refusal for backward copies of universals.
   A free minted name stays shared only if its canonical prefix names a live application
   whose rule actually renamed that variable. Names from completed producers, padded IDs
   and other source spellings are renamed apart for each containment match. These free
@@ -923,8 +925,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UNFOLDING, which can grow exponentially from a small N3 document. The size is computed
   from borrowed terms before building, memoized by address and remaining depth and alias
   allowances. Oversized terms are refused on size; structural nesting uses the run's
-  term-depth allowance, while alias fuel counts binding hops only. A depth cut follows
-  the existing depth-limit path rather than reporting a fictitious term size. Ordinary
+  term-depth allowance, while alias fuel uses the binding length plus one, independently
+  of backward search depth. Excess structural depth fails with a named term-depth refusal
+  even in a positive-only rule. The existing structural bound is unchanged: a parsed-text
+  run allows 128 nested containers, so a fully nested 200-member chain is refused on depth;
+  a 200-member chain within that nesting allowance resolves fully. Ordinary
   substitution is unchanged — a quoted formula is a value, and a formula a caller passes in
   still comes back as the caller wrote it.
 

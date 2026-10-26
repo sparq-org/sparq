@@ -118,9 +118,10 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // containment matches its blanks afresh (no witness carries over to the next one).
 // Inside a backward (<=) proof (GH #6943), a clause, template or containment pattern
 // arriving through a variable follows its binding chain, then matches with its free
-// variables renamed apart (__bp.<fold>., shared by the slots of one atom). A __bw<digits>_
-// name stays shared only when a live application actually minted it: the decimal prefix
-// is canonical and its rule writes the original variable. Other names stay free and
+// variables renamed apart (__bp.<fold>., shared by the slots of one atom). A __bw<digits>.
+// prefix ends with a dot, which source variables cannot contain. A name stays shared
+// only when a live application minted it: the decimal prefix is canonical and its rule
+// writes the original variable. Other names stay free and
 // cannot read unrelated caller bindings before renaming. Scoped operators read the
 // registered ancestry, including enclosing applications.
 // Local containment bindings end with the atom; aggregation outputs restore the original
@@ -129,9 +130,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // even through aliases. Inline clauses keep bound formulas as terms compared by identity.
 // Projection resolves engine names inside landed values, lists and triple terms. The
 // unfolding is sized before building it, with memoized sizes; structural nesting uses the
-// run's term-depth allowance and only binding hops spend alias fuel. Depth cuts are
-// reported as depth, and oversized unfoldings are refused on size. Forward rules retain
-// their existing answers; general backward/forward variable-sharing parity remains #6943.
+// run's term-depth allowance; binding hops use the binding length plus one, independently
+// of backward search depth. Excess structural depth fails with a named term-depth refusal,
+// including in positive-only rules; oversized unfoldings are refused on size.
+// Parsed-text runs keep the existing 128-container evaluation allowance: a 70-member
+// nested-formula chain fits, but a literal 200-member chain builds 199 formulas and is
+// refused on depth. A 200-member chain within that nesting allowance resolves fully.
+// Evaluation without backward rules retains its existing answers; general backward/forward
+// variable-sharing parity remains #6943.
+// Exact writers rename ordinary backward variables bijectively to legal N3 spellings across
+// the whole output document; backward copies of universals retain their existing refusals.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
@@ -172,7 +180,7 @@ pub fn reason_n3_with_limits(dict: &mut Dict, src: &str, cycles: NegationCycles,
 // binds it, right before the first statement that uses it. Err (besides a parse error) when the document could not re-reason exactly
 // as the input: a unit mixing a plain mention and the universal (or a cycle of such units), a
 // plain mention after the universal's declaration in its formula, a shadowed mention, a
-// backward-chaining copy of a universal (__bw<n>___ua.<iri>: its only spelling reads back as
+// backward-chaining copy of a universal (__bw<n>.__ua.<iri>: its only spelling reads back as
 // the universal, which log:equalTo tells apart), or any term the parser would normalize (the
 // WHOLE document is re-parsed and compared, universals by exact name). No fallback spelling.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String>;
@@ -262,7 +270,7 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
 // derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),
 // are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
-// A backward-chaining copy's __bw<n>_ prefix is the FINGERPRINT of the derivation that
+// A backward-chaining copy's __bw<n>. prefix is the FINGERPRINT of the derivation that
 // standardized that rule application apart: a 64-bit fold of where the application sits in the
 // proof tree, the goal it is proving and the evaluation scope (and, for a nested closure, that
 // document's own canonical key, folded width-independently) - so a renamed variable that
