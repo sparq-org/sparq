@@ -425,13 +425,19 @@ impl EmbeddedSparqClient {
 }
 
 /// Publish initialization only after the saved files and directory entries are durable.
-/// Both initial creation and recovery sync every ancestor through the filesystem root:
-/// a caller or DataDirLock may have created existing directories without syncing them.
+/// Both initial creation and recovery sync lexical and canonical ancestors through the
+/// filesystem root, deduplicating paths: a caller or DataDirLock may have created existing
+/// directories without syncing them, including parents reached through a symlink.
 /// An interruption before publication leaves no marker, so `open` repeats the sync barriers.
 fn finish_bootstrap(dir: &Path) -> std::io::Result<()> {
     sync_bootstrap(dir)?;
-    for ancestor in std::path::absolute(dir)?.ancestors().skip(1) {
-        fsync_dir(ancestor)?;
+    let lexical = std::path::absolute(dir)?;
+    let canonical = std::fs::canonicalize(dir)?;
+    let mut synced = std::collections::HashSet::from([lexical.clone()]);
+    for ancestor in lexical.ancestors().skip(1).chain(canonical.ancestors()) {
+        if synced.insert(ancestor.to_path_buf()) {
+            fsync_dir(ancestor)?;
+        }
     }
     let path = dir.join(INIT_COMPLETE);
     std::fs::write(&path, b"1\n")?;
@@ -1285,7 +1291,7 @@ mod tests {
         fn new() -> Self {
             let dir = std::env::temp_dir().join(format!("sparq-lws-bootstrap-{}", next_nonce()));
             std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
+            Self(dir.canonicalize().unwrap())
         }
     }
 
@@ -1419,6 +1425,62 @@ mod tests {
             drop(c);
             let reopened = EmbeddedSparqClient::open(&dir).unwrap();
             assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_syncs_symlink_target_ancestors_before_publication() {
+        block_on(async {
+            for (interrupted, strict_open) in [(false, false), (true, true), (true, false)] {
+                let root = TestDir::new();
+                let root_path = root.0.canonicalize().unwrap();
+                let lexical_parent = root_path.join("lexical");
+                let target_parent = root_path.join("target/new");
+                let target = target_parent.join("data");
+                // Both trees were just created without syncing their parent entries.
+                std::fs::create_dir(&lexical_parent).unwrap();
+                std::fs::create_dir_all(&target).unwrap();
+                std::os::unix::fs::symlink(&target, lexical_parent.join("data")).unwrap();
+                let dir = lexical_parent.join("data/index");
+                if interrupted {
+                    // Simulate a stop after Graph::save, before publishing the marker.
+                    Graph::load_str("", "ntriples").unwrap().save(&dir).unwrap();
+                }
+
+                BOOTSTRAP_SYNCS.with_borrow_mut(Vec::clear);
+                let c = if strict_open {
+                    EmbeddedSparqClient::open(&dir)
+                } else {
+                    EmbeddedSparqClient::open_or_create(&dir)
+                }
+                .unwrap();
+                let synced = bootstrap_syncs_before_publication(&dir);
+                let dirs: Vec<_> = synced.into_iter().filter(|path| path.is_dir()).collect();
+                let mut expected: Vec<_> = dir.ancestors().map(Path::to_path_buf).collect();
+                expected.extend([
+                    target.join("index"),
+                    target,
+                    target_parent,
+                    root_path.join("target"),
+                ]);
+                assert_eq!(
+                    dirs, expected,
+                    "sync both ancestries before publication, with shared paths synced once"
+                );
+                assert_eq!(
+                    dirs.len(),
+                    dirs.iter().collect::<std::collections::HashSet<_>>().len(),
+                    "do not repeat shared ancestor paths"
+                );
+
+                let iri = "http://pod/alice/doc";
+                let expected = meta("text/plain", "blob-1", "\"e1\"");
+                c.put_meta(iri, expected.clone()).await.unwrap();
+                drop(c);
+                let reopened = EmbeddedSparqClient::open(&dir).unwrap();
+                assert_eq!(reopened.get_meta(iri).await.unwrap(), expected);
+            }
         });
     }
 
