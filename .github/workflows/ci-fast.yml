@@ -115,7 +115,7 @@ jobs:
       # The shared boot helpers remain covered by storage_boot in the nextest steps above.
       - name: Durable restart, SIGKILL and offline restore (Solid and LWS)
         timeout-minutes: 15
-        run: cargo test -p sparq-lws-core --test durable_restart --test backup_restore -- --test-threads=1
+        run: cargo test -p sparq-lws-core --test durable_restart --test backup_restore --no-fail-fast -- --test-threads=1
       - name: Doctests (nextest does not run these)
         run: cargo test $CORE_CRATES --doc
 

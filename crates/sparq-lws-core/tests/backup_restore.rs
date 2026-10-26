@@ -5,7 +5,8 @@ mod common;
 #[path = "common/durable.rs"]
 mod durable;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -17,7 +18,9 @@ use durable::{
 };
 use reqwest::Method;
 use serde_json::{json, Value};
+use sparq_lws_core::ldp::content::{parse_to_triples, RdfFormat};
 use sparq_lws_core::lws::jose::EcKey;
+use sparq_lws_core::store::EmbeddedSparqClient;
 
 const TEST_DEADLINE: Duration = Duration::from_secs(240);
 
@@ -103,17 +106,15 @@ fn refuses(data: &Path, mode: Mode, expected: &str) {
     if mode == Mode::Lws {
         values.push(("SOLID_SERVER_PROTOCOL", "lws"));
     }
-    let output = Process::start(
-        env!("CARGO_BIN_EXE_sparq-lws-core"),
-        &values,
-    )
-    .finish();
+    let output = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), &values).finish();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !output.status.success(),
-        "boot unexpectedly succeeded: {stderr}"
+    assert_eq!(output.status.code(), Some(1), "boot refusal exit: {stderr}");
+    let diagnostic = format!("Error: Custom {{ kind: InvalidInput, error: {expected:?} }}");
+    assert_eq!(
+        stderr.lines().last(),
+        Some(diagnostic.as_str()),
+        "wrong boot refusal: {stderr}"
     );
-    assert!(stderr.contains(expected), "missing {expected:?}: {stderr}");
     assert_eq!(
         tree(data),
         before,
@@ -129,7 +130,11 @@ fn incompatible_majors(data: &Path, mode: Mode) {
         let mut altered = format.clone();
         altered[plane]["major"] = json!(2);
         std::fs::write(&marker, serde_json::to_vec(&altered).unwrap()).unwrap();
-        refuses(data, mode, "unsupported format.json");
+        refuses(
+            data,
+            mode,
+            "unsupported format.json: expected schema=1, index.major=1, blobs.major=1",
+        );
     }
     std::fs::write(marker, original).unwrap();
 }
@@ -150,6 +155,170 @@ fn restored_fixture(original: &Fixture, directory: Directory) -> Fixture {
         mode: original.mode,
         client: original.client.clone(),
         key: EcKey::from_jwk(&original.key.private_jwk().to_string()).unwrap(),
+    }
+}
+
+fn assert_listing(f: &Fixture, path: &str, snapshot: &Snapshot, expected_paths: &[&str]) {
+    let parent = format!("{}{path}", f.base);
+    let members: BTreeSet<String> = if f.mode == Mode::Lws {
+        let listing: Value = serde_json::from_slice(&snapshot.body).unwrap();
+        assert_eq!(listing["id"].as_str(), Some(parent.as_str()));
+        let items = listing["items"].as_array().unwrap();
+        assert_eq!(
+            listing["totalItems"].as_u64(),
+            Some(expected_paths.len() as u64)
+        );
+        assert_eq!(items.len(), expected_paths.len(), "complete corpus listing");
+        items
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_owned())
+            .collect()
+    } else {
+        parse_to_triples(RdfFormat::Turtle, &snapshot.body, &parent)
+            .unwrap()
+            .into_iter()
+            .filter(|triple| triple.predicate.as_str() == "http://www.w3.org/ns/ldp#contains")
+            .map(|triple| {
+                assert_eq!(triple.subject.to_string(), format!("<{parent}>"));
+                match triple.object {
+                    oxrdf::Term::NamedNode(iri) => iri.into_string(),
+                    other => panic!("non-IRI corpus member: {other}"),
+                }
+            })
+            .collect()
+    };
+    let expected = expected_paths
+        .iter()
+        .map(|path| format!("{}{path}", f.base))
+        .collect();
+    assert_eq!(members, expected, "corpus listing membership: {path}");
+}
+
+fn assert_corpus(corpus: &Corpus, f: &Fixture) {
+    let mut paths: BTreeSet<_> = [
+        "/corpus/",
+        "/corpus/nested/",
+        "/corpus/nested/deep/",
+        "/corpus/nested/deep/data.ttl",
+        "/corpus/empty.bin",
+        "/corpus/large.bin",
+        "/corpus/overwrite.bin",
+    ]
+    .into_iter()
+    .collect();
+    if f.mode == Mode::Solid {
+        paths.insert("/corpus/.acl");
+    } else {
+        assert!(
+            corpus.grant.is_some(),
+            "restore must exercise a persisted LWS grant"
+        );
+    }
+    assert_eq!(
+        corpus
+            .snapshots
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        paths,
+        "restore must verify the complete corpus"
+    );
+    for (path, snapshot) in &corpus.snapshots {
+        snapshot.assert_resource(path, f.mode);
+        for (name, value) in [
+            ("ETag", snapshot.etag.as_deref()),
+            ("Content-Type", snapshot.content_type.as_deref()),
+        ] {
+            assert!(
+                value.is_some_and(|value| !value.trim().is_empty()),
+                "empty corpus {name}: {path}"
+            );
+        }
+        if f.mode == Mode::Lws || !path.ends_with('/') {
+            assert!(
+                snapshot
+                    .last_modified
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty()),
+                "empty corpus Last-Modified: {path}"
+            );
+        }
+    }
+    assert_eq!(
+        corpus.snapshots["/corpus/large.bin"].body.len(),
+        4 * 1024 * 1024
+    );
+    assert_eq!(
+        corpus.snapshots["/corpus/large.bin"].body,
+        payload(9, 4 * 1024 * 1024)
+    );
+    assert!(corpus.snapshots["/corpus/empty.bin"].body.is_empty());
+    assert_eq!(
+        corpus.snapshots["/corpus/overwrite.bin"].body,
+        payload(4, 8193)
+    );
+    let rdf_path = "/corpus/nested/deep/data.ttl";
+    let triples = parse_to_triples(
+        RdfFormat::Turtle,
+        &corpus.snapshots[rdf_path].body,
+        &format!("{}{rdf_path}", f.base),
+    )
+    .unwrap();
+    assert_eq!(triples.len(), 1, "restore must exercise the RDF resource");
+    assert_eq!(triples[0].subject.to_string(), "<urn:s>");
+    assert_eq!(triples[0].predicate.as_str(), "urn:p");
+    assert_eq!(triples[0].object.to_string(), "<urn:o>");
+    for (parent, members) in [
+        (
+            "/corpus/",
+            [
+                "/corpus/nested/",
+                "/corpus/empty.bin",
+                "/corpus/large.bin",
+                "/corpus/overwrite.bin",
+            ]
+            .as_slice(),
+        ),
+        ("/corpus/nested/", ["/corpus/nested/deep/"].as_slice()),
+        (
+            "/corpus/nested/deep/",
+            ["/corpus/nested/deep/data.ttl"].as_slice(),
+        ),
+    ] {
+        assert_listing(f, parent, &corpus.snapshots[parent], members);
+    }
+}
+
+fn assert_distinct_storage(original: &Path, restored: &Path) {
+    for relative in ["", "index", "blobs", "index.lock", "index/sparq.lock"] {
+        let original = original.join(relative);
+        let restored = restored.join(relative);
+        assert_ne!(
+            std::fs::canonicalize(&original).unwrap(),
+            std::fs::canonicalize(&restored).unwrap(),
+            "aliased restore path: {relative}"
+        );
+        let original = std::fs::metadata(original).unwrap();
+        let restored = std::fs::metadata(restored).unwrap();
+        assert_ne!(
+            (original.dev(), original.ino()),
+            (restored.dev(), restored.ino()),
+            "shared restore directory or lock: {relative}"
+        );
+    }
+}
+
+fn assert_index_locked(f: &Fixture) {
+    match EmbeddedSparqClient::open_or_create(&f.data().join("index")) {
+        Ok(_) => panic!(
+            "server does not own its configured index lock: {:?}",
+            f.data()
+        ),
+        Err(error) => assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock,
+            "index lock probe: {error}"
+        ),
     }
 }
 
@@ -184,8 +353,10 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
     let original = Fixture::new(mode).await;
     let server = original.boot().await;
     let corpus = Corpus::write(&original).await;
+    assert_corpus(&corpus, &original);
     verify(&corpus, &original).await;
     server.stop(); // SIGTERM, exit zero, drained and compacted before tar starts.
+    let expected_tree = tree(&original.data());
 
     let backup = Directory::new();
     let archive_path = backup.0.join("data.tar");
@@ -193,11 +364,17 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
     let destination = Directory::new();
     let data = destination.0.join("data");
     std::fs::create_dir(&data).unwrap();
+    assert_ne!(
+        std::fs::canonicalize(&data).unwrap(),
+        std::fs::canonicalize(original.data()).unwrap()
+    );
     unpack(&archive_path, &data).unwrap();
+    assert_distinct_storage(&original.data(), &data);
+    assert_eq!(tree(&data), expected_tree, "archive lost data or locks");
     assert_eq!(
-        tree(&data),
         tree(&original.data()),
-        "archive lost data or locks"
+        expected_tree,
+        "archive or extraction changed the source"
     );
 
     // Start the original first so its listener is occupied when choosing the copy's port.
@@ -206,11 +383,18 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
     let restored = restored_fixture(&original, destination);
     assert_ne!(restored.data(), original.data());
     assert_ne!(restored.endpoint, original.endpoint);
+    assert_ne!(
+        reqwest::Url::parse(&restored.endpoint).unwrap().port(),
+        reqwest::Url::parse(&original.endpoint).unwrap().port()
+    );
     assert_eq!(
         restored.base, original.base,
         "stored IRIs retain their origin"
     );
     let restored_server = restored.boot().await;
+    assert_ne!(original_server.id(), restored_server.id());
+    assert_index_locked(&original);
+    assert_index_locked(&restored);
     tokio::join!(verify(&corpus, &original), verify(&corpus, &restored));
 
     // Witness that requests reached independent stores, not the original twice.
@@ -248,6 +432,9 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
         verify(&corpus, &original).await;
     }
     restored_server.stop();
+    assert_index_locked(&original);
+    drop(EmbeddedSparqClient::open_or_create(&restored.data().join("index")).unwrap());
+    verify(&corpus, &original).await;
     original_server.stop();
     incompatible_majors(&restored.data(), mode);
     (original, restored)
@@ -309,7 +496,11 @@ fn foreign_restore_target_is_refused_without_changes(mode: Mode) {
             "unpack overwrote foreign data"
         );
         // Pre-extraction boot guard: never overlay this directory with a valid marker from tar.
-        refuses(&destination.0, mode, "refusing foreign data directory");
+        refuses(
+            &destination.0,
+            mode,
+            &format!("refusing foreign data directory {}: format.json is absent but {plane}/ has content", destination.0.display()),
+        );
     }
 }
 
