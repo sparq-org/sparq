@@ -228,8 +228,9 @@ pub fn reconstruct_robust_attributed(
     for e in 0..=e_max {
         if let Some(q) = berlekamp_welch(shares, degree, e) {
             // Re-verify against ALL points: the recovered Q must disagree with at
-            // most e of them; the agreeing majority pins the true codeword. Those
-            // off-curve points ARE exactly the corrected shares — sound attribution.
+            // most e of them. The off-curve points are the corrected shares,
+            // exactly the tampered shares within the correction budget. Beyond
+            // it, miscorrection can select a different codeword (see module docs).
             let bad = disagreeing_points(shares, &q);
             if bad.len() <= e {
                 let mut cheaters: Vec<u64> = bad.into_iter().map(|i| shares[i].x).collect();
@@ -244,7 +245,8 @@ pub fn reconstruct_robust_attributed(
 
     // No degree-`degree` polynomial fits within the correctable budget: the
     // shares are mutually inconsistent beyond what redundancy can repair. Abort
-    // (detect-and-abort), naming the cheaters we can pin by a voting scheme.
+    // with best-effort names from a minimum-disagreement reference fit; these
+    // names do not establish which shares were tampered.
     Err(tampered_error(shares, degree, e_max))
 }
 
@@ -286,6 +288,8 @@ fn tampered_error(shares: &[Share], degree: usize, e_max: usize) -> MpcError {
 /// Compute `C(n, k)` up to an inclusive cap, with no factorials or wrapping.
 /// `None` means over cap, including intermediate multiplication overflow.
 fn binomial_with_cap(n: usize, k: usize, cap: usize) -> Option<usize> {
+    #[cfg(test)]
+    SUSPECT_FIT_CAP.with(|observed| observed.set(Some(cap)));
     if k > n {
         return Some(0);
     }
@@ -309,6 +313,7 @@ fn binomial_with_cap(n: usize, k: usize, cap: usize) -> Option<usize> {
 #[cfg(test)]
 std::thread_local! {
     static SUSPECT_FITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SUSPECT_FIT_CAP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
 /// Off-curve evaluation points of the most self-consistent `degree+1`-point
@@ -771,6 +776,38 @@ mod tests {
     }
 
     #[test]
+    fn work_bound_91_share_abort_attempts_4095_reference_fits() {
+        // C(91,2)=4095 is admitted. The 45 tampers exceed e_max=44;
+        // the original line has 46 agreeing points and is the unique best fit.
+        let shares = work_bound_abort_shares(91, 1);
+        SUSPECT_FITS.with(|fits| fits.set(0));
+        SUSPECT_FIT_CAP.with(|observed| observed.set(None));
+        let err = reconstruct_robust_attributed(&shares, 1).unwrap_err();
+        let MpcError::Tampered { detail, cheaters } = err else {
+            panic!("expected Tampered, got {err:?}");
+        };
+        assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), 4095);
+        // The fit tally alone cannot distinguish caps in 4095..=4185.
+        assert_eq!(SUSPECT_FIT_CAP.with(std::cell::Cell::get), Some(4096));
+        assert_eq!(cheaters, (1..=45).collect::<Vec<u64>>());
+        assert_eq!(
+            detail,
+            "RS consistency check failed: 91 shares of a degree-1 secret are not all on \
+            one polynomial and the inconsistency exceeds the correctable budget e=44 \
+            (need n >= degree + 2e + 1 to correct e errors); cheater attribution is best-effort \
+            on this abort path"
+        );
+    }
+
+    #[test]
+    fn work_bound_92_share_abort_attempts_no_reference_fits() {
+        // C(92,2)=4186 exceeds the cap; 46 tampers exceed e_max=45.
+        SUSPECT_FIT_CAP.with(|observed| observed.set(None));
+        assert_attribution_not_attempted(92, 1);
+        assert_eq!(SUSPECT_FIT_CAP.with(std::cell::Cell::get), Some(4096));
+    }
+
+    #[test]
     fn work_bound_abort_attribution_keeps_first_tied_fit() {
         // Two tampers exceed e_max=1. C(5,3)=10 reference fits include both the
         // original polynomial and a tied fit naming honest points [4,5]. The first
@@ -972,9 +1009,9 @@ mod tests {
     // ---------------------------------------------------------------------
 
     #[test]
-    fn attributed_success_pins_exact_cheaters() {
-        // (1) On the SUCCESS path the corrected shares are EXACTLY the tampered
-        // ones — `cheaters` lists their evaluation points (Share::x), sorted.
+    fn attributed_success_names_corrected_shares() {
+        // Within the correction budget, the corrected shares are exactly the
+        // tampered ones; `cheaters` lists their evaluation points, sorted.
         let b = ShamirBackend::new_seeded(9, 0x9999).unwrap();
         let t = b.threshold();
         assert_eq!(t, 4); // e_max = 2
@@ -988,7 +1025,7 @@ mod tests {
         expected.sort_unstable();
         assert_eq!(
             r.cheaters, expected,
-            "corrected shares must be exactly the tampered evaluation points"
+            "within the correction budget, corrected shares are exactly the tampered points"
         );
     }
 
@@ -1017,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn abort_first_band_names_only_real_cheaters() {
+    fn abort_first_band_names_tampered_points_off_tie_shapes() {
         // These sampled first-band cases recover only the tampered points.
         // They exercise the minimum-disagreement heuristic with independent
         // deltas, rather than establish exact attribution for arbitrary inputs.
