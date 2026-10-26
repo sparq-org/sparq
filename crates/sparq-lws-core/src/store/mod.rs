@@ -1193,28 +1193,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         refuse_marker(&[Some(iri), parent])?;
-        // Look up the byte-pointer from the authoritative index so we delete the right blob.
-        let blob_key = match self.sparq.get_meta(iri).await {
-            Ok(m) => Some(m.blob_key),
-            Err(SparqError::NotFound) => None,
-            Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
-            Err(SparqError::Unsettled { detail, fence }) => {
-                return Err(ServerError::Unsettled { detail, fence })
-            }
-        };
-        // Detach from the parent's containment first, then drop the index record, then the bytes.
+        // Let the index return the pointer it removed; embedded and in-memory clients also
+        // detach containment in that same job, so a concurrent overwrite cannot change the key.
         // Index-before-bytes keeps the invariant "if it's indexed, its bytes exist" — a crash after
         // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
         // pointing at missing bytes. The byte delete is best effort: the resource is already gone
         // from the index, so a failed blob delete must not fail the request; it stays an orphan.
-        // Either step's failure is reported as what it was (`map_sparq`), as the metadata
-        // read above is: a refused admission and a write that failed unsettled (which the caller
-        // settles through the fence it carries) are not flattened into a backend fault.
-        if let Some(p) = parent {
-            self.sparq.remove_child(p, iri).await.map_err(map_sparq)?;
-        }
-        self.sparq.delete_meta(iri).await.map_err(map_sparq)?;
+        let blob_key = self.sparq.delete_resource(iri, parent).await.map_err(map_sparq)?;
         if let Some(key) = blob_key {
             self.reclaim_blob(&key).await;
         }
@@ -1879,6 +1864,13 @@ mod tests {
         }
         async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
             self.0.delete_meta(iri).await
+        }
+        async fn delete_resource(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<Option<String>, SparqError> {
+            self.0.delete_resource(iri, parent).await
         }
         async fn delete_meta_if_empty(
             &self,
