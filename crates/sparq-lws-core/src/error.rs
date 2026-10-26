@@ -74,6 +74,11 @@ pub enum ServerError {
     #[error("storage error: {0}")]
     Storage(String),
 
+    /// Stored LWS resource metadata could be read but did not parse. Access checks deny
+    /// on this metadata; a backend read failure remains [`Self::Storage`].
+    #[error("invalid metadata: {0}")]
+    InvalidMetadata(String),
+
     /// A store write failed in a way after which it may still commit (an HTTP update that timed
     /// out, whose worker may still be running on the server), and fencing it failed too: whether
     /// it committed is not known, and may still change, until
@@ -118,9 +123,9 @@ impl ServerError {
             ServerError::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
             ServerError::UnprocessablePatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
             ServerError::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            ServerError::Storage(_) | ServerError::Unsettled { .. } => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
+            ServerError::Storage(_)
+            | ServerError::InvalidMetadata(_)
+            | ServerError::Unsettled { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
             ServerError::ResourceChanged => StatusCode::SERVICE_UNAVAILABLE,
         }

@@ -331,15 +331,47 @@ async fn a_websocket_retry_close_keeps_the_capability() {
     let (mut socket, url, server) = open_socket(&h, &doc).await;
     let slot = h.state.notify.streams.slot(subscription_id(&doc));
     let sender = slot.channel.lock().unwrap().sender.clone().unwrap();
+    sender.close(End::Undecided);
+    assert_eq!(close_code(&mut socket).await, 1013);
+    settle().await;
+    assert_kept(&h, &doc).await;
+    let (_reconnected, response) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_slow_websocket_consumer_is_withdrawn() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(WEBSOCKET, OWNER, &[&root]).await;
+    let (mut socket, url, server) = open_socket(&h, &doc).await;
+    let slot = h.state.notify.streams.slot(subscription_id(&doc));
+    let sender = slot.channel.lock().unwrap().sender.clone().unwrap();
     // Fill the live queue before yielding to the socket writer.
     for _ in 0..=QUEUE {
         sender.push(Frame::Heartbeat);
     }
     assert_eq!(close_code(&mut socket).await, 1013);
     settle().await;
-    assert_kept(&h, &doc).await;
-    let (_reconnected, response) = tokio_tungstenite::connect_async(&url).await.unwrap();
-    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert!(!h
+        .state
+        .notify
+        .subs
+        .read()
+        .unwrap()
+        .contains_key(subscription_id(&doc)));
+    assert!(!h
+        .state
+        .store
+        .exists(doc["id"].as_str().unwrap())
+        .await
+        .unwrap());
+    let error = tokio_tungstenite::connect_async(&url).await.unwrap_err();
+    let tokio_tungstenite::tungstenite::Error::Http(response) = error else {
+        panic!("expected an HTTP response: {error:?}")
+    };
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
     server.abort();
 }
 
@@ -401,7 +433,7 @@ async fn a_retry_end_during_a_pending_socket_write_keeps_the_capability() {
             }
             assert_eq!(
                 task.await.unwrap(),
-                matches!(end, End::Undecided | End::Slow),
+                matches!(end, End::Undecided),
                 "a pending write must preserve the terminal decision"
             );
         }
@@ -519,6 +551,459 @@ async fn readable_topics_take_priority_over_undecided_topics() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_readable_topic_wins_while_another_topic_waits() {
+    for busy_lock in [false, true] {
+        let h = Harness::new().await;
+        let a = h.create("pending").await;
+        let b = h.create("readable").await;
+        h.grant(&[&a, &b]).await;
+        let doc = h.subscribe(SSE, READER, &[&a, &b]).await;
+        let gate = Arc::new(Semaphore::new(0));
+        let guard = if busy_lock {
+            Some(h.state.locks.lock(&a).await.unwrap())
+        } else {
+            *h.state.store.hold_next_read_reply_of.lock().unwrap() = Some((meta_key(&a), gate));
+            None
+        };
+        let response = h.stream(&doc, None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_kept(&h, &doc).await;
+        drop(guard);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn revoked_hidden_and_deleted_topics_both_withdraw() {
+    let h = Harness::new().await;
+    let a = h.create("hidden").await;
+    let b = h.create("deleted").await;
+    let grant = h.grant(&[&a, &b]).await;
+    let hidden = h.subscribe(SSE, READER, &[&a]).await;
+    let deleted = h.subscribe(SSE, READER, &[&b]).await;
+    let open = h.subscribe(SSE, READER, &[&a]).await;
+    let mut body = h.stream(&open, None).await.into_body();
+    settle().await;
+    h.delete(&grant, OWNER).await;
+    h.delete(&b, OWNER).await;
+    let prior = super::super::super::Prior {
+        existed: Some(true),
+        meta: Some(h.state.resource_meta(&a).await.unwrap()),
+        ..Default::default()
+    };
+    // The in-progress metadata would grant Read; the prior metadata and current grants decide.
+    let mut changed = h.state.resource_meta(&a).await.unwrap();
+    changed.creator = Some(READER.into());
+    h.state.put_resource_meta(&a, &changed).await.unwrap();
+    h.state.locks.hide(
+        std::slice::from_ref(&a),
+        HashMap::from([(a.clone(), prior)]),
+    );
+    for doc in [&hidden, &deleted] {
+        assert_eq!(h.stream(doc, None).await.status(), StatusCode::FORBIDDEN);
+        assert!(!h
+            .state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .contains_key(subscription_id(doc)));
+        assert!(!h
+            .state
+            .store
+            .exists(doc["id"].as_str().unwrap())
+            .await
+            .unwrap());
+    }
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    assert_eq!(
+        frame(&mut body).await.as_deref(),
+        Some("event: revoked\ndata:\n\n")
+    );
+    assert!(frame(&mut body).await.is_none());
+    assert!(!h
+        .state
+        .notify
+        .subs
+        .read()
+        .unwrap()
+        .contains_key(subscription_id(&open)));
+    assert!(!h
+        .state
+        .store
+        .exists(open["id"].as_str().unwrap())
+        .await
+        .unwrap());
+    h.state.locks.show(&[a]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_revoked_reader_does_not_wait_on_a_busy_topic() {
+    let h = Harness::new().await;
+    let topic = h.create("busy").await;
+    let grant = h.grant(&[&topic]).await;
+    let doc = h.subscribe(SSE, READER, &[&topic]).await;
+    h.delete(&grant, OWNER).await;
+    let _guard = h.state.locks.lock(&topic).await.unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(1), h.stream(&doc, None))
+        .await
+        .expect("a denied topic must not wait for its lock");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_changing_topic_uses_prior_metadata_before_waiting() {
+    let h = Harness::new().await;
+    let topic = h.create("changing").await;
+    let grant = h.grant(&[&topic]).await;
+    let doc = h.subscribe(SSE, READER, &[&topic]).await;
+    h.delete(&grant, OWNER).await;
+    let prior = super::super::super::Prior {
+        existed: Some(true),
+        meta: Some(h.state.resource_meta(&topic).await.unwrap()),
+        ..Default::default()
+    };
+    let mut current = h.state.resource_meta(&topic).await.unwrap();
+    current.creator = Some(READER.into());
+    h.state.put_resource_meta(&topic, &current).await.unwrap();
+    let guard = h.state.locks.lock(&topic).await.unwrap();
+    h.state
+        .locks
+        .changing_from(HashMap::from([(topic.clone(), prior)]));
+    let response = tokio::time::timeout(Duration::from_secs(1), h.stream(&doc, None))
+        .await
+        .expect("prior denial must not wait for a changing topic");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(!h
+        .state
+        .notify
+        .subs
+        .read()
+        .unwrap()
+        .contains_key(subscription_id(&doc)));
+    assert!(!h
+        .state
+        .store
+        .exists(doc["id"].as_str().unwrap())
+        .await
+        .unwrap());
+    h.state.locks.landed(&[topic]);
+    drop(guard);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hidden_topic_that_was_missing_keeps_the_capability() {
+    let h = Harness::new().await;
+    let topic = h.create("prior-missing").await;
+    h.grant(&[&topic]).await;
+    let doc = h.subscribe(SSE, READER, &[&topic]).await;
+    h.state.locks.hide(
+        std::slice::from_ref(&topic),
+        HashMap::from([(
+            topic.clone(),
+            super::super::super::Prior {
+                existed: Some(false),
+                ..Default::default()
+            },
+        )]),
+    );
+    let response = h.stream(&doc, None).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    assert_kept(&h, &doc).await;
+    h.state.locks.show(&[topic]);
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_halted_service_closes_streams_for_retry_and_keeps_capabilities() {
+    let h = Harness::new().await;
+    h.state.notify.sweeper_off.store(true, Ordering::SeqCst);
+    let root = h.state.cfg.storage();
+    let sse = h.subscribe(SSE, OWNER, &[&root]).await;
+    let ws = h.subscribe(WEBSOCKET, OWNER, &[&root]).await;
+    let mut body = h.stream(&sse, None).await.into_body();
+    let (mut socket, url, server) = open_socket(&h, &ws).await;
+    tokio::time::pause();
+    settle().await;
+    h.state
+        .store
+        .fail_marker_write
+        .store(true, Ordering::SeqCst);
+    assert!(
+        !h.state
+            .notify
+            .raise(&*h.state.store, h.state.notify.high_water() + 1)
+            .await
+    );
+    assert!(h.state.notify.halted());
+    let response = h.stream(&sse, None).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    assert!(frame(&mut body).await.is_none());
+    tokio::time::resume();
+    assert_eq!(close_code(&mut socket).await, 1013);
+    settle().await;
+    for doc in [&sse, &ws] {
+        assert_kept(&h, doc).await;
+    }
+    let error = tokio_tungstenite::connect_async(&url).await.unwrap_err();
+    let tokio_tungstenite::tungstenite::Error::Http(response) = error else {
+        panic!("expected an HTTP response: {error:?}")
+    };
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    h.state
+        .store
+        .fail_marker_write
+        .store(false, Ordering::SeqCst);
+    h.state.notify.resume(&*h.state.store).await;
+    assert!(!h.state.notify.halted());
+    assert_eq!(h.stream(&sse, None).await.status(), StatusCode::OK);
+    let (_reconnected, response) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    server.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_service_halted_while_connect_waits_on_the_gate_is_retryable() {
+    let h = Harness::new().await;
+    h.state.notify.sweeper_off.store(true, Ordering::SeqCst);
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    let slot = h.state.notify.streams.slot(subscription_id(&doc));
+    let gate = slot.gate.lock().await;
+    let req = Request::builder()
+        .uri(doc["source"].as_str().unwrap())
+        .header(header::ACCEPT, "text/event-stream")
+        .body(Body::empty())
+        .unwrap();
+    let pending = tokio::spawn(h.app.clone().oneshot(req));
+    settle().await;
+    assert!(!pending.is_finished());
+    h.state
+        .store
+        .fail_marker_write
+        .store(true, Ordering::SeqCst);
+    assert!(
+        !h.state
+            .notify
+            .raise(&*h.state.store, h.state.notify.high_water() + 1)
+            .await
+    );
+    drop(gate);
+    let response = pending.await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    assert_kept(&h, &doc).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_service_halted_during_topic_checks_keeps_capabilities() {
+    for periodic in [false, true] {
+        for allowed in [false, true] {
+            let h = Harness::new().await;
+            h.state.notify.sweeper_off.store(true, Ordering::SeqCst);
+            let topic = h.create("halt-during-check").await;
+            let grant = h.grant(&[&topic]).await;
+            let doc = h.subscribe(SSE, READER, &[&topic]).await;
+            let mut body = if periodic {
+                let response = h.stream(&doc, None).await;
+                assert_eq!(response.status(), StatusCode::OK);
+                settle().await;
+                Some(response.into_body())
+            } else {
+                None
+            };
+            if !allowed {
+                h.delete(&grant, OWNER).await;
+            }
+            let gate = Arc::new(Semaphore::new(0));
+            *h.state.store.hold_next_read_reply_of.lock().unwrap() =
+                Some((meta_key(&topic), gate.clone()));
+            let pending = if periodic {
+                tokio::time::advance(RECHECK).await;
+                None
+            } else {
+                let req = Request::builder()
+                    .uri(doc["source"].as_str().unwrap())
+                    .header(header::ACCEPT, "text/event-stream")
+                    .body(Body::empty())
+                    .unwrap();
+                Some(tokio::spawn(h.app.clone().oneshot(req)))
+            };
+            wait_until(|| {
+                h.state
+                    .store
+                    .hold_next_read_reply_of
+                    .lock()
+                    .unwrap()
+                    .is_none()
+            })
+            .await;
+            h.state
+                .store
+                .fail_marker_write
+                .store(true, Ordering::SeqCst);
+            assert!(
+                !h.state
+                    .notify
+                    .raise(&*h.state.store, h.state.notify.high_water() + 1)
+                    .await
+            );
+            assert!(h.state.notify.halted());
+            gate.add_permits(1);
+            if let Some(pending) = pending {
+                let response = pending.await.unwrap().unwrap();
+                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+                assert!(response.headers().contains_key(header::RETRY_AFTER));
+            } else {
+                assert!(frame(body.as_mut().unwrap()).await.is_none());
+            }
+            assert_kept(&h, &doc).await;
+            h.state
+                .store
+                .fail_marker_write
+                .store(false, Ordering::SeqCst);
+            h.state.notify.resume(&*h.state.store).await;
+            assert!(!h.state.notify.halted());
+            if !allowed {
+                h.grant(&[&topic]).await;
+            }
+            assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn hidden_metadata_errors_keep_parse_failures_separate_from_store_failures() {
+    for malformed in [false, true] {
+        let h = Harness::new().await;
+        let topic = h.create("hidden-metadata").await;
+        h.grant(&[&topic]).await;
+        let doc = h.subscribe(SSE, READER, &[&topic]).await;
+        if malformed {
+            h.state
+                .store
+                .write(
+                    &meta_key(&topic),
+                    Bytes::from_static(b"{invalid"),
+                    "application/json",
+                )
+                .await
+                .unwrap();
+            let error = h.state.resource_meta(&topic).await.unwrap_err();
+            assert!(matches!(
+                error,
+                crate::error::ServerError::InvalidMetadata(_)
+            ));
+            assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        } else {
+            *h.state.store.fail_read_of.lock().unwrap() = Some(meta_key(&topic));
+        }
+        h.state
+            .locks
+            .hide(std::slice::from_ref(&topic), HashMap::new());
+        let response = h.stream(&doc, None).await;
+        if malformed {
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert!(!h
+                .state
+                .notify
+                .subs
+                .read()
+                .unwrap()
+                .contains_key(subscription_id(&doc)));
+            assert!(!h
+                .state
+                .store
+                .exists(doc["id"].as_str().unwrap())
+                .await
+                .unwrap());
+        } else {
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert!(response.headers().contains_key(header::RETRY_AFTER));
+            assert_kept(&h, &doc).await;
+        }
+        h.state.locks.show(&[topic]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn malformed_metadata_denies_connect_and_revokes_an_open_stream() {
+    let h = Harness::new().await;
+    let topic = h.create("malformed").await;
+    h.grant(&[&topic]).await;
+    let pending = h.subscribe(SSE, READER, &[&topic]).await;
+    let open = h.subscribe(SSE, READER, &[&topic]).await;
+    let mut body = h.stream(&open, None).await.into_body();
+    settle().await;
+    h.state
+        .store
+        .write(
+            &meta_key(&topic),
+            Bytes::from_static(b"{invalid"),
+            "application/json",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        h.stream(&pending, None).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    assert_eq!(
+        frame(&mut body).await.as_deref(),
+        Some("event: revoked\ndata:\n\n")
+    );
+    assert!(frame(&mut body).await.is_none());
+    for doc in [&pending, &open] {
+        assert!(!h
+            .state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .contains_key(subscription_id(doc)));
+        assert!(!h
+            .state
+            .store
+            .exists(doc["id"].as_str().unwrap())
+            .await
+            .unwrap());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn multi_topic_checks_keep_denied_and_transient_decisions_separate() {
+    let h = Harness::new().await;
+    let a = h.create("denied").await;
+    let b = h.create("transient").await;
+    h.grant(&[&a, &b]).await;
+    let doc = h.subscribe(SSE, READER, &[&a, &b]).await;
+    h.state
+        .store
+        .write(
+            &meta_key(&a),
+            Bytes::from_static(b"{invalid"),
+            "application/json",
+        )
+        .await
+        .unwrap();
+    *h.state.store.fail_read_of.lock().unwrap() = Some(meta_key(&b));
+    let response = h.stream(&doc, None).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    assert_kept(&h, &doc).await;
+    *h.state.store.fail_read_of.lock().unwrap() = None;
+    // Any confirmed readable topic wins even when another topic's metadata is malformed.
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
 async fn capability_index_tracks_register_remove_and_restart() {
     fn agrees(notify: &Notifier) {
         let subs = notify.subs.read().unwrap();
@@ -620,6 +1105,150 @@ async fn replacing_a_subscription_updates_its_capability_index() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn duplicate_stored_capabilities_quarantine_one_record_and_preserve_the_other() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    let container = h.state.cfg.absolute(SUBSCRIPTIONS_PATH);
+    let mut duplicate = h
+        .state
+        .notify
+        .subs
+        .read()
+        .unwrap()
+        .get(subscription_id(&doc))
+        .unwrap()
+        .clone();
+    let hash = duplicate.capability_hash.unwrap();
+    duplicate.id = "duplicate".into();
+    let uri = format!("{container}duplicate");
+    h.state
+        .store
+        .create_in_container(
+            &container,
+            &uri,
+            Bytes::from(serde_json::to_vec(&duplicate).unwrap()),
+            LWS_JSON,
+        )
+        .await
+        .unwrap();
+    h.state
+        .notify
+        .load_with(&*h.state.store, &h.state.cfg, |_| true)
+        .await
+        .unwrap();
+    let notify = &h.state.notify;
+    let (kept, quarantined) = {
+        let subs = notify.subs.read().unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs.capability_index.len(), 1);
+        let quarantined = notify.quarantined.read().unwrap();
+        assert_eq!(quarantined.len(), 1);
+        (
+            subs.by_capability(&hash).unwrap().id.clone(),
+            quarantined.first().unwrap().clone(),
+        )
+    };
+    assert_ne!(kept, quarantined);
+    assert!(h
+        .state
+        .store
+        .exists(&format!("{container}{quarantined}"))
+        .await
+        .unwrap());
+    // Quarantined records belong to the owner's service listing and quota totals.
+    let listing = test_store::body_json(
+        h.call(Method::GET, SUBSCRIPTIONS_PATH, Some(OWNER), &[], "")
+            .await,
+    )
+    .await;
+    let listed: std::collections::BTreeSet<_> = listing["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            format!("{container}{kept}"),
+            format!("{container}{quarantined}")
+        ]
+        .into()
+    );
+    {
+        let mut subs = h.state.notify.subs.write().unwrap();
+        for n in 0..MAX_OWNER_SUBSCRIPTIONS - 2 {
+            let mut other = subs.get(&kept).unwrap().clone();
+            other.id = format!("quota-{n}");
+            other.kind = SubscriptionKind::Webhook;
+            other.capability_hash = None;
+            other.expires_at = None;
+            subs.insert(other.id.clone(), other);
+        }
+    }
+    assert_eq!(
+        h.subscribe_as(SSE, OWNER, &[&root], None).await.status(),
+        StatusCode::INSUFFICIENT_STORAGE
+    );
+    h.delete(&format!("{container}{quarantined}"), OWNER).await;
+    assert_eq!(
+        h.state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .by_capability(&hash)
+            .unwrap()
+            .id,
+        kept
+    );
+    assert_eq!(
+        h.subscribe_as(SSE, OWNER, &[&root], None).await.status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn duplicate_capability_insert_is_refused_and_removal_keeps_the_index_owner() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    let id = subscription_id(&doc);
+    let mut subs = h.state.notify.subs.write().unwrap();
+    let mut duplicate = subs.get(id).unwrap().clone();
+    let hash = duplicate.capability_hash.unwrap();
+    duplicate.id = "duplicate".into();
+    assert!(!subs.insert(duplicate.id.clone(), duplicate.clone()));
+    assert_eq!(subs.len(), 1);
+    assert_eq!(subs.by_capability(&hash).unwrap().id, id);
+    let mut replacement = duplicate.clone();
+    replacement.id = "replacement".into();
+    let other_hash = capability().1;
+    replacement.capability_hash = Some(other_hash);
+    assert!(subs.insert(replacement.id.clone(), replacement.clone()));
+    replacement.capability_hash = Some(hash);
+    assert!(!subs.insert(replacement.id.clone(), replacement.clone()));
+    assert_eq!(subs.len(), 2);
+    assert_eq!(subs.by_capability(&other_hash).unwrap().id, replacement.id);
+    assert_eq!(subs.by_capability(&hash).unwrap().id, id);
+    assert!(subs.remove(&replacement.id).is_some());
+    // Also remove a second id from an older in-memory snapshot that shared this digest.
+    // Its removal must preserve the mapping belonging to the retained id.
+    subs.by_id.insert(duplicate.id.clone(), duplicate.clone());
+    subs.ordered_ids.insert(duplicate.id.clone());
+    subs.by_subscriber
+        .entry(duplicate.subscriber.clone())
+        .or_default()
+        .insert(duplicate.id.clone());
+    assert!(subs.remove(&duplicate.id).is_some());
+    assert_eq!(subs.by_capability(&hash).unwrap().id, id);
+    assert!(subs.remove(id).is_some());
+    assert!(subs.by_capability(&hash).is_none());
+}
+
+#[tokio::test(start_paused = true)]
 async fn connect_work_does_not_grow_with_subscriptions() {
     let h = Harness::new().await;
     let unknown = format!("{STREAMS}{}", "A".repeat(43));
@@ -638,13 +1267,12 @@ async fn connect_work_does_not_grow_with_subscriptions() {
                 .unwrap()
                 .insert(sub.id.clone(), sub);
         }
-        h.state
-            .notify
-            .subs
-            .read()
-            .unwrap()
-            .capability_probes
-            .store(0, Ordering::SeqCst);
+        {
+            let subs = h.state.notify.subs.read().unwrap();
+            assert_eq!(subs.len(), count);
+            subs.capability_probes.store(0, Ordering::SeqCst);
+            subs.record_probes.store(0, Ordering::SeqCst);
+        }
         assert_eq!(
             h.call(Method::GET, &unknown, None, &[], "").await.status(),
             StatusCode::NOT_FOUND
@@ -658,6 +1286,16 @@ async fn connect_work_does_not_grow_with_subscriptions() {
                 .capability_probes
                 .load(Ordering::SeqCst),
             1
+        );
+        assert!(
+            h.state
+                .notify
+                .subs
+                .read()
+                .unwrap()
+                .record_probes
+                .load(Ordering::SeqCst)
+                <= 1
         );
     }
 }

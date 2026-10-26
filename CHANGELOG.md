@@ -815,14 +815,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-lws-core (capability streams, follow-up to #7214):** set-aside topics,
-  metadata read errors and bounded access checks that cannot finish keep the
-  subscription for reconnect. Connect returns `503` with `Retry-After`; an open
+- **sparq-lws-core (capability streams, follow-up to #7214):** readable set-aside topics,
+  store read errors, a halted notification service and bounded access checks that
+  cannot finish keep the subscription for reconnect. Connect returns `503` with `Retry-After`; an open
   WebSocket closes with `1013` and SSE ends without withdrawal. Confirmed denial
-  still withdraws the subscription (`403`, `4403` or SSE `revoked`).
+  still withdraws the subscription (`403`, `4403` or SSE `revoked`), including for hidden
+  topics and stored metadata that does not parse. Any readable topic wins even while
+  another topic waits; otherwise an undecided topic keeps the check undecided even
+  when another topic is denied.
+  A slow WebSocket consumer closes with `1013` and withdraws its subscription.
 - **sparq-lws-core (capability lookup):** connections use a SHA-256 digest index
-  maintained with subscription registration, removal and restart, so an unknown
-  capability needs the same lookup work regardless of other subscribers' records.
+  maintained with subscription registration, removal and restart.
+  A connection does not scan other principals' subscriptions. Duplicate stored digests
+  quarantine the second record; removing it preserves the digest mapping of the record still in force.
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a
   fence two seconds at most (counted from the store's answer); a step whose write failed

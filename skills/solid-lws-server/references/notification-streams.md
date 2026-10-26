@@ -55,7 +55,7 @@ resource access. An unknown, evicted, aged-out or other-epoch id sends `event: r
 an empty data field, then continues live. Read the topics again after reset.
 
 Only one connection may be open per subscription; connecting again closes the
-previous one. Each connection's live queue holds at most 64 events. A slow consumer
+previous one. Each connection's live queue holds at most 64 events. A slow SSE consumer
 is closed and can reconnect with its last id. Replay uses a separate bounded queue,
 which is drained completely before live frames. Registration and the replay snapshot
 share the publication gate; replay authorization and queue sends happen after releasing it.
@@ -67,10 +67,11 @@ Excess connections return 429. Open bodies do not retain request admission permi
 and are outside the request-response timeout.
 
 WebSocket sends one Notification envelope per text frame, pings every 30 seconds,
-and ignores client application frames. It has no replay. A `1013` close asks the client
-to reconnect with the same capability and reconcile the topics; `4403` means subscribe
-again. After another close or a transport end without a close frame, inspect the
-subscription: reconnect with the same capability if it remains, or subscribe again
+and ignores client application frames. It has no replay. An undecided check closes
+with `1013` and keeps the capability; a slow consumer also closes with `1013` but
+withdraws the WebSocket subscription. Inspect its record before reconnecting.
+A `4403` close means subscribe again. After another close or a transport end without
+a close frame, inspect the subscription: reconnect with the same capability if it remains, or subscribe again
 if it was withdrawn. Replacing a connection keeps the capability.
 
 Both bindings prepare authorization while the change's locks are held and check
@@ -80,16 +81,29 @@ topics filters their events. Losing all topic access sends terminal `event: revo
 (SSE) or close code 4403 (WebSocket), closes the connection and deactivates the
 subscription. Connect returns `403` for that confirmed denial. Subscribe again after
 withdrawal. An unreadable absent topic is denied just like an unreadable stored one.
+Hidden or changing topics use their prior metadata and the current grants before
+waiting for a lock. A confirmed denial still withdraws, including while hidden.
+Stored metadata that was read but does not parse also denies access.
 
-A set-aside topic, a store error or an access-check timeout makes the check undecided
-when no other topic is confirmed readable. On connect this returns `503` with
+A readable hidden topic, a store error or an access-check timeout makes the check
+undecided when no other topic is confirmed readable. Any confirmed readable topic
+wins, even while another topic waits for a lock or a store reply. Otherwise any
+undecided topic keeps the whole check undecided, even when another topic is denied;
+all topics denied means withdrawal. On connect an undecided check returns `503` with
 `Retry-After` and the body `authorization could not be evaluated`. An open connection
 ends without withdrawing the subscription: SSE ends without `event: revoked`, and
 WebSocket sends `1013`. Keep the capability and reconnect after recovery. An SSE
 client can inspect the subscription to confirm withdrawal when it receives an end
 without a control event. Timer checks have a bounded deadline; an unfinished check
 ends the connection for retry rather than deciding revocation.
+A halted notification service, including one that halts during a pending topic check,
+uses the same retry responses and keeps the subscription out of the withdrawn set.
+The same capability can connect once the service resumes.
 
 Stream records add `kind` (`Sse` or `WebSocket`) and `capability_hash` and omit `inbox`. Webhook records
 retain their prior encoding; the reader accepts that legacy shape. Event history
 and connections are in memory and are not restored after restart.
+A second stored record with a duplicate capability digest is quarantined, listed to
+the owner and counted in service quotas until deleted. Removing it preserves the
+digest mapping of the record still in force. In-memory registration refuses a digest
+already held by a different subscription.

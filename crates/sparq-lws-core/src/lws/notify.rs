@@ -513,23 +513,43 @@ impl Default for Subs {
 }
 
 impl Subs {
-    /// Hold `sub` under `id`, giving back what `id` held before.
-    fn insert(&mut self, id: String, sub: Subscription) -> Option<Subscription> {
+    /// Hold `sub` under `id`, unless another id already holds its capability digest.
+    fn insert(&mut self, id: String, sub: Subscription) -> bool {
         let subscriber = sub.subscriber.clone();
         let hash = sub.capability_hash;
+        if hash.is_some_and(|hash| {
+            self.capability_index
+                .get(&hash)
+                .is_some_and(|held| held != &id)
+        }) {
+            debug_assert!(self.capability_agrees(&hash.expect("duplicate digest")));
+            return false;
+        }
         let replaced = self.by_id.insert(id.clone(), sub);
         self.ordered_ids.insert(id.clone());
         if let Some(old) = &replaced {
             self.unindex(&id, &old.subscriber);
             if let Some(hash) = old.capability_hash {
-                self.capability_index.remove(&hash);
+                if self
+                    .capability_index
+                    .get(&hash)
+                    .is_some_and(|held| held == &id)
+                {
+                    self.capability_index.remove(&hash);
+                }
             }
         }
         if let Some(hash) = hash {
             self.capability_index.insert(hash, id.clone());
         }
         self.by_subscriber.entry(subscriber).or_default().insert(id);
-        replaced
+        for hash in hash
+            .into_iter()
+            .chain(replaced.and_then(|old| old.capability_hash))
+        {
+            debug_assert!(self.capability_agrees(&hash));
+        }
+        true
     }
 
     fn remove(&mut self, id: &str) -> Option<Subscription> {
@@ -537,9 +557,28 @@ impl Subs {
         self.ordered_ids.remove(id);
         self.unindex(id, &gone.subscriber);
         if let Some(hash) = gone.capability_hash {
-            self.capability_index.remove(&hash);
+            if self
+                .capability_index
+                .get(&hash)
+                .is_some_and(|held| held == id)
+            {
+                self.capability_index.remove(&hash);
+            }
+            debug_assert!(self.capability_agrees(&hash));
         }
         Some(gone)
+    }
+
+    fn capability_agrees(&self, hash: &[u8; 32]) -> bool {
+        let indexed = self.capability_index.get(hash);
+        indexed.is_none_or(|id| {
+            self.by_id
+                .get(id)
+                .is_some_and(|sub| sub.capability_hash.as_ref() == Some(hash))
+        }) && self
+            .by_id
+            .iter()
+            .all(|(id, sub)| sub.capability_hash.as_ref() != Some(hash) || indexed == Some(id))
     }
 
     fn by_capability(&self, hash: &[u8; 32]) -> Option<&Subscription> {
@@ -1003,6 +1042,7 @@ impl Notifier {
             );
         }
         let mut loaded = Vec::new();
+        let mut capabilities = std::collections::HashSet::new();
         let mut held_back = 0;
         let mut quarantined = std::collections::BTreeSet::new();
         for child in store
@@ -1054,6 +1094,13 @@ impl Notifier {
                 continue;
             }
             sub.id = id;
+            if sub
+                .capability_hash
+                .is_some_and(|hash| !capabilities.insert(hash))
+            {
+                quarantined.insert(sub.id);
+                continue;
+            }
             loaded.push((child, sub));
         }
         // No high water stored (or none that reads as a time) while subscriptions with an expiry
@@ -1394,12 +1441,18 @@ impl Notifier {
     /// deliveries) nor expired, decided durably ([`Notifier::decide`]). A delivery that goes
     /// ahead waits on nothing here.
     async fn stands_now<S: Store>(&self, store: &S, id: &str) -> bool {
-        let Some(now) = self.decide(store, |_| vec![id.to_string()]).await else {
-            return false;
-        };
+        self.standing_now(store, id).await.unwrap_or(false)
+    }
+
+    /// A halted service cannot decide whether the subscription still stands.
+    async fn standing_now<S: Store>(&self, store: &S, id: &str) -> Option<bool> {
+        let now = self.decide(store, |_| vec![id.to_string()]).await?;
+        if self.halted() {
+            return None;
+        }
         let high_water = self.high_water();
         let subs = self.subs.read().expect("lock");
-        subs.get(id).is_some_and(|s| !s.lapsing(high_water, now)) && !self.is_withdrawn(id)
+        Some(subs.get(id).is_some_and(|s| !s.lapsing(high_water, now)) && !self.is_withdrawn(id))
     }
 
     /// Whether the subscription `id` is out of force while its removal runs.
@@ -4735,14 +4788,25 @@ mod tests {
         let tag = listed.headers()["etag"].to_str().unwrap().to_string();
         let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
         assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        let last_listed = state
+            .notify
+            .listed(reader.subject.as_deref(), false)
+            .last()
+            .unwrap()
+            .id
+            .clone();
         {
             let mut subs = state.notify.subs.write().unwrap();
             // The last listed, on the second page: the first page lists the same members.
-            let live = subs
-                .values_mut()
-                .filter(|s| s.expires_at.is_none())
-                .last()
+            let id = subs
+                .ordered_ids
+                .iter()
+                .rev()
+                .find(|id| subs.get(id).unwrap().expires_at.is_none())
+                .cloned()
                 .unwrap();
+            assert_eq!(id, last_listed);
+            let live = subs.get_mut(&id).unwrap();
             live.expires_at = Some(1);
         }
         let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
