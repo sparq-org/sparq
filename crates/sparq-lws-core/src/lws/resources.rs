@@ -6802,10 +6802,10 @@ mod tests {
             vec![("if-match", "*".into())],
         )
         .await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        // An out-of-range page cannot bypass the Read gate either.
+        assert_eq!(status, StatusCode::CREATED);
+        // An out-of-range page cannot bypass the Read gate for a concrete tag either.
         let page = format!("{c}?page=99");
-        let status = send(dave.clone(), "POST", page, vec![("if-match", "*".into())]).await;
+        let status = send(dave.clone(), "POST", page, other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         // `*` alongside a date the write compares is still a comparison.
         let status = send(
