@@ -146,6 +146,8 @@ fn unchecked_const_iri(iri: &str) -> NamedNode {
 /// `NotificationHub::notify` (the only notification coupling in the write path — no handler
 /// refactor). The hub is cheap to clone (an `Arc` inside) and shared with the notification routes.
 pub struct LdpState<S: Store> {
+    #[cfg(all(feature = "crdt-sync", not(target_arch = "wasm32")))]
+    pub crdt_limits: sparq_lws_ysync::Limits,
     pub store: S,
     /// [GPT-5.6] sq-r1ei8: request-local snapshot barrier shared by LDP writes
     /// and the optional SPARQL endpoint. Queries hold a read guard while they
@@ -254,6 +256,8 @@ impl<S: Store> LdpState<S> {
         // field doc) so the read path never re-formats them per request.
         let discovery_link_values = build_discovery_link_values(&base_url);
         Self {
+            #[cfg(feature = "crdt-sync")]
+            crdt_limits: crate::crdt::limits_from_env().expect("valid CRDT limits"),
             store,
             #[cfg(feature = "sparql-endpoint")]
             sparql_snapshot: async_lock::RwLock::new(()),

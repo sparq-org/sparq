@@ -2980,3 +2980,13 @@ criteria = "safe-to-deploy"
 [[exemptions.zstd-sys]]
 version = "2.0.16+zstd.1.5.7"
 criteria = "safe-to-deploy"
+
+[[exemptions.yrs]]
+version = "0.28.0"
+criteria = "safe-to-deploy"
+notes = "Yjs v1 protocol and CRDT implementation from the established y-crdt/y-crdt repository; MIT. Used only by the optional native collaboration relay. Exemption pending a full dependency audit."
+
+[[exemptions.smallstr]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "MIT OR Apache-2.0 small-string dependency of yrs, restricted to the optional native collaboration service. Exemption pending a full dependency audit."

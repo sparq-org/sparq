@@ -109,3 +109,8 @@
   crate: "sparq-lws-core"
   features: "authn-openid"
   test: true
+
+- name: "sparq-lws-core (crdt-sync)"
+  crate: "sparq-lws-core"
+  features: "crdt-sync"
+  test: true

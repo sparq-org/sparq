@@ -166,6 +166,8 @@ const TOPIC_BUFFER: usize = 64;
 /// LDP state and the notification routes both hold a handle to one hub.
 #[derive(Clone, Default)]
 pub struct NotificationHub {
+    #[cfg(feature = "crdt-sync")]
+    pub(crate) crdt_changes: sparq_lws_ysync::Changes,
     /// topic IRI -> the broadcast sender that fans a notification to that topic's subscribers.
     topics: Arc<Mutex<HashMap<String, broadcast::Sender<Arc<str>>>>>,
     /// receive token -> its `(topic, web_id, expiry)` binding. Minted by an authenticated subscribe,
@@ -314,6 +316,10 @@ impl NotificationHub {
     /// does not change membership, so no parent notification is emitted for it. (Make-the-call
     /// mapping, documented in [`activity`].)
     pub async fn notify(&self, resource: &str, activity: ActivityType, parent: Option<&str>) {
+        #[cfg(feature = "crdt-sync")]
+        if activity == ActivityType::Create {
+            if let Some(room) = parent { self.crdt_changes.created(room, resource); }
+        }
         // 1. The resource's own subscribers: the resource-level activity, `object` = the resource.
         let resource_body: Arc<str> = Arc::from(activity::build_notification_string(
             activity, resource, None,

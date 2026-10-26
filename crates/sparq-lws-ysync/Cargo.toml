@@ -1,0 +1,19 @@
+[package]
+name = "sparq-lws-ysync"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+description = "Internal Yjs room relay and append-only room log"
+publish = false
+
+[dependencies]
+yrs = { version = "=0.28.0", features = ["sync"] }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+serde_json = "1"
+thiserror = "2"
+getrandom = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "macros", "rt"] }

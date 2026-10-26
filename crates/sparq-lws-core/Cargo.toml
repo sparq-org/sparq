@@ -217,6 +217,7 @@ itoa = "1"
 # Declared for native targets below.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sparq-lws-ysync = { path = "../sparq-lws-ysync", optional = true }
 # Existing default-member JSON-LD processor for compact storage-description output.
 sparq-jsonld = { path = "../sparq-jsonld" }
 # Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
@@ -361,6 +362,8 @@ h3-quinn = "0.0.10"
 
 
 [features]
+# Optional Yjs collaboration service in both native protocol modes.
+crdt-sync = ["dep:sparq-lws-ysync"]
 # Linked Web Storage authentication suites, each in its own package; the server offers each one
 # compiled in that is configured (and that `SOLID_SERVER_LWS_AUTHN` names, when set). SAML 2.0
 # subject tokens (`sparq-lws-authn-saml`), offered when

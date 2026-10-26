@@ -195,3 +195,4 @@ opt-in sparq-zk (vc-bridge — W3C Data-Integrity ingest bridge + canonical inte
 opt-in sparq-zk-compose (dual-leaf — value-lane members + dispatch matrix + boolean-lane cross-vectors)
 opt-in sparq-zk-compose (extended-fragment + dual-leaf — wave-1 routing, binding layers and encoding policy)
 opt-in sparq-zk-compose (successful-results — selected answers and private witnesses)
+sparq-lws-core (crdt-sync)

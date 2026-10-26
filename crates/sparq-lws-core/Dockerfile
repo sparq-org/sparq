@@ -20,7 +20,7 @@ COPY . .
 # cargo-auditable's own lockfile pins its install; the workspace build separately
 # uses the committed Cargo.lock and the crate's default feature set.
 RUN cargo install --locked cargo-auditable
-RUN cargo auditable build --release --locked -p sparq-lws-core ${CARGO_FLAGS}
+RUN cargo auditable build --release --locked -p sparq-lws-core --features crdt-sync ${CARGO_FLAGS}
 
 # -------- runtime --------
 # Tag: gcr.io/distroless/cc-debian12:nonroot

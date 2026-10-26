@@ -349,6 +349,15 @@ the catalog (currently webhooks). Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
+## Collaborate with Yjs
+
+The default-off native `crdt-sync` feature mounts ticket and Yjs socket services
+in Solid and LWS modes, and registers `CrdtSyncService` in the service catalog.
+See [collaboration](references/collaboration.md) for ticket JSON, room templates,
+read/write access, awareness, persistent room logs and configurable bounds.
+Live updates broadcast before persistence: clients retain their local Yjs state
+and append log resources on socket loss before reconnecting and synchronizing.
+
 ## Query readable RDF with `/sparql`
 
 The default `sparql-endpoint` feature exposes authenticated `GET` and `POST`

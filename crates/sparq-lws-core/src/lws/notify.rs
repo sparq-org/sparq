@@ -139,6 +139,8 @@ pub struct Pending {
 #[derive(Debug, Default)]
 #[must_use = "prepared notifications go out, and are counted, only through Notifier::send"]
 pub struct Prepared {
+    #[cfg(feature = "crdt-sync")]
+    crdt_create: Option<(String, String)>,
     pending: Vec<Pending>,
     /// The resource the change is to.
     uri: String,
@@ -590,6 +592,8 @@ impl Subs {
 
 /// The subscriptions of the storage and the notification sender.
 pub struct Notifier {
+    #[cfg(feature = "crdt-sync")]
+    pub(crate) crdt_changes: sparq_lws_ysync::Changes,
     subs: RwLock<Subs>,
     streams: streams::Streams,
     /// Entity tag of the subscription listing; changes with its membership.
@@ -847,6 +851,8 @@ impl Notifier {
             .build()
             .map_err(|e| format!("notification client: {e}"))?;
         Ok(Self {
+            #[cfg(feature = "crdt-sync")]
+            crdt_changes: Default::default(),
             subs: RwLock::new(Subs::default()),
             streams: streams::Streams::new(),
             etag: RwLock::new(new_etag()),
@@ -1491,7 +1497,15 @@ impl Notifier {
         event: &Event,
         limit: usize,
     ) -> Prepared {
-        self.prepare_for(state, event, limit, None).await
+        #[allow(unused_mut)]
+        let mut prepared = self.prepare_for(state, event, limit, None).await;
+        #[cfg(feature = "crdt-sync")]
+        if event.kind == "Create" {
+            if let Some(("target", parent)) = &event.relation {
+                prepared.crdt_create = Some((parent.clone(), event.uri.clone()));
+            }
+        }
+        prepared
     }
 
     /// Tell every subscriber whose topic covers the service record `event.uri` (an access grant
@@ -1663,6 +1677,10 @@ impl Notifier {
     /// Deliver notifications [`Notifier::prepare`]d earlier, and count what preparing them left
     /// out.
     pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, prepared: Prepared) {
+        #[cfg(feature = "crdt-sync")]
+        if let Some((room, file)) = &prepared.crdt_create {
+            self.crdt_changes.created(room, file);
+        }
         if prepared.dropped > 0 {
             self.note_dropped(prepared.dropped, &prepared.uri);
         }
