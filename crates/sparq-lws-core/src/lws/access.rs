@@ -4111,6 +4111,39 @@ mod tests {
         }
     }
 
+    /// A cold creator lookup still fetches bytes only when the metadata record exists.
+    #[tokio::test]
+    async fn a_creator_check_reads_meta_only_when_present_residual() {
+        let (state, store) = test_store::counting_state(100).await;
+        let there = test_store::data(&state, "there").await;
+        let missing = state.cfg.absolute("/missing");
+        let caller = test_store::agent("https://stranger.example/#me");
+        // Writes do not populate the body cache; this record has never been read.
+        state
+            .store
+            .write(
+                &super::super::meta_key(&there),
+                Bytes::from_static(br#"{"creator":"https://creator.example/#me"}"#),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        for (uri, blobs) in [(&missing, 0), (&there, 1)] {
+            store.counters.take_methods();
+            let measured = store.counters.measure();
+            assert!(!allowed(&state, Action::Read, uri, &caller).await.unwrap());
+            let delta = measured.delta();
+            assert_eq!(delta.sparql_queries, 1);
+            assert_eq!(delta.blob_gets, blobs);
+            assert_eq!(delta.sparql_updates, 0);
+            assert_eq!(delta.blob_puts, 0);
+            assert_eq!(
+                store.counters.take_methods().get("index.get_meta"),
+                Some(&1)
+            );
+        }
+    }
+
     #[tokio::test]
     async fn no_applicable_grant_is_decided_without_reading_metadata() {
         let (state, store) = test_store::counting_state(100).await;

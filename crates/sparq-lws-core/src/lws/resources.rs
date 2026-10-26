@@ -163,8 +163,8 @@ async fn handle_now<S: Store + 'static>(
         }
         // A backend failure is a 500, never "absent": absence skips the permission check. Nothing
         // was authorized on a missing target, so nothing is served or changed: an authorized
-        // nonreader's data DELETE is 204, and a reader keeps 404, and answering it here (rather than in the handler) means a resource that
-        // appears after this check is never read or written without its permission check.
+        // nonreader's data DELETE is 204, and a reader keeps 404. Answering it here means a
+        // resource that appears after this check is never read or written without permission.
         if let Some(refused) = authorize_unlocked(state, action, &uri, agent, &req.method).await {
             return refused;
         }
@@ -225,7 +225,7 @@ async fn authorize_unlocked<S: Store + 'static>(
 ) -> Option<Response> {
     stably(state, uri, || async {
         if !state.visible(uri) {
-            return Some(authorized_aside(state, action, uri, agent).await);
+            return Some(authorized_aside(state, action, uri, agent, method).await);
         }
         if state.locks.changing(uri) {
             return in_flight(state, action, uri, agent, method).await;
@@ -235,20 +235,7 @@ async fn authorize_unlocked<S: Store + 'static>(
                 .await
                 .err()
                 .or_else(|| full(state, method)),
-            Ok(false) => {
-                if method == Method::DELETE && !uri.ends_with('/') {
-                    match super::access::allowed_absent(state, action, uri, agent).await {
-                        Ok(true) => match state.check(Action::Read, uri, agent).await {
-                            Ok(false) => return Some(StatusCode::NO_CONTENT.into_response()),
-                            Ok(true) => {}
-                            Err(e) => return Some(store_error(e)),
-                        },
-                        Ok(false) => {}
-                        Err(e) => return Some(store_error(e)),
-                    }
-                }
-                Some(absent(state, action, uri, agent).await)
-            }
+            Ok(false) => Some(absent(state, action, uri, agent, method).await),
             Err(e) => Some(store_error(e)),
         }
     })
@@ -260,22 +247,37 @@ async fn authorize_unlocked<S: Store + 'static>(
 /// authenticated, a `404` to one that would be allowed `action` there
 /// ([`allowed_absent`](super::access::allowed_absent)), and to anyone else the refusal it would
 /// get were something there, so a caller without access learns nothing of whether it is.
+/// An unconditional data DELETE allowed here without Read answers 204, subject to the write
+/// budget. Residual: pending metadata on a present resource, or a Delete policy constrained by
+/// type or format, can still differ from absence: those constraints are the caller's policy.
 async fn absent<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
+    method: &Method,
 ) -> Response {
     if state.needs_auth(agent) {
         return state.challenge(None);
     }
     match super::access::allowed_absent(state, action, uri, agent).await {
-        Ok(true) => problem(StatusCode::NOT_FOUND, None),
+        Ok(true) => {
+            if method == Method::DELETE && !uri.ends_with('/') {
+                match state.check(Action::Read, uri, agent).await {
+                    Ok(false) => {
+                        return full(state, method)
+                            .unwrap_or_else(|| StatusCode::NO_CONTENT.into_response())
+                    }
+                    Ok(true) => {}
+                    Err(e) => return store_error(e),
+                }
+            }
+            problem(StatusCode::NOT_FOUND, None)
+        }
         Ok(false) => state.deny(agent),
         Err(e) => store_error(e),
     }
 }
-
 /// How many times a check without the lock is made again while changes to its resource itself
 /// keep beginning or ending during it, before it refuses.
 const STABLE_ATTEMPTS: usize = 8;
@@ -315,7 +317,7 @@ async fn in_flight<S: Store + 'static>(
 ) -> Option<Response> {
     match super::access::aside(state, action, uri, agent).await {
         Ok(super::access::Aside::Allowed) => full(state, method),
-        Ok(super::access::Aside::Missing) => Some(absent(state, action, uri, agent).await),
+        Ok(super::access::Aside::Missing) => Some(absent(state, action, uri, agent, method).await),
         Ok(super::access::Aside::Denied) | Err(_) => Some(state.deny(agent)),
     }
 }
@@ -337,10 +339,11 @@ async fn authorized_aside<S: Store + 'static>(
     action: Action,
     uri: &str,
     agent: &Agent,
+    method: &Method,
 ) -> Response {
     match super::access::aside(state, action, uri, agent).await {
         Ok(super::access::Aside::Allowed) => set_aside_meanwhile(),
-        Ok(super::access::Aside::Missing) => absent(state, action, uri, agent).await,
+        Ok(super::access::Aside::Missing) => absent(state, action, uri, agent, method).await,
         Ok(super::access::Aside::Denied) | Err(_) => state.deny(agent),
     }
 }
@@ -1700,6 +1703,11 @@ async fn create<S: Store + 'static>(
             None => return set_aside_meanwhile(),
         }
     };
+    if names_precondition(&req.headers, true) {
+        if let Err(r) = recheck(state, Action::Read, parent, agent).await {
+            return r;
+        }
+    }
     if conditional {
         let meta = match current(state, parent).await {
             Ok(m) => m,
@@ -1716,10 +1724,6 @@ async fn create<S: Store + 'static>(
                 // so none that cannot be produced (a page past the last) answers instead.
                 (Some(EXISTS.to_string()), None)
             } else {
-                // The storage description is public; the listing is not.
-                if let Err(r) = recheck(state, Action::Read, parent, agent).await {
-                    return r;
-                }
                 // Held exclusively: no change to a member is in flight.
                 let listing = read_container(state, &get, parent, &meta, true)
                     .await
@@ -3649,8 +3653,10 @@ async fn delete<S: Store + 'static>(
     uri: &str,
 ) -> Response {
     let storage = state.cfg.storage();
-    if let Err(r) = current(state, uri).await {
-        return r;
+    match state.store.meta(uri).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return absent(state, Action::Delete, uri, agent, &req.method).await,
+        Err(e) => return store_error(e),
     }
     if uri == storage {
         return method_not_allowed(&allow_for(uri, true));
@@ -3681,9 +3687,10 @@ async fn delete<S: Store + 'static>(
             return r;
         }
     }
-    let meta = match current(state, uri).await {
-        Ok(m) => m,
-        Err(r) => return r,
+    let meta = match state.store.meta(uri).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return absent(state, Action::Delete, uri, agent, &req.method).await,
+        Err(e) => return store_error(e),
     };
     // A data resource's date is compared only when it has one; a container's listing may have
     // one.
@@ -4736,9 +4743,16 @@ async fn linkset<S: Store + 'static>(
         req.method,
         Method::GET | Method::HEAD | Method::PUT | Method::PATCH
     ) {
-        return method_not_allowed(LINKSET_ALLOW);
+        let mut response = method_not_allowed(LINKSET_ALLOW);
+        set(
+            response.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+        add_link(response.headers_mut(), uri, "anchor", None);
+        return response;
     }
-    let action = if matches!(req.method, Method::GET | Method::HEAD | Method::OPTIONS) {
+    let action = if matches!(req.method, Method::GET | Method::HEAD) {
         Action::Read
     } else {
         Action::Modify
@@ -4827,7 +4841,6 @@ async fn linkset<S: Store + 'static>(
                 r
             }
         },
-        Method::OPTIONS => StatusCode::NO_CONTENT.into_response(),
         Method::PATCH => {
             // The body is held, before it is parsed, to what parsing any text of its size may
             // allocate ([`LINKSET_PATCH_BODY`]); the stored linkset it patches is held to the
@@ -6738,8 +6751,8 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        // A conditional create is compared with the container's listing; at the storage root
-        // without an Accept, with the storage description, which is public.
+        // Conditional creates require Read under the lock, including at the storage root
+        // when their validators come from the public storage description.
         let c = create(
             &st,
             &request("POST", "/", &[("slug", "c"), ("link", CONTAINER_LINK)], ""),
@@ -6753,6 +6766,8 @@ mod tests {
         let status = send(dave.clone(), "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         let status = send(dave.clone(), "POST", "/".into(), other()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(bob.clone(), "POST", "/".into(), other()).await;
         assert_eq!(status, StatusCode::CREATED);
         let status = send(bob.clone(), "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::CREATED);
@@ -11692,6 +11707,16 @@ mod tests {
         );
     }
 
+    /// Validate the request's echoed anchor before comparing responses for different URIs.
+    fn take_anchor_echo(response: &mut Response, uri: &str) {
+        if response.status() == StatusCode::METHOD_NOT_ALLOWED {
+            let mut expected = HeaderMap::new();
+            add_link(&mut expected, uri, "anchor", None);
+            assert_eq!(response.headers()[header::LINK], expected[header::LINK]);
+            response.headers_mut().remove(header::LINK);
+        }
+    }
+
     /// A response as a caller sees it: its status, its headers (but the date) and its body.
     async fn seen(r: Response) -> (StatusCode, Vec<(String, String)>, Bytes) {
         let mut headers: Vec<(String, String)> = r
@@ -11744,12 +11769,12 @@ mod tests {
             let (st, who) = (st.clone(), who.clone());
             let r = req(m, p, &[("content-type", "text/plain"), ("slug", "n")], "z");
             async move {
-                seen(
-                    tokio::time::timeout(std::time::Duration::from_secs(1), route_as(&st, r, &who))
-                        .await
-                        .expect("answered at once"),
-                )
-                .await
+                let uri = r.path.strip_suffix(META_SUFFIX).map(|path| st.cfg.absolute(path));
+                let mut response = tokio::time::timeout(
+                    std::time::Duration::from_secs(1), route_as(&st, r, &who),
+                ).await.expect("answered at once");
+                if let Some(uri) = uri { take_anchor_echo(&mut response, &uri); }
+                seen(response).await
             }
         };
         // a is set aside (a stuck write to it), and with it the root listing it; c is set
@@ -12993,7 +13018,10 @@ mod tests {
             let st = st.clone();
             async move {
                 let h = [("content-type", LINKSET_JSON)];
-                let r = handle(&st, &req(method, &path, &h, r#"{"linkset": []}"#), &who).await;
+                let mut r = handle(&st, &req(method, &path, &h, r#"{"linkset": []}"#), &who).await;
+                if let Some(path) = path.strip_suffix(META_SUFFIX) {
+                    take_anchor_echo(&mut r, &st.cfg.absolute(path));
+                }
                 let mut headers: Vec<String> = r
                     .headers()
                     .iter()
@@ -13188,10 +13216,10 @@ mod tests {
         assert!(st.visible(&root));
     }
     #[tokio::test]
-    async fn a_linkset_post_or_delete_is_405_before_anything_is_read() {
+    async fn unsupported_linkset_methods_are_405_with_fixed_headers_before_any_reads() {
         let (state, store) = super::super::test_store::counting_state(100).await;
         super::super::test_store::data(&state, "there").await;
-        for method in [Method::POST, Method::DELETE] {
+        for method in [Method::POST, Method::DELETE, Method::OPTIONS] {
             let mut answers = Vec::new();
             for path in ["/there.meta", "/gone.meta"] {
                 store.counters.take_methods();
@@ -13205,7 +13233,21 @@ mod tests {
                 assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
                 assert_eq!(response.headers()[header::ALLOW], LINKSET_ALLOW);
                 let status = response.status();
-                let headers = response.headers().clone();
+                assert_eq!(response.headers()["accept-patch"], ACCEPT_PATCH);
+                let mut expected_link = HeaderMap::new();
+                let target = path.strip_suffix(".meta").unwrap();
+                add_link(
+                    &mut expected_link,
+                    &state.cfg.absolute(target),
+                    "anchor",
+                    None,
+                );
+                assert_eq!(
+                    response.headers()[header::LINK],
+                    expected_link[header::LINK]
+                );
+                let mut headers = response.headers().clone();
+                headers.remove(header::LINK);
                 let body = axum::body::to_bytes(response.into_body(), usize::MAX)
                     .await
                     .unwrap();
@@ -13313,6 +13355,261 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    async fn delete_answer(response: Response) -> (StatusCode, HeaderMap, Bytes) {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, headers, body)
+    }
+
+    #[tokio::test]
+    async fn an_absent_delete_during_a_create_or_set_aside_announces_nothing() {
+        use super::super::{test_store as ts, Prior};
+        let (state, store) = ts::counting_state(100).await;
+        let root = state.cfg.storage();
+        let writer = ts::agent("https://writer.example/#me");
+        state.access.put_grant_for_test("writer", super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject}]), &root).unwrap());
+        let there = ts::data(&state, "there").await;
+        let expected = delete_answer(
+            handle(
+                &state,
+                &ts::request(Method::DELETE, "/there", &[], ""),
+                &writer,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(expected.0, StatusCode::NO_CONTENT);
+        // The physical index may contain a create's partial write; its prior is absent.
+        for physically_present in [false, true] {
+            if physically_present {
+                ts::data(&state, "there").await;
+            }
+            for hidden in [false, true] {
+                let priors = std::collections::HashMap::from([(
+                    there.clone(),
+                    Prior {
+                        existed: Some(false),
+                        ..Default::default()
+                    },
+                )]);
+                if hidden {
+                    state.locks.hide(std::slice::from_ref(&there), priors);
+                } else {
+                    state.locks.changing_from(priors);
+                }
+                let generation = state.generation(&root);
+                let measured = store.counters.measure();
+                let actual = delete_answer(
+                    handle(
+                        &state,
+                        &ts::request(Method::DELETE, "/there", &[], ""),
+                        &writer,
+                    )
+                    .await,
+                )
+                .await;
+                assert_eq!(
+                    actual, expected,
+                    "present={physically_present} hidden={hidden}"
+                );
+                assert_eq!(state.generation(&root), generation);
+                assert_eq!(measured.delta().sparql_updates, 0);
+                assert_eq!(measured.delta().blob_puts, 0);
+                if hidden {
+                    state.locks.show(std::slice::from_ref(&there));
+                } else {
+                    state.locks.landed(std::slice::from_ref(&there));
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_absent_delete_observes_the_full_set_aside_budget() {
+        use super::super::test_store as ts;
+        let (state, store) = ts::counting_state(100).await;
+        let root = state.cfg.storage();
+        let writer = ts::agent("https://writer.example/#me");
+        state.access.put_grant_for_test("writer", super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject}]), &root).unwrap());
+        ts::data(&state, "there").await;
+        state.set_aside_bytes.store(
+            super::super::MAX_SET_ASIDE_BYTES,
+            std::sync::atomic::Ordering::Release,
+        );
+        assert!(!state.may_write());
+        let generation = state.generation(&root);
+        let measured = store.counters.measure();
+        let mut answers = Vec::new();
+        for path in ["/there", "/missing"] {
+            let answer = delete_answer(
+                handle(&state, &ts::request(Method::DELETE, path, &[], ""), &writer).await,
+            )
+            .await;
+            assert_eq!(answer.0, StatusCode::SERVICE_UNAVAILABLE);
+            assert!(answer.1.contains_key(header::RETRY_AFTER));
+            answers.push(answer);
+        }
+        assert_eq!(answers[0], answers[1]);
+        assert_eq!(state.generation(&root), generation);
+        assert_eq!(measured.delta().sparql_updates, 0);
+        state
+            .set_aside_bytes
+            .store(0, std::sync::atomic::Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn two_concurrent_deletes_without_read_answer_the_same() {
+        use super::super::test_store as ts;
+        let (state, _store) = ts::counting_state(100).await;
+        let root = state.cfg.storage();
+        let writer = ts::agent("https://writer.example/#me");
+        state.access.put_grant_for_test("writer", super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject}]), &root).unwrap());
+        let there = ts::data(&state, "there").await;
+        let guard = state.locks.lock(&there).await.unwrap();
+        let request = ts::request(Method::DELETE, "/there", &[], "");
+        let first = handle(&state, &request, &writer);
+        let second = handle(&state, &request, &writer);
+        tokio::pin!(first, second);
+        // Both have passed the unlocked existence probe and wait for the same lock.
+        tokio::select! { biased; _ = &mut first => panic!("first did not wait"), () = async {} => {} }
+        tokio::select! { biased; _ = &mut second => panic!("second did not wait"), () = async {} => {} }
+        drop(guard);
+        let (first, second) = tokio::join!(first, second);
+        let first = delete_answer(first).await;
+        assert_eq!(first.0, StatusCode::NO_CONTENT);
+        assert_eq!(first, delete_answer(second).await);
+        let generation = state.generation(&root);
+        assert_eq!(
+            first,
+            delete_answer(handle(&state, &request, &writer).await).await
+        );
+        assert_eq!(
+            state.generation(&root),
+            generation,
+            "the absent delete announces nothing"
+        );
+        // Also pin disappearance before delete()'s first metadata probe.
+        assert_eq!(
+            first,
+            delete_answer(delete(&state, &request, &writer, &there).await).await
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bare_star_create_rechecks_read_after_waiting_for_the_lock() {
+        use super::super::test_store as ts;
+        let (state, _store) = ts::counting_state(100).await;
+        let root = state.cfg.storage();
+        let writer = ts::agent("https://writer.example/#me");
+        for (id, actions) in [("create", json!(["create"])), ("read", json!(["read"]))] {
+            state.access.put_grant_for_test(id, super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": writer.subject}]), &root).unwrap());
+        }
+        let guard = state.locks.lock(&root).await.unwrap();
+        let request = ts::request(
+            Method::POST,
+            "/",
+            &[("if-match", "*"), ("content-type", "text/plain")],
+            "x",
+        );
+        let response = handle(&state, &request, &writer);
+        tokio::pin!(response);
+        tokio::select! { biased; _ = &mut response => panic!("create did not wait"), () = async {} => {} }
+        state.access.remove_grant_for_test("read");
+        drop(guard);
+        assert_eq!(response.await.status(), StatusCode::FORBIDDEN);
+        assert!(state.store.list_children(&root).await.unwrap().is_empty());
+    }
+
+    /// The caller's requested constraints and a present pending record remain observable.
+    #[tokio::test]
+    async fn delete_pending_metadata_and_type_or_format_constraints_residual() {
+        use super::super::test_store as ts;
+        for constraint in [
+            json!({}),
+            json!({"constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": "https://example/T"}]}),
+            json!({"constraint": [{"leftOperand": "format", "operator": "eq", "rightOperand": "text/turtle"}]}),
+        ] {
+            let (state, _store) = ts::counting_state(100).await;
+            let root = state.cfg.storage();
+            let writer = ts::agent("https://writer.example/#me");
+            let mut policy =
+                json!({"type": ["AccessPolicy"], "action": ["delete"], "assignee": writer.subject});
+            policy
+                .as_object_mut()
+                .unwrap()
+                .extend(constraint.as_object().unwrap().clone());
+            state.access.put_grant_for_test(
+                "writer",
+                super::super::access::policies(&json!([policy]), &root).unwrap(),
+            );
+            let there = ts::data(&state, "there").await;
+            if constraint == json!({}) {
+                state
+                    .put_resource_meta(
+                        &there,
+                        &ResourceMeta {
+                            pending: true,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                state
+                    .put_resource_meta(
+                        &there,
+                        &ResourceMeta {
+                            types: vec!["https://example/T".into()],
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                state
+                    .store
+                    .write(&there, Bytes::from_static(b"x"), "text/turtle")
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(
+                handle(
+                    &state,
+                    &ts::request(Method::DELETE, "/there", &[], ""),
+                    &writer
+                )
+                .await
+                .status(),
+                if constraint == json!({}) {
+                    StatusCode::FORBIDDEN
+                } else {
+                    StatusCode::NO_CONTENT
+                }
+            );
+            let absent = handle(
+                &state,
+                &ts::request(Method::DELETE, "/missing", &[], ""),
+                &writer,
+            )
+            .await;
+            // A constrained grant need not authorize an absent target either.
+            assert_eq!(
+                absent.status(),
+                if constraint == json!({}) {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+        }
     }
 
     /// CTH write-access-bob.feature "Bob can POST container no A" and Touchstone

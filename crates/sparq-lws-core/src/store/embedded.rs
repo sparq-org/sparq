@@ -633,6 +633,7 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let q = sparql::select_meta(iri)?;
         let u = sparql::update_delete_resource_with_parent(iri, parent)?;
         self.dispatch(move |graph| {

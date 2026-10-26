@@ -228,6 +228,7 @@ pub trait SparqClient: Send + Sync {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let key = match self.get_meta(iri).await {
             Ok(meta) => Some(meta.blob_key),
             Err(SparqError::NotFound) => None,
@@ -613,6 +614,22 @@ pub(crate) fn max_rows(container: &str, max_bytes: usize) -> usize {
 }
 
 impl InMemorySparqClient {
+    async fn delete_meta_unchecked(&self, iri: &str) -> Result<(), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        guard.meta.remove(iri);
+        // Parity with the live SPARQ path (`DROP SILENT GRAPH <iri>`): a resource's named graph holds
+        // BOTH its index record AND — if it is a container — its `ldp:contains` edges, so dropping the
+        // record drops the containment set too. Mirror that here by clearing `iri`'s own children
+        // entry, so a delete-then-recreate of a container at the same IRI cannot inherit a stale
+        // (empty-or-not) membership list. (The empty-container DELETE check has already run in the
+        // handler, so any surviving entry would be a leak, not a live member.)
+        guard.children.remove(iri);
+        Ok(())
+    }
+
     async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
         let mut guard = self
             .inner
@@ -724,19 +741,7 @@ impl SparqClient for InMemorySparqClient {
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         super::limits::refuse_marker_operands(&[Some(iri)])?;
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        guard.meta.remove(iri);
-        // Parity with the live SPARQ path (`DROP SILENT GRAPH <iri>`): a resource's named graph holds
-        // BOTH its index record AND — if it is a container — its `ldp:contains` edges, so dropping the
-        // record drops the containment set too. Mirror that here by clearing `iri`'s own children
-        // entry, so a delete-then-recreate of a container at the same IRI cannot inherit a stale
-        // (empty-or-not) membership list. (The empty-container DELETE check has already run in the
-        // handler, so any surviving entry would be a leak, not a live member.)
-        guard.children.remove(iri);
-        Ok(())
+        self.delete_meta_unchecked(iri).await
     }
 
     async fn delete_resource(
@@ -744,6 +749,7 @@ impl SparqClient for InMemorySparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let mut guard = self
             .inner
             .lock()
@@ -1037,10 +1043,10 @@ mod tests {
         index.raise_marker(b, 1).await.unwrap();
         assert_eq!(pooled(&index), 1);
         // Exercise internal accounting for a legacy marker removal; public mutators refuse it.
-        index.inner.lock().unwrap().meta.remove(a);
+        index.delete_meta_unchecked(a).await.unwrap();
         index.raise_marker(b, 2).await.unwrap();
         assert_eq!(pooled(&index), 1, "moved into the slot");
-        index.inner.lock().unwrap().meta.remove(b);
+        index.delete_meta_unchecked(b).await.unwrap();
         assert_eq!(pooled(&index), 0);
         // The pool's two places are both free again, and the slot takes a new marker apart.
         for at in ["x", "y"] {

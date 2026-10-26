@@ -159,7 +159,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sparq-lws-core:** resource writes require Read for every `If-Match` or
   `If-None-Match` field, including bare `*`. LWS service containers retain their
   existence-only handling. `Store::lifecycle` is required and returns `Arc<Lifecycle>`;
-  `CompositeStore` clones share it.
+  `CompositeStore` clones share it. `SparqClient::reset_marker` requires a lifecycle guard;
+  wrappers must forward it, or a marker reset is refused by the trait default.
 
 - **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
@@ -769,9 +770,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
-  subscription lookups clone only owned records. A nonreader's authorized unconditional LWS data DELETE
-  returns `204` even when absent. Unsupported resource-linkset methods return `405` before
-  backend reads. Anonymous grant denials skip metadata reads, creator-only checks ignore
+  subscription lookups clone only owned records. An unconditional LWS data DELETE allowed by an
+  unconstrained Delete grant without Read returns `204` for settled present or absent targets,
+  and for an absent prior during in-flight or set-aside creates; a full set-aside budget returns
+  `503` with `Retry-After`. A set-aside change to a previously present resource retains `503`.
+  An absent delete changes and announces nothing. Pending metadata on a present resource and
+  type- or format-constrained Delete grants remain residual differences from absence.
+  Unsupported resource-linkset methods return `405` before backend reads, with `Allow`,
+  `Accept-Patch` and the anchor `Link`. Anonymous grant denials skip metadata reads, creator-only checks ignore
   unrelated metadata, and raw index mutations refuse service-marker operands; marker resets
   require a lifecycle guard.
 

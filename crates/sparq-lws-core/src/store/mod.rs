@@ -1858,6 +1858,14 @@ mod tests {
 
     #[async_trait]
     impl<T: SparqClient> SparqClient for Shared<T> {
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> Result<(), SparqError> {
+            self.0.reset_marker(iri, value, lease).await
+        }
         async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
             self.0.get_meta(iri).await
         }
@@ -2281,6 +2289,7 @@ mod tests {
         refused(client.delete_meta(MARKER).await);
         for (iri, parent) in [(MARKER, None), (MARKER_CONTAINER, Some(MARKER))] {
             refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
+            refused(client.delete_resource(iri, parent).await.map(|_| ()));
         }
         for (container, child) in [(MARKER, MARKER_CONTAINER), (MARKER_CONTAINER, MARKER)] {
             refused(client.create_child(container, child, lower()).await);
@@ -2326,6 +2335,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_shared_client_forwards_a_marker_reset() {
+        let client = Shared(std::sync::Arc::new(InMemorySparqClient::new()));
+        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        client.0.raise_marker(MARKER, 42).await.unwrap();
+        client.reset_marker(MARKER, 2, &lease).await.unwrap();
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn two_states_over_one_composite_store_are_refused() {
         let counters = std::sync::Arc::new(BackendCounters::default());
         let store = CompositeStore::new(
@@ -2339,11 +2357,19 @@ mod tests {
             .unwrap();
         first.notify.pause_sweeper();
         counters.take_methods();
-        assert!(crate::lws::LwsState::new(store.clone(), cfg.clone())
+        let second = crate::lws::LwsState::new(store.clone(), cfg.clone());
+        tokio::pin!(second);
+        assert!(
+            std::future::poll_fn(|cx| match std::future::Future::poll(second.as_mut(), cx) {
+                std::task::Poll::Ready(result) => std::task::Poll::Ready(result),
+                std::task::Poll::Pending => panic!("a second state must be refused before any I/O"),
+            })
             .await
-            .is_err());
+            .is_err()
+        );
         assert!(counters.take_methods().is_empty());
         drop(first);
+        tokio::task::yield_now().await;
         assert!(crate::lws::LwsState::new(store, cfg).await.is_ok());
     }
 }

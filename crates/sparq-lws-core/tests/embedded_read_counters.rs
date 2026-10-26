@@ -379,6 +379,20 @@ impl<S: SparqClient> RawSeamCounter<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
+    fn raises_markers(&self) -> bool {
+        self.inner.raises_markers()
+    }
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        self.inner.raise_marker(iri, value).await
+    }
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.inner.reset_marker(iri, value, lease).await
+    }
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         self.get_meta_calls.fetch_add(1, Ordering::Relaxed);
         self.inner.get_meta(iri).await
@@ -427,6 +441,18 @@ impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
         self.inner.referenced_blob_keys().await
     }
     // NB: no `read_plan` override — the trait default fans out counted `get_meta` calls.
+}
+
+#[tokio::test]
+async fn raw_seam_counter_forwards_a_marker_reset_at_service_start() {
+    let (raw, _) = RawSeamCounter::new(EmbeddedSparqClient::in_memory().unwrap());
+    let store = CompositeStore::new(raw, InMemoryBlobStore::new());
+    let mut cfg = sparq_lws_core::lws::LwsConfig::new("https://pod.example");
+    cfg.open = true;
+    cfg.reset_subscription_clock = true;
+    let state = sparq_lws_core::lws::LwsState::new(store, cfg).await.unwrap();
+    let marker = "https://pod.example/.lws/subscriptions/#high-water";
+    assert!(state.store.read_marker(marker).await.unwrap().is_some());
 }
 
 fn meta(bk: &str) -> ResourceMeta {

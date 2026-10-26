@@ -842,9 +842,20 @@ What the server exposes, all discoverable from the storage description
 - Access grant/request IDs owned by someone else answer exactly like absent IDs for every
   method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
   a borrowed record; only a match is cloned. Subscription lookups do the same.
-- Unconditional LWS data-resource `DELETE` by a caller allowed Delete but denied Read answers `204` for
-  both present and absent targets. An absent delete changes and announces nothing. A caller
-  with Read retains `404` for an absent target. Container deletion still requires Read.
+- `SparqClient` wrappers must forward `reset_marker` with its lifecycle guard. The trait default
+  refuses marker resets; generic `delete_resource` refuses marker operands, including the parent,
+  before any backend call.
+- Unsupported resource-linkset methods return `405` before authorization, existence checks,
+  preconditions, or set-aside checks. The response includes the fixed `Allow`, `Accept-Patch`,
+  and `Link` with `rel="anchor"` headers without backend reads.
+- Unconditional LWS data-resource `DELETE` by a caller whose unconstrained Delete grant applies
+  but who lacks Read answers `204` for settled present and absent targets, and for an absent prior
+  during an in-flight or set-aside create. A full set-aside budget instead returns `503` with
+  `Retry-After`. A set-aside change to a previously present resource still returns `503` to an
+  authorized caller. An absent delete changes and announces nothing. A caller with Read retains
+  `404` for an absent target. Container deletion still requires Read. Residual: pending metadata
+  on a present resource or Delete grants constrained by type or format can produce different
+  answers from absence; those constraints are the caller's requested policy.
 - Authorization computes applicable grant policies in memory first. With no applicable policy,
   an anonymous caller is denied without reading resource metadata. An authenticated caller's
   creator check parses only creator and pending; full metadata is parsed only for a policy.
