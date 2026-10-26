@@ -14,6 +14,8 @@ use subtle::ConstantTimeEq;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, MissedTickBehavior};
 
+use crate::notifications::ws::{authorization_unavailable, ReadAccess};
+
 use super::*;
 
 pub(super) const SSE: &str = "SseSubscription";
@@ -95,6 +97,7 @@ enum End {
     Replaced,
     Slow,
     Revoked,
+    Undecided,
 }
 
 struct Sender {
@@ -318,11 +321,12 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         return problem(StatusCode::NOT_FOUND, None);
     }
     let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-    // Fixed-size digests are always compared in constant time. No token-to-id lookup is retained.
+    // Index only SHA-256 digests of random 256-bit capabilities, never their tokens. A digest
+    // identifies the record without scanning other subscriptions; confirm it in constant time.
     let sub = {
         let subs = state.notify.subs.read().expect("lock");
-        subs.values()
-            .find(|s| {
+        subs.by_capability(&hash)
+            .filter(|s| {
                 s.kind == kind
                     && s.capability_hash
                         .is_some_and(|h| bool::from(h.ct_eq(&hash)))
@@ -381,12 +385,21 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
     if !state.notify.stands_now(&state.store, &sub.id).await {
         return problem(StatusCode::NOT_FOUND, None);
     }
-    if !matches!(
-        tokio::time::timeout(RECHECK, readable(state, &sub)).await,
-        Ok(true)
-    ) {
-        deactivate(state, &sub.id).await;
-        return problem(StatusCode::FORBIDDEN, None);
+    match tokio::time::timeout(RECHECK, readable(state, &sub))
+        .await
+        .unwrap_or(ReadAccess::Undecided)
+    {
+        ReadAccess::Allowed => {}
+        ReadAccess::Denied => {
+            deactivate(state, &sub.id).await;
+            return problem(StatusCode::FORBIDDEN, None);
+        }
+        ReadAccess::Undecided => {
+            let mut response = authorization_unavailable();
+            *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+            set(response.headers_mut(), header::RETRY_AFTER, "1");
+            return response;
+        }
     }
     let (data_tx, data) = mpsc::channel(QUEUE);
     // A full replay snapshot plus reset fits without depending on client consumption.
@@ -486,8 +499,8 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         let weak = state.downgrade();
         upgrade
             .on_upgrade(move |socket| async move {
-                socket_loop(socket, connection).await;
-                // WS has no resumption: once its current connection ends the client re-subscribes.
+                let retry = socket_loop(socket, connection).await;
+                // Retry closes keep the capability, although WebSocket has no event replay.
                 if let Some(state) = weak.upgrade() {
                     let current = slot
                         .channel
@@ -496,7 +509,7 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
                         .sender
                         .as_ref()
                         .is_some_and(|s| Arc::ptr_eq(s, &identity));
-                    if current {
+                    if current && !retry {
                         deactivate(&state, &sub.id).await;
                     }
                 }
@@ -519,17 +532,24 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
     }
 }
 
-async fn readable<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription) -> bool {
+/// Any readable topic keeps the subscription usable. Only set-aside topics, store errors or
+/// a caller's timeout make access undecided. An unreadable absent topic is denied by `check`,
+/// just like an unreadable stored topic; absence alone never selects a different close.
+async fn readable<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription) -> ReadAccess {
+    let mut access = ReadAccess::Denied;
     for topic in &sub.topics {
         let uri = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
         let Some(_guard) = state.locks.read(uri).await else {
+            access = ReadAccess::Undecided;
             continue;
         };
-        if state.allowed(Action::Read, uri, &sub.agent()).await {
-            return true;
+        match state.check(Action::Read, uri, &sub.agent()).await {
+            Ok(true) => return ReadAccess::Allowed,
+            Ok(false) => {}
+            Err(_) => access = ReadAccess::Undecided,
         }
     }
-    false
+    access
 }
 
 async fn deactivate<S: Store + 'static>(state: &LwsState<S>, id: &str) {
@@ -569,12 +589,23 @@ fn monitor<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription, sender: 
                     if !sender.active() { return }
                     let Some(state) = weak.upgrade() else { sender.close(End::Gone); return };
                     let decision = async {
-                        state.notify.stands_now(&state.store, &sub.id).await && readable(&state, &sub).await
+                        if state.notify.stands_now(&state.store, &sub.id).await {
+                            readable(&state, &sub).await
+                        } else {
+                            ReadAccess::Denied
+                        }
                     };
-                    if !matches!(tokio::time::timeout(RECHECK, decision).await, Ok(true)) {
-                        sender.close(End::Revoked);
-                        deactivate(&state, &sub.id).await;
-                        return;
+                    match tokio::time::timeout(RECHECK, decision).await.unwrap_or(ReadAccess::Undecided) {
+                        ReadAccess::Allowed => {}
+                        ReadAccess::Denied => {
+                            sender.close(End::Revoked);
+                            deactivate(&state, &sub.id).await;
+                            return;
+                        }
+                        ReadAccess::Undecided => {
+                            sender.close(End::Undecided);
+                            return;
+                        }
                     }
                 }
                 _ = heartbeats.tick() => {
@@ -586,31 +617,60 @@ fn monitor<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription, sender: 
     });
 }
 
-async fn socket_loop(mut socket: WebSocket, mut connection: Connection) {
+trait StreamSocket: Send {
+    type Error: Send;
+
+    fn receive(
+        &mut self,
+    ) -> impl std::future::Future<Output = Option<Result<Message, Self::Error>>> + Send;
+    fn transmit(
+        &mut self,
+        message: Message,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
+}
+
+impl StreamSocket for WebSocket {
+    type Error = axum::Error;
+
+    async fn receive(&mut self) -> Option<Result<Message, Self::Error>> {
+        self.recv().await
+    }
+
+    async fn transmit(&mut self, message: Message) -> Result<(), Self::Error> {
+        self.send(message).await
+    }
+}
+
+/// A 1013 close asks the client to reconnect with the same capability. A 4403 close withdraws
+/// the subscription, so the client must subscribe again; SSE marks that case as `revoked`.
+async fn socket_loop(mut socket: impl StreamSocket, mut connection: Connection) -> bool {
     loop {
         let message = tokio::select! {
             biased;
             end = connection.end.recv() => {
-                let code = match end { Some(End::Revoked) => 4403, Some(End::Slow) => 1013, _ => 1000 };
-                let _ = tokio::time::timeout(WRITE_TIMEOUT, socket.send(Message::Close(Some(CloseFrame { code, reason: "".into() })))).await;
-                return;
+                let retry = matches!(end, Some(End::Slow | End::Undecided));
+                let code = match end { Some(End::Revoked) => 4403, Some(End::Slow | End::Undecided) => 1013, _ => 1000 };
+                let _ = tokio::time::timeout(WRITE_TIMEOUT, socket.transmit(Message::Close(Some(CloseFrame { code, reason: "".into() })))).await;
+                return retry;
             }
             frame = connection.data.recv() => match frame {
                 Some(Frame::Notification { body, .. }) => Message::Text(body.to_string().into()),
                 Some(Frame::Heartbeat) => Message::Ping(Bytes::new()),
                 Some(Frame::Reset) => continue,
-                None => return,
+                None => return false,
             },
-            incoming = socket.recv() => match incoming {
-                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
+            incoming = socket.receive() => match incoming {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return false,
                 _ => continue,
             },
         };
         if !matches!(
-            tokio::time::timeout(WRITE_TIMEOUT, socket.send(message)).await,
+            tokio::time::timeout(WRITE_TIMEOUT, socket.transmit(message)).await,
             Ok(Ok(()))
         ) {
-            return;
+            // A retry end can arrive while a write is pending. Preserve it even when that
+            // write fails or reaches its deadline before the next receive of the end queue.
+            return matches!(connection.end.try_recv(), Ok(End::Slow | End::Undecided));
         }
     }
 }

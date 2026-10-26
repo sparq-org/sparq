@@ -784,6 +784,15 @@ What the server exposes, all discoverable from the storage description
   Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
   WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
   DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
+  A confirmed denial returns `403` on connect or closes an open WebSocket with `4403`
+  (SSE sends `event: revoked`), withdrawing the subscription: subscribe again.
+  An undecided access check returns `503` with `Retry-After` on connect, or closes
+  an open WebSocket with `1013` (SSE ends without `revoked`). Keep the capability
+  and reconnect when access checks recover. A check is undecided when no topic is
+  confirmed readable and a topic is set aside or a store read fails; a check timeout
+  is also undecided. An unreadable absent topic is denied like a stored one.
+  Capability lookup probes a SHA-256 digest index, with fixed work regardless of
+  how many subscriptions other principals hold; the token itself is never retained.
   SSE retention is bounded by event count, age and serialized body bytes, with
   Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
   without holding the registration gate; webhooks enter their delivery queue independently

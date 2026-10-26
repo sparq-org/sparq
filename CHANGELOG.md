@@ -815,6 +815,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core (capability streams, follow-up to #7214):** set-aside topics,
+  metadata read errors and bounded access checks that cannot finish keep the
+  subscription for reconnect. Connect returns `503` with `Retry-After`; an open
+  WebSocket closes with `1013` and SSE ends without withdrawal. Confirmed denial
+  still withdraws the subscription (`403`, `4403` or SSE `revoked`).
+- **sparq-lws-core (capability lookup):** connections use a SHA-256 digest index
+  maintained with subscription registration, removal and restart, so an unknown
+  capability needs the same lookup work regardless of other subscribers' records.
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a
   fence two seconds at most (counted from the store's answer); a step whose write failed

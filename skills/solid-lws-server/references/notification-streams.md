@@ -29,6 +29,9 @@ Connection URLs are disclosed only in the creation response. Keep that response:
 GET of the subscription and GET of its listing never return the URL or token.
 The URL carries 32 random bytes encoded as base64url. The record holds its SHA-256
 hash. The capability authenticates its own connection; send no bearer token.
+An in-memory hash-to-subscription index is maintained with the subscription records,
+including on restart. A connection probes this digest index without scanning other
+principals' subscriptions; no raw token is retained in the index.
 Expiry, cancellation, deactivation and quarantine invalidate it. DELETE the `id`
 to cancel; subscription records and quotas are shared with webhooks.
 
@@ -64,16 +67,28 @@ Excess connections return 429. Open bodies do not retain request admission permi
 and are outside the request-response timeout.
 
 WebSocket sends one Notification envelope per text frame, pings every 30 seconds,
-and ignores client application frames. It has no replay; after close, subscribe
-again for a new connection URL.
+and ignores client application frames. It has no replay. A `1013` close asks the client
+to reconnect with the same capability and reconcile the topics; `4403` means subscribe
+again. After another close or a transport end without a close frame, inspect the
+subscription: reconnect with the same capability if it remains, or subscribe again
+if it was withdrawn. Replacing a connection keeps the capability.
 
 Both bindings prepare authorization while the change's locks are held and check
 it again before retaining or sending. Delete checks use the pre-delete access
 snapshot. Open connections recheck topic access every 10 seconds; losing some
 topics filters their events. Losing all topic access sends terminal `event: revoked`
 (SSE) or close code 4403 (WebSocket), closes the connection and deactivates the
-subscription. These timer checks have a bounded deadline so revocation closes
-within 30 seconds even when an access check cannot finish.
+subscription. Connect returns `403` for that confirmed denial. Subscribe again after
+withdrawal. An unreadable absent topic is denied just like an unreadable stored one.
+
+A set-aside topic, a store error or an access-check timeout makes the check undecided
+when no other topic is confirmed readable. On connect this returns `503` with
+`Retry-After` and the body `authorization could not be evaluated`. An open connection
+ends without withdrawing the subscription: SSE ends without `event: revoked`, and
+WebSocket sends `1013`. Keep the capability and reconnect after recovery. An SSE
+client can inspect the subscription to confirm withdrawal when it receives an end
+without a control event. Timer checks have a bounded deadline; an unfinished check
+ends the connection for retry rather than deciding revocation.
 
 Stream records add `kind` (`Sse` or `WebSocket`) and `capability_hash` and omit `inbox`. Webhook records
 retain their prior encoding; the reader accepts that legacy shape. Event history

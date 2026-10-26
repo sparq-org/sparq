@@ -1,4 +1,5 @@
 use super::*;
+use crate::lws::meta_key;
 use crate::lws::test_store::{self, FlakyStore, OWNER};
 use axum::Router;
 use http_body_util::BodyExt;
@@ -168,6 +169,533 @@ fn notification(frame: &str) -> (&str, Value) {
 
 fn subscription_id(doc: &Value) -> &str {
     doc["id"].as_str().unwrap().rsplit('/').next().unwrap()
+}
+
+async fn assert_kept(h: &Harness, doc: &Value) {
+    let id = subscription_id(doc);
+    assert!(h.state.notify.subs.read().unwrap().contains_key(id));
+    assert!(!h.state.notify.withdrawn.read().unwrap().contains(id));
+    assert!(h
+        .state
+        .notify
+        .streams
+        .slots
+        .lock()
+        .unwrap()
+        .contains_key(id));
+    assert!(h
+        .state
+        .store
+        .exists(doc["id"].as_str().unwrap())
+        .await
+        .unwrap());
+}
+
+type ClientSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn open_socket(
+    h: &Harness,
+    doc: &Value,
+) -> (ClientSocket, String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = h.app.clone();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let path = url::Url::parse(doc["receiveFrom"].as_str().unwrap())
+        .unwrap()
+        .path()
+        .to_string();
+    let url = format!("ws://{addr}{path}");
+    let (socket, response) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    (socket, url, server)
+}
+
+async fn close_code(socket: &mut ClientSocket) -> u16 {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message as ClientMessage;
+    let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let ClientMessage::Close(Some(close)) = message else {
+        panic!("expected close: {message:?}")
+    };
+    u16::from(close.code)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_set_aside_topic_does_not_withdraw_a_stream_subscription() {
+    let h = Harness::new().await;
+    let topic = h.create("aside").await;
+    h.grant(&[&topic]).await;
+    let doc = h.subscribe(SSE, READER, &[&topic]).await;
+    let topics = vec![topic];
+    h.state.locks.hide(&topics, HashMap::new());
+    let response = h.stream(&doc, None).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+        "authorization could not be evaluated"
+    );
+    assert_kept(&h, &doc).await;
+    h.state.locks.show(&topics);
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_store_fault_or_timeout_on_connect_keeps_the_capability() {
+    let h = Harness::new().await;
+    let topic = h.create("connect").await;
+    h.grant(&[&topic]).await;
+    let doc = h.subscribe(SSE, READER, &[&topic]).await;
+    *h.state.store.fail_read_of.lock().unwrap() = Some(meta_key(&topic));
+    assert_eq!(
+        h.stream(&doc, None).await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_kept(&h, &doc).await;
+    *h.state.store.fail_read_of.lock().unwrap() = None;
+    let guard = h.state.locks.lock(&topic).await.unwrap();
+    let response = h.stream(&doc, None).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    assert_kept(&h, &doc).await;
+    drop(guard);
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_store_fault_during_the_periodic_check_closes_without_withdrawing() {
+    let h = Harness::new().await;
+    let topic = h.create("periodic").await;
+    h.grant(&[&topic]).await;
+    let doc = h.subscribe(SSE, READER, &[&topic]).await;
+    let mut body = h.stream(&doc, None).await.into_body();
+    settle().await;
+    *h.state.store.fail_read_of.lock().unwrap() = Some(meta_key(&topic));
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    assert!(
+        frame(&mut body).await.is_none(),
+        "retry must not send revoked"
+    );
+    assert_kept(&h, &doc).await;
+    *h.state.store.fail_read_of.lock().unwrap() = None;
+    assert!(h
+        .state
+        .store
+        .exists(doc["id"].as_str().unwrap())
+        .await
+        .unwrap());
+    let mut body = h.stream(&doc, None).await.into_body();
+    h.update(&topic).await;
+    assert!(frame(&mut body)
+        .await
+        .unwrap()
+        .contains("event: notification"));
+}
+
+#[tokio::test]
+async fn a_store_fault_during_the_periodic_check_closes_without_withdrawing_websocket() {
+    let h = Harness::new().await;
+    let topic = h.create("periodic-ws").await;
+    h.grant(&[&topic]).await;
+    let doc = h.subscribe(WEBSOCKET, READER, &[&topic]).await;
+    let (mut socket, url, server) = open_socket(&h, &doc).await;
+    tokio::time::pause();
+    settle().await;
+    *h.state.store.fail_read_of.lock().unwrap() = Some(meta_key(&topic));
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    tokio::time::resume();
+    assert_eq!(close_code(&mut socket).await, 1013);
+    settle().await;
+    assert_kept(&h, &doc).await;
+    *h.state.store.fail_read_of.lock().unwrap() = None;
+    let (_reconnected, response) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_websocket_retry_close_keeps_the_capability() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(WEBSOCKET, OWNER, &[&root]).await;
+    let (mut socket, url, server) = open_socket(&h, &doc).await;
+    let slot = h.state.notify.streams.slot(subscription_id(&doc));
+    let sender = slot.channel.lock().unwrap().sender.clone().unwrap();
+    // Fill the live queue before yielding to the socket writer.
+    for _ in 0..=QUEUE {
+        sender.push(Frame::Heartbeat);
+    }
+    assert_eq!(close_code(&mut socket).await, 1013);
+    settle().await;
+    assert_kept(&h, &doc).await;
+    let (_reconnected, response) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    server.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_retry_end_during_a_pending_socket_write_keeps_the_capability() {
+    struct PendingSocket {
+        started: Option<tokio::sync::oneshot::Sender<()>>,
+        finish: tokio::sync::oneshot::Receiver<Result<(), ()>>,
+    }
+
+    impl StreamSocket for PendingSocket {
+        type Error = ();
+
+        async fn receive(&mut self) -> Option<Result<Message, ()>> {
+            std::future::pending().await
+        }
+
+        async fn transmit(&mut self, _: Message) -> Result<(), ()> {
+            self.started.take().unwrap().send(()).unwrap();
+            (&mut self.finish).await.unwrap()
+        }
+    }
+
+    for end in [End::Undecided, End::Slow, End::Revoked] {
+        for fails in [false, true] {
+            let (started, writing) = tokio::sync::oneshot::channel();
+            let (finish, pending) = tokio::sync::oneshot::channel();
+            let (data_tx, data) = mpsc::channel(QUEUE);
+            let (end_tx, end_rx) = mpsc::channel(1);
+            let permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
+            let sender = Arc::new(Sender {
+                data: data_tx,
+                end: end_tx,
+                permit: Mutex::new(Some(permit)),
+            });
+            let connection = Connection {
+                data: Frames {
+                    replay: None,
+                    live: data,
+                },
+                end: end_rx,
+                sender: sender.clone(),
+                done: false,
+            };
+            let task = tokio::spawn(socket_loop(
+                PendingSocket {
+                    started: Some(started),
+                    finish: pending,
+                },
+                connection,
+            ));
+            sender.push(Frame::Heartbeat);
+            writing.await.unwrap();
+            sender.close(end);
+            if fails {
+                finish.send(Err(())).unwrap();
+            } else {
+                tokio::time::advance(WRITE_TIMEOUT).await;
+            }
+            assert_eq!(
+                task.await.unwrap(),
+                matches!(end, End::Undecided | End::Slow),
+                "a pending write must preserve the terminal decision"
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_periodic_check_timeout_closes_without_withdrawing() {
+    let h = Harness::new().await;
+    let topic = h.create("periodic-timeout").await;
+    let doc = h.subscribe(SSE, OWNER, &[&topic]).await;
+    let mut body = h.stream(&doc, None).await.into_body();
+    settle().await;
+    let guard = h.state.locks.lock(&topic).await.unwrap();
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    assert!(frame(&mut body).await.is_none());
+    assert_kept(&h, &doc).await;
+    drop(guard);
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_revoked_reader_is_still_withdrawn() {
+    let h = Harness::new().await;
+    let topic = h.create("revoked").await;
+    let grant = h.grant(&[&topic]).await;
+    let sse = h.subscribe(SSE, READER, &[&topic]).await;
+    let ws = h.subscribe(WEBSOCKET, READER, &[&topic]).await;
+    let pending = h.subscribe(SSE, READER, &[&topic]).await;
+    let mut body = h.stream(&sse, None).await.into_body();
+    let (mut socket, _, server) = open_socket(&h, &ws).await;
+    tokio::time::pause();
+    settle().await;
+    h.delete(&grant, OWNER).await;
+    assert_eq!(
+        h.stream(&pending, None).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    tokio::time::advance(RECHECK).await;
+    settle().await;
+    assert_eq!(
+        frame(&mut body).await.as_deref(),
+        Some("event: revoked\ndata:\n\n")
+    );
+    assert!(frame(&mut body).await.is_none());
+    tokio::time::resume();
+    assert_eq!(close_code(&mut socket).await, 4403);
+    for doc in [&sse, &ws, &pending] {
+        assert!(!h
+            .state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .contains_key(subscription_id(doc)));
+        assert!(!h
+            .state
+            .store
+            .exists(doc["id"].as_str().unwrap())
+            .await
+            .unwrap());
+    }
+    server.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unreadable_absent_topic_is_denied_not_undecided() {
+    let h = Harness::new().await;
+    let present = h.create("present").await;
+    let removed = h.create("removed").await;
+    let grant = h.grant(&[&present, &removed]).await;
+    let existing = h.subscribe(SSE, READER, &[&present]).await;
+    let absent = h.subscribe(SSE, READER, &[&removed]).await;
+    h.delete(&grant, OWNER).await;
+    h.delete(&removed, OWNER).await;
+    for doc in [&existing, &absent] {
+        let sub = h
+            .state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .get(subscription_id(doc))
+            .unwrap()
+            .clone();
+        assert_eq!(readable(&h.state, &sub).await, ReadAccess::Denied);
+        let response = h.stream(doc, None).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(!response.headers().contains_key(header::RETRY_AFTER));
+        assert!(!h
+            .state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .contains_key(subscription_id(doc)));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn readable_topics_take_priority_over_undecided_topics() {
+    let h = Harness::new().await;
+    let a = h.create("unknown").await;
+    let b = h.create("readable").await;
+    h.grant(&[&a, &b]).await;
+    let doc = h.subscribe(SSE, READER, &[&a, &b]).await;
+    *h.state.store.fail_read_of.lock().unwrap() = Some(meta_key(&a));
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+    *h.state.store.fail_read_of.lock().unwrap() = None;
+    h.state.locks.hide(&[a], HashMap::new());
+    assert_eq!(h.stream(&doc, None).await.status(), StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn capability_index_tracks_register_remove_and_restart() {
+    fn agrees(notify: &Notifier) {
+        let subs = notify.subs.read().unwrap();
+        assert_eq!(subs.ordered_ids, subs.by_id.keys().cloned().collect());
+        let expected: HashMap<_, _> = subs
+            .values()
+            .filter_map(|s| s.capability_hash.map(|hash| (hash, s.id.clone())))
+            .collect();
+        assert_eq!(subs.capability_index, expected);
+    }
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let sse = h.subscribe(SSE, OWNER, &[&root]).await;
+    let ws = h.subscribe(WEBSOCKET, OWNER, &[&root]).await;
+    h.subscribe(WEBHOOK, OWNER, &[&root]).await;
+    agrees(&h.state.notify);
+    assert_eq!(
+        h.state.notify.subs.read().unwrap().capability_index.len(),
+        2
+    );
+    h.delete(sse["id"].as_str().unwrap(), OWNER).await;
+    agrees(&h.state.notify);
+    assert_eq!(
+        h.state.notify.subs.read().unwrap().capability_index.len(),
+        1
+    );
+    let store = (*h.state.store).clone();
+    let cfg = h.state.cfg.clone();
+    drop(h);
+    settle().await;
+    let h = Harness::with_state(LwsState::new(store, cfg).await.unwrap());
+    agrees(&h.state.notify);
+    assert_eq!(
+        h.state.notify.subs.read().unwrap().capability_index.len(),
+        1
+    );
+    let path = url::Url::parse(ws["receiveFrom"].as_str().unwrap())
+        .unwrap()
+        .path()
+        .to_string();
+    assert_eq!(
+        h.call(Method::GET, &path, None, &[], "").await.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    // Loading excludes held-back and quarantined records from every in-force index.
+    let notify = Notifier::new(&h.state.cfg).unwrap();
+    notify
+        .load_with(&*h.state.store, &h.state.cfg, |uri| {
+            uri != ws["id"].as_str().unwrap()
+        })
+        .await
+        .unwrap();
+    agrees(&notify);
+    assert!(notify.subs.read().unwrap().capability_index.is_empty());
+    assert_eq!(notify.held_back.load(Ordering::SeqCst), 1);
+    h.state
+        .store
+        .write(
+            ws["id"].as_str().unwrap(),
+            Bytes::from_static(b"{}"),
+            LWS_JSON,
+        )
+        .await
+        .unwrap();
+    notify
+        .load_with(&*h.state.store, &h.state.cfg, |_| true)
+        .await
+        .unwrap();
+    agrees(&notify);
+    assert!(notify.subs.read().unwrap().capability_index.is_empty());
+    assert!(notify
+        .quarantined
+        .read()
+        .unwrap()
+        .contains(subscription_id(&ws)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn replacing_a_subscription_updates_its_capability_index() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    let id = subscription_id(&doc);
+    let mut replacement = h.state.notify.subs.read().unwrap().get(id).unwrap().clone();
+    let old_hash = replacement.capability_hash.unwrap();
+    let (_, new_hash) = capability();
+    replacement.capability_hash = Some(new_hash);
+    h.state
+        .notify
+        .subs
+        .write()
+        .unwrap()
+        .insert(id.into(), replacement);
+    let subs = h.state.notify.subs.read().unwrap();
+    assert!(!subs.capability_index.contains_key(&old_hash));
+    assert_eq!(subs.by_capability(&new_hash).unwrap().id, id);
+    assert_eq!(subs.capability_index.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn connect_work_does_not_grow_with_subscriptions() {
+    let h = Harness::new().await;
+    let unknown = format!("{STREAMS}{}", "A".repeat(43));
+    for count in [0, 500] {
+        for n in 0..count {
+            let (_, hash) = capability();
+            let mut sub: Subscription = serde_json::from_value(json!({
+                "subscriber": format!("https://other-{n}.example/"), "topics": [h.state.cfg.storage()],
+                "kind": "Sse", "capability_hash": hash, "expires_at": jose::now_secs() + 3600
+            })).unwrap();
+            sub.id = format!("other-{n}");
+            h.state
+                .notify
+                .subs
+                .write()
+                .unwrap()
+                .insert(sub.id.clone(), sub);
+        }
+        h.state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .capability_probes
+            .store(0, Ordering::SeqCst);
+        assert_eq!(
+            h.call(Method::GET, &unknown, None, &[], "").await.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            h.state
+                .notify
+                .subs
+                .read()
+                .unwrap()
+                .capability_probes
+                .load(Ordering::SeqCst),
+            1
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_known_capability_uses_one_record_hash_probe() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    let template = h
+        .state
+        .notify
+        .subs
+        .read()
+        .unwrap()
+        .get(subscription_id(&doc))
+        .unwrap()
+        .clone();
+    let mut subs = h.state.notify.subs.write().unwrap();
+    for count in [0, 500] {
+        for n in 0..count {
+            let mut other = template.clone();
+            other.id = format!("other-{n}");
+            other.subscriber = Some(format!("https://other-{n}.example/"));
+            other.capability_hash = Some(capability().1);
+            subs.insert(other.id.clone(), other);
+        }
+        subs.record_probes.store(0, Ordering::SeqCst);
+        subs.capability_probes.store(0, Ordering::SeqCst);
+        assert_eq!(
+            subs.by_capability(&template.capability_hash.unwrap())
+                .unwrap()
+                .id,
+            template.id
+        );
+        assert_eq!(subs.capability_probes.load(Ordering::SeqCst), 1);
+        assert_eq!(subs.record_probes.load(Ordering::SeqCst), 1);
+    }
 }
 
 async fn wait_until(mut ready: impl FnMut() -> bool) {

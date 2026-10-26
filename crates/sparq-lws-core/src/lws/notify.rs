@@ -452,9 +452,29 @@ pub fn covers(topic: &str, uri: &str) -> bool {
     topic == uri || (topic.ends_with('/') && uri.starts_with(topic))
 }
 
-/// The subscriptions in force, held by id and by subscriber.
+#[cfg(not(test))]
+type RecordHasher = std::collections::hash_map::RandomState;
+
+#[cfg(test)]
+#[derive(Default)]
+struct RecordHasher {
+    state: std::collections::hash_map::RandomState,
+    probes: Arc<AtomicUsize>,
+}
+
+#[cfg(test)]
+impl std::hash::BuildHasher for RecordHasher {
+    type Hasher = <std::collections::hash_map::RandomState as std::hash::BuildHasher>::Hasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        self.state.build_hasher()
+    }
+}
+
+/// The subscriptions in force, held by id, subscriber and capability digest.
 ///
-/// Both indexes live under one lock, so the ids recorded for a subscriber and the subscriptions
+/// All indexes live under one lock, so the ids recorded for a subscriber and the subscriptions
 /// themselves can never disagree. The subscriber index is what a subscriber's listing and the
 /// count of its own capacity read ([`Subs::mine`], [`Subs::live_count_of`]): each reads that
 /// subscriber's records and no one else's, so neither its answer nor the work it takes grows
@@ -462,19 +482,51 @@ pub fn covers(topic: &str, uri: &str) -> bool {
 ///
 /// The subscriber a record is indexed under is set when it is inserted and never changed:
 /// [`Subs::get_mut`] is for the delivery failure count, which does change in place.
-#[derive(Default)]
 struct Subs {
-    by_id: BTreeMap<String, Subscription>,
+    by_id: HashMap<String, Subscription, RecordHasher>,
+    // Ordered traversal is for listings and expiry sweeps, never capability lookup.
+    ordered_ids: std::collections::BTreeSet<String>,
     by_subscriber: BTreeMap<Option<String>, std::collections::BTreeSet<String>>,
+    capability_index: HashMap<[u8; 32], String>,
+    #[cfg(test)]
+    capability_probes: AtomicUsize,
+    #[cfg(test)]
+    record_probes: Arc<AtomicUsize>,
+}
+
+impl Default for Subs {
+    fn default() -> Self {
+        let hasher = RecordHasher::default();
+        #[cfg(test)]
+        let record_probes = hasher.probes.clone();
+        Self {
+            by_id: HashMap::with_hasher(hasher),
+            ordered_ids: Default::default(),
+            by_subscriber: Default::default(),
+            capability_index: Default::default(),
+            #[cfg(test)]
+            capability_probes: AtomicUsize::new(0),
+            #[cfg(test)]
+            record_probes,
+        }
+    }
 }
 
 impl Subs {
     /// Hold `sub` under `id`, giving back what `id` held before.
     fn insert(&mut self, id: String, sub: Subscription) -> Option<Subscription> {
         let subscriber = sub.subscriber.clone();
+        let hash = sub.capability_hash;
         let replaced = self.by_id.insert(id.clone(), sub);
+        self.ordered_ids.insert(id.clone());
         if let Some(old) = &replaced {
             self.unindex(&id, &old.subscriber);
+            if let Some(hash) = old.capability_hash {
+                self.capability_index.remove(&hash);
+            }
+        }
+        if let Some(hash) = hash {
+            self.capability_index.insert(hash, id.clone());
         }
         self.by_subscriber.entry(subscriber).or_default().insert(id);
         replaced
@@ -482,8 +534,20 @@ impl Subs {
 
     fn remove(&mut self, id: &str) -> Option<Subscription> {
         let gone = self.by_id.remove(id)?;
+        self.ordered_ids.remove(id);
         self.unindex(id, &gone.subscriber);
+        if let Some(hash) = gone.capability_hash {
+            self.capability_index.remove(&hash);
+        }
         Some(gone)
+    }
+
+    fn by_capability(&self, hash: &[u8; 32]) -> Option<&Subscription> {
+        #[cfg(test)]
+        self.capability_probes.fetch_add(1, Ordering::SeqCst);
+        self.capability_index
+            .get(hash)
+            .and_then(|id| self.by_id.get(id))
     }
 
     /// Drop `id` from `subscriber`'s ids, and the subscriber itself once it holds none. Every
@@ -522,26 +586,28 @@ impl Subs {
     }
 
     #[cfg(test)]
-    fn keys(&self) -> std::collections::btree_map::Keys<'_, String, Subscription> {
-        self.by_id.keys()
+    fn keys(&self) -> std::collections::btree_set::Iter<'_, String> {
+        self.ordered_ids.iter()
     }
 
-    fn values(&self) -> std::collections::btree_map::Values<'_, String, Subscription> {
-        self.by_id.values()
+    fn values(&self) -> impl Iterator<Item = &Subscription> {
+        self.ordered_ids.iter().map(|id| &self.by_id[id])
     }
 
     #[cfg(test)]
-    fn values_mut(&mut self) -> std::collections::btree_map::ValuesMut<'_, String, Subscription> {
+    fn values_mut(&mut self) -> std::collections::hash_map::ValuesMut<'_, String, Subscription> {
         self.by_id.values_mut()
     }
 
-    fn range<T, R>(&self, range: R) -> std::collections::btree_map::Range<'_, String, Subscription>
+    fn range<T, R>(&self, range: R) -> impl Iterator<Item = (&String, &Subscription)>
     where
         T: Ord + ?Sized,
         String: std::borrow::Borrow<T> + Ord,
         R: std::ops::RangeBounds<T>,
     {
-        self.by_id.range(range)
+        self.ordered_ids
+            .range(range)
+            .map(|id| (id, self.by_id.get::<str>(id.as_str()).expect("indexed id")))
     }
 
     /// How many unexpired subscriptions `subscriber` holds, read through the subscriber index as
