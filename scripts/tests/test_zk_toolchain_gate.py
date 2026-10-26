@@ -182,7 +182,7 @@ EVASIONS: dict[str, str] = {
     ),
     "a branch on a spawn failure": (
         "mod support;\n#[test]\nfn case() {\n"
-        '    if !support::require_toolchain("planted_spawn_arm", &["nargo"]) { return; }\n'
+        '    let Some(gate) = support::gate("planted_spawn_arm", &["nargo"]) else { return; };\n'
         "    match run() {\n        Err(DriverError::Spawn { .. }) => return,\n"
         "        _ => {}\n    }\n}\n"
     ),
@@ -194,12 +194,12 @@ EVASIONS: dict[str, str] = {
     ),
     "a non-literal gate name": (
         'mod support;\nconst N: &str = "planted_dyn";\n#[test]\nfn case() {\n'
-        '    if !support::require_toolchain(N, &["nargo"]) { return; }\n}\n'
+        '    let Some(gate) = support::gate(N, &["nargo"]) else { return; };\n}\n'
     ),
     "two gate calls on one line": (
         "mod support;\n#[test]\nfn a() {\n"
-        '    if !support::require_toolchain("x", &["nargo"]) '
-        '|| !support::require_toolchain("y", &["nargo"]) { return; }\n}\n'
+        '    let _ = support::gate("x", &["nargo"]); '
+        'let _ = support::gate("y", &["nargo"]);\n}\n'
     ),
     "the gate in a brace import": (
         "mod support;\nuse support::{gate, live_tool};\n#[test]\nfn case() {\n"
@@ -484,6 +484,77 @@ class CompletionAndInventory(unittest.TestCase):
         self.assertFalse(checker._asserts_status(
             "assert!(String::from_utf8_lossy(&other.stderr).contains(EXPECTED));", "out"))
 
+    def test_absent_diagnostic_is_not_a_positive_outcome_assertion(self):
+        for assertion in (
+            "assert!(!String::from_utf8_lossy(&out.stderr).contains(EXPECTED));",
+            "assert!((!out.stderr.contains(EXPECTED)));",
+            "assert!(out.stderr.contains(EXPECTED) == false);",
+            "assert_ne!(out.stderr.contains(EXPECTED), true);",
+        ):
+            with self.subTest(assertion=assertion):
+                self.assertFalse(checker._asserts_status(assertion, "out"))
+                code = checker._GOOD_LIVE.replace(
+                    "assert!(out.status.success());", assertion)
+                self.assertIn("C3", {f.rule for f in checker.lint_file("fixture.rs", code)})
+        self.assertFalse(checker._asserts_status("assert!(!out.status.success());", "out"))
+
+    def test_diagnostic_assertion_requires_this_process_and_a_required_condition(self):
+        for assertion in (
+            "assert!(out.stderr.is_empty() && other.contains(EXPECTED));",
+            "assert!(out.stderr.contains(EXPECTED) || true);",
+            "assert!(out.status.success() || true);",
+            "assert!(out.status.success() == out.status.success());",
+            "assert!(!out.status.success());",
+        ):
+            with self.subTest(assertion=assertion):
+                self.assertFalse(checker._asserts_status(assertion, "out"))
+                code = checker._GOOD_LIVE.replace("assert!(out.status.success());", assertion)
+                self.assertIn("C3", {f.rule for f in checker.lint_file("fixture.rs", code)})
+        for assertion in (
+            'assert!(String::from_utf8_lossy(&out.stderr).contains(EXPECTED), "details");',
+            "assert!((out.stderr.contains(EXPECTED)));",
+            "assert_eq!(out.status.code(), Some(0));",
+        ):
+            self.assertTrue(checker._asserts_status(assertion, "out"), assertion)
+
+    def test_diagnostic_assertion_requires_a_nonempty_pattern(self):
+        for pattern, accepted in [('""', False), ('r""', False), ('"expected"', True), ('EXPECTED', True)]:
+            with self.subTest(pattern=pattern):
+                assertion = f'assert!(String::from_utf8_lossy(&out.stderr).contains({pattern}));'
+                self.assertEqual(checker._asserts_status(assertion, "out"), accepted)
+                code = checker._GOOD_LIVE.replace("assert!(out.status.success());", assertion)
+                self.assertEqual("C3" not in {f.rule for f in checker.lint_file("fixture.rs", code)}, accepted)
+
+    def test_inline_spawn_must_bind_its_result_before_asserting(self):
+        code = checker._GOOD_LIVE.replace(
+            '    let out = support::live_tool(&gate, "nargo").output().expect("nargo runs");\n'
+            '    assert!(out.status.success());',
+            '    assert!(true || support::live_tool(&gate, "nargo").status().unwrap().success());')
+        self.assertNotEqual(code, checker._GOOD_LIVE)
+        self.assertIn("C3", {f.rule for f in checker.lint_file("fixture.rs", code)})
+
+    def test_question_mark_before_either_brace_is_an_early_exit(self):
+        for expression in ("let x = { f()? };", "if f()? {}"):
+            with self.subTest(expression=expression):
+                root = self.fixture()
+                path = root / "crates/sparq-zk-compose/tests/live.rs"
+                path.write_text(checker._GOOD_LIVE.replace(
+                    "    let out = ", f"    {expression}\n    let out = "))
+                self.assertIn("G", {f.rule for f in self.findings(root)})
+
+    def test_completions_outside_the_last_test_statement_are_red(self):
+        for source in (
+            "fn helper(token: Token) {\n    support::complete(token);\n}\n",
+            "const VALUE: () = { support::complete(token); };\n",
+            "macro_rules! finish { () => { support::complete(token); } }\n",
+            "#[test] fn plain() {\n    fn helper(token: Token) {\n        support::complete(token);\n    }\n}\n",
+            "#[test] fn plain() {\n    let finish = || { support::complete(token); };\n}\n",
+        ):
+            with self.subTest(source=source):
+                root = self.fixture()
+                (root / "crates/sparq-zk-compose/tests/extra.rs").write_text(source)
+                self.assertIn("G", {f.rule for f in self.findings(root)})
+
     def test_completion_and_declared_checks_reject_missing_obligations(self):
         root = self.fixture()
         trees = checker.collect(root)
@@ -601,6 +672,12 @@ class GateSource(unittest.TestCase):
         self.assertIn("pub fn gate(test: &str, tools: &[&str]) -> Option<LiveToolchain>",
                       self.text)
         self.assertIn("pub fn live_tool(_gate: &LiveToolchain, tool: &str)", self.text)
+
+    def test_fixture_calls_use_existing_support_functions(self):
+        exported = set(re.findall(r"pub fn (\w+)\(", self.text))
+        for label, (_file, fixture) in checker.EVASIONS.items():
+            calls = set(re.findall(r"support::(\w+)\s*\(", fixture))
+            self.assertLessEqual(calls, exported, label)
 
     def test_live_tool_hard_fails_on_its_own(self):
         self.assertRegex(

@@ -34,7 +34,7 @@ use sparq_zk::encode::salt_from_bytes;
 use sparq_zk::field::Fr;
 use sparq_zk::sig::{public_key_to_hex, SecretKey, SignatureScheme};
 use sparq_zk_compose::build::{build_filter_int, build_scan, encode_int_literal, Pattern, Slot};
-use sparq_zk_compose::driver::{CircuitProver, ProofArtifacts};
+use sparq_zk_compose::driver::{CircuitProver, DriverError, ProofArtifacts};
 use sparq_zk_compose::manifest::{
     AttestedStatusRef, BindingMode, CommitmentAttestation, EntailmentRegime, FieldHex,
     FilterOp, ProofInputs, ProofManifest, RevocationStatus, StatusListSnapshot, SubProof,
@@ -860,12 +860,25 @@ fn forge_scan_duplicate_commitment_circuit_rejected() {
     };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
-    let (c0, _s0, _c1, _s1) = two_distinct_p_graphs();
+    let (c0, _s0, c1, _s1) = two_distinct_p_graphs();
     let pattern = Pattern {
         s: Slot::Var,
         p: Slot::Const(Term::NamedNode(iri("http://ex/p"))),
         o: Slot::Var,
     };
+    // The same member must first execute an honest, distinct-graph witness.
+    let honest = build_scan(&[c0.clone(), c1], &pattern).expect("honest k=2 scan builds");
+    let (honest_id, honest_toml) = prover_toml_for(
+        &honest.inputs,
+        &challenge,
+        &honest.witness.counts,
+        &honest.witness.enc,
+        &[], None, None,
+    ).unwrap();
+    prover.compile(&honest_id).expect("honest k=2 scan compiles");
+    let witness = prover.gen_witness_tagged(&honest_id, &honest_toml, "fg_dup_control")
+        .expect("honest distinct-graph witness executes");
+    assert!(witness.is_file(), "honest scan must produce its witness");
     // Build a k=2 scan over the SAME graph twice — the duplicate-inclusion forge.
     // Both graphs' encodings derive c0, so the commitment-recompute (step 1) holds
     // for both, and the ONLY violated constraint is the strict ordering
@@ -887,10 +900,15 @@ fn forge_scan_duplicate_commitment_circuit_rejected() {
     // The in-circuit `commitments[0] < commitments[1]` (= `c0 < c0`) is FALSE, so
     // the relation is unsatisfiable: nargo writes no witness => Err.
     let res = prover.gen_witness_tagged(&id, &toml, "fg_dup_commit");
-    assert!(
-        res.is_err(),
-        "a duplicate-commitment k=2 scan witness must be UNSATISFIABLE (strict-ordering gate), but nargo produced a witness"
-    );
+    assert_eq!(id, honest_id, "control and duplicate must use the same member");
+    match res {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("per-graph commitments not strictly increasing"),
+            "duplicate commitments must fail their ordering constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the duplicate-commitment constraint diagnostic, got {other:?}"),
+    }
     support::complete(live);
 }
 

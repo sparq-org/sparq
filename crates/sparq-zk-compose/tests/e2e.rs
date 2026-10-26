@@ -4361,7 +4361,12 @@ fn probe_scan_public_inputs_hex() {
     want.extend(commitments.iter().map(field));
     want.extend(pattern_is_const.iter().map(|b| small(u64::from(*b))));
     want.extend(pattern_const_enc.iter().map(field));
+    let CircuitId::Scan { r, .. } = scan.inputs.circuit_id() else {
+        panic!("scan probe requires a scan circuit id");
+    };
+    assert!(rows.len() <= *r as usize, "scan rows exceed circuit capacity");
     want.extend(rows.iter().flatten().map(field));
+    want.extend(std::iter::repeat_n([0; 32], (*r as usize - rows.len()) * 3));
     want.push(small(u64::from(*row_count)));
     want.extend(attribution.iter().map(|b| small(u64::from(*b))));
     assert_eq!(
@@ -4645,7 +4650,12 @@ fn probe_scan_k2_public_inputs_hex() {
     want.extend(commitments.iter().map(field));
     want.extend(pattern_is_const.iter().map(|b| small(u64::from(*b))));
     want.extend(pattern_const_enc.iter().map(field));
+    let CircuitId::Scan { r, .. } = scan.inputs.circuit_id() else {
+        panic!("scan probe requires a scan circuit id");
+    };
+    assert!(rows.len() <= *r as usize, "scan rows exceed circuit capacity");
     want.extend(rows.iter().flatten().map(field));
+    want.extend(std::iter::repeat_n([0; 32], (*r as usize - rows.len()) * 3));
     want.push(small(u64::from(*row_count)));
     want.extend(attribution.iter().map(|b| small(u64::from(*b))));
     assert_eq!(
@@ -6902,21 +6912,11 @@ fn hidden_issuer_forged_root_rejected() {
     support::complete(live);
 }
 
-/// FAIL-CLOSED: a hidden-issuer attestation present but the relying party did NOT
-/// enable the path (no with_hidden_issuer_depth) is rejected -- the verifier will
-/// not accept a root it cannot itself derive. (Fast: structural reject before bb.)
+/// Empty sub-proof bytes are refused before hidden-issuer policy checks or tools.
 #[test]
-fn hidden_issuer_not_enabled_rejected() {
+fn missing_subproof_precedes_hidden_issuer_policy_check() {
     let prover = CircuitProver::from_crate_root();
-    // A manifest with a (dummy-proof) hidden-issuer attestation.
     let mut m = sample_manifest();
-    // sample_manifest has 2 sub-proofs with empty proof_hex; we only need the
-    // STRUCTURAL path to reach bind_hidden_issuer_attestations, but verify_manifest
-    // runs the sub-proof bb loop first. Use a scan-only manifest with a real proof
-    // is heavy; instead assert the gate directly is exercised by the depth opt-in.
-    // Here we just confirm the KeySet without the opt-in rejects at the gate by
-    // calling with a manifest whose sub-proofs are empty -> MissingProof first.
-    // So this test asserts the policy plumbing via a unit-level check below.
     m.hidden_issuer_attestations = vec![HiddenIssuerAttestation {
         commitment: FieldHex("0x1".into()),
         depth: HI_DEPTH,
@@ -6927,9 +6927,8 @@ fn hidden_issuer_not_enabled_rejected() {
     }];
     // KeySet WITHOUT the hidden-issuer opt-in.
     let k = KeySet::from_hex_keys([public_key_to_hex(&test_issuer_sk(1).public_key())]);
-    // The sub-proof loop rejects MissingProof first (empty proof_hex), which still
-    // proves the path is wired; the dedicated NotEnabled assertion is exercised by
-    // the unit test in verifier.rs. Pin the earlier empty-proof refusal here.
+    // This pins only the earlier empty-proof refusal; it does not reach the
+    // hidden-issuer policy check.
     let res = verify_manifest(
         &m, &prover, &scratch("hi_notenabled"),
         &k, &fresh_policy(), &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(), &nonce_for("0x2a"), &InMemorySeenNonces::new(),
