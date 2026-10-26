@@ -950,7 +950,8 @@ What the server exposes, all discoverable from the storage description
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
   outcome would have been. On LWS resource `DELETE`, `If-None-Match: *` requires Read.
   A non-reader's data `DELETE` with `If-Match: *` is treated as unconditional, answering `204`
-  for settled present and absent targets with the same full-budget and set-aside-parent checks.
+  for settled present and absent targets with the same full-budget and set-aside-parent checks,
+  so for a caller without Read that `204` does not confirm the target existed.
   Other `If-Match` values on `DELETE`, including malformed or empty lists, require Read too.
   `POST` with `If-Match: *` or `If-None-Match: *` works without Read, since even an
   unconditional create discloses whether its container exists. Tags and applicable dates

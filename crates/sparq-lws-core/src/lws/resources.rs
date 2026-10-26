@@ -247,8 +247,9 @@ async fn authorize_unlocked<S: Store + 'static>(
 /// authenticated, a `404` to one that would be allowed `action` there
 /// ([`allowed_absent`](super::access::allowed_absent)), and to anyone else the refusal it would
 /// get were something there, so a caller without access learns nothing of whether it is.
-/// An unconditional data DELETE allowed here without Read answers 204, subject to the write
-/// budget. Read is decided with absent metadata, even if a create has written partial metadata
+/// An unconditional data DELETE allowed here without Read, or one with a bare `If-Match: *`,
+/// answers 204 once the full set-aside budget and then the parent's set-aside state are checked.
+/// Read is decided with absent metadata, even if a create has written partial metadata
 /// or an orphan linkset names the caller as creator. The same decision applies after a concurrent
 /// removal, including under the delete lock. Public Delete grants apply before a challenge.
 /// A set-aside parent returns 503 for both present and absent children.
@@ -13665,7 +13666,8 @@ mod tests {
             }
         }
         assert!(state.store.exists(&there).await.unwrap());
-        // If-Match takes precedence over dates. Even an old date must not restore an oracle.
+        // If-Match takes precedence over dates, so an old date cannot make the answer depend on
+        // whether the target exists.
         for caller in [Agent::anonymous(), ts::agent("https://writer.example/#me")] {
             for headers in [
                 vec![("if-match", "*")],
