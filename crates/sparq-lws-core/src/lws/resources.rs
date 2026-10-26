@@ -1388,7 +1388,11 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
         "NotificationService",
         cfg.absolute(SUBSCRIPTIONS_PATH),
     );
-    notifications["subscriptionType"] = json!(["WebhookSubscription"]);
+    notifications["subscriptionType"] = json!([
+        "WebhookSubscription",
+        "SseSubscription",
+        "WebSocketSubscription"
+    ]);
     let key_id = format!("{storage}#{}", cfg.notify_key.kid());
     json!({
         "@context": [CID_CONTEXT, LWS_CONTEXT],

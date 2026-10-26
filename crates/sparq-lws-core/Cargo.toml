@@ -427,3 +427,7 @@ http3 = ["dep:quinn", "dep:sparq-http3"]
 # Opt-in wasm request-handling core. Target cfgs remove native transport, runtime, crypto, OIDC,
 # notifications, and non-memory backends; the native target remains unchanged when this is enabled.
 wasm = []
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Validate the stream subscription documents against the vendored JLWS shapes.
+sparq-shacl = { path = "../sparq-shacl" }

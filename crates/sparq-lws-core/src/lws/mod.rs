@@ -18,7 +18,7 @@
 //!   identifier and OpenID Connect subject tokens; the storage accepts the RFC 9068 access tokens
 //!   it issues ([`tokens`]);
 //! - **access grants and access requests** ([`access`]): the LWS Access Profile;
-//! - **webhook notifications** ([`notify`]), signed per RFC 9421;
+//! - **notifications** ([`notify`]): signed webhooks, SSE and WebSocket subscriptions;
 //! - the **type index and type search** services ([`index`]).
 //!
 //! Authorization: the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, the agent that
@@ -2415,6 +2415,12 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
+    if notify::stream_path(req.uri().path()) {
+        if let Err(refused) = check_headers(req.headers()) {
+            return refused;
+        }
+        return notify::connect(&state, req).await;
+    }
     let (parts, body) = req.into_parts();
     if let Err(refused) = check_headers(&parts.headers) {
         return refused;

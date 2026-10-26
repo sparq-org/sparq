@@ -2,12 +2,12 @@
 //! (lws10-notifications-webhook).
 //!
 //! The NotificationService lives at [`SUBSCRIPTIONS_PATH`] and offers
-//! one subscription type, `WebhookSubscription`. An authenticated agent subscribes with an
-//! `application/lws+json` request naming a `topic` (an array of resource URIs, each of which it
-//! must be able to read now) and an `inbox`; a topic covers itself and, for a container,
-//! everything beneath it. Each Create, Update and Delete inside a topic is then POSTed to the
-//! inbox as an `application/lws+json` Notification, provided the subscriber may read the
-//! resource when the event occurs (section 10.3.3).
+//! `WebhookSubscription`, `SseSubscription` and `WebSocketSubscription`. An authenticated agent
+//! subscribes with an `application/lws+json` request naming a `topic` (an array of resource URIs,
+//! each of which it must be able to read now). A topic covers itself and, for a container,
+//! everything beneath it. Each Create, Update and Delete inside a topic is delivered as an
+//! `application/lws+json` Notification, provided the subscriber may read the resource when the
+//! event occurs (section 10.3.3). Webhooks name an inbox; streams use capability URLs.
 //!
 //! Deliveries leave the request's task (`tokio::spawn`) before any of them takes a place in the
 //! delivery queue, so a change waits neither on how slow an inbox is nor on the per-delivery
@@ -59,7 +59,10 @@ use super::{
 };
 use crate::store::Store;
 
-/// The one subscription type this NotificationService offers.
+mod streams;
+pub(super) use streams::{connect, stream_path};
+
+/// The webhook subscription type this NotificationService offers.
 pub const WEBHOOK: &str = "WebhookSubscription";
 
 /// Attempts at one delivery: a 5xx or an unreachable inbox is tried again.
@@ -124,6 +127,7 @@ const SIGNATURE_COMPONENTS: [&str; 7] = [
 #[derive(Debug, Clone)]
 pub struct Pending {
     inbox: String,
+    kind: SubscriptionKind,
     activity: Value,
     watch: Watch,
 }
@@ -298,8 +302,32 @@ pub struct Event {
     pub relation: Option<(&'static str, String)>,
 }
 
-/// One webhook subscription, as stored.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// The transport of a notification subscription.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SubscriptionKind {
+    /// An outgoing HTTP delivery; its record retains the original inbox field.
+    #[default]
+    Webhook,
+    /// An incoming EventSource connection.
+    Sse,
+    /// An incoming WebSocket connection.
+    WebSocket,
+}
+
+impl SubscriptionKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Webhook => WEBHOOK,
+            Self::Sse => streams::SSE,
+            Self::WebSocket => streams::WEBSOCKET,
+        }
+    }
+}
+
+/// One notification subscription, as stored.
+///
+/// Legacy webhook records omit kind and capability_hash and round-trip unchanged.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct Subscription {
     #[serde(skip)]
     pub id: String,
@@ -310,7 +338,14 @@ pub struct Subscription {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
     pub topics: Vec<String>,
+    #[serde(default)]
     pub inbox: String,
+    /// Delivery transport; omitted from legacy webhook records.
+    #[serde(default)]
+    pub kind: SubscriptionKind,
+    /// SHA-256 of the capability token; the token itself is never stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_hash: Option<[u8; 32]>,
     /// The expiry the subscriber asked for, as given, and as seconds since the epoch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires: Option<String>,
@@ -323,6 +358,37 @@ pub struct Subscription {
     /// Whether it has been seen expired, in memory only ([`Lapsed`]).
     #[serde(skip)]
     pub lapsed: Lapsed,
+}
+
+// Keep the old webhook field order and omission rules, including an empty inbox, exactly.
+// Stream records have their own shape and do not serialize an inbox.
+impl Serialize for Subscription {
+    fn serialize<T: serde::Serializer>(&self, serializer: T) -> Result<T::Ok, T::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(subscriber) = &self.subscriber {
+            map.serialize_entry("subscriber", subscriber)?;
+        }
+        if let Some(client) = &self.client {
+            map.serialize_entry("client", client)?;
+        }
+        map.serialize_entry("topics", &self.topics)?;
+        if self.kind == SubscriptionKind::Webhook {
+            map.serialize_entry("inbox", &self.inbox)?;
+        } else {
+            map.serialize_entry("kind", &self.kind)?;
+        }
+        if let Some(hash) = &self.capability_hash {
+            map.serialize_entry("capability_hash", hash)?;
+        }
+        if let Some(expires) = &self.expires {
+            map.serialize_entry("expires", expires)?;
+        }
+        if let Some(at) = &self.expires_at {
+            map.serialize_entry("expires_at", at)?;
+        }
+        map.end()
+    }
 }
 
 /// Set once a [`Subscription`] is seen expired, shared by its copies: from then on it stays
@@ -525,6 +591,7 @@ impl Subs {
 /// The subscriptions of the storage and the notification sender.
 pub struct Notifier {
     subs: RwLock<Subs>,
+    streams: streams::Streams,
     /// Entity tag of the subscription listing; changes with its membership.
     etag: RwLock<String>,
     /// The delivery client: no redirects, no proxy, and (unless insecure fetches are allowed) a
@@ -747,6 +814,8 @@ impl Notifier {
             expires: None,
             expires_at: None,
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         self.subs.write().expect("lock").insert("test".into(), sub);
@@ -779,6 +848,7 @@ impl Notifier {
             .map_err(|e| format!("notification client: {e}"))?;
         Ok(Self {
             subs: RwLock::new(Subs::default()),
+            streams: streams::Streams::new(),
             etag: RwLock::new(new_etag()),
             client,
             limits: cfg.delivery,
@@ -903,6 +973,20 @@ impl Notifier {
                 quarantined.insert(id);
                 continue;
             };
+            // Only the new stream shape may omit inbox. Keep the old webhook loader's
+            // required-field check even though the shared record now has a default for it.
+            let missing_webhook_inbox = sub.kind == SubscriptionKind::Webhook
+                && serde_json::from_slice::<Value>(&read.body)
+                    .map_or(true, |raw| raw.get("inbox").is_none());
+            if missing_webhook_inbox
+                || (sub.kind != SubscriptionKind::Webhook
+                    && (sub.capability_hash.is_none()
+                        || sub.expires_at.is_none()
+                        || !sub.inbox.is_empty()))
+            {
+                quarantined.insert(id);
+                continue;
+            }
             sub.id = id;
             loaded.push((child, sub));
         }
@@ -951,6 +1035,9 @@ impl Notifier {
             {
                 unrecorded.remove(&sub.id);
                 continue;
+            }
+            if sub.kind != SubscriptionKind::Webhook {
+                self.streams.register(&sub.id);
             }
             subs.insert(sub.id.clone(), sub);
         }
@@ -1342,6 +1429,7 @@ impl Notifier {
                     // An expired subscription is listed nowhere, so its removal changes no
                     // listing.
                     let removed = me.subs.write().expect("lock").remove(&id);
+                    me.streams.remove(&id);
                     me.high_water.unrecorded.lock().expect("lock").remove(&id);
                     let author = removed.as_ref().and_then(|s| s.subscriber.clone());
                     if removed.is_some_and(|s| !s.expired(me.high_water())) {
@@ -1555,6 +1643,7 @@ impl Notifier {
                 }
                 out.pending.push(Pending {
                     inbox: sub.inbox.clone(),
+                    kind: sub.kind,
                     activity,
                     // Checked as the resource the linkset describes: its lock and who may
                     // read it.
@@ -1593,9 +1682,13 @@ impl Notifier {
         let state = state.detached();
         tokio::spawn(async move {
             for p in prepared.pending {
-                state
-                    .notify
-                    .deliver(&state, &p.inbox, p.activity, Some(p.watch));
+                if p.kind == SubscriptionKind::Webhook {
+                    state
+                        .notify
+                        .deliver(&state, &p.inbox, p.activity, Some(p.watch));
+                } else {
+                    streams::publish(&state, p).await;
+                }
             }
         });
     }
@@ -2185,8 +2278,7 @@ async fn quarantined<S: Store + 'static>(
     }
 }
 
-/// The subscription document: type and subscription are REQUIRED; topic, inbox and expires echo
-/// the request.
+/// The inspection document, without capability URLs; webhooks also echo their inbox.
 fn document<S: Store>(state: &LwsState<S>, sub: &Subscription) -> Value {
     let url = state
         .cfg
@@ -2194,11 +2286,26 @@ fn document<S: Store>(state: &LwsState<S>, sub: &Subscription) -> Value {
     let mut doc = json!({
         "@context": [LWS_CONTEXT],
         "id": url,
-        "type": WEBHOOK,
+        "type": sub.kind.name(),
         "subscription": url,
         "topic": sub.topics,
-        "inbox": sub.inbox,
     });
+    if sub.kind == SubscriptionKind::Webhook {
+        doc["inbox"] = json!(sub.inbox);
+    } else {
+        doc["@context"] = json!([LWS_CONTEXT, {
+            "@vocab": "https://w3id.org/jeswr/lws#",
+            "id": "@id", "type": "@type",
+            "topic": {"@id": "https://w3id.org/jeswr/lws#topic", "@type": "@id"},
+            "source": {"@id": "https://w3id.org/jeswr/lws#source", "@type": "@id"},
+            "receiveFrom": {"@id": "https://w3id.org/jeswr/lws#receiveFrom", "@type": "@id"},
+            "expires": {"@id": "https://w3id.org/jeswr/lws#expires", "@type": "http://www.w3.org/2001/XMLSchema#dateTime"}
+        }]);
+        doc["authMode"] = json!("capability");
+        if sub.kind == SubscriptionKind::Sse {
+            doc["retention"] = json!("PT10M");
+        }
+    }
     if let Some(e) = &sub.expires {
         doc["expires"] = Value::String(e.clone());
     }
@@ -2610,11 +2717,31 @@ async fn subscribe<S: Store + 'static>(
         );
     }
     // type is REQUIRED and one of the advertised subscription types.
-    let ty = body.get("type").and_then(Value::as_str);
-    if ty != Some(WEBHOOK) && ty.and_then(|t| t.strip_prefix(LWS_NS)) != Some(WEBHOOK) {
+    let ty = body.get("type").and_then(Value::as_str).unwrap_or_default();
+    let ty = ty
+        .strip_prefix(LWS_NS)
+        .or_else(|| ty.strip_prefix("https://jeswr.org/ns/solid-sd#"))
+        .or_else(|| ty.strip_prefix("https://w3id.org/jeswr/lws#"))
+        .unwrap_or(ty);
+    let kind = match ty {
+        WEBHOOK => SubscriptionKind::Webhook,
+        streams::SSE => SubscriptionKind::Sse,
+        streams::WEBSOCKET => SubscriptionKind::WebSocket,
+        _ => {
+            return problem(
+                StatusCode::BAD_REQUEST,
+                Some("type is not an advertised subscription type"),
+            )
+        }
+    };
+    if kind != SubscriptionKind::Webhook
+        && !url::Url::parse(&state.cfg.base_url)
+            .is_ok_and(|u| u.scheme() == "https" && u.has_host())
+        && !state.cfg.allow_insecure_fetch
+    {
         return problem(
             StatusCode::BAD_REQUEST,
-            Some("type must be WebhookSubscription"),
+            Some("capability URLs require an https base"),
         );
     }
     // topic is REQUIRED: a non-empty array of URIs. Repeats count once; each topic is checked
@@ -2641,21 +2768,31 @@ async fn subscribe<S: Store + 'static>(
             Some(&format!("a subscription names at most {MAX_TOPICS} topics")),
         );
     }
-    // A WebhookSubscription's inbox is REQUIRED.
-    let Some(inbox) = body
-        .get("inbox")
-        .filter(|v| json_is_uri(v))
-        .and_then(Value::as_str)
-    else {
-        return problem(StatusCode::BAD_REQUEST, Some("inbox must be a URI"));
+    let inbox = if kind == SubscriptionKind::Webhook {
+        let Some(inbox) = body
+            .get("inbox")
+            .filter(|v| json_is_uri(v))
+            .and_then(Value::as_str)
+        else {
+            return problem(StatusCode::BAD_REQUEST, Some("inbox must be a URI"));
+        };
+        if inbox_url(inbox, state.cfg.allow_insecure_fetch).is_none() {
+            return problem(
+                StatusCode::BAD_REQUEST,
+                Some("inbox must be a public https URL"),
+            );
+        }
+        inbox
+    } else {
+        if body.get("inbox").is_some() {
+            return problem(
+                StatusCode::BAD_REQUEST,
+                Some("stream subscriptions have no inbox"),
+            );
+        }
+        ""
     };
-    if inbox_url(inbox, state.cfg.allow_insecure_fetch).is_none() {
-        return problem(
-            StatusCode::BAD_REQUEST,
-            Some("inbox must be a public https URL"),
-        );
-    }
-    let (expires, expires_at) = match body.get("expires") {
+    let (mut expires, mut expires_at) = match body.get("expires") {
         None | Some(Value::Null) => (None, None),
         Some(Value::String(e)) => match parse_rfc3339(e) {
             // Past by the clock or by the stored high water, whichever is later.
@@ -2677,6 +2814,11 @@ async fn subscribe<S: Store + 'static>(
             )
         }
     };
+    if kind != SubscriptionKind::Webhook && expires_at.is_none() {
+        let until = state.notify.clock().max(state.notify.high_water()) + 24 * 60 * 60;
+        expires = Some(format_rfc3339(until));
+        expires_at = Some(until);
+    }
     // "If a subscriber does not have the equivalent of read access to all resources listed in the
     // topic array, the server MUST reject the subscription request." A topic outside this storage,
     // or naming nothing, is refused the same way. A resource's linkset is read under the
@@ -2859,6 +3001,7 @@ async fn subscribe<S: Store + 'static>(
     let id = jose::random_id();
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
     let iri = format!("{container}{id}");
+    let capability = (kind != SubscriptionKind::Webhook).then(streams::capability);
     let sub = Subscription {
         id: id.clone(),
         subscriber: agent.subject.clone(),
@@ -2868,13 +3011,21 @@ async fn subscribe<S: Store + 'static>(
         expires,
         expires_at,
         failures: 0,
+        kind,
+        capability_hash: capability.as_ref().map(|(_, hash)| *hash),
         lapsed: Lapsed::default(),
     };
     let stored = serde_json::to_vec(&sub).unwrap_or_default();
-    let doc = document(state, &sub);
+    let mut doc = document(state, &sub);
+    if let Some((token, _)) = &capability {
+        streams::connection_details(state, kind, token, &mut doc);
+    }
     let author = sub.subscriber.clone();
     let register = {
         move |state: &LwsState<S>| {
+            if sub.kind != SubscriptionKind::Webhook {
+                state.notify.streams.register(&id);
+            }
             state.notify.subs.write().expect("lock").insert(id, sub);
             *state.notify.etag.write().expect("lock") = new_etag();
             // Counted as registered from here on.
@@ -2906,6 +3057,10 @@ async fn subscribe<S: Store + 'static>(
     // request answers without waiting on it.
     wake_expiry_sweeper(state);
     let mut resp = super::json_response(StatusCode::CREATED, LWS_JSON, &doc);
+    if kind != SubscriptionKind::Webhook {
+        set(resp.headers_mut(), header::CACHE_CONTROL, "no-store");
+        set(resp.headers_mut(), header::REFERRER_POLICY, "no-referrer");
+    }
     set(resp.headers_mut(), header::LOCATION, &iri);
     service_links(&state.cfg, resp.headers_mut(), &iri, &container);
     resp
@@ -2929,6 +3084,8 @@ mod tests {
             expires: None,
             expires_at: Some(expires_at),
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         }
     }
@@ -4313,6 +4470,8 @@ mod tests {
             expires: None,
             expires_at: Some(1),
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         let iri = format!("{container}old");
@@ -4644,6 +4803,8 @@ mod tests {
                         expires: None,
                         expires_at: None,
                         failures: 0,
+                        kind: SubscriptionKind::Webhook,
+                        capability_hash: None,
                         lapsed: Lapsed::default(),
                     },
                 );
@@ -4719,6 +4880,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state
@@ -4830,6 +4993,8 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         // A first boot makes the containers; the subscription is stored after it and before
@@ -4905,6 +5070,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
@@ -4971,6 +5138,8 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         state
@@ -5027,6 +5196,8 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         let iri = format!("{container}{id}");
@@ -5471,6 +5642,8 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         state
@@ -5638,6 +5811,8 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         state
@@ -5700,6 +5875,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
@@ -5748,6 +5925,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
@@ -5856,6 +6035,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
@@ -5947,6 +6128,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
@@ -6179,6 +6362,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
@@ -6237,6 +6422,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
@@ -6340,6 +6527,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             let iri = format!("{}s{:04}", container, i);
@@ -6527,6 +6716,8 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                kind: SubscriptionKind::Webhook,
+                capability_hash: None,
                 lapsed: Lapsed::default(),
             };
             state
@@ -7158,6 +7349,8 @@ mod tests {
                         expires: None,
                         expires_at: Some(1),
                         failures: 0,
+                        kind: SubscriptionKind::Webhook,
+                        capability_hash: None,
                         lapsed: Lapsed::default(),
                     },
                 );
@@ -8081,6 +8274,8 @@ mod tests {
             expires: None,
             expires_at: Some(1),
             failures: 0,
+            kind: SubscriptionKind::Webhook,
+            capability_hash: None,
             lapsed: Lapsed::default(),
         };
         state
