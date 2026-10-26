@@ -103,9 +103,19 @@ Set `PSS_SPARQ_BACKEND` to one of:
   writes and the generic write adapter still need fencing support, so the native LWS
   server refuses this backend (below).
 
-The native binary currently uses an in-memory blob backend. A durable/shared
-RDF index therefore does not by itself make resource bodies durable; do not
-present the native image as a durable production data service.
+### Native data-directory boot
+
+`SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
+implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
+This build refuses it with “the filesystem blob store is not built in”; the
+adapter integration is tracked by [#7188](https://github.com/sparq-org/sparq/issues/7188).
+`SOLID_SERVER_WAIT_FOR_LOCK_SECS` (default `0`) controls index-lock retries.
+`SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY=1` (default unset) permits only the
+durable-blob/ephemeral-index mismatch. The native binary otherwise uses in-memory
+blobs and is unsuitable for durable production data.
+
+See [native storage](references/native-storage.md) for the `format.json` contract,
+`EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
 
 The seed variables are test-only:
 
