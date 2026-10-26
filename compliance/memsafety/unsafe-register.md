@@ -7,11 +7,11 @@
 Modelled on the `unsafe-rust-attestation` pattern and the prod-solid-server
 compliance discipline: every `unsafe` site in the workspace's first-party crates is
 enumerated here with the invariant it relies on, why that invariant holds, and how it
-is tested or bounded. `scripts/unsafe-gate.py` (the unsafe-count **ratchet**) mechanically
-bounds the per-crate **count** so no PR can add an `unsafe` site without a reviewed re-seed —
-see [§ Ratchet](#ratchet--how-this-stays-honest). Matching each counted site to a **row** here
-(and keeping the file:line current) is still a **review-time** obligation, not a mechanical one:
-sq-vopxw found a stale duplicate `sparq-vectors` row that the count ratchet could not see. [OPUS-5]
+is tested or bounded. `scripts/unsafe-gate.py --check` mechanically bounds the per-crate
+**count**, while `--verify-register` checks that each live site has exactly one row and
+each File:line cell names a live site — see [§ Ratchet](#ratchet--how-this-stays-honest).
+Stale locations, missing rows and duplicate rows fail even when counts stay unchanged.
+Review still checks that each row's description and safety argument match the named site.
 
 > This register covers **first-party `unsafe` only** (the `crates/` tree). Third-party
 > `unsafe` (e.g. inside `memmap2`, `libc`, `rayon`, the `hdt` dependency) is out of
@@ -43,7 +43,7 @@ register distinguishes two trust classes of `unsafe`:
 | `miri` lane (`.github/workflows/miri.yml`, sq-fo28) | pure-Rust unsafe in `sparq-core` reachable without `mmap`/`dict-spill`: the parallel scatter writes, POD↔bytes reinterprets, `from_utf8_unchecked` over in-memory buffers, `MaybeUninit`+`set_len`. Runs nightly under Tree-Borrows for aliasing/provenance/data-race UB. |
 | `mmap_corruption_oracle` test (`crates/sparq-core/tests/`, run under `--features mmap,dict-spill`) + `fuzz` lane's mmap-loader target | the **B5** mmap sites Miri structurally cannot run (file-backed mappings): hostile/corrupt index → loader must reject or stay in-bounds, never UB. |
 | `#![forbid(unsafe_code)]` across the safe-only crates (sq-emay) | proves the unsafe surface is confined; a new `unsafe` in those crates fails to compile. |
-| `scripts/unsafe-gate.py --check` (this PR, GX-5) | the count **ratchet** — a PR cannot add `unsafe` without updating this register + re-seeding the snapshot. |
+| `scripts/unsafe-gate.py --check` + `--verify-register` (GX-5) | the count **ratchet** and one-to-one site check — the nightly/dispatch job fails on a count increase without re-seeding, a stale location, a missing row or a duplicate row. |
 | `vectors-aarch64` lane (`.github/workflows/vectors-aarch64.yml`, #5028) [SONNET-4.6] | the **aarch64/NEON** `#[target_feature]` sites in `sparq-vectors`' `simd.rs`. Their guard (`simd::tests`) calls the *dispatcher*, so it is arch-generic and verifies whichever kernel the HOST selects — and every other lane that runs these tests is `ubuntu-latest` (x86_64). Before this lane the NEON kernels were compile-checked but never EXECUTED in CI, so their numeric-agreement argument rested on a test that had not run on the arch it was about. The lane runs the crate's suite on `ubuntu-24.04-arm` and fails closed if the host is not aarch64+`asimd` or if `mod simd` was not compiled into the run. |
 | `// SAFETY:` argument on every site, **enforced by `clippy::undocumented_unsafe_blocks`** | the per-site argument lives next to the code. The lint is set at crate root on unsafe-bearing library crates (including `sparq-engine`) and locally on unsafe-bearing test/example crates, so the existing `clippy --all-targets -D warnings` gate **mechanically** rejects any `unsafe` block/impl that lacks a literal `// SAFETY:` comment. Combined with the **register + review + count ratchet** (a new `unsafe` cannot land without a register row, the `// SAFETY:` comment, and a re-seed). Closes gap MS-G2 (sq-8wbn) in [`gap-register.md`](./gap-register.md). [OPUS-4.8] |
 
@@ -217,7 +217,7 @@ pointer cleanup. [GPT-5.6]
 |---|---|---|---|
 | `src/exec/budget.rs:25` | `unsafe impl Send for CancelPtr` | `AtomicBool: Sync`; allocation remains live | moving the shared pointer to a worker is sound because `Guard<'a>` borrows the owning `QueryBudget` through every scoped rayon join and the pointer is only atomically loaded. |
 | `src/exec/budget.rs:29` | `unsafe impl Sync for CancelPtr` | `AtomicBool: Sync`; all shared access is atomic | no mutation or non-atomic access occurs through the pointer; the lifetime-bound guard keeps the allocation live. |
-| `src/exec/budget.rs:112` | `NonNull::as_ref` in `Limits::hit` | live, aligned `AtomicBool` from `Arc::as_ref` | `NonNull::from` preserves the reference's alignment/provenance; the snapshot cannot outlive the guard's scoped rayon work. Direct false/true assertions cover this poll. |
+| `src/exec/budget.rs:112` | `NonNull::as_ref` in `Limits::why` (called by `Limits::hit`) | live, aligned `AtomicBool` from `Arc::as_ref` | `NonNull::from` preserves the reference's alignment/provenance; the snapshot cannot outlive the guard's scoped rayon work. Direct false/true assertions cover this poll. |
 | `src/exec/budget.rs:423` | `NonNull::as_ref` in `budget::exhausted` | live, aligned `AtomicBool` from `Arc::as_ref` | the installing thread holds `Guard<'a>` until the query returns, then clears the pointer before the borrowed budget may drop. Direct and cross-thread cancellation tests cover this poll. |
 
 (sq-my8wd.4.) The other 4 sites live entirely in one integration test,
@@ -304,11 +304,11 @@ forward-to-`System` argument, enforced by the file-local
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
 | `tests/auth_resource_enumeration_memory.rs:52` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `Relaxed` live / peak byte counters. TEST-only; the lib stays `forbid(unsafe_code)`. |
-| `tests/auth_resource_enumeration_memory.rs:53` | `unsafe fn alloc` | caller's `layout` contract forwarded | the method body is the inner call at :55. |
+| `tests/auth_resource_enumeration_memory.rs:53` | `unsafe fn alloc` | caller's `layout` contract forwarded | the method body is the inner call at :46. |
 | `tests/auth_resource_enumeration_memory.rs:55` | `System.alloc(layout)` | caller's `layout` contract forwarded | `layout` unchanged; the returned pointer is only null-checked before `layout.size()` is counted. |
-| `tests/auth_resource_enumeration_memory.rs:63` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the method body is the inner call at :66. |
+| `tests/auth_resource_enumeration_memory.rs:63` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the method body is the inner call at :57. |
 | `tests/auth_resource_enumeration_memory.rs:66` | `System.dealloc(ptr, layout)` | `ptr` came from this allocator with this `layout` | unchanged arguments; holds because every `alloc` / `realloc` also forwarded to `System`. |
-| `tests/auth_resource_enumeration_memory.rs:69` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :71. |
+| `tests/auth_resource_enumeration_memory.rs:69` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :62. |
 | `tests/auth_resource_enumeration_memory.rs:71` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
 
 ### `sparq-mpc` — 7 sites (test-only counting global allocator)
@@ -430,14 +430,23 @@ committed snapshot `bench/unsafe-snapshot.json`:
 
 ```sh
 scripts/unsafe-gate.py --check        # FAIL if any crate rose above its snapshot
+scripts/unsafe-gate.py --verify-register # FAIL on stale cells, missing/duplicate rows
+scripts/unsafe-gate.py --self-test    # fixtures + the real register must pass
 scripts/unsafe-gate.py --seed         # re-seed AFTER a reviewed register update
 scripts/unsafe-gate.py --list         # file:line:text of every counted site
 ```
 
 The **`unsafe-register (count ratchet)`** CI lane (`.github/workflows/ci.yml`) runs
-`--check` nightly (and on `workflow_dispatch`); it is a failing (not informational) job but,
+`--self-test`, `--verify-register` and `--check` nightly (and on `workflow_dispatch`);
+it is a failing (not informational) job but,
 since the `ci-summary` aggregator was deleted, **not** a required merge check — distinct from the pre-existing non-gating
 `unsafe report (cargo-geiger, informational)` lane, which stays as a visibility-only
 report. A change that adds an `unsafe` site therefore reds the nightly run until the author adds a
 register row here, a `// SAFETY:` comment in source, and re-seeds the snapshot — all
 three changes land in the same reviewable diff.
+
+The site check uses the exact census printed by `--list`. Crate-relative paths resolve
+under the enclosing crate heading; `crates/...` paths resolve from the repository root.
+A feature suffix such as `` `src/simd.rs:98` (`approx-ann`) `` does not exempt that site. The check
+reports all mismatches in one run. Moving a site requires updating its File:line cell,
+and removing a site requires removing its row, even when the count ratchet still passes.

@@ -128,6 +128,24 @@ research-grade, not externally audited. See the
 `verify::query_filter_u64(&TypedQueryFilter)` exposes the same canonical integer
 reduction as `fragment_filters`, without parsing the query again.
 
+## Issuance
+
+Issuance hardening: a typed attestation API that always binds the commitment method for dual-leaf and value-only commitments.
+Use `sig::SecretKey::attest(&MethodCommitment, &salt, &status_ref, holder_pk_digest)`
+for every non-string-canonical issuance. `None` selects the presentation message
+(`ZKSIG_M5`); `Some(&holder_digest)` selects the holder message (`ZKSIG_M4`).
+The API derives the scheme digest from `MethodCommitment.method`.
+`commit::GraphCommitment::method_commitment()` supplies the string-canonical pair;
+`dual_leaf::DualGraphCommitment::method_commitment()` supplies the version recorded
+by the V1 or V2 builder (`dual-leaf` feature). For the opt-in value-only research
+dial, construct `sig::MethodCommitment { method: CommitmentMethod::ValueOnlyV1,
+commitment }` and use the same issuance call. Existing method-selection restrictions
+and external-audit obligations remain unchanged. See the [issuance recipe](references/manifest-recipes.md#1-commit-a-credential-graph-and-attest-it-as-an-issuer).
+The four raw `sign_commitment*` helpers are for string-canonical legacy commitments only.
+[`scripts/check-raw-commitment-signers.py`](../../scripts/check-raw-commitment-signers.py)
+inventories non-test raw signer calls with counted certification exceptions;
+`docs-quality / quick-gates` runs it and its self-tests on every PR.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
