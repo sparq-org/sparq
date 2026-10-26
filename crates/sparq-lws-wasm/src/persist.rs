@@ -445,11 +445,6 @@ mod wasm_store {
             self.inner.call_timeout()
         }
 
-        fn raises_markers(&self) -> bool {
-            // Marker writes are not journaled, so snapshot replay cannot preserve high water.
-            false
-        }
-
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             self.inner.read(iri).await
         }

@@ -73,7 +73,8 @@ static NOTIFICATION_METRICS: LazyLock<NotificationMetricCounters> =
 /// lifetime of the process and use relaxed atomic ordering because they are observability-only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NotificationMetrics {
-    /// Lagged subscribers closed with overflow or reconciliation after confirmed read access.
+    /// Overflow closes after confirmed read access, including reconciliation when a tick
+    /// pre-empts a lag check and confirms read access.
     /// Revoked or undecided timer closes do not count, even after a pre-empted lag check.
     pub dropped_subscribers_total: u64,
     /// Events skipped by lagged subscribers counted in `dropped_subscribers_total`.
@@ -2000,6 +2001,61 @@ mod tests {
                     .lagged_events_total
                     .load(Ordering::Relaxed),
                 counted
+            );
+        }
+    }
+
+    /// A completed denied or undecided lag check reconciles later without overflow counts.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_completed_unreadable_lag_check_is_not_counted_as_overflow() {
+        for denied in [false, true] {
+            let (s, store) = faulting_state().await;
+            let topic = format!("{BASE}/doc");
+            let mut ws = open_for_bob(&s, &topic).await;
+            if denied {
+                revoke_bob(&s).await;
+            } else {
+                store.fail_meta.store(true, Ordering::SeqCst);
+            }
+            // Overflow before the socket task can consume the first event.
+            tokio::task::unconstrained(async {
+                for _ in 0..super::super::TOPIC_BUFFER + 1 {
+                    s.hub
+                        .notify(&topic, crate::notifications::ActivityType::Update, None)
+                        .await;
+                }
+            })
+            .await;
+            assert_eq!(next_frame(&mut ws, QUIET).await, None);
+            assert_eq!(s.lag_checks.load(Ordering::Relaxed), 1);
+            store.fail_meta.store(false, Ordering::SeqCst);
+            if denied {
+                s.ldp
+                    .store
+                    .write(
+                        &format!("{BASE}/.acl"),
+                        Bytes::from(acl_with_reader(ALICE, Some(BOB))),
+                        "text/turtle",
+                    )
+                    .await
+                    .expect("restore root acl");
+            }
+            s.tick_now();
+            assert_eq!(
+                next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
+                Some(Err((1011, RECONCILE.to_string())))
+            );
+            assert_eq!(
+                s.overflow_counts
+                    .dropped_subscribers_total
+                    .load(Ordering::Relaxed),
+                0
+            );
+            assert_eq!(
+                s.overflow_counts
+                    .lagged_events_total
+                    .load(Ordering::Relaxed),
+                0
             );
         }
     }

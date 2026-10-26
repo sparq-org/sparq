@@ -1705,9 +1705,8 @@ const UNDO_ATTEMPTS: u32 = 3;
 
 /// Apply `undo` in order while a request waits on it (with its locks held), each tried a few
 /// times ([`UNDO_ATTEMPTS`], with short waits between): `None` once all are applied, else what is
-/// left, from the step that kept failing on. A Fence step whose deadline elapsed is left
-/// at once; a quick error gets the normal retries.
-/// Each attempt waits for a fence for
+/// left, from the step that kept failing on. A Fence step whose deadline elapsed is left at
+/// once; a quick error gets the normal retries. Each attempt waits for a fence for
 /// [`records::LOCK_WAIT`] at most ([`Undo::apply`]). A step whose write failed unsettled (its
 /// fence not succeeding in that time) is not tried again: it is left at once with its fence
 /// first, for the set-aside, which holds the locks, to fence before it puts the step back
