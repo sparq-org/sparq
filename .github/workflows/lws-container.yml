@@ -9,7 +9,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - "crates/sparq-lws-core/**"
+      - "crates/sparq-lws-core/Dockerfile"
+      - "crates/sparq-lws-core/tests/container-smoke.sh"
       - ".github/workflows/lws-container.yml"
       - ".dockerignore"
   # Publish the LWS image on demand WITHOUT cutting a full `v*` release
