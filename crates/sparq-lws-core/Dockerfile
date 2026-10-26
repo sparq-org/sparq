@@ -13,6 +13,8 @@
 FROM rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 AS builder
 
 ARG CARGO_FLAGS=""
+# Optional cargo job cap for memory-limited builders; unset keeps full parallelism.
+ARG BUILD_JOBS=""
 WORKDIR /build
 
 COPY . .
@@ -27,13 +29,13 @@ RUN --mount=type=secret,id=build_ca \
       export SSL_CERT_FILE=/run/secrets/build_ca CURL_CA_BUNDLE=/run/secrets/build_ca \
         CARGO_HTTP_CAINFO=/run/secrets/build_ca GIT_SSL_CAINFO=/run/secrets/build_ca RUSTUP_USE_CURL=1; \
     fi; \
-    cargo install --locked --jobs 2 cargo-auditable
+    cargo install --locked ${BUILD_JOBS:+--jobs "$BUILD_JOBS"} cargo-auditable
 RUN --mount=type=secret,id=build_ca \
     if [ -f /run/secrets/build_ca ]; then \
       export SSL_CERT_FILE=/run/secrets/build_ca CURL_CA_BUNDLE=/run/secrets/build_ca \
         CARGO_HTTP_CAINFO=/run/secrets/build_ca GIT_SSL_CAINFO=/run/secrets/build_ca RUSTUP_USE_CURL=1; \
     fi; \
-    cargo auditable build --release --locked --jobs 2 -p sparq-lws-core ${CARGO_FLAGS}
+    cargo auditable build --release --locked ${BUILD_JOBS:+--jobs "$BUILD_JOBS"} -p sparq-lws-core ${CARGO_FLAGS}
 
 # Distroless has no mkdir; copy an empty mount point with the runtime ownership.
 RUN mkdir /data

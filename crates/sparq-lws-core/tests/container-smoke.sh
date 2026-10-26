@@ -47,6 +47,9 @@ if [ "${LWS_CONTAINER_SKIP_BUILD:-0}" != "1" ]; then
   if [ -n "${CARGO_FLAGS:-}" ]; then
     build_args+=(--build-arg "CARGO_FLAGS=${CARGO_FLAGS}")
   fi
+  if [ -n "${BUILD_JOBS:-}" ]; then
+    build_args+=(--build-arg "BUILD_JOBS=${BUILD_JOBS}")
+  fi
   echo ">> building ${IMAGE}"
   docker build \
     --file crates/sparq-lws-core/Dockerfile \
