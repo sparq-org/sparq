@@ -249,7 +249,7 @@ struct Composition {
 impl Composition {
     fn of(g: &Graph) -> Composition {
         let mut c = Composition::default();
-        for (_id, parts) in g.dict.iter() {
+        for (_id, parts) in g.dict().iter() {
             match parts {
                 TermParts::Iri { prefix, suffix } => {
                     c.iris += 1;
@@ -309,7 +309,7 @@ fn bench(path: &str) {
             let g = Graph::load_reader_parallel(std::io::Cursor::new(&bytes), "ntriples")
                 .expect("dataset must load");
             let e = t.elapsed().as_secs_f64();
-            std::hint::black_box(g.dict.len());
+            std::hint::black_box(g.dict().len());
             e
         })
         .collect();
@@ -319,16 +319,16 @@ fn bench(path: &str) {
     // One more load whose dict we keep for the (deterministic) footprint figures.
     let g = Graph::load_reader_parallel(std::io::Cursor::new(&bytes), "ntriples")
         .expect("dataset must load");
-    let terms = g.dict.len();
+    let terms = g.dict().len();
     let triples = g.len();
-    let arena_bytes = g.dict.heap_bytes();
+    let arena_bytes = g.dict().heap_bytes();
 
     // Blob / browser storage mode: `into_blob` drops the per-`Stored` slot + per-term
     // `Box<str>` for a single concatenated record blob + u32 offsets — the memory-bound
     // (WASM) dictionary. Measuring both modes here gives the two bytes/term numbers the
     // ARCHITECTURE.md storage modes care about.
     let comp = Composition::of(&g);
-    let blob = g.dict.into_blob();
+    let blob = g.into_dict().into_blob();
     let blob_bytes = blob.heap_bytes();
     assert_eq!(blob.len(), terms, "into_blob must preserve term count");
 
@@ -483,15 +483,15 @@ fn selftest() {
     let classified = comp.iris + comp.literals + comp.blanks + comp.triples;
     assert_eq!(
         classified,
-        g.dict.len(),
+        g.dict().len(),
         "every term classified exactly once: {classified} != {}",
-        g.dict.len()
+        g.dict().len()
     );
 
     // into_blob preserves the term count + footprint accounting stays positive.
-    let terms = g.dict.len();
-    let arena = g.dict.heap_bytes();
-    let blob = g.dict.into_blob();
+    let terms = g.dict().len();
+    let arena = g.dict().heap_bytes();
+    let blob = g.into_dict().into_blob();
     assert_eq!(blob.len(), terms, "into_blob preserves term count");
     assert!(
         blob.heap_bytes() > 0 && arena > 0,

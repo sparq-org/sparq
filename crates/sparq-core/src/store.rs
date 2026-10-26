@@ -362,6 +362,10 @@ pub struct TripleStore {
     // NOTE: `pred_stats` is not overlay-adjusted (planner estimates only); `estimate`
     // and `len` are exact.
     overlay: Option<Box<Overlay>>,
+    // The lock of the store directory the permutations are mapped from (`None` for a store
+    // that maps nothing): carried by every fork, so a mapping never outlives its lock.
+    #[cfg(feature = "mmap")]
+    pin: crate::dir_lock::Pin,
 }
 
 /// LSD radix sort of `[Id; 3]` rows into ascending lexicographic order — column 0
@@ -504,7 +508,13 @@ impl TripleStore {
     pub fn from_triples(triples: Vec<[Id; 3]>) -> Self {
         let perms = Self::build_raw_perms(triples);
         let pred_stats = Self::compute_pred_stats(&perms);
-        TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None }
+        TripleStore {
+            perms: std::sync::Arc::new(perms),
+            pred_stats: std::sync::Arc::new(pred_stats),
+            overlay: None,
+            #[cfg(feature = "mmap")]
+            pin: None,
+        }
     }
 
     /// Like [`from_triples`](Self::from_triples) but stores each permutation
@@ -529,7 +539,13 @@ impl TripleStore {
                 }
             }
         }
-        TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None }
+        TripleStore {
+            perms: std::sync::Arc::new(perms),
+            pred_stats: std::sync::Arc::new(pred_stats),
+            overlay: None,
+            #[cfg(feature = "mmap")]
+            pin: None,
+        }
     }
 
     /// Builds the [`BUILT`] raw permutation indexes from canonical [s,p,o] triples (all six
@@ -690,9 +706,10 @@ impl TripleStore {
 
     /// Persists the permutation indexes to `dir` (one raw little-endian `[u32;3]` file
     /// per permutation) so they can be memory-mapped later via [`open`](Self::open) —
-    /// the on-disk side of out-of-core querying.
+    /// the on-disk side of out-of-core querying. Crate-internal: a directory is written only
+    /// under its lock, through [`Graph::save`](crate::Graph::save) and the builders.
     #[cfg(feature = "mmap")]
-    pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
         self.save_with(dir, false)
     }
 
@@ -701,7 +718,7 @@ impl TripleStore {
     /// auto-detected by [`open`](Self::open) via [`crate::compress::FILE_MAGIC`], so old
     /// raw directories keep working and the two formats can be mixed.
     #[cfg(feature = "mmap")]
-    pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
         self.save_with(dir, true)
     }
 
@@ -729,13 +746,13 @@ impl TripleStore {
                 // Unbuilt (empty) permutations stay raw-empty so `open` skips them by size.
                 // sq-7d3dj.32.2.7: `encode_emit` honours the emit-format config gate —
                 // `SPQCPRM1` by default, `SPQCPRM2` only when a `spqcprm2` build has opted in.
-                let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+                let mut w = std::io::BufWriter::new(crate::FreshFile::create(&path)?);
                 crate::compress::CompressedPerm::encode_emit(&rows).write_to(&mut w)?;
-                std::io::Write::flush(&mut w)?;
+                crate::commit_fresh(w)?;
             } else {
                 // SAFETY: reinterpret the contiguous [u32;3] rows as bytes for writing.
                 let bytes = unsafe { std::slice::from_raw_parts(rows.as_ptr().cast::<u8>(), std::mem::size_of_val(rows.as_ref())) };
-                std::fs::write(path, bytes)?;
+                crate::write_fresh(&path, bytes)?;
             }
         }
         self.save_pred_stats(dir)
@@ -750,9 +767,9 @@ impl TripleStore {
     /// # Errors
     /// Returns an error if creating, writing, or flushing the statistics file fails.
     #[cfg(feature = "mmap")]
-    pub fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
-        let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
+        let mut w = std::io::BufWriter::new(crate::FreshFile::create(&dir.join("predstats.bin"))?);
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
         // Hash-map iteration can change after loading/reserving identical stats.
         // Canonicalize the shared writer so external builds and re-saves agree bytewise.
@@ -764,7 +781,7 @@ impl TripleStore {
             w.write_all(&(s.ndv_subj as u64).to_le_bytes())?;
             w.write_all(&(s.ndv_obj as u64).to_le_bytes())?;
         }
-        w.flush()
+        crate::commit_fresh(w)
     }
 
     /// Loads persisted per-predicate stats (written by [`save_pred_stats`]); `None` if the
@@ -814,11 +831,15 @@ impl TripleStore {
     }
 
     /// Opens a store whose permutations are MEMORY-MAPPED from `dir` (written by
-    /// [`save`](Self::save)). The 6 (or 3, compact) index files stay on disk; the OS
+    /// [`Graph::save`](crate::Graph::save)). The 6 (or 3, compact) index files stay on disk; the OS
     /// pages in only the ranges a query touches, so datasets larger than RAM are
     /// queryable. Per-predicate stats are recomputed from the mapped POS/PSO indexes.
+    ///
+    /// Crate-internal: a store's files are opened only by its [`Graph`](crate::Graph), under the
+    /// directory's lock, and `pin` (that lock) is kept with the mappings for as long as they,
+    /// or any fork of them, live.
     #[cfg(feature = "mmap")]
-    pub fn open(dir: &std::path::Path) -> std::io::Result<Self> {
+    pub(crate) fn open(dir: &std::path::Path, pin: crate::dir_lock::Pin) -> std::io::Result<Self> {
         let mut perms: [PermData; 6] = std::array::from_fn(|_| PermData::default());
         for (i, slot) in perms.iter_mut().enumerate() {
             let path = dir.join(format!("perm{i}.bin"));
@@ -845,7 +866,12 @@ impl TripleStore {
         // Use the persisted stats if present (no POS/PSO re-scan — keeps open fast and the
         // resident set small); else recompute (backward compatible with older saved dirs).
         let pred_stats = Self::load_pred_stats(dir).unwrap_or_else(|| Self::compute_pred_stats(&perms));
-        Ok(TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None })
+        Ok(TripleStore {
+            perms: std::sync::Arc::new(perms),
+            pred_stats: std::sync::Arc::new(pred_stats),
+            overlay: None,
+            pin,
+        })
     }
 
     /// Per-predicate stats: count + distinct objects from POS (always built), and
@@ -916,7 +942,7 @@ impl TripleStore {
     /// (sq-5lf) Strong-reference count of the `Arc`-shared base permutation
     /// indexes — i.e. how many stores currently SHARE this exact base storage. 1 for a
     /// freshly built / just-compacted store; bumps by one for each live
-    /// [`fork`](Self::fork) / [`Graph::snapshot`](crate::Graph::snapshot) of it. Used to
+    /// `fork` / [`Graph::snapshot`](crate::Graph::snapshot) of it. Used to
     /// PROVE structural sharing in tests (a cheap snapshot bumps this count rather than
     /// duplicating the index memory). Two stores share a base iff this is > 1 and they
     /// were derived from the same lineage.
@@ -995,7 +1021,7 @@ impl TripleStore {
     /// front, query at exactly raw-store speed. Raw/mapped permutations are untouched.
     ///
     /// Runs on freshly built/opened stores (load-time), which are never yet forked;
-    /// on a structurally SHARED store (post-[`fork`](Self::fork)) it is a no-op —
+    /// on a structurally SHARED store (post-`fork`) it is a no-op —
     /// decompression is an optimisation, never a correctness requirement.
     pub fn decompress_to_ram(&mut self) {
         let Some(perms) = std::sync::Arc::get_mut(&mut self.perms) else {
@@ -1012,12 +1038,15 @@ impl TripleStore {
     /// planner stats are SHARED (Arc bumps, O(1)); the pending delta-overlay is
     /// carried by value (O(overlay), bounded by the compaction policy). The fork and
     /// the original then evolve independently through [`apply_delta`](Self::apply_delta)
-    /// — neither ever mutates the shared base, so existing readers are unaffected.
-    pub fn fork(&self) -> TripleStore {
+    /// — neither ever mutates the shared base, so existing readers are unaffected. The fork
+    /// holds the directory lock of mapped permutations, like the original.
+    pub(crate) fn fork(&self) -> TripleStore {
         TripleStore {
             perms: std::sync::Arc::clone(&self.perms),
             pred_stats: std::sync::Arc::clone(&self.pred_stats),
             overlay: self.overlay.clone(),
+            #[cfg(feature = "mmap")]
+            pin: self.pin.clone(),
         }
     }
 
@@ -1759,9 +1788,9 @@ mod tests {
         }
         assert!(cmp_total * 2 < raw_total, "expected >2x overall perm compression, got {raw_total}/{cmp_total}");
 
-        let raw = TripleStore::open(&raw_dir).unwrap(); // old format: still opens (compat)
-        let lazy = TripleStore::open(&cmp_dir).unwrap(); // auto-detected compressed
-        let mut eager = TripleStore::open(&cmp_dir).unwrap();
+        let raw = TripleStore::open(&raw_dir, None).unwrap(); // old format: still opens (compat)
+        let lazy = TripleStore::open(&cmp_dir, None).unwrap(); // auto-detected compressed
+        let mut eager = TripleStore::open(&cmp_dir, None).unwrap();
         eager.decompress_to_ram(); // load-time decompression mode
         assert!(matches!(lazy.perms[Perm::Spo as usize], PermData::Compressed(_)), "compressed file not auto-detected");
         assert!(matches!(raw.perms[Perm::Spo as usize], PermData::Mapped(_)), "raw file must stay mmap'd");
@@ -1797,7 +1826,7 @@ mod tests {
         // Pred stats: persisted identically; and recomputable from compressed perms when
         // predstats.bin is missing (the fallback decodes, it must not panic or differ).
         std::fs::remove_file(cmp_dir.join("predstats.bin")).unwrap();
-        let refallback = TripleStore::open(&cmp_dir).unwrap();
+        let refallback = TripleStore::open(&cmp_dir, None).unwrap();
         for p in 1..=18 {
             assert_eq!(raw.pred_stat(p), lazy.pred_stat(p), "persisted pred_stat differs for {p}");
             assert_eq!(raw.pred_stat(p), refallback.pred_stat(p), "recomputed pred_stat differs for {p}");

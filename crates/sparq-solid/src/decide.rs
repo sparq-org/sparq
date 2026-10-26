@@ -275,7 +275,7 @@ impl AclIndex {
     pub(crate) fn build(graph: &Graph) -> AclIndex {
         let mut control = rustc_hash::FxHashSet::default();
         let mut materialized = false;
-        for (name, _) in &graph.named {
+        for (name, _) in graph.named() {
             let Term::NamedNode(n) = name else { continue };
             let iri = n.as_str();
             if iri == AUTH_GRAPH {
@@ -285,6 +285,11 @@ impl AclIndex {
             }
         }
         AclIndex { control, materialized }
+    }
+
+    /// A dropped view stays unavailable even if storage refused to remove its slot.
+    pub(crate) fn mark_unmaterialized(&mut self) {
+        self.materialized = false;
     }
 
     /// The control-document IRI governing `resource`, if one exists in the dataset

@@ -48,7 +48,7 @@ fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
 fn dump(graph: &Graph) -> Vec<[String; 3]> {
     let mut rows: Vec<_> = graph
         .iter_ids()
-        .map(|row| row.map(|id| graph.dict.term(id).to_string()))
+        .map(|row| row.map(|id| graph.dict().term(id).to_string()))
         .collect();
     rows.sort();
     rows
@@ -94,7 +94,7 @@ fn v2_numeric_whitespace_values_are_recomputed_without_rewriting_source() {
             "compressed={compressed}"
         );
         assert_eq!(dump(&opened), expected);
-        for id in 1..=graph.dict.len() as u32 {
+        for id in 1..=graph.dict().len() as u32 {
             assert_eq!(opened.numeric_value(id), graph.numeric_value(id));
         }
         for (name, bytes) in before {
@@ -164,7 +164,7 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
                     .unwrap()
                     .instant();
             temporal[ti..ti + 8].copy_from_slice(&old_instant.to_le_bytes());
-            temporal[graph.dict.len() * 8 + bad_time as usize - 1] = 2; // zoned dateTime
+            temporal[graph.dict().len() * 8 + bad_time as usize - 1] = 2; // zoned dateTime
             std::fs::write(archive.join("numerics.bin"), numeric).unwrap();
             std::fs::write(archive.join("temporals.bin"), temporal).unwrap();
             for (bit, name, bytes) in [
@@ -193,7 +193,7 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
                 expected,
                 "ill-typed RDF literals must remain stored"
             );
-            for id in 1..=graph.dict.len() as u32 {
+            for id in 1..=graph.dict().len() as u32 {
                 assert_eq!(opened.numeric_value(id), graph.numeric_value(id));
                 assert_eq!(
                     opened
@@ -254,12 +254,12 @@ fn a_v3_temporal_cache_is_recomputed_for_year_zero() {
         let mut old = std::fs::read(archive.join("temporals-v4.bin")).unwrap();
         let i = (year_zero as usize - 1) * 8;
         old[i..i + 8].copy_from_slice(&0_f64.to_le_bytes());
-        old[graph.dict.len() * 8 + year_zero as usize - 1] = 0;
+        old[graph.dict().len() * 8 + year_zero as usize - 1] = 0;
         std::fs::write(archive.join("temporals-v3.bin"), old).unwrap();
         std::fs::remove_file(archive.join("temporals-v4.bin")).unwrap();
         let before = files(&archive);
         let opened = Graph::open(&archive).unwrap();
-        for id in 1..=graph.dict.len() as u32 {
+        for id in 1..=graph.dict().len() as u32 {
             assert_eq!(
                 opened.temporal_value(id).map(|t| (t.instant, t.has_tz)),
                 graph.temporal_value(id).map(|t| (t.instant, t.has_tz)),

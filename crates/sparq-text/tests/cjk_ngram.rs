@@ -25,7 +25,7 @@ fn graph_of(literals: &[&str]) -> Graph {
 fn values(graph: &Graph, hits: &[sparq_text::Hit]) -> Vec<String> {
     let mut v: Vec<String> = hits
         .iter()
-        .map(|h| match graph.dict.term(h.id) {
+        .map(|h| match graph.dict().term(h.id) {
             Term::Literal(l) => l.value().to_string(),
             other => panic!("hit {} not a literal: {other}", h.id),
         })
@@ -131,14 +131,14 @@ fn ngram_phrase_over_bigrams_keeps_adjacency() {
     let hits: Vec<String> = ng
         .phrase("東京都")
         .iter()
-        .map(|&id| match g.dict.term(id) {
+        .map(|&id| match g.dict().term(id) {
             Term::Literal(l) => l.value().to_string(),
             _ => unreachable!(),
         })
         .collect();
     assert_eq!(hits, ["東京都"]);
     // The reversed run shares no bigram with the forward query, so no match.
-    assert!(ng.phrase("都京東").iter().all(|&id| match g.dict.term(id) {
+    assert!(ng.phrase("都京東").iter().all(|&id| match g.dict().term(id) {
         Term::Literal(l) => l.value() == "都京東",
         _ => true,
     }));

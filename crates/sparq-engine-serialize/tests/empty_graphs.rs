@@ -24,9 +24,9 @@ fn dataset_rows(graph: &Graph, blank_map: &HashMap<String, String>) -> BTreeSet<
     let mut collect = |name: Option<Term>, part: &Graph| {
         for [subject, predicate, object] in part.iter_ids() {
             rows.insert([
-                term_key(part.dict.term(subject), blank_map),
-                term_key(part.dict.term(predicate), blank_map),
-                term_key(part.dict.term(object), blank_map),
+                term_key(part.dict().term(subject), blank_map),
+                term_key(part.dict().term(predicate), blank_map),
+                term_key(part.dict().term(object), blank_map),
                 name.clone()
                     .map(|term| term_key(term, blank_map))
                     .unwrap_or_default(),
@@ -35,7 +35,7 @@ fn dataset_rows(graph: &Graph, blank_map: &HashMap<String, String>) -> BTreeSet<
     };
 
     collect(None, graph);
-    for (name, part) in &graph.named {
+    for (name, part) in graph.named() {
         collect(Some(name.clone()), part);
     }
     rows
@@ -92,7 +92,7 @@ fn assert_isomorphic(expected: &Graph, actual: &Graph) {
 fn assert_empty_round_trip(output: &str, format: &str) {
     let parsed = Graph::load_dataset(output, format).expect("writer output must parse");
     assert_eq!(parsed.len(), 0, "default graph must stay empty");
-    assert!(parsed.named.is_empty(), "no named graph may be introduced");
+    assert!(parsed.named().is_empty(), "no named graph may be introduced");
     assert_isomorphic(&Graph::new(), &parsed);
 }
 

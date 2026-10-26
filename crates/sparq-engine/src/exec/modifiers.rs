@@ -348,7 +348,7 @@ pub(super) fn sort_cell_term(graph: &Graph, local: &LocalVocab, id: Id) -> Value
 #[cfg(feature = "topk-lazy-strkey")]
 #[inline]
 pub(super) fn str_id_value(graph: &Graph, id: Id) -> &str {
-    graph.dict.plain_string_value(id).unwrap_or("")
+    graph.dict().plain_string_value(id).unwrap_or("")
 }
 
 /// sq-7d3dj.30.21 — order a lazy plain-string-literal cell (`StrId(a)`: fixed
@@ -448,7 +448,7 @@ pub(super) fn order_bindings(
                 // The eager `Val{..}` key remains the feature-OFF path (byte-identical order).
                 // This targets the SP2Bench q11 residual: N=17663 keyed, k=60 survive.
                 #[cfg(feature = "topk-lazy-strkey")]
-                if graph.dict.plain_string_value(id).is_some() {
+                if graph.dict().plain_string_value(id).is_some() {
                     return Ok(SortCell::StrId(id));
                 }
                 // Neither numeric nor temporal: materialise the term once. For IRI terms,

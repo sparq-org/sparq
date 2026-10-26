@@ -189,7 +189,7 @@ fn main() {
     let type_id = g
         .id_of(&Term::NamedNode(rdf_type))
         .expect("rdf:type present");
-    let scan = g.store.scan(&[None, Some(type_id), None]);
+    let scan = g.store().scan(&[None, Some(type_id), None]);
     let mut classes_of: HashMap<Id, Vec<Id>> = HashMap::new();
     let mut members: HashMap<Id, Vec<Id>> = HashMap::new();
     for row in scan.rows.iter() {
@@ -214,7 +214,7 @@ fn main() {
         for e in m.iter().step_by(stride).take(PER_CLASS) {
             sample.push((*e, *c));
         }
-        let name = g.dict.term(*c);
+        let name = g.dict().term(*c);
         println!(
             "  class {name}: {} members, sampled {}",
             m.len(),
@@ -253,7 +253,7 @@ fn main() {
             .map(|&(e, _)| {
                 (
                     e,
-                    s.signature(&g.dict.term(e))
+                    s.signature(&g.dict().term(e))
                         .expect("sampled entity in dict"),
                 )
             })
@@ -296,7 +296,7 @@ fn main() {
         let mut hits = 0;
         let mut scored = 0;
         for &e in &seeds {
-            let term = g.dict.term(e);
+            let term = g.dict().term(e);
             let t = Instant::now();
             let top = sim.most_similar(&term, 10);
             latencies.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -311,7 +311,7 @@ fn main() {
         }
         overall.0 += hits;
         overall.1 += scored;
-        let name = g.dict.term(*c);
+        let name = g.dict().term(*c);
         println!(
             "  precision@10 {name}: {:.3}  ({hits}/{scored}, {} seeds)",
             hits as f64 / scored.max(1) as f64,

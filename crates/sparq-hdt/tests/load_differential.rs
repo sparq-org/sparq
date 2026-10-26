@@ -67,15 +67,15 @@ fn generated_graph(rng: &mut Lcg, case: usize) -> String {
 }
 
 fn triple_set(graph: &Graph) -> BTreeSet<[String; 3]> {
-    let scan = graph.store.scan(&[None, None, None]);
+    let scan = graph.store().scan(&[None, None, None]);
     scan.rows
         .iter()
         .map(|row| {
             let [subject, predicate, object] = scan.to_spo(row);
             [
-                graph.dict.term(subject).to_string(),
-                graph.dict.term(predicate).to_string(),
-                graph.dict.term(object).to_string(),
+                graph.dict().term(subject).to_string(),
+                graph.dict().term(predicate).to_string(),
+                graph.dict().term(object).to_string(),
             ]
         })
         .collect()

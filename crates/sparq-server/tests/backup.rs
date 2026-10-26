@@ -734,8 +734,13 @@ async fn restore_persist_corrupt_artifact_leaves_durable_store_untouched() {
     assert_eq!(count_all(&cl, &s1.base).await, 1, "live durable store intact after a corrupt restore");
 
     // No swap-sibling leftovers next to the persist dir (a stray .compact-new/-old could mis-heal).
-    let new_sib = scratch.path().with_extension("compact-new");
-    let old_sib = scratch.path().with_extension("compact-old");
+    // (Staging names append to the whole directory name: `<dir>.compact-new`.)
+    let sibling = |kind: &str| {
+        let mut name = scratch.path().file_name().unwrap().to_os_string();
+        name.push(format!(".{kind}"));
+        scratch.path().with_file_name(name)
+    };
+    let (new_sib, old_sib) = (sibling("compact-new"), sibling("compact-old"));
     assert!(!new_sib.exists(), "no .compact-new leftover after a failed restore");
     assert!(!old_sib.exists(), "no .compact-old leftover after a failed restore");
 

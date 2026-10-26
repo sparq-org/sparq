@@ -274,7 +274,7 @@ fn assert_matches_fresh_build(index: &GeoIndex, graph: &Graph) {
     // consistent (a stale id-set would be an answer-safety bug in the pushdown's
     // fast path). Both are keyed on the SAME graph's dict, so the freshness token
     // matches for both.
-    let dict_ptr = std::ptr::from_ref(&graph.dict) as usize;
+    let dict_ptr = std::ptr::from_ref(graph.dict()) as usize;
     let delta_ids = index.indexed_ids_for(dict_ptr).expect("same-dict freshness holds");
     let fresh_ids = fresh.indexed_ids_for(dict_ptr).expect("fresh build over same dict");
     assert_eq!(delta_ids, fresh_ids, "apply_delta must keep the id-level universe consistent");

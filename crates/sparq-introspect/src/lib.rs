@@ -477,7 +477,7 @@ pub struct CsIdSet {
 /// ties by predicate-id key.
 pub fn characteristic_set_ids(graph: &Graph) -> Vec<CsIdSet> {
     let mut cs: FxHashMap<Box<[Id]>, (u64, Vec<u64>)> = FxHashMap::default();
-    let scan = graph.store.scan(&[None, None, None]);
+    let scan = graph.store().scan(&[None, None, None]);
     let rows = scan.rows.as_ref();
     let (mut ps, mut ms): (Vec<Id>, Vec<u64>) = (Vec::new(), Vec::new());
     let mut i = 0;
@@ -548,7 +548,7 @@ impl Introspection {
         // Only IRI objects count as classes.
         let mut subj_types: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
         if let Some(tid) = type_id {
-            let scan = graph.store.scan(&[None, Some(tid), None]);
+            let scan = graph.store().scan(&[None, Some(tid), None]);
             for row in scan.rows.iter() {
                 let [s, _, c] = scan.to_spo(row);
                 if is_iri(graph, c) {
@@ -605,7 +605,7 @@ impl Introspection {
         let mut subjects: u64 = 0;
         let mut entities: u64 = 0;
 
-        let scan = graph.store.scan(&[None, None, None]);
+        let scan = graph.store().scan(&[None, None, None]);
         let rows = scan.rows.as_ref();
         // The full scan is served by a subject-leading permutation; map rows to
         // canonical (s, p, o) via the scan's own permutation for safety.
@@ -717,7 +717,7 @@ impl Introspection {
         }
         let mut objs: FxHashMap<Id, ObjAcc> = FxHashMap::default();
         for &p in preds.keys() {
-            let scan = graph.store.scan_sorted(&[None, Some(p), None], 2);
+            let scan = graph.store().scan_sorted(&[None, Some(p), None], 2);
             let rows = scan.rows.as_ref();
             let mut acc = ObjAcc {
                 distinct: 0,
@@ -740,7 +740,7 @@ impl Introspection {
                     acc.kinds.literal += n;
                     *acc.datatypes.entry(XSD_INTEGER.to_string()).or_default() += n;
                 } else {
-                    match graph.dict.term_parts(o) {
+                    match graph.dict().term_parts(o) {
                         TermParts::Iri { .. } => {
                             acc.kinds.iri += n;
                             if let Some(ts) = subj_types.get(&o) {
@@ -778,7 +778,7 @@ impl Introspection {
             (RDFS_RANGE, &mut declared_ranges),
         ] {
             if let Some(did) = id_of(iri) {
-                let scan = graph.store.scan(&[None, Some(did), None]);
+                let scan = graph.store().scan(&[None, Some(did), None]);
                 for row in scan.rows.iter() {
                     let [s, _, c] = scan.to_spo(row);
                     if is_iri(graph, c) {
@@ -792,8 +792,8 @@ impl Introspection {
         // already stores every IRI split at the last `#`/`/` (its prefix table), so the
         // namespace of each distinct term is a borrowed lookup.
         let mut ns_terms: FxHashMap<&str, u64> = FxHashMap::default();
-        for id in 1..=graph.dict.len() as Id {
-            if let TermParts::Iri { prefix, .. } = graph.dict.term_parts(id) {
+        for id in 1..=graph.dict().len() as Id {
+            if let TermParts::Iri { prefix, .. } = graph.dict().term_parts(id) {
                 *ns_terms.entry(prefix).or_default() += 1;
             }
         }
@@ -829,9 +829,9 @@ impl Introspection {
 
         // ---- 6. Resolve ids -> strings and assemble, sorted most-frequent-first.
         let iri_str = |id: Id| -> String {
-            match graph.dict.term_parts(id) {
+            match graph.dict().term_parts(id) {
                 TermParts::Iri { prefix, suffix } => format!("{prefix}{suffix}"),
-                _ => graph.dict.term(id).to_string(), // non-IRI (defensive)
+                _ => graph.dict().term(id).to_string(), // non-IRI (defensive)
             }
         };
         let top_counted = |map: &FxHashMap<Id, u64>, cap: usize| -> Vec<Counted> {
@@ -1636,7 +1636,7 @@ impl Introspection {
 
 /// Whether a dictionary id names an IRI (inline ids are integers, never IRIs).
 fn is_iri(graph: &Graph, id: Id) -> bool {
-    !dict::is_inline(id) && matches!(graph.dict.term_parts(id), TermParts::Iri { .. })
+    !dict::is_inline(id) && matches!(graph.dict().term_parts(id), TermParts::Iri { .. })
 }
 
 /// sq-lc3: build the **transitive** superclass relation from the graph's
@@ -1655,7 +1655,7 @@ fn build_superclass_closure(graph: &Graph) -> Option<FxHashMap<Id, FxHashMap<Id,
     let sub_id = graph.id_of(&Term::NamedNode(NamedNode::new_unchecked(RDFS_SUBCLASS_OF)))?;
     // Direct edges: c -> { d : (c subClassOf d) }.
     let mut direct: FxHashMap<Id, FxHashMap<Id, ()>> = FxHashMap::default();
-    let scan = graph.store.scan(&[None, Some(sub_id), None]);
+    let scan = graph.store().scan(&[None, Some(sub_id), None]);
     for row in scan.rows.iter() {
         let [c, _, d] = scan.to_spo(row);
         if c != d && is_iri(graph, c) && is_iri(graph, d) {
@@ -1747,7 +1747,7 @@ fn render_object_sample(graph: &Graph, o: Id, max_chars: usize) -> String {
     if dict::is_inline(o) {
         return format!("\"{}\"", o - INLINE_BASE);
     }
-    match graph.dict.term_parts(o) {
+    match graph.dict().term_parts(o) {
         TermParts::Iri { prefix, suffix } => {
             truncate_chars(&format!("{prefix}{suffix}"), max_chars)
         }
@@ -1763,7 +1763,7 @@ fn render_object_sample(graph: &Graph, o: Id, max_chars: usize) -> String {
             truncate_chars(&rendered, max_chars)
         }
         TermParts::Blank(b) => truncate_chars(&format!("_:{b}"), max_chars),
-        TermParts::Triple(_) => truncate_chars(&graph.dict.term(o).to_string(), max_chars),
+        TermParts::Triple(_) => truncate_chars(&graph.dict().term(o).to_string(), max_chars),
     }
 }
 
@@ -2270,7 +2270,7 @@ mod tests {
                     .predicates
                     .iter()
                     .zip(s.predicate_triples.iter())
-                    .map(|(&p, &t)| (g.dict.term(p).to_string().trim_matches(['<', '>']).to_string(), t))
+                    .map(|(&p, &t)| (g.dict().term(p).to_string().trim_matches(['<', '>']).to_string(), t))
                     .collect();
                 preds.sort();
                 (
@@ -3249,7 +3249,7 @@ mod tests {
             .iter()
             .zip(set.predicate_triples.iter())
             .map(|(&p, &t)| {
-                let raw = g.dict.term(p).to_string();
+                let raw = g.dict().term(p).to_string();
                 let iri = raw.trim_matches(['<', '>']).to_string();
                 (iri, t)
             })

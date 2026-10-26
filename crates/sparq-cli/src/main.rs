@@ -18,6 +18,316 @@ mod tabular;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// Where an output goes ([`output_target`]).
+#[derive(Debug, PartialEq, Eq)]
+enum Target {
+    /// Written through as it is: a device, a pipe, a socket, or a symbolic link into
+    /// `/proc/<pid>/fd`, `/dev/fd` or `/dev` (`/dev/stdout`, whatever stdout is).
+    Direct(std::path::PathBuf),
+    /// A regular file (or nothing yet) at this path, symbolic links resolved: replaced by
+    /// renaming a fresh file onto it.
+    Staged(std::path::PathBuf),
+}
+
+/// Whether `path` (a symbolic link's target) is a process's file-descriptor link or a device
+/// path: `/proc/<pid>/fd/…` (`/proc/self/fd/…` included), `/dev/fd/…`, or anything under `/dev`.
+fn is_descriptor_or_device_path(path: &std::path::Path) -> bool {
+    let parts: Vec<_> = path.components().map(|c| c.as_os_str().to_owned()).collect();
+    let is = |i: usize, s: &str| parts.get(i).is_some_and(|p| p == s);
+    path.is_absolute() && (is(1, "dev") || (is(1, "proc") && is(3, "fd")))
+}
+
+/// Where an output to `path` goes. A symbolic link is never renamed over: it is followed, link
+/// by link; one leading into `/proc/<pid>/fd`, `/dev/fd` or `/dev` (`/dev/stdout`), or to
+/// something that is not a regular file (a device, a pipe), is written through as it is; one
+/// leading to a regular file, or to nothing under an existing directory, has that resolved
+/// path replaced. A dangling link (its target's directory missing) or a loop is an error.
+fn output_target(path: &std::path::Path) -> std::io::Result<Target> {
+    let mut current = path.to_path_buf();
+    for _ in 0..40 {
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let link = std::fs::read_link(&current)?;
+                let next = match current.parent() {
+                    Some(parent) if link.is_relative() => parent.join(link),
+                    _ => link,
+                };
+                if is_descriptor_or_device_path(&next) {
+                    return Ok(Target::Direct(next));
+                }
+                current = next;
+            }
+            Ok(meta) if !meta.is_file() && !meta.is_dir() => {
+                return Ok(Target::Direct(current));
+            }
+            Ok(_) => return Ok(Target::Staged(current)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let parent = match current.parent() {
+                    Some(p) if !p.as_os_str().is_empty() => p,
+                    _ => std::path::Path::new("."),
+                };
+                if current != path && !parent.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "{} is a dangling symbolic link (to {}): write the output somewhere \
+                             else",
+                            path.display(),
+                            current.display()
+                        ),
+                    ));
+                }
+                return Ok(Target::Staged(current));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("{} is a loop of symbolic links", path.display()),
+    ))
+}
+
+/// Opens a direct output, reusing inherited standard descriptors on Unix.
+fn open_direct_output(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsFd;
+        // Duplicating the inherited descriptor also works when reopening /dev is
+        // unavailable, and preserves the shell's offset and append mode.
+        let descriptor = match path.to_str() {
+            Some("/dev/stdout" | "/dev/fd/1" | "/proc/self/fd/1") => {
+                Some(std::io::stdout().as_fd().try_clone_to_owned()?)
+            }
+            Some("/dev/stderr" | "/dev/fd/2" | "/proc/self/fd/2") => {
+                Some(std::io::stderr().as_fd().try_clone_to_owned()?)
+            }
+            _ => None,
+        };
+        if let Some(descriptor) = descriptor {
+            return Ok(std::fs::File::from(descriptor));
+        }
+    }
+    std::fs::OpenOptions::new().append(true).open(path)
+}
+
+/// `Err` when the output file `out` would replace a graph store's file or a name a store
+/// reserves ([`sparq_core::dir_lock::is_reserved_store_path`]): the path, or the file its
+/// symbolic links lead to ([`output_target`]), is in a store (a live store's `perm0.bin`, a
+/// symbolic link inside a store), or is a store's lock file (in any case), a swap's staging
+/// sibling, a marker or `.sparq-*` scratch, or a file some holder has locked. Replacing one
+/// would corrupt the store or take its lock away. Also `Err` when the path cannot be resolved
+/// (a dangling symbolic link, say): it is never checked as spelled. What is written through as
+/// it is (a device, a pipe, `/dev/stdout`) is fine: no store's file is one. Returns where the
+/// output goes.
+fn check_output_path(out: &str) -> std::io::Result<Target> {
+    let path = std::path::Path::new(out);
+    let target = output_target(path)?;
+    #[cfg(feature = "mmap")]
+    if let Target::Staged(resolved) = &target {
+        let reserved = sparq_core::dir_lock::is_reserved_store_path(path)?
+            || (resolved != path && sparq_core::dir_lock::is_reserved_store_path(resolved)?);
+        if reserved {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{out} is inside a graph store or a name a store reserves (its lock file, \
+                     staging or scratch): write the output somewhere else"
+                ),
+            ));
+        }
+    }
+    Ok(target)
+}
+
+/// A name for a new file beside `path`: `.<name>.<tag>-<random>`, unique enough that a name a
+/// killed run left behind (whatever its process id) is not tried again.
+fn fresh_sibling(path: &std::path::Path, tag: &str) -> std::path::PathBuf {
+    use std::hash::{BuildHasher, Hasher};
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    h.write_u32(std::process::id());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    let mut name = std::ffi::OsString::from(".");
+    name.push(path.file_name().unwrap_or_default());
+    name.push(format!(".{tag}-{:016x}", h.finish()));
+    path.with_file_name(name)
+}
+
+/// A new file beside `path` ([`fresh_sibling`]), created new with `mode` on Unix; a name already
+/// taken is retried under another.
+fn new_sibling(
+    path: &std::path::Path,
+    tag: &str,
+    mode: u32,
+) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    let mut last = None;
+    for _ in 0..16 {
+        let candidate = fresh_sibling(path, tag);
+        match new_file(&candidate, mode) {
+            Ok(file) => return Ok((candidate, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
+}
+
+/// An output file a command writes. Checked first ([`check_output_path`]). The bytes go to a
+/// fresh sibling of where the output goes (`.<name>.sparq-tmp-<random>`, created new, never an
+/// existing file or link), which [`finish`](Self::finish) syncs and renames onto it: what was
+/// there (a file, a hard link to someone else's file) is replaced, never written through, and
+/// a failed command leaves it as it was. A symbolic link is never replaced: an output to one
+/// replaces the file it leads to ([`output_target`]). The fresh file is created owner-only
+/// (`0600` on Unix) and gets its final permissions once written: those of the regular file it
+/// replaces, or else a new file's default under the umask. A device, a pipe or `/dev/stdout`
+/// is written directly (appending, so `>>` redirections keep what was there).
+pub(crate) struct OutFile {
+    file: Option<std::fs::File>,
+    /// The fresh sibling and the path it replaces; `None` for what is written directly.
+    staged: Option<(std::path::PathBuf, std::path::PathBuf)>,
+}
+
+impl OutFile {
+    pub(crate) fn create(out: &str) -> std::io::Result<OutFile> {
+        let path = match check_output_path(out)? {
+            Target::Direct(path) => {
+                let file = open_direct_output(&path)?;
+                return Ok(OutFile {
+                    file: Some(file),
+                    staged: None,
+                });
+            }
+            Target::Staged(path) => path,
+        };
+        if path.file_name().is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{out} names no file"),
+            ));
+        }
+        let (tmp, file) = new_sibling(&path, "sparq-tmp", 0o600)?;
+        Ok(OutFile {
+            file: Some(file),
+            staged: Some((tmp, path)),
+        })
+    }
+
+    /// Flushes the output and, for a file, syncs it, gives it its final permissions and renames
+    /// it over the path. On failure the fresh file is removed (made writable first, so a
+    /// read-only one goes too).
+    pub(crate) fn finish(mut self) -> std::io::Result<()> {
+        let mut file = self.file.take().expect("an output is finished once");
+        std::io::Write::flush(&mut file)?;
+        let Some((tmp, path)) = self.staged.take() else {
+            return Ok(());
+        };
+        let published = file
+            .sync_all()
+            .and_then(|()| final_permissions(&path))
+            .and_then(|perms| match perms {
+                Some(perms) => file.set_permissions(perms),
+                None => Ok(()),
+            })
+            .and_then(|()| {
+                drop(file);
+                std::fs::rename(&tmp, &path)
+            });
+        if published.is_err() {
+            if let Ok(meta) = std::fs::symlink_metadata(&tmp) {
+                let mut perms = meta.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                perms.set_readonly(false);
+                std::fs::set_permissions(&tmp, perms).ok();
+            }
+            std::fs::remove_file(&tmp).ok();
+        }
+        published
+    }
+}
+
+impl std::io::Write for OutFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file
+            .as_mut()
+            .expect("written before finish")
+            .write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.as_mut().expect("written before finish").flush()
+    }
+}
+
+impl Drop for OutFile {
+    fn drop(&mut self) {
+        if let Some((tmp, _)) = self.staged.take() {
+            std::fs::remove_file(tmp).ok();
+        }
+    }
+}
+
+/// Creates a new file at `path` (never an existing file or link), with `mode` on Unix.
+fn new_file(path: &std::path::Path, mode: u32) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    options.open(path)
+}
+
+/// The permissions an output replacing `path` gets: those of the regular file there (read from
+/// the path itself, never through a link); else, on Unix, a new file's default under the umask,
+/// read from a probe file created beside it with `0666` (the umask cannot be read without
+/// changing it); `None` (keep what the file has) elsewhere.
+fn final_permissions(path: &std::path::Path) -> std::io::Result<Option<std::fs::Permissions>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_file() => return Ok(Some(meta.permissions())),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    #[cfg(unix)]
+    {
+        // Created new, so what is removed below is only ever this probe.
+        let (probe, file) = new_sibling(path, "sparq-mode", 0o666)?;
+        let meta = file.metadata();
+        drop(file);
+        std::fs::remove_file(&probe).ok();
+        Ok(Some(meta?.permissions()))
+    }
+    #[cfg(not(unix))]
+    Ok(None)
+}
+
+/// Finishes a buffered [`OutFile`]: flush, then [`OutFile::finish`].
+pub(crate) fn finish_out(w: std::io::BufWriter<OutFile>) -> std::io::Result<()> {
+    w.into_inner()
+        .map_err(std::io::IntoInnerError::into_error)?
+        .finish()
+}
+
+/// Writes `bytes` to the output `out` as an [`OutFile`].
+fn write_out(out: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = OutFile::create(out)?;
+    std::io::Write::write_all(&mut f, bytes)?;
+    f.finish()
+}
+
+/// [`check_output_path`], exiting 2 (a usage error) when it refuses.
+pub(crate) fn refuse_output_in_store(out: &str) {
+    if let Err(e) = check_output_path(out) {
+        eprintln!("error: {e}");
+        std::process::exit(2);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -465,7 +775,20 @@ fn cmd_recompress(args: &[String]) {
         }
     };
     check_emit_v2(v2);
-    let g = sparq_core::Graph::open(std::path::Path::new(src)).unwrap_or_else(|e| {
+    // The destination must be another directory. The text check above is only a shortcut: the
+    // directories are compared resolved, so `d/`, `./d` or a link to `d` is `d` too.
+    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(src), std::fs::canonicalize(dst)) {
+        if a == b {
+            eprintln!(
+                "error: <dst-dir> is <src-dir>; recompress writes a new directory\nusage: {}",
+                RECOMPRESS_USAGE
+            );
+            std::process::exit(2);
+        }
+    }
+    // Read-only: the source is only read (several readers may share it; a live server's
+    // directory is refused).
+    let g = sparq_core::Graph::open_read_only(std::path::Path::new(src)).unwrap_or_else(|e| {
         eprintln!("open error: {e}");
         std::process::exit(1);
     });
@@ -571,12 +894,12 @@ fn diff_triples(graph: &sparq_core::Graph) -> std::collections::BTreeSet<String>
         for [s, p, o] in graph.iter_ids() {
             triples.insert(format!(
                 "{} {} {} .",
-                graph.dict.term(s),
-                graph.dict.term(p),
-                graph.dict.term(o)
+                graph.dict().term(s),
+                graph.dict().term(p),
+                graph.dict().term(o)
             ));
         }
-        for (_, named) in &graph.named {
+        for (_, named) in graph.named() {
             extend(named, triples);
         }
     }
@@ -718,11 +1041,28 @@ fn cmd_probe_compress(args: &[String]) {
             std::process::exit(2);
         }
     };
+    // A store's file is mapped only under its store's lock (shared, by opening the store
+    // read-only for the call), so no writer replaces or compacts it underneath the mapping.
+    #[cfg(feature = "mmap")]
+    let _store = match sparq_core::dir_lock::store_root(std::path::Path::new(path)) {
+        Ok(Some(root)) => Some(
+            sparq_core::Graph::open_read_only(&root).unwrap_or_else(|e| {
+                eprintln!("open the store {} holding {path}: {e}", root.display());
+                std::process::exit(1);
+            }),
+        ),
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            std::process::exit(1);
+        }
+    };
     let file = std::fs::File::open(path).unwrap_or_else(|e| {
         eprintln!("open {path}: {e}");
         std::process::exit(1);
     });
-    // SAFETY: read-only mmap of a file held open for the call.
+    // SAFETY: read-only mmap of a file held open for the call (under its store's shared lock
+    // when it is a store's file).
     let map = unsafe { memmap2::Mmap::map(&file) }.unwrap();
     let n = map.len() / 12;
     // SAFETY: a permutation file is a whole number of [u32;3] rows.
@@ -814,13 +1154,13 @@ fn cmd_compare_compress(args: &[String]) {
 
     let raw = load(path, format);
     let raw_heap = raw.heap_bytes();
-    let raw_store = raw.store.heap_bytes();
+    let raw_store = raw.store().heap_bytes();
     // Re-encode the same store compressed (keeps the dict + numeric cache).
     let t = Instant::now();
     let cmp = raw.into_compressed();
     let enc_s = t.elapsed().as_secs_f64();
     let cmp_heap = cmp.heap_bytes();
-    let cmp_store = cmp.store.heap_bytes();
+    let cmp_store = cmp.store().heap_bytes();
 
     println!("=== index footprint (in-RAM) ===");
     println!("  triples            : {}", cmp.len());
@@ -1172,6 +1512,9 @@ fn cmd_classify(args: &[String]) {
             std::process::exit(2);
         }
     };
+    if let Some(out) = args.get(4) {
+        refuse_output_in_store(out);
+    }
     let (dict, triples, report) = el_classify_parts(path, format);
     println!("triples\t{}", triples.len());
     println!("named_classes\t{}", report.named_classes);
@@ -1183,14 +1526,18 @@ fn cmd_classify(args: &[String]) {
     println!("rbox_non_regular\t{}", report.rbox_non_regular);
     if let Some(out) = args.get(4) {
         use std::io::Write;
-        let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
+        let mut w = std::io::BufWriter::new(OutFile::create(out).unwrap_or_else(|e| {
             eprintln!("create {out}: {e}");
             std::process::exit(1);
         }));
-        for t in &triples {
-            writeln!(w, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])).unwrap();
-        }
-        w.flush().unwrap();
+        let written = triples
+            .iter()
+            .try_for_each(|t| writeln!(w, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])));
+        // On a write error the output is dropped (its fresh file removed) before exiting.
+        written.and_then(|()| finish_out(w)).unwrap_or_else(|e| {
+            eprintln!("write {out}: {e}");
+            std::process::exit(1);
+        });
         eprintln!("wrote classified graph to {out}");
     }
 }
@@ -1230,8 +1577,13 @@ fn cmd_reason(args: &[String]) {
         }
         return;
     }
-    let g = load_with_reasoning(path, format, profile);
+    // The output path is checked before the closure is computed, so a refused path costs
+    // nothing.
     let out = args.get(5);
+    if let Some(out) = out {
+        refuse_output_in_store(out);
+    }
+    let g = load_with_reasoning(path, format, profile);
     // With an output path the closure is the data product (and may itself be stdout, e.g.
     // `/dev/stdout`), so the summary is a diagnostic on stderr; without one the count is
     // the command's only result and stays on stdout (#6466).
@@ -1242,16 +1594,20 @@ fn cmd_reason(args: &[String]) {
     }
     if let Some(out) = out {
         use std::io::Write;
-        let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
+        let mut w = std::io::BufWriter::new(OutFile::create(out).unwrap_or_else(|e| {
             eprintln!("create {out}: {e}");
             std::process::exit(1);
         }));
-        let scan = g.store.scan(&[None, None, None]);
-        for r in scan.rows.iter() {
+        let scan = g.store().scan(&[None, None, None]);
+        let written = scan.rows.iter().try_for_each(|r| {
             let spo = scan.to_spo(r);
-            writeln!(w, "{} {} {} .", g.dict.term(spo[0]), g.dict.term(spo[1]), g.dict.term(spo[2])).unwrap();
-        }
-        w.flush().unwrap();
+            writeln!(w, "{} {} {} .", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2]))
+        });
+        // On a write error the output is dropped (its fresh file removed) before exiting.
+        written.and_then(|()| finish_out(w)).unwrap_or_else(|e| {
+            eprintln!("write {out}: {e}");
+            std::process::exit(1);
+        });
         eprintln!("wrote closure to {out}");
     }
 }
@@ -1281,7 +1637,8 @@ fn cmd_query_mmap(args: &[String]) {
     let out_fmt = out_format_flag(args);
 
     let t = Instant::now();
-    let g = sparq_core::Graph::open(std::path::Path::new(dir)).unwrap_or_else(|e| {
+    // Read-only (a shared lock): several readers may query one index side by side.
+    let g = sparq_core::Graph::open_read_only(std::path::Path::new(dir)).unwrap_or_else(|e| {
         eprintln!("open error: {e}");
         std::process::exit(1);
     });
@@ -1290,7 +1647,7 @@ fn cmd_query_mmap(args: &[String]) {
         g.len(),
         t.elapsed().as_secs_f64(),
         g.heap_bytes() as f64 / 1e9,
-        g.dict.heap_bytes() as f64 / 1e9,
+        g.dict().heap_bytes() as f64 / 1e9,
     );
     // The mmap-backed Graph borrows its on-disk permutations for the whole of `g`'s scope;
     // `emit_query_results` takes `&g` and finishes before `g` drops, so the borrow is sound.
@@ -1363,6 +1720,27 @@ fn open_reader(path: &str) -> std::io::Result<Box<dyn std::io::Read + Send>> {
 
 #[cfg(test)]
 mod open_reader_tests {
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn reserved_output_refusal_leaves_the_store_untouched() {
+        const CHILD: &str = "SPARQ_TEST_RESERVED_OUTPUT";
+        if let Some(path) = std::env::var_os(CHILD) {
+            super::refuse_output_in_store(path.to_str().unwrap());
+            panic!("reserved output was accepted");
+        }
+        let dir = std::env::temp_dir().join(format!("sparq-output-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("SPARQ-STAGING");
+        std::fs::write(&path, b"keep").unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "open_reader_tests::reserved_output_refusal_leaves_the_store_untouched"])
+            .env(CHILD, &path)
+            .status().unwrap();
+        assert_eq!(status.code(), Some(2));
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     use super::open_reader;
     use std::io::{Read, Write};
 
@@ -1510,7 +1888,7 @@ fn load(path: &str, format: &str) -> sparq_core::Graph {
     let g = load_quiet(path, format);
     let secs = t.elapsed().as_secs_f64();
     let heap = g.heap_bytes();
-    let dict = g.dict.heap_bytes();
+    let dict = g.dict().heap_bytes();
     eprintln!(
         "loaded {} triples in {:.3}s ({:.2} M/s) | store ~{:.2} GB ({:.0} B/triple), dict ~{:.2} GB ({} terms, {:.0} B/term)",
         g.len(),
@@ -1519,8 +1897,8 @@ fn load(path: &str, format: &str) -> sparq_core::Graph {
         heap as f64 / 1e9,
         heap as f64 / g.len().max(1) as f64,
         dict as f64 / 1e9,
-        g.dict.len(),
-        dict as f64 / g.dict.len().max(1) as f64,
+        g.dict().len(),
+        dict as f64 / g.dict().len().max(1) as f64,
     );
     g
 }
@@ -1564,10 +1942,10 @@ fn cmd_memstat(args: &[String]) {
     let load_s = t.elapsed().as_secs_f64();
 
     let triples = g.len().max(1);
-    let terms = g.dict.len().max(1);
+    let terms = g.dict().len().max(1);
     let heap_total = g.heap_bytes();
-    let heap_dict = g.dict.heap_bytes();
-    let heap_store = g.store.heap_bytes();
+    let heap_dict = g.dict().heap_bytes();
+    let heap_store = g.store().heap_bytes();
     // The remainder is the numerics + temporals literal-value caches (their accessors are
     // crate-private; the subtraction is exact because Graph::heap_bytes is the plain sum).
     let heap_caches = heap_total.saturating_sub(heap_dict + heap_store);
@@ -1576,7 +1954,7 @@ fn cmd_memstat(args: &[String]) {
     println!("memstat_version\t1");
     println!("mode\t{}", if compressed { "compressed" } else { "raw" });
     println!("triples\t{}", g.len());
-    println!("dict_terms\t{}", g.dict.len());
+    println!("dict_terms\t{}", g.dict().len());
     println!("load_s\t{:.3}", load_s);
     println!("heap_total_bytes\t{}", heap_total);
     println!("heap_dict_bytes\t{}", heap_dict);
@@ -1712,7 +2090,7 @@ fn cmd_dump(args: &[String]) {
             let triples: Vec<oxrdf::Triple> = g
                 .iter_ids()
                 .map(|[s, p, o]| {
-                    let subject = match g.dict.term(s) {
+                    let subject = match g.dict().term(s) {
                         oxrdf::Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n),
                         oxrdf::Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b),
                         other => {
@@ -1720,14 +2098,14 @@ fn cmd_dump(args: &[String]) {
                             std::process::exit(1);
                         }
                     };
-                    let predicate = match g.dict.term(p) {
+                    let predicate = match g.dict().term(p) {
                         oxrdf::Term::NamedNode(n) => n,
                         other => {
                             eprintln!("corrupt store: non-IRI predicate {other}");
                             std::process::exit(1);
                         }
                     };
-                    oxrdf::Triple { subject, predicate, object: g.dict.term(o) }
+                    oxrdf::Triple { subject, predicate, object: g.dict().term(o) }
                 })
                 .collect();
             sparq_engine::triples_to_ntriples(&triples)
@@ -2167,6 +2545,7 @@ fn take_json_flag(args: &[String]) -> (Vec<String>, Option<String>) {
         if args[i] == "--json" {
             match args.get(i + 1) {
                 Some(p) => {
+                    refuse_output_in_store(p);
                     json_path = Some(p.clone());
                     i += 2;
                     continue;
@@ -2218,7 +2597,8 @@ fn cmd_bench_mmap(args: &[String]) {
     let iters: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(5);
     let mode = args.get(5).map(String::as_str).unwrap_or("count");
     let t = Instant::now();
-    let mut g = sparq_core::Graph::open(std::path::Path::new(dir)).unwrap_or_else(|e| {
+    // Read-only (a shared lock): several readers may bench one index side by side.
+    let mut g = sparq_core::Graph::open_read_only(std::path::Path::new(dir)).unwrap_or_else(|e| {
         eprintln!("open error: {e}");
         std::process::exit(1);
     });
@@ -2311,7 +2691,7 @@ fn run_query_suite(g: &sparq_core::Graph, dir: &str, iters: usize, mode: &str, j
 
     if let Some(p) = json_path {
         let doc = suite_results_json(mode, iters, &results);
-        if let Err(e) = std::fs::write(p, doc) {
+        if let Err(e) = write_out(p, doc.as_bytes()) {
             eprintln!("error writing --json results to {p}: {e}");
             std::process::exit(1);
         }
@@ -2369,4 +2749,67 @@ fn json_str(raw: &str) -> String {
     sparq_core::json::escape_into(&mut out, raw);
     out.push('"');
     out
+}
+
+#[cfg(all(test, unix))]
+mod out_file_tests {
+    use super::OutFile;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sparq-cli-outfile-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn mode(path: &std::path::Path) -> u32 {
+        std::fs::symlink_metadata(path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777
+    }
+
+    /// The file being written is owner-only while in progress; once published it has a new
+    /// file's default mode (here read from a file made the ordinary way).
+    #[test]
+    fn an_output_is_owner_only_until_published() {
+        let dir = scratch("fresh");
+        let out = dir.join("out.json");
+        let mut f = OutFile::create(out.to_str().unwrap()).unwrap();
+        f.write_all(b"{}").unwrap();
+        let (tmp, _) = f.staged.clone().unwrap();
+        assert_eq!(mode(&tmp) & !0o600, 0, "in progress at {:o}", mode(&tmp));
+        f.finish().unwrap();
+        let reference = dir.join("reference");
+        std::fs::write(&reference, b"").unwrap();
+        assert_eq!(mode(&out), mode(&reference));
+        assert_eq!(std::fs::read(&out).unwrap(), b"{}");
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left.len(), 2, "no temporary or probe file left: {left:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A 0600 file stays 0600 when an output replaces it, and is never wider meanwhile.
+    #[test]
+    fn a_private_output_stays_private() {
+        let dir = scratch("private");
+        let out = dir.join("out.json");
+        std::fs::write(&out, b"old").unwrap();
+        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut f = OutFile::create(out.to_str().unwrap()).unwrap();
+        f.write_all(b"new").unwrap();
+        let (tmp, _) = f.staged.clone().unwrap();
+        assert_eq!(mode(&tmp) & !0o600, 0);
+        f.finish().unwrap();
+        assert_eq!(mode(&out), 0o600);
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

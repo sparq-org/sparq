@@ -164,7 +164,7 @@ fn nearest_known(graph: &Graph, iri: &str) -> Vec<String> {
     let cap = suffix.chars().count().max(1);
 
     let mut scored: Vec<(usize, String)> = Vec::new();
-    for (_, parts) in graph.dict.iter() {
+    for (_, parts) in graph.dict().iter() {
         let TermParts::Iri {
             prefix: p,
             suffix: s,

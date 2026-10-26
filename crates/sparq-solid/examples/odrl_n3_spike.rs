@@ -79,7 +79,7 @@ fn rust_auth_set(s: &Scenario) -> AuthSet {
     }
     // Exercise the REAL bridge: materialize both sides into a fresh dataset's auth view.
     let mut graph = Graph::new();
-    let outcome = materialize_policy(&mut graph, &policy, &req);
+    let outcome = materialize_policy(&mut graph, &policy, &req).unwrap();
     let mut set: AuthSet = Vec::new();
     if let Some(t) = outcome.grant_triple {
         set.push(t);
@@ -318,7 +318,7 @@ fn main() {
     let acp_rules = format!("{}\n{}\n{}\n{}", COMMON, ACP_A, ACP_B, ACP_C);
 
     let wac_graph = Graph::load_dataset(&wac_fixture(), "nquads").unwrap();
-    let n_wac = wac_graph.named.len();
+    let n_wac = wac_graph.named().len();
     let t_wac_full = best_ns(5, 1, || {
         // Fresh PodStore per iteration so each measures a cold full materialize (the real
         // `materialize_wac` path), not a re-run over an already-populated auth view.
@@ -327,7 +327,7 @@ fn main() {
     }) / 1e6;
 
     let acp_graph = Graph::load_dataset(&acp_fixture(), "nquads").unwrap();
-    let n_acp = acp_graph.named.len();
+    let n_acp = acp_graph.named().len();
     let t_acp_full = best_ns(5, 1, || {
         let mut store = PodStore::new(Graph::load_dataset(&acp_fixture(), "nquads").unwrap());
         let _ = store.materialize_acp().unwrap();

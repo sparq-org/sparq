@@ -79,7 +79,7 @@ pub(super) fn write_store_id_json(graph: &Graph, id: Id, s: &mut String) {
     if dict::is_inline(id) {
         crate::json::inline_int_json(s, id - dict::INLINE_BASE);
     } else {
-        match graph.dict.term_parts(id) {
+        match graph.dict().term_parts(id) {
             dict::TermParts::Triple([ts, tp, to]) => {
                 s.push_str("{\"type\":\"triple\",\"value\":{\"subject\":");
                 write_store_id_json(graph, ts, s);
@@ -183,8 +183,8 @@ pub(super) fn single_pattern_scan_json_emit(
     }
 
     let scan = match filt {
-        Some((c, _)) => graph.store.scan_sorted(&id_pat, c),
-        None => graph.store.scan(&id_pat),
+        Some((c, _)) => graph.store().scan_sorted(&id_pat, c),
+        None => graph.store().scan(&id_pat),
     };
     // Range-prune an all-inline filter column (identical to scan_to_bindings) so the
     // order matches the general path exactly (byte-identical output).

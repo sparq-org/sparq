@@ -365,7 +365,7 @@ impl TrainedModel {
     /// because the constituents are ordinary atomic terms, the statement encoding is available
     /// even under the default `IriBlank` scope, where the quoted term itself has **no** row.
     pub fn encode_quoted_term(&self, graph: &Graph, term: Id) -> Option<Vec<f32>> {
-        match graph.dict.term_parts(term) {
+        match graph.dict().term_parts(term) {
             TermParts::Triple([h, p, t]) => self.encode_statement(h, p, t),
             _ => None,
         }
@@ -1051,7 +1051,7 @@ ex:alice ex:owns ex:milo .
             let mut ids: Vec<_> = g
                 .iter_ids()
                 .map(|[_, _, o]| o)
-                .filter(|&o| matches!(g.dict.term_parts(o), TermParts::Triple(_)))
+                .filter(|&o| matches!(g.dict().term_parts(o), TermParts::Triple(_)))
                 .collect();
             ids.sort_unstable();
             ids.dedup();
@@ -1160,9 +1160,9 @@ ex:alice ex:owns ex:milo .
         let tt = g
             .iter_ids()
             .map(|[_, _, o]| o)
-            .find(|&o| matches!(g.dict.term_parts(o), TermParts::Triple(_)))
+            .find(|&o| matches!(g.dict().term_parts(o), TermParts::Triple(_)))
             .expect("the rdf12 slice must carry quoted terms");
-        let TermParts::Triple([h, p, t]) = g.dict.term_parts(tt) else {
+        let TermParts::Triple([h, p, t]) = g.dict().term_parts(tt) else {
             unreachable!()
         };
 

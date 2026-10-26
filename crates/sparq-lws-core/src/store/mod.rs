@@ -305,6 +305,14 @@ pub trait Store: Send + Sync {
         Ok(())
     }
 
+    /// `Ok` when this store's index is this process's alone while the store lives (see
+    /// [`SparqClient::exclusive`]). The default says it is not.
+    fn exclusive(&self) -> ServerResult<()> {
+        Err(ServerError::Storage(
+            "this store's index may be written by other processes too".into(),
+        ))
+    }
+
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -1179,6 +1187,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         Ok(held)
     }
 
+    fn exclusive(&self) -> ServerResult<()> {
+        self.sparq.exclusive().map_err(map_sparq)
+    }
+
     async fn finish_reclaims(&self) -> ServerResult<()> {
         for key in self.sparq.reclaiming().await.map_err(map_sparq)? {
             match self.blob.delete(&key).await {
@@ -1852,6 +1864,9 @@ mod tests {
         }
         async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
             self.0.exists(iri).await
+        }
+        fn exclusive(&self) -> Result<(), SparqError> {
+            self.0.exclusive()
         }
         async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
             self.0.begin_reclaim(blob_key).await

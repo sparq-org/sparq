@@ -376,8 +376,8 @@ fn a_dropped_resource_created_again_has_no_creator_or_owner() {
     store
         .update_as_acp(&alice(), "DROP GRAPH <https://pod.ex/docs/d0>")
         .expect("the creator may remove d0");
-    let again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
-    store.graph_unchecked_mut().named.extend(again.named);
+    let mut again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
+    store.graph_unchecked_mut().extend_named(again.take_named().unwrap()).unwrap();
     store.materialize_acp().expect("rebuild");
     assert_context_forgotten(&store, "drop, then create");
 }
@@ -403,13 +403,18 @@ fn a_resource_removed_outside_an_update_is_forgotten_at_the_next_rebuild() {
     let mut store = store();
     let d0 = store
         .graph_unchecked_mut()
-        .named
+        .named()
         .iter()
         .position(|(n, _)| n.to_string() == format!("<{D0}>"))
         .expect("d0 is stored");
-    let removed = store.graph_unchecked_mut().named.remove(d0);
+    let removed = {
+        let g = store.graph_unchecked_mut();
+        let name = g.named()[d0].0.clone();
+        let sub = g.remove_named(&name).unwrap().expect("present");
+        (name, sub)
+    };
     store.materialize_acp().expect("rebuild without d0");
-    store.graph_unchecked_mut().named.push(removed);
+    store.graph_unchecked_mut().add_named(removed.0, removed.1).unwrap();
     store.materialize_acp().expect("rebuild with d0 again");
     assert_context_forgotten(&store, "remove, rebuild, restore");
 }
@@ -419,13 +424,18 @@ fn a_wac_rebuild_forgets_a_removed_resource_too() {
     let mut store = store();
     let d0 = store
         .graph_unchecked_mut()
-        .named
+        .named()
         .iter()
         .position(|(n, _)| n.to_string() == format!("<{D0}>"))
         .expect("d0 is stored");
-    let removed = store.graph_unchecked_mut().named.remove(d0);
+    let removed = {
+        let g = store.graph_unchecked_mut();
+        let name = g.named()[d0].0.clone();
+        let sub = g.remove_named(&name).unwrap().expect("present");
+        (name, sub)
+    };
     store.materialize_wac().expect("WAC rebuild without d0");
-    store.graph_unchecked_mut().named.push(removed);
+    store.graph_unchecked_mut().add_named(removed.0, removed.1).unwrap();
     store.materialize_acp().expect("ACP rebuild with d0 again");
     assert_context_forgotten(&store, "remove, WAC rebuild, restore");
 }
@@ -456,15 +466,20 @@ fn a_container_left_with_only_its_access_control_document_keeps_its_creator() {
 
     let x = store
         .graph_unchecked_mut()
-        .named
+        .named()
         .iter()
         .position(|(n, _)| n.to_string() == format!("<{BOX}x>"))
         .expect("x is stored");
-    let removed = store.graph_unchecked_mut().named.remove(x);
+    let removed = {
+        let g = store.graph_unchecked_mut();
+        let name = g.named()[x].0.clone();
+        let sub = g.remove_named(&name).unwrap().expect("present");
+        (name, sub)
+    };
     store
         .materialize_acp()
         .expect("rebuild with only the .acr under the container");
-    store.graph_unchecked_mut().named.push(removed);
+    store.graph_unchecked_mut().add_named(removed.0, removed.1).unwrap();
     store
         .materialize_acp()
         .expect("rebuild with the container again");
@@ -490,8 +505,8 @@ fn decisions_follow_a_drop_with_no_rebuild_after_it() {
         .update_as_acp(&admin(), &format!("DROP GRAPH <{D0}>"))
         .expect("ADMIN may remove d0");
     // d0 comes back without any rebuild: the view the drop left grants nothing on it.
-    let again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
-    store.graph_unchecked_mut().named.extend(again.named);
+    let mut again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
+    store.graph_unchecked_mut().extend_named(again.take_named().unwrap()).unwrap();
     assert!(
         !holds(&store, ALICE, Mode::Write),
         "the dropped resource's creator does not write it"
@@ -553,8 +568,8 @@ fn an_update_never_makes_its_agent_a_creator() {
         None,
         "across two changes"
     );
-    let again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
-    store.graph_unchecked_mut().named.extend(again.named);
+    let mut again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
+    store.graph_unchecked_mut().extend_named(again.take_named().unwrap()).unwrap();
     store.materialize_acp().expect("rebuild");
     assert_eq!(store.acp_provenance().creator(D0), None);
     assert_context_forgotten(&store, "a drop, then a create");
@@ -776,7 +791,7 @@ fn an_access_control_list_in_an_acp_pod_keeps_no_creator() {
     let before = store.stored_graphs();
     let acl = "https://pod.ex/a/z.acl";
     let nq = format!("<{acl}#x> <https://ex.dev/ns#k> \"x\" <{acl}> .\n");
-    store.graph_unchecked_mut().named.extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+    store.graph_unchecked_mut().extend_named(Graph::load_dataset(&nq, "nquads").expect("parses").take_named().unwrap()).unwrap();
     store
         .rematerialize_after_edit(&before, None, &[], true)
         .expect("rebuild");
@@ -786,15 +801,15 @@ fn an_access_control_list_in_an_acp_pod_keeps_no_creator() {
     // Removed with no rebuild after it: the next one forgets z, as z.acl is not read.
     store
         .graph_unchecked_mut()
-        .named
-        .retain(|(n, _)| n.to_string() != "<https://pod.ex/a/z>");
+        .retain_named(|n, _| n.to_string() != "<https://pod.ex/a/z>")
+        .unwrap();
     store.materialize_acp().expect("rebuild");
     assert_eq!(store.acp_provenance().creator("https://pod.ex/a/z"), None);
     // Dropped by an update, likewise.
     let mut store = kept_under_own_acr();
     let mut prov = store.acp_provenance().clone();
     prov.set_creator("https://pod.ex/a/z", ALICE);
-    store.graph_unchecked_mut().named.extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+    store.graph_unchecked_mut().extend_named(Graph::load_dataset(&nq, "nquads").expect("parses").take_named().unwrap()).unwrap();
     store.materialize_acp_with(&prov).expect("acp materializes");
     store
         .update_as_acp(&sess(ADMIN), "DROP GRAPH <https://pod.ex/a/z>")
@@ -815,7 +830,7 @@ fn a_resource_whose_acr_went_after_it_comes_back_with_nothing() {
     assert_eq!(store.acp_provenance().creator(KR), None, "r.acr went");
     let before = store.stored_graphs();
     let nq = format!("<{KR}#it> <https://ex.dev/ns#k> \"new\" <{KR}> .\n");
-    store.graph_unchecked_mut().named.extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+    store.graph_unchecked_mut().extend_named(Graph::load_dataset(&nq, "nquads").expect("parses").take_named().unwrap()).unwrap();
     store
         .rematerialize_after_edit(&before, None, &[], true)
         .expect("r made again");
@@ -826,15 +841,15 @@ fn a_resource_whose_acr_went_after_it_comes_back_with_nothing() {
 }
 
 fn drop_graph(store: &mut PodStore, iri: &str) {
-    store.graph_unchecked_mut().named.retain(|(n, _)| n.to_string() != format!("<{iri}>"));
+    store.graph_unchecked_mut().retain_named(|n, _| n.to_string() != format!("<{iri}>")).unwrap();
 }
 
 fn push_graph(store: &mut PodStore, iri: &str) {
     let nq = format!("<{iri}#it> <https://ex.dev/ns#k> \"x\" <{iri}> .\n");
     store
         .graph_unchecked_mut()
-        .named
-        .extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+        .extend_named(Graph::load_dataset(&nq, "nquads").expect("parses").take_named().unwrap())
+        .unwrap();
 }
 
 #[test]
