@@ -4556,7 +4556,7 @@ impl Graph {
     /// Compacts a directory-backed graph tree with one base-image swap.
     #[cfg(feature = "mmap")]
     fn compact_tree_in_one_swap(&mut self) -> Result<(), String> {
-        if !self.tree_has_overlay() {
+        if !self.tree_has_overlay() && !self.tree_has_sparse_slots() {
             if let Some(w) = self.wal.log_mut() {
                 let result = w.truncate().map_err(|e| e.to_string());
                 self.freeze_on_err(result, "a WAL truncate")?;
@@ -4601,6 +4601,13 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn tree_has_overlay(&self) -> bool {
         self.store.has_overlay() || self.named.iter().any(|(_, sub)| sub.tree_has_overlay())
+    }
+
+    /// Whether a whole-tree rewrite can reclaim dropped named slots, including trailing ones.
+    #[cfg(feature = "mmap")]
+    fn tree_has_sparse_slots(&self) -> bool {
+        self.next_slot as usize != self.named.len()
+            || self.named.iter().any(|(_, sub)| sub.tree_has_sparse_slots())
     }
 
     /// (sq-x32t) ROLLBACK-SAFE on-disk swap shared by [`compact`](Self::compact) and
@@ -5169,6 +5176,7 @@ impl FreshFile {
             std::fs::remove_file(&self.tmp).ok();
             return Err(e);
         }
+        fault_point("file-synced", &self.path)?;
         drop(file);
         if let Err(e) = publish_rename(&self.tmp, &self.path) {
             std::fs::remove_file(&self.tmp).ok();
@@ -5251,7 +5259,8 @@ fn fsync_file(path: &std::path::Path) -> std::io::Result<()> {
     let file = std::fs::OpenOptions::new().write(true).open(path)?;
     #[cfg(not(windows))]
     let file = std::fs::File::open(path)?;
-    file.sync_all()
+    file.sync_all()?;
+    fault_point("file-synced", path)
 }
 
 /// (review 1593) fsync a DIRECTORY so a rename of (or into) it is durable. An absent
@@ -5270,7 +5279,10 @@ fn fsync_dir(_dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(all(feature = "mmap", not(windows)))]
 fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     match std::fs::File::open(dir) {
-        Ok(f) => f.sync_all(),
+        Ok(f) => {
+            f.sync_all()?;
+            fault_point("dir-synced", dir)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
@@ -7542,6 +7554,11 @@ fn open_log(path: &std::path::Path) -> std::io::Result<std::fs::File> {
         .truncate(false)
         .open(path)?;
     file.seek(std::io::SeekFrom::End(0))?;
+    // An interrupted open may have left an existing entry unsynced, so sync every open.
+    file.sync_all()?;
+    fault_point("log-file-synced", path)?;
+    fsync_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
+    fault_point("log-opened", path)?;
     Ok(file)
 }
 
@@ -8426,7 +8443,8 @@ impl TxnJournal {
                 "txn journal kept: an earlier commit failed; reopen the graph",
             ));
         }
-        truncate_log(&mut self.file)
+        truncate_log(&mut self.file)?;
+        fault_point("journal-truncated", &self.dir)
     }
 
     /// Reads `dir`'s journal into `(is_insert, slot, triple)` records in append order, frame by

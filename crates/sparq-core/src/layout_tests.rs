@@ -37,6 +37,472 @@ fn store(path: &Path, count: usize) -> Graph {
     Graph::open(path).unwrap()
 }
 
+type SyncEvents = Vec<(String, std::path::PathBuf)>;
+
+struct SyncTrace(std::rc::Rc<std::cell::RefCell<SyncEvents>>);
+
+impl SyncTrace {
+    fn start() -> Self {
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let trace = std::rc::Rc::clone(&events);
+        fault::observe(move |step, path| {
+            trace
+                .borrow_mut()
+                .push((step.to_string(), path.to_path_buf()));
+        });
+        Self(events)
+    }
+
+    fn take(&self) -> SyncEvents {
+        std::mem::take(&mut *self.0.borrow_mut())
+    }
+}
+
+impl Drop for SyncTrace {
+    fn drop(&mut self) {
+        fault::disarm();
+    }
+}
+
+#[test]
+fn log_entries_are_synced_before_open_returns() {
+    for replacement in ["fresh", "existing", "compact", "restore"] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        let mut root = store(&path, 1);
+        let trace = SyncTrace::start();
+        match replacement {
+            "compact" => {
+                root.apply_delta(&[triple()], &[]).unwrap();
+                root.compact().unwrap();
+            }
+            "restore" => {
+                let mut fresh = Graph::new();
+                fresh.ensure_named(&name("g0")).unwrap();
+                root.restore_in_place(fresh).unwrap();
+            }
+            _ => {
+                drop(root);
+                if replacement == "fresh" {
+                    for slot in [path.clone(), path.join("named/0")] {
+                        for log in ["wal.log", "txn.log"] {
+                            std::fs::remove_file(slot.join(log)).unwrap();
+                        }
+                    }
+                }
+                root = Graph::open(&path).unwrap();
+            }
+        }
+        let events = trace.take();
+        for slot in [path.clone(), path.join("named/0")] {
+            for log in ["wal.log", "txn.log"] {
+                let log_path = slot.join(log);
+                let opened = events
+                    .iter()
+                    .position(|(step, p)| step == "log-opened" && *p == log_path)
+                    .expect("log opened");
+                let synced = events[..opened]
+                    .iter()
+                    .rposition(|(step, p)| step == "log-file-synced" && *p == log_path)
+                    .unwrap_or_else(|| panic!("{replacement}: {log_path:?} was not synced"));
+                #[cfg(unix)]
+                assert!(
+                    events[synced + 1..opened]
+                        .iter()
+                        .any(|(step, p)| step == "dir-synced" && *p == slot),
+                    "{replacement}: persist {log_path:?}'s entry before returning its handle"
+                );
+                #[cfg(not(unix))]
+                let _ = synced;
+            }
+        }
+        root.apply_delta(&[triple()], &[]).unwrap();
+        root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+        root.clear_txn().unwrap();
+        drop(root);
+        for _ in 0..2 {
+            let reopened = Graph::open(&path).unwrap();
+            assert_eq!(reopened.len(), 1);
+            assert_eq!(reopened.named_graph(&name("g0")).unwrap().len(), 1);
+        }
+    }
+}
+
+#[test]
+fn interrupted_replacement_log_creation_keeps_acknowledged_data() {
+    for slot in ["", "named/0"] {
+        for log in ["wal.log", "txn.log"] {
+            let tmp = tempdir().unwrap();
+            let path = tmp.path().join("store");
+            let mut root = store(&path, 1);
+            root.apply_delta(&[triple()], &[]).unwrap();
+            root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+            let failed = path.join(slot).join(log);
+            let target = failed.clone();
+            fault::crash_at(move |step, p| step == "log-file-synced" && p == target);
+            let result = root.compact();
+            let hits = fault::disarm();
+            assert!(
+                result.is_err(),
+                "opening a replacement log must fail before use"
+            );
+            assert!(hits > 0, "log sync crash point was not reached");
+            drop(root);
+            // Model loss of a fresh log entry whose parent was not synced. Its base
+            // already holds every acknowledged update; no new append could succeed.
+            std::fs::remove_file(failed).unwrap();
+            for _ in 0..2 {
+                let reopened = Graph::open(&path).unwrap();
+                assert_eq!(reopened.len(), 1);
+                assert_eq!(reopened.named_graph(&name("g0")).unwrap().len(), 1);
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn saved_bases_are_synced_before_publication_and_journal_retirement() {
+    for recovery in [false, true] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        let mut root = store(&path, 0);
+        root.commit_txn(&[(true, Some(name("g0")), triple())])
+            .unwrap();
+        let trace = SyncTrace::start();
+        if recovery {
+            drop(root);
+            root = Graph::open(&path).unwrap();
+        } else {
+            let i = root.ensure_named(&name("g0")).unwrap();
+            root.apply_delta_to_named(i, &[triple()], &[]).unwrap();
+            root.clear_txn().unwrap();
+        }
+        let events = trace.take();
+        let manifest = events
+            .iter()
+            .position(|(step, p)| step == "rename" && *p == path.join("named.bin.tmp"))
+            .unwrap();
+        let retired = events
+            .iter()
+            .rposition(|(step, p)| step == "journal-truncated" && *p == path)
+            .unwrap();
+        let child = path.join("named/0");
+        let child_sync = events[..manifest]
+            .iter()
+            .rposition(|(step, p)| step == "dir-synced" && *p == child)
+            .unwrap();
+        for file in std::fs::read_dir(&child).unwrap() {
+            let file = file.unwrap().path();
+            if file.is_file()
+                && !matches!(
+                    file.file_name().unwrap().to_str(),
+                    Some("wal.log" | "txn.log")
+                )
+            {
+                assert!(
+                    events[..child_sync]
+                        .iter()
+                        .any(|(step, p)| step == "file-synced" && *p == file),
+                    "sync {file:?} before publication"
+                );
+            }
+        }
+        let named_sync = events[child_sync + 1..manifest]
+            .iter()
+            .position(|(step, p)| step == "dir-synced" && *p == path.join("named"))
+            .unwrap()
+            + child_sync
+            + 1;
+        assert!(events[named_sync + 1..manifest]
+            .iter()
+            .any(|(step, p)| step == "dir-synced" && *p == path));
+        assert!(manifest < retired);
+        drop(root);
+        for _ in 0..2 {
+            assert_eq!(
+                Graph::open(&path)
+                    .unwrap()
+                    .named_graph(&name("g0"))
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn compact_syncs_recursive_bases_before_retiring_the_old_tree() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    let mut seed = Graph::new();
+    let child = seed.ensure_named(&name("g0")).unwrap();
+    seed.named[child].1.ensure_named(&name("nested")).unwrap();
+    seed.save(&path).unwrap();
+    let mut root = Graph::open(&path).unwrap();
+    root.apply_delta(&[triple()], &[]).unwrap();
+    root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+    root.named[0]
+        .1
+        .apply_delta_to_named(0, &[triple()], &[])
+        .unwrap();
+    let trace = SyncTrace::start();
+    root.compact().unwrap();
+    let events = trace.take();
+    let staging = staging_path(&path, "compact-new");
+    let publish = events
+        .iter()
+        .position(|(step, p)| step == "rename" && *p == path)
+        .unwrap();
+    for relative in ["", "named/0", "named/0/named/0"] {
+        let live = path.join(relative);
+        let saved = staging.join(relative);
+        let synced = events[..publish]
+            .iter()
+            .rposition(|(step, p)| step == "dir-synced" && *p == saved)
+            .unwrap();
+        for file in std::fs::read_dir(live).unwrap() {
+            let file = file.unwrap();
+            if file.file_type().unwrap().is_file()
+                && !matches!(
+                    file.file_name().to_str(),
+                    Some("wal.log" | "txn.log" | dir_lock::INSIDE_LOCK)
+                )
+            {
+                assert!(
+                    events[..synced].iter().any(
+                        |(step, p)| step == "file-synced" && *p == saved.join(file.file_name())
+                    ),
+                    "sync {:?} before the swap",
+                    file.path()
+                );
+            }
+        }
+    }
+    let swapped = events
+        .iter()
+        .position(|(step, p)| step == "rename" && *p == staging)
+        .unwrap();
+    let retire = events
+        .iter()
+        .position(|(step, p)| {
+            step == "remove-entry" && p.starts_with(staging_path(&path, "compact-old"))
+        })
+        .unwrap();
+    assert!(events[swapped + 1..retire]
+        .iter()
+        .any(|(step, p)| step == "dir-synced" && p == tmp.path()));
+    drop(root);
+    for _ in 0..2 {
+        let reopened = Graph::open(&path).unwrap();
+        assert_eq!(reopened.len(), 1);
+        assert_eq!(reopened.named[0].1.len(), 1);
+        assert_eq!(reopened.named[0].1.named[0].1.len(), 1);
+    }
+}
+
+#[test]
+fn interrupted_named_deletions_reopen_the_complete_old_or_new_set() {
+    for count in [1, 3] {
+        for removed in 0..=count {
+            for published in [false, true] {
+                let tmp = tempdir().unwrap();
+                let path = tmp.path().join("store");
+                let mut root = store(&path, count);
+                root.apply_delta(&[triple()], &[]).unwrap();
+                for i in 0..count {
+                    let t = [name(&format!("ack{i}")), name("p"), name("o")];
+                    root.apply_delta_to_named(i, &[t], &[]).unwrap();
+                }
+                let survivors: Vec<_> = (0..count)
+                    .filter(|&i| removed != count && removed != i)
+                    .flat_map(|i| {
+                        std::fs::read_dir(path.join("named").join(i.to_string()))
+                            .unwrap()
+                            .map(|entry| entry.unwrap().path())
+                    })
+                    .filter(|path| path.is_file())
+                    .map(|path| {
+                        let bytes = std::fs::read(&path).unwrap();
+                        (path, bytes)
+                    })
+                    .collect();
+                let target = if published {
+                    path.join("named")
+                } else {
+                    path.join("named.bin.tmp")
+                };
+                fault::crash_at(move |step, p| {
+                    if published {
+                        step == "remove-tree" && p.starts_with(&target)
+                    } else {
+                        step == "rename" && p == target
+                    }
+                });
+                let result = if removed == count {
+                    root.drop_all_named_durable()
+                } else {
+                    root.drop_named_durable(&name(&format!("g{removed}")))
+                        .map(|_| ())
+                };
+                let hits = fault::disarm();
+                assert!(result.is_err());
+                assert!(hits > 0);
+                drop(root);
+                for (file, bytes) in survivors {
+                    assert_eq!(
+                        std::fs::read(&file).unwrap(), bytes,
+                        "survivor {file:?} was rewritten"
+                    );
+                }
+                for _ in 0..2 {
+                    let reopened = Graph::open(&path).unwrap();
+                    assert_eq!(reopened.len(), 1);
+                    for i in 0..count {
+                        let graph = reopened.named_graph(&name(&format!("g{i}")));
+                        if published && (removed == count || removed == i) {
+                            assert!(graph.is_none());
+                        } else {
+                            let graph = graph.unwrap();
+                            assert_eq!(graph.len(), 1);
+                            assert!(graph.id_of(&name(&format!("ack{i}"))).is_some());
+                            assert_eq!(
+                                graph.wal.dir().unwrap(),
+                                path.join("named").join(i.to_string())
+                            );
+                        }
+                    }
+                }
+                let mut reopened = Graph::open(&path).unwrap();
+                let fresh = reopened.ensure_named(&name("fresh")).unwrap();
+                assert!(
+                    reopened.named[fresh].1.is_empty(),
+                    "orphan logs must not enter a new graph"
+                );
+                reopened
+                    .apply_delta_to_named(fresh, &[triple()], &[])
+                    .unwrap();
+                drop(reopened);
+                let reopened = Graph::open(&path).unwrap();
+                let fresh = reopened.named_graph(&name("fresh")).unwrap();
+                assert_eq!(fresh.len(), 1);
+                assert!(fresh.id_of(&name("ack0")).is_none());
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn directory_sync_is_a_noop_on_windows() {
+    let tmp = tempdir().unwrap();
+    let file = tmp.path().join("file");
+    std::fs::write(&file, b"unchanged").unwrap();
+    for path in [tmp.path(), &file, &tmp.path().join("missing")] {
+        fsync_dir(path).unwrap();
+    }
+    assert_eq!(std::fs::read(file).unwrap(), b"unchanged");
+}
+
+#[test]
+fn compact_reclaims_sparse_slots_without_any_overlay() {
+    fn level(graph: &mut Graph, nested: bool) -> &mut Graph {
+        if nested {
+            &mut graph.named[0].1
+        } else {
+            graph
+        }
+    }
+    for nested in [false, true] {
+        for trailing in [false, true] {
+            for default_base in [false, true] {
+                let tmp = tempdir().unwrap();
+                let path = tmp.path().join("store");
+                let layer_path = if nested {
+                    path.join("named/0")
+                } else {
+                    path.clone()
+                };
+                let mut seed = Graph::new();
+                if nested {
+                    seed.ensure_named(&name("outer")).unwrap();
+                }
+                let layer = level(&mut seed, nested);
+                if default_base {
+                    layer.apply_delta(&[triple()], &[]).unwrap();
+                }
+                for i in 0..8 {
+                    let n = name(&format!("g{i}"));
+                    let slot = layer.ensure_named(&n).unwrap();
+                    layer
+                        .apply_delta_to_named(slot, &[[n, name("p"), name("o")]], &[])
+                        .unwrap();
+                }
+                seed.save(&path).unwrap();
+                let mut root = Graph::open(&path).unwrap();
+                let keep = if trailing { 1 } else { 2 };
+                for i in 1..8 - (keep - 1) {
+                    level(&mut root, nested)
+                        .drop_named_durable(&name(&format!("g{i}")))
+                        .unwrap();
+                }
+                drop(root);
+                let mut root = Graph::open(&path).unwrap();
+                assert!(
+                    !root.tree_has_overlay(),
+                    "the complete tree has clean bases"
+                );
+                assert_eq!(level(&mut root, nested).next_slot, 8);
+                root.compact().unwrap();
+                let manifest = read_named_manifest(&layer_path).unwrap().unwrap();
+                assert_eq!(
+                    manifest.next_slot as usize, keep,
+                    "compaction must reclaim the allocation cursor"
+                );
+                assert_eq!(
+                    manifest
+                        .entries
+                        .iter()
+                        .map(|(slot, _)| *slot)
+                        .collect::<Vec<_>>(),
+                    (0..keep as u32).collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    std::fs::read_dir(layer_path.join("named")).unwrap().count(),
+                    keep
+                );
+                drop(root);
+                for _ in 0..2 {
+                    let mut reopened = Graph::open(&path).unwrap();
+                    let layer = level(&mut reopened, nested);
+                    assert_eq!(layer.len(), usize::from(default_base));
+                    assert_eq!(layer.named.len(), keep);
+                    for (n, sub) in &layer.named {
+                        assert_eq!(sub.len(), 1);
+                        assert!(sub.id_of(n).is_some());
+                    }
+                }
+                let mut root = Graph::open(&path).unwrap();
+                let layer = level(&mut root, nested);
+                let next = layer.ensure_named(&name("after-compact")).unwrap();
+                assert_eq!(
+                    layer.named[next].1.wal.dir().unwrap(),
+                    layer_path.join("named").join(keep.to_string())
+                );
+                assert!(layer.named[next].1.is_empty());
+                drop(root);
+                let mut root = Graph::open(&path).unwrap();
+                assert!(level(&mut root, nested)
+                    .named_graph(&name("after-compact"))
+                    .unwrap()
+                    .is_empty());
+            }
+        }
+    }
+}
+
 #[test]
 fn durability_barrier_preserves_open_mapped_files_and_logs() {
     let tmp = tempdir().unwrap();
