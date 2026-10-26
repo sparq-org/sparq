@@ -1,7 +1,8 @@
 # sparq-lws-blob-key
 
 Internal, dependency-free blob-key grammar shared by the experimental LWS server
-and its blob backends (`publish = false`). Supports native and wasm targets.
+and its filesystem and object backends (`publish = false`). Supports native and
+wasm targets.
 
 ## 🚀 Quickstart
 

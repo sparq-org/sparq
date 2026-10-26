@@ -110,6 +110,12 @@
   features: "authn-openid"
   test: true
 
+# Native filesystem adapter: run the real composite and reconciler paths.
+- name: "sparq-lws-core (blob-fs)"
+  crate: "sparq-lws-core"
+  features: "blob-fs"
+  test: true
+
 # Immutable native byte plane and reusable downstream backend contract.
 - name: "sparq-lws-core (blob-object)"
   crate: "sparq-lws-core"

@@ -18,7 +18,7 @@ actually verifies.
 
 | Crate / path | Why in scope | `unsafe`? |
 |---|---|---|
-| `sparq-core` | Storage, dictionary, mmap on-disk format, RDF text parsers, fused decompress ingest | **Yes — 42 sites** (mmap, dict-spill, parallel scatter, SIMD); canonical count via `scripts/unsafe-gate.py` |
+| `sparq-core` | Storage, dictionary, mmap on-disk format, RDF text parsers, fused decompress ingest | **Yes — 52 sites** (mmap, dict-spill, parallel scatter, SIMD); canonical count via `scripts/unsafe-gate.py` |
 | `sparq-engine` | SPARQL planner + streaming executor, `QueryBudget`, optional `SERVICE` | Four registered `CancelPtr` sites: `Arc`-owned `AtomicBool`, lifetime-bound guard, atomic loads only (sq-kq9ia) |
 | `sparq-server` | The W3C SPARQL 1.1 Protocol HTTP surface | No |
 | `sparq-reason` | RDFS / OWL-RL / N3 materialization, inference-conformance-gated | **No `unsafe`** (pure-safe Rust) |
@@ -115,7 +115,7 @@ and the **GAP** with its bead.
 ### B5 — hostile on-disk index → unsafe mmap loader
 
 This boundary carries the only memory-safety (rather than wrong-answer or DoS)
-risk, so it leads. The canonical count is **42 `unsafe` sites** in `sparq-core`,
+risk, so it leads. The canonical count is **52 `unsafe` sites** in `sparq-core`,
 across `extsort.rs`, `dict.rs`, `store.rs`, `dictspill.rs`, `lib.rs`, `diskann.rs`,
 `main.rs` — produced reproducibly by the count-ratchet
 (`python3 scripts/unsafe-gate.py --check`, the `sparq-core` row; `--list` emits

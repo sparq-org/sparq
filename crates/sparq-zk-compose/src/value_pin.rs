@@ -1,19 +1,9 @@
 //! Relying-party PIN functions for the dual-leaf value lanes (opt-in,
 //! `dual-leaf` feature).
 //!
-//! # ⚠️ THE VALUE-LANE VERIFIER GATES ARE CLOSED
-//! Nothing in this module opens one. `verifier::prefilter_manifest_structure`
-//! still refuses every value-lane sub-proof outright at stage 0
-//! (`CheckError::ValueLaneSubProofNotAccepted`, or `LegacyV1ValueMember` for V1), the stage-2 binding-edge
-//! operand match still admits only the `filter_int` family, and
-//! `filter_edge_true` is untouched. A pin computed here decides nothing, matches
-//! no accepting obligation edge and discharges no query FILTER. The test report
-//! uses `value_obligation::discharge` for structural diagnostic coverage only.
-//! What this module is, is
-//! the INPUT those gates will need: the question "given an authenticated
-//! commitment method and the typed FILTER the query spells, what exactly would a
-//! value-lane sub-proof's public inputs have to be?", answered in one place so
-//! the answer is written down once.
+//! Flat verification uses these pins through `value_obligation`'s shared
+//! per-edge predicate. A pin alone does not establish a query obligation or
+//! verify a proof; the verifier binds the source cell and checks bb separately.
 //!
 //! # What a pin actually fixes
 //! A value-lane member's `datatype_const` is a public input no member CONSTRAINS
@@ -49,10 +39,9 @@
 //!
 //! # Honest scope
 //! This is host-side arithmetic over the query text and the public encoders. It
-//! asserts no soundness or privacy property. The value lanes carry the dual-leaf
-//! INV-VL downgrade (value↔lexical agreement rests on trusted-issuer honesty;
-//! #769 accepted at research grade, CR-G8), and the estate is NOT externally
-//! audited (sq-qhy4).
+//! asserts no soundness or privacy property. V2 lanes are research-grade and
+//! not externally audited (sq-qhy4). The INV-VL issuer-honesty assumption is a
+//! V1 legacy assumption; V1 value members remain refused.
 
 use crate::manifest::{CircuitId, FieldHex, FilterOp, ProofInputs, ProofManifest};
 use crate::method_auth::{AuthenticatedMethod, AuthenticatedMethods};
@@ -417,7 +406,7 @@ pub fn check_lane_routed(datatype: &str) -> Result<(), PinError> {
 /// and verdict are ALL exactly what `filter` under `method` requires. It decides
 /// nothing about the manifest: the caller still has to establish that THIS
 /// sub-proof is the one answering THAT filter, which is the obligation-edge work
-/// the closed gates will do.
+/// the flat verifier establishes through the shared obligation predicate.
 pub fn check_value_lane_pin(
     method: AuthenticatedMethod,
     filter: &TypedQueryFilter,
@@ -644,8 +633,7 @@ fn presented_lane(inputs: &ProofInputs) -> Option<PresentedLane<'_>> {
     }
 }
 
-/// Report the value-lane obligation model, not yet accepting.
-/// The value-lane gate stays CLOSED even when this diagnostic succeeds.
+/// Report value-only obligation coverage without running proof verification.
 #[cfg(test)]
 pub(crate) fn value_lane_pin_report(
     manifest: &ProofManifest,

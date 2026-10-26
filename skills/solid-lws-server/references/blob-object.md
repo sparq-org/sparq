@@ -11,7 +11,9 @@ dependency, and the default server dependency graph excludes `object_store`.
 
 `file://` is for tests and development only. Its LocalFileSystem configuration
 does not fsync file data or directories, so it is not crash-durable. For durable
-local storage, use the data-directory `FsBlobStore` (`SOLID_SERVER_DATA_DIR`), pending #7229.
+local storage in library integrations, use `store::blob_fs::FsBlobStore` with
+the native `blob-fs` feature and hold the exclusive data-directory lock.
+Native server boot still selects in-memory blobs.
 
 ```rust,no_run
 use sparq_lws_core::store::blob_object::{ObjectBlobAdapter, ObjectBlobStore};
@@ -56,6 +58,7 @@ For backend authors, enable `sparq-lws-core/test-support` and call
 runs the same validated, create-only contract, including concurrent creates of
 one key. `InMemoryBlobStore::with_immutable_keys()` supplies this mode locally;
 its legacy constructors retain arbitrary-key replacement for existing fixtures.
+The `blob-fs` tests also run this suite over an isolated `FsBlobStore` directory.
 
 Run the LocalFileSystem contract and router tests with:
 

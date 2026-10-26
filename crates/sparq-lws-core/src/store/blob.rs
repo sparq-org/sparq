@@ -2,7 +2,8 @@
 //! The blob (byte) store seam.
 //!
 //! The authoritative index refers to resource bytes through opaque unique-per-write keys.
-//! The default backend is in memory; `blob_object` supplies the optional native object adapter.
+//! The default backend is in memory; the native `blob-fs` and `blob-object` features
+//! supply filesystem and object-store adapters.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -65,6 +66,13 @@ pub struct BlobEntry {
 
 /// The byte store: a key/value store of resource bodies, keyed by an opaque storage key.
 ///
+/// Callers must mint a unique key for every write and never rewrite or reuse it,
+/// even after deletion. An overwrite of a resource points its index row at a fresh
+/// key. Backends without a generation witness may therefore delete unconditionally:
+/// an obsolete key can never become the key of a later write. The filesystem
+/// backend enforces create-only publication; the in-memory test double also permits
+/// rewrites to exercise defensive generation checks.
+///
 /// Native object storage is available through the optional `blob-object` adapter.
 #[async_trait]
 pub trait BlobStore: Send + Sync {
@@ -96,6 +104,7 @@ pub trait BlobStore: Send + Sync {
     /// This compatibility snapshot may impose a size limit. Use [`BlobStore::list_stream`]
     /// for paginated backends and unbounded namespaces. The native object adapter reports
     /// backend modification times and no delete generation.
+    /// The native filesystem adapter reports file modification times and no delete generation.
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError>;
 
     /// Stream entries for reconciliation with bounded blob-listing batches. Backends with paginated listings should override

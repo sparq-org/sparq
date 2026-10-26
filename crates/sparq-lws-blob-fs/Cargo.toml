@@ -1,0 +1,13 @@
+[package]
+name = "sparq-lws-blob-fs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Filesystem storage for immutable opaque LWS blobs"
+readme = "README.md"
+publish = false
+
+[dependencies]
+sparq-lws-blob-key = { path = "../sparq-lws-blob-key" }

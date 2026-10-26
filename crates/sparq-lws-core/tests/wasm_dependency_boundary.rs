@@ -14,7 +14,7 @@ fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
             "sparq-lws-core",
             "--no-default-features",
             "--features",
-            "wasm",
+            "wasm,blob-fs,blob-object",
             "--target",
             "wasm32-unknown-unknown",
             "--edges",
@@ -48,6 +48,8 @@ fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
         "spargebra",
         "sparq-core",
         "sparq-engine",
+        "sparq-lws-blob-fs",
+        "sparq-lws-blob-object",
         "tokio v",
     ] {
         assert!(

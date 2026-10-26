@@ -135,8 +135,8 @@ pub fn is_hold_record(iri: &str) -> bool {
 }
 
 /// The mark [`crate::store::CompositeStore`] puts at the front of the blob key it mints for a
-/// service-pool record, so the blob store can tell one without being told what an IRI means. A
-/// key minted from an absolute IRI never begins with it.
+/// service-pool record, so the blob store can tell one without being told what an IRI means.
+/// It precedes the opaque `b1-` key; ordinary content keys omit the mark.
 pub const POOLED_BLOB_KEY_MARK: &str = sparq_lws_blob_key::POOL_MARK;
 
 /// Whether `key` is the blob key of a service-pool record ([`POOLED_BLOB_KEY_MARK`]).
