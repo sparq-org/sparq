@@ -219,6 +219,7 @@ structural tests/e2e.rs::entailment_rdfs_ungrounded_antecedent_rejected
 structural tests/e2e.rs::entailment_rdfs_without_steps_rejected
 structural tests/e2e.rs::entailment_simple_accepted_progresses_past_gate
 structural tests/e2e.rs::entailment_simple_with_steps_rejected
+structural tests/e2e.rs::equality_predicate_spellings_have_the_same_refusal
 structural tests/e2e.rs::missing_subproof_precedes_hidden_issuer_policy_check
 structural tests/e2e.rs::holder_binding_a_presents_b_rejected
 structural tests/e2e.rs::holder_binding_bearer_policy_required_vs_allowed

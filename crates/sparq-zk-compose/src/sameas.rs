@@ -164,8 +164,8 @@ impl CanonTable {
     /// Iteration order is deterministic (terms are visited in sorted encoding
     /// order), so the same committed edges always yield the same witness.
     pub fn from_committed_sameas(edges: &[[FieldHex; 2]]) -> Self {
-        // Adjacency over NORMALIZED encodings, plus the first-seen `FieldHex`
-        // spelling for each so the witness round-trips the manifest's form.
+        // Adjacency over canonical field keys, retaining each first-seen
+        // spelling in memory. Serialization emits canonical field hex.
         let mut adjacency: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut spelling: BTreeMap<String, FieldHex> = BTreeMap::new();
         for [a, b] in edges {

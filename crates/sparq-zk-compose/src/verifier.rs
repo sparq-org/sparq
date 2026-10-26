@@ -17734,6 +17734,41 @@ mod field_grounding_tests {
     use crate::derivation::{DerivationStep, EntailmentRule};
 
     #[test]
+    fn method_fold_commitment_spellings_share_authenticated_keys() {
+        use sparq_zk::commit::CommitmentMethod;
+        let canonical = FieldHex::from_field(&Fr::from(0xabcu64));
+        let methods = AuthenticatedMethods::from([(
+            canonical.canonical(),
+            AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1),
+        )]);
+        let hidden = BTreeSet::from([canonical.canonical()]);
+        for text in [canonical.0.as_str(), "abc", "0x000ABC", "0XAbC"] {
+            let bound = [FieldHex(text.into()), canonical.clone()];
+            assert_eq!(fold_bound_methods(
+                "scan", &bound, &methods, &BTreeSet::new(), MethodStage::BeforeHiddenIssuer,
+            ).unwrap(), SubProofMethod::One(CommitmentMethod::StringCanonicalV1));
+            assert_eq!(fold_bound_methods(
+                "scan", &bound, &methods, &hidden, MethodStage::BeforeHiddenIssuer,
+            ).unwrap(), SubProofMethod::Deferred);
+            assert_eq!(fold_bound_methods(
+                "scan", &bound, &methods, &hidden, MethodStage::AfterHiddenIssuer,
+            ).unwrap(), SubProofMethod::One(CommitmentMethod::StringCanonicalV1));
+            assert!(matches!(fold_bound_methods(
+                "scan", &bound, &AuthenticatedMethods::new(), &BTreeSet::new(),
+                MethodStage::AfterHiddenIssuer,
+            ), Err(CheckError::SubProofCommitmentNotAuthenticated { commitment, .. })
+                if commitment == canonical.canonical()));
+        }
+        for text in ["invalid", "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"] {
+            for stage in [MethodStage::BeforeHiddenIssuer, MethodStage::AfterHiddenIssuer] {
+                assert!(matches!(fold_bound_methods(
+                    "scan", &[FieldHex(text.into())], &methods, &hidden, stage,
+                ), Err(CheckError::SubProofMethodUnresolved { .. })));
+            }
+        }
+    }
+
+    #[test]
     fn derivation_field_spellings_share_grounding_keys() {
         let t = encode_iri_hex("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
         let sc = encode_iri_hex("http://www.w3.org/2000/01/rdf-schema#subClassOf").unwrap();
