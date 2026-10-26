@@ -98,12 +98,13 @@ pub enum MpcError {
     /// ([`MpcError::Protocol`]) nor a deferred stub ([`MpcError::NotYetImplemented`]):
     /// it means a party fed an inconsistent share value, so the result is
     /// REFUSED rather than silently corrupted. `cheaters` lists the evaluation
-    /// points (`Share::x`) identified as off-curve. On this abort path it is the
-    /// off-curve set of the MOST self-consistent (minimum-disagreement) reference
-    /// fit — sound (names only true cheaters) in the first abort band of `e+1`
-    /// errors, best-effort beyond it where the honest set is genuinely
-    /// unidentifiable: detection is sound, blame is heuristic. Sound, exact
-    /// attribution is available on the SUCCESS path via
+    /// points (`Share::x`) identified as off-curve. It is empty when the number
+    /// of reference subsets exceeds [`crate::robust::MAX_SUSPECT_FITS`] or its
+    /// checked computation overflows; `detail` explains the omitted attribution.
+    /// Otherwise it is the off-curve set of the minimum-disagreement reference
+    /// fit, with ties keeping the first minimum. This is best-effort and can name
+    /// honest parties even in the first abort band of `e+1` errors. The SUCCESS
+    /// path reports which shares it corrected via
     /// [`crate::robust::reconstruct_robust_attributed`]. NOTE: at exactly `t+1`
     /// shares (no redundancy) tampering is information-theoretically undetectable
     /// and this is NEVER returned there — see
