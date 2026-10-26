@@ -43,15 +43,13 @@ fn public_agent_class() -> WacScenario {
         .expect(Expect::agent(BOB).read(doc).is(Decision::Allow))
         .expect(Expect::pair(BOB, APP).read(doc).is(Decision::Allow))
         // sanity: the `PUBLIC_AGENT` constant is `foaf:Agent`.
-        .expect(
-            Expect::agent(CAROL)
-                .read(doc)
-                .is(if PUBLIC_AGENT == "http://xmlns.com/foaf/0.1/Agent" {
-                    Decision::Allow
-                } else {
-                    Decision::Deny
-                }),
-        )
+        .expect(Expect::agent(CAROL).read(doc).is(
+            if PUBLIC_AGENT == "http://xmlns.com/foaf/0.1/Agent" {
+                Decision::Allow
+            } else {
+                Decision::Deny
+            },
+        ))
 }
 
 /// WAC §"Access subjects" `acl:agentClass acl:AuthenticatedAgent`: grants any *authenticated*
@@ -59,9 +57,7 @@ fn public_agent_class() -> WacScenario {
 fn authenticated_agent_class() -> WacScenario {
     let doc = "https://pod.example/authn/d1";
     let mut acl = AclBuilder::new();
-    acl.access_to(doc, |a| {
-        a.agent_class(AUTHENTICATED_AGENT).mode(Mode::Read)
-    });
+    acl.access_to(doc, |a| a.agent_class(AUTHENTICATED_AGENT).mode(Mode::Read));
     acl.document(doc);
     WacScenario::new("agentClass-AuthenticatedAgent")
         .acl(acl)
