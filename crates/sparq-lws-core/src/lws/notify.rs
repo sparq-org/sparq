@@ -174,6 +174,7 @@ pub struct Committed {
     policies: Arc<[access::Policy]>,
     snapshot: Arc<access::Snapshot>,
     service: Option<Option<String>>,
+    withdrawn: Arc<std::collections::BTreeSet<String>>,
 }
 
 /// What a delivery for a subscription is checked against before every attempt: the subscription
@@ -478,14 +479,29 @@ pub fn covers(topic: &str, uri: &str) -> bool {
 struct Subs {
     by_id: BTreeMap<String, Subscription>,
     by_subscriber: BTreeMap<Option<String>, std::collections::BTreeSet<String>>,
+    owner: Option<String>,
+    non_owners: usize,
 }
 
 impl Subs {
+    fn new(owner: Option<String>) -> Self {
+        Self {
+            owner,
+            ..Self::default()
+        }
+    }
+
+    fn non_owner(&self, subscriber: &Option<String>) -> bool {
+        self.owner.is_none() || *subscriber != self.owner
+    }
+
     /// Hold `sub` under `id`, giving back what `id` held before.
     fn insert(&mut self, id: String, sub: Subscription) -> Option<Subscription> {
         let subscriber = sub.subscriber.clone();
+        self.non_owners += usize::from(self.non_owner(&subscriber));
         let replaced = self.by_id.insert(id.clone(), sub);
         if let Some(old) = &replaced {
+            self.non_owners -= usize::from(self.non_owner(&old.subscriber));
             self.unindex(&id, &old.subscriber);
         }
         self.by_subscriber.entry(subscriber).or_default().insert(id);
@@ -494,6 +510,7 @@ impl Subs {
 
     fn remove(&mut self, id: &str) -> Option<Subscription> {
         let gone = self.by_id.remove(id)?;
+        self.non_owners -= usize::from(self.non_owner(&gone.subscriber));
         self.unindex(id, &gone.subscriber);
         Some(gone)
     }
@@ -660,7 +677,7 @@ pub struct Notifier {
     /// Live subscriptions out of force while their removal runs ([`Notifier::remove`]): no
     /// delivery is prepared or made for one, and it is put back in force should its removal
     /// leave it stored.
-    withdrawn: RwLock<std::collections::BTreeSet<String>>,
+    withdrawn: RwLock<Arc<std::collections::BTreeSet<String>>>,
     /// The time by which subscriptions are expired, as stored.
     high_water: HighWater,
     /// Added to the clock expiry is decided by ([`Notifier::clock`]).
@@ -868,7 +885,7 @@ impl Notifier {
             .build()
             .map_err(|e| format!("notification client: {e}"))?;
         Ok(Self {
-            subs: RwLock::new(Subs::default()),
+            subs: RwLock::new(Subs::new(cfg.owner.clone())),
             streams: streams::Streams::new(),
             etag: RwLock::new(new_etag()),
             client,
@@ -1051,7 +1068,7 @@ impl Notifier {
         }
         // An expired subscription is purged; one that cannot be removed stays loaded and counted
         // (no delivery goes to it: every attempt checks expiry) until it can be.
-        let mut subs = Subs::default();
+        let mut subs = Subs::new(cfg.owner.clone());
         for (child, sub) in loaded {
             if !halted
                 && sub.expired(high_water)
@@ -1442,7 +1459,7 @@ impl Notifier {
                 // to it from here on, and it is put back should its removal leave it stored.
                 // (An expired one is out of force already.)
                 if !unlisted {
-                    me.withdrawn.write().expect("lock").insert(id.clone());
+                    Arc::make_mut(&mut me.withdrawn.write().expect("lock")).insert(id.clone());
                 }
                 Some(!unlisted)
             }
@@ -1466,7 +1483,7 @@ impl Notifier {
                     author
                 });
                 if withdrawn {
-                    me.withdrawn.write().expect("lock").remove(&id);
+                    Arc::make_mut(&mut me.withdrawn.write().expect("lock")).remove(&id);
                 }
                 author.flatten()
             }
@@ -1489,6 +1506,12 @@ impl Notifier {
         removed
     }
 
+    /// Whether any stored live subscription belongs to someone other than the owner.
+    /// The count is maintained with the subscriber indexes, so this takes fixed work.
+    pub(crate) fn has_non_owner_subscriptions(&self) -> bool {
+        self.subs.read().expect("lock").non_owners != 0
+    }
+
     /// Capture the resource state and policies already held at commit, without store calls
     /// or work per subscription or grant. A halted service commits no notification.
     pub fn commit<S: Store + 'static>(
@@ -1506,6 +1529,7 @@ impl Notifier {
             policies: state.access.grant_policies(),
             snapshot: Arc::new(snapshot),
             service: None,
+            withdrawn: self.withdrawn.read().expect("lock").clone(),
         }
     }
 
@@ -1515,10 +1539,11 @@ impl Notifier {
         state: &LwsState<S>,
         event: Event,
         author: Option<String>,
+        admission: Option<crate::overload::AdmissionSlot>,
     ) {
         let mut committed = self.commit(state, event, access::Snapshot::default());
         committed.service = Some(author);
-        self.send(state, committed);
+        self.send(state, committed, admission);
     }
 
     #[cfg(test)]
@@ -1526,7 +1551,7 @@ impl Notifier {
         let snapshot = access::Snapshot::take(state, &event.uri)
             .await
             .unwrap_or_else(|_| access::Snapshot::unreadable());
-        self.send(state, self.commit(state, event, snapshot));
+        self.send(state, self.commit(state, event, snapshot), None);
     }
 
     #[cfg(test)]
@@ -1592,13 +1617,12 @@ impl Notifier {
         } else {
             let high_water = self.high_water();
             let subs = self.subs.read().expect("lock");
-            let withdrawn = self.withdrawn.read().expect("lock");
             subs.values()
                 .filter(|s| {
                     s.in_force_from <= committed.seq
                         && hears(s)
                         && !s.expired(high_water)
-                        && !withdrawn.contains(&s.id)
+                        && !committed.withdrawn.contains(&s.id)
                 })
                 .cloned()
                 .collect()
@@ -1684,14 +1708,28 @@ impl Notifier {
     }
 
     /// Schedule selection, authorization, accounting and queueing off the writer's task.
-    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, committed: Committed) {
-        self.send_all(state, vec![committed]);
+    pub fn send<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        committed: Committed,
+        admission: Option<crate::overload::AdmissionSlot>,
+    ) {
+        self.send_all(state, vec![committed], admission);
     }
 
     /// A recursive delete uses one task and one shared room bound.
-    pub fn send_all<S: Store + 'static>(&self, state: &LwsState<S>, committed: Vec<Committed>) {
+    pub fn send_all<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        committed: Vec<Committed>,
+        admission: Option<crate::overload::AdmissionSlot>,
+    ) {
+        if committed.iter().all(|change| change.event.is_none()) {
+            return;
+        }
         let state = state.detached();
         tokio::spawn(async move {
+            let _admission = admission;
             let mut room = state.notify.limits.queue;
             let mut pending = Vec::new();
             for change in committed {
@@ -3099,7 +3137,11 @@ async fn subscribe<S: Store + 'static>(
         commit_gate(state, expires_at),
     );
     if let Err(refused) = created.await {
-        if refused.status() == StatusCode::INSUFFICIENT_STORAGE {
+        if refused
+            .extensions()
+            .get::<super::records::PoolFull>()
+            .is_some()
+        {
             return super::QuotaFull::Total.response(what);
         }
         return refused;
@@ -6414,6 +6456,7 @@ mod tests {
         )
         .await;
         assert_eq!(created.status(), StatusCode::CREATED);
+        run_ready().await;
         let f = format!("{root}f");
         // `a` hears of `f` and of its linkset, `b` of everything: with room for one delivery,
         // a Delete of `f` prepares `a`'s first, drops `a`'s second (owed) and leaves `b` out.
@@ -6450,6 +6493,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(state.store.exists(&f).await.unwrap());
+        run_ready().await;
         assert_eq!(
             state.notify.prepared_for.load(Ordering::SeqCst),
             0,

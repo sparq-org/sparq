@@ -11,7 +11,7 @@ async fn quota_refusals_are_indistinguishable() {
     let (state, _) = test_store::state(1000).await;
     let body = subscription_body(&state, &state.cfg.storage());
     let x = "https://x.example/";
-    for i in 0..MAX_SUBSCRIPTIONS {
+    for i in 0..16 {
         let mut sub = sub_until(i64::MAX);
         sub.id = format!("s{i:04}");
         sub.subscriber = Some(if i < 16 {
@@ -27,6 +27,17 @@ async fn quota_refusals_are_indistinguishable() {
             .insert(sub.id.clone(), sub);
     }
     let own = response_bytes(call(&state, "POST", SUBSCRIPTIONS_PATH, Some(x), &body).await).await;
+    for i in 16..MAX_SUBSCRIPTIONS {
+        let mut sub = sub_until(i64::MAX);
+        sub.id = format!("s{i:04}");
+        sub.subscriber = Some(format!("https://p{i}.example/"));
+        state
+            .notify
+            .subs
+            .write()
+            .unwrap()
+            .insert(sub.id.clone(), sub);
+    }
     let full = response_bytes(
         call(
             &state,
@@ -322,9 +333,9 @@ fn grant_body<S: Store>(state: &LwsState<S>) -> String {
 
 #[tokio::test]
 async fn automatic_cancellations_use_the_subscriber_s_settlement_places() {
-    let (state, store) = test_store::state(100).await;
+    let (state, store) = test_store::closed_state(100).await;
     let topic = test_store::data(&state, "r").await;
-    let x = "https://x.example/";
+    let x = test_store::OWNER;
     let body = subscription_body(&state, &topic);
     for _ in 0..crate::lws::records::MAX_SETTLING_PER_PRINCIPAL {
         assert_eq!(
@@ -341,7 +352,9 @@ async fn automatic_cancellations_use_the_subscriber_s_settlement_places() {
     // and the real completion path cancels the subscriptions and reserves their places.
     *state.notify.delivery_status.lock().unwrap() = Some(StatusCode::GONE);
     assert_eq!(
-        call(&state, "PUT", "/r", None, "changed").await.status(),
+        call(&state, "PUT", "/r", Some(test_store::OWNER), "changed")
+            .await
+            .status(),
         StatusCode::NO_CONTENT
     );
     store.fail_delete.store(true, Ordering::SeqCst);
@@ -355,12 +368,18 @@ async fn automatic_cancellations_use_the_subscriber_s_settlement_places() {
     })
     .await
     .expect("automatic cancellations did not enter settlement");
-    // An anonymous request reaches the failing store; the subscriber is at its own place bound.
+    // Another subject reaches the failing store; the subscriber is at its own place bound.
     let grant = grant_body(&state);
     assert_eq!(
-        call(&state, "POST", crate::lws::GRANTS_PATH, None, &grant)
-            .await
-            .status(),
+        call(
+            &state,
+            "POST",
+            crate::lws::REQUESTS_PATH,
+            Some("https://y.example/"),
+            &grant.replace("AccessGrant", "AccessRequest")
+        )
+        .await
+        .status(),
         StatusCode::INTERNAL_SERVER_ERROR
     );
     assert_eq!(
@@ -376,7 +395,7 @@ async fn automatic_cancellations_use_the_subscriber_s_settlement_places() {
 
 #[tokio::test]
 async fn quarantined_deletions_use_the_requesting_principal_s_places() {
-    let (state, store) = test_store::state(100).await;
+    let (state, store) = test_store::closed_state(100).await;
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
     store
         .create_in_container(
@@ -392,7 +411,7 @@ async fn quarantined_deletions_use_the_requesting_principal_s_places() {
         .load_with(&state.store, &state.cfg, |_| true)
         .await
         .unwrap();
-    let y = "https://y.example/";
+    let y = test_store::OWNER;
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
     *store.unsettle_creates.lock().unwrap() = Some(gate.clone());
     store.fail_fence.store(true, Ordering::SeqCst);
@@ -410,15 +429,20 @@ async fn quarantined_deletions_use_the_requesting_principal_s_places() {
         call(&state, "DELETE", &path, Some(y), "").await.status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
-    assert_eq!(
-        call(&state, "DELETE", &path, Some("https://x.example/"), "")
-            .await
-            .status(),
-        StatusCode::NO_CONTENT
-    );
     *store.unsettle_creates.lock().unwrap() = None;
     store.fail_fence.store(false, Ordering::SeqCst);
     gate.add_permits(crate::lws::records::MAX_SETTLING_PER_PRINCIPAL);
+    tokio::time::timeout(crate::lws::records::LOCK_WAIT * 4, async {
+        while state.settlements.pending() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        call(&state, "DELETE", &path, Some(y), "").await.status(),
+        StatusCode::NO_CONTENT
+    );
 }
 
 #[tokio::test]
@@ -436,7 +460,7 @@ async fn content_only_patch_reuses_authorization_metadata() {
         cfg.open = mode == "open";
         let state = LwsState::new(store.clone(), cfg).await.unwrap();
         let topic = test_store::data(&state, "r").await;
-        let writer = if mode == "owner" {
+        let writer = if mode.starts_with("owner") {
             test_store::OWNER
         } else {
             "https://writer.example/"
@@ -465,7 +489,9 @@ async fn content_only_patch_reuses_authorization_metadata() {
         for i in 0..n {
             let mut sub = sub_until(i64::MAX);
             sub.id = format!("s{i:04}");
-            sub.subscriber = Some(if denied {
+            sub.subscriber = Some(if mode == "owner_only" {
+                test_store::OWNER.into()
+            } else if denied {
                 format!("https://p{i}.example/")
             } else {
                 "https://reader.example/".into()
@@ -477,6 +503,13 @@ async fn content_only_patch_reuses_authorization_metadata() {
                 .write()
                 .unwrap()
                 .insert(sub.id.clone(), sub);
+        }
+        if mode == "owner_removed" {
+            let mut subs = state.notify.subs.write().unwrap();
+            let ids: Vec<_> = subs.keys().cloned().collect();
+            for id in ids {
+                subs.remove(&id);
+            }
         }
         *state.notify.selection_gate.lock().unwrap() =
             Some(Arc::new(tokio::sync::Semaphore::new(0)));
@@ -514,7 +547,8 @@ async fn content_only_patch_reuses_authorization_metadata() {
             meta_reads,
             match mode {
                 "open" => 0,
-                "owner" => 1,
+                "owner" => usize::from(n != 0),
+                "owner_only" | "owner_removed" => 0,
                 _ => 4,
             },
             "PATCH must not duplicate its authorization metadata read: {trace:?}"
@@ -525,9 +559,357 @@ async fn content_only_patch_reuses_authorization_metadata() {
         );
         (counts, trace)
     }
-    for mode in ["creator", "owner", "open"] {
+    for mode in ["creator", "owner", "owner_only", "owner_removed", "open"] {
         let empty = work(0, false, mode).await;
-        assert_eq!(empty, work(500, false, mode).await);
-        assert_eq!(empty, work(500, true, mode).await);
+        let populated = work(500, false, mode).await;
+        let unreadable = work(500, true, mode).await;
+        assert_eq!(populated, unreadable);
+        if mode != "owner" {
+            assert_eq!(empty, populated);
+        } else {
+            // Owner authorization reads no metadata. The O(1) non-owner check adds exactly
+            // the one snapshot read only when another reader could hear this capture.
+            assert_eq!(
+                populated
+                    .1
+                    .iter()
+                    .filter(|line| line.starts_with("read "))
+                    .count(),
+                empty
+                    .1
+                    .iter()
+                    .filter(|line| line.starts_with("read "))
+                    .count()
+                    + 1
+            );
+        }
     }
+}
+
+#[tokio::test]
+async fn selection_keeps_the_request_s_admission_slot() {
+    use tower::ServiceExt;
+    const BOUND: usize = 4;
+    for method in ["PUT", "POST", "DELETE", "GRANT", "SUBSCRIBE", "REVOKE"] {
+        let (state, _) = test_store::state(100).await;
+        let topic = test_store::data(&state, "r").await;
+        for i in 0..BOUND {
+            test_store::data(&state, &format!("d{i}")).await;
+        }
+        let mut revocations = Vec::new();
+        if method == "REVOKE" {
+            for _ in 0..BOUND {
+                let response = call(
+                    &state,
+                    "POST",
+                    crate::lws::GRANTS_PATH,
+                    None,
+                    &grant_body(&state),
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::CREATED);
+                revocations.push(
+                    response.headers()[header::LOCATION]
+                        .to_str()
+                        .unwrap()
+                        .strip_prefix(&state.cfg.base_url)
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+        }
+        for i in 0..1024 {
+            let mut sub = sub_until(i64::MAX);
+            sub.id = format!("s{i:04}");
+            sub.topics = vec![topic.clone()];
+            sub.subscriber = Some(format!("https://p{i}.example/"));
+            state
+                .notify
+                .subs
+                .write()
+                .unwrap()
+                .insert(sub.id.clone(), sub);
+        }
+        // Inject only the transport result; the full selection and queueing still run.
+        *state.notify.delivery_status.lock().unwrap() = Some(StatusCode::NO_CONTENT);
+        // Subscription creates need room in the existing quota while exercising selection.
+        if method == "SUBSCRIBE" {
+            let mut subs = state.notify.subs.write().unwrap();
+            let ids: Vec<_> = subs.keys().cloned().collect();
+            for id in ids {
+                subs.remove(&id);
+            }
+        }
+        run_ready().await;
+        let before = state.notify.selected.load(Ordering::SeqCst);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *state.notify.selection_gate.lock().unwrap() = Some(gate.clone());
+        let app = crate::app::with_overload_layers(
+            axum::Router::new()
+                .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+                .with_state(state.clone()),
+            crate::app::OverloadConfig::new(BOUND, None),
+        );
+        for i in 0..BOUND * 2 {
+            let (verb, path, body, expected) = match method {
+                "POST" => ("POST", "/".to_string(), "new".into(), StatusCode::CREATED),
+                "DELETE" => (
+                    "DELETE",
+                    format!("/d{}", i % BOUND),
+                    String::new(),
+                    StatusCode::NO_CONTENT,
+                ),
+                "REVOKE" => (
+                    "DELETE",
+                    revocations[i % BOUND].clone(),
+                    String::new(),
+                    StatusCode::NO_CONTENT,
+                ),
+                "GRANT" => (
+                    "POST",
+                    crate::lws::GRANTS_PATH.into(),
+                    grant_body(&state),
+                    StatusCode::CREATED,
+                ),
+                "SUBSCRIBE" => (
+                    "POST",
+                    SUBSCRIPTIONS_PATH.into(),
+                    subscription_body(&state, &topic),
+                    StatusCode::CREATED,
+                ),
+                _ => ("PUT", "/r".into(), "changed".into(), StatusCode::NO_CONTENT),
+            };
+            let request = axum::http::Request::builder()
+                .method(verb)
+                .uri(path)
+                .header("content-type", LWS_JSON)
+                .header("slug", format!("c{i}"))
+                .body(axum::body::Body::from(body))
+                .unwrap();
+            let response =
+                tokio::time::timeout(crate::lws::records::LOCK_WAIT, app.clone().oneshot(request))
+                    .await
+                    .expect("response waited on selection")
+                    .unwrap();
+            if i < BOUND {
+                assert_eq!(response.status(), expected, "{method} write {i}");
+            } else {
+                assert_eq!(
+                    response.status(),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "{method}: selection escaped admission"
+                );
+                assert!(response.headers().contains_key(header::RETRY_AFTER));
+            }
+        }
+        assert_eq!(state.notify.selected.load(Ordering::SeqCst), before);
+        gate.add_permits(BOUND);
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+            while state.notify.selected.load(Ordering::SeqCst) < before + BOUND {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/r")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{method}: admission was not released"
+        );
+    }
+}
+
+#[tokio::test]
+async fn withdrawn_state_is_captured_at_commit() {
+    use futures_util::FutureExt;
+    use http_body_util::BodyExt;
+    for withdrawn_at_commit in [true, false] {
+        let (state, _) = test_store::state(100).await;
+        let topic = test_store::data(&state, "r").await;
+        let response = call(
+            &state,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://reader.example/"),
+            &json!({"type": streams::SSE, "topic": [&topic]}).to_string(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let doc = test_store::body_json(response).await;
+        let id = doc["id"]
+            .as_str()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_string();
+        let mut received = stream(&state, &doc).await;
+        run_ready().await;
+        let selected = state.notify.selected.load(Ordering::SeqCst);
+        let prepared = state.notify.prepared_for.load(Ordering::SeqCst);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *state.notify.selection_gate.lock().unwrap() = Some(gate.clone());
+        if withdrawn_at_commit {
+            Arc::make_mut(&mut state.notify.withdrawn.write().unwrap()).insert(id.clone());
+        }
+        assert_eq!(
+            call(&state, "PUT", "/r", None, "changed").await.status(),
+            StatusCode::NO_CONTENT
+        );
+        if withdrawn_at_commit {
+            Arc::make_mut(&mut state.notify.withdrawn.write().unwrap()).remove(&id);
+        } else {
+            Arc::make_mut(&mut state.notify.withdrawn.write().unwrap()).insert(id.clone());
+        }
+        gate.add_permits(1);
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+            while state.notify.selected.load(Ordering::SeqCst) == selected {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            state.notify.prepared_for.load(Ordering::SeqCst) - prepared,
+            usize::from(!withdrawn_at_commit),
+            "selection used withdrawal state after capture"
+        );
+        // Delivery still checks current withdrawal, even when initial selection included it.
+        assert!(received.frame().now_or_never().is_none());
+    }
+}
+
+#[tokio::test]
+async fn only_the_pool_signal_becomes_a_subscription_quota_refusal() {
+    let (state, store) = test_store::state(100).await;
+    let body = subscription_body(&state, &state.cfg.storage());
+    *store.refuse_creates.lock().unwrap() = Some(false);
+    assert_eq!(
+        call(
+            &state,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://x.example/"),
+            &body
+        )
+        .await
+        .status(),
+        StatusCode::INSUFFICIENT_STORAGE
+    );
+    *store.refuse_creates.lock().unwrap() = Some(true);
+    let pool = response_bytes(
+        call(
+            &state,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://x.example/"),
+            &body,
+        )
+        .await,
+    )
+    .await;
+    *store.refuse_creates.lock().unwrap() = None;
+    for _ in 0..MAX_SUBSCRIPTIONS_PER_SUBSCRIBER {
+        assert_eq!(
+            call(
+                &state,
+                "POST",
+                SUBSCRIPTIONS_PATH,
+                Some("https://x.example/"),
+                &body
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+    let quota = response_bytes(
+        call(
+            &state,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://x.example/"),
+            &body,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(pool, quota);
+    // A real in-memory pool refusal carries precisely the same bytes.
+    let mut cfg = LwsConfig::new("http://localhost:3000");
+    cfg.open = true;
+    cfg.allow_insecure_fetch = true;
+    let limits = crate::store::InMemoryStoreLimits::new(16 << 20, 64).with_pool(1, 16 << 20);
+    let limited = LwsState::new(test_store::FlakyStore::with_limits(limits), cfg.clone())
+        .await
+        .unwrap();
+    let real = response_bytes(
+        call(
+            &limited,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://x.example/"),
+            &body,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(real, quota);
+    // Keep the blob pool roomy so the index's own pool signal is exercised independently.
+    let indexed = LwsState::new(
+        crate::store::CompositeStore::new(
+            crate::store::InMemorySparqClient::with_limits(limits),
+            crate::store::InMemoryBlobStore::new(),
+        ),
+        cfg,
+    )
+    .await
+    .unwrap();
+    let index_full = response_bytes(
+        call(
+            &indexed,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://x.example/"),
+            &body,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(index_full, quota);
+}
+
+#[tokio::test]
+async fn anonymous_subscription_creates_keep_their_existing_quota_in_open_mode() {
+    let (state, _) = test_store::state(100).await;
+    let body = subscription_body(&state, &state.cfg.storage());
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..64 {
+        let (state, body) = (state.clone(), body.clone());
+        tasks.spawn(async move {
+            call(&state, "POST", SUBSCRIPTIONS_PATH, None, &body)
+                .await
+                .status()
+        });
+    }
+    let mut created = 0;
+    let mut quota_full = 0;
+    while let Some(result) = tasks.join_next().await {
+        match result.unwrap() {
+            StatusCode::CREATED => created += 1,
+            StatusCode::TOO_MANY_REQUESTS => quota_full += 1,
+            status => panic!("unexpected anonymous create refusal: {status}"),
+        }
+    }
+    assert_eq!(created, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
+    assert_eq!(quota_full, 64 - MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
 }

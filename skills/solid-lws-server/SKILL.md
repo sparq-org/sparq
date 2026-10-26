@@ -397,7 +397,9 @@ the store's service pool returns that same answer. Every subscriber has its own 
 full; quarantined or held-back subscriptions count only against the owner's total, and
 quarantined access requests take no place from live requests or their authors.
 Admission bounds are 512 live access requests and 512 non-owner subscriptions, with 512
-owner subscriptions counted separately.
+owner subscriptions counted separately. Held-back and quarantined subscriptions count only
+against the owner's share: stored non-owner subscriptions can exceed the 512 total by the
+number of those retained records. Quarantined access requests consume no live request place.
 
 **Subscriptions have storage of their own.** In the in-memory store they are admitted against a
 service pool (`in_service_pool`, `InMemoryStoreLimits::max_pool_resource_count` and
@@ -694,12 +696,18 @@ What the server exposes, all discoverable from the storage description
   being settled nor holds up other creates. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
-  way. At most 256 record changes are in progress or being settled at once, and at most 16
-  belong to one principal, identified by its subject (all anonymous requests are one principal).
+  way. At most 256 record changes are in progress or being settled at once. In closed mode,
+  at most 16 unknown outcomes are being settled for one principal, identified by its subject
+  (anonymous requests share one principal). Ordinary writes and lock waits consume only a
+  shared place; the principal place starts at an unknown answer and lasts until its outcome is
+  known. A confirmed create waiting for its registration lock retains only the shared place.
+  Open mode skips the principal ceiling. If already-running changes fail together, they keep
+  their shared places, locks and admission while waiting for a principal settlement place;
+  new changes by a principal at its unsettled ceiling are refused.
   Client changes use the requesting subject, including deletion of a quarantined record;
   automatic cancellation after a failed delivery uses the subscriber's subject.
-  Both bounds answer the same `503` with `Retry-After`. A place releases both counts when the
-  change settles or is dropped. The expiry sweeper keeps its separate maintenance places.
+  Both bounds answer the same `503` with `Retry-After`. Dropping a place releases every
+  permit it holds. The expiry sweeper keeps its separate maintenance places.
   Residual: the shared places can be filled by multiple principals, so a caller under its own
   bound can still receive that same refusal. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
@@ -804,16 +812,25 @@ What the server exposes, all discoverable from the storage description
   1,024). Each decision uses the commit snapshot and grant policies shared by that change.
   `Snapshot::from_parts(meta, format)` constructs that snapshot from state the change already
   holds, and `AccessStore::grant_policies()` returns a shared `Arc<[Policy]>`, rebuilt when a
-  grant changes. Subscriptions registered after the commit are excluded; expired or withdrawn
-  subscriptions are excluded during selection. Selection, authorization, accounting, queue
+  grant changes. Subscriptions registered after capture are excluded. The withdrawn set is
+  also captured through an Arc snapshot: a subscription withdrawn at capture stays excluded
+  even if restored before selection; one withdrawn later remains eligible for initial selection.
+  Selection excludes subscriptions expired by the high water, and delivery still checks current
+  withdrawal and access. Selection, authorization, accounting, queue
   admission and delivery run on the notification task (`Notifier::send`). A recursive delete
   passes its committed changes to one task with one shared delivery bound. The response never
-  awaits that task. Scheduling may still run it before the response reaches the client.
+  awaits that task. The task retains the request's admission slot through queueing, so selection
+  remains within the concurrency ceiling after the response. Scheduling may still run it before
+  the response reaches the client.
   Pending notifications retain their order within one batch. Separate commits use independent
   tasks and have no cross-commit delivery-order guarantee; stream cursors follow publication
   order. Content-only PATCH reuses the metadata read by its locked Read authorization check;
-  open mode needs no LWS metadata lookup because every subscriber may read. A closed-mode owner
-  check supplies no metadata and retains one snapshot read before writing for other readers.
+  open mode needs no LWS metadata lookup because every subscriber may read. Closed-mode owner
+  writes read a snapshot only when the notifier holds a non-owner subscription, checked through
+  an indexed count. With no subscriptions or only owner subscriptions they read no LWS metadata.
+  In-memory blob/index ceilings emit `BlobError::ServicePoolFull` or `SparqError::ServicePoolFull`;
+  record creates preserve them as `ServerError::ServicePoolFull`. That typed signal maps to a
+  quota `429` for subscriptions and access requests; general `InsufficientStorage` refusals retain `507`.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`

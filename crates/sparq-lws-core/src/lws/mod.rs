@@ -3091,6 +3091,11 @@ pub(crate) mod test_store {
         /// backend. The create is already sent: dropping the call does not stop it, and it
         /// commits once the gate opens.
         pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// Hold ordinary create replies, without making their outcome unknown.
+        pub hold_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        pub creates_waiting: Arc<std::sync::atomic::AtomicUsize>,
+        /// Refuse a create as a generic storage ceiling or the typed service pool ceiling.
+        pub refuse_creates: Arc<std::sync::Mutex<Option<bool>>>,
         /// As `hold_next_create`, for the next `write` of the IRI named.
         pub hold_next_write_of: GateOf,
         /// The next `read` of the IRI named reads it, then waits on the gate before it answers.
@@ -3225,6 +3230,9 @@ pub(crate) mod test_store {
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
+                hold_creates: Default::default(),
+                creates_waiting: Default::default(),
+                refuse_creates: Default::default(),
                 hold_next_write_of: Default::default(),
                 hold_next_read_reply_of: Default::default(),
                 hold_next_delete_of: Default::default(),
@@ -3503,6 +3511,20 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
+            if let Some(pool) = *self.refuse_creates.lock().unwrap() {
+                return Err(if pool {
+                    ServerError::ServicePoolFull
+                } else {
+                    ServerError::InsufficientStorage
+                });
+            }
+            let ordinary_gate = self.hold_creates.lock().unwrap().clone();
+            if let Some(gate) = ordinary_gate {
+                self.creates_waiting.fetch_add(1, Ordering::SeqCst);
+                gate.acquire().await.expect("gate").forget();
+                self.creates_waiting.fetch_sub(1, Ordering::SeqCst);
+            }
+
             let gate = if container.starts_with(super::intents::PREFIX) {
                 self.unsettle_next_intent.lock().unwrap().take()
             } else {

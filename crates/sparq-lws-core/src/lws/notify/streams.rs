@@ -535,12 +535,7 @@ async fn readable<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription) -
 async fn deactivate<S: Store + 'static>(state: &LwsState<S>, id: &str) {
     // Close first: a slow durable removal may not extend the revocation deadline. Withdrawing also
     // revokes the capability when removal has to be retried on a later request/restart.
-    state
-        .notify
-        .withdrawn
-        .write()
-        .expect("lock")
-        .insert(id.into());
+    Arc::make_mut(&mut state.notify.withdrawn.write().expect("lock")).insert(id.into());
     state.notify.streams.remove(id);
     let _ = state
         .notify

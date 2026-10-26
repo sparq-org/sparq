@@ -36,7 +36,7 @@ pub(crate) async fn delete_record<S: Store>(
     container: &str,
     within: Option<std::time::Duration>,
 ) -> Result<(), crate::error::ServerError> {
-    match delete_record_by(store, iri, container, within).await {
+    match delete_record_by(store, iri, container, within, None).await {
         Ok(()) => Ok(()),
         Err(Undeleted::Unfenced { fence, detail, .. }) => {
             Err(crate::error::ServerError::Unsettled { fence, detail })
@@ -68,13 +68,16 @@ async fn delete_record_by<S: Store>(
     iri: &str,
     container: &str,
     within: Option<std::time::Duration>,
+    mut place: Option<&mut SettlementPlace>,
 ) -> Result<(), Undeleted> {
     match remove_member(store, iri, Some(container)).await {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
         Err(crate::error::ServerError::Unsettled { fence, detail }) => {
-            // Counted from the store's answer: an unsettled answer comes once the call has
-            // timed out, and the fence is given the whole wait after it.
+            // Count from the store's answer, including any wait for a principal place.
             let deadline = within.map(deadline_after);
+            if let Some(place) = place.as_mut() {
+                place.unsettled().await;
+            }
             if !fenced_by(store, &fence, deadline).await {
                 return Err(Undeleted::Unfenced { fence, detail });
             }
@@ -92,6 +95,9 @@ async fn delete_record_by<S: Store>(
         Err(e) => match store.exists(iri).await {
             Ok(false) => Ok(()),
             Err(_) if matches!(e, crate::error::ServerError::Storage(_)) => {
+                if let Some(place) = place.as_mut() {
+                    place.unsettled().await;
+                }
                 Err(Undeleted::Unread(e))
             }
             _ => Err(Undeleted::Failed(e)),
@@ -257,19 +263,27 @@ where
     let principal = author.clone();
     let register = {
         let (container, iri) = (container.to_string(), iri.to_string());
-        move |state: &LwsState<S>| {
+        move |state: &LwsState<S>, admission| {
             register(state);
-            announce_record(state, "Create", &iri, &container, author);
+            announce_record(state, "Create", &iri, &container, author, admission);
         }
     };
     use crate::error::ServerError;
-    // A store with no room for the record is the same answer the record capacities give when
-    // they are full, and is told the same way: `507`, the storage is full, not `500`.
+    // Preserve general storage refusals as 507. Only the typed pool signal is marked for
+    // subscription and access-request routes to turn into their ordinary quota response.
     let failed = |e: ServerError| match e {
         ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
+        ServerError::ServicePoolFull => {
+            let mut response = problem(StatusCode::INSUFFICIENT_STORAGE, None);
+            response.extensions_mut().insert(PoolFull);
+            response
+        }
         e => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string())),
     };
-    let Some(place) = state.settlements.reserve(principal.as_deref()) else {
+    let Some(mut place) = state
+        .settlements
+        .reserve_change(principal.as_deref(), state.cfg.open)
+    else {
         return Err(settlements_full());
     };
     let held = match held {
@@ -303,7 +317,7 @@ where
             .create_in_container(&container, &iri, body, LWS_JSON)
             .await;
         let Err(e) = written else {
-            register(&state);
+            register(&state, _admission.clone());
             drop(gate);
             return Ok(());
         };
@@ -315,13 +329,17 @@ where
             ServerError::Unsettled { fence, .. } => Some(fence.clone()),
             _ => None,
         };
+        if unsettled.is_some() {
+            place.unsettled().await;
+        }
         match still_listed(&state.store, &iri, &container).await {
             Ok(true) => {
-                register(&state);
+                register(&state, _admission.clone());
                 Ok(())
             }
             Ok(false) if unsettled.is_none() => Err(e),
             Ok(false) | Err(_) => {
+                place.unsettled().await;
                 // Settled by a task the state owns, holding the record's own lock (a
                 // revocation of it waits), the quota place (`register` holds it), the lock of
                 // the narrowest listing that shows it, shared, and this change's place among
@@ -344,13 +362,18 @@ where
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {
-                    let _held = (own, place, own_listing);
+                    let _held = (own, own_listing);
                     if let Some(fence) = unsettled {
                         fence_in_background(&store, &fence).await;
                     }
-                    if !until_done(|| still_listed(&store, &iri, &container)).await {
+                    let stored = until_done(|| still_listed(&store, &iri, &container)).await;
+                    // The outcome is known. A wait to register it consumes only the shared
+                    // change place, just as any other ordinary lock wait does.
+                    place.settled();
+                    if !stored {
                         return;
                     }
+                    let _place = place;
                     // Registered under the container's lock, shared (taken after the record's,
                     // as a revocation takes them, unless still held), so no conditional create
                     // sees the listing change between its check and its own registration. This
@@ -362,7 +385,7 @@ where
                         ),
                     };
                     if let Some(state) = weak.upgrade() {
-                        register(&state);
+                        register(&state, None);
                     }
                 });
                 Err(ServerError::Storage(
@@ -584,10 +607,12 @@ where
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
     let place = match &by {
-        Remover::Request(principal) => state.settlements.reserve(principal.as_deref()),
+        Remover::Request(principal) => state
+            .settlements
+            .reserve_change(principal.as_deref(), state.cfg.open),
         Remover::Sweeper => state.settlements.reserve_maintenance(),
     };
-    let Some(place) = place else {
+    let Some(mut place) = place else {
         return Err(settlements_full());
     };
     let own_listing = match listed {
@@ -613,7 +638,14 @@ where
         let mut refused = false;
         // The fence budget starts at the store's answer. Once spent, settlement continues
         // in the background; no second attempt is made against an expired deadline.
-        let pending = match delete_record_by(&state.store, &iri, &container, Some(LOCK_WAIT)).await
+        let pending = match delete_record_by(
+            &state.store,
+            &iri,
+            &container,
+            Some(LOCK_WAIT),
+            Some(&mut place),
+        )
+        .await
         {
             Ok(()) => Ok(Some(true)),
             Err(Undeleted::Unfenced { fence, .. }) => Err(Some(fence)),
@@ -645,6 +677,7 @@ where
             }
             // `fence` is the delete's, when it has not succeeded yet.
             Err(fence) => {
+                place.unsettled().await;
                 // Settled by a task the state owns, holding the record's own lock, its own
                 // listing's, the container's (shared) and this change's place among those being
                 // settled, with the record out of force until then: the container's lock is
@@ -665,7 +698,7 @@ where
                     let author = settle(&state, !listed, held);
                     drop((own, listing));
                     if !listed {
-                        announce_record(&state, "Delete", &iri, &container, author);
+                        announce_record(&state, "Delete", &iri, &container, author, None);
                     }
                 });
                 return Err((
@@ -681,7 +714,14 @@ where
         drop((own, listing, place, own_listing));
         match gone {
             Some(true) => {
-                announce_record(&state, "Delete", &iri, &container, author);
+                announce_record(
+                    &state,
+                    "Delete",
+                    &iri,
+                    &container,
+                    author,
+                    _admission.clone(),
+                );
                 Ok(Removed::Gone)
             }
             Some(false) if refused => Err((
@@ -743,7 +783,8 @@ pub(crate) enum Remover {
 /// store that keeps failing cannot pile up settlement tasks, and the records and locks they hold.
 pub(crate) const MAX_SETTLING: usize = 256;
 
-/// Most record changes one subject (including the anonymous principal) may be settling.
+/// Most unknown outcomes one subject may be settling in closed mode. Anonymous requests
+/// share one principal; open mode skips this ceiling.
 pub(crate) const MAX_SETTLING_PER_PRINCIPAL: usize = 16;
 
 /// How many of the expiry sweeper's removals may be in progress or being settled at once, in
@@ -768,23 +809,47 @@ pub(crate) struct Settlements {
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
 }
 
-type PrincipalCounts = Arc<std::sync::Mutex<std::collections::HashMap<Option<String>, usize>>>;
+type PrincipalCounts =
+    Arc<std::sync::Mutex<std::collections::HashMap<Option<String>, Arc<tokio::sync::Semaphore>>>>;
 
-/// Releases both the shared place and its principal's count on every exit path.
+/// Holds a shared change place; its principal permit is taken only for an unknown outcome.
 pub(crate) struct SettlementPlace {
     _place: tokio::sync::OwnedSemaphorePermit,
-    principal: Option<(PrincipalCounts, Option<String>)>,
+    principal: Option<(PrincipalCounts, Option<String>, Arc<tokio::sync::Semaphore>)>,
+    settling: Option<tokio::sync::OwnedSemaphorePermit>,
+}
+
+impl SettlementPlace {
+    fn settled(&mut self) {
+        drop(self.settling.take());
+    }
+
+    async fn unsettled(&mut self) {
+        if self.settling.is_none() {
+            if let Some((_, _, places)) = &self.principal {
+                // Already-running changes can fail together. Until one of the principal's
+                // settlement places is free, this change keeps its shared place, locks and
+                // admission on its existing task; it starts no extra settlement task.
+                self.settling = Some(
+                    places
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("open semaphore"),
+                );
+            }
+        }
+    }
 }
 
 impl Drop for SettlementPlace {
     fn drop(&mut self) {
-        if let Some((counts, principal)) = &self.principal {
+        drop(self.settling.take());
+        if let Some((counts, principal, places)) = &self.principal {
             let mut counts = counts.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(count) = counts.get_mut(principal) {
-                *count -= 1;
-                if *count == 0 {
-                    counts.remove(principal);
-                }
+            // Only the map and this change still refer to the principal's semaphore.
+            if Arc::strong_count(places) == 2 {
+                counts.remove(principal);
             }
         }
     }
@@ -814,6 +879,7 @@ impl Settlements {
         Some(SettlementPlace {
             _place: self.maintenance.clone().try_acquire_owned().ok()?,
             principal: None,
+            settling: None,
         })
     }
 
@@ -823,19 +889,42 @@ impl Settlements {
         self.maintenance.available_permits()
     }
 
-    /// A place for one record change, held until it is settled: `None` when there is none
-    /// (answered with [`settlements_full`]).
+    /// Open mode has only the shared change ceiling; it has no principal settlement limit.
+    pub(crate) fn reserve_change(
+        &self,
+        principal: Option<&str>,
+        open: bool,
+    ) -> Option<SettlementPlace> {
+        if open {
+            return Some(SettlementPlace {
+                _place: self.places.clone().try_acquire_owned().ok()?,
+                principal: None,
+                settling: None,
+            });
+        }
+        self.reserve(principal)
+    }
+
+    /// Reserve a shared place for the whole change. Refuse a principal already at its
+    /// unsettled ceiling, but do not charge ordinary writes or lock waits to that ceiling.
     pub(crate) fn reserve(&self, principal: Option<&str>) -> Option<SettlementPlace> {
         let mut counts = self.principals.lock().unwrap_or_else(|e| e.into_inner());
         let principal = principal.map(str::to_string);
-        if counts.get(&principal).copied().unwrap_or(0) >= MAX_SETTLING_PER_PRINCIPAL {
+        if counts
+            .get(&principal)
+            .is_some_and(|places| places.available_permits() == 0)
+        {
             return None;
         }
         let place = self.places.clone().try_acquire_owned().ok()?;
-        *counts.entry(principal.clone()).or_default() += 1;
+        let places = counts
+            .entry(principal.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(MAX_SETTLING_PER_PRINCIPAL)))
+            .clone();
         Some(SettlementPlace {
             _place: place,
-            principal: Some((self.principals.clone(), principal)),
+            principal: Some((self.principals.clone(), principal, places)),
+            settling: None,
         })
     }
 
@@ -855,6 +944,10 @@ impl Settlements {
     }
 }
 
+/// Private response marker retaining the store's typed pool refusal through create_record.
+#[derive(Clone)]
+pub(crate) struct PoolFull;
+
 /// The answer to a record change when [`Settlements`] has no place for it.
 fn settlements_full() -> Response {
     resources::retry_later("too many changes to records are still being settled")
@@ -870,6 +963,7 @@ pub(crate) fn announce_record<S: Store + 'static>(
     iri: &str,
     container: &str,
     author: Option<String>,
+    admission: Option<crate::overload::AdmissionSlot>,
 ) {
     let relation = if kind == "Create" { "target" } else { "origin" };
     let event = super::notify::Event {
@@ -878,7 +972,9 @@ pub(crate) fn announce_record<S: Store + 'static>(
         is_container: false,
         relation: Some((relation, container.to_string())),
     };
-    state.notify.announce_service(state, event, author);
+    state
+        .notify
+        .announce_service(state, event, author, admission);
 }
 
 #[cfg(test)]
@@ -1164,7 +1260,7 @@ mod tests {
             }
             places.len()
         };
-        assert_eq!(free_places(), MAX_SETTLING_PER_PRINCIPAL - 1);
+        assert_eq!(free_places(), MAX_SETTLING - 1);
         store.hang_fence.store(false, Ordering::SeqCst);
         tokio::time::timeout(LOCK_WAIT * 40, async {
             while state.settlements.pending() != 0 {
@@ -1175,7 +1271,7 @@ mod tests {
         .expect("settlement did not finish after the fence recovered");
         assert!(registered.load(Ordering::SeqCst));
         assert!(state.locks.try_lock(&iri).is_some());
-        assert_eq!(free_places(), MAX_SETTLING_PER_PRINCIPAL);
+        assert_eq!(free_places(), MAX_SETTLING);
     }
 
     /// A slow delete answer does not spend the fence's own request budget.

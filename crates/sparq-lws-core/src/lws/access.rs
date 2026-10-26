@@ -1500,6 +1500,14 @@ async fn create<S: Store + 'static>(
         std::future::ready(Ok(None::<()>)),
     );
     if let Err(refused) = created.await {
+        if !grants
+            && refused
+                .extensions()
+                .get::<super::records::PoolFull>()
+                .is_some()
+        {
+            return super::QuotaFull::Total.response("open access requests");
+        }
         return refused;
     }
     let mut resp = problem(StatusCode::CREATED, None);

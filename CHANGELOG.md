@@ -180,8 +180,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- LWS subscription and access-request capacity bounds now return the same `429` response;
-  subscription pool refusals use that response too. Notification recipients are selected on
+- **Breaking — LWS capacity refusals:** subscription and access-request bounds now return the
+  same `429` response; service-pool exhaustion returns that response instead of `507`.
+  General storage refusals retain `507`. Notification recipients are selected on
   a task the write response never awaits, using the subscriptions, grants and resource state
   captured at commit.
 
@@ -821,11 +822,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - LWS content-only PATCH retains metadata from its Read authorization check for
-  notification capture and skips unnecessary LWS metadata lookups in open mode.
+  notification capture, skips LWS metadata lookups in open mode, and reads metadata for a
+  closed-mode owner only when a non-owner subscription exists.
 
 - LWS quarantined access requests no longer take places from live requests; held-back and
   quarantined subscriptions count only against the owner's total. Record settlements reserve
-  places per principal as well as against the shared bound.
+  places per principal only for unknown outcomes in closed mode, while the shared bound
+  covers each whole change. Notification selection retains request admission through queueing,
+  and withdrawal eligibility uses the state captured at commit.
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a

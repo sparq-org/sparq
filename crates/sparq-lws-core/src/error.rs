@@ -92,6 +92,11 @@ pub enum ServerError {
     #[error("insufficient storage")]
     InsufficientStorage,
 
+    /// A create was refused by the service pool's own entry or byte ceiling.
+    /// LWS subscription and access-request routes map this signal to their quota refusal.
+    #[error("service pool is full")]
+    ServicePoolFull,
+
     /// The version a read authorized is gone: a concurrent rewrite or delete committed and reclaimed
     /// its bytes between the read's metadata round and its byte fetch, and a DIFFERENT version is now
     /// current. The store never silently substitutes that version's bytes (it was never authorized —
@@ -121,7 +126,9 @@ impl ServerError {
             ServerError::Storage(_) | ServerError::Unsettled { .. } => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
-            ServerError::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
+            ServerError::InsufficientStorage | ServerError::ServicePoolFull => {
+                StatusCode::INSUFFICIENT_STORAGE
+            }
             ServerError::ResourceChanged => StatusCode::SERVICE_UNAVAILABLE,
         }
     }

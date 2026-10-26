@@ -1874,8 +1874,8 @@ async fn create<S: Store + 'static>(
             req.admission.clone(),
         );
         tokio::spawn(async move {
-            // Held to the end, announcement included: this work still counts against the
-            // concurrency ceiling once the request has gone.
+            // Held through the write, then passed to the notification task through queueing:
+            // both still count against the concurrency ceiling after the response.
             let _admission = admission;
             let locks = (child_guards, parent_guard);
             // Until the content is created, or what the create may have written is put back, the
@@ -1978,7 +1978,7 @@ async fn create<S: Store + 'static>(
                 access::Snapshot::from_parts(meta, Some(content_type)),
             );
             touch_after(&state, locks, &parent).await;
-            state.notify.send(&state, pending);
+            state.notify.send(&state, pending, _admission);
             Ok(created)
         })
         .await
@@ -2401,7 +2401,8 @@ async fn stored_meta<S: Store + 'static>(
 /// is still pending (a remote store may commit a request that was already sent): nobody else acts
 /// on the resource until the writes are over, and none of them is cut off half way. The task
 /// holds `admission`, the request's share of its admission permit, so a write that outlives its
-/// request still counts against the concurrency ceiling until it ends.
+/// request still counts against the concurrency ceiling. Successful notification work takes
+/// the slot on through selection and queueing, without delaying the response.
 ///
 /// When the writes failed and could not be put back (`writes` yields what is left), the task
 /// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
@@ -2441,7 +2442,7 @@ where
                         Some(container) => touch_after(&state, locks, &container).await,
                         None => drop(locks),
                     }
-                    state.notify.send(&state, pending);
+                    state.notify.send(&state, pending, _admission);
                     (out, None)
                 }
             },
@@ -3703,9 +3704,9 @@ async fn patch<S: Store + 'static>(
     let ct = meta.content_type.clone();
     let rmeta = match authorization_meta {
         Some(meta) => meta,
-        // Open mode permits every reader without consulting metadata. Preserve the unknown
-        // sentinel in the snapshot rather than issue a lookup that cannot affect access.
-        None if state.cfg.open => ResourceMeta {
+        // Open mode and owner-only subscribers need no metadata decision. The indexed
+        // non-owner count avoids a lookup when no other reader can hear this capture.
+        None if state.cfg.open || !state.notify.has_non_owner_subscriptions() => ResourceMeta {
             pending: true,
             ..ResourceMeta::default()
         },
@@ -3843,6 +3844,7 @@ async fn delete<S: Store + 'static>(
     // is in `removed`.
     let removal = {
         let state = state.detached();
+        let admission = req.admission.clone();
         async move {
             // A subtree too large to remove atomically is refused before anything is removed,
             // and before anyone's notifications are prepared: an oversized delete does none of
@@ -3881,7 +3883,7 @@ async fn delete<S: Store + 'static>(
                     .into_iter()
                     .map(|(event, snapshot)| state.notify.commit(&state, event, snapshot))
                     .collect();
-                state.notify.send_all(&state, committed);
+                state.notify.send_all(&state, committed, admission);
             }
             ((removed, outcome), left)
         }
