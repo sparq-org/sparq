@@ -54,7 +54,8 @@ export default function ExamplesPage() {
   );
 }
 
-// The separate /app build needs a full-page anchor; site routes use Next navigation.
+// External cards target the separate /app build, so they need a full-page anchor:
+// Next soft navigation would fetch /app/index.txt as a site RSC payload.
 function ExampleCardLink({ card, children }: { card: ExampleCard; children: React.ReactNode }) {
   const className = "group block focus-visible:outline-none";
   const label = `Open demo: ${card.title}`;
