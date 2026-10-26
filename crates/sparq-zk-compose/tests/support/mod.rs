@@ -217,6 +217,14 @@ pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
     gate(test, tools).is_some()
 }
 
+/// Emit an explicit completion marker after a live test's final assertion.
+/// The existing ledger records gate entry; this marker does not alter its keys.
+#[allow(dead_code)]
+#[track_caller]
+pub fn complete(_gate: LiveToolchain) {
+    skip_line(&format!("COMPLETE {}", ledger_key(std::panic::Location::caller())));
+}
+
 // --------------------------------------------------------------------------- #
 // The gate's own identity tests.
 //

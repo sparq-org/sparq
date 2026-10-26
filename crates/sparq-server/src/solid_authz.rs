@@ -1832,13 +1832,15 @@ fn trust_authz_decide_blocking(
 
     // A depth-one certification produces at most one additional rule. Price the upper
     // bound before deriving any edge or verifying any credential, including empty graphs.
+    // Certification signatures and rule/credential signatures share the same verify budget.
     let rules_bound = direct_rules.len().saturating_add(certifications.len());
     let pairs = rules_bound.saturating_mul(creds_val.len());
     let triples = credentials
         .iter()
         .fold(0usize, |n, c| n.saturating_add(c.graph.len()));
     let validation_work = rules_bound.saturating_mul(triples);
-    if pairs > config.solid_authz_trust_max_pairs {
+    let verifies = certifications.len().saturating_add(pairs);
+    if verifies > config.solid_authz_trust_max_pairs {
         return json_response(
             StatusCode::FORBIDDEN,
             trust_deny_json("trust rule/credential pair limit exceeded"),
@@ -3916,6 +3918,63 @@ mod trust_limit_tests {
         assert_eq!(status, StatusCode::OK, "{allow}");
         assert_eq!(allow["allow"], true);
         assert_eq!(allow["trustJustification"]["admittedCount"], 256);
+        assert!(calls > 0);
+    }
+
+    #[tokio::test]
+    async fn combined_verify_cap_counts_certifications_before_verification() {
+        let config = ServerConfig::default();
+        let certs = config.solid_authz_trust_max_certifications;
+        assert_eq!(certs + (1 + certs), config.solid_authz_trust_max_pairs + 1);
+        let (status, deny, calls) = run(config, body(1, 1, 1, certs)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenied"], true);
+        assert_eq!(deny["allow"], false);
+        assert_eq!(calls, 0, "the combined cap must precede derivation and admission");
+
+        let config = ServerConfig::default();
+        assert_eq!((certs - 1) + (2 + certs - 1), config.solid_authz_trust_max_pairs);
+        let (status, allow, calls) = run(config, body(2, 1, 1, certs - 1)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert_eq!(allow["allow"], true);
+        assert!(calls > 0);
+
+        // Both independent caps fit; adding the certification verifies reaches the boundary.
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: 5,
+            ..Default::default()
+        };
+        let (status, allow, calls) = run(config.clone(), body(1, 1, 1, 2)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert_eq!(allow["allow"], true);
+        assert!(calls > 0);
+        let config = ServerConfig { solid_authz_trust_max_pairs: 4, ..config };
+        let (status, deny, calls) = run(config, body(1, 1, 1, 2)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenied"], true);
+        assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn combined_verify_cap_counts_certifications_without_credentials() {
+        let config = ServerConfig {
+            solid_authz_trust_max_pairs: 0,
+            ..Default::default()
+        };
+        let (status, allow, _) = run(config.clone(), body(1, 0, 1, 0)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert_eq!(allow["allow"], true);
+
+        let (status, deny, calls) = run(config.clone(), body(1, 0, 1, 1)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(deny["trustDenied"], true);
+        assert_eq!(deny["allow"], false);
+        assert_eq!(calls, 0, "certification-only work must fit the shared budget");
+
+        let config = ServerConfig { solid_authz_trust_max_pairs: 1, ..config };
+        let (status, allow, calls) = run(config, body(1, 0, 1, 1)).await;
+        assert_eq!(status, StatusCode::OK, "{allow}");
+        assert_eq!(allow["allow"], true);
         assert!(calls > 0);
     }
 
