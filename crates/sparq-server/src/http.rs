@@ -821,7 +821,7 @@ pub struct ServerConfig {
     pub solid_authz_trust_max_pairs: usize,
     /// Maximum certifications parsed from one trust block.
     ///
-    /// Default: 4096. `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` overrides it;
+    /// Default: 2048. `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` overrides it;
     /// zero permits no certifications. Exceeding it refuses the block with 403.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_certifications: usize,
@@ -1027,7 +1027,7 @@ impl Default for ServerConfig {
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust_max_pairs: 4096,
             #[cfg(feature = "solid-authz-trust")]
-            solid_authz_trust_max_certifications: 4096,
+            solid_authz_trust_max_certifications: 2048,
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust_max_validation_work: 65536,
             // The authorization build is CPU-bound, so the default cap is the CPU count:
@@ -1364,9 +1364,18 @@ impl ServerConfig {
         }
         #[cfg(feature = "solid-authz-trust")]
         for (name, limit) in [
-            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS", &mut cfg.solid_authz_trust_max_pairs),
-            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS", &mut cfg.solid_authz_trust_max_certifications),
-            ("SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK", &mut cfg.solid_authz_trust_max_validation_work),
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+                &mut cfg.solid_authz_trust_max_pairs,
+            ),
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
+                &mut cfg.solid_authz_trust_max_certifications,
+            ),
+            (
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK",
+                &mut cfg.solid_authz_trust_max_validation_work,
+            ),
         ] {
             if let Ok(value) = std::env::var(name) {
                 if let Ok(n) = value.trim().parse::<usize>() {
@@ -1384,7 +1393,7 @@ impl ServerConfig {
             }
         }
         // SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS is how long a request waits for a free build slot
-        // before the fail-closed 503 (default 2000 ms; 0 refuses immediately).
+        // before the fail-closed 503 (default 2000 ms; 0 refuses immediately when saturated).
         #[cfg(feature = "solid-authz")]
         if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS") {
             if let Ok(ms) = v.trim().parse::<u64>() {
@@ -3495,7 +3504,13 @@ impl AppState {
         );
         // Atomic swap: subsequent loads see the new ring+writer; the old core's writer thread
         // joins once its last in-flight reader/Arc drops (Writer's Drop drains + joins).
-        self.core.store(Arc::new(ServingCore { ring, writer }));
+        {
+            // Serialize the lineage swap with auth-view installation. A pre-restore build
+            // holding this lock either installs before the swap or observes the new core.
+            #[cfg(feature = "solid-authz")]
+            let _cache = self.authz_view.write().ok();
+            self.core.store(Arc::new(ServingCore { ring, writer }));
+        }
         // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
         // generation-zero index from the prior lineage so equality on the numeric generation
         // cannot reuse completion data from the replaced graph.
@@ -12622,6 +12637,36 @@ mod from_env_tests {
         // Recover from a poisoned lock: a panicking test still leaves the env serialized
         // for the next test, so the poison flag carries no unsound state here.
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn trust_work_limit_environment_overrides_are_counts() {
+        let _env = env_guard();
+        for name in [
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS",
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS",
+            "SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK",
+        ] {
+            let limit = |cfg: &ServerConfig| match name {
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS" => cfg.solid_authz_trust_max_pairs,
+                "SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS" => {
+                    cfg.solid_authz_trust_max_certifications
+                }
+                _ => cfg.solid_authz_trust_max_validation_work,
+            };
+            for (value, expected) in [
+                (" 17 ", 17),
+                ("0", 0),
+                ("invalid", limit(&ServerConfig::default())),
+                ("-1", limit(&ServerConfig::default())),
+            ] {
+                std::env::set_var(name, value);
+                let result = ServerConfig::from_env();
+                std::env::remove_var(name);
+                assert_eq!(limit(&result.unwrap()), expected, "{name}={value}");
+            }
+        }
     }
 
     #[test]

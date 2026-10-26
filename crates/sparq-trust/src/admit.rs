@@ -1495,6 +1495,60 @@ mod tests {
         admitted
     }
 
+    fn admit_static_reference(
+        cred: &PresentedCredential,
+        rules: &[TrustRule],
+        target: &NamedNode,
+    ) -> Vec<StaticAdmittedFact> {
+        let mut admitted: Vec<StaticAdmittedFact> = Vec::new();
+
+        let salt = salt_from_bytes(&cred.salt);
+        let Ok(commitment) = commit_triples(&cred.graph, salt) else {
+            return admitted; // fail closed
+        };
+        let commitment_fr: Fr = commitment.commitment;
+
+        let Some(signature) = signature_from_hex(&cred.issuer_signature_hex) else {
+            return admitted;
+        };
+
+        for r in rules {
+            if !scope_covers(&r.scope, target) {
+                continue;
+            }
+            let msg = commitment_message(&commitment_fr);
+            if !verify(&r.issuer_key, &msg, &signature) {
+                continue;
+            }
+            if cred.revoked {
+                continue;
+            }
+            for t in &cred.graph {
+                if is_reserved_triple(t) {
+                    continue;
+                }
+                if !shape_admits_reference(&r.shape, t, &cred.graph) {
+                    continue;
+                }
+                let NamedOrBlankNode::NamedNode(holder) = &t.subject else {
+                    continue;
+                };
+                let fact = StaticAdmittedFact {
+                    holder: holder.clone(),
+                    not_after_unix_secs: cred
+                        .issued_at_unix_secs
+                        .saturating_add(r.fresh_within_secs),
+                    triple: t.clone(),
+                    issuer: r.source.clone(),
+                };
+                if !admitted.contains(&fact) {
+                    admitted.push(fact);
+                }
+            }
+        }
+        admitted
+    }
+
     fn check_admission_differential(graph: Vec<Triple>, seed: u64) {
         use sparq_zk::sig::SecretKey;
         let key = SecretKey::from_seed(seed);
@@ -1574,7 +1628,18 @@ mod tests {
                 );
             }
         }
+        let target = iri("https://pod.ex/doc");
+        assert_eq!(
+            admit_static(&credential, &rules, &target),
+            admit_static_reference(&credential, &rules, &target),
+            "static admission seed {seed}"
+        );
         credential.revoked = true;
+        assert_eq!(
+            admit_static(&credential, &rules, &target),
+            admit_static_reference(&credential, &rules, &target),
+            "revoked static admission seed {seed}"
+        );
         let session = Session {
             agent: subjects[0].clone(),
             now_unix_secs: 100,
