@@ -29,6 +29,7 @@ cargo run -p sparq-lws-core
 It listens on `127.0.0.1:3000` and uses `http://localhost:3000` as its public
 base URL unless configured otherwise. The default Cargo features are:
 
+- `blob-fs`, the native filesystem `BlobStore` adapter (excluded on wasm32).
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
 - `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
@@ -133,6 +134,31 @@ Set `PSS_SPARQ_BACKEND` to one of:
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
 present the native image as a durable production data service.
+
+### Filesystem blobs in library integrations
+
+The default-on native `blob-fs` feature implements `BlobStore` for
+`store::blob_fs::FsBlobStore`, re-exported from the std-only
+[`sparq-lws-blob-fs`](../../crates/sparq-lws-blob-fs/README.md) crate. It is absent
+on wasm32 and with `--no-default-features`. Acquire the exclusive data-directory
+lock before `FsBlobStore::open(root)` and retain it through all handles and pending
+operations: open sweeps `tmp/`. The caller must control this directory.
+
+Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
+is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
+use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
+rewritten or reused, even after deletion; composite writes mint opaque keys with
+no resource IRI embedded. Existing keys fail. The filesystem must support hard
+links and directory sync. Fan-out initialization is synced on first use per open
+store and shared across clones; reopening clears that record. The standalone
+`list()` returns `Listing { blobs, foreign }`, excluding `tmp/`. Invalid names,
+misplaced keys and non-files are reported as foreign entries. The async adapter
+warns once per listing and returns the valid blobs, so foreign entries do not
+stop reconciliation. Filesystem I/O errors still propagate. Blobs report
+`Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
+under the unique-key contract. `delete_if_unchanged` returns an error without a generation
+witness. See the crate README for layout and sync semantics. The native binary
+still selects in-memory blobs; this adapter alone does not enable durable boot.
 
 The seed variables are test-only:
 
