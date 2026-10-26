@@ -736,7 +736,7 @@ curl http://127.0.0.1:3030/metrics                              # Prometheus tex
 # Admin WAL compaction / vacuum for ERASURE-COMPLETENESS (sq-x32t). POST-only; gated by the
 # WRITE token. Physically purges data removed by DELETE / DROP (incl. orphaned literal VALUES) from the
 # on-disk store so a logical erasure is followed by real erasure. 200 ok; 409 if in-memory
-# (no --persist, nothing to purge); 503 on a transient durable-write error (retryable):
+# (no --persist, nothing to purge); 503 on a durable-write error (check server recovery logs):
 curl -X POST -H 'Authorization: Bearer <TOKEN>' http://127.0.0.1:3030/admin/compact
 
 # Online consistent-snapshot backup + restore (feature `backup`, default OFF). POST-only, WRITE-gated.
@@ -779,7 +779,8 @@ batches** (no race with a concurrent write), preserves the live triple set **exa
 generation published; reads keep flowing throughout). **POST-only**, gated by the **write** token
 (`--auth-token`), like an UPDATE. Responses: `200` ok; `409` if the server is in-memory (no
 `--persist` — there is no on-disk history to purge, so a no-op success would mislead); `503` on a
-transient durable-write error (retryable, writer stays alive). **Offline equivalent:** stop the
+durable-write error. Reads continue from the published snapshot. Check the server logs for
+recovery status; a frozen store refuses further writes until it is reopened. **Offline equivalent:** stop the
 server and run `sparq-cli compact <persist-dir>` (see the `cli` skill). **Honest scope:** this
 scrubs the engine's own on-disk segments + dictionary; it cannot reach bytes already copied off-box
 (filesystem snapshots, COW history, external backups) — those are the operator's responsibility
@@ -1976,6 +1977,27 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **Durable UPDATE journals include named-graph existence.** One committed frame records
+  inserts, deletes, creates and drops in order. Recovery supports both the previous data-only
+  journal and the current operation format. A failed journal materialization or indeterminate
+  log write freezes the tree; later durable writes are refused until recovery.
+- **Named-graph layout recovery is hardened.** The manifest records stable slot ids and the
+  next allocation id. Creating a graph adds one manifest entry; dropping one removes only that
+  entry. Removing a child from the attached in-memory set does not remove its on-disk manifest
+  entry. Use the durable drop methods to change the persisted set. Public named accessors refuse
+  moving durable children and refuse inserting in-memory children into a directory-backed root.
+  A stale child may be removed from memory without changing the current directories.
+- **Writable opens validate before cleanup.** The complete declared tree, including nested
+  named graphs, must open before undeclared slots are swept. Cleanup preserves separate root
+  stores, unmarked store images and directories containing held locks. Linked `named/`
+  containers are refused before cleanup or a DROP ALL manifest commit. Only a writable opener holding the
+  exclusive store lock cleans undeclared slots. Cleanup failures leave the slot in place and
+  emit a warning naming its path. Read-only opens perform no sweep. A whole-store rewrite
+  (save, compaction or vacuum) produces a fresh layout.
+- **Manifest publication follows the durability barrier.** Child files and directories, the
+  named container, and root files (including numeric, temporal and streamed caches) are synced
+  before publication. Default-only saves and builds sync root files as well. Slot reservation
+  creates a fresh directory, skips occupied ids and reports other errors.
 - **One server per `--persist DIR`.** The server holds `DIR`'s exclusive lock (sparq-core
   `dir_lock`; `Graph::open_or_create`) for its lifetime: a second server, `sparq-cli compact`, or a
   read-only `sparq-cli query-mmap` on the same `DIR` fails at once (`WouldBlock`) while it runs.
