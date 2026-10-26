@@ -406,20 +406,8 @@ fn holder_pok_absent_and_not_required_is_noop() {
         &nonce_for(CHALLENGE_HEX),
         &InMemorySeenNonces::new(),
     ) {
-        Err(CheckError::HolderPokUnreferencedCommitment { .. })
-        | Err(CheckError::HolderPokBindingMissing { .. })
-        | Err(CheckError::HolderPokMissing { .. })
-        | Err(CheckError::HolderPokDigestMismatch { .. })
-        | Err(CheckError::HolderPokProofRejected { .. })
-        | Err(CheckError::HolderPokMalformedProof) => {
-            panic!("the B2 gate must be a no-op when no PoK is present or required")
-        }
-        // Any non-B2 outcome (e.g. an unrelated clear-path Ok/Err) is fine: we only
-        // assert the B2 gate did not fire.
-        // zk-toolchain-gate: allow the test asserts a NEGATIVE — that no HolderPok* error fires
-        //   — so every other outcome is deliberately accepted; tracing it with a recording
-        //   nargo/bb shim on PATH records no spawn, so a missing tool cannot reach this arm
-        _ => {}
+        Ok(()) => {}
+        other => panic!("an empty presentation with valid holder binding must verify: {other:?}"),
     }
 }
 
@@ -555,9 +543,12 @@ fn verify_full(
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_valid_binding_verifies_end_to_end() {
-    if !support::require_toolchain("holder_pok_valid_binding_verifies_end_to_end", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "holder_pok_valid_binding_verifies_end_to_end",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let issuer = test_issuer_sk(1);
     let holder = SecretKey::from_seed(777);
     let registry = HolderRegistry::from_hex_keys([public_key_to_hex(&holder.public_key())]);
@@ -579,6 +570,7 @@ fn holder_pok_valid_binding_verifies_end_to_end() {
     );
     verify_full(&m, &prover, &issuer, &registry, "pok_pos_verify")
         .expect("a valid issuer-bound holder PoK must verify end-to-end");
+    support::complete(live);
 }
 
 /// INVALID WITNESS (the binding edge rejection): a `holder_pok` proof for a
@@ -591,9 +583,12 @@ fn holder_pok_valid_binding_verifies_end_to_end() {
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_wrong_holder_rejected_digest_mismatch() {
-    if !support::require_toolchain("holder_pok_wrong_holder_rejected_digest_mismatch", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "holder_pok_wrong_holder_rejected_digest_mismatch",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let issuer = test_issuer_sk(1);
     let bound_holder = SecretKey::from_seed(777); // issuer bound THIS holder
     let other_holder = SecretKey::from_seed(888); // ...but the PoK is for THIS one
@@ -630,6 +625,7 @@ fn holder_pok_wrong_holder_rejected_digest_mismatch() {
              HolderPokDigestMismatch (the hidden-key A-presents-B closure), got {other:?}"
         ),
     }
+    support::complete(live);
 }
 
 /// TAMPER: a single flipped byte in the `holder_pok` proof blob is rejected. The
@@ -638,9 +634,9 @@ fn holder_pok_wrong_holder_rejected_digest_mismatch() {
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_tampered_proof_rejected() {
-    if !support::require_toolchain("holder_pok_tampered_proof_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("holder_pok_tampered_proof_rejected", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let issuer = test_issuer_sk(1);
     let holder = SecretKey::from_seed(777);
     let registry = HolderRegistry::from_hex_keys([public_key_to_hex(&holder.public_key())]);
@@ -679,6 +675,7 @@ fn holder_pok_tampered_proof_rejected() {
         | Err(CheckError::HolderPokMalformedProof) => {}
         other => panic!("a tampered holder PoK proof must be rejected, got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// MISSING (mandated PoK): under `require_in_circuit_pok`, a holder-bound credential
@@ -688,9 +685,10 @@ fn holder_pok_tampered_proof_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan member (sq-c2ql)"]
 fn holder_pok_required_but_absent_rejected() {
-    if !support::require_toolchain("holder_pok_required_but_absent_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("holder_pok_required_but_absent_rejected", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let issuer = test_issuer_sk(1);
     let holder = SecretKey::from_seed(777);
     let registry = HolderRegistry::from_hex_keys([public_key_to_hex(&holder.public_key())]);
@@ -707,4 +705,5 @@ fn holder_pok_required_but_absent_rejected() {
              must be HolderPokMissing, got {other:?}"
         ),
     }
+    support::complete(live);
 }
