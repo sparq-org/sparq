@@ -630,8 +630,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // HttpSparqClient (opt-in `http-sparq` feature — the remote shared-service shape). See
     // `research/lws-design-records.md` §3.
     let storage = StorageConfig::from_env()?;
-    // Data-directory boot requires durable bytes; its constructor fails closed until the
-    // filesystem adapter is built in. Legacy backends retain the in-memory blob guard.
+    // Data-directory boot pairs the durable index with filesystem bytes.
+    // Legacy backends retain the in-memory blob guard.
     storage.check_durability(storage.has_data_dir())?;
     let backend = &storage.backend;
 

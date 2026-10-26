@@ -135,12 +135,16 @@ Set `PSS_SPARQ_BACKEND` to one of:
 
 `SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
 implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
-This build refuses it with “the filesystem blob store is not built in”; the
-adapter integration is tracked by [#7188](https://github.com/sparq-org/sparq/issues/7188).
-`SOLID_SERVER_WAIT_FOR_LOCK_SECS` (default `0`) controls index-lock retries.
-`SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY=1` (default unset) permits only the
-durable-blob/ephemeral-index mismatch. The native binary otherwise uses in-memory
-blobs and is unsuitable for durable production data.
+The default native build opens the filesystem blob store after acquiring the
+index lock. Builds without `embedded-sparq` or `blob-fs` refuse data-directory boot.
+Without a data directory, the native binary uses in-memory blobs.
+
+| Variable | Meaning |
+|---|---|
+| `SOLID_SERVER_DATA_DIR` | Data root (default unset); opens a durable embedded index and filesystem blobs. |
+| `SOLID_SERVER_SPARQ_DIR` | Legacy existing index snapshot (default unset); retains the durable-index/in-memory-blob refusal. A directory-backed index opened through this path also compacts on graceful shutdown. |
+| `SOLID_SERVER_WAIT_FOR_LOCK_SECS` | Non-negative integer seconds to retry the data-directory index lock (default `0`). |
+| `SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY` | `1` permits only the durable-blob/ephemeral-index mismatch (default unset). |
 
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
@@ -168,32 +172,7 @@ stop reconciliation. Filesystem I/O errors still propagate. Blobs report
 `Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
 under the unique-key contract. `delete_if_unchanged` returns an error without a generation
 witness. See the crate README for layout and sync semantics. The native binary
-still selects in-memory blobs; this adapter alone does not enable durable boot.
-
-### Filesystem blobs in library integrations
-
-The default-on native `blob-fs` feature implements `BlobStore` for
-`store::blob_fs::FsBlobStore`, re-exported from the std-only
-[`sparq-lws-blob-fs`](../../crates/sparq-lws-blob-fs/README.md) crate. It is absent
-on wasm32 and with `--no-default-features`. Acquire the exclusive data-directory
-lock before `FsBlobStore::open(root)` and retain it through all handles and pending
-operations: open sweeps `tmp/`. The caller must control this directory.
-
-Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
-is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
-use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
-rewritten or reused, even after deletion; composite writes mint opaque keys with
-no resource IRI embedded. Existing keys fail. The filesystem must support hard
-links and directory sync. Fan-out initialization is synced on first use per open
-store and shared across clones; reopening clears that record. The standalone
-`list()` returns `Listing { blobs, foreign }`, excluding `tmp/`. Invalid names,
-misplaced keys and non-files are reported as foreign entries. The async adapter
-warns once per listing and returns the valid blobs, so foreign entries do not
-stop reconciliation. Filesystem I/O errors still propagate. Blobs report
-`Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
-under the unique-key contract. `delete_if_unchanged` returns an error without a generation
-witness. See the crate README for layout and sync semantics. The native binary
-still selects in-memory blobs; this adapter alone does not enable durable boot.
+uses this store for `SOLID_SERVER_DATA_DIR` boot (above).
 
 The seed variables are test-only:
 
