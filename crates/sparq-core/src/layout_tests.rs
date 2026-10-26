@@ -28,6 +28,16 @@ fn triple() -> [Term; 3] {
     [name("s"), name("p"), name("o")]
 }
 
+fn assert_triples(graph: &Graph, expected: &[[Term; 3]]) {
+    let scan = graph.store.scan(&[None, None, None]);
+    let actual: std::collections::HashSet<_> = scan
+        .rows
+        .iter()
+        .map(|row| scan.to_spo(row).map(|id| graph.dict.term(id).clone()))
+        .collect();
+    assert_eq!(actual, expected.iter().cloned().collect());
+}
+
 fn store(path: &Path, count: usize) -> Graph {
     let mut seed = Graph::new();
     for i in 0..count {
@@ -70,20 +80,28 @@ fn log_entries_are_synced_before_open_returns() {
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("store");
         let mut root = store(&path, 1);
+        root.apply_delta(&[triple()], &[]).unwrap();
+        root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
         let trace = SyncTrace::start();
         match replacement {
             "compact" => {
-                root.apply_delta(&[triple()], &[]).unwrap();
                 root.compact().unwrap();
             }
             "restore" => {
                 let mut fresh = Graph::new();
                 fresh.ensure_named(&name("g0")).unwrap();
+                fresh.apply_delta(&[triple()], &[]).unwrap();
+                fresh.apply_delta_to_named(0, &[triple()], &[]).unwrap();
                 root.restore_in_place(fresh).unwrap();
             }
             _ => {
                 drop(root);
                 if replacement == "fresh" {
+                    // Fold acknowledged data before modeling missing log entries.
+                    let mut saved = Graph::open(&path).unwrap();
+                    saved.compact().unwrap();
+                    drop(saved);
+                    trace.take();
                     for slot in [path.clone(), path.join("named/0")] {
                         for log in ["wal.log", "txn.log"] {
                             std::fs::remove_file(slot.join(log)).unwrap();
@@ -97,33 +115,57 @@ fn log_entries_are_synced_before_open_returns() {
         for slot in [path.clone(), path.join("named/0")] {
             for log in ["wal.log", "txn.log"] {
                 let log_path = slot.join(log);
-                let opened = events
+                let mut previous = 0;
+                let mut opens = 0;
+                for (opened, _) in events
                     .iter()
-                    .position(|(step, p)| step == "log-opened" && *p == log_path)
-                    .expect("log opened");
-                let synced = events[..opened]
-                    .iter()
-                    .rposition(|(step, p)| step == "log-file-synced" && *p == log_path)
-                    .unwrap_or_else(|| panic!("{replacement}: {log_path:?} was not synced"));
-                #[cfg(unix)]
-                assert!(
-                    events[synced + 1..opened]
+                    .enumerate()
+                    .filter(|(_, (step, p))| step == "log-opened" && *p == log_path)
+                {
+                    opens += 1;
+                    let synced = events[previous..opened]
                         .iter()
-                        .any(|(step, p)| step == "dir-synced" && *p == slot),
-                    "{replacement}: persist {log_path:?}'s entry before returning its handle"
-                );
-                #[cfg(not(unix))]
-                let _ = synced;
+                        .rposition(|(step, p)| step == "log-file-synced" && *p == log_path)
+                        .unwrap_or_else(|| panic!("{replacement}: {log_path:?} was not synced"))
+                        + previous;
+                    #[cfg(unix)]
+                    assert!(
+                        events[synced + 1..opened]
+                            .iter()
+                            .any(|(step, p)| step == "dir-synced" && *p == slot),
+                        "{replacement}: persist {log_path:?}'s entry before returning its handle"
+                    );
+                    #[cfg(not(unix))]
+                    let _ = synced;
+                    previous = opened + 1;
+                }
+                assert!(opens > 0, "{replacement}: {log_path:?} was not opened");
             }
         }
-        root.apply_delta(&[triple()], &[]).unwrap();
-        root.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+        let update = [name("after-open"), name("p"), name("o")];
+        root.commit_txn(&[
+            (true, None, update.clone()),
+            (true, Some(name("g0")), update.clone()),
+        ])
+        .unwrap();
+        root.apply_delta(std::slice::from_ref(&update), &[])
+            .unwrap();
+        root.apply_delta_to_named(0, std::slice::from_ref(&update), &[])
+            .unwrap();
+        for slot in [path.clone(), path.join("named/0")] {
+            assert!(std::fs::metadata(slot.join("wal.log")).unwrap().len() > 0);
+        }
+        assert!(std::fs::metadata(path.join("txn.log")).unwrap().len() > 0);
         root.clear_txn().unwrap();
+        assert_eq!(std::fs::metadata(path.join("txn.log")).unwrap().len(), 0);
         drop(root);
         for _ in 0..2 {
             let reopened = Graph::open(&path).unwrap();
-            assert_eq!(reopened.len(), 1);
-            assert_eq!(reopened.named_graph(&name("g0")).unwrap().len(), 1);
+            assert_triples(&reopened, &[triple(), update.clone()]);
+            assert_triples(
+                reopened.named_graph(&name("g0")).unwrap(),
+                &[triple(), update.clone()],
+            );
         }
     }
 }
@@ -153,8 +195,8 @@ fn interrupted_replacement_log_creation_keeps_acknowledged_data() {
             std::fs::remove_file(failed).unwrap();
             for _ in 0..2 {
                 let reopened = Graph::open(&path).unwrap();
-                assert_eq!(reopened.len(), 1);
-                assert_eq!(reopened.named_graph(&name("g0")).unwrap().len(), 1);
+                assert_triples(&reopened, &[triple()]);
+                assert_triples(reopened.named_graph(&name("g0")).unwrap(), &[triple()]);
             }
         }
     }
@@ -220,14 +262,8 @@ fn saved_bases_are_synced_before_publication_and_journal_retirement() {
         assert!(manifest < retired);
         drop(root);
         for _ in 0..2 {
-            assert_eq!(
-                Graph::open(&path)
-                    .unwrap()
-                    .named_graph(&name("g0"))
-                    .unwrap()
-                    .len(),
-                1
-            );
+            let reopened = Graph::open(&path).unwrap();
+            assert_triples(reopened.named_graph(&name("g0")).unwrap(), &[triple()]);
         }
     }
 }
@@ -297,9 +333,9 @@ fn compact_syncs_recursive_bases_before_retiring_the_old_tree() {
     drop(root);
     for _ in 0..2 {
         let reopened = Graph::open(&path).unwrap();
-        assert_eq!(reopened.len(), 1);
-        assert_eq!(reopened.named[0].1.len(), 1);
-        assert_eq!(reopened.named[0].1.named[0].1.len(), 1);
+        assert_triples(&reopened, &[triple()]);
+        assert_triples(&reopened.named[0].1, &[triple()]);
+        assert_triples(&reopened.named[0].1.named[0].1, &[triple()]);
     }
 }
 
@@ -353,21 +389,32 @@ fn interrupted_named_deletions_reopen_the_complete_old_or_new_set() {
                 drop(root);
                 for (file, bytes) in survivors {
                     assert_eq!(
-                        std::fs::read(&file).unwrap(), bytes,
+                        std::fs::read(&file).unwrap(),
+                        bytes,
                         "survivor {file:?} was rewritten"
                     );
                 }
                 for _ in 0..2 {
                     let reopened = Graph::open(&path).unwrap();
-                    assert_eq!(reopened.len(), 1);
+                    assert_triples(&reopened, &[triple()]);
+                    let remaining = if !published {
+                        count
+                    } else if removed == count {
+                        0
+                    } else {
+                        count - 1
+                    };
+                    assert_eq!(reopened.named.len(), remaining);
                     for i in 0..count {
                         let graph = reopened.named_graph(&name(&format!("g{i}")));
                         if published && (removed == count || removed == i) {
                             assert!(graph.is_none());
                         } else {
                             let graph = graph.unwrap();
-                            assert_eq!(graph.len(), 1);
-                            assert!(graph.id_of(&name(&format!("ack{i}"))).is_some());
+                            assert_triples(
+                                graph,
+                                &[[name(&format!("ack{i}")), name("p"), name("o")]],
+                            );
                             assert_eq!(
                                 graph.wal.dir().unwrap(),
                                 path.join("named").join(i.to_string())
@@ -387,8 +434,7 @@ fn interrupted_named_deletions_reopen_the_complete_old_or_new_set() {
                 drop(reopened);
                 let reopened = Graph::open(&path).unwrap();
                 let fresh = reopened.named_graph(&name("fresh")).unwrap();
-                assert_eq!(fresh.len(), 1);
-                assert!(fresh.id_of(&name("ack0")).is_none());
+                assert_triples(fresh, &[triple()]);
             }
         }
     }
@@ -480,8 +526,7 @@ fn compact_reclaims_sparse_slots_without_any_overlay() {
                     assert_eq!(layer.len(), usize::from(default_base));
                     assert_eq!(layer.named.len(), keep);
                     for (n, sub) in &layer.named {
-                        assert_eq!(sub.len(), 1);
-                        assert!(sub.id_of(n).is_some());
+                        assert_triples(sub, &[[n.clone(), name("p"), name("o")]]);
                     }
                 }
                 let mut root = Graph::open(&path).unwrap();
