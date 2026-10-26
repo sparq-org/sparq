@@ -29,15 +29,20 @@ The binary is configured entirely by `SOLID_SERVER_*` / `PSS_*` env variables (b
 
 **`SOLID_SERVER_SEED_DEMO`** (default OFF, `1|true|TRUE|True` only) opt-in-seeds the `research/lws-demo-architecture.md` §3.2 public demo: `/playground/` writable by any *authenticated* agent, anonymous read-only, `acl:Control` granted to nobody — so visitors are not isolated and can overwrite/delete each other's resources (disclosed in the seeded `/README`). It normally requires `PSS_SPARQ_BACKEND=memory`; the escape hatch `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` permits it on **any** non-memory backend, intended for an *ephemeral* embedded test instance — the server does **not** verify ephemerality, so it is not memory-only in the enforced sense. API break: `seed::DEMO_USER` + `DemoFixtures::{pod, welcome_doc, owner}` removed, `DemoFixtures::playground` moved `/demo/playground/` → `/playground/`, `DemoFixtures::readme` added.
 
+## Native storage lifecycle
+
+`SOLID_SERVER_DATA_DIR` (default unset) implies `PSS_SPARQ_BACKEND=embedded`, opens a durable index at `<data>/index` and `FsBlobStore` at `<data>/blobs`, and conflicts with `SOLID_SERVER_SPARQ_DIR` or another explicit backend. Both `embedded-sparq` and `blob-fs` are required (default-on); builds missing either refuse boot. The legacy directory setting keeps existing-snapshot behavior and its durability guard; a directory-backed index opened through that path also compacts on graceful shutdown.
+
+Boot atomically publishes and syncs `format.json` (`schema=1`, `index.major=1`, `blobs.major=1`) before creating either plane; content without a marker or an incompatible marker refuses boot. The index opens before blob construction; its `index.lock` + `index/sparq.lock` guard the data root. `SOLID_SERVER_WAIT_FOR_LOCK_SECS` (default `0`, non-negative integer seconds) retries index contention with backoff, then names the lock path; other errors fail immediately.
+
+Durable blobs with an ephemeral index refuse boot unless `SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY=1` (default unset); a durable index with ephemeral bytes always refuses. SIGTERM/Ctrl-C drains listeners and stops the reconciler before actor compaction; failure logs and exits non-zero with recovery data retained. Final client drop joins the actor and releases the lock. See [native storage](../../skills/solid-lws-server/references/native-storage.md) for the complete boot and library contract.
+
 ## 📦 Native container image
 
 <!-- sq-lmz40: native image contract; distinct from the wasm/npm development host. -->
 
-Release tags publish `ghcr.io/sparq-org/sparq-lws-core` as a multi-arch image
-(`linux/amd64` + `linux/arm64`); pin an immutable `X.Y.Z` tag (also `X.Y` / `latest`).
-It binds `0.0.0.0:3000` via `SOLID_SERVER_BIND`, runs as uid/gid **65532** (non-root),
-serves unauthenticated `GET /livez` + `GET /readyz` probes, and enables **no** auth
-bypass or dev escape hatch — all other `SOLID_SERVER_*` / `PSS_*` settings pass through.
+Release tags publish `ghcr.io/sparq-org/sparq-lws-core` for `linux/amd64` + `linux/arm64`; pin an immutable `X.Y.Z` tag (also `X.Y` / `latest`).
+It binds `0.0.0.0:3000` via `SOLID_SERVER_BIND`, runs as uid/gid **65532**, serves unauthenticated `GET /livez` + `GET /readyz`, and enables no auth bypass or dev escape hatch; other `SOLID_SERVER_*` / `PSS_*` settings pass through.
 
 ```bash
 VERSION=0.1.0   # the release to deploy
@@ -57,10 +62,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on
   by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or
   `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
-- **Storage:** review `PSS_SPARQ_BACKEND` — its default `memory` (and `embedded` without
-  `SOLID_SERVER_SPARQ_DIR`) is **ephemeral**, and the native binary has only an in-memory
-  blob backend, so this image is **not for durable production data** yet. The `http` and
-  `redis-replay` backends need opt-in compile-time features.
+- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above. The `http` and `redis-replay` backends require opt-in features.
 
 ## ✨ Features
 
@@ -76,9 +78,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   unreadable or uncertain resources never reach the query engine.
 - **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
   tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
-- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the in-process
-  engine (selected by `PSS_SPARQ_BACKEND=embedded`; boot defaults to memory), opt-in
-  live SPARQ HTTP client, and a filesystem blob adapter with immutable opaque keys.
+- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the default-enabled in-process engine (`PSS_SPARQ_BACKEND=embedded` or `SOLID_SERVER_DATA_DIR`), opt-in live SPARQ HTTP client, and filesystem blobs with immutable opaque keys. An unconfigured boot uses the in-memory double.
 - **Notification observability** — process-wide backlog-overflow totals
   are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and
   receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
@@ -91,8 +91,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
     `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, sq-r1ei8) — the WAC-scoped, query-only
-    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
+  - `sparql-endpoint` (**default-on**, sq-r1ei8) — query-only endpoints: `/sparql`
+    under WAC in Solid mode and `/.lws/sparql` under LWS Read rules; internal Store methods remain independent.
   - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
     (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
   - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve

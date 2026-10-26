@@ -344,6 +344,7 @@ pub fn run_federated(
 /// produced by [`compare::disclose_threshold_verdict`]. Anything other than the
 /// expected single boolean literal is a protocol error (we never guess a verdict).
 fn verdict_from_partial(p: &PartialResult) -> Result<bool, MpcError> {
+    p.check_shape()?;
     if p.rows.len() != 1 || p.rows[0].len() != 1 {
         return Err(MpcError::Protocol(format!(
             "verdict partial must be exactly one row / one column, got {} row(s)",
@@ -848,6 +849,52 @@ mod tests {
             "same logical key-set in a different caller order must yield the SAME canonical \
              disclosed_key_set (and thus the same statement shape)"
         );
+    }
+
+    #[test]
+    fn verdict_partial_refuses_short_and_long_rows_before_reading_a_cell() {
+        // A one-cell boolean would previously be accepted regardless of vars.
+        // Also exercise empty rows so moving validation past the first index
+        // cannot substitute a different refusal for the shape diagnostic.
+        for (arity, width) in [(1, 0), (2, 1), (0, 1), (1, 2)] {
+            let p = PartialResult {
+                holder: HolderId::new("verdict-holder"),
+                vars: (0..arity)
+                    .map(|i| oxrdf::Variable::new_unchecked(format!("v{i}")))
+                    .collect(),
+                rows: vec![vec![
+                    Some(oxrdf::Term::Literal(oxrdf::Literal::from(true)));
+                    width
+                ]],
+            };
+            assert_eq!(
+                verdict_from_partial(&p),
+                Err(MpcError::Protocol(format!(
+                    "holder verdict-holder expected arity {arity} at row 0"
+                )))
+            );
+        }
+    }
+
+    #[test]
+    fn verdict_partial_refuses_duplicate_variables() {
+        for (names, column) in [(vec!["a", "a"], 1), (vec!["a", "b", "a"], 2)] {
+            let p = PartialResult {
+                holder: HolderId::new("verdict-holder"),
+                vars: names
+                    .into_iter()
+                    .map(oxrdf::Variable::new_unchecked)
+                    .collect(),
+                rows: vec![vec![None; column + 1]],
+            };
+            assert_eq!(
+                verdict_from_partial(&p),
+                Err(MpcError::Protocol(format!(
+                    "holder verdict-holder repeats a projected variable at column {column} (expected arity {})",
+                    p.vars.len(),
+                )))
+            );
+        }
     }
 
     /// The verdict-partial refusals name the binding's kind, never its content.

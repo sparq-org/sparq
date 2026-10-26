@@ -248,9 +248,11 @@ function EntailedFactsBrowser({
 }) {
   const [visibleCount, setVisibleCount] = React.useState(ENTAILED_FACT_PAGE_SIZE);
 
-  React.useEffect(() => {
+  const [previousFacts, setPreviousFacts] = React.useState(facts);
+  if (previousFacts !== facts) {
+    setPreviousFacts(facts);
     setVisibleCount(ENTAILED_FACT_PAGE_SIZE);
-  }, [facts]);
+  }
 
   const visibleFacts = facts.slice(0, visibleCount);
   return (
@@ -328,9 +330,11 @@ export function InferenceTool() {
   );
   const [explainTarget, setExplainTarget] = React.useState<ExplainTarget | null>(null);
 
-  React.useEffect(() => {
+  const [previousInference, setPreviousInference] = React.useState(inference);
+  if (previousInference !== inference) {
+    setPreviousInference(inference);
     setExplainTarget(null);
-  }, [inference]);
+  }
   const tool = toolById("inference");
   const tier = tool ? TIER_META[tool.tier] : null;
   const modeMeta = INFERENCE_MODE_META[inference];
