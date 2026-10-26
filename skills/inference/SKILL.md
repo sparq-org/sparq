@@ -334,7 +334,14 @@ refusal at the effective cap. Nested closures retain fresh allowances and only
 the top-level charge is debited; the compiled subset currently has no nested
 closure builtin. Dictionary interning is not rolled back on refusal. Existing
 closure entry points retain their behaviour. No production caller uses this
-ledger yet.
+ledger yet. The term-size cap `Limits::term_bytes` applies per term and term sizing
+never debits it. `spent(Dim::DocumentBytes)` and `spent(Dim::Depth)` report current
+values, not totals. Triple-term nesting has a separate fixed guard:
+`Dim::TermDepth` (`"term_depth"`) reports `MAX_TRIPLE_DEPTH`, independently of
+`Limits::depth`. Stored directional language tags are sized using the language
+component, matching oxrdf terms. `Ledger::mint` reserves capacity fallibly; a
+reservation failure refunds both byte counters and returns `Dim::Alloc`, whose
+display describes the requested element count without an unbounded-limit sentinel.
 
 
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.

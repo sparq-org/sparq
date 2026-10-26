@@ -4,7 +4,7 @@
 //! counters unchanged. Bytes are aggregate; document bytes reset at each document.
 //! This module does not install a global allocator or meter existing loaders.
 
-use crate::dict::{is_inline, Dict, Id, TermParts, INLINE_BASE};
+use crate::dict::{is_inline, split_lang_dir, Dict, Id, TermParts, INLINE_BASE};
 use oxrdf::Term;
 use std::fmt;
 
@@ -17,16 +17,28 @@ pub const MAX_TRIPLE_DEPTH: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Dim {
+    /// Source bytes accepted by an explicitly metered reader.
     SourceBytes,
+    /// Aggregate lexical and fixed-node bytes charged across documents.
     Bytes,
+    /// Bytes charged in the current document, reset by `Ledger::open_document`.
     DocumentBytes,
+    /// Per-term size cap, checked without debiting it by term-sizing operations.
     TermBytes,
+    /// Facts accepted by an explicitly metered operation.
     Facts,
+    /// Nodes accepted by an explicitly metered operation.
     Nodes,
+    /// Current entered depth, balanced by `Ledger::enter` and `Ledger::leave`.
     Depth,
+    /// Query result rows charged by a consumer.
     QueryRows,
+    /// Premise join rows and rule firings charged across closures.
     JoinRows,
+    /// Facts held by successful closures, charged across closures.
     ClosureFacts,
+    /// Fixed triple-term nesting guard, independent of `Limits::depth`.
+    TermDepth,
     /// Allocation failure, reported only by fallible allocation helpers.
     Alloc,
 }
@@ -45,6 +57,7 @@ impl Dim {
             Self::QueryRows => "query_rows",
             Self::JoinRows => "join_rows",
             Self::ClosureFacts => "closure_facts",
+            Self::TermDepth => "term_depth",
             Self::Alloc => "alloc",
         }
     }
@@ -54,15 +67,25 @@ impl Dim {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Limits {
+    /// Maximum accepted source bytes.
     pub source_bytes: usize,
+    /// Maximum aggregate lexical and fixed-node bytes across documents.
     pub bytes: usize,
+    /// Maximum bytes in each document; the current value resets on opening one.
     pub document_bytes: usize,
+    /// Maximum size of each term; this cap is checked but never debited by term sizing.
     pub term_bytes: usize,
+    /// Maximum accepted facts.
     pub facts: usize,
+    /// Maximum accepted nodes.
     pub nodes: usize,
+    /// Maximum simultaneously entered depth levels; leaving a level refunds it.
     pub depth: usize,
+    /// Maximum query result rows.
     pub query_rows: usize,
+    /// Maximum aggregate premise join rows and rule firings.
     pub join_rows: usize,
+    /// Maximum aggregate facts held by successful closures.
     pub closure_facts: usize,
 }
 
@@ -87,8 +110,11 @@ impl Default for Limits {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Exceeded {
+    /// Dimension whose limit was exceeded, or `Dim::Alloc` for allocation failure.
     pub dim: Dim,
+    /// Configured cap, fixed triple-depth guard, or `usize::MAX` for allocation failure.
     pub limit: usize,
+    /// Refused total, or requested resulting element count for allocation failure.
     pub reached: usize,
 }
 
@@ -105,6 +131,9 @@ impl Exceeded {
 
 impl fmt::Display for Exceeded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.dim == Dim::Alloc {
+            return write!(f, "allocation for {} elements failed", self.reached);
+        }
         write!(
             f,
             "Work limit {} ({}) exceeded by a charge reaching {}.",
@@ -154,7 +183,7 @@ impl<'a> From<&'a Term> for TermRef<'a> {
 #[non_exhaustive]
 pub struct Ledger {
     limits: Limits,
-    spent: [usize; 11],
+    spent: [usize; 12],
 }
 
 impl Ledger {
@@ -162,7 +191,7 @@ impl Ledger {
     pub fn new(limits: Limits) -> Self {
         Self {
             limits,
-            spent: [0; 11],
+            spent: [0; 12],
         }
     }
 
@@ -183,6 +212,7 @@ impl Ledger {
             Dim::QueryRows => self.limits.query_rows,
             Dim::JoinRows => self.limits.join_rows,
             Dim::ClosureFacts => self.limits.closure_facts,
+            Dim::TermDepth => MAX_TRIPLE_DEPTH,
             Dim::Alloc => usize::MAX,
         }
     }
@@ -227,7 +257,10 @@ impl Ledger {
         }
     }
 
-    /// Returns spent work (current document bytes and current depth for those dimensions).
+    /// Returns spent work.
+    ///
+    /// `DocumentBytes` and `Depth` are current values, not cumulative totals.
+    /// Term-sizing operations never debit `TermBytes` or `TermDepth`.
     pub fn spent(&self, dim: Dim) -> usize {
         self.spent[dim as usize]
     }
@@ -308,7 +341,7 @@ impl Ledger {
                 } => value
                     .len()
                     .saturating_add(datatype.len())
-                    .saturating_add(lang.map_or(0, str::len)),
+                    .saturating_add(lang.map_or(0, |l| split_lang_dir(l).0.len())),
                 TermParts::Triple(ids) => {
                     check_depth(depth)?;
                     for child in ids {
@@ -323,27 +356,31 @@ impl Ledger {
         self.sized(total)
     }
 
-    /// Charges joined lexical bytes before allocating the result with exact capacity.
+    /// Charges joined lexical bytes before fallibly allocating exact capacity.
     /// # Errors
-    /// Refuses the compound byte charge without allocating the result.
-    /// # Panics
-    /// As with `String::with_capacity`, an unbounded, impossible capacity can panic.
-    /// # Abort
-    /// The allocator may abort on exhaustion after an accepted byte charge.
+    /// Refuses the compound byte charge, or returns `Alloc` and refunds it on reservation failure.
     pub fn mint(&mut self, parts: &[&str]) -> Result<String, Exceeded> {
-        self.mint_using(parts, String::with_capacity)
+        self.mint_using(parts, |size| {
+            let mut out = String::new();
+            out.try_reserve_exact(size)?;
+            Ok(out)
+        })
     }
 
-    // This seam makes charge-before-allocation ordering observable in tests
-    // without unsafe code or a global counting allocator.
+    // This seam makes charge-before-allocation ordering and allocation failure
+    // observable without unsafe code or a global allocator.
     fn mint_using(
         &mut self,
         parts: &[&str],
-        allocate: impl FnOnce(usize) -> String,
+        allocate: impl FnOnce(usize) -> Result<String, std::collections::TryReserveError>,
     ) -> Result<String, Exceeded> {
         let size = parts.iter().fold(0usize, |n, s| n.saturating_add(s.len()));
+        let before = self.spent;
         self.charge(Dim::Bytes, size)?;
-        let mut out = allocate(size);
+        let mut out = allocate(size).map_err(|_| {
+            self.spent = before;
+            Exceeded::new(Dim::Alloc, usize::MAX, size)
+        })?;
         for part in parts {
             out.push_str(part);
         }
@@ -388,7 +425,7 @@ impl Ledger {
 fn check_depth(depth: usize) -> Result<(), Exceeded> {
     if depth >= MAX_TRIPLE_DEPTH {
         return Err(Exceeded {
-            dim: Dim::Depth,
+            dim: Dim::TermDepth,
             limit: MAX_TRIPLE_DEPTH,
             reached: depth.saturating_add(1),
         });
@@ -492,6 +529,24 @@ mod tests {
                 TERM_NODE_BYTES + 4 + oxrdf::vocab::rdf::LANG_STRING.as_str().len(),
             ),
             (
+                Literal::new_directional_language_tagged_literal_unchecked(
+                    "hi",
+                    "en",
+                    oxrdf::BaseDirection::Ltr,
+                )
+                .into(),
+                TERM_NODE_BYTES + 4 + oxrdf::vocab::rdf::DIR_LANG_STRING.as_str().len(),
+            ),
+            (
+                Literal::new_directional_language_tagged_literal_unchecked(
+                    "hi",
+                    "en",
+                    oxrdf::BaseDirection::Rtl,
+                )
+                .into(),
+                TERM_NODE_BYTES + 4 + oxrdf::vocab::rdf::DIR_LANG_STRING.as_str().len(),
+            ),
+            (
                 nested(plain, 3),
                 10 * TERM_NODE_BYTES + 3 * 6 + 3 + oxrdf::vocab::xsd::STRING.as_str().len(),
             ),
@@ -504,8 +559,11 @@ mod tests {
         for (t, size) in table {
             let id = dict.intern(&t);
             let mut l = Ledger::new(Limits::default());
-            assert_eq!(l.term(TermRef::from(&t)).unwrap(), size, "{t}");
-            assert_eq!(l.stored_term(&dict, id).unwrap(), size, "{t}");
+            let term_size = l.term(TermRef::from(&t)).unwrap();
+            let stored_size = l.stored_term(&dict, id).unwrap();
+            assert_eq!(term_size, size, "{t}");
+            assert_eq!(term_size, stored_size, "{t}");
+            assert_eq!(l.spent(Dim::TermBytes), 0);
             assert_eq!(l.spent(Dim::Bytes), 2 * size);
             assert_eq!(l.spent(Dim::DocumentBytes), 2 * size);
             let mut refused = Ledger::new(Limits {
@@ -542,7 +600,7 @@ mod tests {
         let mut l = Ledger::new(Limits::default());
         assert_eq!(
             l.term((&t).into()).unwrap_err(),
-            Exceeded::new(Dim::Depth, MAX_TRIPLE_DEPTH, MAX_TRIPLE_DEPTH + 1)
+            Exceeded::new(Dim::TermDepth, MAX_TRIPLE_DEPTH, MAX_TRIPLE_DEPTH + 1)
         );
         let mut dict = Dict::new();
         // Intern one shallow triple at a time, so the dictionary interner never
@@ -553,7 +611,7 @@ mod tests {
         for _ in 0..=MAX_TRIPLE_DEPTH {
             id = dict.intern_triple_ids([s, p, id]);
         }
-        assert_eq!(l.stored_term(&dict, id).unwrap_err().dim, Dim::Depth);
+        assert_eq!(l.stored_term(&dict, id).unwrap_err().dim, Dim::TermDepth);
         assert_eq!(l.spent(Dim::Bytes), 0);
         let t = nested(Literal::new_simple_literal("x").into(), MAX_TRIPLE_DEPTH);
         assert!(l.term((&t).into()).is_ok());
@@ -582,6 +640,27 @@ mod tests {
             Dim::Nodes
         );
         assert_eq!(v.capacity(), 0);
+    }
+
+    #[test]
+    fn mint_refunds_failed_allocation() {
+        let mut l = Ledger::new(Limits::default());
+        l.charge(Dim::Bytes, 3).unwrap();
+        // Real exhaustion cannot be forced safely from valid string slices.
+        // Inject a deterministic capacity-overflow reservation error at the allocation seam.
+        let e = l
+            .mint_using(&["ab", "cd"], |size| {
+                assert_eq!(size, 4);
+                let mut out = String::new();
+                out.try_reserve_exact(usize::MAX)?;
+                Ok(out)
+            })
+            .unwrap_err();
+        assert_eq!(e, Exceeded::new(Dim::Alloc, usize::MAX, 4));
+        assert_eq!(l.spent(Dim::Bytes), 3);
+        assert_eq!(l.spent(Dim::DocumentBytes), 3);
+        assert_eq!(e.to_string(), "allocation for 4 elements failed");
+        assert_eq!(Dim::TermDepth.name(), "term_depth");
     }
 
     #[test]
