@@ -24,6 +24,8 @@ const SOCKETS: &str = "/.lws/sockets/";
 const MAX_CONNECTIONS: usize = 1024;
 const QUEUE: usize = 64;
 const RETAINED: usize = 256;
+/// Bound serialized envelope storage independently of event count and age.
+const RETAINED_BYTES: usize = 128 * 1024;
 const RETENTION: Duration = Duration::from_secs(10 * 60);
 const RECHECK: Duration = Duration::from_secs(10);
 const HEARTBEAT: Duration = Duration::from_secs(30);
@@ -124,6 +126,7 @@ impl Sender {
 struct Channel {
     seq: u64,
     ring: VecDeque<Retained>,
+    ring_bytes: usize,
     sender: Option<Arc<Sender>>,
 }
 
@@ -135,8 +138,11 @@ impl Channel {
             .front()
             .is_some_and(|e| now.duration_since(e.at) >= RETENTION)
             || self.ring.len() > RETAINED
+            || self.ring_bytes > RETAINED_BYTES
         {
-            self.ring.pop_front();
+            if let Some(event) = self.ring.pop_front() {
+                self.ring_bytes -= event.body.len();
+            }
         }
     }
 }
@@ -213,6 +219,7 @@ pub(super) async fn publish<S: Store + 'static>(state: &LwsState<S>, pending: Pe
         watch: pending.watch,
     };
     if pending.kind == SubscriptionKind::Sse {
+        channel.ring_bytes += event.body.len();
         channel.ring.push_back(event.clone());
         channel.prune();
     }
@@ -224,9 +231,31 @@ pub(super) async fn publish<S: Store + 'static>(state: &LwsState<S>, pending: Pe
     }
 }
 
+/// Replay completes before live frames are polled, even if its Watch checks yield.
+struct Frames {
+    replay: Option<mpsc::Receiver<Frame>>,
+    live: mpsc::Receiver<Frame>,
+}
+
+impl Frames {
+    fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Frame>> {
+        if let Some(replay) = &mut self.replay {
+            match replay.poll_recv(cx) {
+                Poll::Ready(None) => self.replay = None,
+                frame => return frame,
+            }
+        }
+        self.live.poll_recv(cx)
+    }
+
+    async fn recv(&mut self) -> Option<Frame> {
+        std::future::poll_fn(|cx| self.poll_recv(cx)).await
+    }
+}
+
 /// The receiver owns the connection's lifetime; dropping an HTTP body frees its slot immediately.
 struct Connection {
-    data: mpsc::Receiver<Frame>,
+    data: Frames,
     end: mpsc::Receiver<End>,
     sender: Arc<Sender>,
     done: bool,
@@ -360,6 +389,8 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         return problem(StatusCode::FORBIDDEN, None);
     }
     let (data_tx, data) = mpsc::channel(QUEUE);
+    // A full replay snapshot plus reset fits without depending on client consumption.
+    let (replay_tx, replay_rx) = mpsc::channel(RETAINED + 1);
     let (end_tx, end) = mpsc::channel(1);
     let (sender, replay, reset) = {
         // Serialize counts/registration across subscriptions as well as within this one.
@@ -410,20 +441,25 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         channel.sender = Some(sender.clone());
         (sender, replay, reset)
     };
+    // Registration and the snapshot are atomic with publication; client pacing is not.
+    drop(gate);
     let connection = Connection {
-        data,
+        data: Frames {
+            replay: Some(replay_rx),
+            live: data,
+        },
         end,
         sender: sender.clone(),
         done: false,
     };
     monitor(state, &sub, sender.clone());
     let weak = state.downgrade();
-    // Keep the registration gate through replay so live events cannot overtake it. The response
-    // returns immediately; a replay uses the same bounded queue and rechecks each Watch before send.
+    // Recheck each Watch into a separate queue. Frames drains it before the live queue, so
+    // publication can proceed while replay waits on authorization or the client.
     tokio::spawn(async move {
-        let _gate = gate;
-        if reset {
-            sender.push(Frame::Reset);
+        if reset && replay_tx.try_send(Frame::Reset).is_err() {
+            sender.close(End::Slow);
+            return;
         }
         for event in replay {
             let Some(state) = weak.upgrade() else { return };
@@ -436,7 +472,7 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
                     body: event.body,
                 };
                 if !matches!(
-                    tokio::time::timeout(RECHECK, sender.data.send(frame)).await,
+                    tokio::time::timeout(RECHECK, replay_tx.send(frame)).await,
                     Ok(Ok(()))
                 ) {
                     sender.close(End::Slow);

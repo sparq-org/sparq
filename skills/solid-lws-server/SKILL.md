@@ -691,8 +691,10 @@ What the server exposes, all discoverable from the storage description
   Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
   WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
   DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
-  SSE retains at most 256 events and 10 minutes (`retention: "PT10M"`), with
-  Last-Event-ID replay or reset. See the [stream bindings reference](references/notification-streams.md)
+  SSE retention is bounded by event count, age and serialized body bytes, with
+  Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
+  without holding the registration gate; webhooks enter their delivery queue independently
+  of stream publication. See the [stream bindings reference](references/notification-streams.md)
   for connection limits, expiry defaults, control events, record compatibility and examples.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
   key in the storage description's `verificationMethod`. The signature covers `@method`,

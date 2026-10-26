@@ -166,6 +166,232 @@ fn notification(frame: &str) -> (&str, Value) {
     (id, serde_json::from_str(body).unwrap())
 }
 
+fn subscription_id(doc: &Value) -> &str {
+    doc["id"].as_str().unwrap().rsplit('/').next().unwrap()
+}
+
+async fn wait_until(mut ready: impl FnMut() -> bool) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !ready() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("notification did not progress while replay was unread or gated");
+}
+
+// A persisted fixture sorts after every generated stream id, so dispatch tests always exercise
+// a webhook that the original inline publication loop would visit after the blocked stream.
+async fn webhook_after_streams(h: &Harness, topic: &str, inbox: &str) {
+    let id = "~webhook";
+    let mut sub: Subscription = serde_json::from_value(json!({
+        "subscriber": OWNER, "topics": [topic], "inbox": inbox
+    }))
+    .unwrap();
+    let container = h.state.cfg.absolute(SUBSCRIPTIONS_PATH);
+    h.state
+        .store
+        .create_in_container(
+            &container,
+            &format!("{container}{id}"),
+            Bytes::from(serde_json::to_vec(&sub).unwrap()),
+            LWS_JSON,
+        )
+        .await
+        .unwrap();
+    sub.id = id.into();
+    h.state.notify.subs.write().unwrap().insert(id.into(), sub);
+}
+
+#[tokio::test]
+async fn unread_replay_does_not_gate_live_publication_and_drains_in_order() {
+    for round in 0..3 {
+        let h = Harness::new().await;
+        let root = h.state.cfg.storage();
+        let a = h.create("replayed").await;
+        let b = h.create("live").await;
+        let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+        let mut initial = h.stream(&doc, None).await.into_body();
+        h.update(&a).await;
+        let f = frame(&mut initial).await.unwrap();
+        let anchor = notification(&f).0.to_string();
+        let (epoch, seq) = anchor.rsplit_once('-').unwrap();
+        let seq: u64 = seq.parse().unwrap();
+        drop(initial);
+        let slot = h.state.notify.streams.slot(subscription_id(&doc));
+        // A literal count, independent of the live-queue constant, exceeds that queue's capacity.
+        for _ in 0..80 {
+            h.update(&a).await;
+        }
+        wait_until(|| slot.channel.lock().unwrap().seq == seq + 80).await;
+
+        let observer = h.subscribe(SSE, OWNER, &[&root]).await;
+        let mut observed = h.stream(&observer, None).await.into_body();
+        let (sent, mut received) = mpsc::channel::<Value>(1);
+        let inbox = Router::new().fallback(axum::routing::post(
+            move |axum::Json(body): axum::Json<Value>| {
+                let sent = sent.clone();
+                async move {
+                    sent.send(body).await.unwrap();
+                    StatusCode::NO_CONTENT
+                }
+            },
+        ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, inbox).await.unwrap() });
+        webhook_after_streams(&h, &root, &format!("http://{address}/inbox")).await;
+
+        // Also pause a replay Watch in one round. Registration reads the root, while replay
+        // rechecks this child; neither its access check nor client pacing may hold the gate.
+        let guard = if round == 1 {
+            Some(h.state.locks.lock(&a).await.unwrap())
+        } else {
+            None
+        };
+        let response = h.stream(&doc, Some(&anchor)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut unread = response.into_body();
+        settle().await;
+        h.update(&b).await;
+        wait_until(|| slot.channel.lock().unwrap().seq == seq + 81).await;
+        let f = frame(&mut observed).await.unwrap();
+        assert_eq!(notification(&f).1["activity"]["object"]["id"], b);
+        let webhook = tokio::time::timeout(Duration::from_secs(2), received.recv())
+            .await
+            .expect("webhook waited for the unread stream")
+            .unwrap();
+        assert_eq!(webhook["activity"]["object"]["id"], b);
+        drop(guard);
+        for offset in 1..=81 {
+            let f = frame(&mut unread).await.unwrap();
+            let (id, body) = notification(&f);
+            assert_eq!(id, format!("{epoch}-{}", seq + offset));
+            let expected = if offset == 81 { &b } else { &a };
+            assert_eq!(body["activity"]["object"]["id"], *expected);
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), unread.frame())
+                .await
+                .is_err(),
+            "duplicate or unexpected frame after replay and live delivery"
+        );
+        server.abort();
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn webhook_is_queued_while_stream_publication_waits_on_its_gate() {
+    let h = Harness::new().await;
+    let a = h.create("a").await;
+    let b = h.create("b").await;
+    let root = h.state.cfg.storage();
+    let doc = h.subscribe(SSE, OWNER, &[&root]).await;
+    webhook_after_streams(&h, &root, "https://inbox.example/").await;
+    // Keep deliveries queued rather than doing network I/O; admission is the observed behavior.
+    let _workers = h
+        .state
+        .notify
+        .workers
+        .acquire_many(h.state.notify.limits.workers as u32)
+        .await
+        .unwrap();
+    let slot = h.state.notify.streams.slot(subscription_id(&doc));
+    let gate = slot.gate.lock().await;
+    h.update(&a).await;
+    h.update(&b).await;
+    wait_until(|| h.state.notify.admitted.load(Ordering::SeqCst) == 2).await;
+    assert_eq!(slot.channel.lock().unwrap().seq, 0);
+    drop(gate);
+    wait_until(|| slot.channel.lock().unwrap().seq == 2).await;
+    let anchor = {
+        let channel = slot.channel.lock().unwrap();
+        let resources: Vec<_> = channel
+            .ring
+            .iter()
+            .map(|e| {
+                serde_json::from_str::<Value>(&e.body).unwrap()["activity"]["object"]["id"].clone()
+            })
+            .collect();
+        assert_eq!(resources, vec![json!(a), json!(b)]);
+        channel.ring[0].id.clone()
+    };
+    let mut body = h.stream(&doc, Some(&anchor)).await.into_body();
+    let f = frame(&mut body).await.unwrap();
+    assert_eq!(notification(&f).1["activity"]["object"]["id"], b);
+    h.update(&a).await;
+    let f = frame(&mut body).await.unwrap();
+    assert!(notification(&f).0.ends_with("-3"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn retained_body_bytes_evict_oldest_events_and_reset_the_cursor() {
+    let h = Harness::new().await;
+    // Slugs are truncated by the HTTP create route; nested containers give the changed
+    // resource a genuinely long URI while still exercising the normal HTTP write path.
+    let mut a = h.state.cfg.storage();
+    let slug = "a".repeat(120);
+    for depth in 0..9 {
+        let mut headers = vec![("content-type", "text/plain"), ("slug", slug.as_str())];
+        if depth < 8 {
+            headers.push(("link", "<https://www.w3.org/ns/lws#Container>; rel=type"));
+        }
+        let response = h
+            .call(Method::POST, &a, Some(OWNER), &headers, "contents")
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        a = response.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+    }
+    let doc = h.subscribe(SSE, OWNER, &[&a]).await;
+    let mut body = h.stream(&doc, None).await.into_body();
+    h.update(&a).await;
+    let f = frame(&mut body).await.unwrap();
+    let oldest = notification(&f).0.to_string();
+    let epoch = oldest.rsplit_once('-').unwrap().0;
+    drop(body);
+    // Below count retention, but beyond the independently specified serialized-body byte cap.
+    for _ in 0..180 {
+        h.update(&a).await;
+    }
+    let slot = h.state.notify.streams.slot(subscription_id(&doc));
+    wait_until(|| slot.channel.lock().unwrap().seq == 181).await;
+    let (cursor, first, last) = {
+        let channel = slot.channel.lock().unwrap();
+        let bytes: usize = channel.ring.iter().map(|e| e.body.len()).sum();
+        assert_eq!(channel.ring_bytes, bytes);
+        assert!(bytes <= 128 * 1024, "serialized bodies exceed the byte cap");
+        assert!(bytes + channel.ring.back().unwrap().body.len() > 128 * 1024);
+        assert!(channel.ring.len() < 181);
+        assert!(!channel.ring.iter().any(|e| e.id == oldest));
+        let cursor = channel.ring.front().unwrap().id.clone();
+        let first: u64 = cursor.rsplit_once('-').unwrap().1.parse().unwrap();
+        (cursor, first, channel.seq)
+    };
+    let mut replay = h.stream(&doc, Some(&cursor)).await.into_body();
+    for seq in first + 1..=last {
+        let f = frame(&mut replay).await.unwrap();
+        let (id, body) = notification(&f);
+        assert_eq!(id, format!("{epoch}-{seq}"));
+        assert_eq!(body["activity"]["object"]["id"], a);
+    }
+    let mut reset = h.stream(&doc, Some(&oldest)).await.into_body();
+    assert_eq!(
+        frame(&mut reset).await.as_deref(),
+        Some("event: reset\ndata:\n\n")
+    );
+    h.update(&a).await;
+    let f = frame(&mut reset).await.unwrap();
+    assert_eq!(notification(&f).0, format!("{epoch}-182"));
+    tokio::time::advance(RETENTION + Duration::from_secs(1)).await;
+    h.update(&a).await;
+    let channel = slot.channel.lock().unwrap();
+    assert_eq!(channel.ring.len(), 1);
+    assert_eq!(channel.ring_bytes, channel.ring[0].body.len());
+}
+
 #[tokio::test(start_paused = true)]
 async fn sse_sq4a_container_create_and_revocation() {
     let h = Harness::new().await;

@@ -44,15 +44,20 @@ data: <the same Notification JSON envelope used by webhooks>
 
 There is one activity per event, with no resource content or batching. The epoch
 changes on restart and the sequence increases per subscription. A heartbeat comment
-is sent every 30 seconds. Each subscription retains at most its last 256 events
-and at most 10 minutes of history (both limits apply). Reconnect with
+is sent every 30 seconds. Each subscription retains at most its last 256 events,
+10 minutes of history, and 128 KiB of serialized envelope bodies
+(`RETAINED_BYTES`); all limits apply, with the oldest events evicted first. Reconnect with
 `Last-Event-ID`: a retained id replays subsequent events after rechecking their
-resource access. An unknown, aged-out or other-epoch id sends `event: reset` with
+resource access. An unknown, evicted, aged-out or other-epoch id sends `event: reset` with
 an empty data field, then continues live. Read the topics again after reset.
 
 Only one connection may be open per subscription; connecting again closes the
 previous one. Each connection's live queue holds at most 64 events. A slow consumer
-is closed and can reconnect with its last id. Replay feeds that same bounded queue.
+is closed and can reconnect with its last id. Replay uses a separate bounded queue,
+which is drained completely before live frames. Registration and the replay snapshot
+share the publication gate; replay authorization and queue sends happen after releasing it.
+An unread replay therefore permits live publication and webhook dispatch to proceed.
+Webhooks for each change enter their delivery queue before stream publication is awaited.
 There are at most 1024 open connections across both bindings per storage instance,
 and a subscriber cannot exceed its subscription quota in open connections.
 Excess connections return 429. Open bodies do not retain request admission permits

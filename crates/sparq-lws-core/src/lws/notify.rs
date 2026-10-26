@@ -1675,20 +1675,27 @@ impl Notifier {
         // The deliveries themselves leave this task: taking a place in the delivery queue,
         // parsing each inbox, building and signing each body and running each delivery is work
         // per subscription, and how many subscriptions one change has is no business of the
-        // request that made it. One task takes the queue for all of them, in the order they
-        // were prepared, so a subscription's notifications still go out in that order. When the
+        // request that made it. One task admits webhooks first, then publishes stream pendings
+        // in preparation order. Each subscription uses one transport, so its pending order is
+        // preserved. When the
         // runtime runs that task is the runtime's business: this says the request does not do
         // the work, not that the work happens after the response reaches the client.
         let state = state.detached();
         tokio::spawn(async move {
+            let mut streams = Vec::new();
             for p in prepared.pending {
                 if p.kind == SubscriptionKind::Webhook {
                     state
                         .notify
                         .deliver(&state, &p.inbox, p.activity, Some(p.watch));
                 } else {
-                    streams::publish(&state, p).await;
+                    streams.push(p);
                 }
+            }
+            // Admit every webhook before any stream's asynchronous access recheck or gate.
+            // The stream pendings retain their preparation order.
+            for p in streams {
+                streams::publish(&state, p).await;
             }
         });
     }
