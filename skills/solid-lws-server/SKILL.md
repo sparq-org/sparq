@@ -168,6 +168,10 @@ inherits that ownership. Mounting it alone keeps storage in-memory. Setting
 `SOLID_SERVER_DATA_DIR=/data` opts in to the boot contract above, including
 `/data/index`, `/data/blobs`, and `/data/format.json`.
 
+Building the image behind a TLS-intercepting proxy: pass
+`--secret id=build_ca,src=/path/to/ca-bundle.crt` (the bundle never enters a layer),
+and `--build-arg BUILD_JOBS=N` to cap cargo on a memory-limited builder.
+
 For Helm set `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and
 `persistence.accessMode=ReadWriteOnce`; optionally choose `persistence.storageClass`
 or `persistence.existingClaim`. The shared top-level persistence block mounts

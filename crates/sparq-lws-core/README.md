@@ -62,25 +62,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on
   by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or
   `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
-- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above. The `http` and `redis-replay` backends require opt-in features.
-
-### Running durably in a container
-
-Mount a named volume and enable the data-directory contract. When building behind a trusted proxy, pass `--secret id=build_ca,src=/path/to/ca-bundle.crt`; the CA bundle stays outside image layers.
-
-```sh
-docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
-  -v data:/data -e SOLID_SERVER_DATA_DIR=/data \
-  -e SOLID_SERVER_BASE_URL=https://solid.example \
-  -e SOLID_SERVER_TRUSTED_ISSUER=https://idp.example/realms/solid \
-  "ghcr.io/sparq-org/sparq-lws-core:${VERSION}"
-```
-
-The image ships an empty `/data` owned by `65532:65532`; a fresh named Docker volume inherits that ownership. `SOLID_SERVER_DATA_DIR=/data` enables the storage lifecycle above, keeping `index/`, `blobs/`, and `format.json` together. Mounting the volume alone does not enable persistence.
-
-For Helm, use `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and `persistence.accessMode=ReadWriteOnce`; optionally set `persistence.storageClass` or `persistence.existingClaim`. These shared top-level values mount `/data`, set the environment variable, and select `Recreate` for upgrades.
-
-Use a filesystem on a **block volume** (EBS, PD, Azure Disk). Network filesystems (EFS, Azure Files, NFS) are unsupported because the index needs file locking and fsync semantics. Run **one replica**; the index and blob store are single-instance. **Stop the server before backing up** the entire volume (backup procedure: #7188 P0-8).
+- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above and [running durably in a container](../../skills/solid-lws-server/SKILL.md#running-durably-in-a-container) (volume, Helm, block storage, one replica). The `http` and `redis-replay` backends require opt-in features.
 
 ## ✨ Features
 
