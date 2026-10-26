@@ -319,16 +319,6 @@ crates = ["sparq-zk-compose"]
 # reaches all three without a map entry. Do not re-add them; re-adding one would
 # mean a cross-package `include_str!` came back (see sq-3705).
 
-# The issuance inventory scans non-test Rust across crates, including examples.
-# Every sibling source is an input to the sparq-zk-compose guard.
-[[map]]
-pattern = "crates"
-crates = ["sparq-zk-compose"]
-
-[[map]]
-pattern = "crates/**"
-readers = ["sparq-zk-compose"]
-
 # sparq-reason's compiled-vs-interpreted N3 equivalence + incremental tests read
 # sparq-solid's WAC/ACP/ODRL-spike rule corpus READ-ONLY from ../sparq-solid/rules
 # at runtime. sparq-solid DEPENDS ON sparq-reason (crates/sparq-solid/Cargo.toml),

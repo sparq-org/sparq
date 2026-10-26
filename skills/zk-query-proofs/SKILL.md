@@ -130,6 +130,9 @@ dial, construct `sig::MethodCommitment { method: CommitmentMethod::ValueOnlyV1,
 commitment }` and use the same issuance call. Existing method-selection restrictions
 and external-audit obligations remain unchanged. See the [issuance recipe](references/manifest-recipes.md#1-commit-a-credential-graph-and-attest-it-as-an-issuer).
 The four raw `sign_commitment*` helpers are for string-canonical legacy commitments only.
+[`scripts/check-raw-commitment-signers.py`](../../scripts/check-raw-commitment-signers.py)
+inventories non-test raw signer calls with counted certification exceptions;
+`docs-quality / quick-gates` runs it and its self-tests on every PR.
 
 ## Prerequisites
 

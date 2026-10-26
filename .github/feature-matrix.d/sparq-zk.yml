@@ -27,8 +27,7 @@
 # scripts/tests/feature-matrix-legnames.golden.txt is untouched.
 - name: "sparq-zk (dual-leaf — identity/desync regression guard)"
   crate: "sparq-zk"
-  # Exercise typed issuance for every recognised method, including the research dial.
-  features: "dual-leaf,commitment-value-only"
+  features: "dual-leaf"
   test: true
 
 # sq-bevd3 (epic sq-0dksu, Phase 3): the per-method
@@ -81,4 +80,10 @@
 - name: "sparq-zk (vc-bridge — W3C Data-Integrity ingest bridge + canonical interop vectors)"
   crate: "sparq-zk"
   features: "vc-bridge"
+  test: true
+
+# Cover ValueOnlyV1 typed issuance alongside the dual-leaf methods.
+- name: "sparq-zk (dual-leaf + commitment-value-only — typed issuance)"
+  crate: "sparq-zk"
+  features: "dual-leaf,commitment-value-only"
   test: true

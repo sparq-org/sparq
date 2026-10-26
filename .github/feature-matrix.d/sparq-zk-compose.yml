@@ -36,8 +36,7 @@
 # The pinned zk-toolchain workflow separately executes its real proof tests.
 - name: "sparq-zk-compose (successful-results — selected answers and private witnesses)"
   crate: "sparq-zk-compose"
-  # Exercise typed issuance with the full commitment-method and composition feature set.
-  features: "successful-results,dual-leaf,extended-fragment,commitment-value-only"
+  features: "successful-results"
   test: true
 
 # sq-h732x / sq-ygk6x: the default-OFF `extended-fragment` wave-1 lane. ci.yml's
@@ -55,4 +54,10 @@
 - name: "sparq-zk-compose (extended-fragment + dual-leaf — wave-1 routing, binding layers and encoding policy)"
   crate: "sparq-zk-compose"
   features: "extended-fragment,dual-leaf"
+  test: true
+
+# Cover typed issuance with every opt-in composition and commitment feature.
+- name: "sparq-zk-compose (all opt-in features — typed issuance)"
+  crate: "sparq-zk-compose"
+  features: "successful-results,dual-leaf,extended-fragment,commitment-value-only"
   test: true
