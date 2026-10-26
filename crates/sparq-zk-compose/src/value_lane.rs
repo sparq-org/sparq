@@ -299,12 +299,12 @@ impl ValueLaneProof {
                 .map(ValueLane::variant_name)
                 .unwrap_or_else(|| dispatch::non_value_lane_variant_name(inputs));
             return Err(DispatchError::ValueLaneVariantIdMismatch {
-                circuit: declared.package(),
+                circuit: declared.label(),
                 variant: variant.to_string(),
             });
         }
         let malformed = |reason: &str| DispatchError::MalformedValueLaneInputs {
-            circuit: declared.package(),
+            circuit: declared.label(),
             reason: reason.to_string(),
         };
         let wrong_shape = "the witness shape is not this lane's";
@@ -573,7 +573,7 @@ mod tests {
     fn the_variant_member_table_is_one_to_one_and_round_trips() {
         let members: std::collections::HashSet<String> = ValueLane::ALL
             .iter()
-            .map(|l| l.member().package())
+            .map(|l| l.member().label())
             .collect();
         assert_eq!(members.len(), ValueLane::ALL.len());
         let h = || FieldHex::from_field(&sparq_zk::field::Fr::from(1u64));

@@ -210,7 +210,7 @@ fn v2_boolean_witnesses_rebind_to_the_committed_operand_enc() {
 
         // The V2 lane targets its OWN compiled member.
         assert_eq!(p.id, &CircuitId::FilterValueDlBool);
-        assert_eq!(p.id.package(), "filter_value_dl_bool");
+        assert_eq!(p.id.package().unwrap(), "filter_value_dl_bool");
 
         // The public anchor is the committed dual leaf.
         assert_eq!(fr(p.operand_enc), committed.leaf());
@@ -1973,13 +1973,13 @@ fn every_lane_constant_member_cell_is_decided_by_the_allow_list() {
                 MethodUse::LegacyAlreadyIssued,
             );
             if member == owner {
-                assert_eq!(legacy, Ok(()), "{} must ride {}", label, member.package());
+                assert_eq!(legacy, Ok(()), "{} must ride {}", label, member.package().unwrap());
             } else {
                 assert!(
                     matches!(legacy, Err(DispatchError::LaneMemberMismatch { .. })),
                     "{} on {} must be a lane/member refusal, got {:?}",
                     label,
-                    member.package(),
+                    member.package().unwrap(),
                     legacy
                 );
             }
@@ -2221,7 +2221,7 @@ fn check_every_encodable_decimal_scale_rides_the_decimal_member() {
                     Err(DispatchError::UnknownLaneConst { .. })
                 ),
                 "an unencodable scale must be unknown on {}",
-                member.package()
+                member.package().unwrap()
             );
         }
     }
@@ -2280,7 +2280,7 @@ fn an_unknown_constant_is_refused_on_every_member() {
                     matches!(r, Err(DispatchError::UnknownLaneConst { .. })),
                     "{} on {} must be an unknown-constant refusal, got {:?}",
                     label,
-                    member.package(),
+                    member.package().unwrap(),
                     r
                 );
             }

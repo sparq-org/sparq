@@ -157,7 +157,7 @@ fn encode_boolean_witnesses_rebind_to_the_committed_operand_enc() {
 
         // The lane targets the EXISTING integer member — no new circuit exists.
         assert_eq!(id, &CircuitId::FilterValueDl);
-        assert_eq!(id.package(), "filter_value_dl_int");
+        assert_eq!(id.package().unwrap(), "filter_value_dl_int");
 
         // The public anchor is the committed dual leaf.
         assert_eq!(fr(operand_enc), committed.leaf());
