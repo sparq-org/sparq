@@ -20,6 +20,11 @@ one proof; every value proof must cover an obligation. `BindingEdge` now include
 `None` for existing edges. Absent indices deserialize as `None` and serialize
 without the field; canonical ordering adds this field after `to_proof`.
 The predicate rejects missing conjunct indices rather than guessing from bounds.
+Both accepting verifiers refuse every edge carrying `Some(_)` at their shared
+stage-2 prefilter with `CheckError::EdgeFilterIndexNotAccepted { edge }`, including
+out-of-range indices on ordinary FILTER members. Existing `None` edges retain
+their structural checks. Diagnostic `discharge` still reads the index; the later
+accepting PR replaces this refusal. The value-lane gate stays CLOSED.
 
 Only `!=` and `!(=)` normalize to `Ne`. General NOT is `OpNotModelled`, never an
 `expected=false` obligation. False verdicts fail the pin. Integer values are
@@ -30,6 +35,8 @@ relation. Private operand-domain checks remain circuit constraints.
 
 V1 integer, boolean, double, decimal (all admitted scales), date and dateTime
 value lanes are refused at stage 0 with `CheckError::LegacyV1ValueMember`.
+Only the matching dispatch error maps to that variant; other legacy-check
+errors map to `CheckError::LaneMemberMismatch { proof, reason }`.
 `dispatch::resolve_circuit(DualLeafV1, value_member)` returns
 `DispatchError::LegacyV1ValueMember`, including for already-issued use.
 `admit_legacy_dual_leaf_v1` preserves V1 string-lane verification only. Pairing

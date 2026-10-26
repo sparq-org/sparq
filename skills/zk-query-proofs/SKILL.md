@@ -111,7 +111,9 @@ opens; the INV-VL downgrade and pending external review remain unchanged.
 ## Value FILTER obligations
 
 With `dual-leaf`, `value_obligation::{derive, discharge}` provides the value-lane
-obligation model, not yet accepting. The value-lane gate stays CLOSED. See the
+obligation model, not yet accepting. The value-lane gate stays CLOSED. Both accepting
+verifiers refuse `BindingEdge::filter = Some(_)` with
+`CheckError::EdgeFilterIndexNotAccepted { edge }`. See the
 [typed obligation API, edge schema and lane refusals](references/value-obligations.md).
 
 ## Prerequisites

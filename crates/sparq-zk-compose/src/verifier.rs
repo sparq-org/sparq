@@ -1354,6 +1354,9 @@ pub enum CheckError {
     /// A binding edge connects proofs whose kinds cannot be bound (e.g. the
     /// source is not a scan or the target is not a filter).
     EdgeKindMismatch { edge: usize },
+    /// A binding edge carries a FILTER index while the value-lane gate is CLOSED.
+    /// The later accepting PR replaces this check with value-obligation binding.
+    EdgeFilterIndexNotAccepted { edge: usize },
     /// A binding edge's encodings disagree: the scanned column does not equal
     /// the filter's operand (the join the prover claimed is a lie).
     BindingInconsistent { edge: usize },
@@ -2234,6 +2237,10 @@ impl std::fmt::Display for CheckError {
             CheckError::EdgeKindMismatch { edge } => {
                 write!(f, "binding edge {edge} connects incompatible proof kinds")
             }
+            CheckError::EdgeFilterIndexNotAccepted { edge } => write!(
+                f,
+                "binding edge {edge}: FILTER index not accepted; value-lane gate is CLOSED"
+            ),
             CheckError::BindingInconsistent { edge } => write!(
                 f,
                 "binding edge {edge}: scanned column does not equal the filter operand"
@@ -3021,8 +3028,12 @@ fn prefilter_manifest_structure_impl(
     for (i, sp) in manifest.sub_proofs.iter().enumerate() {
         crate::dispatch::check_lane_member_pairing(&sp.inputs)
             .map_err(|e| CheckError::LaneMemberMismatch { proof: i, reason: e.to_string() })?;
-        crate::dispatch::refuse_legacy_value_member(&sp.inputs)
-            .map_err(|_| CheckError::LegacyV1ValueMember { proof: i })?;
+        crate::dispatch::refuse_legacy_value_member(&sp.inputs).map_err(|e| match e {
+            crate::dispatch::DispatchError::LegacyV1ValueMember { .. } => {
+                CheckError::LegacyV1ValueMember { proof: i }
+            }
+            other => CheckError::LaneMemberMismatch { proof: i, reason: other.to_string() },
+        })?;
         // And a value-lane sub-proof is refused outright, rather than
         // verified-but-undischarging. No edge is inspected: `filter_edge_true`
         // accepts a `FilterInt` edge and nothing else, so NO value-lane member can
@@ -3174,6 +3185,9 @@ fn prefilter_manifest_structure_impl(
 
     // --- Stage 2: binding-consistency edges. ---
     for (e, edge) in manifest.binding_edges.iter().enumerate() {
+        if edge.filter.is_some() {
+            return Err(CheckError::EdgeFilterIndexNotAccepted { edge: e });
+        }
         let from = manifest
             .sub_proofs
             .get(edge.from_proof)
@@ -14908,6 +14922,38 @@ mod fragment_dispatch_tests {
             "the FILTER-free control must get past the routing gate, got {:?}",
             ok_err
         );
+    }
+
+    #[test]
+    fn fragment_binding_edge_filter_indices_are_not_accepted() {
+        let scan = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), int_lit(3)]],
+        );
+        let operand = match &scan {
+            ProofInputs::Scan { rows, .. } => rows[0][2].clone(),
+            _ => unreachable!(),
+        };
+        let (filter, _) = crate::build::build_filter_int(
+            operand, 3, crate::manifest::FilterOp::Gt, 1, true,
+        ).unwrap();
+        let mut m = fm(
+            UNFILTERED,
+            vec![sub(scan), sub(filter)],
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1")]))],
+        );
+        m.manifest.binding_edges = vec![crate::manifest::BindingEdge {
+            filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1,
+        }];
+        let k = attest_fragment_fixture(&mut m);
+        assert!(matches!(run_fragment(&m, &k), Err(CheckError::MissingProof { proof: 0 })),
+            "the None control must pass the shared structural prefilter");
+        for index in [0, 99] {
+            m.manifest.binding_edges[0].filter = Some(index);
+            let err = run_fragment(&m, &k).unwrap_err();
+            assert!(matches!(err, CheckError::EdgeFilterIndexNotAccepted { edge: 0 }),
+                "FILTER index {index} must be refused by name, got {err:?}");
+        }
     }
 
     /// The FILTER refusal is over EVERY re-derived branch, not only the ones a

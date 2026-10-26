@@ -469,6 +469,29 @@ fn structure_accepts_well_formed_manifest() {
 }
 
 #[test]
+fn structure_rejects_binding_edge_filter_index_zero() {
+    let mut m = sample_manifest();
+    assert_eq!(m.binding_edges[0].filter, None);
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("the None control still passes the structural prefilter");
+    m.binding_edges[0].filter = Some(0);
+    assert!(matches!(
+        prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()),
+        Err(CheckError::EdgeFilterIndexNotAccepted { edge: 0 })
+    ));
+}
+
+#[test]
+fn structure_rejects_binding_edge_filter_index_out_of_range() {
+    let mut m = sample_manifest();
+    m.binding_edges[0].filter = Some(99);
+    assert!(matches!(
+        prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()),
+        Err(CheckError::EdgeFilterIndexNotAccepted { edge: 0 })
+    ));
+}
+
+#[test]
 fn structure_rejects_inconsistent_binding_edge() {
     let mut m = sample_manifest();
     // Tamper: point the filter's operand at a different encoding than the
