@@ -77,8 +77,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 - **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
   tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
 - **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the in-process
-  engine (compiled by default, but selected only by `PSS_SPARQ_BACKEND=embedded` — the
-  boot default stays the in-memory double), opt-in live SPARQ HTTP client, `object_store`.
+  engine (selected by `PSS_SPARQ_BACKEND=embedded`; boot defaults to memory), opt-in
+  live SPARQ HTTP client, and a filesystem blob adapter with immutable opaque keys.
 - **Notification observability** — process-wide backlog-overflow totals
   are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and
   receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
@@ -87,6 +87,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   limits, per-connection max-requests, rate limiting, and overload shedding.
 - **LWS 1.0 mode** — `SOLID_SERVER_PROTOCOL=lws` serves W3C Linked Web Storage (`src/lws/`, skill § *Run the LWS 1.0 protocol*, [`conformance/lws/`](./conformance/lws)).
 - Cargo features:
+  - `blob-fs` (**default-on**, native only) — async adapter for [`sparq-lws-blob-fs`](../sparq-lws-blob-fs); hold the data-directory lock before open and until drop.
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
     `--no-default-features` builds the engine-free profile.
@@ -112,8 +113,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 - Specification estate (what this crate is pinned to, and what is still UNRESOLVED — issue #4971): the crate-level rustdoc, `cargo doc -p sparq-lws-core --open`.
 - Normative specs — the spec is the contract, not this implementation: [DPoP-SK](https://jeswr.github.io/dpop-sk-spec/), implemented here in `src/pop/sk/` against that profile (its Appendix-A worked example runs as a test vector); and the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier), which owns baseline (cache-miss) Solid-OIDC token + DPoP proof verification. On a verified-token-cache hit `src/auth_cache.rs` re-verifies the fresh proof locally — signature, `htm`/`htu`/`iat`, `ath`, `jti` replay, `cnf.jkt` binding — built from the verifier's own public primitives and its shared replay store, so that path is security-sensitive code to audit here.
 - Solid CTH conformance: [`conformance/`](./conformance) — opt-in lane; the score is generated + ratcheted, never committed prose (sq-gg0qq.7).
-- Related crates: [`sparq-solid`](../sparq-solid) (Solid protocol pieces),
-  [`sparq-server`](../sparq-server) (the SPARQL endpoint it can delegate to).
+- Related crates: [`sparq-solid`](../sparq-solid) (Solid protocol pieces), [`sparq-server`](../sparq-server) (the SPARQL endpoint it can delegate to).
 
 ## License
 

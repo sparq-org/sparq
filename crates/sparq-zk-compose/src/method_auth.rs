@@ -744,6 +744,7 @@ mod tests {
         }
         // A method-UNBOUND signature is refused under the default policy, and
         // authenticates as Unbound only under the explicit downgrade.
+        // Legacy unbound attestation fixture retained for negative tests.
         let sig_hex = sk.sign_commitment_with_status(&c, &s, &r);
         let pk = public_key_from_hex(&pk_hex).unwrap();
         let sig = signature_from_hex(&sig_hex).unwrap();

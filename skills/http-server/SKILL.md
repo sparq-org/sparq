@@ -1471,12 +1471,15 @@ Malformed numeric overrides leave defaults unchanged; valid overrides are nonneg
 size is chosen by untrusted input — the request's own `"dataset"` on the stateless lane, the
 store's control documents on the stateful one. Every lane that builds a view therefore runs on
 ONE bounded blocking pool: the stateless per-request build, stateful per-generation **cache
-misses** (hits use an O(1) read-lock lookup and claim no slot), the `odrl-authz` lane's store
+misses** (hits use a short cache lookup and claim no slot), the `odrl-authz` lane's store
 build plus policy evaluation and index rebuild under **one claim**, and the
 `solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
-The stateless build and stateful cache-miss build keep the decision, ACL discovery,
+The stateless build and the stateful miss leader keep the decision, ACL discovery,
 `WAC-Allow` calculation, or query in the same blocking closure under that one permit.
+Other misses await the shared view without a permit, then claim a pool permit for their
+request work. A completed view is published while the leader retains its permit through
+request completion. Only a completed outcome from the shared read-lock lookup is a warm hit.
 Stateful cache-hit decisions and `WAC-Allow` calculation run inline on the async worker,
 without a build claim. ACL targets are indexed once per view; targets longer than
 `max_resource_iri_bytes` or deeper than `max_resource_path_depth` are omitted. Each
@@ -1508,11 +1511,31 @@ second, with the count shed since the preceding warning.
   carry a `"dataset"` (a body naming both pods is ambiguous → `400`). A pod resource IS a named
   graph of the loaded store, so `"resource"` must be that graph's absolute IRI; relative paths are
   not resolved. The pinned current generation is forked, materialised once, and cached in
-  `AppState` keyed by the **serving lineage and generation number** — so the N3 materialisation is paid once per
-  generation, not once per request, and **an `.acl`/`.acr` write re-materialises automatically**
+  `AppState` keyed by **serving lineage, generation and requested view kind** (WAC, ACP or
+  inferred). Concurrent misses for one key share one build; waiters claim no pool slots
+  while awaiting that build.
+  Selecting a new generation or lineage drops superseded slots; restore clears the cache.
+  The three kinds have independent slots. Warm hits use a shared cache read lock and
+  an `Arc` clone; only misses take the write lock and re-check the key. Successful views
+  and deterministic count/size allowance refusals remain cached for that key.
+  `AuthAllowance::Deadline` depends on host load: current waiters receive the refusal,
+  the slot is cleared, and the next request rebuilds the same generation. The native materialization budget
+  `AuthBudget::max_materialize_time` defaults to five seconds (`None` disables it;
+  wasm32 ignores it). Coarse checks cover input assembly and stratum boundaries;
+  expiration is a fail-closed `503`, logged as `max_materialize_time`, with no partial
+  view installed. Library callers recognize `[allowance=deadline]` through
+  `auth_allowance_refusal`; HTTP responses contain no control-document details.
+  Pool shedding, task join failures,
+  panics and other materialization errors are transient and are retried on the next request.
+  A shed returns `503` with `"the authorization build pool is saturated; retry"`;
+  an incomplete or failed build returns the retryable materialization refusal.
+  Incomplete leader tasks evict their own slot and publish `503` to current waiters.
+  Cancelling the initiating handler leaves the pool build running and its outcome still
+  reaches the waiters. **An `.acl`/`.acr` write re-materialises automatically**
   (every commit publishes a new generation; an in-memory `/admin/restore` replaces the serving
   lineage even when it restarts at generation zero. Both cache hits and installation check lineage,
-  so an in-flight build from the replaced store cannot install after restore).
+  so a build or waiter from the replaced store receives a fail-closed `503` after restore
+  and cannot install or serve the old view).
 
 The stateful lane is fail-closed on the same terms, and additionally **refuses** (never silently
 un-enforces) two combinations it cannot evaluate faithfully: under `odrl-authz`, a server store
@@ -1574,7 +1597,7 @@ env overrides the default.
 | `--shacl-shapes FILE` | `SPARQ_SHACL_SHAPES` | unset | (feature `shacl`) load the guard shapes graph once at startup; required when the guard is on |
 | `--solid-authz` | `SPARQ_SOLID_AUTHZ` | off | (feature `solid-authz`) serve the Solid WAC/ACP authorization endpoints `POST /authz/decide`+`/wac-allow`+`/query` — a fail-closed HTTP shell over `sparq-solid`; POST the pod dataset (or `"source":"server"` for the server's own loaded store, sq-snopa.8) + an already-resolved session, get the decision / `WAC-Allow` value / access-controlled query result; read-only — see "Solid WAC/ACP authorization endpoints" |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
-| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) maximum potential `(rule, credential)` pairs: `(direct rules + certifications) × presented credentials`; each depth-one certification can add at most one rule. Checked after parsing and before derivation/admission; excess → `403` trust deny, no grant. `0` permits no pairs. |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) maximum combined signature-verification budget: `certifications + (direct rules + certifications) × presented credentials`; each depth-one certification can add at most one rule. Checked after parsing and before derivation/admission; excess → `403` trust deny, no grant. `0` permits neither certifications nor pairs. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` | `2048` | (feature `solid-authz-trust`) maximum certification edges per block, checked before any signature verification; excess → `403` trust deny. `0` permits no certifications. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK` | `65536` | (feature `solid-authz-trust`) maximum potential rule/triple validations: `(direct rules + certifications) × sum(credential triple counts)`; checked before derivation/admission because a pair can carry many triples. Excess → `403` trust deny. `0` permits no validation work. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` | CPU count | (feature `solid-authz`) how many authorization-view BUILDS may run at once on the bounded blocking pool, across every `/authz/*` lane; `0` is read as `1` — see "Bounded authorization-build pool" |
