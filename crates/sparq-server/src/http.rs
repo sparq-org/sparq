@@ -2633,7 +2633,8 @@ pub struct AppState {
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
     /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
-    /// the server's OWN loaded store, cached per serving lineage and generation. `None` until the first
+    /// the server's OWN loaded store, with independent single-flight slots per serving
+    /// lineage, generation and requested view kind. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
     /// WHERE THE AUTH VIEW LIVES relative to the ring's immutable generations (the design

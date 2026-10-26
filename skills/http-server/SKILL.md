@@ -1460,7 +1460,7 @@ Malformed numeric overrides leave defaults unchanged; valid overrides are nonneg
 size is chosen by untrusted input — the request's own `"dataset"` on the stateless lane, the
 store's control documents on the stateful one. Every lane that builds a view therefore runs on
 ONE bounded blocking pool: the stateless per-request build, stateful per-generation **cache
-misses** (hits use an O(1) read-lock lookup and claim no slot), the `odrl-authz` lane's store
+misses** (hits use a short cache lookup and claim no slot), the `odrl-authz` lane's store
 build plus policy evaluation and index rebuild under **one claim**, and the
 `solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
@@ -1483,11 +1483,17 @@ second, with the count shed since the preceding warning.
   carry a `"dataset"` (a body naming both pods is ambiguous → `400`). A pod resource IS a named
   graph of the loaded store, so `"resource"` must be that graph's absolute IRI; relative paths are
   not resolved. The pinned current generation is forked, materialised once, and cached in
-  `AppState` keyed by the **serving lineage and generation number** — so the N3 materialisation is paid once per
-  generation, not once per request, and **an `.acl`/`.acr` write re-materialises automatically**
+  `AppState` keyed by **serving lineage, generation and requested view kind** (WAC, ACP or
+  inferred). Concurrent misses for one key share one build; waiters claim no pool slots.
+  The three kinds have independent slots. A successful view or an `AuthAllowance` refusal
+  (including `Deadline`) remains cached for that key. Pool shedding, task join failures,
+  panics and other materialization errors are transient and are retried on the next request.
+  Cancelling the initiating handler leaves the pool build running and its outcome still
+  reaches the waiters. **An `.acl`/`.acr` write re-materialises automatically**
   (every commit publishes a new generation; an in-memory `/admin/restore` replaces the serving
   lineage even when it restarts at generation zero. Both cache hits and installation check lineage,
-  so an in-flight build from the replaced store cannot install after restore).
+  so a build or waiter from the replaced store receives a fail-closed `503` after restore
+  and cannot install or serve the old view).
 
 The stateful lane is fail-closed on the same terms, and additionally **refuses** (never silently
 un-enforces) two combinations it cannot evaluate faithfully: under `odrl-authz`, a server store
