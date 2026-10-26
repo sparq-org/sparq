@@ -100,9 +100,10 @@ use crate::shamir::Share;
 
 /// Maximum number of shares accepted by robust reconstruction.
 ///
-/// Matches the 64-party sanity cap introduced by #7167. The two caps will be
-/// unified when the ResourcePlan party cap lands.
-pub const MAX_ROBUST_SHARES: usize = 64;
+/// This cap follows #7167's planned `crate::oblivious_join::MAX_OUTPUT_PARTIES`.
+/// It is `1 << 10` for now and will be defined as that shared constant when
+/// #7167 merges, adopting whatever value it has then.
+pub const MAX_ROBUST_SHARES: usize = 1 << 10;
 
 /// Maximum number of reference-subset fits attempted for abort-path attribution.
 ///
@@ -315,7 +316,7 @@ std::thread_local! {
 fn best_effort_suspects(shares: &[Share], degree: usize) -> Vec<u64> {
     let mut best: Option<Vec<usize>> = None;
     // The caller admits at most MAX_SUSPECT_FITS reference subsets. This includes
-    // every degree at n <= 13 (maximum C(13,6)=1716) and the n=3..9 cases.
+    // every degree at n <= 14 (maximum C(14,7)=3432) and the n=3..9 cases.
     for_each_combination(shares.len(), degree + 1, &mut |idxs| {
         let subset: Vec<Share> = idxs.iter().map(|&i| shares[i]).collect();
         #[cfg(test)]
@@ -686,7 +687,6 @@ mod tests {
 
     #[test]
     fn work_bound_accepts_64_shares_and_corrects_one_tamper() {
-        assert_eq!(MAX_ROBUST_SHARES, 64);
         let mut shares = work_bound_shares(64, 31);
         assert_eq!(reconstruct_robust(&shares, 31).unwrap(), fp(42));
         let clean = reconstruct_robust_attributed(&shares, 31).unwrap();
@@ -697,30 +697,41 @@ mod tests {
         assert_eq!(corrected.secret, fp(42));
         assert_eq!(corrected.cheaters, vec![64]);
         assert_eq!(reconstruct_robust(&shares, 31).unwrap(), fp(42));
-        // The same inclusive cap also admits the no-redundancy interpolation.
+        // No-redundancy interpolation also retains its existing behaviour.
         let minimal = work_bound_shares(64, 63);
         assert_eq!(reconstruct_robust(&minimal, 63).unwrap(), fp(42));
     }
 
     #[test]
-    fn work_bound_refuses_65_shares_before_distinct_point_validation() {
-        let mut shares = work_bound_shares(65, 31);
-        let expected = "robust reconstruction: share count 65 exceeds MAX_ROBUST_SHARES=64";
-        for degree in [31, 64] {
+    fn work_bound_accepts_1024_shares_on_consistency_check() {
+        assert_eq!(MAX_ROBUST_SHARES, 1024);
+        // Degree zero exercises the e=0 consistency path with redundancy.
+        let shares = work_bound_shares(1024, 0);
+        let clean = reconstruct_robust_attributed(&shares, 0).unwrap();
+        assert_eq!(clean.secret, fp(42));
+        assert!(clean.cheaters.is_empty());
+        assert_eq!(reconstruct_robust(&shares, 0).unwrap(), fp(42));
+    }
+
+    #[test]
+    fn work_bound_refuses_1025_shares_before_distinct_point_validation() {
+        let mut shares = work_bound_shares(1025, 0);
+        let expected = "robust reconstruction: share count 1025 exceeds MAX_ROBUST_SHARES=1024";
+        for degree in [0, 1024] {
             let err = reconstruct_robust_attributed(&shares, degree).unwrap_err();
             assert!(matches!(err, MpcError::Protocol(m) if m == expected));
             let err = reconstruct_robust(&shares, degree).unwrap_err();
             assert!(matches!(err, MpcError::Protocol(m) if m == expected));
         }
-        shares[64].x = shares[0].x;
-        let err = reconstruct_robust_attributed(&shares, 31).unwrap_err();
+        shares[1024].x = shares[0].x;
+        let err = reconstruct_robust_attributed(&shares, 0).unwrap_err();
         assert!(matches!(err, MpcError::Protocol(m) if m == expected));
     }
 
     #[test]
     fn work_bound_preserves_existing_precondition_messages() {
-        let shares = work_bound_shares(65, 0);
-        for n in [2, 65] {
+        let shares = work_bound_shares(1025, 0);
+        for n in [2, 1025] {
             let err = reconstruct_robust_attributed(&shares[..n], usize::MAX).unwrap_err();
             let expected = format!(
                 "robust reconstruction: degree {} + 1 overflows usize; no share count \
@@ -834,7 +845,7 @@ mod tests {
         assert_eq!(binomial_with_cap(15, 8, 6435), Some(6435));
         assert_eq!(binomial_with_cap(15, 8, 4096), None);
         // Independent Pascal recurrence checks every reachable degree, including
-        // all n <= 13 and the n=3..9 cases, against the inclusive production cap.
+        // all n <= 14 and the n=3..9 cases, against the inclusive production cap.
         let mut row = vec![1u128];
         for n in 0..=64 {
             for (k, &expected) in row.iter().enumerate() {
