@@ -172,7 +172,8 @@ pub trait BlobStore: Send + Sync {
     /// [`BlobEntry::generation`] as `None`. On a backend WITHOUT a conditional delete,
     /// safety rests on the **unique-per-write blob keys** the composite store now mints
     /// (`CompositeStore::mint_blob_key`): an overwrite never reuses a candidate's key, so the
-    /// reconciler can never target live bytes and the delete is safe to be unconditional.
+    /// reconciler calls [`BlobStore::delete`] unconditionally. Such a backend must return a
+    /// backend error from `delete_if_unchanged`; calling it without a witness is a caller bug.
     async fn delete_if_unchanged(
         &self,
         key: &str,
@@ -319,17 +320,8 @@ impl InMemoryBlobStore {
 
     #[cfg(any(test, feature = "test-support"))]
     fn validate_key(&self, key: &str) -> Result<(), BlobError> {
-        if self.immutable_keys {
-            let bare = key.strip_prefix("$pool$").unwrap_or(key);
-            let valid = bare.strip_prefix("b1-").is_some_and(|suffix| {
-                suffix.len() == 32
-                    && suffix
-                        .bytes()
-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            });
-            if !valid {
-                return Err(BlobError::Backend("invalid blob key".into()));
-            }
+        if self.immutable_keys && sparq_lws_blob_key::parse(key).is_none() {
+            return Err(BlobError::Backend("invalid blob key".into()));
         }
         Ok(())
     }

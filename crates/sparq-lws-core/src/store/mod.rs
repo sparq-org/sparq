@@ -789,7 +789,6 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
     fn mint_blob_key(iri: &str) -> ServerResult<String> {
-        let prefix = "b1";
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -800,18 +799,10 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         getrandom::getrandom(&mut suffix).map_err(|e| {
             ServerError::Storage(format!("OS RNG unavailable for blob-key minting: {e}"))
         })?;
-        let hex = suffix.iter().fold(String::with_capacity(32), |mut acc, b| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        });
         // A record in the service pool ([`in_service_pool`]) is marked here, where the IRI says
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
-        if limits::in_service_pool(iri) {
-            return Ok(format!("{}{prefix}-{hex}", limits::POOLED_BLOB_KEY_MARK));
-        }
-        Ok(format!("{prefix}-{hex}"))
+        Ok(sparq_lws_blob_key::format(suffix, limits::in_service_pool(iri)))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash

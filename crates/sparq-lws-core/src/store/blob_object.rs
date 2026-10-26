@@ -80,16 +80,11 @@ impl BlobStore for ObjectBlobAdapter {
 
     async fn delete_if_unchanged(
         &self,
-        key: &str,
+        _key: &str,
         _expected_generation: u64,
     ) -> Result<bool, BlobError> {
         // This backend never advertises a generation and has no atomic conditional delete.
-        // The trait explicitly permits unconditional deletion under unique-per-write keys.
         // The reconciler selects BlobStore::delete for generation=None entries.
-        if !self.exists(key).await? {
-            return Ok(false);
-        }
-        self.delete(key).await?;
-        Ok(true)
+        Err(BlobError::Backend("conditional delete unsupported".into()))
     }
 }

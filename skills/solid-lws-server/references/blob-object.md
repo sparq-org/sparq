@@ -9,6 +9,10 @@ Enable crate feature `aws`, `azure`, or `gcp` for `s3://`, `az://`, or `gs://`.
 `file://` is available without a provider feature. The object crate has no server
 dependency, and the default server dependency graph excludes `object_store`.
 
+`file://` is for tests and development only. Its LocalFileSystem configuration
+does not fsync file data or directories, so it is not crash-durable. For durable
+local storage, use the data-directory `FsBlobStore` (`SOLID_SERVER_DATA_DIR`), pending #7229.
+
 ```rust,no_run
 use sparq_lws_core::store::blob_object::{ObjectBlobAdapter, ObjectBlobStore};
 use sparq_lws_core::store::{CompositeStore, InMemorySparqClient};
@@ -39,9 +43,10 @@ existence and metadata; a missing key is absent, while other backend errors
 propagate. Delete is idempotent and unconditional.
 
 `BlobStore::list_stream` exposes modification times and `generation = None`.
-The reconciler consumes bounded batches, rechecks references and age, then uses
-the trait's versionless unconditional-delete path. `delete_if_unchanged` follows
-that same documented fallback. The compatibility `list` snapshot refuses more
+The reconciler consumes bounded batches, rechecks references and age, then calls
+`BlobStore::delete` for entries with no generation. `delete_if_unchanged` returns
+`BlobError::Backend("conditional delete unsupported".into())`: calling it on this
+backend is a caller bug. The compatibility `list` snapshot refuses more
 than 4096 entries; use the stream for an unbounded namespace. Foreign object names
 and nested directories are excluded from listings. If a later page fails, a sweep
 returns an error and earlier batches may already have completed.

@@ -63,26 +63,55 @@ jobs:
         with:
           key: lws-blob-object
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Start isolated MinIO
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          # Match the toolchain directive in the pinned MinIO go.mod.
+          go-version: "1.24.2"
+          cache: false
+      - name: Install pinned MinIO and bucket client
         run: |
-          docker run --detach --name blob-minio --publish 127.0.0.1:9000:9000 \
-            --env MINIO_ROOT_USER="$LWS_BLOB_TEST_ACCESS_KEY" \
-            --env MINIO_ROOT_PASSWORD="$LWS_BLOB_TEST_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e \
-            server /data
-          curl --fail --retry 20 --retry-delay 1 --retry-connrefused \
+          export GOBIN="$RUNNER_TEMP/minio-bin"
+          mkdir -p "$GOBIN"
+          # RELEASE.2025-04-22T22-12-26Z, commit 0d7408fc9969caf07de6a8c3a84f9fbb10a6739e.
+          go install github.com/minio/minio@v0.0.0-20250422221226-0d7408fc9969
+          # The object-store wrapper has no bucket API; avoid custom signing in the test.
+          go install github.com/minio/mc@v0.0.0-20250312172924-c1d5d4cbb4ca
+      - name: Start isolated MinIO
+        env:
+          MINIO_ROOT_USER: ${{ env.LWS_BLOB_TEST_ACCESS_KEY }}
+          MINIO_ROOT_PASSWORD: ${{ env.LWS_BLOB_TEST_SECRET_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/minio-data"
+          nohup "$RUNNER_TEMP/minio-bin/minio" server \
+            --address 127.0.0.1:9000 --console-address 127.0.0.1:9001 \
+            "$RUNNER_TEMP/minio-data" > "$RUNNER_TEMP/minio.log" 2>&1 < /dev/null &
+          echo "$!" > "$RUNNER_TEMP/minio.pid"
+          curl --fail --retry 20 --retry-delay 1 --retry-connrefused --max-time 5 \
             "$LWS_BLOB_TEST_ENDPOINT/minio/health/ready"
-          docker exec blob-minio mc alias set fixture http://127.0.0.1:9000 \
+      - name: Create isolated bucket
+        run: |
+          "$RUNNER_TEMP/minio-bin/mc" --config-dir "$RUNNER_TEMP/minio-client" \
+            alias set fixture "$LWS_BLOB_TEST_ENDPOINT" \
             "$LWS_BLOB_TEST_ACCESS_KEY" "$LWS_BLOB_TEST_SECRET_KEY"
-          docker exec blob-minio mc mb fixture/blob-contract
+          "$RUNNER_TEMP/minio-bin/mc" --config-dir "$RUNNER_TEMP/minio-client" \
+            mb fixture/blob-contract
       - name: Run MinIO contract, router round trip and grace-window sweep
         run: |
           cargo test -p sparq-lws-core \
             --features blob-object,test-support,sparq-lws-blob-object/aws \
             --test blob_object minio_contract_router_and_orphan_sweep -- --ignored
-      - name: Remove MinIO
+      - name: Print MinIO server log
+        if: failure()
+        run: |
+          if [[ -f "$RUNNER_TEMP/minio.log" ]]; then
+            cat "$RUNNER_TEMP/minio.log"
+          fi
+      - name: Stop MinIO
         if: always()
-        run: docker rm --force blob-minio
+        run: |
+          if [[ -f "$RUNNER_TEMP/minio.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/minio.pid")" || true
+          fi
 
   touchstone:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.

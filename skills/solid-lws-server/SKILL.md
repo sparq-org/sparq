@@ -118,6 +118,13 @@ contract suite exposed by `test-support`. The same create-only contract runs ove
 `InMemoryBlobStore::with_immutable_keys()` (under `test-support`) and the object adapter; legacy in-memory
 constructors keep their replacement semantics.
 
+The dependency-free `sparq-lws-blob-key` crate shares `POOL_MARK`, `PREFIX`,
+`parse(&str) -> Option<(&str, bool)>` (bare key and pool flag), and
+`format([u8; 16], bool) -> String` across key minting and validation. The object
+adapter advertises no generation and rejects `delete_if_unchanged`; the
+reconciler uses `BlobStore::delete` for these entries. Its `file://` backend is
+for tests and development only; see the reference for local durability limits.
+
 The seed variables are test-only:
 
 - `SOLID_SERVER_SEED_CONFORMANCE=1` provisions conformance fixtures.

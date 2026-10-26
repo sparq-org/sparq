@@ -36,6 +36,7 @@ async fn local_filesystem_contract() {
     blob.put(key, Bytes::new()).await.unwrap();
     let entry = blob.stat(key).await.unwrap().unwrap();
     assert!(entry.generation.is_none());
+    assert!(matches!(blob.delete_if_unchanged(key, 0).await, Err(sparq_lws_core::store::BlobError::Backend(message)) if message == "conditional delete unsupported"));
     assert!(entry.last_modified.is_some());
     assert!(blob
         .list()

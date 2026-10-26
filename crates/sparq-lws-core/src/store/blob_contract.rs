@@ -8,7 +8,7 @@ use futures_util::{StreamExt, TryStreamExt};
 use super::{BlobError, BlobStore};
 
 fn key(n: u128) -> String {
-    format!("b1-{n:032x}")
+    sparq_lws_blob_key::format(n.to_be_bytes(), false)
 }
 
 /// Exercise the shared store contract, including timestamp, pool, concurrency and delete semantics.
@@ -75,7 +75,7 @@ pub async fn run<B: BlobStore + ?Sized>(store: &B) {
         if left.is_ok() { "left" } else { "right" }
     );
     store.delete(&raced).await.unwrap();
-    let pool = format!("$pool${first}");
+    let pool = sparq_lws_blob_key::format(1u128.to_be_bytes(), true);
     store
         .put(&pool, Bytes::from_static(b"pool body"))
         .await
@@ -131,9 +131,11 @@ pub async fn run<B: BlobStore + ?Sized>(store: &B) {
         assert!(store.delete_if_unchanged(&first, generation).await.unwrap());
         assert!(!store.delete_if_unchanged(&first, generation).await.unwrap());
     } else {
-        // Versionless backends use the trait's unique-key unconditional-delete fallback.
-        assert!(store.delete_if_unchanged(&first, 0).await.unwrap());
-        assert!(!store.delete_if_unchanged(&first, 0).await.unwrap());
+        // Versionless backends reject conditional deletion; callers use delete directly.
+        assert!(matches!(store.delete_if_unchanged(&first, 0).await, Err(BlobError::Backend(_))));
+        assert_eq!(store.get(&first).await.unwrap(), body);
+        store.delete(&first).await.unwrap();
+        assert!(matches!(store.delete_if_unchanged(&first, 0).await, Err(BlobError::Backend(_))));
     }
     assert!(!store.exists(&first).await.unwrap());
     store.delete(&first).await.unwrap();

@@ -25,6 +25,9 @@ assert_eq!(store.get(key).await?, "body");
 
 LocalFileSystem is always available on native targets. Features `aws`, `azure`,
 and `gcp` enable `s3://`, `az://`, and `gs://` respectively; all are off by default.
+`file://` is for tests and development only: its LocalFileSystem configuration
+does not fsync file data or directories and is not crash-durable. For durable
+local storage, use the data-directory `FsBlobStore` (`SOLID_SERVER_DATA_DIR`), pending #7229.
 `ObjectBlobStore::new(Arc<dyn ObjectStore>, prefix)` wraps an existing backend.
 `from_url(url, options)` uses the pinned provider's configuration options and
 rejects unknown options. Provider credential discovery can consult local files,
@@ -36,6 +39,8 @@ pooled objects under `<prefix>/pool/b1-…`. Writes use atomic create mode. Call
 must mint a fresh key for every write, including after deletion. Delete is
 unconditional and idempotent. Listings stream backend pages, preserve modification
 times, and skip foreign objects. No conditional-delete generation is advertised.
+The server adapter rejects `delete_if_unchanged` with a backend error; the
+reconciler calls `delete` for entries with no generation.
 
 ## 📚 Learn more
 
