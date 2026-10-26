@@ -639,33 +639,34 @@ impl std::fmt::Debug for BatchedHiddenInput {
 impl BatchedHiddenInput {
     /// Assemble a batched hidden input, validating each payload row's arity and
     /// the [`RowBinding::Keyed`] key count against the row count. Shape errors
-    /// identify the holder, expected arity and row index without term values.
+    /// identify the holder, expected arity and row index, or key and row counts,
+    /// without key strings or term values.
     pub fn new(
         holder: HolderId,
         payload_vars: Vec<Variable>,
         rows: Vec<(Fp, Vec<Option<Term>>)>,
         binding: RowBinding,
     ) -> Result<Self, MpcError> {
-        if let RowBinding::Keyed(keys) = &binding {
-            if keys.len() != rows.len() {
-                return Err(MpcError::Protocol(format!(
-                    "BatchedHiddenInput: keyed binding has {} keys but {} rows",
-                    keys.len(),
-                    rows.len()
-                )));
-            }
-        }
         let input = BatchedHiddenInput {
             holder,
             payload_vars,
             rows,
             binding,
         };
-        input.check_payload_arity()?;
+        input.check_shape()?;
         Ok(input)
     }
 
-    fn check_payload_arity(&self) -> Result<(), MpcError> {
+    fn check_shape(&self) -> Result<(), MpcError> {
+        if let RowBinding::Keyed(keys) = &self.binding {
+            if keys.len() != self.rows.len() {
+                return Err(MpcError::Protocol(format!(
+                    "BatchedHiddenInput: keyed binding has {} keys but {} rows",
+                    keys.len(),
+                    self.rows.len()
+                )));
+            }
+        }
         let expected = self.payload_vars.len();
         for (index, (_, row)) in self.rows.iter().enumerate() {
             if row.len() != expected {
@@ -696,10 +697,9 @@ impl BatchedHiddenInput {
     /// Each key is drawn through the [`DistributedRandomness`] seam
     /// ([`DistributedRandomness::vss_own_input`]), in row order — for
     /// [`ShamirDealer`] exactly the [`ShamirDealer::share_batch`] it always was, so
-    /// the shares are unchanged. Payload arity is checked before any sharing is
-    /// drawn.
+    /// the shares are unchanged. Payload arity and the keyed binding count are
+    /// checked before any sharing is drawn.
     pub fn shared_keys(&self, dealer: &mut ShamirDealer) -> Result<BatchedShares, MpcError> {
-        self.check_payload_arity()?;
         let n = dealer.parties();
         self.shared_keys_through(dealer, n)
     }
@@ -708,12 +708,14 @@ impl BatchedHiddenInput {
     /// [`DistributedRandomness::vss_own_input`] per row, in row order, each refused
     /// unless it is the canonical sharing for the caller's (already validated)
     /// party count `n`. A source that cannot share a holder's own input (PRSS
-    /// today) fails closed with its own error. Shape checks only.
+    /// today) fails closed with its own error. Input shape is checked before any
+    /// draw, including when the input was built through public fields.
     pub(crate) fn shared_keys_through(
         &self,
         source: &mut dyn DistributedRandomness,
         n: usize,
     ) -> Result<BatchedShares, MpcError> {
+        self.check_shape()?;
         let shares = self
             .rows
             .iter()
@@ -730,8 +732,9 @@ pub type BatchedJoinOutput = (PartialResult, ObliviousOutputCost);
 
 impl HiddenValueJoin {
     /// The bound contract every candidate-materialising entry runs FIRST: refuse an
-    /// over-cap `B`, then count the candidates the binding permits without
-    /// enumerating them, then require `B` to cover that count.
+    /// over-cap `B`, then check both inputs' payload arity and keyed binding
+    /// counts, count the candidates without enumerating them, and require `B` to
+    /// cover that count.
     ///
     /// Each candidate costs one equality sharing on the way to the output stage and
     /// one materialised slot inside it, so leaving the cardinality to the output
@@ -749,8 +752,8 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<usize, MpcError> {
         oblivious_join::check_output_bound_cap(bound)?;
-        left.check_payload_arity()?;
-        right.check_payload_arity()?;
+        left.check_shape()?;
+        right.check_shape()?;
         let count = candidate_pair_count(&left.binding, &right.binding, left.len(), right.len())?;
         oblivious_join::check_output_bound(bound, count)?;
         Ok(count)
@@ -3618,6 +3621,157 @@ mod randomness_seam_tests {
 }
 
 #[cfg(test)]
+mod keyed_binding_shape_tests {
+    use super::*;
+    use crate::randomness::test_sources::RecordingSource;
+    use crate::shamir::dealer_mints;
+
+    fn input(holder: &str, key_count: usize) -> BatchedHiddenInput {
+        BatchedHiddenInput {
+            holder: HolderId::new(holder),
+            payload_vars: vec![Variable::new_unchecked(holder)],
+            rows: vec![(
+                Fp::new(7),
+                vec![Some(Term::Literal(oxrdf::Literal::new_simple_literal(
+                    "key-count-term-sentinel",
+                )))],
+            )],
+            binding: RowBinding::Keyed(vec!["a".into(); key_count]),
+        }
+    }
+
+    fn binding_error(key_count: usize) -> MpcError {
+        MpcError::Protocol(format!(
+            "BatchedHiddenInput: keyed binding has {key_count} keys but 1 rows"
+        ))
+    }
+
+    #[test]
+    fn constructor_checks_keyed_binding_count_with_unchanged_error() {
+        for key_count in [2, 0] {
+            let bad = input("constructor", key_count);
+            assert_eq!(bad.check_shape(), Err(binding_error(key_count)));
+            assert_eq!(
+                BatchedHiddenInput::new(bad.holder, bad.payload_vars, bad.rows, bad.binding)
+                    .unwrap_err(),
+                binding_error(key_count),
+            );
+        }
+    }
+
+    fn public_join_checks_keyed_binding_count(fully_oblivious: bool) {
+        let join = HiddenValueJoin::new(ShamirBackend::new_seeded(3, 0xA817).unwrap());
+        for key_count in [2, 0] {
+            for bad_left in [true, false] {
+                let left = input("left", if bad_left { key_count } else { 1 });
+                let right = input("right", if bad_left { 1 } else { key_count });
+                dealer_mints::reset();
+                // The surplus-left case is exactly Keyed(["a", "a"]) with
+                // one row, Keyed(["a"]) with one row, and bound 2.
+                let result = std::panic::catch_unwind(|| {
+                    if fully_oblivious {
+                        join.fully_oblivious_batched_join(&left, &right, 2)
+                    } else {
+                        join.batched_join(&left, &right, 2)
+                    }
+                });
+                assert!(result.is_ok(), "a mismatched binding must return an error");
+                assert_eq!(result.unwrap().unwrap_err(), binding_error(key_count));
+                // Public wrappers own their dealer: no mint also means no draw.
+                assert_eq!(dealer_mints::count(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn batched_join_checks_keyed_binding_count_before_minting() {
+        public_join_checks_keyed_binding_count(false);
+    }
+
+    #[test]
+    fn fully_oblivious_batched_join_checks_keyed_binding_count_without_panicking() {
+        public_join_checks_keyed_binding_count(true);
+    }
+
+    fn join_through_checks_keyed_binding_count(entry: usize) {
+        let backend = ShamirBackend::new_seeded(3, 0xA817).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        for key_count in [2, 0] {
+            for bad_left in [true, false] {
+                let left = input("left", if bad_left { key_count } else { 1 });
+                let right = input("right", if bad_left { 1 } else { key_count });
+                let mut source = RecordingSource::new(backend.dealer());
+                let result = match entry {
+                    0 => join
+                        .batched_join_through(&mut source, &left, &right, 2)
+                        .map(|_| ()),
+                    1 => join
+                        .fully_oblivious_batched_join_through(&mut source, &left, &right, 2)
+                        .map(|_| ()),
+                    _ => join
+                        .fully_oblivious_candidates_and_opened_rows(&mut source, &left, &right, 2)
+                        .map(|_| ()),
+                };
+                assert!(
+                    source.log.is_empty(),
+                    "binding shape must precede every draw"
+                );
+                assert_eq!(result.unwrap_err(), binding_error(key_count));
+            }
+        }
+    }
+
+    #[test]
+    fn batched_join_through_checks_keyed_binding_count_before_any_draw() {
+        join_through_checks_keyed_binding_count(0);
+    }
+
+    #[test]
+    fn fully_oblivious_batched_join_through_checks_keyed_binding_count_before_any_draw() {
+        join_through_checks_keyed_binding_count(1);
+    }
+
+    #[test]
+    fn candidate_instrumentation_checks_keyed_binding_count_before_any_draw() {
+        join_through_checks_keyed_binding_count(2);
+    }
+
+    #[test]
+    fn shared_keys_checks_keyed_binding_count_before_any_draw() {
+        let backend = ShamirBackend::new_seeded(3, 0xA817).unwrap();
+        for holder in ["left", "right"] {
+            for key_count in [2, 0] {
+                let mut dealer = backend.dealer();
+                let mut reference = backend.dealer();
+                assert_eq!(
+                    input(holder, key_count)
+                        .shared_keys(&mut dealer)
+                        .unwrap_err(),
+                    binding_error(key_count),
+                );
+                assert_eq!(dealer.draw_fp(), reference.draw_fp());
+            }
+        }
+    }
+
+    #[test]
+    fn shared_keys_through_checks_keyed_binding_count_before_any_draw() {
+        let backend = ShamirBackend::new_seeded(3, 0xA817).unwrap();
+        for holder in ["left", "right"] {
+            for key_count in [2, 0] {
+                let mut source = RecordingSource::new(backend.dealer());
+                let result = input(holder, key_count).shared_keys_through(&mut source, 3);
+                assert!(
+                    source.log.is_empty(),
+                    "binding shape must precede every draw"
+                );
+                assert_eq!(result.unwrap_err(), binding_error(key_count));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod payload_shape_tests {
     use super::*;
     use crate::randomness::test_sources::RecordingSource;
@@ -3647,10 +3801,7 @@ mod payload_shape_tests {
             for index in [0, 1] {
                 let mut bad = input("constructor", width);
                 bad.rows.swap(index, 1);
-                assert_eq!(
-                    bad.check_payload_arity(),
-                    Err(shape_error("constructor", index))
-                );
+                assert_eq!(bad.check_shape(), Err(shape_error("constructor", index)));
                 assert_eq!(
                     BatchedHiddenInput::new(bad.holder, bad.payload_vars, bad.rows, bad.binding)
                         .unwrap_err(),
@@ -3713,7 +3864,10 @@ mod payload_shape_tests {
                             )
                             .unwrap_err(),
                     };
-                    assert!(source.log.is_empty(), "payload shape must precede every draw");
+                    assert!(
+                        source.log.is_empty(),
+                        "payload shape must precede every draw"
+                    );
                     assert_eq!(err, shape_error(holder, 1));
                     left.rows[1].1.push(None);
                 }

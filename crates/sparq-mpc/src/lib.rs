@@ -407,8 +407,7 @@ pub use auth_disclose::experimental_tamper_evident_disclose_threshold_verdict;
 pub use field::Fp;
 pub use holder::{Holder, HolderResult};
 pub use join::{
-    BatchedHiddenInput, BatchedJoinOutput, DisclosedKeyJoin, GlobalJoin,
-    HiddenValueJoin, JoinPlan,
+    BatchedHiddenInput, BatchedJoinOutput, DisclosedKeyJoin, GlobalJoin, HiddenValueJoin, JoinPlan,
 };
 pub use metrics::{CommCounter, FIELD_BYTES};
 pub use oblivious::{
