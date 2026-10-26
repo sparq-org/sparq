@@ -4117,6 +4117,16 @@ impl Graph {
         entries: &[(u32, Term)],
     ) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
+        if let Some(slot) = slot {
+            check_named_container(&named_dir).map_err(|e| e.to_string())?;
+            // Validate everything the drop will remove before committing the manifest.
+            let removed = if entries.is_empty() {
+                named_dir.clone()
+            } else {
+                named_dir.join(slot.to_string())
+            };
+            check_dir_tree_removable(&removed).map_err(|e| e.to_string())?;
+        }
         self.publish_named_set(dir, &[], entries)
             .map_err(|e| e.to_string())?;
         let Some(slot) = slot else {
@@ -4162,14 +4172,19 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn commit_drop_all_named(&mut self, dir: &std::path::Path) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
-        check_named_container(&named_dir).map_err(|e| e.to_string())?;
+        let removed = [
+            named_dir.clone(),
+            staging_sibling(&named_dir, "drop-new"),
+            staging_sibling(&named_dir, "drop-old"),
+        ];
+        for path in &removed {
+            check_dir_tree_removable(path).map_err(|e| e.to_string())?;
+        }
         publish_named_manifest(dir, &[], &[], self.next_slot).map_err(|e| e.to_string())?;
         self.tree.record_replacement(&named_dir);
-        remove_dir_tree_checked(&named_dir).map_err(|e| e.to_string())?;
-        remove_dir_tree_checked(&staging_sibling(&named_dir, "drop-new"))
-            .map_err(|e| e.to_string())?;
-        remove_dir_tree_checked(&staging_sibling(&named_dir, "drop-old"))
-            .map_err(|e| e.to_string())?;
+        for path in &removed {
+            remove_dir_tree_checked(path).map_err(|e| e.to_string())?;
+        }
         fsync_dir(dir).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -5870,10 +5885,19 @@ fn remove_named_slot(named_dir: &std::path::Path, slot: u32) -> std::io::Result<
 /// exclusive store lock is held are unsupported.
 #[cfg(feature = "mmap")]
 fn remove_dir_tree_checked(target: &std::path::Path) -> std::io::Result<()> {
+    if check_dir_tree_removable(target)? {
+        remove_tree(target)?;
+    }
+    Ok(())
+}
+
+/// Checks removal safety without changing disk; returns false when the tree is absent.
+#[cfg(feature = "mmap")]
+fn check_dir_tree_removable(target: &std::path::Path) -> std::io::Result<bool> {
     let meta = match std::fs::symlink_metadata(target) {
         Ok(meta) => meta,
         // Removal is idempotent when the directory is already absent.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
     };
     if !meta.is_dir() {
@@ -5897,7 +5921,7 @@ fn remove_dir_tree_checked(target: &std::path::Path) -> std::io::Result<()> {
         ));
     }
     refuse_foreign_below(target, false)?;
-    remove_tree(target)
+    Ok(true)
 }
 
 /// Syncs the changed trees and root files before publishing the named manifest.

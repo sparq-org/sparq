@@ -600,6 +600,146 @@ fn undeclared_root_store_is_preserved_during_cleanup() {
     }
 }
 
+fn assert_drop_refuses_undeclared_store(legacy: bool) {
+    fn image_files(path: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        let mut files = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                for (relative, bytes) in image_files(&entry.path()) {
+                    files.insert(
+                        std::path::PathBuf::from(entry.file_name()).join(relative),
+                        bytes,
+                    );
+                }
+            } else {
+                files.insert(
+                    entry.file_name().into(),
+                    std::fs::read(entry.path()).unwrap(),
+                );
+            }
+        }
+        files
+    }
+
+    for all in [false, true] {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("store");
+        let base = [name("base"), name("p"), name("o")];
+        let mut seed = Graph::new();
+        seed.apply_delta(std::slice::from_ref(&base), &[]).unwrap();
+        let graph = name("declared");
+        let slot = seed.ensure_named(&graph).unwrap();
+        seed.apply_delta_to_named(slot, &[triple()], &[]).unwrap();
+        seed.save(&path).unwrap();
+
+        let outside = tmp.path().join("other");
+        seed.save(&outside).unwrap();
+        if legacy {
+            std::fs::remove_file(outside.join(STORE_MARKER)).unwrap();
+        }
+        let residue = path.join("named/9");
+        std::fs::rename(&outside, &residue).unwrap();
+        let before = image_files(&residue);
+        let manifest = std::fs::read(path.join(NAMED_MANIFEST)).unwrap();
+        let mut root = Graph::open(&path).unwrap();
+        assert_eq!(root.named.len(), 1);
+        assert_eq!(
+            read_named_manifest(&path).unwrap().unwrap().entries,
+            vec![(0, graph.clone())]
+        );
+        assert_eq!(image_files(&residue), before);
+        let err = if all {
+            root.drop_all_named_durable().unwrap_err()
+        } else {
+            root.drop_named_durable(&graph).unwrap_err()
+        };
+        assert!(err.contains(&residue.display().to_string()), "{err}");
+        for kind in ["drop-new", "drop-old"] {
+            assert!(!staging_path(&path.join("named"), kind).exists());
+        }
+        assert_eq!(std::fs::read(path.join(NAMED_MANIFEST)).unwrap(), manifest);
+        assert_eq!(image_files(&residue), before);
+        drop(root);
+
+        let mut reopened = Graph::open(&path).unwrap();
+        assert_eq!(reopened.named.len(), 1);
+        let triples = |g: &Graph| {
+            g.iter_ids()
+                .map(|spo| spo.map(|id| g.dict.term(id)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(triples(&reopened), vec![base.clone()]);
+        assert_eq!(
+            triples(reopened.named_graph(&graph).unwrap()),
+            vec![triple()]
+        );
+        // Log idempotent inserts to confirm both graphs reopened writable.
+        reopened.apply_delta(&[base], &[]).unwrap();
+        reopened.apply_delta_to_named(0, &[triple()], &[]).unwrap();
+        assert_eq!(image_files(&residue), before);
+    }
+}
+
+#[test]
+fn drop_refuses_undeclared_root_store_before_publication() {
+    assert_drop_refuses_undeclared_store(false);
+}
+
+#[test]
+fn drop_refuses_undeclared_unmarked_store_before_publication() {
+    assert_drop_refuses_undeclared_store(true);
+}
+
+#[test]
+fn drops_accept_removable_residue_and_legacy_declared_slots() {
+    for all in [false, true] {
+        for residue in [false, true] {
+            let tmp = tempdir().unwrap();
+            let path = tmp.path().join("store");
+            drop(store(&path, 1));
+            let child = path.join("named/0");
+            std::fs::remove_file(child.join(STORE_MARKER)).unwrap();
+            let mut root = Graph::open(&path).unwrap();
+            assert_eq!(read_store_marker(&child).unwrap(), Some(Role::Child));
+            if residue {
+                let orphan = path.join("named/9");
+                std::fs::create_dir(&orphan).unwrap();
+                std::fs::write(orphan.join("discard"), b"discard").unwrap();
+            }
+            if all {
+                root.drop_all_named_durable().unwrap();
+            } else {
+                assert!(root.drop_named_durable(&name("g0")).unwrap());
+            }
+            assert!(!path.join("named").exists());
+            drop(root);
+            assert!(Graph::open(&path).unwrap().named.is_empty());
+        }
+    }
+}
+
+#[test]
+fn single_drop_keeps_unremovable_residue_when_the_container_survives() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    let mut root = store(&path, 2);
+    let outside = tmp.path().join("other");
+    Graph::new().save(&outside).unwrap();
+    let residue = path.join("named/9");
+    std::fs::rename(&outside, &residue).unwrap();
+    let marker = std::fs::read(residue.join(STORE_MARKER)).unwrap();
+    assert!(root.drop_named_durable(&name("g0")).unwrap());
+    assert_eq!(root.named.len(), 1);
+    assert_eq!(std::fs::read(residue.join(STORE_MARKER)).unwrap(), marker);
+    assert!(!path.join("named/0").exists());
+    drop(root);
+    let reopened = Graph::open(&path).unwrap();
+    assert_eq!(reopened.named.len(), 1);
+    assert!(reopened.named_graph(&name("g1")).is_some());
+    assert_eq!(std::fs::read(residue.join(STORE_MARKER)).unwrap(), marker);
+}
+
 #[test]
 fn journal_upgrade_preserves_existing_temporary_file_links() {
     let tmp = tempdir().unwrap();
