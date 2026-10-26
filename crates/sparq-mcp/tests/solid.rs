@@ -2544,3 +2544,75 @@ fn the_write_anchor_is_the_nearest_container_the_view_can_decide() {
     );
     assert!(is_err, "/b/ has its own access-control document, and it is bob's");
 }
+
+#[test]
+fn write_names_observe_store_caps_before_content_or_containment() {
+    let mut store = pod();
+    let mut budget = sparq_solid::default_auth_budget();
+    budget.max_resource_iri_bytes = 96;
+    budget.max_resource_path_depth = 6;
+    store.set_auth_budget(budget);
+    let mut server = SolidMcpServer::with_config(
+        store,
+        SolidServerConfig {
+            agent: Some(ALICE.into()),
+            allow_update: true,
+            ..SolidServerConfig::default()
+        },
+    )
+    .unwrap();
+    let snapshot = |s: &SolidMcpServer| {
+        sparq_engine::query_json(
+            s.store().graph(),
+            "SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } } ORDER BY ?g ?s ?p ?o",
+        )
+        .unwrap()
+    };
+    let before = snapshot(&server);
+    let too_long = format!("https://pod.ex/{}", "x".repeat(82));
+    let too_deep = "https://pod.ex/a/b/c/d/e/f/g";
+    for (url, cap) in [
+        (too_long.as_str(), "max_resource_iri_bytes"),
+        (too_deep, "max_resource_path_depth"),
+    ] {
+        // Valid content exercises refusal of the name itself. Malformed content
+        // also distinguishes validation before parsing from a later rollback.
+        for content in ["<urn:s> <urn:p> <urn:o> .", "not turtle"] {
+            let (text, error) = tool(
+                &mut server,
+                "resource_put",
+                json!({
+                    "url": url, "content_type": "text/turtle", "content": content
+                }),
+            );
+            assert!(error && text.contains(cap), "{text}");
+            assert_eq!(snapshot(&server), before);
+        }
+        let (text, error) = tool(
+            &mut server,
+            "container_create",
+            json!({"url": format!("{url}/")}),
+        );
+        assert!(error && text.contains(cap), "{text}");
+        assert_eq!(snapshot(&server), before);
+    }
+    let at_length = format!("https://pod.ex/{}", "x".repeat(81));
+    let at_depth = "https://pod.ex/a/b/c/d/e/f";
+    for url in [at_length.as_str(), at_depth] {
+        let (text, error) = tool(
+            &mut server,
+            "resource_put",
+            json!({
+                "url": url, "content_type": "text/turtle", "content": "<urn:s> <urn:p> <urn:o> ."
+            }),
+        );
+        assert!(!error, "at-cap resource accepted: {text}");
+    }
+    for url in [
+        format!("https://pod.ex/{}/", "x".repeat(80)),
+        "https://pod.ex/a/b/c/d/e/f/".into(),
+    ] {
+        let (text, error) = tool(&mut server, "container_create", json!({"url": url}));
+        assert!(!error, "at-cap container accepted: {text}");
+    }
+}

@@ -1293,18 +1293,30 @@ fn is_authority_less(iri: &str) -> bool {
 /// container traversal the auth view, the store's provenance and the MCP server's
 /// containment all use.
 pub fn parent_iri(iri: &str) -> Option<&str> {
-    let scheme_end = iri.find("://").map(|i| i + 3)?;
-    let path = &iri[scheme_end..];
-    let host_end = scheme_end + path.find('/')?;
-    let trimmed = iri.strip_suffix('/').unwrap_or(iri);
-    if trimmed.len() <= host_end {
-        return None; // already the root container
-    }
-    let cut = trimmed.rfind('/')?;
-    if cut < host_end {
-        return None;
-    }
-    Some(&iri[..cut + 1])
+    parent_iris(iri).next()
+}
+
+/// Walk borrowed ancestors, finding the authority boundary once and scanning each
+/// path segment once. Uses exactly the same slash semantics as `parent_iri`.
+pub(crate) fn parent_iris(iri: &str) -> impl Iterator<Item = &str> {
+    let host_end = iri.find("://").and_then(|i| {
+        let scheme_end = i + 3;
+        iri[scheme_end..].find('/').map(|j| scheme_end + j)
+    });
+    let mut cur = iri;
+    std::iter::from_fn(move || {
+        let host_end = host_end?;
+        let trimmed = cur.strip_suffix('/').unwrap_or(cur);
+        if trimmed.len() <= host_end {
+            return None;
+        }
+        let cut = trimmed.rfind('/')?;
+        if cut < host_end {
+            return None;
+        }
+        cur = &cur[..cut + 1];
+        Some(cur)
+    })
 }
 
 #[cfg(test)]

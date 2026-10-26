@@ -1972,8 +1972,20 @@ impl PodStore {
     /// [`QueryResult`]. Same view path, same fail-closed semantics (incl. the
     /// `solid-sparql-query` union-default opt-in — see [`PodStore::query_as`]).
     pub fn query_json_as(&self, s: &Session, mode: Mode, sparql: &str) -> Result<String, String> {
+        self.query_json_as_with_budget(s, mode, sparql, &sparq_engine::QueryBudget::unlimited())
+    }
+
+    /// [`Self::query_json_as`] under a cooperative engine budget. The authorized view
+    /// and query rewrite are identical; a budget refusal returns no query results.
+    pub fn query_json_as_with_budget(
+        &self,
+        s: &Session,
+        mode: Mode,
+        sparql: &str,
+        budget: &sparq_engine::QueryBudget,
+    ) -> Result<String, String> {
         let wrapped = wrap_read(sparql)?;
-        sparq_engine::query_json_view(&self.view_for(s, mode), &wrapped)
+        sparq_engine::query_json_view_with_budget(&self.view_for(s, mode), &wrapped, budget)
     }
 
     /// ASK as `session` through the view path ([`sparq_engine::ask_view`]): `true`

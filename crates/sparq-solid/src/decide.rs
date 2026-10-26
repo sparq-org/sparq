@@ -33,7 +33,7 @@
 //! set), so a `decide` allow can never be wider than the oracle would grant.
 
 use crate::authindex::Mode;
-use crate::loader::{parent_iri, ACL_SUFFIX, ACR_SUFFIX};
+use crate::loader::{parent_iris, ACL_SUFFIX, ACR_SUFFIX};
 use crate::{AuthIndex, Session, AUTH_GRAPH};
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
@@ -265,7 +265,11 @@ impl WacDecision {
 pub(crate) struct AclIndex {
     /// Every control-document IRI present (both `.acl` and `.acr` — a pod is one system,
     /// but we don't assume which, and an own-ACL lookup is just a set membership test).
-    control: rustc_hash::FxHashSet<String>,
+    control: rustc_hash::FxHashMap<String, NamedNode>,
+    /// Longest target of a stored control document, excluding its suffix.
+    max_target_len: usize,
+    #[cfg(test)]
+    lookup_bytes: std::sync::atomic::AtomicUsize,
     /// Whether the materialized auth view (`<urn:sparq:auth>`) is present in the dataset.
     materialized: bool,
 }
@@ -273,18 +277,32 @@ pub(crate) struct AclIndex {
 impl AclIndex {
     /// Index the dataset's named-graph names in one pass.
     pub(crate) fn build(graph: &Graph) -> AclIndex {
-        let mut control = rustc_hash::FxHashSet::default();
+        let mut control = rustc_hash::FxHashMap::default();
+        let mut max_target_len = 0;
         let mut materialized = false;
         for (name, _) in graph.named() {
             let Term::NamedNode(n) = name else { continue };
             let iri = n.as_str();
             if iri == AUTH_GRAPH {
                 materialized = true;
-            } else if iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX) {
-                control.insert(iri.to_owned());
+            } else if let Some(target) = iri
+                .strip_suffix(ACL_SUFFIX)
+                .or_else(|| iri.strip_suffix(ACR_SUFFIX))
+            {
+                max_target_len = max_target_len.max(target.len());
+                // Own .acl precedes .acr, independently of named-graph iteration order.
+                if iri.ends_with(ACL_SUFFIX) || !control.contains_key(target) {
+                    control.insert(target.to_owned(), n.clone());
+                }
             }
         }
-        AclIndex { control, materialized }
+        AclIndex {
+            control,
+            max_target_len,
+            materialized,
+            #[cfg(test)]
+            lookup_bytes: std::sync::atomic::AtomicUsize::new(0),
+        }
     }
 
     /// A dropped view stays unavailable even if storage refused to remove its slot.
@@ -294,14 +312,16 @@ impl AclIndex {
 
     /// The control-document IRI governing `resource`, if one exists in the dataset
     /// (`<resource>.acl` / `<resource>.acr`).
-    fn own_acl(&self, resource: &str) -> Option<String> {
-        for suffix in [ACL_SUFFIX, ACR_SUFFIX] {
-            let candidate = format!("{}{}", resource, suffix);
-            if self.control.contains(&candidate) {
-                return Some(candidate);
-            }
+    fn own_acl(&self, resource: &str) -> Option<&NamedNode> {
+        // No longer prefix can name a stored control target. Borrow the target key:
+        // suffix construction and ownership happen only when the index is built.
+        if resource.len() > self.max_target_len {
+            return None;
         }
-        None
+        #[cfg(test)]
+        self.lookup_bytes
+            .fetch_add(resource.len(), std::sync::atomic::Ordering::Relaxed);
+        self.control.get(resource)
     }
 
     /// FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for `resource` in ONE
@@ -317,15 +337,19 @@ impl AclIndex {
     pub(crate) fn resolve_acl(&self, resource: &str) -> Option<EffectiveAcl> {
         // Own ACL → accessTo scope.
         if let Some(acl) = self.own_acl(resource) {
-            return Some(EffectiveAcl { acl: NamedNode::new_unchecked(acl), scope: AclScope::AccessTo });
+            return Some(EffectiveAcl {
+                acl: acl.clone(),
+                scope: AclScope::AccessTo,
+            });
         }
         // Walk up the container chain; the nearest ancestor with an ACL governs by default.
-        let mut cur = resource;
-        while let Some(parent) = parent_iri(cur) {
+        for parent in parent_iris(resource) {
             if let Some(acl) = self.own_acl(parent) {
-                return Some(EffectiveAcl { acl: NamedNode::new_unchecked(acl), scope: AclScope::Default });
+                return Some(EffectiveAcl {
+                    acl: acl.clone(),
+                    scope: AclScope::Default,
+                });
             }
-            cur = parent;
         }
         None
     }
@@ -593,6 +617,29 @@ mod tests {
 <https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .
 <https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
 "#;
+
+    #[test]
+    fn acl_resolution_skips_hashing_long_prefixes() {
+        use std::sync::atomic::Ordering;
+        let ix = AclIndex::build(&graph(ROOT_ACL));
+        let resource = format!(
+            "https://pod.ex/{}{}",
+            format!("{}/", "x".repeat(1023)).repeat(63),
+            "x".repeat(1024)
+        );
+        assert_eq!(parent_iris(&resource).count(), 64);
+        assert!(resource.len() >= 64 << 10);
+        let effective = ix.resolve_acl(&resource).unwrap();
+        assert_eq!(effective.acl.as_str(), "https://pod.ex/.acl");
+        assert_eq!(effective.scope, AclScope::Default);
+        // Every deep prefix exceeds the longest stored control target. Only the
+        // root reaches the hash table, independent of those segments' lengths.
+        assert_eq!(
+            ix.lookup_bytes.load(Ordering::Relaxed),
+            "https://pod.ex/".len()
+        );
+        assert!(ix.lookup_bytes.load(Ordering::Relaxed) <= 64 * ix.max_target_len);
+    }
 
     #[test]
     fn resolve_inherited_default_scope() {

@@ -140,6 +140,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `max_decision_facts` 512,000). Same application rules as `set_auth_limits`: from the NEXT
   materialization, WAC and ACP alike, every self-made rebuild included; the free
   `materialize_*` functions always use `default_auth_budget()`.
+- `budget.validate_resource_iri(iri) -> Result<(), String>` checks the per-resource
+  byte-length and container-depth caps before storing a resource or linking ancestors.
+  It returns the materializer's allowance refusal and charges no aggregate allowance.
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
   -> bool` — whether a materialization error is a refusal by that allowance or budget rather
   than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
@@ -258,7 +261,9 @@ Materialize the authorization view from the access-control documents, then enfor
 - `store.query_as(&Session, Mode, sparql)` → `QueryResult` (`.rows`);
   `store.query_json_as(...)` → JSON string; `store.ask_as(...)` → `bool`. These evaluate
   through the engine's **zero-copy `DatasetView`** filtered to the session's authorized
-  graphs (the default, fast path).
+  graphs (the default, fast path). `store.query_json_as_with_budget(&session, mode,
+  sparql, &QueryBudget)` uses the same authorized view and union-default rewrite with
+  an explicit cooperative engine budget; a refusal returns no result JSON.
 - **Empty default graph + union-default-graph opt-in — SPEC-COMPLIANT BY DEFAULT**
   (sq-gq28y, issue #1546; maintainer decision "spec compliant - empty by default").
   The read path (`query_as`/`query_json_as`/`ask_as`) implements the *Access-Controlled SPARQL

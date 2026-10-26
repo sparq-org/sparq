@@ -380,32 +380,6 @@ enum ServerViewError {
     Odrl,
 }
 
-/// (sq-snopa.8) The store an endpoint decides over: an owned per-request store
-/// (stateless lane) or the shared per-generation one (stateful lane). Both are read through
-/// [`get`](Self::get); only the owned variant can be mutated by the ODRL lane.
-///
-/// Both variants hold the store BEHIND A POINTER so neither arm pays for the other's payload:
-/// a bare `PodStore` inline would make every `ResolvedStore` — including the shared one, whose
-/// own payload is one `Arc` word — as large as a whole materialised store
-/// (`clippy::large_enum_variant`). The stateless lane's extra allocation is noise beside the
-/// N-Quads parse + materialisation it already paid to build that store.
-enum ResolvedStore {
-    /// Stateless: built from the request body's dataset, dies with the response.
-    Owned(Box<PodStore>),
-    /// Stateful: the lineage/generation view shared by requests of the same snapshot.
-    Shared(Arc<PodStore>),
-}
-
-impl ResolvedStore {
-    /// The store to decide against, whichever lane produced it.
-    fn get(&self) -> &PodStore {
-        match self {
-            ResolvedStore::Owned(s) => s,
-            ResolvedStore::Shared(s) => s,
-        }
-    }
-}
-
 /// A parsed `/authz/*` request envelope. The `session` fields are borrowed from the owned JSON
 /// value the caller keeps alive; `dataset` is the owned N-Quads text.
 ///
@@ -924,14 +898,20 @@ fn build_server_view(
 
 /// [`build_server_view`] on the BOUNDED blocking pool — the materialisation is a whole-store
 /// N3 run, so it must never occupy an async worker, and it shares the one authorization-build
-/// cap with every other lane ([`on_build_pool`]). A saturated pool or a join failure is the
-/// same fail-closed 503: no decision is produced.
+/// cap with every other lane ([`on_build_pool`]). The request's work stays in that
+/// closure, holding the permit through completion. Cache hits run their work on a
+/// blocking worker without claiming a build slot. A join failure returns 503.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
-async fn server_store(
+async fn server_store<T, F>(
     state: &AppState,
     requested_view: Option<AuthView>,
-) -> Result<Arc<PodStore>, Response> {
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(Arc<PodStore>) -> T + Send + 'static,
+{
     // Lineage plus generation identifies the snapshot, including automatic view selection
     // and the ODRL refusal. Restores can reuse generation zero with different policies.
     #[cfg(feature = "backup")]
@@ -940,24 +920,35 @@ async fn server_store(
     let generation = core.ring.current().number();
     #[cfg(not(feature = "backup"))]
     let generation = state.current().number();
-    if let Ok(cache) = state.authz_view_cache().read() {
-        if let Some(cached) = cache.as_ref() {
-            #[cfg(feature = "backup")]
-            let same_lineage = Arc::ptr_eq(&cached.core, &core);
-            #[cfg(not(feature = "backup"))]
-            let same_lineage = true;
-            if same_lineage
-                && cached.generation == generation
-                && requested_view.unwrap_or(cached.inferred_view) == cached.view
-            {
-                return Ok(cached.store.clone());
-            }
-        }
+    let cached_store = state.authz_view_cache().read().ok().and_then(|cache| {
+        let cached = cache.as_ref()?;
+        #[cfg(feature = "backup")]
+        let same_lineage = Arc::ptr_eq(&cached.core, &core);
+        #[cfg(not(feature = "backup"))]
+        let same_lineage = true;
+        (same_lineage
+            && cached.generation == generation
+            && requested_view.unwrap_or(cached.inferred_view) == cached.view)
+            .then(|| cached.store.clone())
+    });
+    if let Some(store) = cached_store {
+        // A cache hit already needed no build slot. Keep its admission unchanged,
+        // while moving the request's decision/query off the async worker.
+        return tokio::task::spawn_blocking(move || work(store))
+            .await
+            .map_err(|_| {
+                json_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "could not materialise the authorization view",
+                )
+            });
     }
     let st = state.clone();
-    on_build_pool(state, move || build_server_view(&st, requested_view))
-        .await?
-        .map_err(server_view_error_response)
+    on_build_pool(state, move || {
+        let store = build_server_view(&st, requested_view).map_err(server_view_error_response)?;
+        Ok(work(store))
+    })
+    .await?
 }
 
 /// [`build_store`] on the blocking pool — the STATELESS lane's counterpart of
@@ -972,11 +963,16 @@ async fn server_store(
 /// materialisation failure is: no decision is produced.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
-async fn body_store(
+async fn body_store<T, F>(
     state: &AppState,
     req: &AuthzRequest,
     mode: Mode,
-) -> Result<PodStore, Response> {
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(&PodStore, &AuthzRequest) -> T + Send + 'static,
+{
     let owned = req.clone();
     on_build_pool(state, move || {
         let store = build_store_from(&owned.dataset, owned.view)?;
@@ -986,12 +982,12 @@ async fn body_store(
             if owned.carries_odrl {
                 apply_odrl_lane(&mut store, &owned, mode)?;
             }
-            Ok(store)
+            Ok(work(&store, &owned))
         }
         #[cfg(not(feature = "odrl-authz"))]
         {
             let _ = mode;
-            Ok(store)
+            Ok(work(&store, &owned))
         }
     })
     .await?
@@ -999,19 +995,26 @@ async fn body_store(
 
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
 /// per-request build ([`body_store`]) or the stateful per-generation view ([`server_store`]).
-/// Both lanes are fail-closed; neither can yield a store that silently grants.
+/// Build and request work share one blocking closure and one permit. Cache hits
+/// run only the request work on a blocking worker, retaining their slot-free admission.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
-async fn resolve_store(
+async fn with_store_work<T, F>(
     state: &AppState,
     req: &AuthzRequest,
     mode: Mode,
-) -> Result<ResolvedStore, Response> {
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(&PodStore, &AuthzRequest) -> T + Send + 'static,
+{
     match req.source {
-        AuthzSource::Body => body_store(state, req, mode)
-            .await
-            .map(|s| ResolvedStore::Owned(Box::new(s))),
-        AuthzSource::Server => server_store(state, req.view).await.map(ResolvedStore::Shared),
+        AuthzSource::Body => body_store(state, req, mode, work).await,
+        AuthzSource::Server => {
+            let owned = req.clone();
+            server_store(state, req.view, move |store| work(&store, &owned)).await
+        }
     }
 }
 
@@ -1102,14 +1105,16 @@ pub(crate) async fn decide_endpoint(
             return trust_authz_decide(&state, trust_val.take(), req, resource, mode).await;
         }
     }
-    let store = match resolve_store(&state, &req, mode).await {
-        Ok(s) => s,
+    let decision = match with_store_work(&state, &req, mode, move |store, req| {
+        store.decide(&req.session(), &resource, mode)
+    })
+    .await
+    {
+        Ok(d) => d,
         Err(resp) => return resp,
     };
     #[cfg(feature = "odrl-authz")]
     let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
-    // Deciding is CPU-light here (the materialise already ran), so it stays inline.
-    let decision = store.get().decide(&req.session(), &resource, mode);
     // sq-3mu76 — read-scoped advertisement (module doc): when the lane fired, mask
     // the advisory `grantedModes` to the requested (read) mode — the lane evidenced no other.
     #[cfg(feature = "odrl-authz")]
@@ -2059,21 +2064,20 @@ pub(crate) async fn wac_allow_endpoint(
             return json_error(StatusCode::BAD_REQUEST, "'resource' is not a valid IRI");
         }
     };
-    let store = match resolve_store(&state, &req, Mode::Read).await {
-        Ok(s) => s,
+    let (acl_link, value) = match with_store_work(&state, &req, Mode::Read, move |store, req| {
+        let acl_link = store
+            .resolve_acl(&resource_iri)
+            .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
+        let value = store.wac_allow(&req.session(), &resource);
+        (acl_link, value)
+    })
+    .await
+    {
+        Ok(result) => result,
         Err(resp) => return resp,
     };
     #[cfg(feature = "odrl-authz")]
     let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
-    // sq-snopa.7 FR-5: resolve the governing ACL for the Link header BEFORE
-    // `wac_allow` consumes the store. `resolve_acl` is a pure index lookup (no mode needed) and
-    // returns `None` when no ACL was discovered — fail-closed: no header emitted in that case.
-    // POSITIONAL format args (CodeQL rust/unused-variable guard).
-    let acl_link: Option<String> = store
-        .get()
-        .resolve_acl(&resource_iri)
-        .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
-    let value = store.get().wac_allow(&req.session(), &resource);
     // sq-3mu76 — read-scoped advertisement (module doc): the lane materialised
     // read-action outcomes only, so advertise at most `user="read"` and never a public mode
     // (an anonymous session is refused wherever the lane fires). Fail-closed: this can only
@@ -2330,7 +2334,7 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
 /// `{ "dataset": nquads, "session": {..}, "mode"?: "read"|…, "query": sparql, "view"?: …,
 /// "source"?: "body"|"server" }` (sq-snopa.8: `"server"` omits `"dataset"` and
 /// queries the server's own loaded store through the same access-controlled view).
-/// Delegates to [`PodStore::query_json_as`] (the zero-copy authorised-graph-set view path) and
+/// Delegates to [`PodStore::query_json_as_with_budget`] (the zero-copy authorised-graph-set view path) and
 /// returns the SPARQL 1.1 JSON results serialisation. `mode` defaults to `read` (the query path).
 ///
 /// Fail-closed: a session with no grants sees an empty view (zero rows), never the whole store; an
@@ -2375,13 +2379,26 @@ pub(crate) async fn query_endpoint(
             }
         },
     };
-    let store = match resolve_store(&state, &req, mode).await {
-        Ok(s) => s,
+    let timeout = state.config().query_timeout;
+    let result = match with_store_work(&state, &req, mode, move |store, req| {
+        // Match the main endpoint's deadline, without adding row or byte caps.
+        // Start it at evaluation, after view construction and pool admission.
+        let budget = sparq_engine::QueryBudget {
+            deadline: timeout.map(|t| std::time::Instant::now() + t),
+            ..sparq_engine::QueryBudget::unlimited()
+        };
+        store.query_json_as_with_budget(&req.session(), mode, &query, &budget)
+    })
+    .await
+    {
+        Ok(result) => result,
         Err(resp) => return resp,
     };
-    match store.get().query_json_as(&req.session(), mode, &query) {
+    match result {
         Ok(json) => json_response(StatusCode::OK, json),
-        // The engine's parse/eval detail is withheld (info-leak posture); the class is enough.
+        Err(e) if e.contains("query budget exceeded (timeout)") => {
+            crate::http::engine_error_response(&e, state.config(), false)
+        }
         Err(_) => json_error(
             StatusCode::BAD_REQUEST,
             "query did not parse or could not be evaluated",
@@ -3359,6 +3376,110 @@ mod build_pool_tests {
     }
 
     #[tokio::test]
+    async fn stateless_decide_is_shed_while_the_only_build_is_blocked() {
+        let st = state(1, 0);
+        let hook = block_builds(&st);
+        let _release = ReleaseOnDrop(hook.clone());
+        let build_state = st.clone();
+        let blocked = tokio::spawn(async move {
+            on_build_pool(&build_state, || {
+                build_store_from(WAC_NQUADS, Some(AuthView::Wac)).expect("fixture builds")
+            })
+            .await
+        });
+        wait_for_running(&hook, 1).await;
+        let response = response_or_release_extra_build(start_build(&st), &hook, 1).await;
+        hook.release();
+        blocked.await.unwrap().unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+        assert_eq!(st.authz_build_pool().refused(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn request_work_retains_the_build_slot() {
+        let st = state(1, 0);
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        let decision_hook = hook.clone();
+        let request_state = st.clone();
+        let first = tokio::spawn(async move {
+            let req = parse_request(&body_lane_request()).unwrap();
+            with_store_work(&request_state, &req, Mode::Read, move |store, req| {
+                decision_hook.block();
+                store.decide(&req.session(), "https://pod.ex/n1", Mode::Read)
+            })
+            .await
+            .unwrap()
+        });
+        wait_for_running(&hook, 1).await;
+        let available = st.authz_build_pool().available();
+        let second =
+            decide_endpoint(State(st.clone()), HeaderMap::new(), body_lane_request()).await;
+        hook.release();
+        let decision = first.await.unwrap();
+        assert!(decision.allow);
+        assert_eq!(available, 0, "the decision still owns the build permit");
+        assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+    }
+
+    #[tokio::test]
+    async fn authz_query_uses_the_server_deadline_and_timeout_response() {
+        let st = AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                query_timeout: Some(Duration::from_millis(100)),
+                // These existing limits must not become additional authz query caps.
+                max_results: Some(1),
+                max_query_rows: Some(1),
+                max_query_bytes: Some(1),
+                ..ServerConfig::default()
+            },
+        );
+        let values = (0..32).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
+        let product = format!("SELECT (COUNT(*) AS ?n) WHERE {{ VALUES ?a {{ {values} }} VALUES ?b {{ {values} }} VALUES ?c {{ {values} }} VALUES ?d {{ {values} }} }}");
+        let request = |query: &str| {
+            decide_bytes(serde_json::json!({
+                "dataset": WAC_NQUADS,
+                "session": {"agent": "https://alice.ex/card#me"},
+                "query": query,
+            }))
+        };
+        let response = query_endpoint(State(st.clone()), HeaderMap::new(), request(&product)).await;
+        let expected = crate::http::engine_error_response(
+            "query budget exceeded (timeout)",
+            st.config(),
+            false,
+        );
+        assert_eq!(response.status(), expected.status());
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let expected_body = axum::body::to_bytes(expected.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body, expected_body);
+        let small = query_endpoint(
+            State(st),
+            HeaderMap::new(),
+            request("SELECT ?a WHERE { VALUES ?a { 1 2 } }"),
+        )
+        .await;
+        assert_eq!(
+            small.status(),
+            StatusCode::OK,
+            "only the deadline is applied"
+        );
+        let body = axum::body::to_bytes(small.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["results"]["bindings"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
     async fn build_pool_caps_running_builds_even_after_handler_cancellation() {
         let st = state(2, 50);
         let hook = block_builds(&st);
@@ -3430,9 +3551,18 @@ mod build_pool_tests {
         let blocked = start_build(&st);
         wait_for_running(&hook, 1).await;
         let response = decide_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        let advertisement =
+            wac_allow_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        let query = decide_bytes(serde_json::json!({
+            "source": "server", "session": {"agent": "https://alice.ex/card#me"},
+            "query": "SELECT ?s WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?o } }"
+        }));
+        let query_response = query_endpoint(State(st.clone()), HeaderMap::new(), query).await;
         hook.release();
         let _ = blocked.await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(advertisement.status(), StatusCode::OK);
+        assert_eq!(query_response.status(), StatusCode::OK);
         assert_eq!(
             st.authz_build_pool().admitted(),
             2,
@@ -3451,8 +3581,8 @@ mod build_pool_tests {
                 ..ServerConfig::default()
             },
         );
-        let explicit = server_store(&st, Some(AuthView::Wac)).await.unwrap();
-        let automatic = server_store(&st, None).await.unwrap();
+        let explicit = server_store(&st, Some(AuthView::Wac), |s| s).await.unwrap();
+        let automatic = server_store(&st, None, |s| s).await.unwrap();
         let session = Session {
             agent: Some("https://alice.ex/card#me"),
             ..Session::default()
@@ -3763,7 +3893,7 @@ mod build_pool_tests {
         let _release = ReleaseOnDrop(hook.clone());
         *st.authz_build_pool().view_hook.lock().unwrap() = Some(hook.clone());
         let old_state = st.clone();
-        let old = tokio::spawn(async move { server_store(&old_state, None).await });
+        let old = tokio::spawn(async move { server_store(&old_state, None, |s| s).await });
         wait_for_running(&hook, 1).await;
         let source = AppState::with_config(
             sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
@@ -3774,7 +3904,7 @@ mod build_pool_tests {
         st.restore_from(artifact.as_slice(), false).unwrap();
         // Warm the restored lineage while the old miss remains blocked.
         *st.authz_build_pool().view_hook.lock().unwrap() = None;
-        let restored = server_store(&st, None).await.unwrap();
+        let restored = server_store(&st, None, |s| s).await.unwrap();
         assert!(
             restored
                 .decide(
@@ -3796,7 +3926,7 @@ mod build_pool_tests {
                 "old build must not replace the restored view"
             );
         }
-        let following = server_store(&st, None).await.unwrap();
+        let following = server_store(&st, None, |s| s).await.unwrap();
         assert!(Arc::ptr_eq(&following, &restored));
     }
 }

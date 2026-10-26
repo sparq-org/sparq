@@ -1421,6 +1421,10 @@ surface, `research/sparq-solid-scope.md` §4); this is exactly that missing shel
 - `POST /authz/query` — body `{ "dataset", "session", "mode"?, "query", "view"? }` runs an
   **access-controlled** SPARQL query as the session and returns SPARQL-results JSON; a grant-less
   session sees ZERO rows (empty view), never the whole store.
+  The query uses the server's existing `query_timeout` (`--query-timeout` /
+  `SPARQ_QUERY_TIMEOUT`, default 30 seconds; zero disables it), starting when evaluation
+  begins after view construction. Only the deadline is applied here. A timeout returns
+  the same `503` JSON error as `/sparql`, with no partial query results.
   - **ODRL lane** (`odrl-authz` cargo feature, default OFF; sq-lrtc3.1 + sq-3mu76): when the
     request dataset carries ODRL policy rules (`odrl:permission`/`odrl:prohibition`), the handler
     parses them from the UNION of the dataset's graphs and runs the `sparq-solid` bridge
@@ -1469,6 +1473,10 @@ misses** (hits use an O(1) read-lock lookup and claim no slot), the `odrl-authz`
 build plus policy evaluation and index rebuild under **one claim**, and the
 `solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
+The stateless build and stateful cache-miss build keep the decision, ACL discovery,
+`WAC-Allow` calculation, or query in the same blocking closure under that one permit.
+Stateful cache hits run their request work through `spawn_blocking` without a build claim,
+so a saturated build pool does not change which cached requests are served.
 The permit remains in the blocking task until it finishes, even if the handler is cancelled.
 `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` is clamped to `1..=tokio::sync::Semaphore::MAX_PERMITS`
 (0 becomes 1), and caps the
