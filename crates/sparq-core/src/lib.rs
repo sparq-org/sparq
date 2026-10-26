@@ -3583,7 +3583,9 @@ impl Graph {
     /// it keeps compaction O(triples) with no re-interning). For a directory-backed
     /// graph the new base is persisted ATOMICALLY (written to a fresh sibling directory,
     /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
-    /// memory-mapped from the new base. Refused while the txn journal is poisoned
+    /// memory-mapped from the new base. Any named-graph tombstone also forces this rewrite,
+    /// packing live slots densely even when the default graph has no delta-overlay.
+    /// Refused while the txn journal is poisoned
     /// ([`Graph::poison_txn`]), as the new base would start a journal without its frame.
     pub fn compact(&mut self) -> Result<(), String> {
         self.refuse_while_txn_poisoned()?;
@@ -3604,23 +3606,22 @@ impl Graph {
             let temporals = std::mem::replace(&mut self.temporals, TempData::Sparse(rustc_hash::FxHashMap::default()));
             self.temporals = temporals.fold(n);
         }
-        if self.store.has_overlay() {
+        let has_overlay = self.store.has_overlay();
+        if has_overlay {
             let triples: Vec<[Id; 3]> = {
                 let scan = self.store.scan(&[None, None, None]);
                 scan.rows.iter().map(|r| scan.to_spo(r)).collect()
             };
             self.store = TripleStore::from_triples(triples);
-        } else {
-            // Nothing pending: for a directory-backed graph just discard the (no-op) log.
-            #[cfg(feature = "mmap")]
-            if let Some(w) = &mut self.wal {
-                w.truncate().map_err(|e| e.to_string())?;
-            }
-            return Ok(());
         }
         #[cfg(feature = "mmap")]
         if let Some(dir) = dir {
-            self.persist_swap(&dir)?;
+            if has_overlay || named_manifest_is_sparse(&dir).map_err(|e| e.to_string())? {
+                self.persist_swap(&dir)?;
+            } else if let Some(w) = &mut self.wal {
+                // Neither pending triples nor tombstones: just discard the no-op log.
+                w.truncate().map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }
@@ -3975,6 +3976,21 @@ const MIN_MANIFEST_ENTRY_BYTES: usize = 5;
 fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
     let slots: Vec<_> = names.iter().cloned().map(Some).collect();
     write_named_slots(dir, &slots)
+}
+
+/// Version 2 marks a sparse manifest, including trailing tombstones that cannot be
+/// reconstructed from surviving WAL paths. Read only its header, already validated on open.
+#[cfg(feature = "mmap")]
+fn named_manifest_is_sparse(dir: &std::path::Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(dir.join(NAMED_MANIFEST)) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let mut header = [0; 8];
+    file.read_exact(&mut header)?;
+    Ok(u32::from_le_bytes(header[4..8].try_into().expect("4 bytes")) == NAMED_TOMBSTONE_VERSION)
 }
 
 /// Publish one complete slot map. Tombstones refer to no files; live slots must already be

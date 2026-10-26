@@ -470,6 +470,91 @@ fn sparse_slots_survive_create_drop_compact_and_legacy_reopen() {
 }
 
 #[test]
+fn compact_reclaims_sparse_manifests_without_a_default_overlay() {
+    // Interior holes require renumbering survivors; trailing tombstones still require
+    // a manifest rewrite even when the surviving physical slots are already dense.
+    for trailing in [false, true] {
+        for default_base in [false, true] {
+            let dir = TestDir::new("compact_sparse_named");
+            let base = if default_base {
+                Graph::load_str("<http://ex/base> <http://ex/p> <http://ex/o> .", "ntriples")
+                    .unwrap()
+            } else {
+                Graph::new()
+            };
+            base.save(&dir.0).unwrap();
+            let mut graph = Graph::open(&dir.0).unwrap();
+            let names: Vec<_> = (0..24).map(|i| named(&format!("graph-{i}"))).collect();
+            for name in &names {
+                let i = graph.ensure_named(name).unwrap();
+                graph.named[i]
+                    .1
+                    .apply_delta(&[[named("ack"), named("p"), name.clone()]], &[])
+                    .unwrap();
+            }
+            let keep = if trailing { 1 } else { 2 };
+            for name in &names[1..names.len() - (keep - 1)] {
+                assert!(graph.drop_named_durable(name).unwrap());
+            }
+            let expected = dataset(&graph);
+            drop(graph);
+            let mut graph = Graph::open(&dir.0).unwrap();
+            assert!(!graph.store.has_overlay(), "parent has no pending triples");
+            let manifest_path = dir.0.join("named.bin");
+            let sparse = std::fs::read(&manifest_path).unwrap();
+            assert_eq!(u32::from_le_bytes(sparse[4..8].try_into().unwrap()), 2);
+            assert_eq!(u32::from_le_bytes(sparse[8..12].try_into().unwrap()), 24);
+
+            graph.compact().unwrap();
+            let dense = std::fs::read(&manifest_path).unwrap();
+            assert_eq!(u32::from_le_bytes(dense[4..8].try_into().unwrap()), 1);
+            assert_eq!(
+                u32::from_le_bytes(dense[8..12].try_into().unwrap()),
+                keep as u32
+            );
+            let live_name_bytes: usize = graph
+                .named
+                .iter()
+                .map(|(name, _)| match name {
+                    Term::NamedNode(name) => 5 + name.as_str().len(),
+                    _ => unreachable!("fixture uses IRI graph names"),
+                })
+                .sum();
+            assert_eq!(
+                dense.len(),
+                12 + live_name_bytes,
+                "no tombstone bytes remain"
+            );
+            assert_eq!(
+                std::fs::read_dir(dir.0.join("named")).unwrap().count(),
+                keep
+            );
+            assert_eq!(dataset(&graph), expected);
+            drop(graph);
+
+            let mut graph = Graph::open(&dir.0).unwrap();
+            assert_eq!(dataset(&graph), expected);
+            for (i, (_, sub)) in graph.named.iter().enumerate() {
+                assert_eq!(
+                    sub.wal.as_ref().unwrap().dir,
+                    dir.0.join("named").join(i.to_string())
+                );
+            }
+            let next = graph.ensure_named(&named("after-compact")).unwrap();
+            assert_eq!(next, keep);
+            assert_eq!(
+                graph.named[next].1.wal.as_ref().unwrap().dir,
+                dir.0.join("named").join(keep.to_string())
+            );
+            assert!(contents(&graph.named[next].1).is_empty());
+            let expected = dataset(&graph);
+            drop(graph);
+            assert_eq!(dataset(&Graph::open(&dir.0).unwrap()), expected);
+        }
+    }
+}
+
+#[test]
 fn interrupted_delete_orphan_logs_are_not_replayed_into_a_new_graph() {
     let dir = TestDir::new("drop_orphan");
     let mut graph = deletion_fixture(&dir.0);

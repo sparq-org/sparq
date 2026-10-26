@@ -337,7 +337,9 @@ Directory-backed `drop_named_durable` keeps survivor slots and WAL handles stabl
 it publishes a tombstone through one atomic, fsync'd manifest replacement before
 reclaiming the dropped graph's files. `drop_all_named_durable` removes and syncs
 the manifest before reclaiming the subtree. Reopen accepts legacy dense manifests
-and sparse tombstone manifests; a base rewrite during save/compaction packs slots.
+and sparse tombstone manifests. `Graph::compact` rewrites any manifest containing
+tombstones and packs live slots densely, even without a default-graph overlay.
+After reopen, the next named graph allocates immediately after the dense live slots.
 Opening a graph syncs each WAL/journal and its containing directory before exposing
 an append handle, including replacement logs after compaction and in named graphs.
 
