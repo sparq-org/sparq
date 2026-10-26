@@ -82,10 +82,19 @@ live tests/e2e.rs::hidden_revocation_revoked_index_is_unprovable
 live tests/e2e.rs::hidden_revocation_unrevoked_verifies_and_index_is_private
 live tests/e2e.rs::holder_pop_valid_verifies_end_to_end
 live tests/e2e.rs::live_opaque_scan_cross_v2_vk_is_refused
+live tests/e2e.rs::live_v2_boolean_filter_verifies_end_to_end
+live tests/e2e.rs::live_v2_datetime_filter_verifies_end_to_end
+live tests/e2e.rs::live_v2_decimal_filter_verifies_end_to_end
+live tests/e2e.rs::live_v2_double_filter_verifies_end_to_end
+live tests/e2e.rs::live_v2_integer_filter_verifies_end_to_end
 live tests/e2e.rs::live_v2_join_cross_vk_is_refused
 live tests/e2e.rs::live_v2_join_verifies_end_to_end
 live tests/e2e.rs::live_v2_scan_cross_vk_is_refused
 live tests/e2e.rs::live_v2_scan_verifies_end_to_end
+live tests/e2e.rs::live_v2_value_filter_crypto_is_reached
+live tests/e2e.rs::live_v2_value_filter_different_constant_is_refused
+live tests/e2e.rs::live_v2_value_filter_false_verdict_is_refused
+live tests/e2e.rs::live_v2_value_filter_wrong_row_is_refused
 live tests/e2e.rs::nonce_happy_path_fresh_nonce_verifies
 live tests/e2e.rs::nonce_replay_under_new_nonce_rejected
 live tests/e2e.rs::nonce_single_use_second_presentation_rejected
@@ -148,7 +157,6 @@ structural src/result/proof_bindings.rs::public_pattern_native_rejections_separa
 structural src/result/proof_bindings.rs::public_pattern_native_valid_bindings_dispatch_v4_only
 structural src/result/signed.rs::signed_type_and_version_do_not_extend_unsigned_wire_acceptance
 structural src/result/signed.rs::verify_signed_result_refuses_a_legacy_member_under_the_default_policy
-structural src/value_obligation.rs::fully_discharged_manifest_is_still_refused_by_verify_manifest
 structural src/verifier.rs::a_branch_carrying_a_filter_is_refused_before_bb
 structural src/verifier.rs::a_path_claiming_a_cycle_must_have_equal_endpoints
 structural src/verifier.rs::a_path_endpoint_of_a_hidden_join_is_refused_in_the_extended_regime
