@@ -82,6 +82,7 @@ use async_trait::async_trait;
 use sparq_core::Graph;
 use tokio::sync::{mpsc, oneshot};
 
+use super::open_retry::{open_with_retry, OPEN_RETRY_TIMEOUT};
 use super::sparq::{DeleteOutcome, ReadPlan, ResourceMeta, SparqClient, SparqError};
 use super::sparql;
 use super::timestamp;
@@ -289,8 +290,12 @@ impl EmbeddedSparqClient {
 
     /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
     /// snapshot). The on-disk path the persistence option selects.
+    ///
+    /// Retries `WouldBlock` for up to 250 ms: on Unix, a child between fork and exec can briefly
+    /// retain a dropped graph's lock descriptors. A holder that remains live is still refused
+    /// once that retry budget expires; other I/O errors are returned immediately.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
-        let graph = Graph::open(dir).map_err(|e| {
+        let graph = open_with_retry(OPEN_RETRY_TIMEOUT, || Graph::open(dir)).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
         })?;
         Self::over(graph)

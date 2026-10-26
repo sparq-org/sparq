@@ -6,9 +6,14 @@
 //! The lock is an advisory lock ([`fs4::FileExt::try_lock`] / `try_lock_shared`: `flock` on
 //! Unix, `LockFileEx` on Windows) on a lock file. It is held as long as its [`DirLock`] lives
 //! (for a graph: while the graph, or any named graph taken out of it, lives) and released by
-//! the operating system when the process ends, however it ends, so it never outlives its
-//! process. A second attempt fails at once ([`std::io::ErrorKind::WouldBlock`]) rather than
-//! wait. Advisory locks over network file systems (NFS and the like) are not relied on: such
+//! the operating system when its last descriptor closes, including when a process ends.
+//! On Unix, a child between fork and exec can briefly retain an inherited descriptor even
+//! after the parent's holder is dropped: close-on-exec takes effect at exec, not fork.
+//! A second attempt fails at once ([`std::io::ErrorKind::WouldBlock`]) rather than wait.
+//! Callers that expect to reopen a just-dropped holder amid child-process creation may use
+//! a bounded retry of the whole open on `WouldBlock`; the embedded LWS client allows 250 ms.
+//! The lock itself never waits or bypasses a live holder. Advisory locks over network file
+//! systems (NFS and the like) are not relied on: such
 //! directories are not supported.
 //!
 //! A store's lock is two lock files ([`DirLock`]): `<dir>.lock` beside the directory, taken

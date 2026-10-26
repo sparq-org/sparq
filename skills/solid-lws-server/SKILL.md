@@ -99,6 +99,9 @@ LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
 
 ## Choose a data backend
 
+For embedded directory opens, lock lifetimes, and the bounded retry of transient
+lock contention, see [native storage](references/native-storage.md).
+
 Set `PSS_SPARQ_BACKEND` to one of:
 
 - `memory` (default): an ephemeral in-memory test double.
