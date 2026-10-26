@@ -31,7 +31,7 @@ The binary is configured entirely by `SOLID_SERVER_*` / `PSS_*` env variables (b
 
 ## Native storage lifecycle
 
-`SOLID_SERVER_DATA_DIR` (default unset) implies `PSS_SPARQ_BACKEND=embedded`, selects `<data>/index` + `<data>/blobs`, and conflicts with `SOLID_SERVER_SPARQ_DIR` or another explicit backend. This build refuses it with “the filesystem blob store is not built in”; adapter integration is tracked by [#7188](https://github.com/sparq-org/sparq/issues/7188). The legacy directory setting keeps existing-snapshot behavior and its durability guard.
+`SOLID_SERVER_DATA_DIR` (default unset) implies `PSS_SPARQ_BACKEND=embedded`, opens a durable index at `<data>/index` and `FsBlobStore` at `<data>/blobs`, and conflicts with `SOLID_SERVER_SPARQ_DIR` or another explicit backend. Both `embedded-sparq` and `blob-fs` are required (default-on); builds missing either refuse boot. The legacy directory setting keeps existing-snapshot behavior and its durability guard; a directory-backed index opened through that path also compacts on graceful shutdown.
 
 Boot atomically publishes and syncs `format.json` (`schema=1`, `index.major=1`, `blobs.major=1`) before creating either plane; content without a marker or an incompatible marker refuses boot. The index opens before blob construction; its `index.lock` + `index/sparq.lock` guard the data root. `SOLID_SERVER_WAIT_FOR_LOCK_SECS` (default `0`, non-negative integer seconds) retries index contention with backoff, then names the lock path; other errors fail immediately.
 
@@ -62,7 +62,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on
   by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or
   `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
-- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. The native binary's in-memory blob backend makes this image unsuitable for durable production data; see the storage lifecycle above. The `http` and `redis-replay` backends require opt-in features.
+- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above. The `http` and `redis-replay` backends require opt-in features.
 
 ## ✨ Features
 

@@ -5,13 +5,13 @@ at `<data>/index` and resource bytes at `<data>/blobs`. It implies
 `PSS_SPARQ_BACKEND=embedded`; explicitly selecting any other backend refuses boot.
 Setting it together with a non-empty `SOLID_SERVER_SPARQ_DIR` also refuses boot.
 The legacy `SOLID_SERVER_SPARQ_DIR` setting still opens an existing snapshot and
-retains the durable-index/in-memory-blob refusal.
+retains the durable-index/in-memory-blob refusal. A directory-backed index opened
+through this legacy path also compacts on graceful shutdown.
 
-**Adapter availability:** this build refuses `SOLID_SERVER_DATA_DIR` with
-“the filesystem blob store is not built in”. It never substitutes ephemeral
-bytes for the requested durable store. The native binary otherwise uses in-memory
-blobs, so it is unsuitable for durable production data. Filesystem adapter
-integration is tracked by [#7188](https://github.com/sparq-org/sparq/issues/7188).
+The default native build opens `FsBlobStore` at `<data>/blobs`. Both
+`embedded-sparq` and `blob-fs` are required; a build without either feature refuses
+data-directory boot with a message naming the missing feature. Without a data
+directory, the native binary uses in-memory blobs.
 
 The boot contract checks `<data>/format.json` before opening either plane:
 
@@ -29,7 +29,9 @@ without an index resumes first boot. Do not remove the marker from an existing s
 interrupted-swap recovery and exclusive locking to the core. Its I/O result preserves
 `WouldBlock` when another holder owns the directory. The index's `<data>/index.lock`
 and `<data>/index/sparq.lock` guard the data root; there is no separate `LOCK` file.
-The index opens before the blob constructor runs. `SOLID_SERVER_WAIT_FOR_LOCK_SECS`
+The index lock is held before the blob constructor opens the store and sweeps
+abandoned writes from `blobs/tmp/`. A second boot that cannot acquire the index
+lock never opens or sweeps blobs. `SOLID_SERVER_WAIT_FOR_LOCK_SECS`
 (default `0`) is a non-negative integer: data-directory boot retries only
 `WouldBlock` with bounded backoff until that duration, then reports the lock path.
 Other errors fail immediately.

@@ -59,7 +59,7 @@ impl Fixture {
             key,
             client: Client::builder()
                 .no_proxy()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(120))
                 .build()
                 .unwrap(),
         };
@@ -197,14 +197,22 @@ impl Fixture {
             let (parent, slug) = split_member(path.trim_end_matches('/'));
             self.request(Method::POST, &parent)
                 .header("Slug", slug)
-                .header("Link", "<http://www.w3.org/ns/lws#Container>; rel=\"type\"")
+                .header(
+                    "Link",
+                    "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                )
                 .header("Content-Type", "text/turtle")
                 .body("")
                 .send()
                 .await
                 .unwrap()
         };
-        success(response, path).await;
+        let response = success(response, path).await;
+        assert_eq!(
+            response.headers()["location"].to_str().unwrap(),
+            format!("{}{path}", self.base),
+            "container Location"
+        );
         assert_eq!(self.snapshot(path).await.status, 200, "container {path}");
     }
 
@@ -307,14 +315,18 @@ impl Snapshot {
         }
     }
 
-    pub fn assert_resource(&self, path: &str) {
+    pub fn assert_resource(&self, path: &str, mode: Mode) {
         assert_eq!(self.status, 200, "{path}: {self:?}");
         assert!(self.etag.is_some(), "ETag missing: {path}");
         assert!(self.content_type.is_some(), "Content-Type missing: {path}");
-        assert!(
-            self.last_modified.is_some(),
-            "Last-Modified missing: {path}"
-        );
+        // Solid listings deliberately omit Last-Modified: their body is generated from members.
+        // Plain resources still require it, so metadata equality cannot pass on two missing dates.
+        if mode == Mode::Lws || !path.ends_with('/') {
+            assert!(
+                self.last_modified.is_some(),
+                "Last-Modified missing: {path}"
+            );
+        }
     }
 }
 
@@ -358,12 +370,22 @@ impl Corpus {
             ),
         ] {
             f.put(path, body.clone(), content_type).await;
+            let actual = f.snapshot(path).await;
+            actual.assert_resource(path, f.mode);
             if content_type == "application/octet-stream" {
-                assert_eq!(
-                    f.snapshot(path).await.body,
-                    body,
-                    "initial binary bytes: {path}"
-                );
+                assert_eq!(actual.body, body, "initial binary bytes: {path}");
+            } else {
+                use sparq_lws_core::ldp::content::{parse_to_triples, RdfFormat};
+                let triples = parse_to_triples(
+                    RdfFormat::Turtle,
+                    &actual.body,
+                    &format!("{}{path}", f.base),
+                )
+                .unwrap();
+                assert_eq!(triples.len(), 1, "initial RDF corpus");
+                assert_eq!(triples[0].subject.to_string(), "<urn:s>");
+                assert_eq!(triples[0].predicate.as_str(), "urn:p");
+                assert_eq!(triples[0].object.to_string(), "<urn:o>");
             }
         }
         f.put(
@@ -372,6 +394,11 @@ impl Corpus {
             "application/octet-stream",
         )
         .await;
+        assert_eq!(
+            f.snapshot("/corpus/overwrite.bin").await.body,
+            payload(4, 8193),
+            "clean corpus must witness the overwritten bytes before restart"
+        );
         success(
             f.request(Method::DELETE, "/corpus/deleted.bin")
                 .send()
@@ -389,6 +416,15 @@ impl Corpus {
             .await;
             None
         } else {
+            assert_eq!(
+                f.request_as(Method::GET, "/corpus/large.bin", Some(READER))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                403,
+                "clean corpus reader must depend on its grant"
+            );
             Some(f.grant_read("/corpus/large.bin").await)
         };
         let mut snapshots = BTreeMap::new();
@@ -402,11 +438,13 @@ impl Corpus {
             "/corpus/overwrite.bin",
         ] {
             let snapshot = f.snapshot(path).await;
-            snapshot.assert_resource(path);
+            snapshot.assert_resource(path, f.mode);
             snapshots.insert(path.into(), snapshot);
         }
         if f.mode == Mode::Solid {
-            snapshots.insert("/corpus/.acl".into(), f.snapshot("/corpus/.acl").await);
+            let acl = f.snapshot("/corpus/.acl").await;
+            acl.assert_resource("/corpus/.acl", f.mode);
+            snapshots.insert("/corpus/.acl".into(), acl);
         }
         assert_eq!(f.snapshot("/corpus/deleted.bin").await.status, 404);
         Self { snapshots, grant }
@@ -444,14 +482,27 @@ pub async fn inspect_blobs(f: &Fixture, sweep: bool) {
     );
     let index = EmbeddedSparqClient::open_or_create(&f.data().join("index")).unwrap();
     let blob = FsBlobStore::open(f.data().join("blobs")).unwrap();
-    let referenced = index.referenced_blob_keys().await.unwrap();
+    // Byte-free service marker/hold-directory records use an empty pointer. It names no blob;
+    // retain every nonempty pointer (including invalid ones, which must fail rather than hide).
+    let referenced: BTreeSet<_> = index
+        .referenced_blob_keys()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|key| !key.is_empty())
+        .collect();
     assert!(
         !referenced.is_empty(),
         "empty index cannot witness blob durability"
     );
     let mut bodies = BTreeMap::new();
     for key in &referenced {
-        bodies.insert(key.clone(), BlobStore::get(&blob, key).await.unwrap());
+        bodies.insert(
+            key.clone(),
+            BlobStore::get(&blob, key)
+                .await
+                .unwrap_or_else(|error| panic!("referenced blob {key:?}: {error}")),
+        );
     }
     if sweep {
         // No writers can race this zero-grace sweep: the server is stopped and this owns the lock.
@@ -478,6 +529,14 @@ pub async fn inspect_blobs(f: &Fixture, sweep: bool) {
         assert_eq!(report.delete_errors, 0);
         assert_eq!(report.skipped_unknown_age, 0);
     }
+    // The independent walk below counts every file; the adapter also rejects misplaced keys
+    // and foreign entries, so matching basenames in the wrong fan-out cannot pass equality.
+    let listing = blob.list().unwrap();
+    assert!(
+        listing.foreign.is_empty(),
+        "foreign blob paths: {:?}",
+        listing.foreign
+    );
     let mut files = BTreeSet::new();
     for plane in ["objects", "pool"] {
         walk_files(&f.data().join("blobs").join(plane), &mut files);

@@ -30,10 +30,26 @@ async fn clean_restart(mode: Mode) {
     let f = Fixture::new(mode).await;
     let server = f.boot().await;
     let corpus = Corpus::write(&f).await;
+    let mut listings = BTreeMap::new();
+    for path in ["/corpus/", "/corpus/nested/", "/corpus/nested/deep/"] {
+        let listing = members(&f, path).await;
+        assert!(
+            !listing.is_empty(),
+            "clean corpus must witness containment: {path}"
+        );
+        listings.insert(path, listing);
+    }
     server.stop();
     inspect_blobs(&f, false).await;
     let server = f.boot().await;
     corpus.verify(&f).await;
+    for (path, expected) in listings {
+        assert_eq!(
+            members(&f, path).await,
+            expected,
+            "restart changed membership: {path}"
+        );
+    }
     server.stop();
     inspect_blobs(&f, false).await;
 }
@@ -66,7 +82,108 @@ struct Ack {
 #[derive(Debug)]
 enum Progress {
     Partial(usize),
-    Complete(usize, Result<Ack, String>),
+    Complete(usize, Result<Ack, Failure>),
+}
+
+#[derive(Debug)]
+struct Failure {
+    message: String,
+    before_kill: bool,
+}
+
+// Record the status/headers as soon as they arrive. A truncated response body cannot turn a
+// received 2xx into an unacknowledged mutation. The return value describes body drainage only.
+async fn send_write(
+    id: usize,
+    request: reqwest::RequestBuilder,
+    write: &Write,
+    mode: Mode,
+    base: &str,
+    killed: &std::sync::atomic::AtomicBool,
+    progress: &tokio::sync::mpsc::UnboundedSender<Progress>,
+) -> bool {
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            progress
+                .send(Progress::Complete(
+                    id,
+                    Err(Failure {
+                        message: format!("{error:?}"),
+                        before_kill: !killed.load(std::sync::atomic::Ordering::SeqCst),
+                    }),
+                ))
+                .unwrap();
+            return false;
+        }
+    };
+    if !response.status().is_success() {
+        progress
+            .send(Progress::Complete(
+                id,
+                Err(Failure {
+                    message: format!("{}: {}", write.path, response.status()),
+                    before_kill: !killed.load(std::sync::atomic::Ordering::SeqCst),
+                }),
+            ))
+            .unwrap();
+        return false;
+    }
+    let etag = response
+        .headers()
+        .get("etag")
+        .map(|h| h.to_str().unwrap().to_string());
+    if !write.delete {
+        assert_eq!(
+            etag.as_deref(),
+            Some(body_etag(&write.body).as_str()),
+            "acknowledged ETag: {}",
+            write.path
+        );
+        if mode == Mode::Lws && write.create {
+            assert_eq!(
+                response.headers()["location"].to_str().unwrap(),
+                format!("{base}{}", write.path),
+                "Slug must select the intended IRI"
+            );
+        }
+    }
+    progress
+        .send(Progress::Complete(
+            id,
+            Ok(Ack {
+                hash: Sha256::digest(&write.body).into(),
+                etag,
+            }),
+        ))
+        .unwrap();
+    response.bytes().await.is_ok()
+}
+
+fn record_completion(
+    id: usize,
+    result: Result<Ack, Failure>,
+    acknowledgements: &mut BTreeMap<usize, Ack>,
+) {
+    match result {
+        Ok(ack) => assert!(acknowledgements.insert(id, ack).is_none()),
+        Err(failure) => assert!(
+            !failure.before_kill,
+            "request failed before kill: writer {id}: {}",
+            failure.message
+        ),
+    }
+}
+
+fn drain_completions(
+    progress: &mut tokio::sync::mpsc::UnboundedReceiver<Progress>,
+    acknowledgements: &mut BTreeMap<usize, Ack>,
+) {
+    while let Ok(event) = progress.try_recv() {
+        if let Progress::Complete(id, result) = event {
+            record_completion(id, result, acknowledgements);
+        }
+    }
 }
 
 // Independent check of the composite store's documented content/type ETag encoding. Do not
@@ -81,9 +198,14 @@ fn body_etag(body: &[u8]) -> String {
 
 async fn members(f: &Fixture, path: &str) -> BTreeSet<String> {
     let snapshot = f.snapshot(path).await;
+    listing_members(f.mode, &format!("{}{path}", f.base), &snapshot)
+}
+
+fn listing_members(mode: Mode, parent: &str, snapshot: &Snapshot) -> BTreeSet<String> {
     assert_eq!(snapshot.status, 200);
-    if f.mode == Mode::Lws {
+    if mode == Mode::Lws {
         let doc: Value = serde_json::from_slice(&snapshot.body).unwrap();
+        assert_eq!(doc["id"].as_str(), Some(parent), "container identity");
         assert_eq!(
             doc["totalItems"].as_u64().unwrap() as usize,
             doc["items"].as_array().unwrap().len(),
@@ -97,19 +219,22 @@ async fn members(f: &Fixture, path: &str) -> BTreeSet<String> {
             .collect()
     } else {
         use sparq_lws_core::ldp::content::{parse_to_triples, RdfFormat};
-        parse_to_triples(
-            RdfFormat::Turtle,
-            &snapshot.body,
-            &format!("{}{path}", f.base),
-        )
-        .unwrap()
-        .into_iter()
-        .filter(|t| t.predicate.as_str() == "http://www.w3.org/ns/ldp#contains")
-        .map(|t| match t.object {
-            oxrdf::Term::NamedNode(n) => n.into_string(),
-            other => panic!("containment member is not an IRI: {other}"),
-        })
-        .collect()
+        parse_to_triples(RdfFormat::Turtle, &snapshot.body, parent)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.predicate.as_str() == "http://www.w3.org/ns/ldp#contains")
+            .map(|t| {
+                assert_eq!(
+                    t.subject.to_string(),
+                    format!("<{parent}>"),
+                    "containment subject"
+                );
+                match t.object {
+                    oxrdf::Term::NamedNode(n) => n.into_string(),
+                    other => panic!("containment member is not an IRI: {other}"),
+                }
+            })
+            .collect()
     }
 }
 
@@ -128,8 +253,17 @@ async fn crash(mode: Mode) {
         let create = partial || id % 5 >= 2;
         let path = format!("/c{}/item-{id}.bin", id % 4);
         let prior = if !create {
-            f.put(&path, payload(id + 300, 257), BINARY).await;
-            Some(f.snapshot(&path).await)
+            let body = payload(id + 300, 257);
+            f.put(&path, body.clone(), BINARY).await;
+            let prior = f.snapshot(&path).await;
+            prior.assert_resource(&path, mode);
+            assert_eq!(prior.body, body, "pre-existing bytes: {path}");
+            assert_eq!(
+                prior.etag.as_deref(),
+                Some(body_etag(&body).as_str()),
+                "pre-existing ETag: {path}"
+            );
+            Some(prior)
         } else {
             None
         };
@@ -186,8 +320,16 @@ async fn crash(mode: Mode) {
                 let mut stream = tokio::net::TcpStream::connect(&address).await.unwrap();
                 let method = if mode == Mode::Lws { "POST" } else { "PUT" };
                 let auth = if mode == Mode::Lws { format!("Authorization: Bearer {token}\r\n") } else { String::new() };
-                let header = format!("{method} {target} HTTP/1.1\r\nHost: {address}\r\n{auth}Slug: {slug}\r\nContent-Type: {BINARY}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", w.body.len());
+                let header = format!("{method} {target} HTTP/1.1\r\nHost: {address}\r\n{auth}Slug: {slug}\r\nContent-Type: {BINARY}\r\nContent-Length: {}\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n", w.body.len());
                 stream.write_all(header.as_bytes()).await.unwrap();
+                // Hyper sends 100 only once the handler polls this request body. A socket write
+                // alone could sit in the accept queue and would not prove server-side activity.
+                let mut interim = Vec::new();
+                while !interim.ends_with(b"\r\n\r\n") {
+                    interim.push(stream.read_u8().await.unwrap());
+                    assert!(interim.len() < 4096, "oversized interim response");
+                }
+                assert_eq!(interim, b"HTTP/1.1 100 Continue\r\n\r\n");
                 stream.write_all(&w.body[..4096]).await.unwrap();
                 stream.flush().await.unwrap();
                 active_partial.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -202,31 +344,13 @@ async fn crash(mode: Mode) {
                 let _ = result;
                 return;
             }
-            let result = async {
-                let response = request.send().await.map_err(|e| e.to_string())?;
-                if !response.status().is_success() {
-                    return Err(format!("{}: {}", response.status(), response.text().await.unwrap()));
-                }
-                let etag = response.headers().get("etag").map(|h| h.to_str().unwrap().to_string());
-                if !w.delete {
-                    assert_eq!(etag.as_deref(), Some(body_etag(&w.body).as_str()), "acknowledged ETag: {}", w.path);
-                    if mode == Mode::Lws && w.create {
-                        assert_eq!(response.headers()["location"].to_str().unwrap(),
-                            format!("http://{address}{}", w.path), "Slug must select the intended IRI");
-                    }
-                }
-                // Complete the exchange before declaring it acknowledged to the controller.
-                response.bytes().await.map_err(|e| e.to_string())?;
-                Ok(Ack { hash: Sha256::digest(&w.body).into(), etag })
-            }.await;
-            let _ = send.send(Progress::Complete(id, result));
+            send_write(id, request, &w, mode, &format!("http://{address}"), &killed, &send).await;
         });
     }
     drop(send);
     barrier.wait().await;
     let mut acknowledgements = BTreeMap::new();
     let mut partials = BTreeSet::new();
-    let mut errors = BTreeMap::new();
     while acknowledgements.len() < 100 || partials.len() < 40 {
         match progress
             .recv()
@@ -236,11 +360,15 @@ async fn crash(mode: Mode) {
             Progress::Partial(id) => {
                 assert!(partials.insert(id));
             }
-            Progress::Complete(id, Ok(ack)) => {
-                assert!(acknowledgements.insert(id, ack).is_none());
-            }
-            Progress::Complete(id, Err(error)) => {
-                errors.insert(id, error);
+            Progress::Complete(id, result) => {
+                record_completion(id, result, &mut acknowledgements);
+                if acknowledgements.len() % 25 == 0 {
+                    eprintln!(
+                        "{mode:?}: {} writes acknowledged, {} bodies in flight",
+                        acknowledgements.len(),
+                        partials.len()
+                    );
+                }
             }
         }
     }
@@ -260,10 +388,6 @@ async fn crash(mode: Mode) {
             .any(|id| !writes[*id].create && !writes[*id].delete),
         "acknowledge an overwrite before killing"
     );
-    assert!(
-        errors.is_empty(),
-        "requests failed before the kill: {errors:?}"
-    );
     assert_eq!(
         active_partial.load(std::sync::atomic::Ordering::SeqCst),
         40,
@@ -275,11 +399,7 @@ async fn crash(mode: Mode) {
         result.unwrap();
     }
     // Include every 2xx racing the kill, not only events consumed before the signal.
-    while let Ok(event) = progress.try_recv() {
-        if let Progress::Complete(id, Ok(ack)) = event {
-            assert!(acknowledgements.insert(id, ack).is_none());
-        }
-    }
+    drain_completions(&mut progress, &mut acknowledgements);
     eprintln!(
         "{mode:?}: SIGKILL with {} acknowledged writes, {} incomplete HTTP bodies",
         acknowledgements.len(),
@@ -287,6 +407,7 @@ async fn crash(mode: Mode) {
     );
     let server = f.boot().await;
     let mut readable = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut recovered = BTreeMap::new();
     for (id, w) in writes.iter().enumerate() {
         let snapshot = f.snapshot(&w.path).await;
         let ack = acknowledgements.get(&id);
@@ -335,6 +456,7 @@ async fn crash(mode: Mode) {
                 .or_default()
                 .insert(format!("{}{}", f.base, w.path));
         }
+        recovered.insert(w.path.clone(), snapshot);
     }
     for i in 0..4 {
         let parent = format!("/c{i}/");
@@ -356,16 +478,12 @@ async fn crash(mode: Mode) {
     inspect_blobs(&f, true).await;
     let server = f.boot().await;
     // HTTP reads after GC catch removal hidden by a warm body cache or by comparing only key names.
-    for (id, ack) in &acknowledgements {
-        let w = &writes[*id];
-        let s = f.snapshot(&w.path).await;
-        if w.delete {
-            assert_eq!(s.status, 404);
-        } else {
-            assert_eq!(s.status, 200);
-            assert_eq!(s.body, w.body);
-            assert_eq!(s.etag, ack.etag);
-        }
+    for (path, expected) in recovered {
+        assert_eq!(
+            f.snapshot(&path).await,
+            expected,
+            "GC changed recovered {path}"
+        );
     }
     server.stop();
 }
@@ -524,4 +642,139 @@ async fn grants_and_webhooks_survive_sigterm() {
 #[tokio::test]
 async fn grants_and_webhooks_survive_sigkill() {
     bounded(grant_and_webhook(true)).await;
+}
+
+#[cfg(test)]
+mod guards {
+    use super::*;
+
+    #[tokio::test]
+    async fn received_2xx_survives_a_truncated_response_body() {
+        bounded(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let write = Write {
+                path: "/resource.bin".into(),
+                body: b"new".to_vec(),
+                delete: false,
+                create: false,
+                partial: false,
+                prior: None,
+            };
+            let etag = body_etag(&write.body);
+            let reply = format!("HTTP/1.1 201 Created\r\nETag: {etag}\r\nContent-Length: 10\r\nConnection: close\r\n\r\nx");
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut headers = Vec::new();
+                while !headers.ends_with(b"\r\n\r\n") {
+                    headers.push(stream.read_u8().await.unwrap());
+                    assert!(headers.len() < 8192);
+                }
+                let mut body = [0; 3];
+                stream.read_exact(&mut body).await.unwrap();
+                assert_eq!(&body, b"new");
+                stream.write_all(reply.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            });
+            let client = reqwest::Client::builder().no_proxy()
+                .timeout(Duration::from_secs(5)).build().unwrap();
+            let request = client.put(format!("{base}{}", write.path))
+                .header("Content-Type", BINARY).body(write.body.clone());
+            let (send, mut received) = tokio::sync::mpsc::unbounded_channel();
+            let killed = std::sync::atomic::AtomicBool::new(false);
+            assert!(!send_write(7, request, &write, Mode::Solid, &base, &killed, &send).await,
+                "control must actually truncate the response body");
+            match received.try_recv().unwrap() {
+                Progress::Complete(7, Ok(ack)) => {
+                    assert_eq!(ack.hash, <[u8; 32]>::from(Sha256::digest(b"new")));
+                    assert_eq!(ack.etag, Some(etag));
+                }
+                event => panic!("received 2xx was not recorded: {event:?}"),
+            }
+            assert!(received.try_recv().is_err(), "exactly one completion");
+            tokio::time::timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
+        }).await;
+    }
+
+    #[test]
+    #[should_panic(expected = "request failed before kill")]
+    fn queued_pre_kill_failure_is_rejected() {
+        // The controller already sent SIGKILL before draining this earlier event.
+        let (send, mut pending) = tokio::sync::mpsc::unbounded_channel();
+        send.send(Progress::Complete(
+            9,
+            Err(Failure {
+                message: "500 Internal Server Error".into(),
+                before_kill: true,
+            }),
+        ))
+        .unwrap();
+        drain_completions(&mut pending, &mut BTreeMap::new());
+    }
+
+    #[test]
+    fn post_kill_transport_error_keeps_prior_acknowledgements() {
+        let (send, mut pending) = tokio::sync::mpsc::unbounded_channel();
+        send.send(Progress::Complete(
+            1,
+            Ok(Ack {
+                hash: [1; 32],
+                etag: Some("witness".into()),
+            }),
+        ))
+        .unwrap();
+        send.send(Progress::Complete(
+            2,
+            Err(Failure {
+                message: "connection reset by SIGKILL".into(),
+                before_kill: false,
+            }),
+        ))
+        .unwrap();
+        let mut acknowledged = BTreeMap::new();
+        drain_completions(&mut pending, &mut acknowledged);
+        assert_eq!(acknowledged.len(), 1);
+        assert_eq!(acknowledged[&1].hash, [1; 32]);
+        assert_eq!(acknowledged[&1].etag.as_deref(), Some("witness"));
+    }
+
+    fn listing(body: &str) -> Snapshot {
+        Snapshot {
+            status: 200,
+            body: body.as_bytes().to_vec(),
+            etag: None,
+            content_type: None,
+            last_modified: None,
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "containment subject")]
+    fn solid_listing_rejects_another_subject() {
+        listing_members(Mode::Solid, "http://pod.example/c/", &listing(
+            "<urn:another-container> <http://www.w3.org/ns/ldp#contains> <http://pod.example/c/item> ."));
+    }
+
+    #[test]
+    #[should_panic(expected = "container identity")]
+    fn lws_listing_rejects_another_container() {
+        listing_members(
+            Mode::Lws,
+            "http://pod.example/c/",
+            &listing(
+                r#"{"id":"urn:another-container","totalItems":1,"items":[{"id":"http://pod.example/c/item"}]}"#,
+            ),
+        );
+    }
+
+    #[test]
+    fn listings_accept_the_expected_parent() {
+        let expected = BTreeSet::from(["http://pod.example/c/item".to_string()]);
+        for (mode, body) in [
+            (Mode::Solid, "<http://pod.example/c/> <http://www.w3.org/ns/ldp#contains> <http://pod.example/c/item> ."),
+            (Mode::Lws, r#"{"id":"http://pod.example/c/","totalItems":1,"items":[{"id":"http://pod.example/c/item"}]}"#),
+        ] {
+            assert_eq!(listing_members(mode, "http://pod.example/c/", &listing(body)), expected);
+        }
+    }
 }

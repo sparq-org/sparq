@@ -14,6 +14,23 @@ fn refuses(values: &[(&str, &str)], expected: &str) {
     assert!(stderr.contains(expected), "missing {expected:?}: {stderr}");
 }
 
+#[cfg(all(target_os = "linux", feature = "embedded-sparq", feature = "blob-fs"))]
+fn journal_lengths(dir: &std::path::Path) -> Vec<u64> {
+    let mut lengths = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            lengths.extend(journal_lengths(&path));
+        } else if matches!(
+            path.file_name().unwrap().to_str(),
+            Some("wal.log" | "txn.log")
+        ) {
+            lengths.push(std::fs::metadata(path).unwrap().len());
+        }
+    }
+    lengths
+}
+
 #[test]
 fn native_boot_refuses_conflicting_paths_and_backend_selection() {
     let dir = Directory::new();
@@ -93,10 +110,50 @@ fn data_directory_boot_requires_the_embedded_feature() {
 #[cfg(target_os = "linux")]
 #[test]
 fn native_server_drains_on_terminate_and_interrupt() {
-    for signal in ["-TERM", "-INT"] {
-        let mut process = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), &[]);
-        process.wait_signal_handlers();
-        process.signal(signal);
-        assert_eq!(process.finish().status.code(), Some(0));
+    #[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
+    let dir = Directory::new();
+    let configurations: &[&[(&str, &str)]] = &[
+        &[],
+        #[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
+        &[
+            ("SOLID_SERVER_DATA_DIR", dir.0.to_str().unwrap()),
+            // Only this disposable directory permits fixtures in a durable backend.
+            ("SOLID_SERVER_SEED_DEMO", "1"),
+            ("SOLID_SERVER_ALLOW_SEED_NONMEMORY", "1"),
+        ],
+    ];
+    for values in configurations {
+        for signal in ["-TERM", "-INT"] {
+            let mut process = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), values);
+            process.wait_signal_handlers();
+            #[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
+            if !values.is_empty() {
+                assert!(journal_lengths(&dir.0.join("index"))
+                    .iter()
+                    .any(|len| *len > 0));
+            }
+            process.signal(signal);
+            assert_eq!(process.finish().status.code(), Some(0));
+            #[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
+            if !values.is_empty() {
+                let lengths = journal_lengths(&dir.0.join("index"));
+                assert!(!lengths.is_empty());
+                assert!(lengths.iter().all(|len| *len == 0));
+                drop(
+                    sparq_lws_core::store::EmbeddedSparqClient::open_or_create(
+                        &dir.0.join("index"),
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+    }
+    #[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
+    {
+        assert!(dir.0.join("format.json").is_file());
+        assert!(dir.0.join("index").is_dir());
+        for path in ["blobs/objects", "blobs/pool", "blobs/tmp"] {
+            assert!(dir.0.join(path).is_dir(), "missing {path}");
+        }
     }
 }
