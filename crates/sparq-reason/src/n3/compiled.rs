@@ -499,6 +499,12 @@ pub struct ClosureCharge {
     pub facts: usize,
 }
 
+// Private diagnostics shared by the charged and metered closure adapters.
+struct ClosureRefusal {
+    message: String,
+    kind: Option<bounded::CutKind>,
+}
+
 /// [`eval_with_limits`], also reporting what the closure charged ([`ClosureCharge`]).
 ///
 /// # Errors
@@ -1253,136 +1259,21 @@ impl BoundRuleSet<'_> {
         limits: ClosureLimits,
     ) -> Result<(Vec<[Id; 3]>, ClosureCharge), String> {
         let run = Truncation::top_level_with(limits);
-        let strata = &self.compiled.strata;
-        // The closure's round and fact allowance (the text engine's `ClosureRounds`).
-        let mut allowance = bounded::ClosureRounds::forward(&run);
-        let mut store = FactStore::default();
-        // The fact allowance is charged while the input is READ, not after: a caller can
-        // hand over any number of facts, and the store plus the round-0 delta copied from
-        // it below hold two of each. Checking each newly-held fact stops at the allowance
-        // (plus the one fact whose insertion crossed it) instead of holding the whole set.
-        for f in facts {
-            if store.insert(*f) {
-                allowance.hold(store.all.len(), &run)?;
-            }
-        }
-        for f in &self.compiled.facts {
-            if store.insert([
-                self.syms[f[0] as usize],
-                self.syms[f[1] as usize],
-                self.syms[f[2] as usize],
-            ]) {
-                allowance.hold(store.all.len(), &run)?;
-            }
-        }
-        // Round 0: every fact is "new". Rules with scoped negation re-evaluate fully
-        // each round (needs_full); pure-constant rules fire in round 0 only — the text
-        // engine's exact round discipline.
-        let mut delta: Vec<[Id; 3]> = store.list.clone();
-        // One semi-naive fixpoint per stratum (the text engine's automatic stratification,
-        // GH #6201): a single-stratum set runs exactly one loop; at each later stratum
-        // boundary the whole store is the delta and round-0 handling restarts.
-        let cs = self.compiled;
-        // Each round's join rows and firings (the text engine's `JoinWork`).
-        let work = bounded::JoinWork::forward(&run);
-        for stratum in 0..strata.n_strata {
-            if stratum > 0 {
-                delta = store.list.clone();
-            }
-            let mut first_round = true;
-            loop {
-                bounded::ClosureRounds::round(&mut allowance, store.all.len(), &run)?;
-                work.round();
-                let mut produced: Vec<[Id; 3]> = Vec::new();
-                for (ri, rule) in cs.rules.iter().enumerate() {
-                    if strata
-                        .rule_stratum
-                        .as_ref()
-                        .is_some_and(|rs| rs[ri] != stratum)
-                    {
-                        continue;
-                    }
-                    // A stratum's first round is NAIVE, as in the text engine: every rule
-                    // once over the whole store (its delta is the whole store, so seeding
-                    // each join position with it would find the same rows once per position).
-                    if first_round || rule.needs_full || rule.join_steps.is_empty() {
-                        if rule.needs_full || first_round {
-                            self.run_rule(rule, &store, None, dict, (&run, &work), &mut produced);
-                        }
-                    } else {
-                        // Semi-naive: once per join position, with that pattern restricted
-                        // to the delta (dedup happens at store insertion).
-                        for &k in &rule.join_steps {
-                            self.run_rule(
-                                rule,
-                                &store,
-                                Some((&delta, k)),
-                                dict,
-                                (&run, &work),
-                                &mut produced,
-                            );
-                        }
-                    }
-                }
-                // A builtin refused a term past the term-size allowance, or the round
-                // passed its join-work allowance: the round's derivations are incomplete,
-                // so the closure fails (the text engine's run refusal).
-                if let Some(e) = run.refusal() {
-                    return Err(e);
-                }
-                let mut new_delta: Vec<[Id; 3]> = Vec::new();
-                for f in produced {
-                    if store.insert(f) {
-                        new_delta.push(f);
-                    }
-                }
-                first_round = false;
-                if new_delta.is_empty() {
-                    break;
-                }
-                delta = new_delta;
-            }
-        }
-        let charge = ClosureCharge {
-            join_rows: work.charged(),
-            facts: store.all.len(),
-        };
-        Ok((store.list, charge))
+        self.eval_closure(dict, facts, &run)
+            .map_err(|error| error.message)
     }
 
-    /// Evaluates under the smaller of each closure cap and the ledger's remaining allowance.
-    ///
-    /// Successful calls debit the actual [`ClosureCharge`] to `JoinRows` and
-    /// `ClosureFacts`. Failed calls debit neither. Acceptance matches [`Self::eval_charged`]
-    /// followed by checking that charge against the ledger, but refusal occurs at the cap.
-    /// Equal caps belong to the caller. An unbounded effective join cap is run as
-    /// `usize::MAX - 1` to enable counting: `join_rows` is always `Some`, never a fabricated
-    /// zero. The unreachable sentinel-sized closure is therefore refused at that value.
-    /// Nested closures keep their own fresh per-closure allowances; only the top-level
-    /// charge is debited here. This compiled subset currently has no nested closure builtin.
-    ///
-    /// # Errors
-    /// A strictly narrower ledger cap returns [`MeteredError::Ledger`]. Other failures
-    /// return [`MeteredError::Closure`] with the exact existing error string.
-    /// The ledger refusal's `reached` is the first total past the cap (a lower bound
-    /// when a batch of firings crosses it). Dictionary interning is not rolled back.
-    pub fn eval_metered(
+    // Both entry points use the same schedule; typed diagnostics are read only on failure.
+    fn eval_closure(
         &self,
         dict: &mut Dict,
         facts: &[[Id; 3]],
-        limits: ClosureLimits,
-        ledger: &mut Ledger,
-    ) -> Result<(Vec<[Id; 3]>, ClosureCharge), MeteredError> {
-        let joins = ledger.remaining(Dim::JoinRows);
-        let facts_left = ledger.remaining(Dim::ClosureFacts);
-        let effective = bounded::metered_limits(limits, joins, facts_left);
-        let run = Truncation::top_level_with(effective);
-        // Keep the incumbent public evaluator unchanged. The differential fixtures
-        // exercise this identical fixpoint schedule through both entry points.
-        let result = (|| -> Result<(Vec<[Id; 3]>, ClosureCharge), String> {
+        run: &Truncation,
+    ) -> Result<(Vec<[Id; 3]>, ClosureCharge), ClosureRefusal> {
+        let result = (|| {
             let strata = &self.compiled.strata;
             // The closure's round and fact allowance (the text engine's `ClosureRounds`).
-            let mut allowance = bounded::ClosureRounds::forward(&run);
+            let mut allowance = bounded::ClosureRounds::forward(run);
             let mut store = FactStore::default();
             // The fact allowance is charged while the input is READ, not after: a caller can
             // hand over any number of facts, and the store plus the round-0 delta copied from
@@ -1390,7 +1281,7 @@ impl BoundRuleSet<'_> {
             // (plus the one fact whose insertion crossed it) instead of holding the whole set.
             for f in facts {
                 if store.insert(*f) {
-                    allowance.hold(store.all.len(), &run).inspect_err(|e| {
+                    allowance.hold(store.all.len(), run).inspect_err(|e| {
                         run.classify(bounded::CutKind::Facts, e);
                     })?;
                 }
@@ -1401,7 +1292,7 @@ impl BoundRuleSet<'_> {
                     self.syms[f[1] as usize],
                     self.syms[f[2] as usize],
                 ]) {
-                    allowance.hold(store.all.len(), &run).inspect_err(|e| {
+                    allowance.hold(store.all.len(), run).inspect_err(|e| {
                         run.classify(bounded::CutKind::Facts, e);
                     })?;
                 }
@@ -1415,7 +1306,7 @@ impl BoundRuleSet<'_> {
             // boundary the whole store is the delta and round-0 handling restarts.
             let cs = self.compiled;
             // Each round's join rows and firings (the text engine's `JoinWork`).
-            let work = bounded::JoinWork::forward(&run);
+            let work = bounded::JoinWork::forward(run);
             let mut rounds = 0usize;
             for stratum in 0..strata.n_strata {
                 if stratum > 0 {
@@ -1423,7 +1314,7 @@ impl BoundRuleSet<'_> {
                 }
                 let mut first_round = true;
                 loop {
-                    bounded::ClosureRounds::round(&mut allowance, store.all.len(), &run)
+                    bounded::ClosureRounds::round(&mut allowance, store.all.len(), run)
                         .inspect_err(|e| {
                             run.classify_round(rounds, e);
                         })?;
@@ -1448,7 +1339,7 @@ impl BoundRuleSet<'_> {
                                     &store,
                                     None,
                                     dict,
-                                    (&run, &work),
+                                    (run, &work),
                                     &mut produced,
                                 );
                             }
@@ -1461,7 +1352,7 @@ impl BoundRuleSet<'_> {
                                     &store,
                                     Some((&delta, k)),
                                     dict,
-                                    (&run, &work),
+                                    (run, &work),
                                     &mut produced,
                                 );
                             }
@@ -1492,29 +1383,66 @@ impl BoundRuleSet<'_> {
             };
             Ok((store.list, charge))
         })();
-        let (closure, charge) = result.map_err(|e| {
-            let dim = match run.kind() {
-                Some(bounded::CutKind::TotalJoinRows) if joins < limits.max_total_join_rows => {
-                    Dim::JoinRows
-                }
-                Some(bounded::CutKind::Facts) if facts_left < limits.max_facts => Dim::ClosureFacts,
-                Some(bounded::CutKind::Rounds) => {
-                    return MeteredError::Closure(bounded::rounds_error(limits));
-                }
-                _ => return MeteredError::Closure(e),
-            };
-            MeteredError::Ledger(Exceeded::new(
-                dim,
-                match dim {
-                    Dim::JoinRows => ledger.limits().join_rows,
-                    _ => ledger.limits().closure_facts,
-                },
-                ledger
-                    .spent(dim)
-                    .saturating_add(ledger.remaining(dim))
-                    .saturating_add(1),
-            ))
-        })?;
+        result.map_err(|message| ClosureRefusal {
+            message,
+            kind: run.kind(),
+        })
+    }
+
+    /// Evaluates under the smaller of each closure cap and the ledger's remaining allowance.
+    ///
+    /// Successful calls debit the actual [`ClosureCharge`] to `JoinRows` and
+    /// `ClosureFacts`. Failed calls debit neither. Acceptance matches [`Self::eval_charged`]
+    /// followed by checking that charge against the ledger, but refusal occurs at the cap.
+    /// Equal caps belong to the caller. An unbounded effective join cap is run as
+    /// `usize::MAX - 1` to enable counting: `join_rows` is always `Some`, never a fabricated
+    /// zero. The unreachable sentinel-sized closure is therefore refused at that value.
+    /// Nested closures keep their own fresh per-closure allowances; only the top-level
+    /// charge is debited here. This compiled subset currently has no nested closure builtin.
+    ///
+    /// # Errors
+    /// A strictly narrower ledger cap returns [`MeteredError::Ledger`]. Other failures
+    /// return [`MeteredError::Closure`] with the exact existing error string.
+    /// The ledger refusal's `reached` is the first total past the cap (a lower bound
+    /// when a batch of firings crosses it). Dictionary interning is not rolled back.
+    pub fn eval_metered(
+        &self,
+        dict: &mut Dict,
+        facts: &[[Id; 3]],
+        limits: ClosureLimits,
+        ledger: &mut Ledger,
+    ) -> Result<(Vec<[Id; 3]>, ClosureCharge), MeteredError> {
+        let joins = ledger.remaining(Dim::JoinRows);
+        let facts_left = ledger.remaining(Dim::ClosureFacts);
+        let effective = bounded::metered_limits(limits, joins, facts_left);
+        let run = Truncation::top_level_with(effective);
+        let (closure, charge) =
+            self.eval_closure(dict, facts, &run)
+                .map_err(|ClosureRefusal { message: e, kind }| {
+                    let dim = match kind {
+                        Some(bounded::CutKind::TotalJoinRows) if joins < limits.max_total_join_rows => {
+                            Dim::JoinRows
+                        }
+                        Some(bounded::CutKind::Facts) if facts_left < limits.max_facts => {
+                            Dim::ClosureFacts
+                        }
+                        Some(bounded::CutKind::Rounds) => {
+                            return MeteredError::Closure(bounded::rounds_error(limits));
+                        }
+                        _ => return MeteredError::Closure(e),
+                    };
+                    MeteredError::Ledger(Exceeded::new(
+                        dim,
+                        match dim {
+                            Dim::JoinRows => ledger.limits().join_rows,
+                            _ => ledger.limits().closure_facts,
+                        },
+                        ledger
+                            .spent(dim)
+                            .saturating_add(ledger.remaining(dim))
+                            .saturating_add(1),
+                    ))
+                })?;
         // Both charges have already been checked by the effective caps. The clone
         // also keeps compound publication atomic if a future dimension is added.
         let mut charged = ledger.clone();

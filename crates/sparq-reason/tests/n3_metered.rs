@@ -1,5 +1,4 @@
 //! Running-ledger caps compose with each closure's existing limits.
-#![cfg(feature = "compiled-rules")]
 
 use sparq_core::dict::{Dict, Id};
 use sparq_core::meter::{Dim, Ledger, Limits};
@@ -37,6 +36,19 @@ fn ledger(dim: Dim, cap: usize) -> Ledger {
         _ => unreachable!(),
     }
     Ledger::new(limits)
+}
+
+#[test]
+fn metered_refuses_closure_facts_while_reading_input() {
+    let (mut d, f, r) = fixture();
+    let mut l = ledger(Dim::ClosureFacts, 4);
+    l.charge(Dim::ClosureFacts, 3).unwrap();
+    assert!(l.remaining(Dim::ClosureFacts) < f.len());
+    let e = eval_metered(&mut d, &f, &r, ClosureLimits::default(), &mut l).unwrap_err();
+    assert!(matches!(e, MeteredError::Ledger(e)
+        if e.dim == Dim::ClosureFacts && e.limit == 4 && e.reached == 5));
+    assert_eq!(l.spent(Dim::ClosureFacts), 3);
+    assert_eq!(l.spent(Dim::JoinRows), 0);
 }
 
 #[test]

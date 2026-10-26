@@ -182,17 +182,22 @@ impl Truncation {
     // The compiled adapter classifies ClosureRounds at its typed call sites;
     // ClosureRounds itself remains shared with the text/counting engines.
     #[cfg(feature = "compiled-rules")]
+    #[cold]
     pub(crate) fn classify(&self, kind: CutKind, message: &str) {
         self.refuse(kind, || message.to_owned());
     }
 
     #[cfg(feature = "compiled-rules")]
+    #[cold]
     pub(crate) fn classify_round(&self, rounds: usize, message: &str) {
-        self.classify(if rounds >= self.limits.max_rounds {
-            CutKind::Rounds
-        } else {
-            CutKind::Facts
-        }, message);
+        self.classify(
+            if rounds >= self.limits.max_rounds {
+                CutKind::Rounds
+            } else {
+                CutKind::Facts
+            },
+            message,
+        );
     }
 }
 
@@ -709,7 +714,10 @@ impl JoinWork {
             return true;
         }
         // Both allowances are charged, and neither is debited unless both cover `n`.
-        match (self.left.get().checked_sub(n), self.total_left.get().checked_sub(n)) {
+        match (
+            self.left.get().checked_sub(n),
+            self.total_left.get().checked_sub(n),
+        ) {
             (Some(left), Some(total_left)) => {
                 self.left.set(left);
                 self.total_left.set(total_left);
@@ -732,23 +740,30 @@ impl JoinWork {
         self.spent.set(true);
         let limit = self.limit;
         let total_limit = self.total_limit;
-        run.refuse(if total { CutKind::TotalJoinRows } else { CutKind::JoinRows }, move || {
+        run.refuse(
             if total {
-                format!(
-                    "n3: {CLOSURE_CUT}: the closure's premise joins and rule firings would \
+                CutKind::TotalJoinRows
+            } else {
+                CutKind::JoinRows
+            },
+            move || {
+                if total {
+                    format!(
+                        "n3: {CLOSURE_CUT}: the closure's premise joins and rule firings would \
                      produce more than max_total_join_rows ({total_limit}) binding rows over \
                      all its rounds: the rules keep joining patterns whose matches multiply \
                      (raise ClosureLimits::max_total_join_rows to allow more)"
-                )
-            } else {
-                format!(
-                    "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
+                    )
+                } else {
+                    format!(
+                        "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
                      produce more than max_join_rows ({limit}) binding rows: the rules join \
                      patterns whose matches multiply (raise ClosureLimits::max_join_rows to \
                      allow more)"
-                )
-            }
-        });
+                    )
+                }
+            },
+        );
     }
 }
 
