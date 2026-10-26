@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
+  removal alongside triple changes, with ordered replay and support for the previous journal
+  format. Hardens named-graph layout recovery alongside directory ownership support:
+  stable manifest slots, checked allocation and cleanup, complete durability barriers, and
+  shared write refusal after indeterminate log writes. Removing a child from the attached
+  in-memory set no longer removes its on-disk manifest entry; durable drop methods change the
+  persisted set. Read-only opens leave undeclared slots alone; writable cleanup failures warn
+  with the affected path. Cleanup follows opening the complete declared tree and preserves
+  separate stores and held descendant locks. Journal format upgrades use durable file
+  publication. Invalid declared layouts leave slots intact, and linked named-graph
+  containers are refused before cleanup or batch-drop publication.
 - **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
   open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
   `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
@@ -525,6 +536,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but the cut it is refused with may change from `backward proof-node limit exceeded` to a
   forward-closure limit. Wherever both the old and the new behaviour answer, the answers are
   identical; no run that previously answered is now refused.
+
+- **sparq-core (`sq-ycle`):** hardens named-graph layout recovery. Stable manifest slots,
+  checked allocation and removal, complete file-sync barriers, and ordered journal replay
+  integrate with exclusive directory locks and role markers. Read-only opens do no cleanup.
+  Whole-tree compaction keeps the existing rollback and frozen-view recovery behavior.
+  Layout-generation lookups follow path ancestors; ordinary slot records do not scan the log.
+  Dictionary metadata and named manifests write version 2 while reading version 1. A legacy
+  single-file dictionary must be re-saved before atomic UPDATE journaling. Preserve a backup
+  if an older executable must remain usable.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that

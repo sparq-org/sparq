@@ -57,6 +57,9 @@ fn main() {
 mod reconcile_runtime;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod storage_runtime;
+
+#[cfg(not(target_arch = "wasm32"))]
 macro_rules! native_main {
     ($($item:item)*) => {
         $($item)*
@@ -82,7 +85,7 @@ use solid_oidc_verifier::verifier::Verifier;
 use solid_oidc_verifier::webid::{BidirectionalMode, NetworkWebIdResolver};
 use sparq_lws_core::acl_cache::{AclCache, DEFAULT_ACL_CACHE_CAPACITY};
 use sparq_lws_core::app::{
-    build_router_with_overload, with_overload_layers, AppState, OverloadConfig,
+    build_router_with_overload, with_overload_layers_and_cors, AppState, OverloadConfig,
 };
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::auth_cache::{
@@ -101,6 +104,12 @@ use sparq_lws_core::store::{
 };
 use sparq_lws_core::tls::{self, TlsMode};
 use sparq_lws_core::transport::{ConnectionLimiter, TransportConfig};
+
+use crate::storage_runtime::{StorageConfig, StorageShutdown};
+#[cfg(feature = "embedded-sparq")]
+use crate::storage_runtime::make_blobs;
+#[cfg(test)]
+use crate::storage_runtime::{sparq_backend_is_durable, reject_durable_sparq_with_inmem_blob};
 
 use crate::reconcile_runtime::{
     reconcile_interval_from_env, spawn_periodic_if_configured, SharedStore,
@@ -237,50 +246,6 @@ const ENV_SPARQ_BACKEND: &str = "PSS_SPARQ_BACKEND";
 /// The SPARQ `/sparql` endpoint URL for `PSS_SPARQ_BACKEND=http` (opt-in `http-sparq` feature).
 #[cfg(feature = "http-sparq")]
 const ENV_SPARQ_ENDPOINT: &str = "SOLID_SERVER_SPARQ_ENDPOINT";
-/// Optional on-disk directory for `PSS_SPARQ_BACKEND=embedded` (a previously-saved graph snapshot);
-/// unset ⇒ a fresh in-memory graph.
-#[cfg(feature = "embedded-sparq")]
-const ENV_SPARQ_DIR: &str = "SOLID_SERVER_SPARQ_DIR";
-
-/// Operational-safety: is the SELECTED SPARQ backend **durable / shared** (i.e. its index outlives a
-/// process restart and/or is shared across instances)?
-///
-/// - `http` — a shared SPARQ service: DURABLE/SHARED. ✔
-/// - `embedded` WITH a persistence dir (`SOLID_SERVER_SPARQ_DIR` set) — a directory-backed graph:
-///   DURABLE. ✔
-/// - `embedded` WITHOUT a persistence dir — a fresh in-memory graph: EPHEMERAL. ✘
-/// - `memory` (the in-memory double) — EPHEMERAL. ✘
-///
-/// `backend` is the already-lowercased `PSS_SPARQ_BACKEND` value; `sparq_dir_set` is whether
-/// `SOLID_SERVER_SPARQ_DIR` is set to a non-empty value.
-fn sparq_backend_is_durable(backend: &str, sparq_dir_set: bool) -> bool {
-    match backend {
-        "http" => true,
-        "embedded" => sparq_dir_set,
-        // "memory" / unknown — unknown backends abort later in dispatch; treat as non-durable here.
-        _ => false,
-    }
-}
-
-/// Startup guard #1 — a DURABLE/SHARED SPARQ index paired with an EPHEMERAL (in-memory) blob store is
-/// a byte/index INCONSISTENCY: a resource is indexed in SPARQ (survives restart / visible on another
-/// instance) but its bytes live only in this process's in-memory blob store (lost on restart / absent
-/// elsewhere). Reject that combination at boot.
-///
-/// Fires ONLY when the blob store is in-memory AND the SPARQ backend is durable/shared
-/// ([`sparq_backend_is_durable`]). The EPHEMERAL combinations are CONSISTENT and allowed:
-/// `memory` + in-mem-blob (both ephemeral — the conformance/test path) and `embedded`-without-dir +
-/// in-mem-blob (both ephemeral). The blob store is currently ALWAYS in-memory (the S3 blob is an
-/// unimplemented stub), so `blob_is_in_memory` is `true` today; the parameter keeps the predicate
-/// honest for when a durable BlobStore lands (the guard then simply stops firing).
-fn reject_durable_sparq_with_inmem_blob(
-    backend: &str,
-    sparq_dir_set: bool,
-    blob_is_in_memory: bool,
-) -> bool {
-    blob_is_in_memory && sparq_backend_is_durable(backend, sparq_dir_set)
-}
-
 /// Startup guard #2 — refuse to run the dev SEED flags ([`ENV_SEED_CONFORMANCE`] /
 /// [`ENV_SEED_BENCH`] / [`ENV_SEED_DEMO`]) against a NON-`memory` backend, so test fixtures are
 /// never written into a live `http`/`embedded` store by accident.
@@ -664,43 +629,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (`embedded-sparq` feature, default-on — the first-class backend); `http` wires the live
     // HttpSparqClient (opt-in `http-sparq` feature — the remote shared-service shape). See
     // `research/lws-design-records.md` §3.
-    let backend = std::env::var(ENV_SPARQ_BACKEND)
-        .ok()
-        .map(|s| s.trim().to_ascii_lowercase())
-        .unwrap_or_else(|| "memory".to_string());
-
-    // --- Startup operational-safety guards (fail-closed at boot, before any backend is built). -----
-    // The blob store is currently ALWAYS the in-memory double (the S3 blob is an unimplemented stub),
-    // so `blob_is_in_memory` is `true`. Read it from one place so the guard is honest when a durable
-    // BlobStore eventually lands (the guard then simply stops firing for the durable-blob case).
-    let blob_is_in_memory = true;
-    // Whether SOLID_SERVER_SPARQ_DIR is set to a non-empty value — read by its literal name so the
-    // guard works regardless of the `embedded-sparq` feature gate (an `embedded` backend without the
-    // feature aborts in dispatch anyway).
-    let sparq_dir_set = std::env::var("SOLID_SERVER_SPARQ_DIR")
-        .ok()
-        .is_some_and(|d| !d.trim().is_empty());
-
-    // GUARD #1 — a DURABLE/SHARED SPARQ index requires a DURABLE blob store. A persistent/shared index
-    // (http, or dir-backed embedded) over the EPHEMERAL in-memory blob store is a byte/index
-    // inconsistency: a resource is indexed in SPARQ but its bytes are lost on restart / absent on
-    // another instance. `memory` and `embedded`-without-dir are ephemeral on BOTH sides (consistent) —
-    // those still boot. Fail closed otherwise.
-    if reject_durable_sparq_with_inmem_blob(&backend, sparq_dir_set, blob_is_in_memory) {
-        return Err(format!(
-            "a durable/shared SPARQ index (PSS_SPARQ_BACKEND={backend}{}) requires a durable blob \
-             store; the in-memory blob store is ephemeral, so a resource indexed in SPARQ would lose \
-             its bytes on restart / be absent on another instance. Configure a durable BlobStore, or \
-             use PSS_SPARQ_BACKEND=memory (or PSS_SPARQ_BACKEND=embedded WITHOUT SOLID_SERVER_SPARQ_DIR \
-             for an ephemeral in-memory graph).",
-            if sparq_dir_set {
-                " with SOLID_SERVER_SPARQ_DIR"
-            } else {
-                ""
-            }
-        )
-        .into());
-    }
+    let storage = StorageConfig::from_env()?;
+    // Data-directory boot pairs the durable index with filesystem bytes.
+    // Legacy backends retain the in-memory blob guard.
+    storage.check_durability(storage.has_data_dir())?;
+    let backend = &storage.backend;
 
     // GUARD #2 — refuse to seed test fixtures into a NON-`memory` backend. The dev seed flags
     // (SOLID_SERVER_SEED_CONFORMANCE / SOLID_SERVER_SEED_BENCH / SOLID_SERVER_SEED_DEMO) now run
@@ -708,7 +641,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // http/embedded store. Set SOLID_SERVER_ALLOW_SEED_NONMEMORY=1 to permit it ONLY for an ephemeral
     // embedded test instance (the conformance run.sh embedded leg). Seeding `memory` is always allowed.
     let seed_requested = seed_requested_from_env();
-    if reject_seed_on_nonmemory(seed_requested, &backend, env_flag(ENV_ALLOW_SEED_NONMEMORY)) {
+    if reject_seed_on_nonmemory(seed_requested, backend, env_flag(ENV_ALLOW_SEED_NONMEMORY)) {
         return Err(format!(
             "refusing to seed test fixtures into a non-memory backend (PSS_SPARQ_BACKEND={backend}): \
              SOLID_SERVER_SEED_CONFORMANCE / SOLID_SERVER_SEED_BENCH / SOLID_SERVER_SEED_DEMO would \
@@ -723,6 +656,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Crucially, the OFF path keeps the original direct backend construction (no Arc allocation or
     // indirection); only an explicitly-present interval selects shared handles for request path + sweep.
     let reconcile_interval = reconcile_interval_from_env()?;
+    #[allow(unused_mut)]
+    let mut storage_shutdown = StorageShutdown::default();
     let (app, reconcile_task) = match backend.as_str() {
         "memory" => {
             eprintln!("  STORAGE: SPARQ backend = MEMORY (in-memory double — boot-without-SPARQ; the conformance/test default).");
@@ -771,28 +706,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         #[cfg(feature = "embedded-sparq")]
         "embedded" => {
-            // The IN-PROCESS engine over a fresh in-memory Graph, or a directory-backed one when a
-            // persistence dir is configured. A construction failure aborts boot (fail-closed).
-            let sparq = match std::env::var(ENV_SPARQ_DIR)
-                .ok()
-                .filter(|d| !d.trim().is_empty())
-            {
-                Some(dir) => {
-                    eprintln!("  STORAGE: SPARQ backend = EMBEDDED (in-process engine; directory-backed graph at {dir}).");
-                    sparq_lws_core::store::embedded::EmbeddedSparqClient::open(
-                        std::path::Path::new(&dir),
-                    )
-                    .map_err(|e| format!("failed to open the embedded SPARQ graph at {dir}: {e}"))?
-                }
-                None => {
-                    eprintln!("  STORAGE: SPARQ backend = EMBEDDED (in-process engine; fresh in-memory graph).");
-                    sparq_lws_core::store::embedded::EmbeddedSparqClient::in_memory()
-                        .map_err(|e| format!("failed to init the embedded SPARQ graph: {e}"))?
-                }
-            };
+            let (sparq, blob) = storage
+                .open_embedded_with(storage.has_data_dir(), make_blobs)
+                .await?;
+            storage_shutdown.retain(&storage, &sparq);
             build_app_for_backend(
                 sparq,
-                InMemoryBlobStore::new(),
+                blob,
                 reconcile_interval,
                 &base_url,
                 &issuer,
@@ -895,173 +815,173 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     eprintln!("WARNING: experimental parallel track — NOT the production prod-solid-server.");
 
-    match rustls_config {
-        // HTTPS: axum-server terminates TLS over the process-wide aws-lc-rs rustls provider, with the
-        // SAME graceful-shutdown + bind-resolution behaviour as the plain-HTTP path below.
-        //
-        // Bind-addr PARITY: resolve `bind` with `tokio::net::TcpListener::bind`, exactly as the plain
-        // path does, so a hostname:port string (e.g. `localhost:3000`) works in TLS mode too — it
-        // would be rejected by `SocketAddr::parse`, which only accepts a numeric address. We then hand
-        // the already-bound listener to `axum_server::from_tcp_rustls`, which serves TLS over an
-        // existing `std::net::TcpListener` (so no second, parse-restricted bind).
-        Some(config) => {
-            let tokio_listener = tokio::net::TcpListener::bind(&bind).await?;
-            #[cfg(feature = "http3")]
-            let http3_addr = tokio_listener.local_addr()?;
-
-            // The h3 listener gets a clone of the ONE already-assembled, hardened router.
-            // `serve_h3` injects the Quinn peer as `ConnectInfo<SocketAddr>` before dispatch, so the
-            // OUTERMOST pre-crypto rate limiter sees the real source instead of failing open to auth.
-            // Endpoint construction happens before the TCP listener is handed off: a UDP bind/config
-            // failure aborts startup rather than silently serving only the unadvertised TCP subset.
-            #[cfg(feature = "http3")]
-            let (app, http3_server) = {
-                let endpoint = bind_http3_endpoint(&config, http3_addr)?;
-                let bound_addr = endpoint.local_addr()?;
-                // sq-oprna.4: an Alt-Svc promise is created only after UDP bind succeeds,
-                // and names the endpoint's actual port. The unlayered clone remains the h3 router.
-                let h3_app = app.clone();
-                let tcp_app = app.layer(sparq_http3::alt_svc_layer(bound_addr.port()));
-                eprintln!(
-                    "  HTTP/3: QUIC listener ACTIVE on udp://{bound_addr} (ALPN h3; shared LDP router; \
-                     WebSocket extended CONNECT is out of scope)."
-                );
-                let server = tokio::spawn(sparq_http3::serve_h3(
-                    endpoint,
-                    h3_app,
-                    shutdown_signal(),
-                ));
-                (tcp_app, server)
-            };
-
-            // axum-server wants a blocking `std::net::TcpListener`; converting the tokio one keeps the
-            // resolved address (and avoids re-binding through the numeric-only `SocketAddr` path).
-            let std_listener = tokio_listener.into_std()?;
-            std_listener.set_nonblocking(true)?;
-
-            // Graceful-shutdown PARITY: wire `shutdown_signal()` to `Handle::graceful_shutdown` so
-            // Ctrl-C drains in-flight TLS connections instead of dropping them, matching the plain
-            // path's `with_graceful_shutdown`.
-            let handle = axum_server::Handle::new();
-            let shutdown_handle = handle.clone();
-            tokio::spawn(async move {
-                shutdown_signal().await;
-                // DRAIN TIMEOUT (best-call, per the standing rule): give in-flight requests up to 10s
-                // to finish, then force-close. 10s is the conventional reverse-proxy / k8s
-                // `terminationGracePeriod` default — long enough for a normal LDP request (incl. a
-                // backend SPARQ round-trip) to complete, short enough that a stuck connection cannot
-                // wedge shutdown. `Some(..)` (not `None`) is deliberate: `None` would wait FOREVER for
-                // a hung connection, which is the opposite of graceful.
-                shutdown_handle.graceful_shutdown(Some(Duration::from_secs(10)));
-            });
-
-            // Build the axum-server, then:
-            //  (a) `.map(..)` wraps the RustlsAcceptor with the connection-cap acceptor so each served
-            //      connection holds a permit for its lifetime (the slowloris connection-flood bound),
-            //  (b) `.http_builder()` applies the HTTP/2 (max_concurrent_streams + rapid-reset cap) +
-            //      HTTP/1.1 (slowloris header-read timeout, keep-alive) knobs to the SAME hyper
-            //      `auto::Builder` axum-server serves with — preserving rustls TLS + h2/http1.1 ALPN
-            //      exactly (the rustls config owns ALPN; we touch only the hyper protocol knobs).
-            let handshake_timeout = transport_config.handshake_timeout;
-            let idle_timeout = transport_config.idle_timeout;
-            let max_requests_per_conn = transport_config.max_requests_per_conn;
-            // Bind the guarded acceptor into `base` (the PoP Tier-1b/Tier-2 dispatch below consumes
-            // `base` in both the wrapped and unwrapped serve branches).
-            let base = axum_server::from_tcp_rustls(std_listener, config)?
-                .handle(handle)
-                .map(move |acceptor| {
-                    // P1.5 (beyond-50k): set TCP_NODELAY on the raw accepted TcpStream by composing
-                    // axum-server's `NoDelayAcceptor` as the INNER acceptor of the RustlsAcceptor — it
-                    // runs on the raw stream BEFORE the TLS handshake, so small responses are not held
-                    // by Nagle. Type-preserving: `RustlsAcceptor<NoDelayAcceptor>::Stream` is still
-                    // `TlsStream<TcpStream>` (NoDelayAcceptor::Stream = TcpStream), so every guard/PoP
-                    // wrapper downstream is unchanged.
-                    let acceptor =
-                        acceptor.acceptor(sparq_lws_core::nodelay::NoDelayAcceptor::new());
-                    // The FULL guard set: connection-cap permit (global + per-source) + handshake
-                    // timeout (accept-time) + idle-keepalive read timeout (IO-layer) +
-                    // max-requests-per-conn (service-layer).
-                    connection_limiter.wrap_acceptor_with_guards(
-                        acceptor,
-                        handshake_timeout,
-                        idle_timeout,
-                        max_requests_per_conn,
-                    )
-                });
-
-            // `into_make_service_with_connect_info::<SocketAddr>()` (NOT plain `into_make_service`) so
-            // each request carries `ConnectInfo<SocketAddr>` in its extensions — the pre-crypto rate
-            // limiter reads the direct peer IP from it. axum-server supports the connect-info make
-            // service. Without this the limiter would see no peer IP and FAIL OPEN (proceed to auth).
+    let serving = async move {
+        match rustls_config {
+            // HTTPS: axum-server terminates TLS over the process-wide aws-lc-rs rustls provider, with the
+            // SAME graceful-shutdown + bind-resolution behaviour as the plain-HTTP path below.
             //
-            // PoP Tier-1b / Tier-2: when the mTLS flag is on (Tier 1b) OR the DPoP-SK exporter path
-            // is active (Tier 2 on in-process TLS), wrap the connection-cap acceptor with the
-            // `ConnPopAcceptor` OUTERMOST — it reads the peer client certificate ONCE per connection
-            // (after the handshake) and injects a `ConnPop` into every request so the auth layer can
-            // match a cert-bound token against it; with the SK exporter enabled it ALSO exports the
-            // DPoP-SK keying material once per connection and injects a `ConnSk` (connection id +
-            // establishment-path EKM). With neither flag, the serve path is byte-identical (no
-            // wrap), so the `.map` type differs between branches — hence the duplicated serve call.
-            // (With SK-only, the injected `ConnPop` carries no cert and the mTLS dispatch stays off —
-            // the cert path is untouched.)
-            if mtls_bound_tokens || sk_exporter_active {
-                let mut server = base.map(move |acceptor| {
-                    sparq_lws_core::pop::conn::ConnPopAcceptor::new(acceptor)
-                        .with_sk_exporter(sk_exporter_active)
-                });
-                transport_config.apply_to_builder(server.http_builder());
-                server
-                    .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-                    .await?;
-            } else {
-                let mut server = base;
-                transport_config.apply_to_builder(server.http_builder());
-                server
-                    .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-                    .await?;
-            }
+            // Bind-addr PARITY: resolve `bind` with `tokio::net::TcpListener::bind`, exactly as the plain
+            // path does, so a hostname:port string (e.g. `localhost:3000`) works in TLS mode too — it
+            // would be rejected by `SocketAddr::parse`, which only accepts a numeric address. We then hand
+            // the already-bound listener to `axum_server::from_tcp_rustls`, which serves TLS over an
+            // existing `std::net::TcpListener` (so no second, parse-restricted bind).
+            Some(config) => {
+                let tokio_listener = tokio::net::TcpListener::bind(&bind).await?;
+                #[cfg(feature = "http3")]
+                let http3_addr = tokio_listener.local_addr()?;
 
-            // Both listener shutdown futures observe the same process signal. Await the UDP task so
-            // its endpoint closes and drains QUIC connections before the process exits normally.
-            #[cfg(feature = "http3")]
-            http3_server.await??;
+                // The h3 listener gets a clone of the ONE already-assembled, hardened router.
+                // `serve_h3` injects the Quinn peer as `ConnectInfo<SocketAddr>` before dispatch, so the
+                // OUTERMOST pre-crypto rate limiter sees the real source instead of failing open to auth.
+                // Endpoint construction happens before the TCP listener is handed off: a UDP bind/config
+                // failure aborts startup rather than silently serving only the unadvertised TCP subset.
+                #[cfg(feature = "http3")]
+                let (app, http3_server) = {
+                    let endpoint = bind_http3_endpoint(&config, http3_addr)?;
+                    let bound_addr = endpoint.local_addr()?;
+                    // sq-oprna.4: an Alt-Svc promise is created only after UDP bind succeeds,
+                    // and names the endpoint's actual port. The unlayered clone remains the h3 router.
+                    let h3_app = app.clone();
+                    let tcp_app = app.layer(sparq_http3::alt_svc_layer(bound_addr.port()));
+                    eprintln!(
+                        "  HTTP/3: QUIC listener ACTIVE on udp://{bound_addr} (ALPN h3; shared LDP router; \
+                         WebSocket extended CONNECT is out of scope)."
+                    );
+                    let server = tokio::spawn(sparq_http3::serve_h3(
+                        endpoint,
+                        h3_app,
+                        shutdown_signal(),
+                    ));
+                    (tcp_app, server)
+                };
+
+                // axum-server wants a blocking `std::net::TcpListener`; converting the tokio one keeps the
+                // resolved address (and avoids re-binding through the numeric-only `SocketAddr` path).
+                let std_listener = tokio_listener.into_std()?;
+                std_listener.set_nonblocking(true)?;
+
+                // Graceful-shutdown PARITY: wire `shutdown_signal()` to `Handle::graceful_shutdown` so
+                // Ctrl-C drains in-flight TLS connections instead of dropping them, matching the plain
+                // path's `with_graceful_shutdown`.
+                let handle = axum_server::Handle::new();
+                let shutdown_handle = handle.clone();
+                tokio::spawn(async move {
+                    shutdown_signal().await;
+                    // DRAIN TIMEOUT (best-call, per the standing rule): give in-flight requests up to 10s
+                    // to finish, then force-close. 10s is the conventional reverse-proxy / k8s
+                    // `terminationGracePeriod` default — long enough for a normal LDP request (incl. a
+                    // backend SPARQ round-trip) to complete, short enough that a stuck connection cannot
+                    // wedge shutdown. `Some(..)` (not `None`) is deliberate: `None` would wait FOREVER for
+                    // a hung connection, which is the opposite of graceful. Shutdown compaction stays
+                    // safe after a force-close: it queues behind every job already sent to the
+                    // embedded actor, and a dropped request leaves at most what a crash would.
+                    shutdown_handle.graceful_shutdown(Some(Duration::from_secs(10)));
+                });
+
+                // Build the axum-server, then:
+                //  (a) `.map(..)` wraps the RustlsAcceptor with the connection-cap acceptor so each served
+                //      connection holds a permit for its lifetime (the slowloris connection-flood bound),
+                //  (b) `.http_builder()` applies the HTTP/2 (max_concurrent_streams + rapid-reset cap) +
+                //      HTTP/1.1 (slowloris header-read timeout, keep-alive) knobs to the SAME hyper
+                //      `auto::Builder` axum-server serves with — preserving rustls TLS + h2/http1.1 ALPN
+                //      exactly (the rustls config owns ALPN; we touch only the hyper protocol knobs).
+                let handshake_timeout = transport_config.handshake_timeout;
+                let idle_timeout = transport_config.idle_timeout;
+                let max_requests_per_conn = transport_config.max_requests_per_conn;
+                // Bind the guarded acceptor into `base` (the PoP Tier-1b/Tier-2 dispatch below consumes
+                // `base` in both the wrapped and unwrapped serve branches).
+                let base = axum_server::from_tcp_rustls(std_listener, config)?
+                    .handle(handle)
+                    .map(move |acceptor| {
+                        // P1.5 (beyond-50k): set TCP_NODELAY on the raw accepted TcpStream by composing
+                        // axum-server's `NoDelayAcceptor` as the INNER acceptor of the RustlsAcceptor — it
+                        // runs on the raw stream BEFORE the TLS handshake, so small responses are not held
+                        // by Nagle. Type-preserving: `RustlsAcceptor<NoDelayAcceptor>::Stream` is still
+                        // `TlsStream<TcpStream>` (NoDelayAcceptor::Stream = TcpStream), so every guard/PoP
+                        // wrapper downstream is unchanged.
+                        let acceptor =
+                            acceptor.acceptor(sparq_lws_core::nodelay::NoDelayAcceptor::new());
+                        // The FULL guard set: connection-cap permit (global + per-source) + handshake
+                        // timeout (accept-time) + idle-keepalive read timeout (IO-layer) +
+                        // max-requests-per-conn (service-layer).
+                        connection_limiter.wrap_acceptor_with_guards(
+                            acceptor,
+                            handshake_timeout,
+                            idle_timeout,
+                            max_requests_per_conn,
+                        )
+                    });
+
+                // `into_make_service_with_connect_info::<SocketAddr>()` (NOT plain `into_make_service`) so
+                // each request carries `ConnectInfo<SocketAddr>` in its extensions — the pre-crypto rate
+                // limiter reads the direct peer IP from it. axum-server supports the connect-info make
+                // service. Without this the limiter would see no peer IP and FAIL OPEN (proceed to auth).
+                //
+                // PoP Tier-1b / Tier-2: when the mTLS flag is on (Tier 1b) OR the DPoP-SK exporter path
+                // is active (Tier 2 on in-process TLS), wrap the connection-cap acceptor with the
+                // `ConnPopAcceptor` OUTERMOST — it reads the peer client certificate ONCE per connection
+                // (after the handshake) and injects a `ConnPop` into every request so the auth layer can
+                // match a cert-bound token against it; with the SK exporter enabled it ALSO exports the
+                // DPoP-SK keying material once per connection and injects a `ConnSk` (connection id +
+                // establishment-path EKM). With neither flag, the serve path is byte-identical (no
+                // wrap), so the `.map` type differs between branches — hence the duplicated serve call.
+                // (With SK-only, the injected `ConnPop` carries no cert and the mTLS dispatch stays off —
+                // the cert path is untouched.)
+                if mtls_bound_tokens || sk_exporter_active {
+                    let mut server = base.map(move |acceptor| {
+                        sparq_lws_core::pop::conn::ConnPopAcceptor::new(acceptor)
+                            .with_sk_exporter(sk_exporter_active)
+                    });
+                    transport_config.apply_to_builder(server.http_builder());
+                    server
+                        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                        .await?;
+                } else {
+                    let mut server = base;
+                    transport_config.apply_to_builder(server.http_builder());
+                    server
+                        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                        .await?;
+                }
+
+                // Both listener shutdown futures observe the same process signal. Await the UDP task so
+                // its endpoint closes and drains QUIC connections before the process exits normally.
+                #[cfg(feature = "http3")]
+                http3_server.await??;
+            }
+            // Plain TCP (dev/test behaviour). Graceful shutdown on Ctrl-C.
+            //
+            // The transport-layer knobs (HTTP/2 stream/reset caps, slowloris header-read timeout, the
+            // connection cap) are NOT applied on this path: `axum::serve` builds its hyper `auto::Builder`
+            // internally and exposes neither it nor a connection-cap hook, and an axum `Listener` wrapper
+            // cannot carry the `ConnectInfo<SocketAddr>` the pre-crypto rate limiter needs (axum's
+            // `Connected` impls are orphan-locked to `TcpListener`/`TapIo`). Plain HTTP is the DEV/TEST /
+            // TLS-at-a-reverse-proxy posture; in production the in-process TLS path (fully hardened above)
+            // or a fronting reverse proxy terminates HTTP/2 and caps connections. The application-layer
+            // defences (admission control, the per-IP rate limiter, the request timeout) DO apply here.
+            None => {
+                let listener = tokio::net::TcpListener::bind(&bind).await?;
+                // `connection_limiter` is unused on this path (see above); a fronting proxy / the TLS path
+                // owns the connection cap in production. Drop it explicitly so the intent is clear.
+                drop(connection_limiter);
+                // P1.5 (beyond-50k): set TCP_NODELAY on every accepted plain-TCP stream. `axum::serve`
+                // does NOT do this by default; `tap_nodelay` wraps the listener with the `ListenerExt`
+                // tap so each accepted stream gets the option (Nagle off), matching the TLS path. `TapIo`
+                // preserves `Io = TcpStream` / `Addr = SocketAddr`, so connect-info still carries the peer
+                // IP to the rate limiter.
+                let listener = sparq_lws_core::nodelay::tap_nodelay(listener);
+                // Same as the TLS path: serve WITH connect-info so the rate limiter sees the peer IP.
+                axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                )
+                .with_graceful_shutdown(shutdown_signal())
+                .await?;
+            }
         }
-        // Plain TCP (dev/test behaviour). Graceful shutdown on Ctrl-C.
-        //
-        // The transport-layer knobs (HTTP/2 stream/reset caps, slowloris header-read timeout, the
-        // connection cap) are NOT applied on this path: `axum::serve` builds its hyper `auto::Builder`
-        // internally and exposes neither it nor a connection-cap hook, and an axum `Listener` wrapper
-        // cannot carry the `ConnectInfo<SocketAddr>` the pre-crypto rate limiter needs (axum's
-        // `Connected` impls are orphan-locked to `TcpListener`/`TapIo`). Plain HTTP is the DEV/TEST /
-        // TLS-at-a-reverse-proxy posture; in production the in-process TLS path (fully hardened above)
-        // or a fronting reverse proxy terminates HTTP/2 and caps connections. The application-layer
-        // defences (admission control, the per-IP rate limiter, the request timeout) DO apply here.
-        None => {
-            let listener = tokio::net::TcpListener::bind(&bind).await?;
-            // `connection_limiter` is unused on this path (see above); a fronting proxy / the TLS path
-            // owns the connection cap in production. Drop it explicitly so the intent is clear.
-            drop(connection_limiter);
-            // P1.5 (beyond-50k): set TCP_NODELAY on every accepted plain-TCP stream. `axum::serve`
-            // does NOT do this by default; `tap_nodelay` wraps the listener with the `ListenerExt`
-            // tap so each accepted stream gets the option (Nagle off), matching the TLS path. `TapIo`
-            // preserves `Io = TcpStream` / `Addr = SocketAddr`, so connect-info still carries the peer
-            // IP to the rate limiter.
-            let listener = sparq_lws_core::nodelay::tap_nodelay(listener);
-            // Same as the TLS path: serve WITH connect-info so the rate limiter sees the peer IP.
-            axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-            )
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
-        }
-    }
-    // The runtime would cancel this task on process exit, but abort explicitly after the listener
-    // drains so the task's ownership/lifetime stays bounded to the server boot that created it.
-    if let Some(task) = reconcile_task {
-        task.abort();
-    }
-    Ok(())
+        Ok(())
+    };
+    storage_shutdown.run(serving, reconcile_task).await
 }
 
 /// Build one selected backend in one of two shapes: the original direct store when reconciliation is
@@ -1148,6 +1068,7 @@ where
     J: JwksProvider + Send + Sync + 'static,
     R: ReplayStore + Send + Sync + 'static,
 {
+    let cors = sparq_lws_core::ldp::cors::CorsPolicy::from_env()?;
     // Linked Web Storage (`SOLID_SERVER_PROTOCOL=lws`): the LWS 1.0 surface replaces the Solid
     // router on the same store. Its own `SOLID_SERVER_LWS_*` settings configure it.
     if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
@@ -1155,6 +1076,7 @@ where
         // One body ceiling for both surfaces: the LWS dispatcher reads the body itself, so it is
         // handed the configured limit rather than relying on the `DefaultBodyLimit` layer.
         cfg.max_body = overload_config.body_limit_bytes;
+        cfg.cors = cors.clone();
         eprintln!(
             "  PROTOCOL: Linked Web Storage — storage {} owner {} {}",
             cfg.storage(),
@@ -1165,7 +1087,7 @@ where
         // The same overload stack the Solid router carries: the per-IP rate limiter, admission
         // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
         let lws = sparq_lws_core::lws::router(store, cfg).await?;
-        return Ok(with_overload_layers(lws, overload_config));
+        return Ok(with_overload_layers_and_cors(lws, overload_config, cors));
     }
     // Dev/conformance seeding (gated): write the test users' WebID profiles + the container tree the
     // Solid CTH dereferences to bootstrap. Done BEFORE the store is moved into the LDP state; a seeding
@@ -1252,6 +1174,7 @@ where
     // Identity-host serving (when configured) rides the same AppState — the gate is mounted by the
     // router assembly; the namespace refusal is mounted regardless.
     let mut app_state = AppState::new(auth, ldp);
+    app_state.cors = cors;
     if let Some(config) = identity {
         app_state = app_state.with_identity(config);
     }
@@ -1766,6 +1689,21 @@ mod tests {
                 Some(p) => std::env::set_var(self.key, p),
                 None => std::env::remove_var(self.key),
             }
+        }
+    }
+
+    #[test]
+    fn durable_blob_guard_reads_the_exact_override_from_the_environment() {
+        let _lock = REAL_ENV_LOCK.lock().unwrap();
+        let _backend = RealEnvVar::set("PSS_SPARQ_BACKEND", Some("embedded"));
+        let _data = RealEnvVar::set("SOLID_SERVER_DATA_DIR", None);
+        let _index = RealEnvVar::set("SOLID_SERVER_SPARQ_DIR", None);
+        let _wait = RealEnvVar::set("SOLID_SERVER_WAIT_FOR_LOCK_SECS", None);
+        for value in [None, Some("0"), Some("true"), Some("1")] {
+            let _override = RealEnvVar::set("SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY", value);
+            let config = StorageConfig::from_env().unwrap();
+            let decision = config.check_durability(true);
+            assert_eq!(decision.is_ok(), value == Some("1"));
         }
     }
 

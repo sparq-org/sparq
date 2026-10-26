@@ -736,7 +736,7 @@ curl http://127.0.0.1:3030/metrics                              # Prometheus tex
 # Admin WAL compaction / vacuum for ERASURE-COMPLETENESS (sq-x32t). POST-only; gated by the
 # WRITE token. Physically purges data removed by DELETE / DROP (incl. orphaned literal VALUES) from the
 # on-disk store so a logical erasure is followed by real erasure. 200 ok; 409 if in-memory
-# (no --persist, nothing to purge); 503 on a transient durable-write error (retryable):
+# (no --persist, nothing to purge); 503 on a durable-write error (check server recovery logs):
 curl -X POST -H 'Authorization: Bearer <TOKEN>' http://127.0.0.1:3030/admin/compact
 
 # Online consistent-snapshot backup + restore (feature `backup`, default OFF). POST-only, WRITE-gated.
@@ -779,7 +779,8 @@ batches** (no race with a concurrent write), preserves the live triple set **exa
 generation published; reads keep flowing throughout). **POST-only**, gated by the **write** token
 (`--auth-token`), like an UPDATE. Responses: `200` ok; `409` if the server is in-memory (no
 `--persist` — there is no on-disk history to purge, so a no-op success would mislead); `503` on a
-transient durable-write error (retryable, writer stays alive). **Offline equivalent:** stop the
+durable-write error. Reads continue from the published snapshot. Check the server logs for
+recovery status; a frozen store refuses further writes until it is reopened. **Offline equivalent:** stop the
 server and run `sparq-cli compact <persist-dir>` (see the `cli` skill). **Honest scope:** this
 scrubs the engine's own on-disk segments + dictionary; it cannot reach bytes already copied off-box
 (filesystem snapshots, COW history, external backups) — those are the operator's responsibility
@@ -1465,7 +1466,7 @@ Malformed numeric overrides leave defaults unchanged; valid overrides are nonneg
 size is chosen by untrusted input — the request's own `"dataset"` on the stateless lane, the
 store's control documents on the stateful one. Every lane that builds a view therefore runs on
 ONE bounded blocking pool: the stateless per-request build, stateful per-generation **cache
-misses** (hits use an O(1) read-lock lookup and claim no slot), the `odrl-authz` lane's store
+misses** (hits use a short cache lookup and claim no slot), the `odrl-authz` lane's store
 build plus policy evaluation and index rebuild under **one claim**, and the
 `solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
@@ -1488,11 +1489,30 @@ second, with the count shed since the preceding warning.
   carry a `"dataset"` (a body naming both pods is ambiguous → `400`). A pod resource IS a named
   graph of the loaded store, so `"resource"` must be that graph's absolute IRI; relative paths are
   not resolved. The pinned current generation is forked, materialised once, and cached in
-  `AppState` keyed by the **serving lineage and generation number** — so the N3 materialisation is paid once per
-  generation, not once per request, and **an `.acl`/`.acr` write re-materialises automatically**
+  `AppState` keyed by **serving lineage, generation and requested view kind** (WAC, ACP or
+  inferred). Concurrent misses for one key share one build; waiters claim no pool slots.
+  Selecting a new generation or lineage drops superseded slots; restore clears the cache.
+  The three kinds have independent slots. Warm hits use a shared cache read lock and
+  an `Arc` clone; only misses take the write lock and re-check the key. Successful views
+  and deterministic count/size allowance refusals remain cached for that key.
+  `AuthAllowance::Deadline` depends on host load: current waiters receive the refusal,
+  the slot is cleared, and the next request rebuilds the same generation. The native materialization budget
+  `AuthBudget::max_materialize_time` defaults to five seconds (`None` disables it;
+  wasm32 ignores it). Coarse checks cover input assembly and stratum boundaries;
+  expiration is a fail-closed `503`, logged as `max_materialize_time`, with no partial
+  view installed. Library callers recognize `[allowance=deadline]` through
+  `auth_allowance_refusal`; HTTP responses contain no control-document details.
+  Pool shedding, task join failures,
+  panics and other materialization errors are transient and are retried on the next request.
+  A shed returns `503` with `"the authorization build pool is saturated; retry"`;
+  an incomplete or failed build returns the retryable materialization refusal.
+  Incomplete leader tasks evict their own slot and publish `503` to current waiters.
+  Cancelling the initiating handler leaves the pool build running and its outcome still
+  reaches the waiters. **An `.acl`/`.acr` write re-materialises automatically**
   (every commit publishes a new generation; an in-memory `/admin/restore` replaces the serving
   lineage even when it restarts at generation zero. Both cache hits and installation check lineage,
-  so an in-flight build from the replaced store cannot install after restore).
+  so a build or waiter from the replaced store receives a fail-closed `503` after restore
+  and cannot install or serve the old view).
 
 The stateful lane is fail-closed on the same terms, and additionally **refuses** (never silently
 un-enforces) two combinations it cannot evaluate faithfully: under `odrl-authz`, a server store
@@ -1554,7 +1574,7 @@ env overrides the default.
 | `--shacl-shapes FILE` | `SPARQ_SHACL_SHAPES` | unset | (feature `shacl`) load the guard shapes graph once at startup; required when the guard is on |
 | `--solid-authz` | `SPARQ_SOLID_AUTHZ` | off | (feature `solid-authz`) serve the Solid WAC/ACP authorization endpoints `POST /authz/decide`+`/wac-allow`+`/query` — a fail-closed HTTP shell over `sparq-solid`; POST the pod dataset (or `"source":"server"` for the server's own loaded store, sq-snopa.8) + an already-resolved session, get the decision / `WAC-Allow` value / access-controlled query result; read-only — see "Solid WAC/ACP authorization endpoints" |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
-| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) maximum potential `(rule, credential)` pairs: `(direct rules + certifications) × presented credentials`; each depth-one certification can add at most one rule. Checked after parsing and before derivation/admission; excess → `403` trust deny, no grant. `0` permits no pairs. |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` | `4096` | (feature `solid-authz-trust`) maximum combined signature-verification budget: `certifications + (direct rules + certifications) × presented credentials`; each depth-one certification can add at most one rule. Checked after parsing and before derivation/admission; excess → `403` trust deny, no grant. `0` permits neither certifications nor pairs. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_CERTIFICATIONS` | `2048` | (feature `solid-authz-trust`) maximum certification edges per block, checked before any signature verification; excess → `403` trust deny. `0` permits no certifications. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST_MAX_VALIDATION_WORK` | `65536` | (feature `solid-authz-trust`) maximum potential rule/triple validations: `(direct rules + certifications) × sum(credential triple counts)`; checked before derivation/admission because a pair can carry many triples. Excess → `403` trust deny. `0` permits no validation work. |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` | CPU count | (feature `solid-authz`) how many authorization-view BUILDS may run at once on the bounded blocking pool, across every `/authz/*` lane; `0` is read as `1` — see "Bounded authorization-build pool" |
@@ -1957,6 +1977,27 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **Durable UPDATE journals include named-graph existence.** One committed frame records
+  inserts, deletes, creates and drops in order. Recovery supports both the previous data-only
+  journal and the current operation format. A failed journal materialization or indeterminate
+  log write freezes the tree; later durable writes are refused until recovery.
+- **Named-graph layout recovery is hardened.** The manifest records stable slot ids and the
+  next allocation id. Creating a graph adds one manifest entry; dropping one removes only that
+  entry. Removing a child from the attached in-memory set does not remove its on-disk manifest
+  entry. Use the durable drop methods to change the persisted set. Public named accessors refuse
+  moving durable children and refuse inserting in-memory children into a directory-backed root.
+  A stale child may be removed from memory without changing the current directories.
+- **Writable opens validate before cleanup.** The complete declared tree, including nested
+  named graphs, must open before undeclared slots are swept. Cleanup preserves separate root
+  stores, unmarked store images and directories containing held locks. Linked `named/`
+  containers are refused before cleanup or a DROP ALL manifest commit. Only a writable opener holding the
+  exclusive store lock cleans undeclared slots. Cleanup failures leave the slot in place and
+  emit a warning naming its path. Read-only opens perform no sweep. A whole-store rewrite
+  (save, compaction or vacuum) produces a fresh layout.
+- **Manifest publication follows the durability barrier.** Child files and directories, the
+  named container, and root files (including numeric, temporal and streamed caches) are synced
+  before publication. Default-only saves and builds sync root files as well. Slot reservation
+  creates a fresh directory, skips occupied ids and reports other errors.
 - **One server per `--persist DIR`.** The server holds `DIR`'s exclusive lock (sparq-core
   `dir_lock`; `Graph::open_or_create`) for its lifetime: a second server, `sparq-cli compact`, or a
   read-only `sparq-cli query-mmap` on the same `DIR` fails at once (`WouldBlock`) while it runs.

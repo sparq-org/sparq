@@ -8,6 +8,7 @@
 // reason bundle (src/lib/reason-wasm.ts) lazily so the landing page never pays for it.
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import {
   Play,
   Loader2,
@@ -80,7 +81,9 @@ export function InferencePlayground() {
   const [mode, setMode] = React.useState<InferenceMode>(DEFAULT.mode);
   const [profile, setProfile] = React.useState<ReasoningProfile>(DEFAULT.profile);
   const [state, setState] = React.useState<RunState>({ kind: "idle" });
-  const [engine, setEngine] = React.useState<EngineState>("cold");
+  const [engineState, setEngine] = React.useState<EngineState>("cold");
+  const hydrated = useHydrated();
+  const engine = hydrated && engineState === "cold" ? "warming" : engineState;
   const [activeExample, setActiveExample] = React.useState<string>(DEFAULT.id);
   // The triple whose proof is being shown (and the proof itself / loading flag).
   const [proof, setProof] = React.useState<{
@@ -93,7 +96,6 @@ export function InferencePlayground() {
   // pays no cold start. A failure resets the indicator; reasoning retries the load.
   React.useEffect(() => {
     let cancelled = false;
-    setEngine("warming");
     prewarmReason()
       .then(() => {
         if (!cancelled) setEngine("ready");

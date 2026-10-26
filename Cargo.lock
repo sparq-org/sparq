@@ -5293,6 +5293,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-lws-blob-fs"
+version = "0.1.0"
+
+[[package]]
 name = "sparq-lws-core"
 version = "0.1.0"
 dependencies = [
@@ -5341,6 +5345,7 @@ dependencies = [
  "sparq-lws-authn-openid",
  "sparq-lws-authn-saml",
  "sparq-lws-authn-ssi",
+ "sparq-lws-blob-fs",
  "sparq-policy",
  "sparq-shacl",
  "sparq-solid",
@@ -5355,6 +5360,19 @@ dependencies = [
  "tower",
  "tower-http 0.7.1",
  "url",
+]
+
+[[package]]
+name = "sparq-lws-crypt"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "proptest",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]

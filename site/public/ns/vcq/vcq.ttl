@@ -1,0 +1,79 @@
+# Vocabulary for the query request and answer presentation of the sparq proposal
+# "Zero-Knowledge SPARQL Answers: Request and Presentation Data Model" (site/specs/zksparql-answers.typ).
+# Unofficial Proposal Draft. Intended namespace https://w3id.org/sparq/vcq# (redirect not yet registered).
+PREFIX vcq:  <https://w3id.org/sparq/vcq#>
+PREFIX cred: <https://www.w3.org/2018/credentials#>
+PREFIX sec:  <https://w3id.org/security#>
+PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl:  <http://www.w3.org/2002/07/owl#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+
+<https://w3id.org/sparq/vcq#> a owl:Ontology ;
+  rdfs:label "Zero-knowledge SPARQL answers vocabulary"@en ;
+  dcterms:license <https://www.apache.org/licenses/LICENSE-2.0> ;
+  rdfs:seeAlso <https://sparq.jeswr.org/specs/zksparql-answers> .
+
+vcq:QueryRequest a rdfs:Class ; rdfs:label "Query request"@en ;
+  rdfs:comment "A SPARQL query a verifier asks a holder to answer, with the conditions an answer must meet."@en .
+vcq:QueryAnswerPresentation a rdfs:Class ; rdfs:subClassOf cred:VerifiablePresentation ;
+  rdfs:label "Query answer presentation"@en ;
+  rdfs:comment "A verifiable presentation carrying the result of a query request and a proof that it is correct."@en .
+vcq:QueryAnswerProof a rdfs:Class ; rdfs:label "Query answer proof"@en ;
+  rdfs:comment "The proof of a query answer presentation, made by a proof method."@en .
+vcq:TrustRequirement a rdfs:Class ; rdfs:label "Trust requirement"@en ;
+  rdfs:comment "A way of identifying the issuers a verifier trusts."@en .
+vcq:IssuerKeys a rdfs:Class ; rdfs:subClassOf vcq:TrustRequirement ; rdfs:label "Issuer keys"@en ;
+  rdfs:comment "An issuer and its verification methods, given with their public keys."@en .
+vcq:TrustedList a rdfs:Class ; rdfs:subClassOf vcq:TrustRequirement ; rdfs:label "Trusted list (reserved)"@en ;
+  rdfs:comment "Reserved: issuers on an ETSI trusted list or list of trusted entities."@en .
+vcq:FederationTrustAnchor a rdfs:Class ; rdfs:subClassOf vcq:TrustRequirement ; rdfs:label "Federation trust anchor (reserved)"@en ;
+  rdfs:comment "Reserved: issuers with a trust chain to an OpenID Federation trust anchor."@en .
+vcq:RecognitionCredential a rdfs:Class ; rdfs:subClassOf vcq:TrustRequirement ; rdfs:label "Recognition credential (reserved)"@en ;
+  rdfs:comment "Reserved: issuers recognized by a verifiable recognition credential from a named authority."@en .
+vcq:TrustFramework a rdfs:Class ; rdfs:subClassOf vcq:TrustRequirement ; rdfs:label "Trust framework (reserved)"@en ;
+  rdfs:comment "Reserved: issuers certified under a named trust framework."@en .
+vcq:SignatureMode a rdfs:Class ; rdfs:label "Signature mode"@en ;
+  rdfs:comment "How the issuers' signatures on the input credentials are shown to the verifier."@en .
+vcq:hidden a vcq:SignatureMode ; rdfs:label "hidden"@en ;
+  rdfs:comment "The proof shows the credentials are signed without revealing the signatures."@en .
+vcq:revealed a vcq:SignatureMode ; rdfs:label "revealed"@en ;
+  rdfs:comment "The signatures and signed messages are given to the verifier, which checks them itself."@en .
+vcq:disclosed a vcq:SignatureMode ; rdfs:label "disclosed"@en ;
+  rdfs:comment "The credentials, or selectively disclosed presentations of them, are given to the verifier."@en .
+
+vcq:query a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range xsd:string ; rdfs:label "query"@en ;
+  rdfs:comment "The SPARQL 1.2 query text."@en .
+vcq:inputCommitment a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "input commitment"@en ;
+  rdfs:comment "A multibase-encoded dataset commitment."@en .
+vcq:trustedIssuers a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range vcq:TrustRequirement ; rdfs:label "trusted issuers"@en ;
+  rdfs:comment "A trust requirement; an issuer is trusted if it meets at least one."@en .
+vcq:issuer a rdf:Property ; rdfs:domain vcq:TrustRequirement ; rdfs:label "issuer"@en ;
+  rdfs:comment "The issuer a trust requirement names."@en .
+vcq:signatureMode a rdf:Property ; rdfs:range vcq:SignatureMode ; rdfs:label "signature mode"@en ;
+  rdfs:comment "A signature mode the request accepts, or the one the presentation uses."@en .
+vcq:proofMethod a rdf:Property ; rdfs:label "proof method"@en ;
+  rdfs:comment "On a request, an accepted proof method entry with vcq:method, vcq:verificationKey and vcq:parameters; on a proof, the IRI of the method used."@en .
+vcq:method a rdf:Property ; rdfs:label "method"@en ;
+  rdfs:comment "The IRI of the proof method a request entry accepts."@en .
+vcq:verificationKey a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "verification key"@en ;
+  rdfs:comment "The multibase-encoded verification key or image ID of a proof method."@en .
+vcq:parameters a rdf:Property ; rdfs:range rdf:JSON ; rdfs:label "parameters"@en ;
+  rdfs:comment "The parameters of a proof method entry, as a JSON value."@en .
+vcq:maxPresentationBytes a rdf:Property ; rdfs:range xsd:nonNegativeInteger ; rdfs:label "maximum presentation bytes"@en ;
+  rdfs:comment "The largest encoded presentation the verifier accepts."@en .
+vcq:maxResultSize a rdf:Property ; rdfs:range xsd:nonNegativeInteger ; rdfs:label "maximum result size"@en ;
+  rdfs:comment "The most solutions in a SELECT result, or triples in a CONSTRUCT result, the verifier accepts."@en .
+vcq:requestDigest a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:range sec:multibase ; rdfs:label "request digest"@en ;
+  rdfs:comment "SHA-256 over the RDFC-1.0 canonical N-Quads of the query request answered."@en .
+vcq:revealedSignature a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:label "revealed signature"@en ;
+  rdfs:comment "A revealed signature, with sec:verificationMethod, sec:cryptosuite, vcq:signedMessage and vcq:signatureValue."@en .
+vcq:signedMessage a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "signed message"@en ;
+  rdfs:comment "The message a revealed signature signs."@en .
+vcq:signatureValue a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "signature value"@en ;
+  rdfs:comment "The signature bytes alone, without other values the cryptosuite proof value carries."@en .
+vcq:result a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:range rdf:JSON ; rdfs:label "result"@en ;
+  rdfs:comment "A SELECT or ASK result as a SPARQL 1.2 Query Results JSON document."@en .
+vcq:resultGraph a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:label "result graph"@en ;
+  rdfs:comment "A CONSTRUCT result, as a named graph."@en .

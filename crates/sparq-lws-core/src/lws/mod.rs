@@ -85,6 +85,8 @@ pub const META_SUFFIX: &str = ".meta";
 pub struct LwsConfig {
     /// The public origin, without a trailing slash: `https://storage.example`.
     pub base_url: String,
+    /// Browser origin policy shared with the outer overload response layer.
+    pub cors: crate::ldp::cors::CorsPolicy,
     /// The agent (WebID or DID) that owns the storage and may do anything in it.
     pub owner: Option<String>,
     /// Development mode: no authentication, every request may do everything.
@@ -239,6 +241,7 @@ impl LwsConfig {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            cors: crate::ldp::cors::CorsPolicy::default(),
             owner: None,
             open: false,
             page_size: 100,
@@ -301,8 +304,10 @@ impl LwsConfig {
     ///   ids to their keys, which offers the SAML 2.0 suite (set when that suite is not offered,
     ///   it is an error; `saml` in `SOLID_SERVER_LWS_AUTHN` without it is an error too);
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
+    /// - `SOLID_SERVER_CORS_ORIGINS`: an optional comma-separated exact-origin allowlist.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
+        cfg.cors = crate::ldp::cors::CorsPolicy::from_env()?;
         cfg.max_body = crate::body_limit::max_body_bytes_from_env();
         let var = |k: &str| {
             std::env::var(k)
@@ -2453,11 +2458,15 @@ pub async fn router_with_catalog<S: Store + 'static>(
     cfg: LwsConfig,
     catalog: crate::describe::ServiceCatalog,
 ) -> Result<Router, String> {
+    let cors = cfg.cors.clone();
     let state = LwsState::with_catalog(store, cfg, catalog).await?;
     Ok(Router::new()
         .fallback(dispatch::<S>)
         .with_state(state)
-        .layer(axum::middleware::from_fn(crate::ldp::cors::cors_middleware)))
+        .layer(axum::middleware::from_fn_with_state(
+            cors,
+            crate::ldp::cors::cors_middleware_with_policy,
+        )))
 }
 
 /// The largest body a request to `path` may carry: the service routes that anyone may send to
