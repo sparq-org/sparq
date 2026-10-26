@@ -431,7 +431,7 @@ fn sample_manifest() -> ProofManifest {
             SubProof { inputs: filter, proof_hex: String::new() },
         ],
         binding_edges: vec![BindingEdge {
-            from_proof: 0,
+            filter: None, from_proof: 0,
             from_row: 0,
             from_slot: 2,
             to_proof: 1,
@@ -466,6 +466,29 @@ fn manifest_serde_round_trip() {
 fn structure_accepts_well_formed_manifest() {
     let m = sample_manifest();
     prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()).expect("structure verifies");
+}
+
+#[test]
+fn structure_rejects_binding_edge_filter_index_zero() {
+    let mut m = sample_manifest();
+    assert_eq!(m.binding_edges[0].filter, None);
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("the None control still passes the structural prefilter");
+    m.binding_edges[0].filter = Some(0);
+    assert!(matches!(
+        prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()),
+        Err(CheckError::EdgeFilterIndexNotAccepted { edge: 0 })
+    ));
+}
+
+#[test]
+fn structure_rejects_binding_edge_filter_index_out_of_range() {
+    let mut m = sample_manifest();
+    m.binding_edges[0].filter = Some(99);
+    assert!(matches!(
+        prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()),
+        Err(CheckError::EdgeFilterIndexNotAccepted { edge: 0 })
+    ));
 }
 
 #[test]
@@ -2346,7 +2369,7 @@ fn filter_reject_comparison_substitution_17_vs_18() {
             SubProof { inputs: scan, proof_hex: String::new() },
             SubProof { inputs: filt, proof_hex: String::new() },
         ],
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -2474,7 +2497,7 @@ fn filter_reject_operand_slot_substitution() {
             SubProof { inputs: filt, proof_hex: String::new() },        // proof 2
         ],
         // Edge points at proof 0 (salary scan) slot 2 — the WRONG column for ?age.
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -2524,7 +2547,7 @@ fn filter_reject_false_verdict_row() {
             SubProof { inputs: scan, proof_hex: String::new() },
             SubProof { inputs: filt, proof_hex: String::new() },
         ],
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -2609,7 +2632,7 @@ fn filter_binding_happy_path_structure() {
             SubProof { inputs: scan, proof_hex: String::new() },
             SubProof { inputs: filt, proof_hex: String::new() },
         ],
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -2679,7 +2702,7 @@ fn filter_reject_unproven_failing_row() {
             SubProof { inputs: filt, proof_hex: String::new() },
         ],
         // Edge only for row 0 — row 1 has no true-verdict filter proof.
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -2737,8 +2760,8 @@ fn filter_two_rows_both_gated_verifies() {
             SubProof { inputs: filt1, proof_hex: String::new() }, // proof 2
         ],
         binding_edges: vec![
-            BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 },
-            BindingEdge { from_proof: 0, from_row: 1, from_slot: 2, to_proof: 2 },
+            BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 },
+            BindingEdge { filter: None, from_proof: 0, from_row: 1, from_slot: 2, to_proof: 2 },
         ],
         join_edges: vec![],
         hidden_revocation: None,
@@ -2801,7 +2824,7 @@ fn filter_reject_ungated_second_slot_within_scan() {
             SubProof { inputs: filt, proof_hex: String::new() }, // proof 1
         ],
         // Slot 2 gated; slot 0 (where ?v binds under pattern 1) NOT gated.
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -2853,7 +2876,7 @@ fn filter_same_slot_in_two_patterns_needs_one_edge() {
             SubProof { inputs: scan, proof_hex: String::new() },
             SubProof { inputs: filt, proof_hex: String::new() },
         ],
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -3096,7 +3119,7 @@ fn same_layout_manifest() -> ProofManifest {
             SubProof { inputs: filt_a, proof_hex: String::new() }, // proof 2
         ],
         binding_edges: vec![BindingEdge {
-            from_proof: 0,
+            filter: None, from_proof: 0,
             from_row: 0,
             from_slot: 2,
             to_proof: 2,
@@ -3214,8 +3237,8 @@ fn pattern_scans_do_not_narrow_the_cross_slot_filter_obligation() {
             SubProof { inputs: filt_b, proof_hex: String::new() },
         ],
         binding_edges: vec![
-            BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 },
-            BindingEdge { from_proof: 1, from_row: 0, from_slot: 0, to_proof: 3 },
+            BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 },
+            BindingEdge { filter: None, from_proof: 1, from_row: 0, from_slot: 0, to_proof: 3 },
         ],
         join_edges: vec![],
         hidden_revocation: None,
@@ -3268,7 +3291,7 @@ fn pattern_scans_cannot_ungate_the_l1_second_slot() {
             SubProof { inputs: filt, proof_hex: String::new() },
         ],
         // Slot 2 gated; slot 0 (where ?v binds under pattern 1) NOT gated.
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],
@@ -6890,7 +6913,7 @@ fn filter_f64_composes_end_to_end() {
             SubProof { inputs: filter_inputs, proof_hex: encode_artifacts(&filter_art) },
         ],
         // Binding edge: scan proof 0, row 0, object slot (2) -> float filter proof 1.
-        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        binding_edges: vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
         join_edges: vec![],
         hidden_revocation: None,
         hidden_issuer_attestations: vec![],

@@ -1354,6 +1354,9 @@ pub enum CheckError {
     /// A binding edge connects proofs whose kinds cannot be bound (e.g. the
     /// source is not a scan or the target is not a filter).
     EdgeKindMismatch { edge: usize },
+    /// A binding edge carries a FILTER index while the value-lane gate is CLOSED.
+    /// The later accepting PR replaces this check with value-obligation binding.
+    EdgeFilterIndexNotAccepted { edge: usize },
     /// A binding edge's encodings disagree: the scanned column does not equal
     /// the filter's operand (the join the prover claimed is a lie).
     BindingInconsistent { edge: usize },
@@ -1566,6 +1569,9 @@ pub enum CheckError {
     /// real edge check.
     #[cfg(feature = "dual-leaf")]
     ValueLaneSubProofNotAccepted { proof: usize },
+    /// A V1 value lane is never admitted by the legacy string-lane policy.
+    #[cfg(feature = "dual-leaf")]
+    LegacyV1ValueMember { proof: usize },
 
     /// sq-j506: a scan sub-proof binds `K` graph commitments whose authenticated
     /// commitment methods select DIFFERENT pattern-constant encoders. One
@@ -2231,6 +2237,10 @@ impl std::fmt::Display for CheckError {
             CheckError::EdgeKindMismatch { edge } => {
                 write!(f, "binding edge {edge} connects incompatible proof kinds")
             }
+            CheckError::EdgeFilterIndexNotAccepted { edge } => write!(
+                f,
+                "binding edge {edge}: FILTER index not accepted; value-lane gate is CLOSED"
+            ),
             CheckError::BindingInconsistent { edge } => write!(
                 f,
                 "binding edge {edge}: scanned column does not equal the filter operand"
@@ -2338,6 +2348,10 @@ impl std::fmt::Display for CheckError {
             CheckError::LaneMemberMismatch { proof, reason } => write!(
                 f,
                 "sub-proof {proof}: {reason}"
+            ),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::LegacyV1ValueMember { proof } => write!(
+                f, "sub_proofs[{proof}] is a legacy V1 value member and is refused"
             ),
             #[cfg(feature = "dual-leaf")]
             CheckError::ValueLaneSubProofNotAccepted { proof } => write!(
@@ -3014,6 +3028,12 @@ fn prefilter_manifest_structure_impl(
     for (i, sp) in manifest.sub_proofs.iter().enumerate() {
         crate::dispatch::check_lane_member_pairing(&sp.inputs)
             .map_err(|e| CheckError::LaneMemberMismatch { proof: i, reason: e.to_string() })?;
+        crate::dispatch::refuse_legacy_value_member(&sp.inputs).map_err(|e| match e {
+            crate::dispatch::DispatchError::LegacyV1ValueMember { .. } => {
+                CheckError::LegacyV1ValueMember { proof: i }
+            }
+            other => CheckError::LaneMemberMismatch { proof: i, reason: other.to_string() },
+        })?;
         // And a value-lane sub-proof is refused outright, rather than
         // verified-but-undischarging. No edge is inspected: `filter_edge_true`
         // accepts a `FilterInt` edge and nothing else, so NO value-lane member can
@@ -3165,6 +3185,9 @@ fn prefilter_manifest_structure_impl(
 
     // --- Stage 2: binding-consistency edges. ---
     for (e, edge) in manifest.binding_edges.iter().enumerate() {
+        if edge.filter.is_some() {
+            return Err(CheckError::EdgeFilterIndexNotAccepted { edge: e });
+        }
         let from = manifest
             .sub_proofs
             .get(edge.from_proof)
@@ -3173,13 +3196,11 @@ fn prefilter_manifest_structure_impl(
             .sub_proofs
             .get(edge.to_proof)
             .ok_or(CheckError::DanglingEdge { edge: e })?;
-        let scanned = match &from.inputs {
-            ProofInputs::Scan { rows, .. } => rows
-                .get(edge.from_row)
-                .and_then(|r| r.get(edge.from_slot))
-                .ok_or(CheckError::DanglingEdge { edge: e })?,
-            _ => return Err(CheckError::EdgeKindMismatch { edge: e }),
-        };
+        if !matches!(from.inputs, ProofInputs::Scan { .. }) {
+            return Err(CheckError::EdgeKindMismatch { edge: e });
+        }
+        let scanned = scan_binding_cell(&from.inputs, edge.from_row, edge.from_slot)
+            .ok_or(CheckError::DanglingEdge { edge: e })?;
         // sq-q7e + sq-tat: a binding edge may consume the scanned
         // column into EITHER an xsd:integer FILTER (filter_int) or a composable
         // xsd:double FILTER (filter_f64) — both carry `operand_enc` as the
@@ -6205,6 +6226,44 @@ fn resolve_member_for_sub_proof(
     }
 }
 
+/// Read the scan cell named by a binding edge, without admitting its consumer.
+/// Active-row checks belong to the caller; legacy stage 2 retains its own rules.
+pub(crate) fn scan_binding_cell(inputs: &ProofInputs, row: usize, slot: usize) -> Option<&FieldHex> {
+    match inputs {
+        ProofInputs::Scan { rows, .. } => rows.get(row).and_then(|r| r.get(slot)),
+        _ => None,
+    }
+}
+
+/// Resolve a diagnostic scan through the same authenticated-method fold as dispatch.
+#[cfg(feature = "dual-leaf")]
+pub(crate) fn obligation_scan_method(
+    manifest: &ProofManifest,
+    proof: usize,
+    methods: &AuthenticatedMethods,
+) -> Result<sparq_zk::commit::CommitmentMethod, CheckError> {
+    let joins = JoinEndpointIndex::build(manifest);
+    let sp = &manifest.sub_proofs[proof];
+    if derive_id(&sp.inputs).as_ref() != Some(sp.inputs.circuit_id()) {
+        return Err(CheckError::CircuitIdMismatch { proof, declared: sp.inputs.circuit_id().clone(), derived: derive_id(&sp.inputs) });
+    }
+    let bound = bound_commitments(manifest, proof, &joins);
+    let label = format!("sub_proofs[{proof}]");
+    let stage = MethodStage::AfterHiddenIssuer;
+    let hidden = BTreeSet::new();
+    let method = match fold_bound_methods(&label, &bound, methods, &hidden, stage)? {
+        SubProofMethod::One(method) => method,
+        _ => return Err(CheckError::SubProofMethodUnresolved {
+            proof: label,
+            reason: "a value obligation requires an authenticated source scan".into(),
+        }),
+    };
+    resolve_member_for_sub_proof(
+        manifest, proof, sp.inputs.circuit_id(), methods, &hidden, stage, &joins,
+    )?;
+    Ok(method)
+}
+
 /// Whether a scan sub-proof's bound pattern constancy/encoding matches a query
 /// pattern's constant slots. This is the verifier-side equality over the
 /// bb-bound `pattern_is_const`/`pattern_const_enc` (audit #10): a scan over
@@ -6215,7 +6274,7 @@ fn resolve_member_for_sub_proof(
 /// [`encode_pattern_slot`]). A method with no encoder makes every constant slot
 /// mismatch, so this returns `false` -- fail-closed, and already refused up
 /// front by [`bind_scan_pattern_methods`] on the sound path.
-fn scan_matches_pattern(
+pub(crate) fn scan_matches_pattern(
     inputs: &ProofInputs,
     consts: &[Option<oxrdf::Term>; 3],
     method: Option<AuthenticatedMethod>,
@@ -6294,7 +6353,7 @@ fn scan_matches_pattern(
 /// is recorded metadata, nothing more.
 // sq-q9r5e follow-up: explicit pattern→scan mapping, validated but
 // deliberately NOT load-bearing. Research-grade, NOT externally audited (sq-qhy4).
-fn check_pattern_scans(
+pub(crate) fn check_pattern_scans(
     manifest: &ProofManifest,
     methods: &AuthenticatedMethods,
 ) -> Result<(), CheckError> {
@@ -14865,6 +14924,38 @@ mod fragment_dispatch_tests {
         );
     }
 
+    #[test]
+    fn fragment_binding_edge_filter_indices_are_not_accepted() {
+        let scan = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s1"), iri("http://ex/p"), int_lit(3)]],
+        );
+        let operand = match &scan {
+            ProofInputs::Scan { rows, .. } => rows[0][2].clone(),
+            _ => unreachable!(),
+        };
+        let (filter, _) = crate::build::build_filter_int(
+            operand, 3, crate::manifest::FilterOp::Gt, 1, true,
+        ).unwrap();
+        let mut m = fm(
+            UNFILTERED,
+            vec![sub(scan), sub(filter)],
+            vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1")]))],
+        );
+        m.manifest.binding_edges = vec![crate::manifest::BindingEdge {
+            filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1,
+        }];
+        let k = attest_fragment_fixture(&mut m);
+        assert!(matches!(run_fragment(&m, &k), Err(CheckError::MissingProof { proof: 0 })),
+            "the None control must pass the shared structural prefilter");
+        for index in [0, 99] {
+            m.manifest.binding_edges[0].filter = Some(index);
+            let err = run_fragment(&m, &k).unwrap_err();
+            assert!(matches!(err, CheckError::EdgeFilterIndexNotAccepted { edge: 0 }),
+                "FILTER index {index} must be refused by name, got {err:?}");
+        }
+    }
+
     /// The FILTER refusal is over EVERY re-derived branch, not only the ones a
     /// branch witness attributes a solution to: attributing everything to the
     /// unfiltered branch does not get the filtered one past the gate.
@@ -15417,6 +15508,79 @@ mod fragment_dispatch_tests {
                 other
             ),
         }
+    }
+
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn every_value_member_is_refused_by_the_extended_entry_point() {
+        use crate::manifest::FilterOp;
+        use sparq_zk::{dual_leaf, dual_leaf_boolean, dual_leaf_datetime, dual_leaf_v2};
+        let hex = |f: Fr| FieldHex(field_to_hex(&f));
+        // Every legacy table row is decided explicitly, including both temporal
+        // types, the shared V1 boolean member and all admitted decimal scales.
+        let mut lanes = vec![
+            (CircuitId::FilterValueDl, dual_leaf_v2::integer_lane_const(), false),
+            (CircuitId::FilterValueDlF64, dual_leaf_v2::double_lane_const(), false),
+            (CircuitId::FilterValueDlDateTime, dual_leaf_v2::datetime_lane_const(), false),
+            (CircuitId::FilterValueDlDateTime, dual_leaf_v2::date_lane_const(), false),
+            (CircuitId::FilterValueDlBool, dual_leaf_v2::boolean_lane_const(), false),
+            (CircuitId::FilterValueDl, dual_leaf::datatype_const(dual_leaf::XSD_INTEGER), true),
+            (CircuitId::FilterValueDl, dual_leaf_boolean::boolean_datatype_const(), true),
+            (CircuitId::FilterValueDlF64, dual_leaf::datatype_const(dual_leaf::XSD_DOUBLE), true),
+            (CircuitId::FilterValueDlDateTime, dual_leaf_datetime::datetime_datatype_const(), true),
+            (CircuitId::FilterValueDlDateTime, dual_leaf_datetime::date_datatype_const(), true),
+        ];
+        for fd in 1..=19 {
+            lanes.push((CircuitId::FilterValueDlDecimal, dual_leaf::decimal_datatype_const(fd), true));
+            lanes.push((CircuitId::FilterValueDlDecimal, dual_leaf_v2::decimal_lane_const(fd), false));
+        }
+        const Q: &str =
+            "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        let mut base = fm(
+            Q,
+            vec![sub(p_scan_with_object("http://ex/a"))],
+            vec![bw_scan(0, vec![0], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        let ks = attest_fragment_fixture(&mut base);
+        let (p, w, _, _, hr, hbp, ep, n, seen) = empty_verify_env();
+        let rp = join_fixture_policy();
+        assert!(matches!(
+            verify_fragment_manifest(&base, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen),
+            Err(CheckError::MissingProof { .. })
+        ), "the control must reach the crypto stage without a value member");
+        for (id, dt, legacy) in lanes {
+            let mut m = base.clone();
+            let inputs = match id {
+                CircuitId::FilterValueDl => ProofInputs::FilterValueDl { id, operand_enc: hex(Fr::from(1u64)), op: FilterOp::Eq, bound: 1, datatype_const: hex(dt), expected: true },
+                CircuitId::FilterValueDlF64 => ProofInputs::FilterValueDlF64 { id, operand_enc: hex(Fr::from(1u64)), op: FilterOp::Eq, b_bits: 1, datatype_const: hex(dt), expected: true },
+                CircuitId::FilterValueDlDecimal => ProofInputs::FilterValueDlDecimal { id, operand_enc: hex(Fr::from(1u64)), op: FilterOp::Eq, bound_neg: false, bound_scaled: 1, datatype_const: hex(dt), expected: true },
+                CircuitId::FilterValueDlDateTime => ProofInputs::FilterValueDlDateTime { id, operand_enc: hex(Fr::from(1u64)), op: FilterOp::Eq, bound_neg: false, bound_scaled_epoch: 1, datatype_const: hex(dt), expected: true },
+                CircuitId::FilterValueDlBool => ProofInputs::FilterValueDlBool { id, operand_enc: hex(Fr::from(1u64)), op: FilterOp::Eq, bound: 1, datatype_const: hex(dt), expected: true },
+                _ => unreachable!(),
+            };
+            m.manifest.sub_proofs.push(sub(inputs));
+            let (p, w, _, _, hr, hbp, ep, n, seen) = empty_verify_env();
+            let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen).unwrap_err();
+            assert!(if legacy { matches!(err, CheckError::LegacyV1ValueMember { proof: 1 }) }
+                else { matches!(err, CheckError::ValueLaneSubProofNotAccepted { proof: 1 }) },
+                "every value member must be refused by name: {err:?}");
+        }
+    }
+
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn a_v2_join_member_is_refused_by_the_extended_entry_point() {
+        let mut m = fm(VALUES, vec![sub(scan_min())],
+            vec![bw_sol(0, vec![0], vec![], vec![0], sol(&[("o", "http://ex/x")]))]);
+        let ks = attest_fragment_fixture_with_method(&mut m, sparq_zk::commit::CommitmentMethod::DualLeafV2);
+        m.manifest.sub_proofs.push(sub(ProofInputs::JoinEq {
+            id: CircuitId::JoinEqV2Dl { n_a: 16, n_b: 16 },
+            commit_a: fh("0x1"), commit_b: fh("0x1"), join_commitment: fh("0x2"), slot_a: 0, slot_b: 0,
+        }));
+        let (p, w, _, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        assert!(matches!(verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen),
+            Err(CheckError::FragmentUnsupportedCommitmentMethod { method_iri, .. })
+                if method_iri == sparq_zk::commit::CommitmentMethod::DualLeafV2.scheme_iri()));
     }
 
     /// FULL-STACK positive control: an HONEST string-canonical presentation —
@@ -16419,8 +16583,8 @@ mod member_from_authenticated_method_tests {
             filter_value_dl(),
         ]);
         m.binding_edges = vec![
-            BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 },
-            BindingEdge { from_proof: 1, from_row: 0, from_slot: 2, to_proof: 3 },
+            BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 },
+            BindingEdge { filter: None, from_proof: 1, from_row: 0, from_slot: 2, to_proof: 3 },
         ];
         let methods = map_of(&[(&c_v2, Some(V2)), (&c_canon, Some(CANON))]);
 
@@ -16456,12 +16620,12 @@ mod member_from_authenticated_method_tests {
         ]);
         let methods = map_of(&[(&c_v2, Some(V2)), (&c_canon, Some(CANON))]);
 
-        m.binding_edges = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 }];
+        m.binding_edges = vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 }];
         assert!(
             resolve(&m, 2, &methods).is_ok(),
             "bound to the V2 scan, the value-lane member is legal"
         );
-        m.binding_edges = vec![BindingEdge { from_proof: 1, from_row: 0, from_slot: 2, to_proof: 2 }];
+        m.binding_edges = vec![BindingEdge { filter: None, from_proof: 1, from_row: 0, from_slot: 2, to_proof: 2 }];
         assert!(
             matches!(
                 resolve(&m, 2, &methods),
@@ -16658,7 +16822,7 @@ mod member_from_authenticated_method_tests {
     #[test]
     fn an_unbound_sub_proof_resolves_as_string_canonical() {
         let c = fhx("0x64");
-        let edge = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+        let edge = vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         let mut value = manifest_of(vec![scan_over(vec![c.clone()]), filter_value_dl()]);
         value.binding_edges = edge.clone();
         let mut string_lane = manifest_of(vec![scan_over(vec![c.clone()]), filter_int()]);
@@ -16817,7 +16981,7 @@ mod member_from_authenticated_method_tests {
         // rules are distinguishable.
         let mut bound = m.clone();
         bound.binding_edges =
-            vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+            vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         assert!(matches!(
             resolve(&bound, 1, &methods),
             Err(CheckError::MemberNotLegalForMethod { .. })
@@ -16945,7 +17109,7 @@ mod member_from_authenticated_method_tests {
     fn a_hidden_only_commitment_defers_until_its_proof_is_bound() {
         let c = fhx("0x64");
         let mut m = manifest_of(vec![scan_over(vec![c.clone()]), filter_value_dl()]);
-        m.binding_edges = vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+        m.binding_edges = vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         // The candidate entry says string-canonical, which would REFUSE the
         // value-lane member if it were read as authenticated.
         let methods = map_of(&[(&c, Some(CANON))]);
@@ -17114,7 +17278,7 @@ mod member_from_authenticated_method_tests {
             "a FILTER no binding edge binds is bound to no commitment"
         );
         m.binding_edges =
-            vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+            vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         assert_eq!(bound_commitments(&m, 1, &JoinEndpointIndex::build(&m)), vec![c1, c2]);
         // An out-of-range index is bound to nothing (no panic).
         assert!(bound_commitments(&m, 99, &JoinEndpointIndex::build(&m)).is_empty());
@@ -17142,7 +17306,7 @@ mod member_from_authenticated_method_tests {
         let scan_only = manifest_of(vec![scan_over(vec![c.clone()])]);
         let mut with_filter = manifest_of(vec![scan_over(vec![c.clone()]), filter_int()]);
         with_filter.binding_edges =
-            vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
+            vec![BindingEdge { filter: None, from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }];
         for &method in CommitmentMethod::recognised() {
             if !MethodPolicy::widest_admissible().admits_method(method) {
                 continue;
