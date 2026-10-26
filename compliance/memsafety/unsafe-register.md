@@ -7,11 +7,11 @@
 Modelled on the `unsafe-rust-attestation` pattern and the prod-solid-server
 compliance discipline: every `unsafe` site in the workspace's first-party crates is
 enumerated here with the invariant it relies on, why that invariant holds, and how it
-is tested or bounded. `scripts/unsafe-gate.py` (the unsafe-count **ratchet**) mechanically
-bounds the per-crate **count** so no PR can add an `unsafe` site without a reviewed re-seed —
-see [§ Ratchet](#ratchet--how-this-stays-honest). Matching each counted site to a **row** here
-(and keeping the file:line current) is still a **review-time** obligation, not a mechanical one:
-sq-vopxw found a stale duplicate `sparq-vectors` row that the count ratchet could not see. [OPUS-5]
+is tested or bounded. `scripts/unsafe-gate.py --check` mechanically bounds the per-crate
+**count**, while `--verify-register` checks that each live site has exactly one row and
+each File:line cell names a live site — see [§ Ratchet](#ratchet--how-this-stays-honest).
+Stale locations, missing rows and duplicate rows fail even when counts stay unchanged.
+Review still checks that each row's description and safety argument match the named site.
 
 > This register covers **first-party `unsafe` only** (the `crates/` tree). Third-party
 > `unsafe` (e.g. inside `memmap2`, `libc`, `rayon`, the `hdt` dependency) is out of
@@ -43,7 +43,7 @@ register distinguishes two trust classes of `unsafe`:
 | `miri` lane (`.github/workflows/miri.yml`, sq-fo28) | pure-Rust unsafe in `sparq-core` reachable without `mmap`/`dict-spill`: the parallel scatter writes, POD↔bytes reinterprets, `from_utf8_unchecked` over in-memory buffers, `MaybeUninit`+`set_len`. Runs nightly under Tree-Borrows for aliasing/provenance/data-race UB. |
 | `mmap_corruption_oracle` test (`crates/sparq-core/tests/`, run under `--features mmap,dict-spill`) + `fuzz` lane's mmap-loader target | the **B5** mmap sites Miri structurally cannot run (file-backed mappings): hostile/corrupt index → loader must reject or stay in-bounds, never UB. |
 | `#![forbid(unsafe_code)]` across the safe-only crates (sq-emay) | proves the unsafe surface is confined; a new `unsafe` in those crates fails to compile. |
-| `scripts/unsafe-gate.py --check` (this PR, GX-5) | the count **ratchet** — a PR cannot add `unsafe` without updating this register + re-seeding the snapshot. |
+| `scripts/unsafe-gate.py --check` + `--verify-register` (GX-5) | the count **ratchet** and one-to-one site check — the nightly/dispatch job fails on a count increase without re-seeding, a stale location, a missing row or a duplicate row. |
 | `vectors-aarch64` lane (`.github/workflows/vectors-aarch64.yml`, #5028) [SONNET-4.6] | the **aarch64/NEON** `#[target_feature]` sites in `sparq-vectors`' `simd.rs`. Their guard (`simd::tests`) calls the *dispatcher*, so it is arch-generic and verifies whichever kernel the HOST selects — and every other lane that runs these tests is `ubuntu-latest` (x86_64). Before this lane the NEON kernels were compile-checked but never EXECUTED in CI, so their numeric-agreement argument rested on a test that had not run on the arch it was about. The lane runs the crate's suite on `ubuntu-24.04-arm` and fails closed if the host is not aarch64+`asimd` or if `mod simd` was not compiled into the run. |
 | `// SAFETY:` argument on every site, **enforced by `clippy::undocumented_unsafe_blocks`** | the per-site argument lives next to the code. The lint is set at crate root on unsafe-bearing library crates (including `sparq-engine`) and locally on unsafe-bearing test/example crates, so the existing `clippy --all-targets -D warnings` gate **mechanically** rejects any `unsafe` block/impl that lacks a literal `// SAFETY:` comment. Combined with the **register + review + count ratchet** (a new `unsafe` cannot land without a register row, the `// SAFETY:` comment, and a re-seed). Closes gap MS-G2 (sq-8wbn) in [`gap-register.md`](./gap-register.md). [OPUS-4.8] |
 
@@ -140,10 +140,10 @@ re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 |---|---|---|---|
 | `src/store.rs:213` | mut slice reinterpret | `words` is u32-aligned, holds ≥ `len` bytes; region exclusively owned | `AlignedBytes::from_vec` over-allocates to a word boundary (`len.div_ceil(4)` u32s); `copy_from_slice` fills exactly `len` bytes of the freshly-allocated, unaliased buffer. |
 | `src/store.rs:221` | slice reinterpret (read) | u32-aligned, ≥ `len` initialised bytes | `AlignedBytes::as_bytes` reads the bytes copied in above; base ≥ 4-byte aligned by construction (review 1874). |
-| `src/store.rs:285` | `Mmap::map` (`open_backing`) | own-for-lifetime | the SINGLE read-backing map site, shared by `VectorStore::open` (`.spqv`) and `DiskAnnIndex::open` (`.spqg`); `open_validated` bounds every offset afterwards. Native-only — wasm32 takes the owned-bytes branch. **B5**. |
-| `src/store.rs:773` | slice reinterpret (write) | f32 has no invalid bit patterns; `align(f32) ≥ align(u8)` | `finalize`: the f32 data section → LE bytes for `write_all`; big-endian hosts are rejected by the WRITER (`create`/`create_inner`). The READER accepts them: `open_validated` validates the complete little-endian structure first and only then byte-swaps the dense f32 words into owned aligned storage (sq-i7w), so no `unsafe` site gains a new precondition. |
-| `src/store.rs:1059` | slice reinterpret (read) | `start` is a multiple of 4 ⇒ f32-aligned; range validated in `open` | `slot_vector`: the backing is u32-aligned for BOTH branches — page-aligned map, or `AlignedBytes` (review 1874 fixed a UB align bug here); `debug_assert_eq!` checks it; f32 accepts any bit pattern. **B5**. |
-| `src/store.rs:1579` | slice reinterpret (write) | f32 no invalid patterns; align ok | the streaming builder's `put`: f32→LE bytes for `write_all` after `validate_vector`. |
+| `src/store.rs:291` | `Mmap::map` (`open_backing`) | own-for-lifetime | the SINGLE read-backing map site, shared by `VectorStore::open` (`.spqv`) and `DiskAnnIndex::open` (`.spqg`); `open_validated` bounds every offset afterwards. Native-only — wasm32 takes the owned-bytes branch. **B5**. |
+| `src/store.rs:779` | slice reinterpret (write) | f32 has no invalid bit patterns; `align(f32) ≥ align(u8)` | `finalize`: the f32 data section → LE bytes for `write_all`; big-endian hosts are rejected by the WRITER (`create`/`create_inner`). The READER accepts them: `open_validated` validates the complete little-endian structure first and only then byte-swaps the dense f32 words into owned aligned storage (sq-i7w), so no `unsafe` site gains a new precondition. |
+| `src/store.rs:1065` | slice reinterpret (read) | `start` is a multiple of 4 ⇒ f32-aligned; range validated in `open` | `slot_vector`: the backing is u32-aligned for BOTH branches — page-aligned map, or `AlignedBytes` (review 1874 fixed a UB align bug here); `debug_assert_eq!` checks it; f32 accepts any bit pattern. **B5**. |
+| `src/store.rs:1585` | slice reinterpret (write) | f32 no invalid patterns; align ok | the streaming builder's `put`: f32→LE bytes for `write_all` after `validate_vector`. |
 | `src/diskann.rs:461` | slice reinterpret (read) | f32 no invalid patterns; align ok | build path: f32→LE bytes copied into the fixed-width record; LE target asserted; borrows `b.vectors`. |
 | `src/diskann.rs:808` | slice reinterpret (read) | `start` a multiple of 4 ⇒ f32-aligned; range validated in `open_validated` | `node_vector`: `debug_assert_eq!` checks alignment; both backings are ≥ 4-byte aligned; f32 accepts any bit pattern; borrows the backing. **B5**. |
 | `src/simd.rs:98` (`approx-ann`) | `#[target_feature(enable="neon")]` call | the `neon` ISA extension is present at runtime | entered ONLY when `active_kernel()` answers `Neon`, which it does ONLY inside `if is_aarch64_feature_detected!("neon")`; `l2_sq_neon` reads exactly `a.len()==b.len()` lanes. sq-lfo84 |
@@ -155,22 +155,22 @@ re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/main.rs:492` | `Mmap::map` | own-for-lifetime | read-only map of a perm file held open for the call. |
-| `src/main.rs:495` | slice reinterpret (read) | page-align; whole `[u32;3]` rows | `n = len/12`; `n==0` handled. CLI utility over a file the operator named. |
+| `src/main.rs:1066` | `Mmap::map` | own-for-lifetime | read-only map of a perm file held open for the call. |
+| `src/main.rs:1069` | slice reinterpret (read) | page-align; whole `[u32;3]` rows | `n = len/12`; `n==0` handled. CLI utility over a file the operator named. |
 
 ### `sparq-zk-compose` — 3 sites (cross-process advisory file locks)
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/verifier.rs:967` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
-| `src/verifier.rs:975` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
-| `src/driver.rs:144` | `libc::flock(LOCK_EX)` | the private `NargoCacheLock` exclusively owns the valid open file descriptor across the call | no pointer arguments or descriptor ownership transfer; errors reject, and scope-owned `File` closure releases the lock on return/unwind. Four-process exclusion and real concurrent compilation regressions exercise OS behavior; Miri does not model this external OS lock. |
+| `src/verifier.rs:1293` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
+| `src/verifier.rs:1301` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
+| `src/driver.rs:168` | `libc::flock(LOCK_EX)` | the private `NargoCacheLock` exclusively owns the valid open file descriptor across the call | no pointer arguments or descriptor ownership transfer; errors reject, and scope-owned `File` closure releases the lock on return/unwind. Four-process exclusion and real concurrent compilation regressions exercise OS behavior; Miri does not model this external OS lock. |
 
 ### `sparq-bench` — 1 site (peak-RSS measurement; non-shipping bench binary)
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/main.rs:375` | `getrusage` FFI | `rusage` is a plain C struct (sound to zero-init); `getrusage(RUSAGE_SELF, &mut ru)` writes only into the valid out-param | return checked before any field read. Bench-only binary, not shipped. |
+| `src/main.rs:399` | `getrusage` FFI | `rusage` is a plain C struct (sound to zero-init); `getrusage(RUSAGE_SELF, &mut ru)` writes only into the valid out-param | return checked before any field read. Bench-only binary, not shipped. |
 
 ### `sparq-py` — 4 sites (opt-in PyO3 binding; the Arrow C-Data-Interface stream-capsule bridge) [OPUS-4.8]
 
@@ -214,10 +214,10 @@ pointer cleanup. [GPT-5.6]
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/exec.rs:87` | `unsafe impl Send for CancelPtr` | `AtomicBool: Sync`; allocation remains live | moving the shared pointer to a worker is sound because `Guard<'a>` borrows the owning `QueryBudget` through every scoped rayon join and the pointer is only atomically loaded. |
-| `src/exec.rs:90` | `unsafe impl Sync for CancelPtr` | `AtomicBool: Sync`; all shared access is atomic | no mutation or non-atomic access occurs through the pointer; the lifetime-bound guard keeps the allocation live. |
-| `src/exec.rs:167` | `NonNull::as_ref` in `Limits::hit` | live, aligned `AtomicBool` from `Arc::as_ref` | `NonNull::from` preserves the reference's alignment/provenance; the snapshot cannot outlive the guard's scoped rayon work. Direct false/true assertions cover this poll. |
-| `src/exec.rs:415` | `NonNull::as_ref` in `budget::exhausted` | live, aligned `AtomicBool` from `Arc::as_ref` | the installing thread holds `Guard<'a>` until the query returns, then clears the pointer before the borrowed budget may drop. Direct and cross-thread cancellation tests cover this poll. |
+| `src/exec/budget.rs:25` | `unsafe impl Send for CancelPtr` | `AtomicBool: Sync`; allocation remains live | moving the shared pointer to a worker is sound because `Guard<'a>` borrows the owning `QueryBudget` through every scoped rayon join and the pointer is only atomically loaded. |
+| `src/exec/budget.rs:29` | `unsafe impl Sync for CancelPtr` | `AtomicBool: Sync`; all shared access is atomic | no mutation or non-atomic access occurs through the pointer; the lifetime-bound guard keeps the allocation live. |
+| `src/exec/budget.rs:112` | `NonNull::as_ref` in `Limits::why` (called by `Limits::hit`) | live, aligned `AtomicBool` from `Arc::as_ref` | `NonNull::from` preserves the reference's alignment/provenance; the snapshot cannot outlive the guard's scoped rayon work. Direct false/true assertions cover this poll. |
+| `src/exec/budget.rs:423` | `NonNull::as_ref` in `budget::exhausted` | live, aligned `AtomicBool` from `Arc::as_ref` | the installing thread holds `Guard<'a>` until the query returns, then clears the pointer before the borrowed budget may drop. Direct and cross-thread cancellation tests cover this poll. |
 
 (sq-my8wd.4.) The other 4 sites live entirely in one integration test,
 `tests/service_stream_bounded.rs`, which pins the DoS-relevant invariant of streaming
@@ -240,10 +240,10 @@ Miri does not cover it (Miri supplies its own allocator and does not model a
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `tests/service_stream_bounded.rs:83` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args, so `System` upholds the trait contract; the wrapper adds only size reads + a thread-local counter. TEST-only. |
-| `tests/service_stream_bounded.rs:87` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; only the returned pointer's nullness is inspected before recording `layout.size()`. |
-| `tests/service_stream_bounded.rs:98` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
-| `tests/service_stream_bounded.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the returned pointer's nullness is inspected before recording the delta. |
+| `tests/federation_features/service_stream_bounded.rs:83` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args, so `System` upholds the trait contract; the wrapper adds only size reads + a thread-local counter. TEST-only. |
+| `tests/federation_features/service_stream_bounded.rs:87` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; only the returned pointer's nullness is inspected before recording `layout.size()`. |
+| `tests/federation_features/service_stream_bounded.rs:98` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
+| `tests/federation_features/service_stream_bounded.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the returned pointer's nullness is inspected before recording the delta. |
 
 ### `sparq-reason` — 14 sites (test-only byte-counting allocators)
 
@@ -302,13 +302,13 @@ forward-to-`System` argument, enforced by the file-local
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `tests/auth_resource_enumeration_memory.rs:43` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `Relaxed` live / peak byte counters. TEST-only; the lib stays `forbid(unsafe_code)`. |
-| `tests/auth_resource_enumeration_memory.rs:44` | `unsafe fn alloc` | caller's `layout` contract forwarded | the method body is the inner call at :46. |
-| `tests/auth_resource_enumeration_memory.rs:46` | `System.alloc(layout)` | caller's `layout` contract forwarded | `layout` unchanged; the returned pointer is only null-checked before `layout.size()` is counted. |
-| `tests/auth_resource_enumeration_memory.rs:54` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the method body is the inner call at :57. |
-| `tests/auth_resource_enumeration_memory.rs:57` | `System.dealloc(ptr, layout)` | `ptr` came from this allocator with this `layout` | unchanged arguments; holds because every `alloc` / `realloc` also forwarded to `System`. |
-| `tests/auth_resource_enumeration_memory.rs:60` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :62. |
-| `tests/auth_resource_enumeration_memory.rs:62` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
+| `tests/auth_resource_enumeration_memory.rs:52` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `Relaxed` live / peak byte counters. TEST-only; the lib stays `forbid(unsafe_code)`. |
+| `tests/auth_resource_enumeration_memory.rs:53` | `unsafe fn alloc` | caller's `layout` contract forwarded | the method body is the inner call at :46. |
+| `tests/auth_resource_enumeration_memory.rs:55` | `System.alloc(layout)` | caller's `layout` contract forwarded | `layout` unchanged; the returned pointer is only null-checked before `layout.size()` is counted. |
+| `tests/auth_resource_enumeration_memory.rs:63` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the method body is the inner call at :57. |
+| `tests/auth_resource_enumeration_memory.rs:66` | `System.dealloc(ptr, layout)` | `ptr` came from this allocator with this `layout` | unchanged arguments; holds because every `alloc` / `realloc` also forwarded to `System`. |
+| `tests/auth_resource_enumeration_memory.rs:69` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :62. |
+| `tests/auth_resource_enumeration_memory.rs:71` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
 
 ### `sparq-lws-core` — 12 sites (example- and test-only counting global allocators) [FABLE-5]
 
@@ -343,10 +343,10 @@ the examples run on the standard toolchain.
 | `examples/support/mod.rs:78` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; `layout.size()` is only read into the byte counter. |
 | `examples/support/mod.rs:83` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `examples/support/mod.rs:86` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; `new_size` is only read into the byte counter. |
-| `tests/linkset_parse_amplification.rs:24` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `SeqCst` live/peak byte counters. TEST-only; lib + bin stay `forbid(unsafe_code)`. |
-| `tests/linkset_parse_amplification.rs:26` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; `layout.size()` is only read into the counters. |
-| `tests/linkset_parse_amplification.rs:33` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
-| `tests/linkset_parse_amplification.rs:38` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; the returned pointer is only null-checked to keep the counter right. |
+| `tests/linkset_parse_amplification.rs:28` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `SeqCst` live/peak byte counters. TEST-only; lib + bin stay `forbid(unsafe_code)`. |
+| `tests/linkset_parse_amplification.rs:30` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; `layout.size()` is only read into the counters. |
+| `tests/linkset_parse_amplification.rs:37` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
+| `tests/linkset_parse_amplification.rs:42` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; the returned pointer is only null-checked to keep the counter right. |
 
 ### `sparq-lws-wasm` — 4 sites (the SHIPPING bounded `#[global_allocator]`) [SONNET-4.6]
 
@@ -407,14 +407,23 @@ committed snapshot `bench/unsafe-snapshot.json`:
 
 ```sh
 scripts/unsafe-gate.py --check        # FAIL if any crate rose above its snapshot
+scripts/unsafe-gate.py --verify-register # FAIL on stale cells, missing/duplicate rows
+scripts/unsafe-gate.py --self-test    # fixtures + the real register must pass
 scripts/unsafe-gate.py --seed         # re-seed AFTER a reviewed register update
 scripts/unsafe-gate.py --list         # file:line:text of every counted site
 ```
 
 The **`unsafe-register (count ratchet)`** CI lane (`.github/workflows/ci.yml`) runs
-`--check` nightly (and on `workflow_dispatch`); it is a failing (not informational) job but,
+`--self-test`, `--verify-register` and `--check` nightly (and on `workflow_dispatch`);
+it is a failing (not informational) job but,
 since the `ci-summary` aggregator was deleted, **not** a required merge check — distinct from the pre-existing non-gating
 `unsafe report (cargo-geiger, informational)` lane, which stays as a visibility-only
 report. A change that adds an `unsafe` site therefore reds the nightly run until the author adds a
 register row here, a `// SAFETY:` comment in source, and re-seeds the snapshot — all
 three changes land in the same reviewable diff.
+
+The site check uses the exact census printed by `--list`. Crate-relative paths resolve
+under the enclosing crate heading; `crates/...` paths resolve from the repository root.
+A feature suffix such as `` `src/simd.rs:98` (`approx-ann`) `` does not exempt that site. The check
+reports all mismatches in one run. Moving a site requires updating its File:line cell,
+and removing a site requires removing its row, even when the count ratchet still passes.
