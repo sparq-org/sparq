@@ -85,7 +85,7 @@ use solid_oidc_verifier::verifier::Verifier;
 use solid_oidc_verifier::webid::{BidirectionalMode, NetworkWebIdResolver};
 use sparq_lws_core::acl_cache::{AclCache, DEFAULT_ACL_CACHE_CAPACITY};
 use sparq_lws_core::app::{
-    build_router_with_overload, with_overload_layers, AppState, OverloadConfig,
+    build_router_with_overload, with_overload_layers_and_cors, AppState, OverloadConfig,
 };
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::auth_cache::{
@@ -1068,6 +1068,7 @@ where
     J: JwksProvider + Send + Sync + 'static,
     R: ReplayStore + Send + Sync + 'static,
 {
+    let cors = sparq_lws_core::ldp::cors::CorsPolicy::from_env()?;
     // Linked Web Storage (`SOLID_SERVER_PROTOCOL=lws`): the LWS 1.0 surface replaces the Solid
     // router on the same store. Its own `SOLID_SERVER_LWS_*` settings configure it.
     if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
@@ -1075,6 +1076,7 @@ where
         // One body ceiling for both surfaces: the LWS dispatcher reads the body itself, so it is
         // handed the configured limit rather than relying on the `DefaultBodyLimit` layer.
         cfg.max_body = overload_config.body_limit_bytes;
+        cfg.cors = cors.clone();
         eprintln!(
             "  PROTOCOL: Linked Web Storage — storage {} owner {} {}",
             cfg.storage(),
@@ -1085,7 +1087,7 @@ where
         // The same overload stack the Solid router carries: the per-IP rate limiter, admission
         // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
         let lws = sparq_lws_core::lws::router(store, cfg).await?;
-        return Ok(with_overload_layers(lws, overload_config));
+        return Ok(with_overload_layers_and_cors(lws, overload_config, cors));
     }
     // Dev/conformance seeding (gated): write the test users' WebID profiles + the container tree the
     // Solid CTH dereferences to bootstrap. Done BEFORE the store is moved into the LDP state; a seeding
@@ -1172,6 +1174,7 @@ where
     // Identity-host serving (when configured) rides the same AppState — the gate is mounted by the
     // router assembly; the namespace refusal is mounted regardless.
     let mut app_state = AppState::new(auth, ldp);
+    app_state.cors = cors;
     if let Some(config) = identity {
         app_state = app_state.with_identity(config);
     }

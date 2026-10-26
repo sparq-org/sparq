@@ -44,16 +44,16 @@ SHIPPING bounded `#[global_allocator]` (the only way to bound wasm32 linear memo
 `deny(unsafe_code)` plus a single `#[allow(unsafe_code)] pub mod memory;` — every other module in
 the crate still fails to compile on `unsafe`. sq-wubkf.
 
-## MS-2 — 118-site register (ceiling and live), count-verified
+## MS-2 — 119-site register (ceiling and live), count-verified
 
 ```sh
-python3 scripts/unsafe-gate.py --check    # → "live total = 118, snapshot total = 118"
+python3 scripts/unsafe-gate.py --check    # → "live total = 119, snapshot total = 119"
 ```
 Per-crate (from `--check`, matching `bench/unsafe-snapshot.json::crates`):
 
 | crate | snapshot | live |
 |---|---:|---:|
-| sparq-core | 51 | 51 |
+| sparq-core | 52 | 52 |
 | sparq-reason | 14 | 14 |
 | sparq-vectors | 12 | 12 |
 | sparq-lws-core | 12 | 12 |
@@ -64,7 +64,7 @@ Per-crate (from `--check`, matching `bench/unsafe-snapshot.json::crates`):
 | sparq-cli | 2 | 2 |
 | sparq-zk-compose | 3 | 3 |
 | sparq-bench | 1 | 1 |
-| **total** | **118** | **118** |
+| **total** | **119** | **119** |
 
 <!-- sq-gg0qq.2: sparq-lws-core imported with EXAMPLE- and TEST-only counting-allocator
 sites (register rows in unsafe-register.md). -->

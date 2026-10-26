@@ -1,11 +1,8 @@
-//! The value-lane obligation model, not yet accepting.
+//! Query-derived value-lane obligations for flat verification and diagnostics.
 //!
-//! This diagnostic predicate binds typed query conjuncts to authenticated scans,
-//! active rows and exact slots. No accepting path calls it. The value-lane gate
-//! stays CLOSED, including when every obligation discharges here. These are
-//! structural checks, not proof verification; private handle domains and the
-//! comparison relation remain circuit constraints. Research-grade, not externally
-//! audited; the documented INV-VL issuer-honesty assumption still applies.
+//! The flat verifier and diagnostic discharge share the per-edge predicate.
+//! Structural checks bind authenticated V2 scans, typed pins and exact cells;
+//! bb checks the challenge-bound relation. Research-grade, not externally audited.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -33,7 +30,7 @@ pub struct ValueObligation {
 /// Diagnostic assignment of each obligation to exactly one value sub-proof.
 pub type DischargeMap = BTreeMap<ValueObligation, usize>;
 
-/// A named structural refusal; none of these changes a verifier verdict.
+/// A named structural refusal shared with the flat verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObligationError {
     /// No proof covers this active row and slot.
@@ -144,7 +141,7 @@ pub fn discharge(
     let filters = fragment_typed_filters(&manifest.query).map_err(|_| ObligationError::OpNotModelled)?;
     let mut out = DischargeMap::new();
     for (proof, sp) in manifest.sub_proofs.iter().enumerate() {
-        let Some((member, _)) = crate::dispatch::value_lane_fields(&sp.inputs) else { continue };
+        let Some(_) = crate::dispatch::value_lane_fields(&sp.inputs) else { continue };
         crate::dispatch::refuse_legacy_value_member(&sp.inputs).map_err(|e| match e {
             crate::dispatch::DispatchError::LegacyV1ValueMember { .. } => ObligationError::LegacyV1ValueMember { proof },
             _ => ObligationError::LaneMismatch { proof },
@@ -172,36 +169,7 @@ pub fn discharge(
                 }
                 return Err(ObligationError::EdgeMismatch);
             };
-            let method = crate::verifier::obligation_scan_method(manifest, o.source_proof, methods)
-                .map_err(invalid_scan)?;
-            if method == CommitmentMethod::DualLeafV1 {
-                return Err(ObligationError::LegacyV1ValueMember { proof });
-            }
-            if method != CommitmentMethod::DualLeafV2 {
-                return Err(ObligationError::MethodHasNoValueLane { source_proof: o.source_proof });
-            }
-            let f = &filters[o.filter];
-            let method = AuthenticatedMethod::Bound(method);
-            let expected = expected_value_lane(method, f.op, &f.constant)
-                .map_err(|e| pin_error(proof, e))?;
-            if member != &expected.member {
-                return Err(ObligationError::LaneMismatch { proof });
-            }
-            check_value_lane_pin(method, f, &sp.inputs).map_err(|e| pin_error(proof, e))?;
-            let operand = match &sp.inputs {
-                ProofInputs::FilterValueDl { operand_enc, .. }
-                | ProofInputs::FilterValueDlF64 { operand_enc, .. }
-                | ProofInputs::FilterValueDlDecimal { operand_enc, .. }
-                | ProofInputs::FilterValueDlDateTime { operand_enc, .. }
-                | ProofInputs::FilterValueDlBool { operand_enc, .. } => operand_enc,
-                _ => return Err(ObligationError::LaneMismatch { proof }),
-            };
-            // V2 scan rows and value members' operand_enc both carry the full
-            // dual-leaf term encoding, not a bare value hook. Reuse stage 2's
-            // scan-cell lookup; this diagnostic adds no accepting edge arm.
-            if crate::verifier::scan_binding_cell(&source.inputs, o.row, o.slot) != Some(operand) {
-                return Err(ObligationError::PinMismatch { proof, reason: "scan cell != operand_enc".into() });
-            }
+            check_value_edge(manifest, methods, o, &filters[o.filter], edge)?;
             if out.insert(o.clone(), proof).is_some() {
                 return Err(ObligationError::DischargedTwice { obligation: o.clone() });
             }
@@ -217,6 +185,62 @@ pub fn discharge(
         }
     }
     Ok(out)
+}
+
+/// The shared per-edge value predicate used by diagnostics and flat acceptance.
+/// The caller supplies a query-derived obligation, never an edge-derived one.
+pub(crate) fn check_value_edge(
+    manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
+    o: &ValueObligation,
+    f: &sparq_zk::verify::TypedQueryFilter,
+    edge: &crate::manifest::BindingEdge,
+) -> Result<(), ObligationError> {
+    if edge.filter != Some(o.filter) || edge.from_proof != o.source_proof
+        || edge.from_row != o.row || edge.from_slot != o.slot || f.variable != o.var
+    {
+        return Err(ObligationError::EdgeMismatch);
+    }
+    let proof = edge.to_proof;
+    let source = manifest.sub_proofs.get(o.source_proof).ok_or(ObligationError::EdgeMismatch)?;
+    let target = manifest.sub_proofs.get(proof).ok_or(ObligationError::EdgeMismatch)?;
+    let ProofInputs::Scan { rows, row_count, .. } = &source.inputs else {
+        return Err(ObligationError::EdgeMismatch);
+    };
+    if o.row >= (*row_count as usize).min(rows.len()) {
+        return Err(ObligationError::RowOutOfRange);
+    }
+    let Some((member, _)) = crate::dispatch::value_lane_fields(&target.inputs) else {
+        return Err(ObligationError::LaneMismatch { proof });
+    };
+    let method = crate::verifier::obligation_scan_method(manifest, o.source_proof, methods)
+        .map_err(invalid_scan)?;
+    if method == CommitmentMethod::DualLeafV1 {
+        return Err(ObligationError::LegacyV1ValueMember { proof });
+    }
+    if method != CommitmentMethod::DualLeafV2 {
+        return Err(ObligationError::MethodHasNoValueLane { source_proof: o.source_proof });
+    }
+    let method = AuthenticatedMethod::Bound(method);
+    let expected = expected_value_lane(method, f.op, &f.constant)
+        .map_err(|e| pin_error(proof, e))?;
+    if member != &expected.member {
+        return Err(ObligationError::LaneMismatch { proof });
+    }
+    check_value_lane_pin(method, f, &target.inputs).map_err(|e| pin_error(proof, e))?;
+    let operand = match &target.inputs {
+        ProofInputs::FilterValueDl { operand_enc, .. }
+        | ProofInputs::FilterValueDlF64 { operand_enc, .. }
+        | ProofInputs::FilterValueDlDecimal { operand_enc, .. }
+        | ProofInputs::FilterValueDlDateTime { operand_enc, .. }
+        | ProofInputs::FilterValueDlBool { operand_enc, .. } => operand_enc,
+        _ => return Err(ObligationError::LaneMismatch { proof }),
+    };
+    // Both operands carry the full dual-leaf term encoding.
+    if crate::verifier::scan_binding_cell(&source.inputs, o.row, o.slot) != Some(operand) {
+        return Err(ObligationError::PinMismatch { proof, reason: "scan cell != operand_enc".into() });
+    }
+    Ok(())
 }
 
 fn pin_error(proof: usize, error: PinError) -> ObligationError {
@@ -311,6 +335,202 @@ mod tests {
         let mut v = serde_json::to_value(&m.sub_proofs[proof].inputs).unwrap();
         v[key] = value;
         m.sub_proofs[proof].inputs = serde_json::from_value(v).unwrap();
+    }
+
+    // Sign the structural fixture under each scan's own method. The row cells
+    // are structural witnesses only; live e2e tests build real V2 credentials.
+    fn accepting(m: &ProofManifest, methods: &AuthenticatedMethods) -> Result<(), crate::verifier::CheckError> {
+        use crate::manifest::{AttestedStatusRef, CommitmentAttestation, RevocationStatus, StatusListSnapshot};
+        use crate::verifier::{KeySet, RevocationPolicy, prefilter_manifest_structure};
+        use sparq_zk::sig::{SecretKey, SignatureScheme, public_key_to_hex, scheme_iri_to_field, status_list_id_to_field, status_ref_digest};
+        let mut m = m.clone();
+        let sk = SecretKey::from_seed(19);
+        let status_ref = status_ref_digest(&status_list_id_to_field("http://ex/status"), 0, 1);
+        m.revocation = Some(RevocationStatus { status_list: Some("http://ex/status".into()), index: Some(0), version: Some(1),
+            index_commitment: None, ref_commitment: None });
+        m.attributions = vec![vec![0]; fragment_patterns(&m.query).unwrap().len()];
+        let mut unbound = false;
+        for (index, sp) in m.sub_proofs.iter().enumerate() {
+            let ProofInputs::Scan { commitments, .. } = &sp.inputs else { continue };
+            for commitment in commitments {
+                let salt = Fr::from(index as u64 + 70);
+                let c = commitment.to_field().unwrap();
+                let signature = match methods[&commitment.0] {
+                    AuthenticatedMethod::Bound(method) => sk.sign_presentation_with_status_and_scheme(
+                        &c, &salt, &status_ref, &scheme_iri_to_field(method.scheme_iri())),
+                    AuthenticatedMethod::Unbound => { unbound = true; sk.sign_commitment_with_status(&c, &salt, &status_ref) }
+                };
+                m.commitment_attestations.push(CommitmentAttestation {
+                    commitment: commitment.clone(), issuer_public_key: public_key_to_hex(&sk.public_key()), signature,
+                    cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().into(), salt: Some(FieldHex(field_to_hex(&salt))),
+                    status: Some(AttestedStatusRef { index: Some(0), version: Some(1), index_commitment: None, ref_commitment: None }), holder: None,
+                });
+            }
+        }
+        let mut keys = KeySet::from_hex_keys([public_key_to_hex(&sk.public_key())]);
+        if unbound { keys = keys.with_method_policy(crate::MethodPolicy::current().admit_unbound()); }
+        prefilter_manifest_structure(&m, &keys, &RevocationPolicy::accept_version(1).with_snapshot(StatusListSnapshot {
+            status_list: "http://ex/status".into(), version: 1, bits: vec![0],
+        })).map(|_| ())
+    }
+
+    #[test]
+    fn shared_check_value_edge_requires_the_exact_active_cell() {
+        let (mut m, methods) = fixture("?o >= 18", 2);
+        accepting(&m, &methods).expect("honest control passes the accepting prefilter");
+        let obligations = derive(&m, &methods).unwrap();
+        let filters = fragment_typed_filters(&m.query).unwrap();
+        assert_eq!(check_value_edge(&m, &methods, &obligations[0], &filters[0], &m.binding_edges[0]), Ok(()));
+        change_input(&mut m, 1, "operand_enc", serde_json::json!(fh(31)));
+        assert!(matches!(check_value_edge(&m, &methods, &obligations[0], &filters[0], &m.binding_edges[0]),
+            Err(ObligationError::PinMismatch { proof: 1, .. })));
+    }
+
+    #[test]
+    fn accepting_path_checks_every_value_edge() {
+        use crate::verifier::CheckError;
+        let (m, methods) = fixture("?o >= 18", 3);
+        accepting(&m, &methods).expect("honest value control passes the public prefilter");
+        let mut bad = m.clone(); bad.sub_proofs.pop(); bad.binding_edges.pop();
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::UnboundFilter { .. })), "every active row needs an edge");
+        let mut bad = m.clone(); bad.binding_edges[0].from_row = 1;
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::BindingInconsistent { edge: 0 })), "operand equality binds the exact row");
+        let mut bad = m.clone(); bad.binding_edges[0].from_slot = 0;
+        // Equal encodings cannot turn the subject slot into the filtered slot.
+        if let ProofInputs::Scan { rows, .. } = &mut bad.sub_proofs[0].inputs { rows[0][0] = rows[0][2].clone(); }
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::UnboundFilter { .. })), "wrong slot cannot discharge");
+        let mut bad = m.clone(); bad.binding_edges[0].from_row = 3;
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::RowOutOfRange))), "padding is not active");
+        let mut bad = m.clone(); bad.binding_edges[0].filter = Some(99);
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::EdgeFilterIndexOutOfRange { edge: 0 })));
+        let mut bad = m.clone(); change_input(&mut bad, 1, "bound", serde_json::json!(19));
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::PinMismatch { .. }))));
+        let mut bad = m.clone(); change_input(&mut bad, 1, "expected", serde_json::json!(false));
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::PinMismatch { .. }))));
+        let mut bad = m.clone(); bad.binding_edges.push(bad.binding_edges[0].clone());
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::DischargedTwice { .. }))));
+        let mut bad = m.clone(); bad.sub_proofs.push(bad.sub_proofs[1].clone());
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::OrphanValueProof { proof: 4 }))));
+        let mut bad = m.clone(); bad.binding_edges[0].filter = None;
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueEdgeWithoutConjunct { edge: 0 })));
+        let mut bad = m.clone(); bad.sub_proofs[1].inputs = ProofInputs::FilterInt {
+            id: CircuitId::FilterInt { d: 2 }, operand_enc: fh(30), op: FilterOp::Ge, bound: 18, expected: true,
+        };
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::EdgeFilterIndexOnNonValueProof { edge: 0 })));
+        // An extra edge must be refused even when every real obligation is covered.
+        let mut bad = m.clone(); let mut edge = bad.binding_edges[0].clone(); edge.from_slot = 0;
+        if let ProofInputs::Scan { rows, .. } = &mut bad.sub_proofs[0].inputs { rows[0][0] = rows[0][2].clone(); }
+        bad.binding_edges.push(edge);
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::EdgeMismatch))));
+    }
+
+    #[test]
+    fn accepting_typed_lanes_and_mixed_conjuncts() {
+        use crate::verifier::CheckError;
+        for expr in ["?o >= 18", "?o >= \"1.50\"^^xsd:decimal", "?o >= \"1960-01-01T00:00:00Z\"^^xsd:dateTime",
+            "?o != \"NaN\"^^xsd:double", "?o = true"] {
+            let (m, methods) = fixture(expr, 1);
+            accepting(&m, &methods).expect("every typed family is reachable through the accepting prefilter");
+        }
+        let (mut m, methods) = fixture("?o >= 18 && ?o >= \"1.50\"^^xsd:decimal", 1);
+        m.sub_proofs[1].inputs = ProofInputs::FilterInt { id: CircuitId::FilterInt { d: 2 },
+            operand_enc: fh(30), op: FilterOp::Ge, bound: 18, expected: true };
+        m.binding_edges[0].filter = None;
+        accepting(&m, &methods).expect("integer string lane plus decimal value lane");
+        let mut bad = m.clone(); bad.sub_proofs.pop(); bad.binding_edges.pop();
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::UnboundFilter { .. })));
+        let value = proof(&m.query, 0, fh(30));
+        let to_proof = m.sub_proofs.len(); m.sub_proofs.push(sub(value));
+        m.binding_edges.push(BindingEdge { filter: Some(0), from_proof: 0, from_row: 0, from_slot: 2, to_proof });
+        assert!(matches!(accepting(&m, &methods), Err(CheckError::ValueObligation(ObligationError::DischargedTwice { .. }))),
+            "string and value lanes cannot both present the same obligation");
+    }
+
+    #[test]
+    fn accepting_checks_lane_conjunct_scan_and_every_slot() {
+        use crate::verifier::CheckError;
+        let (m, methods) = fixture("?o >= 18 && ?o >= 99", 1);
+        accepting(&m, &methods).unwrap();
+        let mut bad = m.clone(); bad.binding_edges[1].filter = Some(0);
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::PinMismatch { .. }))));
+        let mut bad = m.clone(); bad.sub_proofs[1].inputs = proof(&query("?o >= \"1.50\"^^xsd:decimal"), 0, fh(30));
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::ValueObligation(ObligationError::LaneMismatch { proof: 1 }))));
+        let mut bad = m.clone(); bad.binding_edges[0].from_proof = 1;
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::EdgeKindMismatch { edge: 0 })));
+        let (mut m, methods) = fixture("?o >= 18", 1);
+        m.query = "SELECT * WHERE { ?s ?p ?o . ?o ?p ?s FILTER(?o >= 18) }".into();
+        m.sub_proofs.truncate(1); m.binding_edges.clear();
+        if let ProofInputs::Scan { rows, .. } = &mut m.sub_proofs[0].inputs { rows[0][0] = rows[0][2].clone(); }
+        complete(&mut m, &methods);
+        m.pattern_scans = vec![vec![0], vec![0]];
+        accepting(&m, &methods).expect("one scan answering both patterns needs both slots");
+        m.sub_proofs.pop(); m.binding_edges.pop();
+        assert!(matches!(accepting(&m, &methods), Err(CheckError::UnboundFilter { .. })), "equal cells at different slots remain different obligations");
+    }
+
+    #[test]
+    fn accepting_replays_typed_pin_and_negation_controls() {
+        use crate::verifier::CheckError;
+        for (honest, changed) in [
+            ("?o >= 1", "?o >= \"-1\"^^xsd:integer"),
+            ("?o >= \"0.00\"^^xsd:decimal", "?o >= \"-0.00\"^^xsd:decimal"),
+            ("?o >= \"1960-01-01T00:00:00Z\"^^xsd:dateTime", "?o >= 18"),
+            ("?o >= \"1.5000\"^^xsd:decimal", "?o >= \"1.5001\"^^xsd:decimal"),
+        ] {
+            let (mut m, methods) = fixture(honest, 1);
+            accepting(&m, &methods).expect("honest typed control passes the public prefilter");
+            m.query = query(changed);
+            assert!(matches!(accepting(&m, &methods), Err(CheckError::ValueObligation(
+                ObligationError::PinMismatch { .. } | ObligationError::LaneMismatch { .. }))));
+        }
+        for expr in ["?o != \"NaN\"^^xsd:double", "?o != \"-0.0E0\"^^xsd:double"] {
+            let (mut m, methods) = fixture(expr, 1);
+            accepting(&m, &methods).unwrap();
+            let ProofInputs::FilterValueDlF64 { b_bits, .. } = &mut m.sub_proofs[1].inputs else { unreachable!() };
+            *b_bits ^= 1;
+            assert!(matches!(accepting(&m, &methods), Err(CheckError::ValueObligation(ObligationError::PinMismatch { .. }))));
+        }
+        let (mut m, methods) = fixture("?o = true", 1);
+        accepting(&m, &methods).unwrap();
+        change_input(&mut m, 1, "bound", serde_json::json!(2));
+        assert!(matches!(accepting(&m, &methods), Err(CheckError::ValueObligation(ObligationError::PinMismatch { .. }))));
+        for expr in ["?o != 18", "!(?o = 18)"] {
+            let (mut m, methods) = fixture(expr, 1);
+            accepting(&m, &methods).unwrap();
+            change_input(&mut m, 1, "expected", serde_json::json!(false));
+            assert!(matches!(accepting(&m, &methods), Err(CheckError::ValueObligation(ObligationError::PinMismatch { .. }))));
+        }
+        for expr in ["!(?o > 18)", "!(?o >= 18 && ?o < 99)", "!!(?o = 18)"] {
+            let (mut m, methods) = fixture("?o >= 18", 1);
+            accepting(&m, &methods).unwrap();
+            m.query = query(expr);
+            assert!(matches!(accepting(&m, &methods), Err(CheckError::Sparqzk(_))));
+        }
+    }
+
+    #[test]
+    fn accepting_uses_each_scans_own_method() {
+        use crate::verifier::CheckError;
+        let (m, methods) = fixture("?o >= 18", 1);
+        accepting(&m, &methods).unwrap();
+        // A non-answering scan with a different method cannot disable the V2 scan.
+        let mut mixed = m.clone();
+        let mut other = scan(2, 1, AuthenticatedMethod::Unbound);
+        if let ProofInputs::Scan { pattern_is_const, pattern_const_enc, .. } = &mut other {
+            pattern_is_const[1] = true;
+            pattern_const_enc[1] = fh(7);
+        }
+        mixed.sub_proofs.push(sub(other));
+        let mut mixed_methods = methods.clone(); mixed_methods.insert(fh(2).0, AuthenticatedMethod::Unbound);
+        accepting(&mixed, &mixed_methods).expect("unrelated unbound scan does not change the answering scan method");
+        for auth in [AuthenticatedMethod::Unbound, AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1)] {
+            let mut bad = m.clone(); bad.sub_proofs[0].inputs = scan(1, 1, auth);
+            let map = [(fh(1).0, auth)].into_iter().collect();
+            assert!(matches!(accepting(&bad, &map), Err(CheckError::ValueObligation(ObligationError::MethodHasNoValueLane { source_proof: 0 }))));
+        }
+        let mut bad = m;
+        change_input(&mut bad, 1, "datatype_const", serde_json::json!(FieldHex(field_to_hex(&sparq_zk::dual_leaf::datatype_const(sparq_zk::dual_leaf::XSD_INTEGER)))));
+        assert!(matches!(accepting(&bad, &methods), Err(CheckError::LegacyV1ValueMember { proof: 1 })));
     }
 
     #[test]
@@ -575,15 +795,9 @@ mod tests {
     }
 
     #[test]
-    fn fully_discharged_manifest_is_still_refused_by_verify_manifest() {
-        use crate::verifier::*;
+    fn fully_discharged_manifest_passes_the_flat_prefilter() {
         let (m, methods) = fixture("?o >= 18", 3);
         assert_eq!(control(&m, &methods).len(), 3);
-        let result = verify_manifest(&m, &crate::driver::CircuitProver::new(std::env::temp_dir()),
-            &std::env::temp_dir(), &KeySet::empty(), &RevocationPolicy::accept_version(1),
-            &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(),
-            &VerifierNonce::from_field(Fr::from(42u64)), &InMemorySeenNonces::new());
-        assert!(matches!(result, Err(CheckError::ValueLaneSubProofNotAccepted { proof: 1 })),
-            "fully discharged diagnostics must leave the gate CLOSED: {result:?}");
+        accepting(&m, &methods).expect("the flat structural value gate is open");
     }
 }
