@@ -945,6 +945,16 @@ pod costs at most the input budget, whatever shape its names have. Past any of t
 whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
 `InputBytes` for the aggregate), fail-closed, with nothing installed.
 
+ACL discovery indexes control documents once per view by their target IRI, with `.acl`
+preceding `.acr`. Targets beyond that view's `max_resource_iri_bytes` or
+`max_resource_path_depth` are omitted: an admitted resource cannot name them. Each
+ancestor-prefix lookup hashes at most the byte cap, and prefixes deeper than the indexed
+targets are skipped. The borrowed ancestor walks scan the resource linearly. The HTTP
+server runs warm stateful decisions and
+`WAC-Allow` calculation inline on the async worker; stateless builds and stateful misses
+retain their work on the bounded blocking pool. Queries run on a blocking worker even on
+a cache hit, under the request deadline and await grace.
+
 The store's provenance pruning owns container strings and uses the same three caps, with
 its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`
 and update provenance staging) instead borrows names from the before-store or edit events,

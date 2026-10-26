@@ -3,7 +3,7 @@ mod common;
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
-use sparq_solid::{AclScope, EffectiveAcl, PodStore};
+use sparq_solid::{AclScope, AclStatus, EffectiveAcl, Mode, PodStore, Session, WacDecision};
 use std::collections::HashSet;
 
 // Keep both the old suffix lookup and the old parent walk independent of production.
@@ -42,6 +42,121 @@ fn old_resolve(graph: &Graph, resource: &str) -> Option<EffectiveAcl> {
             return None;
         }
         cur = &cur[..cut + 1];
+    }
+}
+
+// Main's decision body, using the independent original ACL resolver above and
+// the public authorization oracle rather than production structural discovery.
+fn original_decision(
+    store: &PodStore,
+    session: &Session,
+    resource: &str,
+    mode: Mode,
+) -> WacDecision {
+    let mut result = WacDecision {
+        allow: false,
+        granted_modes: Vec::new(),
+        governing_acl: None,
+        scope: None,
+        status: AclStatus::Transient,
+    };
+    let Ok(node) = NamedNode::new(resource) else {
+        return result;
+    };
+    let Some(effective) = old_resolve(store.graph(), resource) else {
+        result.status = AclStatus::NoAcl;
+        return result;
+    };
+    result.governing_acl = Some(effective.acl);
+    result.scope = Some(effective.scope);
+    if !store
+        .graph()
+        .named()
+        .iter()
+        .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == sparq_solid::AUTH_GRAPH))
+    {
+        result.status = AclStatus::Unloaded;
+        return result;
+    }
+    result.status = AclStatus::Resolved;
+    result.granted_modes = [Mode::Read, Mode::Write, Mode::Append, Mode::Control]
+        .into_iter()
+        .filter(|m| store.accessible(session, *m).contains(&node))
+        .collect();
+    result.allow = result.granted_modes.contains(&mode);
+    result
+}
+
+fn assert_decision_parity(store: &PodStore, resource: &str, session: &Session) {
+    for mode in [Mode::Read, Mode::Write, Mode::Append, Mode::Control] {
+        assert_eq!(
+            store.decide(session, resource, mode),
+            original_decision(store, session, resource, mode),
+            "{resource}: {mode:?}"
+        );
+    }
+}
+
+#[test]
+fn decisions_match_main_over_wac_fixtures_and_name_boundaries() {
+    for scenario in common::wac_corpus() {
+        let mut store =
+            PodStore::new(Graph::load_dataset(scenario.nquads_str(), "nquads").unwrap());
+        for materialized in [false, true] {
+            if materialized {
+                store.materialize_wac().unwrap();
+            }
+            for expected in scenario.expects() {
+                let session = Session {
+                    agent: expected.req_agent(),
+                    client: expected.req_client(),
+                    ..Session::default()
+                };
+                assert_decision_parity(&store, expected.req_resource(), &session);
+            }
+        }
+    }
+    let mut base =
+        PodStore::new(Graph::load_dataset(&sparq_solid::wac_fixture(), "nquads").unwrap());
+    base.materialize_wac().unwrap();
+    let cap = base.auth_budget().max_resource_iri_bytes;
+    let mut graph = base.graph().fork();
+    let at_cap = format!(
+        "https://pod.ex/{}",
+        "x".repeat(cap - "https://pod.ex/".len())
+    );
+    for target in [
+        &at_cap,
+        &format!("https://other.ex/{}", "x".repeat(1 << 20)),
+    ] {
+        graph
+            .add_named(
+                Term::NamedNode(NamedNode::new_unchecked(format!("{target}.acl"))),
+                Graph::default(),
+            )
+            .unwrap();
+    }
+    let store = PodStore::new(graph);
+    for resource in [
+        at_cap,
+        "https://pod.ex/".into(),
+        format!("https://pod.ex/{}leaf", "a/".repeat(4096)),
+        format!(
+            "https://pod.ex/{}leaf",
+            format!("{}/", "a".repeat(4095)).repeat(63)
+        ),
+        "https://pod.ex//a///leaf?x#part".into(),
+    ] {
+        for agent in [None, Some("https://alice.ex/card#me")] {
+            assert_decision_parity(
+                &store,
+                &resource,
+                &Session {
+                    agent,
+                    ..Session::default()
+                },
+            );
+        }
     }
 }
 
@@ -99,7 +214,7 @@ fn acl_resolution_matches_original_over_random_ancestors() {
         for _ in 0..depth {
             let r = next();
             resource.push_str(match r % 4 {
-                0 => "",
+                0 => "/",
                 1 => "é/",
                 2 => "a/",
                 _ => "long-segment/",
@@ -114,7 +229,11 @@ fn acl_resolution_matches_original_over_random_ancestors() {
         }
         resources.push(format!("{resource}{}", "x/".repeat(2048)));
         resources.push(format!("{resource}leaf"));
-        let store = PodStore::new(Graph::load_dataset(&dataset, "nquads").unwrap());
+        let mut store = PodStore::new(Graph::load_dataset(&dataset, "nquads").unwrap());
+        // This generated corpus admits targets beyond the default container cap.
+        let mut budget = store.auth_budget();
+        budget.max_resource_path_depth = 128;
+        store.set_auth_budget(budget);
         for r in resources {
             assert_eq!(
                 store.resolve_acl(&r),
@@ -123,4 +242,30 @@ fn acl_resolution_matches_original_over_random_ancestors() {
             );
         }
     }
+}
+
+#[test]
+fn name_caps_are_captured_when_the_view_is_materialized() {
+    let resource = format!("https://pod.ex/{}", "a".repeat(80));
+    let mut graph = Graph::default();
+    graph
+        .add_named(
+            Term::NamedNode(NamedNode::new_unchecked(format!("{resource}.acl"))),
+            Graph::default(),
+        )
+        .unwrap();
+    let mut store = PodStore::new(graph);
+    store.materialize_wac().unwrap();
+    let mut budget = store.auth_budget();
+    budget.max_resource_iri_bytes = 32;
+    store.set_auth_budget(budget);
+    assert!(
+        store.resolve_acl(&resource).is_some(),
+        "the installed view retains its name budget"
+    );
+    store.materialize_wac().unwrap();
+    assert!(
+        store.resolve_acl(&resource).is_none(),
+        "a rebuilt view uses the lowered cap"
+    );
 }

@@ -680,7 +680,9 @@ fn valid_target(url: &str, budget: sparq_solid::AuthBudget) -> Result<NamedNode,
     let name = valid_target_name(url)?;
     // Control documents are excluded from the materializer's resource enumeration.
     if !is_control_doc(url) {
-        budget.validate_resource_iri(url)?;
+        budget
+            .validate_resource_iri(url)
+            .map_err(|e| format!("invalid target <{url}>: {e}"))?;
     }
     Ok(name)
 }

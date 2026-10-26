@@ -2585,7 +2585,7 @@ fn write_names_observe_store_caps_before_content_or_containment() {
                     "url": url, "content_type": "text/turtle", "content": content
                 }),
             );
-            assert!(error && text.contains(cap), "{text}");
+            assert!(error && text.contains(cap) && text.contains("invalid target <"), "{text}");
             assert_eq!(snapshot(&server), before);
         }
         let (text, error) = tool(

@@ -1422,8 +1422,10 @@ surface, `research/sparq-solid-scope.md` §4); this is exactly that missing shel
   **access-controlled** SPARQL query as the session and returns SPARQL-results JSON; a grant-less
   session sees ZERO rows (empty view), never the whole store.
   The query uses the server's existing `query_timeout` (`--query-timeout` /
-  `SPARQ_QUERY_TIMEOUT`, default 30 seconds; zero disables it), starting when evaluation
-  begins after view construction. Only the deadline is applied here. A timeout returns
+  `SPARQ_QUERY_TIMEOUT`, default 30 seconds; zero disables it), starting before request
+  parsing, pool admission, view construction, query rewrite, session-view setup, and
+  dataset construction. The blocking task is awaited until that deadline plus the same
+  two-second grace as `/sparql`. Only the deadline is applied here. A timeout returns
   the same `503` JSON error as `/sparql`, with no partial query results.
   - **ODRL lane** (`odrl-authz` cargo feature, default OFF; sq-lrtc3.1 + sq-3mu76): when the
     request dataset carries ODRL policy rules (`odrl:permission`/`odrl:prohibition`), the handler
@@ -1475,8 +1477,15 @@ build plus policy evaluation and index rebuild under **one claim**, and the
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
 The stateless build and stateful cache-miss build keep the decision, ACL discovery,
 `WAC-Allow` calculation, or query in the same blocking closure under that one permit.
-Stateful cache hits run their request work through `spawn_blocking` without a build claim,
-so a saturated build pool does not change which cached requests are served.
+Stateful cache-hit decisions and `WAC-Allow` calculation run inline on the async worker,
+without a build claim. ACL targets are indexed once per view; targets longer than
+`max_resource_iri_bytes` or deeper than `max_resource_path_depth` are omitted. Each
+borrowed ancestor-prefix lookup hashes at most the byte cap; prefixes deeper than the
+indexed targets are skipped. The ancestor walks scan the request resource linearly.
+Cache-hit queries use a blocking worker so the handler can
+bound their await; they also claim no build slot. A saturated build pool therefore keeps
+serving cached requests. A stateless or cache-miss query holds its build permit through
+query completion, so other builds can be shed during that interval.
 The permit remains in the blocking task until it finishes, even if the handler is cancelled.
 `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` is clamped to `1..=tokio::sync::Semaphore::MAX_PERMITS`
 (0 becomes 1), and caps the

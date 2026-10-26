@@ -259,21 +259,10 @@ pub struct PodStore {
     // sq-j8qtt (issue #1570): the PERSISTENT structural ACL index — the
     // `.acl`/`.acr` control-document set + `<urn:sparq:auth>`-materialized flag that
     // `decide` / `decide_batch` / `resolve_acl` walk to discover the governing ACL. It is
-    // a pure function of the current named-graph NAMES, so it is built LAZILY on the first
-    // point decision of a generation and then reused across the whole generation instead of
-    // rebuilt per call (the pre-fix `AclIndex::build(&self.graph)` was an O(named-graph-
-    // count) whole-store scan on EVERY `decide`). `OnceLock` gives the interior mutability
-    // the `&self` decision surface needs while keeping `PodStore: Sync` (a per-request LDP
-    // server shares `&PodStore` across threads): steady-state reads are a lock-free
-    // `get()`, and the first caller of a generation wins the one-time build.
-    //
-    // INVALIDATION — airtight by construction: it is dropped ONLY in `reindex`, the single
-    // seam that also rebuilds `auth` and clears the session cache (`self.auth` is assigned
-    // NOWHERE else). So it invalidates *exactly* when the authorization view does — a
-    // `put_acl`/`delete_acl`/`materialize_*`/bridge/trust change re-materializes, `reindex`
-    // empties this cell, and the next decision rebuilds from the new graph. It can never be
-    // more stale than `auth` itself, so it introduces no fail-open window. (sq-b7k7u's
-    // incremental reindex + sq-cnuqd's shared `&self` session cache compose on this seam.)
+    // prepared with the current name budget during materialization and reused for
+    // that view. An unmaterialized store initializes it lazily. OnceLock supports
+    // shared point decisions without rebuilding the structural map on every call.
+    // reindex replaces it alongside auth and the session caches after policy changes.
     acl_index: OnceLock<decide::AclIndex>,
     // issue #55: the set of graphs the current access-control documents
     // reference via `acl:agentGroup` — the WAC group-membership INPUTS of the auth view.
@@ -1147,7 +1136,7 @@ impl PodStore {
     ///   from B's old ones → B is invalidated automatically; no semantic confinement argument
     ///   needed.
     ///
-    /// The structural `acl_index` is dropped either way — it can never be more stale than
+    /// The structural `acl_index` is rebuilt either way — it can never be more stale than
     /// `auth`, so a rule change (put_acl/delete_acl/materialize_*/bridge/trust) is reflected
     /// by the next decision and no stale ACL discovery survives.
     fn reindex_with(&mut self, scope: ReindexScope) {
@@ -1187,10 +1176,10 @@ impl PodStore {
                 }
             }
         }
-        // sq-j8qtt: drop the persistent structural ACL index in lock-step with
-        // the auth rebuild. `take` empties the cell; the next `decide`/`resolve_acl` rebuilds
-        // from the just-re-materialized graph.
+        // Install structural discovery with the view and its current name budget,
+        // before any point decision can reuse the generation.
         self.acl_index.take();
+        let _ = self.acl_index();
         // issue #55: same lock-step for the referenced-group-document set — an
         // `.acl` write that starts (or stops) referencing a group document is reflected on
         // the next update's re-materialization decision.
@@ -1206,14 +1195,14 @@ impl PodStore {
         self.group_docs.get_or_init(|| loader::referenced_group_docs(&self.graph))
     }
 
-    /// The persistent structural ACL index for the current generation, built lazily on the
-    /// first point decision after a (re-)materialization and reused across the whole
-    /// generation (sq-j8qtt). Shared by [`PodStore::decide`] / `decide_batch` /
+    /// The persistent structural ACL index for the current generation, prepared during
+    /// (re-)materialization and reused across the generation. An unmaterialized store
+    /// builds it lazily. Shared by [`PodStore::decide`] / `decide_batch` /
     /// [`PodStore::resolve_acl`] so a decision is a point lookup, not a per-call whole-store
-    /// scan. `reindex` empties the cell, so this can never outlive an ACL change.
+    /// scan. `reindex` replaces the index, so this can never outlive an ACL change.
     fn acl_index(&self) -> &decide::AclIndex {
         self.acl_index.get_or_init(|| {
-            let mut index = decide::AclIndex::build(&self.graph);
+            let mut index = decide::AclIndex::build(&self.graph, self.auth_budget);
             if self.view_dropped {
                 index.mark_unmaterialized();
             }

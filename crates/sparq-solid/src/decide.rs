@@ -259,15 +259,16 @@ impl WacDecision {
 }
 
 /// A read-only structural index of a dataset's named graphs: which IRIs are control
-/// documents (`.acl`/`.acr`), and whether the auth view is loaded. Built ONCE per
-/// `decide_batch` / `resolve_acl` call so a batch of N decisions is N point lookups, not
-/// N full scans (FR-7's "one indexed call, not N round-trips").
+/// documents (`.acl`/`.acr`), keyed by target IRI, and whether the auth view is loaded.
+/// Prepared once per materialized view and reused by point and batch decisions;
+/// unmaterialized stores build it lazily.
 pub(crate) struct AclIndex {
-    /// Every control-document IRI present (both `.acl` and `.acr` — a pod is one system,
-    /// but we don't assume which, and an own-ACL lookup is just a set membership test).
+    /// Control targets within the view's resource name caps, with `.acl` precedence.
     control: rustc_hash::FxHashMap<String, NamedNode>,
     /// Longest target of a stored control document, excluding its suffix.
     max_target_len: usize,
+    /// Deepest indexed target, measured in the resource enumeration's containers.
+    max_target_depth: usize,
     #[cfg(test)]
     lookup_bytes: std::sync::atomic::AtomicUsize,
     /// Whether the materialized auth view (`<urn:sparq:auth>`) is present in the dataset.
@@ -276,9 +277,10 @@ pub(crate) struct AclIndex {
 
 impl AclIndex {
     /// Index the dataset's named-graph names in one pass.
-    pub(crate) fn build(graph: &Graph) -> AclIndex {
+    pub(crate) fn build(graph: &Graph, budget: crate::AuthBudget) -> AclIndex {
         let mut control = rustc_hash::FxHashMap::default();
         let mut max_target_len = 0;
+        let mut max_target_depth = 0;
         let mut materialized = false;
         for (name, _) in graph.named() {
             let Term::NamedNode(n) = name else { continue };
@@ -289,6 +291,17 @@ impl AclIndex {
                 .strip_suffix(ACL_SUFFIX)
                 .or_else(|| iri.strip_suffix(ACR_SUFFIX))
             {
+                // A resource admitted to this view cannot name a longer target.
+                if target.len() > budget.max_resource_iri_bytes {
+                    continue;
+                }
+                let depth = parent_iris(target)
+                    .take(budget.max_resource_path_depth.saturating_add(1))
+                    .count();
+                if depth > budget.max_resource_path_depth {
+                    continue;
+                }
+                max_target_depth = max_target_depth.max(depth);
                 max_target_len = max_target_len.max(target.len());
                 // Own .acl precedes .acr, independently of named-graph iteration order.
                 if iri.ends_with(ACL_SUFFIX) || !control.contains_key(target) {
@@ -299,6 +312,7 @@ impl AclIndex {
         AclIndex {
             control,
             max_target_len,
+            max_target_depth,
             materialized,
             #[cfg(test)]
             lookup_bytes: std::sync::atomic::AtomicUsize::new(0),
@@ -335,8 +349,17 @@ impl AclIndex {
     /// fails closed). The container-prefix walk is exactly the loader's `parent_iri`
     /// slash-semantics walk, so discovery and materialization can never disagree.
     pub(crate) fn resolve_acl(&self, resource: &str) -> Option<EffectiveAcl> {
+        if self.control.is_empty() {
+            return None;
+        }
+        // Count in a linear borrowed walk, then skip prefixes deeper than any
+        // admitted target. Even an unenumerated request keeps bounded hash work.
+        let mut depth = parent_iris(resource).count();
         // Own ACL → accessTo scope.
-        if let Some(acl) = self.own_acl(resource) {
+        if let Some(acl) = (depth <= self.max_target_depth)
+            .then(|| self.own_acl(resource))
+            .flatten()
+        {
             return Some(EffectiveAcl {
                 acl: acl.clone(),
                 scope: AclScope::AccessTo,
@@ -344,6 +367,10 @@ impl AclIndex {
         }
         // Walk up the container chain; the nearest ancestor with an ACL governs by default.
         for parent in parent_iris(resource) {
+            depth -= 1;
+            if depth > self.max_target_depth {
+                continue;
+            }
             if let Some(acl) = self.own_acl(parent) {
                 return Some(EffectiveAcl {
                     acl: acl.clone(),
@@ -357,7 +384,7 @@ impl AclIndex {
 
 /// Compute the decision for one `(session, resource, mode)` against a prebuilt index +
 /// auth index. Shared by [`crate::PodStore::decide`] and `decide_batch` (the batch path
-/// builds the [`AclIndex`] once).
+/// reuses the same [`AclIndex`]).
 pub(crate) fn decide_one(
     index: &AclIndex,
     auth: &AuthIndex,
@@ -621,7 +648,10 @@ mod tests {
     #[test]
     fn acl_resolution_skips_hashing_long_prefixes() {
         use std::sync::atomic::Ordering;
-        let ix = AclIndex::build(&graph(ROOT_ACL));
+        let ix = AclIndex::build(
+            &graph(ROOT_ACL),
+            crate::default_auth_budget(),
+        );
         let resource = format!(
             "https://pod.ex/{}{}",
             format!("{}/", "x".repeat(1023)).repeat(63),
@@ -642,9 +672,102 @@ mod tests {
     }
 
     #[test]
+    fn acl_resolution_work_observes_the_view_iri_cap() {
+        use std::sync::atomic::Ordering;
+        let budget = crate::default_auth_budget();
+        let resource = format!(
+            "https://pod.ex/{}leaf",
+            "a/".repeat(budget.max_resource_path_depth - 1)
+        );
+        for target_bytes in [
+            budget.max_resource_iri_bytes,
+            budget.max_resource_iri_bytes + 1,
+            1 << 20,
+        ] {
+            let target = format!(
+                "https://pod.ex/{}",
+                "x".repeat(target_bytes - "https://pod.ex/".len())
+            );
+            let mut g = graph(ROOT_ACL);
+            g.add_named(
+                Term::NamedNode(NamedNode::new_unchecked(format!("{target}.acl"))),
+                Graph::default(),
+            )
+            .unwrap();
+            let deep_target = format!(
+                "https://pod.ex/{}b",
+                "b/".repeat((budget.max_resource_iri_bytes - 16) / 2)
+            );
+            g.add_named(
+                Term::NamedNode(NamedNode::new_unchecked(format!("{deep_target}.acl"))),
+                Graph::default(),
+            )
+            .unwrap();
+            let admitted_target = format!(
+                "https://pod.ex/{}last",
+                "c/".repeat(budget.max_resource_path_depth - 1)
+            );
+            g.add_named(
+                Term::NamedNode(NamedNode::new_unchecked(format!("{admitted_target}.acl"))),
+                Graph::default(),
+            )
+            .unwrap();
+            let ix = AclIndex::build(&g, budget);
+            // Exercise both an admitted chain and a long chain whose trailing
+            // segments must be skipped before consulting a stored ancestor.
+            for r in [
+                &resource,
+                &format!("https://pod.ex/{}leaf", "a/".repeat(4096)),
+                &format!(
+                    "https://pod.ex/{}leaf",
+                    format!("{}/", "a".repeat(4095)).repeat(63)
+                ),
+            ] {
+                ix.lookup_bytes.store(0, Ordering::Relaxed);
+                let effective = ix.resolve_acl(r).unwrap();
+                assert_eq!(effective.acl.as_str(), "https://pod.ex/.acl");
+                assert!(
+                    ix.lookup_bytes.load(Ordering::Relaxed)
+                        <= budget.max_resource_path_depth * budget.max_resource_iri_bytes
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn acl_index_preserves_inclusive_target_name_caps() {
+        let mut budget = crate::default_auth_budget();
+        budget.max_resource_iri_bytes = 64;
+        budget.max_resource_path_depth = 2;
+        let at_bytes = format!(
+            "https://pod.ex/{}",
+            "x".repeat(budget.max_resource_iri_bytes - "https://pod.ex/".len())
+        );
+        let over_bytes = format!("{at_bytes}x");
+        let at_depth = "https://pod.ex/a/b";
+        let over_depth = "https://pod.ex/a/b/c";
+        let mut g = Graph::default();
+        for target in [&at_bytes, &over_bytes, at_depth, over_depth] {
+            g.add_named(
+                Term::NamedNode(NamedNode::new_unchecked(format!("{target}.acl"))),
+                Graph::default(),
+            )
+            .unwrap();
+        }
+        let ix = AclIndex::build(&g, budget);
+        for target in [&at_bytes, at_depth] {
+            let effective = ix.resolve_acl(target).unwrap();
+            assert_eq!(effective.acl.as_str(), format!("{target}.acl"));
+            assert_eq!(effective.scope, AclScope::AccessTo);
+        }
+        assert!(ix.resolve_acl(&over_bytes).is_none());
+        assert!(ix.resolve_acl(over_depth).is_none());
+    }
+
+    #[test]
     fn resolve_inherited_default_scope() {
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let eff = ix
             .resolve_acl("https://pod.ex/notes/n1")
             .expect("inherited acl");
@@ -660,7 +783,7 @@ mod tests {
              <https://pod.ex/notes/n1.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/notes/n1.acl> .\n"
         );
         let g = graph(&nquads);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let eff = ix.resolve_acl("https://pod.ex/notes/n1").expect("own acl");
         assert_eq!(eff.acl.as_str(), "https://pod.ex/notes/n1.acl");
         assert_eq!(eff.scope, AclScope::AccessTo);
@@ -671,7 +794,7 @@ mod tests {
         // A pod with NO control document anywhere.
         let nquads = "<https://pod.ex/d#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/d> .\n";
         let g = graph(nquads);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         assert!(ix.resolve_acl("https://pod.ex/d").is_none());
     }
 
@@ -683,7 +806,7 @@ mod tests {
              <https://pod.ex/notes/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/notes/.acl> .\n"
         );
         let g = graph(&nquads);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let eff = ix
             .resolve_acl("https://pod.ex/notes/n1")
             .expect("nearest acl");
@@ -700,7 +823,7 @@ mod tests {
         // The view was never materialized: governing ACL is discovered, but we cannot
         // decide → Unloaded, deny, retryable. FR-6 present-but-unloaded path.
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let empty_auth = AuthIndex::default();
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -727,7 +850,7 @@ mod tests {
     #[test]
     fn malformed_resource_iri_is_transient_deny() {
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let auth = AuthIndex::default();
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -759,7 +882,7 @@ mod tests {
     fn acl_link_header_built_from_governing_acl() {
         // FR-5: the resolved decision advertises the governing ACL as a rel=acl Link value.
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let auth = AuthIndex::default(); // unmaterialized → Unloaded, but ACL still discovered
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -782,7 +905,7 @@ mod tests {
         // FR-5 fail-closed: NoAcl and Transient have no governing ACL ⇒ no link to emit.
         let nquads = "<https://pod.ex/d#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/d> .\n";
         let g = graph(nquads);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let auth = AuthIndex::default();
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -887,7 +1010,7 @@ mod tests {
     #[test]
     fn create_refusal_is_definitive_and_carries_the_acl_link() {
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let auth = AuthIndex::default();
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -923,7 +1046,7 @@ mod tests {
         // retryable `Unloaded`. The name refusal must still win and stay definitive —
         // otherwise a 503 invites the escalation attempt to be retried until it lands.
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         assert!(!ix.materialized, "fixture is deliberately unmaterialized");
         let auth = AuthIndex::default();
         let alice = Session {
@@ -957,7 +1080,7 @@ mod tests {
     #[test]
     fn create_into_a_non_container_is_refused() {
         let g = graph(ROOT_ACL);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let auth = AuthIndex::default();
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -982,7 +1105,7 @@ mod tests {
     fn no_acl_is_definitive_deny_not_retryable() {
         let nquads = "<https://pod.ex/d#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/d> .\n";
         let g = graph(nquads);
-        let ix = AclIndex::build(&g);
+        let ix = AclIndex::build(&g, crate::default_auth_budget());
         let auth = AuthIndex::default();
         let alice = Session {
             agent: Some("https://alice.ex/card#me"),
