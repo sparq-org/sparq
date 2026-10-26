@@ -34,6 +34,10 @@ pre-processing: it produces the `Vec<TrustRule>` that the **UNCHANGED** admissio
                                   (pod wiring: sparq-solid `trust-graph`, default-OFF)
 ```
 
+Both `admit` and `admit_static` preserve first-seen output order while deduplicating facts
+with a hash set. `AdmittedFact` and `StaticAdmittedFact` implement `Hash` consistently with
+`Eq`, including issuer and, for static facts, holder and freshness deadline.
+
 ## What this is — and is NOT (honest scope, read first)
 
 - **RESEARCH prototype, default-OFF.** Every flag involved is opt-in and **default-OFF**
@@ -239,6 +243,9 @@ the wrong one is a soundness bug (the `sq-xc4y` static/dynamic split):
 Feed `effective_rules` from the closure to either path as the `rules` argument; admission
 itself never errors — a credential that fails any gate simply admits nothing
 (fail-closed, default-deny).
+The PodStore install methods return `Result`: reasoning or authorization-view storage
+failures return an error. A failed view write disables authorization until a successful
+static WAC/ACP materialization, even when storage also refuses cleanup.
 
 ## Trust-expression surfaces — verifier↔holder contract (sq-6syab, issue #1592)
 

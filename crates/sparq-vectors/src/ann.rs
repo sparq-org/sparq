@@ -134,7 +134,7 @@ pub fn nearest_term_exact(
         .into_iter()
         .filter(|&(n, _)| n != id)
         .take(k)
-        .map(|(n, s)| (graph.dict.term(n), s))
+        .map(|(n, s)| (graph.dict().term(n), s))
         .collect()
 }
 
@@ -209,7 +209,7 @@ fn tiebreak_domain_term(graph: &Graph, id: Id) -> Result<Term, String> {
             }
         }
     }
-    let term = graph.dict.term(id);
+    let term = graph.dict().term(id);
     if is_ground(&term) {
         Ok(term)
     } else {
@@ -618,7 +618,7 @@ impl VectorIndex {
             .into_iter()
             .filter(|&(n, _)| n != id)
             .take(k)
-            .map(|(n, s)| (graph.dict.term(n), s))
+            .map(|(n, s)| (graph.dict().term(n), s))
             .collect()
     }
 
@@ -760,7 +760,7 @@ mod tests {
         const TWO: &str = "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>";
 
         fn iris(g: &Graph, hits: &[(sparq_core::dict::Id, f32)]) -> Vec<String> {
-            hits.iter().map(|&(id, _)| g.dict.term(id).to_string()).collect()
+            hits.iter().map(|&(id, _)| g.dict().term(id).to_string()).collect()
         }
 
         #[test]
@@ -876,7 +876,7 @@ mod tests {
                 let hits = nearest_exact_tiebreak(&store, &g, &[1.0, 0.0], 1, None).unwrap();
                 assert_eq!(hits.len(), 1);
                 assert_eq!(
-                    g.dict.term(hits[0].0).to_string(),
+                    g.dict().term(hits[0].0).to_string(),
                     "<http://ex/top>".to_string()
                 );
             }

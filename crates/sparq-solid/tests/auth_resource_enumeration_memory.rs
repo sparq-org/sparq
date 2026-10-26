@@ -22,14 +22,23 @@
 //! the budget's order of magnitude rather than the name's. The kinds themselves are pinned
 //! by `tests/auth_input_budget.rs`.
 //!
-//! This test lives in its own test binary so no other test's allocations land in the
-//! measurement.
+//! The same bound is measured for the store-side walk over the same names: the lifecycle
+//! REPLAY behind `PodStore::rematerialize_after_edit` announces every resource an edit brings
+//! into being, and the caller owns each of those names, so one ADDED name of length L under D
+//! containers costs up to L x D bytes there before the rebuild's own input assembly runs.
+//!
+//! These tests share one test binary (a process has one global allocator) and hold `SERIAL`
+//! while they measure, so no other test's allocations land in a measurement.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
 use sparq_core::Graph;
 use sparq_solid::{default_auth_budget, is_auth_allowance_refusal, PodStore};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+
+/// Held by each test while it measures, so the measurements never overlap.
+static SERIAL: Mutex<()> = Mutex::new(());
 
 /// Bytes this process currently holds through the global allocator.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -82,6 +91,7 @@ const HELD_CEILING: usize = 8 << 20;
 
 #[test]
 fn a_deep_resource_iri_is_refused_without_building_its_chain() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let resource = format!("https://pod.ex/{}doc", "a/".repeat(DEPTH));
     assert!(
         resource.len() > 4 * default_auth_budget().max_resource_iri_bytes,
@@ -112,4 +122,45 @@ fn a_deep_resource_iri_is_refused_without_building_its_chain() {
     );
     // The dataset is still alive, so the measurement really did span the materialization.
     assert!(!dataset.is_empty());
+}
+
+#[test]
+fn a_deep_added_name_is_refused_without_replaying_its_chain() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = PodStore::new(Graph::default());
+    store.materialize_wac().expect("an empty pod materializes");
+    let before = store.stored_graphs();
+
+    let name = format!("https://pod.ex/{}doc", "a/".repeat(DEPTH));
+    assert!(
+        name.len() > 4 * default_auth_budget().max_resource_iri_bytes,
+        "the name is well past the caps in force"
+    );
+    let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new(&name).expect("an IRI"));
+    store
+        .graph_unchecked_mut()
+        .ensure_named(&term)
+        .expect("store the graph");
+
+    let start = LIVE.load(Ordering::Relaxed);
+    PEAK.store(start, Ordering::Relaxed);
+    let err = store
+        .rematerialize_after_edit(&before, None, &[name.as_str()], false)
+        .expect_err("a name past the caps must refuse the rebuild");
+    let held = PEAK.load(Ordering::Relaxed).saturating_sub(start);
+
+    assert!(
+        is_auth_allowance_refusal(&err),
+        "the refusal is a typed budget refusal: {}",
+        err
+    );
+    assert!(
+        held < HELD_CEILING,
+        "the refused rebuild held {} bytes — the caps admit a 2 KiB name under {} containers, \
+         so this name's container chain was being replayed before it was refused",
+        held,
+        default_auth_budget().max_resource_path_depth
+    );
+    // The name is still alive, so the measurement really did span the rebuild.
+    assert!(!name.is_empty());
 }

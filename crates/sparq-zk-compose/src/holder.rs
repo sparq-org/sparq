@@ -307,7 +307,7 @@ mod tests {
     // verifier (T6) and the driver resolve the same compiled member.
     #[test]
     fn holder_pok_circuit_id_package_name() {
-        assert_eq!(CircuitId::HolderPok.package(), "holder_pok");
+        assert_eq!(CircuitId::HolderPok.package().unwrap(), "holder_pok");
     }
 
     // The witness is assembled directly from a holder secret; its digest is
@@ -395,8 +395,8 @@ mod tests {
     // the verifier (bind_holder_set) and the driver resolve the same compiled member.
     #[test]
     fn holder_set_circuit_id_package_name() {
-        assert_eq!(CircuitId::HolderSet { depth: 4 }.package(), "holder_set_d4");
-        assert_eq!(CircuitId::HolderSet { depth: 2 }.package(), "holder_set_d2");
+        assert_eq!(CircuitId::HolderSet { depth: 4 }.package().unwrap(), "holder_set_d4");
+        assert_eq!(CircuitId::HolderSet { depth: 2 }.package().unwrap(), "holder_set_d2");
     }
 
     // The holder-set LEAF is the holder-key digest (NOT the issuer h2(x,y) shape):

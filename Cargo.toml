@@ -127,6 +127,11 @@ memchr = "2"
 # Memory-mapped on-disk indexes (out-of-core, native only) — query datasets larger
 # than RAM by letting the OS page in only the working set.
 memmap2 = "0.9"
+# Cross-platform advisory file locks: the exclusive lock on a persisted graph directory.
+fs4 = { version = "1.1", default-features = false, features = ["sync"] }
+# File identity (device + inode on Unix, volume + file index on Windows): whether two paths
+# name one directory, whatever their spelling.
+same-file = "1.0.6"
 # RAM / free-disk detection for the spillable-dictionary build budget (native only,
 # behind sparq-core's `dict-spill` feature — never reaches the wasm build).
 libc = "0.2"

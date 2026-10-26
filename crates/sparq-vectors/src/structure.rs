@@ -165,7 +165,7 @@ impl TypeConstraints {
     /// built from the *same* `graph` — class/predicate IRIs are resolved back to ids via the
     /// graph's dictionary.
     pub fn from_introspection(graph: &Graph, introspection: &Introspection) -> TypeConstraints {
-        let dict = &graph.dict;
+        let dict = graph.dict();
 
         // Resolve the rdf:type predicate id (NO_ID-equivalent if the graph never uses it → the
         // entity_types map is simply empty and every entity is unconstrained).
@@ -302,7 +302,7 @@ pub enum TermScope {
 /// Under [`TermScope::Embeddable`] quoted-triple terms are additionally admitted. Literals and
 /// inline values are excluded under both scopes.
 pub(crate) fn is_embeddable(graph: &Graph, id: Id, scope: TermScope) -> bool {
-    match graph.dict.term_parts(id) {
+    match graph.dict().term_parts(id) {
         TermParts::Iri { .. } | TermParts::Blank(_) => true,
         TermParts::Triple(_) => scope == TermScope::Embeddable,
         _ => false,
@@ -390,7 +390,7 @@ impl<'a> NegativeSampler<'a> {
                 for id in [s, o] {
                     // Route each endpoint into the pool of its sort. Under `IriBlank` no quoted
                     // term can pass `is_embeddable`, so `triple_set` stays empty by construction.
-                    if matches!(graph.dict.term_parts(id), TermParts::Triple(_)) {
+                    if matches!(graph.dict().term_parts(id), TermParts::Triple(_)) {
                         triple_set.insert(id);
                     } else {
                         entity_set.insert(id);
@@ -796,7 +796,7 @@ _:b0 <http://ex/knows> <http://ex/alice> .\n";
         let mut ids: Vec<Id> = graph
             .iter_ids()
             .map(|[_, _, o]| o)
-            .filter(|&o| matches!(graph.dict.term_parts(o), TermParts::Triple(_)))
+            .filter(|&o| matches!(graph.dict().term_parts(o), TermParts::Triple(_)))
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -815,7 +815,7 @@ _:b0 <http://ex/knows> <http://ex/alice> .\n";
         let blank = g
             .iter_ids()
             .map(|[s, _, _]| s)
-            .find(|&s| matches!(g.dict.term_parts(s), TermParts::Blank(_)))
+            .find(|&s| matches!(g.dict().term_parts(s), TermParts::Blank(_)))
             .expect("fixture has a blank-node subject");
         assert!(is_embeddable(g, blank, TermScope::IriBlank));
         assert!(is_embeddable(g, blank, TermScope::Embeddable));
@@ -832,7 +832,7 @@ _:b0 <http://ex/knows> <http://ex/alice> .\n";
         let lit = g
             .iter_ids()
             .map(|[_, _, o]| o)
-            .find(|&o| matches!(g.dict.term_parts(o), TermParts::Lit { .. }))
+            .find(|&o| matches!(g.dict().term_parts(o), TermParts::Lit { .. }))
             .expect("fixture has a literal object");
         assert!(!is_embeddable(g, lit, TermScope::IriBlank));
         assert!(!is_embeddable(g, lit, TermScope::Embeddable));
@@ -896,7 +896,7 @@ _:b0 <http://ex/knows> <http://ex/alice> .\n";
                     .any(|[su, p, o]| su == stmt1 && p == reifies && o == tt)
             })
             .expect("stmt1 reifies a quoted term");
-        let is_quoted = |id: Id| matches!(g.dict.term_parts(id), TermParts::Triple(_));
+        let is_quoted = |id: Id| matches!(g.dict().term_parts(id), TermParts::Triple(_));
 
         // Corrupting the quoted-term TAIL slot must only ever emit quoted terms…
         let mut tail_negs = Vec::new();

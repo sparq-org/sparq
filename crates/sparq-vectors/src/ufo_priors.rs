@@ -563,7 +563,7 @@ fn named(iri: &str) -> oxrdf::Term {
 /// Is the id a named or blank node (the only things that can be classes/individuals here)?
 fn is_node(graph: &Graph, id: Id) -> bool {
     matches!(
-        graph.dict.term_parts(id),
+        graph.dict().term_parts(id),
         TermParts::Iri { .. } | TermParts::Blank(_)
     )
 }

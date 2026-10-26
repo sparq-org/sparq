@@ -34,7 +34,7 @@ fn random_corpus(rng: &mut StdRng, len: usize) -> Vec<String> {
 }
 
 fn literal(graph: &Graph, hit: &Hit) -> String {
-    match graph.dict.term(hit.id) {
+    match graph.dict().term(hit.id) {
         Term::Literal(value) => value.value().to_owned(),
         term => panic!("text hit referred to non-literal {term:?}"),
     }

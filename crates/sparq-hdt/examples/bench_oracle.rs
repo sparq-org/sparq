@@ -65,8 +65,8 @@ fn main() {
     let g = sparq_hdt::load(&hdt_path).expect("loading benchmark HDT archive");
 
     // (a) load-and-decode-to-native: stored triple count + distinct dictionary terms.
-    let triples = g.store.len();
-    let terms = g.dict.len();
+    let triples = g.store().len();
+    let terms = g.dict().len();
 
     // (b) triple-pattern RESOLUTION on the decoded graph (the design's §3.7(a) "+
     //     triple-pattern resolution on the same archive"): both prove the decoded
@@ -86,8 +86,8 @@ fn main() {
     let upstream = sparq_hdt::load_reader_via_upstream(std::io::Cursor::new(bytes.clone()))
         .expect("upstream-oracle load");
     let direct_eq_upstream = (triple_set(&g) == triple_set(&upstream)
-        && g.store.len() == upstream.store.len()
-        && g.dict.len() == upstream.dict.len()) as u64;
+        && g.store().len() == upstream.store().len()
+        && g.dict().len() == upstream.dict().len()) as u64;
 
     // DETERMINISTIC rows (unit `count`) — the HARD gate in run.sh.
     let mut out = String::new();
@@ -144,7 +144,7 @@ fn main() {
 /// A full SPO scan grouped by predicate -> number of DISTINCT predicates.
 fn distinct_predicate_count(g: &Graph) -> usize {
     use std::collections::BTreeSet;
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     let mut preds: BTreeSet<u32> = BTreeSet::new();
     for r in scan.rows.iter() {
         let [_, pid, _] = scan.to_spo(r);
@@ -156,12 +156,12 @@ fn distinct_predicate_count(g: &Graph) -> usize {
 /// A single bound-predicate triple-pattern resolution: count of triples whose
 /// predicate term is `pred_str` (returns 0 if that predicate is absent).
 fn bound_predicate_count(g: &Graph, pred_str: &str) -> usize {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     scan.rows
         .iter()
         .filter(|r| {
             let [_, pid, _] = scan.to_spo(r);
-            g.dict.term(pid).to_string() == pred_str
+            g.dict().term(pid).to_string() == pred_str
         })
         .count()
 }
@@ -169,15 +169,15 @@ fn bound_predicate_count(g: &Graph, pred_str: &str) -> usize {
 /// A canonical, comparable triple set (N-Triples term rendering) for the
 /// direct-vs-upstream decode-agreement oracle.
 fn triple_set(g: &Graph) -> std::collections::BTreeSet<[String; 3]> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     scan.rows
         .iter()
         .map(|r| {
             let [s, p, o] = scan.to_spo(r);
             [
-                g.dict.term(s).to_string(),
-                g.dict.term(p).to_string(),
-                g.dict.term(o).to_string(),
+                g.dict().term(s).to_string(),
+                g.dict().term(p).to_string(),
+                g.dict().term(o).to_string(),
             ]
         })
         .collect()
@@ -225,7 +225,7 @@ fn synthetic_timing(n: usize) -> Option<(f64, f64, usize)> {
         let t = Instant::now();
         let g = sparq_hdt::load(&hdt_path).ok()?;
         best_hdt = best_hdt.min(t.elapsed().as_secs_f64());
-        triples = g.store.len();
+        triples = g.store().len();
     }
 
     let mut best_ntgz = f64::MAX;
@@ -236,7 +236,7 @@ fn synthetic_timing(n: usize) -> Option<(f64, f64, usize)> {
         best_ntgz = best_ntgz.min(t.elapsed().as_secs_f64());
         // Both ingest paths must agree on the stored triple count (a cheap sanity
         // cross-check; the HARD correctness gate is the snikmeta block above).
-        debug_assert_eq!(g.store.len(), triples);
+        debug_assert_eq!(g.store().len(), triples);
     }
 
     // Clean the scratch dir (disk discipline; bench data is regenerable).

@@ -216,7 +216,7 @@ impl<'g> ControlWrites<'g> {
         let replaced = self.replaced.as_ref().map(|(doc, _)| *doc);
         let mut graphs: Vec<(&'g str, Vec<[Term; 3]>)> = self
             .graph
-            .named
+            .named()
             .iter()
             .filter_map(|(n, g)| {
                 graph_iri(n)
@@ -406,11 +406,101 @@ fn document_view<'a>(
 /// `<urn:sparq:auth>`: a loaded dataset must not be able to smuggle in the rewrite
 /// sentinel (`urn:sparq:nothing`) or a FORGED auth view; only `install_auth_view`
 /// creates `<urn:sparq:auth>`, after a successful materialization (roborev 1727).
-pub(crate) fn strip_reserved_graphs(graph: &mut Graph) {
-    graph.named.retain(|(name, _)| match name {
+///
+/// Directory-backed roots remove reserved slots through the durable drop methods.
+/// Returns an error when a removal cannot complete.
+pub(crate) fn strip_reserved_graphs(graph: &mut Graph) -> Result<(), String> {
+    if graph.is_directory_backed() {
+        let reserved: Vec<_> = graph
+            .named()
+            .iter()
+            .filter_map(|(name, _)| match name {
+                Term::NamedNode(n) if n.as_str().starts_with(RESERVED_PREFIX) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        for name in reserved {
+            drop_named_view(graph, &name)?;
+        }
+        return Ok(());
+    }
+    graph.retain_named(|name, _| match name {
         Term::NamedNode(n) => !n.as_str().starts_with(RESERVED_PREFIX),
         _ => true,
-    });
+    })
+}
+
+/// Remove a view only when its slot exists; a durable drop rewrites surviving slots.
+pub(crate) fn drop_named_view(graph: &mut Graph, name: &Term) -> Result<(), String> {
+    if graph.named_graph(name).is_none() {
+        return Ok(());
+    }
+    view_write_fault()?;
+    if graph.is_directory_backed() {
+        while graph.named_graph(name).is_some() {
+            graph.drop_named_durable(name)?;
+        }
+        Ok(())
+    } else {
+        graph.retain_named(|n, _| n != name)
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static FAIL_VIEW_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static FAIL_ALL_VIEW_WRITES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[inline]
+fn view_write_fault() -> Result<(), String> {
+    #[cfg(test)]
+    if FAIL_VIEW_WRITE.replace(false) || FAIL_ALL_VIEW_WRITES.get() {
+        return Err("injected authorization view write failure".into());
+    }
+    Ok(())
+}
+
+/// Install a named view through logged writes when the dataset has a durable root.
+pub(crate) fn install_named_view(graph: &mut Graph, name: Term, view: Graph) -> Result<(), String> {
+    if graph.is_directory_backed() {
+        let slot = graph.ensure_named(&name)?;
+        let old: FxHashSet<_> = graph_triples(&graph.named()[slot].1).into_iter().collect();
+        let new: FxHashSet<_> = graph_triples(&view).into_iter().collect();
+        let inserts: Vec<_> = new.difference(&old).cloned().collect();
+        let deletes: Vec<_> = old.difference(&new).cloned().collect();
+        if inserts.is_empty() && deletes.is_empty() {
+            return Ok(());
+        }
+        view_write_fault()?;
+        graph.apply_delta_to_named(slot, &inserts, &deletes)
+    } else {
+        graph.set_named(name, view).map(|_| ())
+    }
+}
+
+/// Empties writable in-memory reserved slots when removal did not complete, preserving their
+/// positions. Durable slots stay in place; the caller disables the authorization view until
+/// materialization succeeds.
+pub(crate) fn empty_reserved_graphs(graph: &mut Graph) {
+    let reserved: Vec<Term> = graph
+        .named()
+        .iter()
+        .filter(|(name, g)| {
+            !g.is_directory_backed()
+                && matches!(name, Term::NamedNode(n) if n.as_str().starts_with(RESERVED_PREFIX))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in reserved {
+        let _ = graph.set_named(name, Graph::new());
+    }
+}
+
+/// `Err` unless the auth view can be installed in `graph`: it accepts writes (checked before
+/// anything changes, so a refusal leaves the previous view in place).
+pub(crate) fn require_writable(graph: &Graph) -> Result<(), String> {
+    graph.check_writable()
 }
 
 /// Whether a session-supplied agent/client value may participate in principal
@@ -447,12 +537,12 @@ pub(crate) fn graph_triples_metered(
     meter: &mut InputMeter,
 ) -> Result<Vec<[Term; 3]>, String> {
     let pat: sparq_core::store::Pattern = [None, None, None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     meter.open();
     let mut out = Vec::with_capacity(scan.rows.len());
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);
-        let triple = [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])];
+        let triple = [g.dict().term(t[0]), g.dict().term(t[1]), g.dict().term(t[2])];
         for term in &triple {
             meter.term(iri, term)?;
         }
@@ -464,12 +554,16 @@ pub(crate) fn graph_triples_metered(
 /// The triples of one named graph as ground term triples.
 pub(crate) fn graph_triples(g: &Graph) -> Vec<[Term; 3]> {
     let pat: sparq_core::store::Pattern = [None, None, None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     scan.rows
         .iter()
         .map(|r| {
             let t = scan.to_spo(r);
-            [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])]
+            [
+                g.dict().term(t[0]),
+                g.dict().term(t[1]),
+                g.dict().term(t[2]),
+            ]
         })
         .collect()
 }
@@ -635,7 +729,7 @@ pub(crate) fn assemble_facts(
         }
     }
     if system == System::Wac {
-        for (name, sub) in &graph.named {
+        for (name, sub) in graph.named() {
             let Some(iri) = graph_iri(name) else { continue };
             // Same reserved-space skip as the resource pass above: a forged
             // `<urn:sparq:…>` graph named by an `acl:agentGroup` must never be read.
@@ -818,7 +912,7 @@ fn group_doc_of(group_iri: &str) -> &str {
 /// document, so a write to one cannot change the auth view either.
 pub(crate) fn referenced_group_docs(graph: &Graph) -> FxHashSet<String> {
     let mut docs: FxHashSet<String> = FxHashSet::default();
-    for (name, sub) in graph.named.iter() {
+    for (name, sub) in graph.named().iter() {
         let Some(iri) = graph_iri(name) else { continue };
         if iri.starts_with(RESERVED_PREFIX)
             || !(iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX))
@@ -914,7 +1008,7 @@ fn enumerate<'g>(
 ) -> Result<Enumerated<'g>, String> {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
-    for (name, sub) in &graph.named {
+    for (name, sub) in graph.named() {
         let Some(iri) = graph_iri(name) else { continue };
         // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
         // never reasoning input. [`strip_reserved_graphs`] also drops these from the
@@ -947,7 +1041,7 @@ fn is_control_graph(iri: &str) -> bool {
 /// document the ACP view, the one reader of creators and owners, reads.
 pub(crate) fn controlled_resources(graph: &Graph) -> FxHashSet<&str> {
     graph
-        .named
+        .named()
         .iter()
         .filter_map(|(n, _)| graph_iri(n))
         .filter_map(|iri| iri.strip_suffix(ACR_SUFFIX))
@@ -1027,7 +1121,7 @@ fn insert_with_containers(
 /// so is every container on its chain (see [`enumerate`]). Every lifecycle decision about
 /// the stored provenance is made against this one rule.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct ResourceGraphs(std::collections::BTreeSet<String>);
+pub(crate) struct ResourceGraphs<'a>(std::collections::BTreeSet<&'a str>);
 
 /// Whether each of `resources` is a resource of `graph` (as [`ResourceGraphs::holds`]), in one
 /// pass over its graph names: for judging a few resources without enumerating them all.
@@ -1036,7 +1130,7 @@ pub(crate) fn held(graph: &Graph, resources: &[String]) -> Vec<bool> {
     if resources.is_empty() {
         return held;
     }
-    for name in graph.named.iter().filter_map(|(n, _)| graph_iri(n)) {
+    for name in graph.named().iter().filter_map(|(n, _)| graph_iri(n)) {
         if !is_resource_graph(name) {
             continue;
         }
@@ -1052,21 +1146,15 @@ pub(crate) fn held(graph: &Graph, resources: &[String]) -> Vec<bool> {
     held
 }
 
-impl ResourceGraphs {
+impl<'a> ResourceGraphs<'a> {
     /// The resource graphs among the names of `graph`'s named graphs.
-    pub(crate) fn of(graph: &Graph) -> Self {
-        Self::from_names(graph.named.iter().filter_map(|(n, _)| graph_iri(n)))
+    pub(crate) fn of(graph: &'a Graph) -> Self {
+        Self::from_names(graph.named().iter().filter_map(|(n, _)| graph_iri(n)))
     }
 
     /// The resource graphs among `names`.
-    pub(crate) fn from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
-        ResourceGraphs(
-            names
-                .into_iter()
-                .filter(|n| is_resource_graph(n))
-                .map(str::to_owned)
-                .collect(),
-        )
+    pub(crate) fn from_names(names: impl IntoIterator<Item = &'a str>) -> Self {
+        ResourceGraphs(names.into_iter().filter(|n| is_resource_graph(n)).collect())
     }
 
     /// Whether `iri` is a resource: a stored resource graph, or a container on the chain of
@@ -1083,56 +1171,84 @@ impl ResourceGraphs {
                     .is_some_and(|n| n.starts_with(iri)))
     }
 
-    /// Every resource, with its containers.
-    pub(crate) fn all(&self) -> FxHashSet<String> {
+    /// Every resource, with its containers, charged against `meter`.
+    ///
+    /// The names are the store's own, but their container chains are built HERE, so this
+    /// walk costs what the names say and not what the store already holds — the same
+    /// product [`insert_with_containers`] describes. It is therefore metered on the same
+    /// terms as a materialization's own enumeration: a name past
+    /// [`crate::AuthBudget::max_resource_iri_bytes`] /
+    /// [`crate::AuthBudget::max_resource_path_depth`], or an enumeration past the aggregate
+    /// [`crate::AuthBudget::max_input_bytes`], refuses rather than being walked.
+    #[cfg(test)]
+    pub(crate) fn all(&self, meter: &mut InputMeter) -> Result<FxHashSet<String>, String> {
         let mut out = FxHashSet::default();
         for name in &self.0 {
-            // Over names this store already holds, with no materialization budget to charge
-            // them against: unmetered, and infallible as a result.
-            let _ = insert_with_containers(&mut out, name, None);
+            insert_with_containers(&mut out, name, Some(meter))?;
         }
-        out
+        Ok(out)
     }
 
-    /// Store a graph named `name`, calling `appears` for each resource it makes that was
-    /// not one just before (the graph itself and the containers it brings).
-    pub(crate) fn add(&mut self, name: &str, mut appears: impl FnMut(&str)) {
+    /// Add a graph, announcing borrowed names for resources newly brought into being.
+    ///
+    /// Only added names face the per-name length/depth caps, before their chain is walked.
+    /// The replay owns no strings, so it spends no aggregate input-byte allowance.
+    /// A refusal leaves the set unchanged and nothing announced.
+    pub(crate) fn add(
+        &mut self,
+        name: &'a str,
+        meter: &mut InputMeter,
+        mut appears: impl FnMut(&'a str),
+    ) -> Result<(), String> {
         if !is_resource_graph(name) || self.0.contains(name) {
-            return;
+            return Ok(());
         }
-        let mut chain = vec![name];
-        let mut cur = name;
-        while let Some(parent) = parent_iri(cur) {
-            chain.push(parent);
-            cur = parent;
+        meter.resource(name)?;
+        let mut cur = Some(name);
+        while let Some(r) = cur {
+            if self.holds(r) {
+                break;
+            }
+            appears(r);
+            cur = parent_iri(r);
         }
-        let fresh: Vec<&str> = chain.into_iter().filter(|r| !self.holds(r)).collect();
-        self.0.insert(name.to_owned());
-        fresh.into_iter().for_each(&mut appears);
+        self.0.insert(name);
+        Ok(())
     }
 
-    /// Remove the graph named `name`, calling `gone` for each resource that is not one any
-    /// more (the graph itself, and each container left with no graph below it).
-    pub(crate) fn remove(&mut self, name: &str, mut gone: impl FnMut(&str)) {
+    /// Remove a graph, announcing borrowed names for resources that cease to exist.
+    ///
+    /// Removals never refuse, including names beyond the current per-name caps. Each
+    /// parent is a subslice of the removed name; no container strings are allocated.
+    pub(crate) fn remove(&mut self, name: &'a str, mut gone: impl FnMut(&'a str)) {
         if !self.0.remove(name) {
             return;
         }
-        let mut cur = name;
-        if !self.holds(cur) {
-            gone(cur);
-        }
-        while let Some(parent) = parent_iri(cur) {
-            if self.holds(parent) {
+        let mut cur = Some(name);
+        while let Some(r) = cur {
+            if self.holds(r) {
                 break;
             }
-            gone(parent);
-            cur = parent;
+            gone(r);
+            cur = parent_iri(r);
         }
     }
 
-    /// Remove every graph, calling `gone` for every resource.
-    pub(crate) fn clear(&mut self, mut gone: impl FnMut(&str)) {
-        self.all().iter().for_each(|r| gone(r));
+    /// Remove all graphs, announcing each resource once through borrowed names.
+    ///
+    /// Like individual removals, clears never refuse or charge an input allowance.
+    pub(crate) fn clear(&mut self, mut gone: impl FnMut(&'a str)) {
+        let mut announced = FxHashSet::default();
+        for &name in &self.0 {
+            let mut cur = Some(name);
+            while let Some(r) = cur {
+                if !announced.insert(r) {
+                    break;
+                }
+                gone(r);
+                cur = parent_iri(r);
+            }
+        }
         self.0.clear();
     }
 }
@@ -1140,7 +1256,7 @@ impl ResourceGraphs {
 /// Whether an access-control resource document in `graph` names `acp:CreatorAgent` or
 /// `acp:OwnerAgent`: whether an ACP view built from it depends on the trusted provenance.
 pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
-    graph.named.iter().any(|(name, g)| {
+    graph.named().iter().any(|(name, g)| {
         graph_iri(name).is_some_and(|iri| iri.ends_with(ACR_SUFFIX))
             && graph_triples(g).iter().any(|t| {
                 matches!(&t[2], Term::NamedNode(o) if SPECIAL_AGENTS[2..4].contains(&o.as_str()))
@@ -1148,14 +1264,19 @@ pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
     })
 }
 
-/// The auth view's resources in `graph` (see [`enumerate`]).
+/// The auth view's resources in `graph` (see [`enumerate`]), charged against `meter`.
 ///
-/// Unmetered: this is the store's own provenance pruning over names it already holds, not
-/// the reasoning input of a materialization, so there is no input budget to charge. The
-/// materialization path passes its [`InputMeter`] instead.
-pub(crate) fn resources(graph: &Graph) -> FxHashSet<String> {
-    // With no meter there is nothing to charge and so no refusal to propagate.
-    enumerate(graph, ACR_SUFFIX, None).unwrap_or_default().0
+/// This is the store's own provenance pruning, over names it already holds — but it BUILDS
+/// their container chains, so it costs what those names say rather than what is already
+/// held, and it is metered on exactly the terms a materialization's own enumeration is. A
+/// name past the per-name caps, or an enumeration past the aggregate, refuses: the
+/// authorization view is not rebuilt (the caller propagates the refusal before anything is
+/// installed), rather than the walk being done unbounded.
+pub(crate) fn resources(
+    graph: &Graph,
+    meter: &mut InputMeter,
+) -> Result<FxHashSet<String>, String> {
+    Ok(enumerate(graph, ACR_SUFFIX, Some(meter))?.0)
 }
 
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
@@ -1188,6 +1309,15 @@ pub fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn require_writable_refuses_a_frozen_graph() {
+        let mut graph = sparq_core::Graph::new();
+        assert!(super::require_writable(&graph).is_ok());
+        graph.freeze_for_test("storage unavailable");
+        assert!(super::require_writable(&graph).is_err());
+    }
+
     use super::{assemble_facts_default, graph_triples, named, skolemize, System};
     use super::{iri_origin, parent_iri};
     use crate::{
@@ -1199,6 +1329,89 @@ mod tests {
 
     const ACR: &str = "https://pod.ex/doc.acr";
     const OTHER_ACR: &str = "https://other.ex/doc.acr";
+
+    /// A fresh input meter over the default budget, for the enumeration helpers.
+    fn meter() -> crate::budget::InputMeter {
+        crate::budget::InputMeter::new(crate::default_auth_budget())
+    }
+
+    /// A resource IRI under `depth` containers, inside the LENGTH cap so the depth cap is
+    /// the one that refuses it.
+    fn deep(depth: usize) -> String {
+        format!("https://pod.ex/{}doc", "a/".repeat(depth))
+    }
+
+    /// [`ResourceGraphs::add`] charges the name it is given: past the depth cap it refuses
+    /// before the chain is walked, and announces nothing — the caller's `appears` is what
+    /// would own each container.
+    #[test]
+    fn resource_graphs_add_refuses_a_name_past_the_caps_announcing_nothing() {
+        let mut graphs = super::ResourceGraphs::default();
+        let mut announced: Vec<String> = Vec::new();
+        let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
+        let err = graphs
+            .add(&name, &mut meter(), |r| announced.push(r.to_owned()))
+            .expect_err("a name past the depth cap is refused");
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::ResourceIri),
+            "the typed enumeration refusal: {}",
+            err
+        );
+        assert!(
+            announced.is_empty(),
+            "nothing is announced, so nothing owns the chain: {:?}",
+            announced
+        );
+        // A name inside the caps still goes in, with its containers announced.
+        let ok = "https://pod.ex/a/b/doc";
+        graphs
+            .add(ok, &mut meter(), |r| announced.push(r.to_owned()))
+            .expect("an ordinary name is admitted");
+        assert!(graphs.holds(ok));
+        assert!(announced.iter().any(|r| r == "https://pod.ex/a/"));
+    }
+
+    /// [`ResourceGraphs::all`] and [`resources`] walk the SAME chains and are charged the
+    /// same way: a held name past the caps refuses the enumeration rather than being walked.
+    #[test]
+    fn the_store_side_enumerations_refuse_a_held_name_past_the_caps() {
+        let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
+        let graphs = super::ResourceGraphs::from_names([name.as_str()]);
+        let err = graphs
+            .all(&mut meter())
+            .expect_err("a held name past the caps is refused");
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::ResourceIri),
+            "the typed enumeration refusal: {}",
+            err
+        );
+
+        let nq = format!("<{name}#it> <https://ex.dev/ns#k> \"v\" <{name}> .\n");
+        let graph = Graph::load_dataset(&nq, "nquads").expect("parses");
+        let err = super::resources(&graph, &mut meter())
+            .expect_err("the provenance pruning is refused on the same terms");
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::ResourceIri),
+            "the typed enumeration refusal: {}",
+            err
+        );
+    }
+
+    /// Removal still works after the caller lowers its per-name caps.
+    #[test]
+    fn resource_graphs_remove_borrows_a_name_past_the_caps() {
+        let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
+        let mut graphs = super::ResourceGraphs::from_names([name.as_str()]);
+        let mut ended = Vec::new();
+        graphs.remove(&name, |r| ended.push(r));
+        assert!(!graphs.holds(&name));
+        assert_eq!(ended.first(), Some(&name.as_str()));
+        assert_eq!(ended.last(), Some(&"https://pod.ex/"));
+        assert!(ended.iter().all(|r| name.as_ptr() == r.as_ptr()));
+    }
 
     #[test]
     fn skolem_components_are_valid_and_unambiguous() {
@@ -1254,7 +1467,7 @@ mod tests {
             let mut sub = Graph::new();
             sub.insert_triple(BlankNode::new("shared").unwrap(), named(predicate), named(object))
                 .unwrap();
-            graph.named.push((named(iri), sub));
+            graph.add_named(named(iri), sub).unwrap();
         }
         let facts = |g: &Graph| -> FxHashSet<_> {
             assemble_facts_default(
@@ -1278,24 +1491,26 @@ mod tests {
             2,
             "the same label belongs to separate documents"
         );
-        graph.named.reverse();
+        let mut reversed = graph.take_named().unwrap();
+        reversed.reverse();
+        graph.extend_named(reversed).unwrap();
         assert_eq!(facts(&graph), before);
     }
 
     fn blank_matcher_store() -> PodStore {
         let mut graph = Graph::new();
-        graph.named.push((named(OTHER_ACR), Graph::new()));
+        graph.add_named(named(OTHER_ACR), Graph::new()).unwrap();
+        graph.add_named(named("https://pod.ex/doc"), Graph::new()).unwrap();
         graph
-            .named
-            .push((named("https://pod.ex/doc"), Graph::new()));
-        graph.named.push((
-            named(ACR),
-            Graph::load_str(
-                include_str!("../tests/fixtures/blank_node_matcher.ttl"),
-                "turtle",
+            .add_named(
+                named(ACR),
+                Graph::load_str(
+                    include_str!("../tests/fixtures/blank_node_matcher.ttl"),
+                    "turtle",
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        ));
+            .unwrap();
         let mut store = PodStore::new(graph);
         store.materialize_acp().unwrap();
         store
@@ -1355,7 +1570,7 @@ mod tests {
             let old_auth = store.auth.clone();
             let auth_graph = &store
                 .graph()
-                .named
+                .named()
                 .iter()
                 .find(|(n, _)| *n == named(AUTH_GRAPH))
                 .unwrap()
@@ -1369,7 +1584,7 @@ mod tests {
             );
             let position = |s: &PodStore| {
                 s.graph
-                    .named
+                    .named()
                     .iter()
                     .position(|(n, _)| *n == named(ACR))
                     .unwrap()
@@ -1749,7 +1964,7 @@ mod tests {
         );
         let graph = Graph::load_dataset(&base, "nquads").unwrap();
         let blank = graph
-            .named
+            .named()
             .iter()
             .filter(|(name, _)| matches!(name, Term::NamedNode(n) if n.as_str() == acl))
             .flat_map(|(_, sub)| graph_triples(sub))

@@ -248,7 +248,7 @@ fn resolve_source(source: &Bound<'_, PyAny>, format: Option<&str>) -> PyResult<(
 
 /// All triples of the (default) graph as canonical `[s, p, o]` id rows.
 fn all_triples(g: &CoreGraph) -> Vec<[Id; 3]> {
-    let scan = g.store.scan(&[None, None, None]);
+    let scan = g.store().scan(&[None, None, None]);
     scan.rows.iter().map(|r| scan.to_spo(r)).collect()
 }
 
@@ -303,6 +303,19 @@ impl Graph {
             self.text = Some(py.detach(|| TextIndex::build(inner)));
         }
     }
+
+    /// The graph, for reading — unless a failed directory swap froze it: what a frozen graph
+    /// reads may be empty or older than its directory, so it raises `OSError` instead (re-open
+    /// the directory with `Graph.open`).
+    fn live(&self) -> PyResult<&CoreGraph> {
+        if self.inner.is_frozen() {
+            let why = self.inner.check_writable().err().unwrap_or_default();
+            return Err(PyIOError::new_err(format!(
+                "the graph is frozen and must be re-opened from its directory: {why}"
+            )));
+        }
+        Ok(&self.inner)
+    }
 }
 
 #[pymethods]
@@ -352,17 +365,48 @@ impl Graph {
         Ok(Graph { inner, text: None })
     }
 
-    /// Persist the graph (indexes + dictionary) into `dir` for later `Graph.open`.
-    fn save(&self, py: Python<'_>, dir: std::path::PathBuf) -> PyResult<()> {
-        py.detach(|| self.inner.save(&dir))
-            .map_err(|e| PyIOError::new_err(format!("cannot save to {}: {e}", dir.display())))
+    /// Open a persisted graph READ-ONLY: the directory is shared with other read-only opens
+    /// (in this or other processes) but not with a writable `Graph.open`, which is refused
+    /// while readers hold it (and they while it does). Updates on the result raise. Refused
+    /// while the directory holds updates still to fold in (open it writable and compact).
+    #[staticmethod]
+    fn open_read_only(py: Python<'_>, dir: std::path::PathBuf) -> PyResult<Graph> {
+        let inner = py
+            .detach(|| CoreGraph::open_read_only(&dir))
+            .map_err(|e| PyIOError::new_err(format!("cannot open {}: {e}", dir.display())))?;
+        Ok(Graph { inner, text: None })
+    }
+
+    /// True when a failed directory swap (a `save` that compacted the directory the graph is
+    /// open from) froze the graph: it then refuses writes, and its queries and `save` raise
+    /// `OSError`. Drop it and re-open the directory with `Graph.open`.
+    #[getter]
+    fn frozen(&self) -> bool {
+        self.inner.is_frozen()
+    }
+
+    /// Persist the graph (indexes + dictionary) into `dir` for later `Graph.open`. Into the
+    /// directory this graph was opened from, it compacts that directory instead (it already
+    /// holds the graph's state, and the graph still maps the files a plain save would rewrite).
+    fn save(&mut self, py: Python<'_>, dir: std::path::PathBuf) -> PyResult<()> {
+        self.live()?;
+        let inner = &mut self.inner;
+        py.detach(|| {
+            if inner.is_backed_by(&dir) {
+                inner.compact()
+            } else {
+                inner.save(&dir).map_err(|e| e.to_string())
+            }
+        })
+        .map_err(|e| PyIOError::new_err(format!("cannot save to {}: {e}", dir.display())))
     }
 
     /// Run a SPARQL SELECT, materialising the solutions as a `QueryResult`
     /// (`.vars` + `.rows`, where each row is a `{var: Term}` dict).
     fn query(&self, py: Python<'_>, sparql: &str) -> PyResult<QueryResult> {
+        let inner = self.live()?;
         let res = py
-            .detach(|| sparq_engine::query(&self.inner, sparql))
+            .detach(|| sparq_engine::query(inner, sparql))
             .map_err(engine_err)?;
         select_result(py, &res)
     }
@@ -371,7 +415,8 @@ impl Graph {
     /// `str` — the fast path: rows are serialised straight from the dictionary,
     /// skipping per-cell term materialisation.
     fn query_json(&self, py: Python<'_>, sparql: &str) -> PyResult<String> {
-        py.detach(|| sparq_engine::query_json(&self.inner, sparql))
+        let inner = self.live()?;
+        py.detach(|| sparq_engine::query_json(inner, sparql))
             .map_err(engine_err)
     }
 
@@ -394,8 +439,9 @@ impl Graph {
     /// if it is missing.
     #[cfg(feature = "arrow")]
     fn query_arrow<'py>(&self, py: Python<'py>, sparql: &str) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.live()?;
         let res = py
-            .detach(|| sparq_engine::query(&self.inner, sparql))
+            .detach(|| sparq_engine::query(inner, sparql))
             .map_err(engine_err)?;
         arrow_export::query_result_to_pyarrow_table(py, &res)
     }
@@ -410,13 +456,14 @@ impl Graph {
             .map_err(|error| engine_err(error.to_string()))?;
         let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)
             .map_err(engine_err)?;
+        let inner = self.live()?;
         match prepared.query() {
             Query::Ask { .. } => {
-                py.detach(|| sparq_engine::ask_prepared(&self.inner, &prepared)).map_err(engine_err)
+                py.detach(|| sparq_engine::ask_prepared(inner, &prepared)).map_err(engine_err)
             }
             Query::Select { .. } => {
                 let n = py
-                    .detach(|| sparq_engine::count_prepared(&self.inner, &prepared))
+                    .detach(|| sparq_engine::count_prepared(inner, &prepared))
                     .map_err(engine_err)?;
                 Ok(n > 0)
             }
@@ -430,8 +477,9 @@ impl Graph {
     /// unbound variable or an illegal RDF position are silently dropped, and
     /// template blank nodes are fresh per solution).
     fn construct(&self, py: Python<'_>, sparql: &str) -> PyResult<Vec<(Term, Term, Term)>> {
+        let inner = self.live()?;
         let triples = py
-            .detach(|| sparq_engine::construct(&self.inner, sparql))
+            .detach(|| sparq_engine::construct(inner, sparql))
             .map_err(engine_err)?;
         Ok(triples.iter().map(triple_terms).collect())
     }
@@ -441,8 +489,9 @@ impl Graph {
     /// through blank-node objects) of each described resource, as a list of
     /// `(subject, predicate, object)` `Term` triples.
     fn describe(&self, py: Python<'_>, sparql: &str) -> PyResult<Vec<(Term, Term, Term)>> {
+        let inner = self.live()?;
         let triples = py
-            .detach(|| sparq_engine::describe(&self.inner, sparql))
+            .detach(|| sparq_engine::describe(inner, sparql))
             .map_err(engine_err)?;
         Ok(triples.iter().map(triple_terms).collect())
     }
@@ -454,6 +503,7 @@ impl Graph {
     /// dataset is modelled: `GRAPH`-scoped data and templates, `USING (NAMED)`,
     /// and the graph-management operations all work on named graphs.
     fn update(&mut self, py: Python<'_>, sparql: &str) -> PyResult<()> {
+        self.inner.check_writable().map_err(engine_err)?;
         let inner = &self.inner;
         let new = py.detach(|| sparq_engine::update(inner, sparql)).map_err(engine_err)?;
         self.inner = new;
@@ -470,6 +520,7 @@ impl Graph {
     /// `Graph.load_n3(text)` (rules + facts in one document) or
     /// `Graph.reason_n3_with(rules)` (rules applied to this graph) instead.
     fn reason(&mut self, py: Python<'_>, profile: &str) -> PyResult<usize> {
+        self.inner.check_writable().map_err(engine_err)?;
         if profile.eq_ignore_ascii_case("n3") {
             return Err(PyValueError::new_err(
                 "N3 rules live in an N3 document; use Graph.load_n3(text) or Graph.reason_n3_with(rules) instead of reason(\"n3\")",
@@ -478,21 +529,15 @@ impl Graph {
         let prof = sparq_reason::Profile::parse(profile).ok_or_else(|| {
             PyValueError::new_err(format!("unknown reasoning profile {profile:?} (known: \"rdfs\", \"owl\")"))
         })?;
-        // Take the graph apart through its public fields (no Clone on Dict/Graph):
-        // move `dict` and `store` out, re-derive the canonical triples, materialize,
-        // rebuild (re-attaching the named graphs, which reasoning does not touch).
-        // A placeholder empty graph holds the slot during the closure.
-        let g = std::mem::replace(&mut self.inner, CoreGraph::from_parts(Dict::new(), Vec::new()));
-        let (inner, added) = py.detach(move || {
-            let mut triples = all_triples(&g);
-            let named = g.named;
-            let mut dict = g.dict;
-            let added = sparq_reason::materialize(prof, &mut dict, &mut triples);
-            let mut rebuilt = CoreGraph::from_parts(dict, triples);
-            rebuilt.named = named;
-            (rebuilt, added)
-        });
-        self.inner = inner;
+        // Rebuild the default graph around its dictionary (a mapped dictionary keeps its
+        // store's lock), materialized; the named graphs, which reasoning does not touch,
+        // stay where they are.
+        let inner = &mut self.inner;
+        let added = py
+            .detach(move || {
+                inner.rebuild_default(|dict, triples| sparq_reason::materialize(prof, dict, triples))
+            })
+            .map_err(engine_err)?;
         self.text = None; // rebuilt graph: the cached text index is stale
         Ok(added)
     }
@@ -509,13 +554,14 @@ impl Graph {
     /// local blanks stay rule-local; review 1961). RDF 1.2 triple terms have no
     /// N3 form and are rejected.
     fn reason_n3_with(&mut self, py: Python<'_>, rules: &str) -> PyResult<usize> {
+        self.inner.check_writable().map_err(engine_err)?;
         use std::fmt::Write as _;
         let inner = &self.inner;
         let before = inner.len();
         // Render the default graph as N-Triples (a syntactic subset of N3) under
         // the rules document and run the same chainer as `load_n3` — exactly the
         // composition sparq-reason's own MaterializedN3Graph uses in fallback mode.
-        let mut new = py
+        let new = py
             .detach(|| {
                 let rows = all_triples(inner);
                 let mut src = String::with_capacity(rules.len() + 1 + 64 * rows.len());
@@ -523,7 +569,7 @@ impl Graph {
                 src.push('\n');
                 for [s, p, o] in rows {
                     for id in [s, p, o] {
-                        let term = inner.dict.term(id);
+                        let term = inner.dict().term(id);
                         match term {
                             oxrdf::Term::Triple(_) => {
                                 return Err("RDF 1.2 triple terms cannot participate in N3 reasoning".into());
@@ -553,9 +599,8 @@ impl Graph {
                 Ok::<_, String>(CoreGraph::from_parts(dict, triples))
             })
             .map_err(engine_err)?;
-        new.named = std::mem::take(&mut self.inner.named);
         let added = new.len().saturating_sub(before);
-        self.inner = new;
+        self.inner.replace_default(new).map_err(engine_err)?;
         self.text = None; // rebuilt graph (fresh dictionary): the cached text index is stale
         Ok(added)
     }
@@ -591,7 +636,12 @@ impl Graph {
             hits.truncate(n);
         }
         hits.iter()
-            .map(|h| (Term::from_oxrdf(&inner.dict.term(h.id)), f64::from(h.score)))
+            .map(|h| {
+                (
+                    Term::from_oxrdf(&inner.dict().term(h.id)),
+                    f64::from(h.score),
+                )
+            })
             .collect()
     }
 
@@ -612,7 +662,7 @@ impl Graph {
     fn query_text(&mut self, py: Python<'_>, sparql: &str) -> PyResult<QueryResult> {
         self.ensure_text_index(py);
         let index = self.text.as_ref().expect("ensure_text_index just built it");
-        let inner = &self.inner;
+        let inner = self.live()?;
         let res = py
             .detach(|| sparq_text::query_text(inner, sparql, index))
             .map_err(engine_err)?;
@@ -649,7 +699,7 @@ impl Graph {
     /// clashes that only follow by entailment.
     fn inconsistencies(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         let inner = &self.inner;
-        Ok(py.detach(|| sparq_reason::inconsistencies(&inner.dict, &all_triples(inner))))
+        Ok(py.detach(|| sparq_reason::inconsistencies(inner.dict(), &all_triples(inner))))
     }
 
     /// A cheap, logically-INDEPENDENT copy of this graph that can then be
@@ -700,6 +750,13 @@ impl Graph {
     // it is intentionally undocumented in SKILL.md (not part of the public API).
     fn _panic_for_test(&self) {
         panic!("sparq-py panic-surface test: this must reach Python as a PanicException, not abort");
+    }
+
+    // Private test hook (not in SKILL.md): freeze the graph as a failed directory swap that
+    // could not be recovered does. A real freeze needs a filesystem failure part-way through a
+    // swap, which no Python test can arrange; this asserts the frozen state is surfaced.
+    fn _freeze_for_test(&mut self, why: &str) {
+        self.inner.freeze_for_test(why);
     }
 }
 

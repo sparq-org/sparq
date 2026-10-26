@@ -718,7 +718,7 @@ mod incidence {
              INSERT DATA { ex:p0 ex:befriends ex:p1 . }",
         )
         .expect("insert");
-        assert!(g.store.has_overlay(), "the INSERT must produce a delta overlay");
+        assert!(g.store().has_overlay(), "the INSERT must produce a delta overlay");
 
         let (off, on) = incidence_on_off(&g, &q);
         assert_eq!(off, on, "incidence path differs from exact under an update overlay");

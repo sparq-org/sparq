@@ -1699,15 +1699,16 @@ fn build_sources(f: &Flags) -> Result<(Vec<ChunkIter>, bool), String> {
 
 /// Sink for `--out`: plain, `.gz`, or `.zst` N-Triples — finished EXPLICITLY so a failed
 /// trailer write is an error, not a silently-truncated archive.
+/// The file is a [`crate::OutFile`]: published over the path only once finished.
 enum OutSink {
-    Plain(std::io::BufWriter<std::fs::File>),
-    Gz(flate2::write::GzEncoder<std::io::BufWriter<std::fs::File>>),
-    Zst(Box<zstd::stream::write::Encoder<'static, std::io::BufWriter<std::fs::File>>>),
+    Plain(std::io::BufWriter<crate::OutFile>),
+    Gz(flate2::write::GzEncoder<std::io::BufWriter<crate::OutFile>>),
+    Zst(Box<zstd::stream::write::Encoder<'static, std::io::BufWriter<crate::OutFile>>>),
 }
 
 impl OutSink {
     fn create(path: &str) -> std::io::Result<OutSink> {
-        let w = std::io::BufWriter::new(std::fs::File::create(path)?);
+        let w = std::io::BufWriter::new(crate::OutFile::create(path)?);
         Ok(if path.ends_with(".gz") {
             OutSink::Gz(flate2::write::GzEncoder::new(w, flate2::Compression::default()))
         } else if path.ends_with(".zst") || path.ends_with(".zstd") {
@@ -1725,16 +1726,41 @@ impl OutSink {
     }
     fn finish(self) -> std::io::Result<()> {
         match self {
-            OutSink::Plain(mut w) => w.flush(),
-            OutSink::Gz(w) => w.finish().and_then(|mut w| w.flush()),
-            OutSink::Zst(w) => w.finish().and_then(|mut w| w.flush()),
+            OutSink::Plain(w) => crate::finish_out(w),
+            OutSink::Gz(w) => w.finish().and_then(crate::finish_out),
+            OutSink::Zst(w) => w.finish().and_then(crate::finish_out),
         }
     }
+}
+
+/// Streams `reader` to the output `out_path` ([`OutSink`]), returning how many statements
+/// (lines) it wrote. The sink is dropped on any error, so its unfinished file is removed.
+fn stream_out(reader: &mut NtReader, out_path: &str) -> Result<u64, String> {
+    let mut sink = OutSink::create(out_path).map_err(|e| format!("creating {out_path}: {e}"))?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut stmts: u64 = 0;
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        stmts += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+        sink.writer()
+            .write_all(&buf[..n])
+            .map_err(|e| format!("writing {out_path}: {e}"))?;
+    }
+    sink.finish().map_err(|e| format!("finishing {out_path}: {e}"))?;
+    Ok(stmts)
 }
 
 /// `sparq-cli tabular …` — see [`usage`] and the module docs for the exact contract.
 pub(crate) fn cmd_tabular(args: &[String]) {
     let flags = parse_flags(args);
+    // An output path a store's files or reserved names would be replaced by is a usage error
+    // (exit 2), refused before any input is read.
+    if let Some(out_path) = &flags.out {
+        crate::refuse_output_in_store(out_path);
+    }
     let (srcs, quads) = build_sources(&flags).unwrap_or_else(|e| die(e));
     let mut reader = NtReader::new(srcs);
     // A mapping with graph maps emits N-Quads; anything else keeps the N-Triples fast path.
@@ -1742,19 +1768,9 @@ pub(crate) fn cmd_tabular(args: &[String]) {
     let t = Instant::now();
 
     if let Some(out_path) = &flags.out {
-        // Stream N-Triples straight out — no graph build, constant memory.
-        let mut sink = OutSink::create(out_path).unwrap_or_else(|e| die(format!("creating {out_path}: {e}")));
-        let mut buf = vec![0u8; 64 * 1024];
-        let mut stmts: u64 = 0;
-        loop {
-            let n = reader.read(&mut buf).unwrap_or_else(|e| die(e));
-            if n == 0 {
-                break;
-            }
-            stmts += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
-            sink.writer().write_all(&buf[..n]).unwrap_or_else(|e| die(format!("writing {out_path}: {e}")));
-        }
-        sink.finish().unwrap_or_else(|e| die(format!("finishing {out_path}: {e}")));
+        // Stream N-Triples straight out — no graph build, constant memory. Any error drops the
+        // sink (removing its unfinished file) before the process exits.
+        let stmts = stream_out(&mut reader, out_path).unwrap_or_else(|e| die(e));
         eprintln!("wrote {stmts} {kind} to {out_path} in {:.3}s", t.elapsed().as_secs_f64());
         return;
     }
@@ -1770,7 +1786,7 @@ pub(crate) fn cmd_tabular(args: &[String]) {
     }
     .unwrap_or_else(|e| die(e));
     let secs = t.elapsed().as_secs_f64();
-    let n = g.len() + g.named.iter().map(|(_, ng)| ng.len()).sum::<usize>();
+    let n = g.len() + g.named().iter().map(|(_, ng)| ng.len()).sum::<usize>();
     eprintln!(
         "loaded {n} {kind} in {secs:.3}s ({:.2} M/s) from tabular import",
         n as f64 / secs / 1e6

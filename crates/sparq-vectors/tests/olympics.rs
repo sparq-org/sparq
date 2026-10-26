@@ -26,7 +26,7 @@ fn data_path() -> Option<std::path::PathBuf> {
 
 /// The rdf:type objects of `id`, via one SPO range scan.
 fn types_of(g: &Graph, type_pid: Id, id: Id) -> Vec<Id> {
-    let scan = g.store.scan(&[Some(id), Some(type_pid), None]);
+    let scan = g.store().scan(&[Some(id), Some(type_pid), None]);
     scan.rows.iter().map(|row| scan.to_spo(row)[2]).collect()
 }
 

@@ -301,7 +301,7 @@ fn contains(graph: &Graph, triple: &Triple) -> bool {
     ) else {
         return false;
     };
-    graph.store.contains([subject, predicate, object])
+    graph.store().contains([subject, predicate, object])
 }
 
 #[cfg(test)]

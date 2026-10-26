@@ -509,6 +509,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "fsum"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1798,6 +1808,7 @@ dependencies = [
 name = "sparq-core"
 version = "0.1.6"
 dependencies = [
+ "fs4",
  "hashbrown 0.17.1",
  "memchr",
  "memmap2",
@@ -1806,6 +1817,9 @@ dependencies = [
  "oxttl 0.2.3",
  "rayon",
  "rustc-hash",
+ "same-file",
+ "winapi-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1833,7 +1847,6 @@ version = "0.1.6"
 dependencies = [
  "oxrdf 0.3.3",
  "quick-xml",
- "rustc-hash",
  "serde",
  "serde_json",
  "sparq-core",
@@ -1903,6 +1916,7 @@ dependencies = [
  "rayon",
  "regex",
  "rustc-hash",
+ "sha2 0.10.9",
  "smallvec",
  "sparq-core",
  "sparq-substrate",

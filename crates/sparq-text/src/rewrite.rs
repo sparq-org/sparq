@@ -480,7 +480,7 @@ fn rewrite_bgp(
         let bindings = hits
             .iter()
             .map(|&(id, score)| {
-                let Term::Literal(lit) = graph.dict.term(id) else {
+                let Term::Literal(lit) = graph.dict().term(id) else {
                     unreachable!("text index documents are literals");
                 };
                 let mut row = vec![Some(GroundTerm::Literal(lit))];

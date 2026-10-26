@@ -68,9 +68,18 @@ Set `PSS_SPARQ_BACKEND` to one of:
   ephemeral.
   Directory-backed mutations commit through the transaction journal; in-memory
   mutations retain the engine's atomic update path. `EmbeddedSparqClient::save(dir)`
-  exports a snapshot to a separate directory and refuses the client's open backing
-  directory, including aliases that resolve to the same canonical path, because
-  replacing named-graph files under live WALs can lose later writes.
+  exports an independent snapshot to a different directory. Into the client's open
+  backing directory (by file identity, including path and symlink aliases), it compacts
+  the graph and reopens its journals so later writes remain durable. Repeated refused
+  compactions retain pending writes for reopen. Path components created while resolving a
+  save alias are removed when empty on compaction or failure. A frozen graph,
+  path resolution or snapshot/compaction I/O failure, unavailable compaction (including
+  a missing outside lock or poisoned transaction journal), or stopped actor returns a
+  backend error. After an indeterminate commit or job panic, the actor closes its queue and
+  drops pending jobs, including sends already in flight; their callers receive the stopped-actor
+  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
+  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
   read its own writes: a query sent after an update has completed must see what the
@@ -413,9 +422,9 @@ write lock, so a raise that lands late never lowers it; it needs no blob capacit
 entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
 one IRI, the first marker stored; any other IRI of that shape takes room in the pool). The mark
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
-the process, and the embedded index writes it to disk only when it saves a snapshot
-(`EmbeddedSparqClient::save`), so a start from a snapshot taken before a raise finds the earlier
-mark, and the expiries decided after that snapshot are not durable. A listing,
+the process; the directory-backed embedded index journals each raise before acknowledging it.
+Restoring an independent snapshot taken before a raise restores the earlier mark and loses
+expiries decided after that snapshot. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -776,7 +785,18 @@ What the server exposes, all discoverable from the storage description
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
-  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
+  storage is served by one process at a time. The LWS service starts only over a store whose
+  index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
+  whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
+  by the graph on its actor's thread). If that thread panics the graph, and with it the lock,
+  is dropped, and every later store call fails (`5xx`): the index is never used without the
+  lock. Over any other index (a remote SPARQL endpoint, or a store that does not say; the wasm
+  host's persistent store does not say) the start fails before anything is read or written.
+  The lock is `<dir>.lock` beside the index directory, when it exists or can be created, and
+  `sparq.lock` inside it; an index directory whose parent is not writable is held by the inside
+  lock alone and serves; compaction that must swap the index's root directory is refused.
+  A graph a failed compaction froze is reported
+  as a failed store call (`5xx`), never served: restart to re-open the directory. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees

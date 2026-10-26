@@ -327,7 +327,7 @@ fn expand_dataset_preserves_every_asserted_graph_and_the_input() {
     ));
     // Input not mutated.
     assert_eq!(len(&data), 1);
-    assert_eq!(data.named.len(), 3);
+    assert_eq!(data.named().len(), 3);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn expand_dataset_into_a_named_destination() {
     let d = out.dataset.named_graph(&iri("urn:ex:derived")).unwrap();
     assert_eq!(len(d), 1);
     assert!(has(d, "urn:ex:a", "urn:ex:derived", &iri("urn:ex:Agent")));
-    assert_eq!(out.dataset.named.len(), 4);
+    assert_eq!(out.dataset.named().len(), 4);
     // Materializing into an EXISTING named graph merges and dedups there, while
     // an identical assertion in another graph is not collapsed.
     let into_g1 = expand_dataset(
@@ -353,7 +353,7 @@ fn expand_dataset_into_a_named_destination() {
     );
     let g1 = into_g1.dataset.named_graph(&iri("urn:ex:g1")).unwrap();
     assert_eq!(len(g1), 2);
-    assert_eq!(into_g1.dataset.named.len(), 3);
+    assert_eq!(into_g1.dataset.named().len(), 3);
 }
 
 /// A derivation already asserted in the destination is not duplicated, while the

@@ -1691,7 +1691,7 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
   The **default build pulls no HTTP client** (no reqwest) and the crate never enters the wasm
   bundle, so neither tier affects the default or wasm builds.
 - **Keys are dictionary term ids** (`sparq_core::dict::Id`, a `u32`). Resolve a `Term` with
-  `graph.id_of(&term) -> Option<Id>` and an `Id` back with `graph.dict.term(id)`. Coverage
+  `graph.id_of(&term) -> Option<Id>` and an `Id` back with `graph.dict().term(id)`. Coverage
   is **sparse by design** — only entities get vectors, not every literal.
 - **Graph scoping (sq-quuu).** Every `&Graph` entry point (`verbalize`, `embed_entities`,
   `embed_labels`, `nearest_term*`) reads the store of the `Graph` it is handed — the

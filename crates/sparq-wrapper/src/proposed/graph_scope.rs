@@ -208,10 +208,10 @@ impl<'graph> GraphScope<'graph> {
         let index = dataset
             .ensure_named(&self.write_graph)
             .map_err(GraphScopeError::Graph)?;
-        let write_graph = &mut dataset.named[index].1;
+        let triple = [subject, Term::NamedNode(predicate), object];
         match change {
-            Change::Insert => write_graph.insert_triple(subject, predicate, object),
-            Change::Remove => write_graph.remove_triple(subject, predicate, object),
+            Change::Insert => dataset.apply_delta_to_named(index, &[triple], &[]),
+            Change::Remove => dataset.apply_delta_to_named(index, &[], &[triple]),
         }
         .map_err(GraphScopeError::Graph)
     }
@@ -420,9 +420,9 @@ fn append_traversal(
         Direction::Out => ([Some(focus), Some(predicate), None], 2),
         Direction::In => ([None, Some(predicate), Some(focus)], 0),
     };
-    let scan = graph.store.scan(&pattern);
+    let scan = graph.store().scan(&pattern);
     for row in scan.rows.iter() {
-        let term = graph.dict.term(scan.to_spo(row)[position]);
+        let term = graph.dict().term(scan.to_spo(row)[position]);
         if seen.insert(term.clone()) {
             terms.push(term);
         }

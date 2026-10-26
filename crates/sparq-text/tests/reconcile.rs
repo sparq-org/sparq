@@ -102,7 +102,7 @@ fn build_marks_the_full_dictionary() {
     graph.apply_delta(&seed, &[]).unwrap();
 
     let index = TextIndex::build(&graph);
-    assert_eq!(index.indexed_dict_len(), graph.dict.len());
+    assert_eq!(index.indexed_dict_len(), graph.dict().len());
     assert!(index.is_consistent_with(&graph));
     assert!(!index.needs_rebuild(&graph));
 }
@@ -124,10 +124,10 @@ fn reconcile_equals_rebuilt_across_random_growth() {
         let inserts: Vec<[Term; 3]> = (0..rng.random_range(1..=20))
             .map(|_| random_triple(&mut rng))
             .collect();
-        let before = graph.dict.len();
+        let before = graph.dict().len();
         graph.apply_delta(&inserts, &[]).unwrap();
 
-        if graph.dict.len() > before {
+        if graph.dict().len() > before {
             assert!(
                 !index.is_consistent_with(&graph),
                 "round {round}: index should lag after growth"
@@ -278,12 +278,12 @@ fn in_process_compact_keeps_ids_so_index_stays_valid() {
     let extra: Vec<[Term; 3]> = (0..20).map(|_| random_triple(&mut rng)).collect();
     graph.apply_delta(&extra, &[]).unwrap();
     let mut index = TextIndex::build(&graph);
-    let len_before = graph.dict.len();
+    let len_before = graph.dict().len();
 
     graph.compact().unwrap();
 
     assert!(
-        graph.dict.len() >= len_before,
+        graph.dict().len() >= len_before,
         "compact must not drop ids in-process"
     );
     assert!(
@@ -311,14 +311,14 @@ fn shorter_dictionary_needs_rebuild_and_panics_reconcile() {
     let seed: Vec<[Term; 3]> = (0..80).map(|_| random_triple(&mut rng)).collect();
     big.apply_delta(&seed, &[]).unwrap();
     let index = TextIndex::build(&big);
-    assert_eq!(index.indexed_dict_len(), big.dict.len());
+    assert_eq!(index.indexed_dict_len(), big.dict().len());
 
     // A strictly smaller reopened graph (fewer interned terms).
     let mut small = Graph::load_str("", "ntriples").unwrap();
     let small_seed: Vec<[Term; 3]> = (0..5).map(|_| random_triple(&mut rng)).collect();
     small.apply_delta(&small_seed, &[]).unwrap();
     assert!(
-        small.dict.len() < index.indexed_dict_len(),
+        small.dict().len() < index.indexed_dict_len(),
         "scenario requires a shorter dict"
     );
 
