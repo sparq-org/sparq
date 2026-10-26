@@ -251,13 +251,227 @@ fn repository_odrl_fixtures_match_main() {
             }
         }
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
-    for dir in ["crates", "bench"] {
-        visit(&root.join(dir), &mut files);
-    }
+    // Keep the full Turtle corpus from the former crates/ + bench/ walk.
+    // Literal roots let the CI input audit attribute every fixture reader.
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/arrow-interop"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/fo-km/overlays"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/fts/queries-jena-text"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bench/service-fed-loopback/fixtures/data"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/shacl/shapes"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/shacl/shapes-sparql"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/shacl-wasm/data"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-canon/tests/rdf-canon-testdata"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/blank-node"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/constants"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/join"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/language"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/multi-table"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/null-cells"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/percent-encoding"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/tc0000-empty-mapping"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/tc0001a-template-class"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-cli/tests/fixtures/r2rml/tc0002a-columns-typed"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-conformance/tests/fixtures/agg-min-02"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-conformance/tests/quoted_opacity"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-conformance/tests/ufo_sn3/vocab"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-forms/tests/fixtures"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-kb/examples"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-kb/ingest"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-kb/ontology/pkg"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-kb/shapes"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-kb/tests/fixtures"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-kb/tests/golden"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-lws-core/conformance/config"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-lws-core/tests/fixtures"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-mpc/ontologies"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-mpc/tests/fixtures"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-policy/ontologies"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-reason-dl/examples/data"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-reason-el/examples/data"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-secprop-vocab/ontologies"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-shacl/tests/vendor"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-shaclc/tests/fixtures/extended"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-shaclc/tests/fixtures/rdf12"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-shaclc/tests/fixtures/valid"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-solid/tests/conformance/solid-sparql-query"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-solid/tests/fixtures"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-trust/ontologies/trust"),
+        &mut files,
+    );
+    // The retired vocabulary-wide mappings stay retired: name the remaining
+    // ontology fixtures precisely, including the annotation graph below.
+    files.push(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-trust/ontologies/zkp-sparql/sigimpl-ext.ttl"),
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-trust/ontologies/zkp-sparql/shapes"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-trust/tests/trust-expression"),
+        &mut files,
+    );
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sparq-wac-oracle/fixtures"),
+        &mut files,
+    );
+    files.push(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sparq-zk/ontologies/secprop-methods.ttl"),
+    );
     assert!(
-        files.len() >= 114,
+        files.len() >= 151,
         "fixture discovery missed policies: {}",
         files.len()
     );
