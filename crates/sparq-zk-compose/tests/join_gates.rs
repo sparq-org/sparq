@@ -1178,6 +1178,7 @@ fn attest_method_unbound(commitment: Fr, salt: Fr, sk: &SecretKey) -> Commitment
     let list_id = sparq_zk::sig::status_list_id_to_field(STATUS_LIST);
     let status_ref = sparq_zk::sig::status_ref_digest(&list_id, STATUS_INDEX, STATUS_VERSION);
     let mut att = attest_full(commitment, salt, sk);
+    // Legacy unbound attestation fixture retained for negative tests.
     att.signature = sk.sign_commitment_with_status(&commitment, &salt, &status_ref);
     att
 }

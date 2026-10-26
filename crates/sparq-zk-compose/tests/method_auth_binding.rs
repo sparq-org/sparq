@@ -205,6 +205,7 @@ fn attestation(commitment: Fr, signature: String, sk: &SecretKey) -> CommitmentA
 fn attest_unbound(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestation {
     let mut a = attestation(
         commitment,
+        // Legacy unbound attestation fixture retained for negative tests.
         sk.sign_commitment_with_status(&commitment, &salt, &fixture_status_ref()),
         sk,
     );
@@ -278,6 +279,7 @@ fn a_forged_signature_is_still_the_invalid_signature_refusal() {
     // A signature by a DIFFERENT key, presented under `sk`'s public key: no
     // candidate message verifies.
     let mut att = attest_unbound(c, salt, &sk);
+    // Legacy unbound attestation fixture retained for negative tests.
     att.signature = other.sign_commitment_with_status(&c, &salt, &fixture_status_ref());
     m.commitment_attestations.push(att);
     match prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy()) {
