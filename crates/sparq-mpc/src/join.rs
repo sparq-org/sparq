@@ -323,10 +323,10 @@ fn canonicalize_rows(rows: &mut [Vec<Option<Term>>]) {
 // M3 — the HIDDEN-VALUE join (the path M2 deferred).
 // =====================================================================
 
-/// A holder's contribution to a hidden-value join: rows whose JOIN KEY is
-/// PRIVATE (already encoded as a field element — see [`HiddenValueJoin`] doc on
+/// Internal table for the capped equality match-count reference, carrying a
+/// PRIVATE key (already encoded as a field element — see [`HiddenValueJoin`] doc on
 /// the encoding contract) plus the DISCLOSED payload columns that may be opened
-/// on a match.
+/// by a caller. This table is not an operator input.
 ///
 /// The key is `Fp` because the secret-shared equality primitive operates over
 /// the field; the holder encodes its private key term into `Fp` via the
@@ -343,7 +343,7 @@ fn canonicalize_rows(rows: &mut [Vec<Option<Term>>]) {
 /// the disclosed payload column names, and the row count, which this join already
 /// treats as public (input cardinality, L3).
 #[derive(Clone)]
-pub struct HiddenKeyedRows {
+pub(crate) struct HiddenKeyedRows {
     /// The holder that owns these rows.
     pub holder: HolderId,
     /// Disclosed payload column names (NOT including the hidden key).
@@ -388,10 +388,10 @@ impl std::fmt::Debug for HiddenKeyedRows {
 ///   hidden). The keys are NEVER reconstructed.
 ///
 /// SCAFFOLDED / out of scope (honestly stated, not faked):
-/// - The `O(|L|·|R|)` all-pairs comparison is the naive oblivious join. A real
-///   circuit-PSI uses oblivious hashing / cuckoo bins to cut this to ~linear;
-///   that optimisation (Q3, RQ2b — BGP-join obliviousness cost) is NOT done. The
-///   all-pairs version is correct but not the SOTA cost profile.
+/// - Candidate comparisons follow the explicit [`RowBinding`]. A common
+///   [`RowBinding::Keyed`] group still requires `|L|·|R|` equality tests. Oblivious
+///   hashing / cuckoo bins could reduce that work; this optimisation (Q3, RQ2b)
+///   remains deferred.
 /// - The field encoding of the key now has a documented, collision-resistant
 ///   construction — [`crate::term_encode::encode_term`] (domain-separated SHA-512
 ///   folded into the field) with a stated birthday bound, plus
@@ -405,15 +405,12 @@ impl std::fmt::Debug for HiddenKeyedRows {
 /// - Malicious security (a party feeding inconsistent shares) is NOT provided —
 ///   semi-honest only, exactly as [`ShamirBackend`] states.
 ///
-/// ## Feasibility envelope (honest, per the skill — minutes, not seconds)
+/// ## Cost
 ///
-/// Communication: ONE multiplication round PER candidate pair → `|L|·|R|` secure
-/// equality tests, each an open of one field element across the parties. On a
-/// real network that all-pairs structure is the cost center the skill flags
-/// ("joins are the cost center; obliviousness forces worst-case padding"). For
-/// the viable regime (≤10³–10⁴ rows/holder, LAN) this is the
-/// minutes-to-tens-of-minutes envelope (ORQ SOSP'25), NOT sub-second. We do not
-/// extrapolate beyond it.
+/// Each candidate pair requires a secure equality test. With a common
+/// [`RowBinding::Keyed`] group, [`Self::batched_join`] tests `|L|·|R|` pairs;
+/// the output bound limits candidate materialisation but does not reduce that
+/// equality work. This is not a sub-second join at scale.
 #[derive(Debug, Clone)]
 pub struct HiddenValueJoin {
     backend: ShamirBackend,
@@ -589,14 +586,10 @@ impl HiddenValueJoin {
 // cardinality / ordering hidden.
 // =====================================================================
 
-/// A holder's BATCHED contribution to a hidden-value join: a COLUMN of rows
-/// addressed under an explicit [`RowBinding`] (sq-dwb5). The single-scalar
-/// [`HiddenKeyedRows`] caps a holder to an unstructured bag of rows; this carries
-/// the same per-row `(private_key_fp, disclosed_payload)` pairs **plus the
-/// row-binding contract** that says how rows correlate across holders.
-///
-/// Why a dedicated type (vs reusing [`HiddenKeyedRows`]). The row-binding is
-/// load-bearing for correctness: it decides which `(i, j)` pairs are even
+/// A holder's BATCHED contribution to a hidden-value join: a COLUMN of
+/// `(private_key_fp, disclosed_payload)` rows addressed under an explicit
+/// [`RowBinding`] (sq-dwb5). The row-binding contract says how rows correlate
+/// across holders and decides which `(i, j)` pairs are even
 /// *candidates* (every pair under `Positional` aligned columns vs only same-key
 /// pairs under `Keyed`). It must travel WITH the rows so the join cannot silently
 /// correlate them the wrong way (the `batched.rs` contract).
@@ -615,8 +608,8 @@ impl HiddenValueJoin {
 /// and are NEVER reconstructed from shares — exactly as the four-flatmates aggregate
 /// uses its salary column. The DISCLOSED payload columns ride alongside in the clear
 /// (disclosure-minimisation, convention #4 — only the *key* is hidden).
-/// `Debug` is hand-written for the same reason as [`HiddenKeyedRows`]: `rows`
-/// carries the private key of each row next to its payload. The binding IS printed
+/// `Debug` is hand-written because `rows` carries the private key of each row
+/// next to its payload. The binding IS printed
 /// — a [`RowBinding::Keyed`] holds the DISCLOSED public row keys (convention #4).
 #[derive(Clone)]
 pub struct BatchedHiddenInput {
@@ -644,9 +637,9 @@ impl std::fmt::Debug for BatchedHiddenInput {
 }
 
 impl BatchedHiddenInput {
-    /// Assemble a batched hidden input, validating the [`RowBinding::Keyed`] key
-    /// count against the row count (a mismatch is an ambiguous binding → a protocol
-    /// error, mirroring [`BatchedShares::new`]).
+    /// Assemble a batched hidden input, validating each payload row's arity and
+    /// the [`RowBinding::Keyed`] key count against the row count. Shape errors
+    /// identify the holder, expected arity and row index without term values.
     pub fn new(
         holder: HolderId,
         payload_vars: Vec<Variable>,
@@ -662,12 +655,27 @@ impl BatchedHiddenInput {
                 )));
             }
         }
-        Ok(BatchedHiddenInput {
+        let input = BatchedHiddenInput {
             holder,
             payload_vars,
             rows,
             binding,
-        })
+        };
+        input.check_payload_arity()?;
+        Ok(input)
+    }
+
+    fn check_payload_arity(&self) -> Result<(), MpcError> {
+        let expected = self.payload_vars.len();
+        for (index, (_, row)) in self.rows.iter().enumerate() {
+            if row.len() != expected {
+                return Err(MpcError::Protocol(format!(
+                    "holder {} expected arity {expected} at row {index}",
+                    self.holder,
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Number of rows in this batch.
@@ -688,8 +696,10 @@ impl BatchedHiddenInput {
     /// Each key is drawn through the [`DistributedRandomness`] seam
     /// ([`DistributedRandomness::vss_own_input`]), in row order — for
     /// [`ShamirDealer`] exactly the [`ShamirDealer::share_batch`] it always was, so
-    /// the shares are unchanged.
+    /// the shares are unchanged. Payload arity is checked before any sharing is
+    /// drawn.
     pub fn shared_keys(&self, dealer: &mut ShamirDealer) -> Result<BatchedShares, MpcError> {
+        self.check_payload_arity()?;
         let n = dealer.parties();
         self.shared_keys_through(dealer, n)
     }
@@ -739,6 +749,8 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<usize, MpcError> {
         oblivious_join::check_output_bound_cap(bound)?;
+        left.check_payload_arity()?;
+        right.check_payload_arity()?;
         let count = candidate_pair_count(&left.binding, &right.binding, left.len(), right.len())?;
         oblivious_join::check_output_bound(bound, count)?;
         Ok(count)
@@ -817,7 +829,8 @@ impl HiddenValueJoin {
     /// - `bound` must cover the candidate count (`oblivious_join_output` fails closed
     ///   otherwise — never truncating a candidate, which could drop a true match).
     /// - Both holders must agree on the disclosed payload arity per side; the output
-    ///   schema is `left.payload_vars ++ right.payload_vars`.
+    ///   schema is `left.payload_vars ++ right.payload_vars`. Every row is checked
+    ///   against its own holder's payload variables before any randomness draw.
     pub fn batched_join(
         &self,
         left: &BatchedHiddenInput,
@@ -862,7 +875,6 @@ impl HiddenValueJoin {
         // projected — it stays hidden).
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
-        let payload_arity = out_vars.len();
 
         // (1) Secret-share each holder's private key column as a BatchedShares (the
         // sq-dwb5 primitive): each row's key gets its OWN fresh degree-`t` masking
@@ -890,18 +902,6 @@ impl HiddenValueJoin {
             )?;
             let mut payload = lpay.clone();
             payload.extend(rpay.iter().cloned());
-            // Pad / validate to the uniform output arity so the oblivious output's
-            // recipient sees one schema (a short row is a malformed input, not a
-            // silent truncation).
-            if payload.len() != payload_arity {
-                return Err(MpcError::Protocol(format!(
-                    "batched_join: candidate payload arity {} != schema arity {payload_arity} \
-                     (left {} + right {} payload vars)",
-                    payload.len(),
-                    left.payload_vars.len(),
-                    right.payload_vars.len()
-                )));
-            }
             candidates.push(Candidate {
                 payload,
                 matched: MatchBit::Public(matched),
@@ -1050,8 +1050,6 @@ impl HiddenValueJoin {
         left: &BatchedHiddenInput,
         right: &BatchedHiddenInput,
     ) -> Result<Vec<Candidate>, MpcError> {
-        let payload_arity = left.payload_vars.len() + right.payload_vars.len();
-
         // (1) Enumerate the candidate row pairs the RowBinding permits — the SAME
         // public candidate structure as `batched_join` (the candidate COUNT is a
         // public MPC assumption; only the per-pair match VERDICT is hidden here).
@@ -1069,17 +1067,6 @@ impl HiddenValueJoin {
             let match_bit = secure_equal_to_bit_through(source, *lkey, *rkey)?;
             let mut payload = lpay.clone();
             payload.extend(rpay.iter().cloned());
-            // Uniform output arity for the recipient (a short row is a malformed
-            // input, never a silent truncation).
-            if payload.len() != payload_arity {
-                return Err(MpcError::Protocol(format!(
-                    "fully_oblivious_batched_join: candidate payload arity {} != schema arity \
-                     {payload_arity} (left {} + right {} payload vars)",
-                    payload.len(),
-                    left.payload_vars.len(),
-                    right.payload_vars.len()
-                )));
-            }
             candidates.push(Candidate {
                 payload,
                 matched: MatchBit::SecretShared(match_bit),
@@ -1826,7 +1813,7 @@ mod hidden_value_tests {
     // but `fully_oblivious_*` already pins the no-open property — together they
     // fence the boundary.
 
-    /// PIN (sq-4vgx): the scalar all-pairs `secure_equal` driver learns the EXACT
+    /// PIN (sq-4vgx): repeating scalar `secure_equal` over every pair records the EXACT
     /// bipartite match graph. We play the role of the party driving the opens:
     /// call `secure_equal` on every `(i, j)` and collect each opened verdict. The
     /// recovered incidence matrix must equal the TRUE bipartite match graph — i.e.
@@ -3627,5 +3614,136 @@ mod randomness_seam_tests {
             "got {:?}",
             outcome
         );
+    }
+}
+
+#[cfg(test)]
+mod payload_shape_tests {
+    use super::*;
+    use crate::randomness::test_sources::RecordingSource;
+
+    fn input(holder: &str, width: usize) -> BatchedHiddenInput {
+        let cell = Some(Term::Literal(oxrdf::Literal::new_simple_literal(
+            "payload-shape-sentinel",
+        )));
+        BatchedHiddenInput {
+            holder: HolderId::new(holder),
+            payload_vars: vec![Variable::new_unchecked(holder)],
+            rows: vec![
+                (Fp::new(7), vec![cell.clone()]),
+                (Fp::new(7), vec![cell; width]),
+            ],
+            binding: RowBinding::Keyed(vec!["common".into(), "unmatched".into()]),
+        }
+    }
+
+    fn shape_error(holder: &str, index: usize) -> MpcError {
+        MpcError::Protocol(format!("holder {holder} expected arity 1 at row {index}"))
+    }
+
+    #[test]
+    fn constructor_checks_payload_arity_for_every_row() {
+        for width in [0, 2] {
+            for index in [0, 1] {
+                let mut bad = input("constructor", width);
+                bad.rows.swap(index, 1);
+                assert_eq!(
+                    bad.check_payload_arity(),
+                    Err(shape_error("constructor", index))
+                );
+                assert_eq!(
+                    BatchedHiddenInput::new(bad.holder, bad.payload_vars, bad.rows, bad.binding)
+                        .unwrap_err(),
+                    shape_error("constructor", index),
+                );
+            }
+        }
+        let valid = input("valid", 1);
+        assert!(BatchedHiddenInput::new(
+            valid.holder,
+            valid.payload_vars,
+            valid.rows,
+            valid.binding,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn shared_keys_checks_payload_arity_before_drawing() {
+        let backend = ShamirBackend::new_seeded(3, 0xA817).unwrap();
+        for width in [0, 2] {
+            let mut dealer = backend.dealer();
+            let mut reference = backend.dealer();
+            assert_eq!(
+                input("shared", width).shared_keys(&mut dealer).unwrap_err(),
+                shape_error("shared", 1),
+            );
+            assert_eq!(dealer.draw_fp(), reference.draw_fp());
+        }
+    }
+
+    #[test]
+    fn join_entries_check_each_payload_side_before_any_draw() {
+        let backend = ShamirBackend::new_seeded(3, 0xA817).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        for entry in 0..3 {
+            for no_candidates in [false, true] {
+                let mut left = input("left", 0);
+                let mut right = input("right", 2);
+                // The malformed row has no candidate even when row 0 pairs.
+                right.binding = RowBinding::Keyed(vec![
+                    if no_candidates { "different" } else { "common" }.into(),
+                    "right-only".into(),
+                ]);
+                for holder in ["left", "right"] {
+                    let mut source = RecordingSource::new(backend.dealer());
+                    let err = match entry {
+                        0 => join
+                            .batched_join_through(&mut source, &left, &right, 1)
+                            .unwrap_err(),
+                        1 => join
+                            .fully_oblivious_batched_join_through(&mut source, &left, &right, 1)
+                            .unwrap_err(),
+                        _ => join
+                            .fully_oblivious_candidates_and_opened_rows(
+                                &mut source,
+                                &left,
+                                &right,
+                                1,
+                            )
+                            .unwrap_err(),
+                    };
+                    assert!(source.log.is_empty(), "payload shape must precede every draw");
+                    assert_eq!(err, shape_error(holder, 1));
+                    left.rows[1].1.push(None);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn internal_keyed_rows_redact_keys_and_payloads() {
+        let keyed = HiddenKeyedRows {
+            holder: HolderId::new("h"),
+            payload_vars: vec![Variable::new_unchecked("name")],
+            rows: vec![(
+                Fp::new(987_654_321_987),
+                vec![Some(Term::Literal(oxrdf::Literal::new_simple_literal(
+                    "SENTINEL-PAYLOAD-24681357",
+                )))],
+            )],
+        };
+        for rendered in [
+            format!("{keyed:?}"),
+            format!("{keyed:#?}"),
+            format!("{:?}", Some(vec![&keyed])),
+            format!("{:#?}", Some(vec![&keyed])),
+        ] {
+            assert!(!rendered.contains("987654321987"));
+            assert!(!rendered.contains("SENTINEL-PAYLOAD-24681357"));
+            assert!(rendered.contains('h') && rendered.contains("name"));
+            assert!(rendered.contains("row_count"));
+        }
+        assert!(format!("{keyed:?}").contains("row_count: 1"));
     }
 }

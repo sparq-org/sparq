@@ -878,19 +878,23 @@ mod tests {
 
     #[test]
     fn verdict_partial_refuses_duplicate_variables() {
-        let var = oxrdf::Variable::new_unchecked("over_threshold");
-        let p = PartialResult {
-            holder: HolderId::new("verdict-holder"),
-            vars: vec![var.clone(), var],
-            rows: vec![vec![None, None]],
-        };
-        assert_eq!(
-            verdict_from_partial(&p),
-            Err(MpcError::Protocol(
-                "holder verdict-holder repeats a projected variable at column 1 (expected arity 2)"
-                    .into(),
-            ))
-        );
+        for (names, column) in [(vec!["a", "a"], 1), (vec!["a", "b", "a"], 2)] {
+            let p = PartialResult {
+                holder: HolderId::new("verdict-holder"),
+                vars: names
+                    .into_iter()
+                    .map(oxrdf::Variable::new_unchecked)
+                    .collect(),
+                rows: vec![vec![None; column + 1]],
+            };
+            assert_eq!(
+                verdict_from_partial(&p),
+                Err(MpcError::Protocol(format!(
+                    "holder verdict-holder repeats a projected variable at column {column} (expected arity {})",
+                    p.vars.len(),
+                )))
+            );
+        }
     }
 
     /// The verdict-partial refusals name the binding's kind, never its content.

@@ -534,23 +534,15 @@ pub fn check_hidden_join(backend: &ShamirBackend, scale: usize) -> Result<usize,
     Ok(matches)
 }
 
-/// Build a `scale`-row hidden-keyed table with keys `0..scale` and a single
-/// disclosed payload column carrying the row index, for the join correctness gate.
+/// Build a `scale`-row hidden-keyed table with keys `0..scale` and no payload
+/// columns for the equality match-count reference.
 fn synthetic_table(holder: HolderId, scale: usize) -> HiddenKeyedRows {
-    use oxrdf::{Literal, Term, Variable};
-    let payload_vars = vec![Variable::new_unchecked("v")];
     let rows = (0..scale)
-        .map(|i| {
-            let key = Fp::new(i as u64);
-            let payload = vec![Some(Term::Literal(Literal::new_simple_literal(
-                i.to_string(),
-            )))];
-            (key, payload)
-        })
+        .map(|i| (Fp::new(i as u64), Vec::new()))
         .collect();
     HiddenKeyedRows {
         holder,
-        payload_vars,
+        payload_vars: Vec::new(),
         rows,
     }
 }

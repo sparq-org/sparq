@@ -295,17 +295,19 @@ mod tests {
 
     #[test]
     fn check_shape_refuses_duplicate_variables_even_without_rows() {
-        let mut p = partial("duplicate-holder");
-        p.vars.push(p.vars[0].clone());
-        for rows in [vec![], vec![vec![None, None]]] {
-            p.rows = rows;
-            assert_eq!(
-                p.check_shape(),
-                Err(MpcError::Protocol(
-                    "holder duplicate-holder repeats a projected variable at column 1 (expected arity 2)"
-                        .into(),
-                ))
-            );
+        for (names, column) in [(vec!["a", "a"], 1), (vec!["a", "b", "a"], 2)] {
+            let mut p = partial("duplicate-holder");
+            p.vars = names.into_iter().map(Variable::new_unchecked).collect();
+            for rows in [vec![], vec![vec![None; p.vars.len()]]] {
+                p.rows = rows;
+                assert_eq!(
+                    p.check_shape(),
+                    Err(MpcError::Protocol(format!(
+                        "holder duplicate-holder repeats a projected variable at column {column} (expected arity {})",
+                        p.vars.len(),
+                    )))
+                );
+            }
         }
     }
 

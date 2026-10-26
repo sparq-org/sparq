@@ -1,5 +1,51 @@
 use oxrdf::{Literal, Term, Variable};
-use sparq_mpc::{DisclosedKeyJoin, GlobalJoin, HolderId, JoinPlan, MpcError, PartialResult};
+use sparq_mpc::{
+    BatchedHiddenInput, DisclosedKeyJoin, Fp, GlobalJoin, HiddenValueJoin, HolderId, JoinPlan,
+    MpcError, PartialResult, RowBinding, ShamirBackend,
+};
+
+fn hidden_input(holder: &str, width: usize) -> BatchedHiddenInput {
+    BatchedHiddenInput {
+        holder: HolderId::new(holder),
+        payload_vars: vec![Variable::new_unchecked(holder)],
+        rows: vec![(
+            Fp::new(7),
+            vec![
+                Some(Term::Literal(Literal::new_simple_literal(
+                    "shape-term-sentinel",
+                )));
+                width
+            ],
+        )],
+        binding: RowBinding::Keyed(vec!["common".into()]),
+    }
+}
+
+fn hidden_join_refuses_compensating_payload_arities(fully_oblivious: bool) {
+    let join = HiddenValueJoin::new(ShamirBackend::new(3).unwrap());
+    let mut left = hidden_input("left", 0);
+    let right = hidden_input("right", 2);
+    let run = |left: &BatchedHiddenInput| {
+        if fully_oblivious {
+            join.fully_oblivious_batched_join(left, &right, 1)
+        } else {
+            join.batched_join(left, &right, 1)
+        }
+    };
+    assert_eq!(run(&left).unwrap_err(), shape_error("left", 0));
+    left.rows[0].1.push(None);
+    assert_eq!(run(&left).unwrap_err(), shape_error("right", 0));
+}
+
+#[test]
+fn batched_join_refuses_compensating_payload_arities() {
+    hidden_join_refuses_compensating_payload_arities(false);
+}
+
+#[test]
+fn fully_oblivious_batched_join_refuses_compensating_payload_arities() {
+    hidden_join_refuses_compensating_payload_arities(true);
+}
 
 fn partial(holder: &str) -> PartialResult {
     PartialResult {
@@ -55,20 +101,20 @@ fn disclosed_join_refuses_long_rows() {
 
 #[test]
 fn disclosed_join_refuses_duplicate_variables() {
-    let mut p = partial("duplicate-holder");
-    p.vars.push(p.vars[0].clone());
-    p.rows[0].push(None);
-    let plan = JoinPlan {
-        join_var: p.vars[0].clone(),
-        key_disclosed: true,
-    };
-    assert_eq!(
-        DisclosedKeyJoin.join(&[p], &plan),
-        Err(MpcError::Protocol(
-            "holder duplicate-holder repeats a projected variable at column 1 (expected arity 2)"
-                .into(),
-        ))
-    );
+    for (names, column) in [(vec!["a", "a"], 1), (vec!["a", "b", "a"], 2)] {
+        let mut p = partial("duplicate-holder");
+        p.vars = names.into_iter().map(Variable::new_unchecked).collect();
+        p.rows[0].resize(p.vars.len(), None);
+        let plan = JoinPlan {
+            join_var: p.vars[0].clone(),
+            key_disclosed: true,
+        };
+        let expected = MpcError::Protocol(format!(
+            "holder duplicate-holder repeats a projected variable at column {column} (expected arity {})",
+            p.vars.len(),
+        ));
+        assert_eq!(DisclosedKeyJoin.join(&[p], &plan), Err(expected));
+    }
 }
 
 #[test]
