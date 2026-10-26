@@ -16,7 +16,7 @@
 //! reference, and the tests below assert the two produce the SAME `<urn:sparq:auth>`
 //! triple set on the WAC/ACP fixtures.
 
-use crate::budget::{default_auth_budget, AuthBudget, DecisionWork};
+use crate::budget::{default_auth_budget, AuthBudget, DecisionWork, MaterializeDeadline};
 use crate::loader::{assemble_input_ids, strip_reserved_graphs, System};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_GRAPH, AUTH_NS};
 use oxrdf::{NamedNode, Term};
@@ -73,6 +73,9 @@ pub enum AuthAllowance {
     /// one authorization materialization added up, which the per-closure [`ClosureLimits`]
     /// cannot bound.
     DecisionWork,
+    /// `max_materialize_time`: the native wall-clock allowance for the entire
+    /// materialization. Never emitted on wasm32.
+    Deadline,
     /// An allowance this crate does not name individually (a newer reasoner cut).
     Unspecified,
 }
@@ -91,6 +94,7 @@ impl AuthAllowance {
             AuthAllowance::InputTermBytes => "max_input_term_bytes",
             AuthAllowance::ResourceIri => "max_resource_iri_bytes/max_resource_path_depth",
             AuthAllowance::DecisionWork => "max_decision_join_rows/max_decision_facts",
+            AuthAllowance::Deadline => "max_materialize_time",
             AuthAllowance::Unspecified => "an unnamed limit",
         }
     }
@@ -107,6 +111,7 @@ impl AuthAllowance {
             AuthAllowance::InputTermBytes => "input-term-bytes",
             AuthAllowance::ResourceIri => "resource-iri",
             AuthAllowance::DecisionWork => "decision-work",
+            AuthAllowance::Deadline => "deadline",
             AuthAllowance::Unspecified => "unspecified",
         }
     }
@@ -124,6 +129,7 @@ impl AuthAllowance {
             AuthAllowance::InputTermBytes,
             AuthAllowance::ResourceIri,
             AuthAllowance::DecisionWork,
+            AuthAllowance::Deadline,
         ] {
             if kind.tag() == tag {
                 return kind;
@@ -285,10 +291,36 @@ pub(crate) fn auth_eval(
     limits: ClosureLimits,
     work: &mut DecisionWork,
 ) -> Result<Vec<[sparq_core::dict::Id; 3]>, String> {
+    stratum_boundary(work)?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    STRATA_EVALUATED.with(|count| count.set(count.get() + 1));
     let (closure, charge) =
         eval_charged(dict, facts, rules, limits).map_err(tag_allowance_refusal)?;
     work.charge(charge)?;
+    stratum_boundary(work)?;
     Ok(closure)
+}
+
+/// Sample at stratum boundaries, including after the final stratum before installation.
+fn stratum_boundary(work: &DecisionWork) -> Result<(), String> {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    STRATUM_DELAY_AFTER.with(|remaining| {
+        if remaining.get() == 0 {
+            STRATUM_DELAY.with(|delay| std::thread::sleep(delay.get()));
+        } else {
+            remaining.set(remaining.get() - 1);
+        }
+    });
+    work.checkpoint()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+std::thread_local! {
+    static STRATA_EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static STRATUM_DELAY_AFTER: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static STRATUM_DELAY: std::cell::Cell<std::time::Duration> = const {
+        std::cell::Cell::new(std::time::Duration::ZERO)
+    };
 }
 
 /// An authorization refusal of kind `kind` carrying `detail`: the same
@@ -466,6 +498,16 @@ pub(crate) fn materialize_wac_limited(
     limits: ClosureLimits,
     budget: AuthBudget,
 ) -> Result<MaterializeStats, String> {
+    materialize_wac_with_deadline(graph, limits, budget, MaterializeDeadline::new(budget))
+}
+
+/// Continue the store's materialization clock after its provenance resource enumeration.
+pub(crate) fn materialize_wac_with_deadline(
+    graph: &mut Graph,
+    limits: ClosureLimits,
+    budget: AuthBudget,
+    deadline: MaterializeDeadline,
+) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Every fallible step runs BEFORE the first mutation of `graph`, so an `Err` leaves
@@ -483,11 +525,11 @@ pub(crate) fn materialize_wac_limited(
         &AccessProvenance::new(),
         &VerifiedCredentials::new(),
         budget,
+        deadline,
     )?;
-    let mut work = DecisionWork::new(budget);
+    let mut work = DecisionWork::new(budget, deadline);
     let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
-    prepare_auth_view(graph)?;
-    let mut stats = install_auth_view(graph, &dict, &closure)?;
+    let mut stats = install_auth_view(graph, &dict, &closure, deadline)?;
     stats.strata_facts = vec![closure.len()];
     stats.millis = elapsed_millis(
         #[cfg(not(target_arch = "wasm32"))]
@@ -611,6 +653,25 @@ pub(crate) fn materialize_acp_limited(
     limits: ClosureLimits,
     budget: AuthBudget,
 ) -> Result<MaterializeStats, String> {
+    materialize_acp_with_deadline(
+        graph,
+        provenance,
+        credentials,
+        limits,
+        budget,
+        MaterializeDeadline::new(budget),
+    )
+}
+
+/// ACP counterpart of [`materialize_wac_with_deadline`].
+pub(crate) fn materialize_acp_with_deadline(
+    graph: &mut Graph,
+    provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
+    limits: ClosureLimits,
+    budget: AuthBudget,
+    deadline: MaterializeDeadline,
+) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
@@ -624,8 +685,9 @@ pub(crate) fn materialize_acp_limited(
         provenance,
         credentials,
         budget,
+        deadline,
     )?;
-    let mut work = DecisionWork::new(budget);
+    let mut work = DecisionWork::new(budget, deadline);
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
     // closure is the next one's fact set, so a negated predicate is complete before the
     // stratum that negates it runs (design doc §3.5) and nothing round-trips through text.
@@ -636,8 +698,7 @@ pub(crate) fn materialize_acp_limited(
         strata_facts.push(closure.len());
     }
 
-    prepare_auth_view(graph)?;
-    let mut stats = install_auth_view(graph, &dict, &closure)?;
+    let mut stats = install_auth_view(graph, &dict, &closure, deadline)?;
     stats.strata_facts = strata_facts;
     stats.millis = elapsed_millis(
         #[cfg(not(target_arch = "wasm32"))]
@@ -690,6 +751,7 @@ fn install_auth_view(
     graph: &mut Graph,
     dict: &Dict,
     closure: &[[sparq_core::dict::Id; 3]],
+    deadline: MaterializeDeadline,
 ) -> Result<MaterializeStats, String> {
     // pass 1: matchers referenced by conditional grants
     let mut except_matchers: FxHashSet<sparq_core::dict::Id> = FxHashSet::default();
@@ -720,6 +782,9 @@ fn install_auth_view(
     }
     let stats = MaterializeStats { auth_triples: ids.len(), ..Default::default() };
     let auth = Graph::from_parts(adict, ids);
+    // Charge replacement assembly to the same clock before mutating the served view.
+    deadline.check()?;
+    prepare_auth_view(graph)?;
     let name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
     crate::loader::install_named_view(graph, name, auth)?;
     Ok(stats)
@@ -740,6 +805,179 @@ mod tests {
     use sparq_reason::{reason_n3, reason_n3_stratified_with_cycles};
     use std::collections::BTreeSet;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    struct ResetDelay;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl Drop for ResetDelay {
+        fn drop(&mut self) {
+            STRATUM_DELAY.with(|d| d.set(std::time::Duration::ZERO));
+            STRATUM_DELAY_AFTER.with(|remaining| remaining.set(0));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn deadline_at_a_stratum_boundary_preserves_the_installed_view() {
+        for (system, src) in [
+            (System::Wac, crate::wac_fixture()),
+            (System::Acp, crate::acp_fixture()),
+        ] {
+            let mut graph = Graph::load_dataset(&src, "nquads").unwrap();
+            let run = |graph: &mut Graph, budget| match system {
+                System::Wac => materialize_wac_limited(graph, default_auth_limits(), budget),
+                System::Acp => materialize_acp_limited(
+                    graph,
+                    &AccessProvenance::new(),
+                    &VerifiedCredentials::new(),
+                    default_auth_limits(),
+                    budget,
+                ),
+            };
+            run(&mut graph, default_auth_budget()).unwrap();
+            let before = auth_view(&graph);
+            assert!(!before.is_empty());
+            // Keep the installed grants but remove their inputs. Without the deadline,
+            // this rebuild would replace the old view with an empty one.
+            graph
+                .retain_named(
+                    |name, _| matches!(name, Term::NamedNode(n) if n.as_str() == AUTH_GRAPH),
+                )
+                .unwrap();
+            // Check both input-to-reasoner entry and the final boundary before install.
+            let final_boundary = if system == System::Wac { 1 } else { 5 };
+            for boundary in [0, final_boundary] {
+                let _reset = ResetDelay;
+                STRATUM_DELAY_AFTER.with(|remaining| remaining.set(boundary));
+                STRATA_EVALUATED.with(|count| count.set(0));
+                STRATUM_DELAY.with(|d| d.set(std::time::Duration::from_millis(100)));
+                let mut budget = default_auth_budget();
+                budget.max_materialize_time = Some(std::time::Duration::from_millis(50));
+                let error = run(&mut graph, budget).unwrap_err();
+                STRATA_EVALUATED.with(|count| {
+                    assert_eq!(
+                        count.get(),
+                        if boundary == 0 {
+                            0
+                        } else if system == System::Wac {
+                            1
+                        } else {
+                            3
+                        },
+                        "an expired boundary must not start another stratum"
+                    )
+                });
+                assert_eq!(
+                    auth_allowance_refusal(&error),
+                    Some(AuthAllowance::Deadline)
+                );
+                assert_eq!(AuthAllowance::Deadline.limit_name(), "max_materialize_time");
+                assert_eq!(
+                    auth_view(&graph),
+                    before,
+                    "refusal must preserve the installed grants"
+                );
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn no_deadline_allows_slow_strata() {
+        let _reset = ResetDelay;
+        // Six boundaries together exceed the default allowance, while None permits them.
+        STRATUM_DELAY.with(|d| d.set(std::time::Duration::from_secs(1)));
+        let mut budget = default_auth_budget();
+        budget.max_materialize_time = None;
+        let mut graph = Graph::load_dataset(&crate::acp_fixture(), "nquads").unwrap();
+        let stats = materialize_acp_limited(
+            &mut graph,
+            &AccessProvenance::new(),
+            &VerifiedCredentials::new(),
+            default_auth_limits(),
+            budget,
+        )
+        .unwrap();
+        assert_eq!(stats.strata_facts.len(), 3);
+        assert!(!auth_view(&graph).is_empty());
+    }
+
+    #[test]
+    fn default_deadline_accepts_the_materialization_fixtures() {
+        for src in [crate::wac_fixture(), crate::fixture::wac_fixture_sized(50)] {
+            let mut graph = Graph::load_dataset(&src, "nquads").unwrap();
+            materialize_wac(&mut graph).unwrap();
+            assert!(!auth_view(&graph).is_empty());
+        }
+        let mut graph = Graph::load_dataset(&crate::acp_fixture(), "nquads").unwrap();
+        materialize_acp(&mut graph).unwrap();
+        assert!(!auth_view(&graph).is_empty());
+        assert_eq!(
+            default_auth_budget().max_materialize_time,
+            Some(std::time::Duration::from_secs(5))
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn expiry_before_install_preserves_the_served_view() {
+        let mut graph = Graph::load_dataset(&crate::wac_fixture(), "nquads").unwrap();
+        materialize_wac(&mut graph).unwrap();
+        let before = auth_view(&graph);
+        assert!(!before.is_empty());
+        let mut budget = default_auth_budget();
+        budget.max_materialize_time = Some(std::time::Duration::ZERO);
+        let error = install_auth_view(
+            &mut graph,
+            &Dict::new(),
+            &[],
+            MaterializeDeadline::new(budget),
+        )
+        .unwrap_err();
+        assert_eq!(
+            auth_allowance_refusal(&error),
+            Some(AuthAllowance::Deadline)
+        );
+        assert_eq!(auth_view(&graph), before);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn input_and_reasoning_share_the_same_deadline() {
+        let mut budget = default_auth_budget();
+        budget.max_materialize_time = Some(std::time::Duration::from_millis(50));
+        let deadline = MaterializeDeadline::new(budget);
+        // Simulate time spent assembling input before entering the next phase.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let mut graph = Graph::default();
+        for system in [System::Wac, System::Acp] {
+            let result = match system {
+                System::Wac => materialize_wac_with_deadline(
+                    &mut graph,
+                    default_auth_limits(),
+                    budget,
+                    deadline,
+                ),
+                System::Acp => materialize_acp_with_deadline(
+                    &mut graph,
+                    &AccessProvenance::new(),
+                    &VerifiedCredentials::new(),
+                    default_auth_limits(),
+                    budget,
+                    deadline,
+                ),
+            };
+            assert_eq!(
+                auth_allowance_refusal(&result.unwrap_err()),
+                Some(AuthAllowance::Deadline)
+            );
+            assert!(
+                graph.named().is_empty(),
+                "expired input cannot install a view"
+            );
+        }
+    }
+
     /// The WAC auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
     fn wac_text(graph: &mut Graph) -> Result<MaterializeStats, String> {
         strip_reserved_graphs(graph)?;
@@ -753,7 +991,12 @@ mod tests {
         let src = format!("{}\n{}\n{}", input, COMMON_RULES, WAC_RULES);
         let mut dict = Dict::new();
         let closure = reason_n3(&mut dict, &src)?;
-        install_auth_view(graph, &dict, &closure)
+        install_auth_view(
+            graph,
+            &dict,
+            &closure,
+            MaterializeDeadline::new(default_auth_budget()),
+        )
     }
 
     /// The ACP auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
@@ -778,7 +1021,12 @@ mod tests {
             &[&accepts, ACP_B, ACP_C],
             NegationCycles::SinglePass,
         )?;
-        install_auth_view(graph, &dict, &closure.facts)
+        install_auth_view(
+            graph,
+            &dict,
+            &closure.facts,
+            MaterializeDeadline::new(default_auth_budget()),
+        )
     }
 
     /// The installed `<urn:sparq:auth>` view as a comparable set of `s p o` strings.
@@ -872,6 +1120,7 @@ mod tests {
                 &prov,
                 &VerifiedCredentials::new(),
                 default_auth_budget(),
+                MaterializeDeadline::new(default_auth_budget()),
             )
             .expect("id facts");
             let direct: BTreeSet<String> = ids

@@ -137,14 +137,15 @@ Materialize the authorization view from the access-control documents, then enfor
   one term, `max_resource_iri_bytes` 2 KiB and `max_resource_path_depth` 64 for one resource
   IRI the enumeration walks) and the AGGREGATE of
   all the closures one materialization runs (`max_decision_join_rows` 4,000,000,
-  `max_decision_facts` 512,000). Same application rules as `set_auth_limits`: from the NEXT
+  `max_decision_facts` 512,000) and wall-clock time (`max_materialize_time`: default
+  `Some(Duration::from_secs(5))`, `None` = unbounded). Same application rules as `set_auth_limits`: from the NEXT
   materialization, WAC and ACP alike, every self-made rebuild included; the free
   `materialize_*` functions always use `default_auth_budget()`.
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
   -> bool` — whether a materialization error is a refusal by that allowance or budget rather
   than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
   RoundsOrFacts, TermBytes, InputBytes, InputFacts, InputTermBytes, ResourceIri,
-  DecisionWork, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
+  DecisionWork, Deadline, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
   as a tag directly after the refusal wording, and the pair is read from ANYWHERE in the
   message, so it still matches when a write path wraps the failed rebuild's error in its own
   sentence — while an error that merely quotes the tag literal is not read as a refusal.
@@ -909,6 +910,30 @@ drops the view, denying every request until a materialization succeeds. The refu
 allowance was reached, so an operator can act on "raise the allowance" rather than reading it
 as a policy decision. Raise it with
 `PodStore::set_auth_limits`.
+
+### Materialization deadline
+
+`AuthBudget::max_materialize_time` gives one native materialization a shared wall-clock
+allowance, defaulting to five seconds. Set it to `None` to disable the deadline. It covers
+input assembly and all strata together, including edit-triggered rebuilds and the ODRL N3
+bridge. The clock is sampled per document, per resource batch, during input assembly and
+at stratum boundaries, never per rule row. A running stratum can overrun the allowance;
+the next boundary refuses before installation and preserves the view in force.
+`auth_allowance_refusal` returns `Some(AuthAllowance::Deadline)` with
+`limit_name() == "max_materialize_time"` and the usual refusal wording plus
+`[allowance=deadline]`. On wasm32 this field is ignored because there is no monotonic clock.
+Configure it through the existing store budget, for example:
+
+```rust
+let mut budget = sparq_solid::default_auth_budget();
+budget.max_materialize_time = None; // explicitly allow unbounded elapsed time
+let mut store = sparq_solid::PodStore::new(sparq_core::Graph::default());
+store.set_auth_budget(budget);
+```
+
+The deadline is cooperative: it does not interrupt a stratum or undo a successful
+materialization. A refused rebuild leaves the previous authorization view in force;
+the caller must handle the error before treating a control-document edit as applied.
 
 ### Input and whole-decision budget
 

@@ -2619,7 +2619,8 @@ pub struct AppState {
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
     /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
-    /// the server's OWN loaded store, cached per serving lineage and generation. `None` until the first
+    /// the server's OWN loaded store, with independent single-flight slots per serving
+    /// lineage, generation and requested view kind. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
     /// WHERE THE AUTH VIEW LIVES relative to the ring's immutable generations (the design
@@ -3494,8 +3495,12 @@ impl AppState {
             // Serialize the lineage swap with auth-view installation. A pre-restore build
             // holding this lock either installs before the swap or observes the new core.
             #[cfg(feature = "solid-authz")]
-            let _cache = self.authz_view.write().ok();
+            let mut cache = self.authz_view.write().unwrap_or_else(|e| e.into_inner());
             self.core.store(Arc::new(ServingCore { ring, writer }));
+            #[cfg(feature = "solid-authz")]
+            {
+                *cache = None;
+            }
         }
         // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
         // generation-zero index from the prior lineage so equality on the numeric generation
