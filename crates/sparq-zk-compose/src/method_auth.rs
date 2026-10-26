@@ -91,7 +91,8 @@ pub enum AuthenticatedMethod {
 
 impl AuthenticatedMethod {
     /// The attested method, or `None` for [`Self::Unbound`]. The `None` means
-    /// "no method was attested" — a caller must not substitute a default.
+    /// "no method was attested"; only the explicit [`MethodPolicy::admit_unbound`]
+    /// downgrade permits the verifier's string-canonical legacy reading.
     pub fn method(self) -> Option<CommitmentMethod> {
         match self {
             AuthenticatedMethod::Bound(m) => Some(m),
@@ -185,8 +186,11 @@ impl MethodPolicy {
     /// It is a DOWNGRADE, and the weaker of the two settings: an unbound
     /// attestation covers the commitment, the salt and the status reference but
     /// attests NO commitment method, so nothing authenticates which leaf shape
-    /// the graph was committed under. `Unbound` is still never read AS a method;
-    /// this only decides whether its explicit absence is tolerated.
+    /// the graph was committed under. Under `admit_unbound` the commitment is
+    /// ASSUMED string-canonical; nothing checks it. The downgrade is sound only
+    /// if the issuer signed unbound messages over string-canonical commitments
+    /// alone. A dual-leaf commitment signed unbound cannot use the V2 members,
+    /// and its opaque presentations are not sound.
     #[must_use]
     pub fn admit_unbound(mut self) -> Self {
         self.accept_unbound = true;
@@ -196,7 +200,7 @@ impl MethodPolicy {
     /// The WIDEST policy over attested methods — the one that admits every method
     /// some policy admits.
     ///
-    /// The orphan / no-method-attested member rule in `crate::verifier` has to
+    /// The orphan member rule in `crate::verifier` has to
     /// quantify over the methods a commitment could ever have authenticated.
     /// Stage 2d refuses any method the relying party's policy does not admit, so
     /// that set is exactly the union over all policies, and this names it in one

@@ -428,8 +428,8 @@ pub fn check_value_lane_pin(
 
     if presented.member != expected.member {
         return Err(PinError::MemberMismatch {
-            expected: expected.member.package(),
-            presented: presented.member.package(),
+            expected: expected.member.label(),
+            presented: presented.member.label(),
         });
     }
 

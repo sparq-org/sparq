@@ -42,7 +42,9 @@
 #     follow the same rule, and so do the method-bound version-5 members
 #     (result_v5_*, sq-j506), which prove string-canonical leaves; any other
 #     `result_` member fails generation.
-#   * STRING-LANE members (all remaining members — scan, join, path, revoke, issuer,
+#   * V2 component-witnessed scan/join members admit only `dual-leaf-v2`.
+#     Opaque scan/join members admit string-canonical and legacy `dual-leaf` only.
+#   * Other STRING-LANE members (path, revoke, issuer,
 #     holder, and the blake3-token `filter_*` FILTER lanes) read the
 #     string-canonical / lexical leaf, so they are LEGAL against `string-canonical`
 #     and `dual-leaf` (whose `lexical_component` preserves term identity), ILLEGAL
@@ -142,8 +144,8 @@ METHODS = [
         "over a length-framed (datatype, params) pair, a no-value sentinel asserted "
         "outside the reachable value-handle band, and a dedicated bit-domain "
         "xsd:boolean member (filter_value_dl_bool) that constrains its handle and its "
-        "bound to {0, 1} in-circuit. Same leaf SHAPE as v1, hence the same legality "
-        "row. REMOVES INV-VL exactly as v1 does — the versioning changes constant "
+        "bound to {0, 1} in-circuit. Dedicated component-witnessed scan/join members "
+        "have their own dispatch row. REMOVES INV-VL exactly as v1 does — the versioning changes constant "
         "derivation, not the trust model (CR-G8 / sq-qhy4). Opt-in (`dual-leaf` "
         "feature).",
     },
@@ -201,6 +203,8 @@ def legality(method_key: str, lane: str, member: str = "") -> dict:
         )
     elif member.startswith(V2_DUAL_LEAF_PREFIXES):
         legal = method_key == "dual-leaf-v2"
+    elif member.startswith(("scan_k", "join_eq_na")):
+        legal = method_key in ("string-canonical", "dual-leaf")
     elif lane == "value":
         # value-lane: legal only where a value handle was committed. BOTH dual-leaf
         # versions commit one, so both admit it — legality is about the leaf SHAPE,

@@ -609,7 +609,7 @@ fn both_lanes_round_trip_on_the_shared_wire_tag() {
         assert_eq!(back, built.inputs);
     }
     assert_eq!(
-        CircuitId::FilterValueDlDateTime.package(),
+        CircuitId::FilterValueDlDateTime.package().unwrap(),
         "filter_value_dl_datetime"
     );
 }

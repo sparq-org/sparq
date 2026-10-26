@@ -84,12 +84,11 @@
 //! a slot declaring none carries exactly `VALUE_NONE_V2` — reached by the
 //! component-witnessed `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members.
 //!
-//! What is still OPEN is REACHABILITY: no `CircuitId` names either V2 member
-//! (pinned by `sparq-zk-compose/tests/v2_dual_leaf_members_unreachable.rs`), so no
-//! verify path selects one and those asserts are not yet enforced on any
-//! verification. On the value-lane FILTER members, which have no such assert, an
-//! out-of-band value is still refused only because their `u64` range decomposition
-//! (and `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
+//! Dedicated `CircuitId` variants now select those two compiled members only
+//! for `DualLeafV2` commitments. Opaque scan/join ids are refused for that method.
+//! Value-lane FILTER members have no explicit band assertion: out-of-band values
+//! are refused only through u64 decomposition (plus `{0, 1}` for boolean).
+//! Value-lane FILTER verification remains refused at stage 0; no value gate opens.
 //!
 //! The §14.1 **`LANG_NONE` separation** is enforced on the HOST side, not by
 //! construction: the no-language slot still folds the V1
@@ -102,9 +101,8 @@
 //! `compose_core::dual_leaf_v2_leaf::recompute_term` asserts that a slot declaring
 //! a language tag carries `LANG_CONST != LANG_NONE` and that a language-free slot
 //! carries exactly `LANG_NONE`, at the witnessed component sites of the
-//! `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members. No `CircuitId` names
-//! either member, so no verify path selects one and that assert is not yet
-//! enforced on any verification.
+//! `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members selected by the
+//! dedicated V2 ids. This leaves the INV-VL downgrade unchanged.
 //!
 //! ## 3. The bit-domain boolean lane
 //!

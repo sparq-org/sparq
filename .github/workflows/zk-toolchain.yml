@@ -540,12 +540,17 @@ jobs:
             a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate \
             hidden_issuer_in_set_verifies_and_key_is_private \
             hidden_issuer_only_verifies_with_clear_key_absent \
-            hidden_issuer_only_message_is_held_to_the_method_policy; do
+            hidden_issuer_only_message_is_held_to_the_method_policy \
+            v2_members_live::live_v2_scan_verifies_end_to_end \
+            v2_members_live::live_v2_join_verifies_end_to_end \
+            v2_members_live::live_v2_scan_cross_vk_is_refused \
+            v2_members_live::live_v2_join_cross_vk_is_refused \
+            v2_members_live::live_opaque_scan_cross_v2_vk_is_refused; do
             echo "::group::$t"
             cargo test -p sparq-zk-compose --features dual-leaf --test e2e \
               -- --ignored --exact --test-threads=1 "$t" 2>&1 | tee "/tmp/dl-e2e-$t.log"
             echo "::endgroup::"
-            if ! grep -qE '^test result: ok\. 1 passed' "/tmp/dl-e2e-$t.log"; then
+            if ! grep -qE '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;' "/tmp/dl-e2e-$t.log"; then
               echo "FAIL: $t did not run as exactly one passing test under --features dual-leaf" >&2
               exit 1
             fi
@@ -579,6 +584,7 @@ jobs:
             verifier::fragment_dispatch_tests::a_non_projected_disclosed_binding_is_refused \
             verifier::fragment_dispatch_tests::a_sliced_query_is_refused_end_to_end \
             verifier::fragment_dispatch_tests::an_extended_presentation_over_a_non_string_canonical_commitment_is_refused \
+            verifier::fragment_dispatch_tests::a_v2_member_is_refused_by_the_extended_entry_point \
             verifier::fragment_dispatch_tests::an_honest_extended_presentation_passes_every_binding_layer \
             verifier::fragment_dispatch_tests::the_filter_sweep_runs_even_with_no_branch_witness \
             verifier::fragment_dispatch_tests::a_values_only_branch_carrying_a_filter_is_refused \
