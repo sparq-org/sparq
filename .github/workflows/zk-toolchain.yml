@@ -604,6 +604,25 @@ jobs:
             exit 1
           fi
 
+      - name: Run the ignored dual-leaf method-authentication suite (real bb)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          set -euo pipefail
+          cargo test -p sparq-zk-compose --features dual-leaf --test method_auth_binding \
+            -- --ignored --test-threads=1 2>&1 | tee /tmp/dl-method-auth.log
+          if ! grep -qE '^test result: ok\. 4 passed; 0 failed; 0 ignored; 0 measured;' /tmp/dl-method-auth.log; then
+            echo "FAIL: the dual-leaf method-authentication suite did not run all four live tests" >&2
+            exit 1
+          fi
+          if grep -qE '(^|\.\.\. )SKIP [A-Za-z0-9_]+: ' /tmp/dl-method-auth.log; then
+            echo "FAIL: the dual-leaf method-authentication suite declared a SKIP" >&2
+            exit 1
+          fi
+          if [[ $(grep -cE '(^|\.\.\. )COMPLETE crates/sparq-zk-compose/tests/method_auth_binding\.rs:[0-9]+$' /tmp/dl-method-auth.log) -ne 4 ]]; then
+            echo "FAIL: the dual-leaf method-authentication suite did not complete all four live tests" >&2
+            exit 1
+          fi
+
       # The OFF-by-default `extended-fragment` lane's regression cases live INLINE
       # in `src/verifier.rs` (`verifier::fragment_dispatch_tests`), so
       # `scripts/check-feature-test-execution.py` cannot see them (it scans
