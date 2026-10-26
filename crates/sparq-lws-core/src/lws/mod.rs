@@ -122,6 +122,10 @@ pub struct LwsConfig {
     /// `None` disables it; embedders may supply a shorter duration.
     #[cfg(feature = "sparql-endpoint")]
     pub sparql_timeout: Option<std::time::Duration>,
+    /// Maximum query barrier wait and assembly time (default 500 ms).
+    /// Must be positive and shorter than the two-second mutation admission wait.
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_barrier_budget: std::time::Duration,
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
     /// Start in the notification service's recovery mode: [`LwsState::new`] removes every stored
@@ -270,6 +274,8 @@ impl LwsConfig {
             sparql_timeout: Some(std::time::Duration::from_secs(
                 crate::overload::DEFAULT_REQUEST_TIMEOUT_SECS,
             )),
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_barrier_budget: std::time::Duration::from_millis(500),
             delivery: notify::DeliveryLimits::default(),
             reset_subscription_clock: false,
             suites: default_suites(),
@@ -323,6 +329,8 @@ impl LwsConfig {
     ///   ids to their keys, which offers the SAML 2.0 suite (set when that suite is not offered,
     ///   it is an error; `saml` in `SOLID_SERVER_LWS_AUTHN` without it is an error too);
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
+    /// - `SOLID_SERVER_LWS_SPARQL_BARRIER_MS`: query barrier wait and assembly budget
+    ///   with `sparql-endpoint` (default 500 ms; positive and less than 2000 ms).
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
         cfg.max_body = crate::body_limit::max_body_bytes_from_env();
@@ -371,6 +379,12 @@ impl LwsConfig {
                 "SOLID_SERVER_LWS_SPARQL_MAX_BYTES",
                 &mut cfg.sparql_max_bytes,
             )?;
+            if let Some(ms) = std::env::var_os("SOLID_SERVER_LWS_SPARQL_BARRIER_MS") {
+                let ms = ms
+                    .to_str()
+                    .ok_or("SOLID_SERVER_LWS_SPARQL_BARRIER_MS must be a positive integer")?;
+                cfg.sparql_barrier_budget = snapshot::parse_barrier_budget(ms.trim())?;
+            }
         }
         positive("SOLID_SERVER_LWS_DELIVERY_QUEUE", &mut cfg.delivery.queue)?;
         positive(
@@ -692,6 +706,8 @@ pub struct Inner<S: Store> {
     /// How many failed releases were not kept for the sweeper, the wait list being full (see
     /// [`LwsState::release_later`]).
     dropped_releases: std::sync::atomic::AtomicU64,
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    sparql_evaluation: std::sync::Mutex<Option<sparql::EvaluationGate>>,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -757,6 +773,8 @@ impl<S: Store + 'static> LwsState<S> {
         cfg: LwsConfig,
         additional: crate::describe::ServiceCatalog,
     ) -> Result<Self, String> {
+        #[cfg(feature = "sparql-endpoint")]
+        snapshot::validate_barrier_budget(cfg.sparql_barrier_budget)?;
         store
             .exclusive()
             .map_err(|e| format!("the storage cannot be served over this store: {e}"))?;
@@ -810,6 +828,8 @@ impl<S: Store + 'static> LwsState<S> {
                 settlements: Default::default(),
                 unreleased: Default::default(),
                 dropped_releases: Default::default(),
+                #[cfg(all(test, feature = "sparql-endpoint"))]
+                sparql_evaluation: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.

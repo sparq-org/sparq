@@ -3,9 +3,28 @@
 use crate::error::ServerError;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 pub(super) const OPTIMISTIC_ATTEMPTS: usize = 2;
+
+pub(super) fn validate_barrier_budget(budget: Duration) -> Result<(), String> {
+    if budget.is_zero() || budget >= super::records::LOCK_WAIT {
+        return Err(
+            "SOLID_SERVER_LWS_SPARQL_BARRIER_MS must be positive and less than 2000 ms".to_string(),
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn parse_barrier_budget(value: &str) -> Result<Duration, String> {
+    let ms = value
+        .parse::<u64>()
+        .map_err(|_| "SOLID_SERVER_LWS_SPARQL_BARRIER_MS must be a positive integer".to_string())?;
+    let budget = Duration::from_millis(ms);
+    validate_barrier_budget(budget)?;
+    Ok(budget)
+}
 
 tokio::task_local! {
     static CHANGES: Vec<Arc<Gate>>;

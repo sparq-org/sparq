@@ -12,6 +12,20 @@ use std::collections::BTreeSet;
 
 pub(super) const PATH: &str = "/.lws/sparql";
 
+#[cfg(test)]
+pub(super) struct EvaluationGate {
+    entered: std::sync::Arc<tokio::sync::Semaphore>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+impl EvaluationGate {
+    fn wait(self) {
+        self.entered.add_permits(1);
+        let _ = self.release.recv_timeout(std::time::Duration::from_secs(5));
+    }
+}
+
 pub(super) async fn handle<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -58,31 +72,60 @@ pub(super) async fn handle<S: Store + 'static>(
         let mut attempts = 0;
         loop {
             let barrier = attempts >= super::snapshot::OPTIMISTIC_ATTEMPTS;
-            let Some(snapshot) = state.store.snapshot(barrier).await else {
-                attempts += 1;
-                tokio::task::yield_now().await;
-                continue;
+            let assemble_view = async {
+                let snapshot = state.store.snapshot(barrier).await?;
+                let assembled = assemble(state, agent, deadline).await;
+                let unchanged = snapshot.unchanged();
+                // Evaluation uses only owned data. Release admission immediately after
+                // validating assembly, including when this attempt returned an error.
+                drop(snapshot);
+                unchanged.then_some(assembled)
             };
-            let assembled = assemble(state, agent, deadline).await;
-            let answer = match assembled {
-                Ok(dataset) => {
-                    let mut selected = parsed.clone();
-                    selected.restrict_named(&dataset.graph_names);
-                    protocol::evaluate(selected, &dataset, &req.headers, &budget, true)
-                        .map_err(protocol_error)
+            let assembled = if barrier {
+                match tokio::time::timeout(state.cfg.sparql_barrier_budget, assemble_view).await {
+                    Ok(assembled) => assembled,
+                    Err(_) => {
+                        return super::resources::retry_later(
+                            "the storage is too busy to assemble a consistent view now",
+                        )
+                    }
                 }
-                Err(response) => Err(response),
+            } else {
+                assemble_view.await
             };
             if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                 return problem(StatusCode::GATEWAY_TIMEOUT, None);
             }
-            if snapshot.unchanged() {
-                return answer.unwrap_or_else(|response| response);
+            let Some(assembled) = assembled else {
+                attempts += 1;
+                tokio::task::yield_now().await;
+                continue;
+            };
+            let dataset = match assembled {
+                Ok(dataset) => dataset,
+                Err(response) => return response,
+            };
+            let headers = req.headers.clone();
+            #[cfg(test)]
+            let evaluation = state.sparql_evaluation.lock().unwrap().take();
+            let answer = tokio::task::spawn_blocking(move || {
+                #[cfg(test)]
+                if let Some(gate) = evaluation {
+                    gate.wait();
+                }
+                let mut selected = parsed;
+                selected.restrict_named(&dataset.graph_names);
+                protocol::evaluate(selected, &dataset, &headers, &budget, true)
+            })
+            .await;
+            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                return problem(StatusCode::GATEWAY_TIMEOUT, None);
             }
-            // A mutation overlapped assembly or evaluation. Discard the whole attempt and
-            // rebuild in a stable generation, authorization included.
-            drop(snapshot);
-            attempts += 1;
+            return match answer {
+                Ok(Ok(response)) => response,
+                Ok(Err(error)) => protocol_error(error),
+                Err(_) => problem(StatusCode::INTERNAL_SERVER_ERROR, None),
+            };
         }
     };
     let mut response = match deadline {
@@ -124,6 +167,7 @@ async fn assemble<S: Store + 'static>(
     let mut nquads = String::new();
     let mut parsed_bytes = 0usize;
     while let Some(uri) = queue.pop() {
+        tokio::task::yield_now().await;
         if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             return Err(problem(StatusCode::GATEWAY_TIMEOUT, None));
         }
@@ -155,7 +199,7 @@ async fn assemble<S: Store + 'static>(
         let Ok(name) = NamedNode::new(uri.clone()) else {
             continue;
         };
-        let mut triples = Vec::new();
+        let mut document = None;
         if !uri.ends_with('/') {
             if let Ok(format) = classify(Some(&meta.content_type)) {
                 // Account only authorized RDF, including malformed documents, before parsing.
@@ -170,7 +214,7 @@ async fn assemble<S: Store + 'static>(
                     ));
                 }
                 parsed_bytes += body.len();
-                triples = parse_to_triples(format, &body, &uri).unwrap_or_default();
+                document = Some((format, body));
             }
         }
         if names.len() >= state.cfg.sparql_max_resources {
@@ -180,12 +224,23 @@ async fn assemble<S: Store + 'static>(
             ));
         }
         let scope = names.len();
-        names.push(uri);
-        for triple in protocol::scope_blank_nodes(triples, scope) {
-            protocol::write_quad(&mut nquads, &triple, &name);
+        names.push(uri.clone());
+        if let Some((format, body)) = document {
+            nquads = tokio::task::spawn_blocking(move || {
+                let triples = parse_to_triples(format, &body, &uri).unwrap_or_default();
+                for triple in protocol::scope_blank_nodes(triples, scope) {
+                    protocol::write_quad(&mut nquads, &triple, &name);
+                }
+                nquads
+            })
+            .await
+            .map_err(|_| problem(StatusCode::INTERNAL_SERVER_ERROR, None))?;
         }
     }
-    protocol::dataset(&nquads, names).map_err(protocol_error)
+    tokio::task::spawn_blocking(move || protocol::dataset(&nquads, names))
+        .await
+        .map_err(|_| problem(StatusCode::INTERNAL_SERVER_ERROR, None))?
+        .map_err(protocol_error)
 }
 
 #[cfg(test)]
@@ -213,9 +268,17 @@ mod tests {
     const READER: &str = "https://id.example/reader";
 
     async fn fixture(timeout: Duration) -> (LwsState<FlakyStore>, Router) {
+        fixture_with(timeout, |_| {}).await
+    }
+
+    async fn fixture_with(
+        timeout: Duration,
+        configure: impl FnOnce(&mut LwsConfig),
+    ) -> (LwsState<FlakyStore>, Router) {
         let mut cfg = LwsConfig::new(BASE);
         cfg.owner = Some(WRITER.into());
         cfg.sparql_timeout = Some(timeout);
+        configure(&mut cfg);
         let state = LwsState::new(FlakyStore::new(), cfg).await.unwrap();
         for name in ["a", "b"] {
             let uri = format!("{BASE}/{name}");
@@ -327,6 +390,223 @@ mod tests {
         );
         for row in rows {
             assert_eq!(row["x"]["value"], row["y"]["value"]);
+        }
+    }
+
+    async fn query_under_barrier(
+        state: &LwsState<FlakyStore>,
+        app: Router,
+    ) -> tokio::task::JoinHandle<Response> {
+        let entered = Arc::new(Semaphore::new(0));
+        let release = Arc::new(Semaphore::new(0));
+        let changing = {
+            let (state, entered, release) = (state.clone(), entered.clone(), release.clone());
+            tokio::spawn(async move {
+                state
+                    .store
+                    .change(async {
+                        entered.add_permits(1);
+                        release.acquire().await.unwrap().forget();
+                    })
+                    .await
+                    .unwrap()
+            })
+        };
+        entered.acquire().await.unwrap().forget();
+        let reading = {
+            let state = state.clone();
+            tokio::spawn(async move { query(&state, app).await })
+        };
+        wait_until(|| state.store.barrier_pending()).await;
+        release.add_permits(1);
+        changing.await.unwrap();
+        reading
+    }
+
+    async fn assert_assembly_busy(response: Response) {
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "5");
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "application/problem+json"
+        );
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let data: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(data["status"], 503);
+        assert_eq!(
+            data["detail"],
+            "the storage is too busy to assemble a consistent view now"
+        );
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(!body.contains(BASE));
+        assert!(!body.contains("urn:"));
+    }
+
+    #[tokio::test]
+    async fn writes_complete_when_barrier_assembly_spends_its_budget() {
+        let budget = Duration::from_millis(100);
+        let (state, app) = fixture_with(Duration::from_secs(4), |cfg| {
+            cfg.sparql_barrier_budget = budget;
+        })
+        .await;
+        let body = Arc::new(Semaphore::new(0));
+        *state.store.hold_next_read_reply_of.lock().unwrap() = Some((format!("{BASE}/b"), body));
+        let reading = query_under_barrier(&state, app.clone()).await;
+        wait_until(|| {
+            state
+                .store
+                .hold_next_read_reply_of
+                .lock()
+                .unwrap()
+                .is_none()
+        })
+        .await;
+        assert!(state.store.barrier_pending());
+        let written = tokio::time::timeout(
+            budget + Duration::from_millis(400),
+            call(
+                &state,
+                app.clone(),
+                WRITER,
+                "PUT",
+                "/a",
+                "<urn:s> <urn:x> 1; <urn:y> 1 .",
+            ),
+        )
+        .await
+        .expect("a write must be admitted when the query assembly budget ends");
+        assert!(written.status().is_success());
+        assert_assembly_busy(reading.await.unwrap()).await;
+        assert!(!state.store.barrier_pending());
+        assert_generation(query(&state, app).await).await;
+    }
+
+    #[tokio::test]
+    async fn evaluation_releases_admission_and_keeps_its_assembled_view() {
+        let (state, app) = fixture(Duration::from_secs(4)).await;
+        let entered = Arc::new(Semaphore::new(0));
+        let (release, receiver) = std::sync::mpsc::channel();
+        *state.sparql_evaluation.lock().unwrap() = Some(EvaluationGate {
+            entered: entered.clone(),
+            release: receiver,
+        });
+        let reading = query_under_barrier(&state, app.clone()).await;
+        tokio::time::timeout(Duration::from_secs(1), entered.acquire())
+            .await
+            .expect("evaluation must reach the blocking pool")
+            .unwrap()
+            .forget();
+        let written = tokio::time::timeout(
+            Duration::from_millis(300),
+            call(
+                &state,
+                app.clone(),
+                WRITER,
+                "PUT",
+                "/a",
+                "<urn:s> <urn:x> 1; <urn:y> 1 .",
+            ),
+        )
+        .await
+        .expect("evaluation must not hold writer admission");
+        assert!(written.status().is_success());
+        assert!(!reading.is_finished());
+        release.send(()).unwrap();
+        let response = reading.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let data: Value = serde_json::from_slice(&bytes).unwrap();
+        let rows = data["results"]["bindings"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert_eq!(row["x"]["value"], "0");
+            assert_eq!(row["y"]["value"], "0");
+        }
+        assert_generation(query(&state, app).await).await;
+    }
+
+    #[tokio::test]
+    async fn barrier_budget_includes_waiting_for_changes_to_drain() {
+        let (state, app) = fixture_with(Duration::from_secs(3), |cfg| {
+            cfg.sparql_barrier_budget = Duration::from_millis(100);
+        })
+        .await;
+        let gate = Arc::new(Semaphore::new(0));
+        *state.store.hold_next_write_of.lock().unwrap() = Some((format!("{BASE}/a"), gate.clone()));
+        let writing = {
+            let (state, app) = (state.clone(), app.clone());
+            tokio::spawn(async move {
+                call(
+                    &state,
+                    app,
+                    WRITER,
+                    "PUT",
+                    "/a",
+                    "<urn:s> <urn:x> 1; <urn:y> 1 .",
+                )
+                .await
+            })
+        };
+        wait_until(|| state.store.hold_next_write_of.lock().unwrap().is_none()).await;
+        let response = tokio::time::timeout(Duration::from_millis(500), query(&state, app.clone()))
+            .await
+            .expect("waiting for a change uses the assembly barrier budget");
+        assert_assembly_busy(response).await;
+        assert!(!state.store.barrier_pending());
+        gate.add_permits(1);
+        assert!(writing.await.unwrap().status().is_success());
+        assert_generation(query(&state, app).await).await;
+    }
+
+    #[tokio::test]
+    async fn evaluation_remains_bounded_by_the_request_deadline() {
+        let (state, app) = fixture(Duration::from_millis(100)).await;
+        let entered = Arc::new(Semaphore::new(0));
+        let (release, receiver) = std::sync::mpsc::channel();
+        *state.sparql_evaluation.lock().unwrap() = Some(EvaluationGate {
+            entered: entered.clone(),
+            release: receiver,
+        });
+        let reading = query_under_barrier(&state, app.clone()).await;
+        entered.acquire().await.unwrap().forget();
+        let response = tokio::time::timeout(Duration::from_millis(500), reading)
+            .await
+            .expect("the HTTP response must respect the evaluation deadline")
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert!(!state.store.barrier_pending());
+        release.send(()).unwrap();
+        assert_generation(query(&state, app).await).await;
+    }
+
+    #[tokio::test]
+    async fn invalid_barrier_budgets_are_refused_before_storage_startup() {
+        for budget in [
+            Duration::ZERO,
+            records::LOCK_WAIT,
+            records::LOCK_WAIT + Duration::from_millis(1),
+        ] {
+            let mut cfg = LwsConfig::new(BASE);
+            cfg.sparql_barrier_budget = budget;
+            let store = FlakyStore::new();
+            let result = super::super::router(store.clone(), cfg).await;
+            let error = result.expect_err("invalid barrier budget must prevent startup");
+            assert!(error.contains("SOLID_SERVER_LWS_SPARQL_BARRIER_MS"));
+            assert!(!store.exists(&format!("{BASE}/")).await.unwrap());
+        }
+        assert_eq!(
+            LwsConfig::new(BASE).sparql_barrier_budget,
+            Duration::from_millis(500)
+        );
+        assert!(super::super::snapshot::validate_barrier_budget(Duration::from_nanos(1)).is_ok());
+        for invalid in ["", "0", "-1", "1.5", "2000", "2500", "x"] {
+            assert!(super::super::snapshot::parse_barrier_budget(invalid).is_err());
+        }
+        for ms in ["1", "150", "500", "1999"] {
+            assert_eq!(
+                super::super::snapshot::parse_barrier_budget(ms).unwrap(),
+                Duration::from_millis(ms.parse().unwrap())
+            );
         }
     }
 

@@ -49,20 +49,33 @@ reads or authorization checks omit the resource; a failed container enumeration
 omits that branch. No placeholder triples are added. Blank node identifiers
 are scoped separately for each document, including nested triple terms.
 
-LWS holds the optimistic read side of a storage-wide generation guard through
-enumeration, authorization and evaluation. Every tracked store mutation and
+LWS uses a storage-wide generation guard through enumeration, authorization
+and dataset assembly. Every tracked store mutation and
 logical content/metadata change marks activity and advances the generation;
 grant publication and settlement do the same. Queries start only between
-logical changes and validate the generation before returning. An overlapping
+logical changes and validate the generation immediately after assembly. An overlapping
 change discards the whole attempt, including any error, and the query rebuilds
 after activity settles. After two unsuccessful optimistic attempts, a query
 queues a fair barrier: existing changes finish, new top-level changes wait,
-and the query assembles and evaluates while holding the barrier. Nested work
+and the query assembles while holding the barrier. Nested work
 uses its task's existing mutation lease. Independent mutations keep their
-existing concurrency; queries acquire no per-resource locks. A new top-level
-change waits at most the existing lock-wait budget (two seconds), then receives
-a retryable `503` if it has not been admitted. The query deadline also releases
-a queued or held barrier when the request expires.
+existing concurrency; queries acquire no per-resource locks. The snapshot,
+including its barrier, is released before evaluating the owned dataset on the
+blocking pool. Concurrent changes do not invalidate that assembled view.
+
+`LwsConfig::sparql_barrier_budget` bounds waiting for in-flight changes to drain
+and assembly under the barrier together. It defaults to 500 ms;
+`LwsConfig::from_env` reads `SOLID_SERVER_LWS_SPARQL_BARRIER_MS` as positive integer
+milliseconds. The value must be shorter than the existing mutation admission
+wait of two seconds, for both environment and embedded configurations; invalid
+values prevent startup. When this budget is spent, the query releases its queued
+or held barrier and returns `503` with `Retry-After: 5` and
+`application/problem+json` detail
+`the storage is too busy to assemble a consistent view now`.
+No partial result is returned. New top-level changes retain their existing
+mutation admission wait. A query's barrier releases within its shorter budget,
+and evaluation holds no mutation admission lease. The request deadline also
+releases a queued or held barrier when the request expires.
 
 Record publication holds a mutation lease for its bounded store and memory
 steps. Record settlement fence waits and retry loops run outside that lease;
@@ -80,5 +93,7 @@ cap returns `507`; crossing the byte cap returns `413`. Both are
 `LwsConfig::sparql_timeout` defaults to the server request timeout. `from_env`
 uses `SOLID_SERVER_REQUEST_TIMEOUT_SECS` (default 30 seconds; `0` disables it).
 Embedders may set an optional duration directly. The deadline covers snapshot
-waiting and assembly and is also passed to the engine's cooperative query
-budget. Expiry returns `504` problem details.
+waiting, assembly, and evaluation and is also passed to the engine's cooperative
+query budget. RDF parsing, dataset construction and query evaluation run on the
+blocking pool so the asynchronous deadline can end the response while CPU work
+finishes against owned data. Expiry returns `504` problem details.
