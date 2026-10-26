@@ -127,6 +127,10 @@ backends; `CompositeStore` uses it for every body write. The decorator refuses
 plain `put`. `BlobScopePolicy` selects the storage root for LWS, the first path
 segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
 seal reservations live in reserved index records, outside HTTP resources.
+Resource read plans refuse this namespace in both target and ACL-candidate
+positions.
+Queued requests share a key-provider result, including a failed unwrap or initial
+generation. A later independent request can retry after a failed call.
 
 This is the library stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
 Runtime activation is held for the D1 reference audit and the

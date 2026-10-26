@@ -26,6 +26,10 @@ impl CryptClock for ManualClock {
 struct Provider {
     inner: Arc<LocalKeyProvider>,
     calls: Arc<AtomicU64>,
+    refuse: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
 }
 
 fn provider(byte: u8) -> Provider {
@@ -47,6 +51,25 @@ fn provider(byte: u8) -> Provider {
     Provider {
         inner: Arc::new(inner),
         calls: Arc::new(AtomicU64::new(0)),
+        refuse: Arc::new(AtomicBool::new(false)),
+        pause: Arc::new(AtomicBool::new(false)),
+        entered: Arc::default(),
+        release: Arc::default(),
+    }
+}
+
+impl Provider {
+    async fn before_call(&self) -> sparq_lws_crypt::Result<()> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.pause.swap(false, Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        tokio::task::yield_now().await;
+        if self.refuse.load(Ordering::SeqCst) {
+            return Err(sparq_lws_crypt::Error::ProviderUnavailable);
+        }
+        Ok(())
     }
 }
 
@@ -59,8 +82,7 @@ impl KeyProvider for Provider {
         &self,
         ctx: &KeyContext,
     ) -> sparq_lws_crypt::Result<(SecretKey, WrappedKey)> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        tokio::task::yield_now().await;
+        self.before_call().await?;
         self.inner.generate_data_key(ctx).await
     }
     async fn unwrap(
@@ -68,8 +90,7 @@ impl KeyProvider for Provider {
         wrapped: &WrappedKey,
         ctx: &KeyContext,
     ) -> sparq_lws_crypt::Result<SecretKey> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        tokio::task::yield_now().await;
+        self.before_call().await?;
         self.inner.unwrap(wrapped, ctx).await
     }
 }
@@ -105,6 +126,74 @@ impl BlobStore for Backend {
     }
     async fn delete_if_unchanged(&self, key: &str, generation: u64) -> Result<bool, BlobError> {
         self.bytes.delete_if_unchanged(key, generation).await
+    }
+}
+
+#[derive(Clone, Default)]
+struct ControlledIndex {
+    inner: Arc<InMemorySparqClient>,
+    // One-shot faults: refuse before commit, lose the reply, or pause after commit.
+    fault: Arc<AtomicU64>,
+    committed: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait]
+impl SparqClient for ControlledIndex {
+    async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+        self.inner.get_meta(iri).await
+    }
+    async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        self.inner.put_meta(iri, meta).await
+    }
+    async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+        self.inner.exists(iri).await
+    }
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.inner.exclusive()
+    }
+    async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        self.inner.delete_meta(iri).await
+    }
+    async fn delete_meta_if_empty(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<crate::store::DeleteOutcome, SparqError> {
+        self.inner.delete_meta_if_empty(iri, parent).await
+    }
+    async fn create_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<(), SparqError> {
+        let fault = if container == DATA_KEY_CONTAINER {
+            self.fault.swap(0, Ordering::SeqCst)
+        } else {
+            0
+        };
+        let failure = || SparqError::Backend("private index detail".into());
+        if fault == 1 {
+            return Err(failure());
+        }
+        self.inner.create_child(container, child, meta).await?;
+        if fault == 2 {
+            return Err(failure());
+        }
+        if fault == 3 {
+            self.committed.notify_one();
+            std::future::pending::<()>().await;
+        }
+        Ok(())
+    }
+    async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        self.inner.remove_child(container, child).await
+    }
+    async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        self.inner.list_children(container).await
+    }
+    async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
+        self.inner.referenced_blob_keys().await
     }
 }
 
@@ -171,6 +260,7 @@ async fn seal_count(store: &Encrypted, id: [u8; 16]) -> u64 {
         .await
         .lock()
         .await
+        .value
         .as_ref()
         .unwrap()
         .dek
@@ -419,6 +509,106 @@ async fn reservation_commits_before_any_seal_and_parallel_writers_share_it() {
 }
 
 #[tokio::test]
+async fn index_commit_errors_never_publish_unreserved_envelopes() {
+    // Fail initial reservation, extension, and retirement, both before and after
+    // the index actually commits. Every case runs through the resource write path.
+    for fault in [1, 2] {
+        for prior_writes in 0..3 {
+            let f = Fixture::new();
+            let index = ControlledIndex::default();
+            let mut options = f.options();
+            options.block = 1;
+            options.rotate_at = 2;
+            let store = CompositeStore::with_body_cache(
+                index.clone(),
+                f.backend.clone(),
+                BodyCache::disabled(),
+            )
+            .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, options)
+            .await
+            .unwrap();
+            for i in 0..prior_writes {
+                store
+                    .write(
+                        &format!("{ALICE}/{i}"),
+                        Bytes::from_static(BODY),
+                        "text/plain",
+                    )
+                    .await
+                    .unwrap();
+            }
+            let before = f.backend.list().await.unwrap();
+            index.fault.store(fault, Ordering::SeqCst);
+            let error = store
+                .write(ALICE, Bytes::from_static(BODY), "text/plain")
+                .await
+                .expect_err("a failed key-record commit must fail the resource write");
+            assert!(!error.to_string().contains("private index detail"));
+            assert!(matches!(
+                index.get_meta(ALICE).await,
+                Err(SparqError::NotFound)
+            ));
+            let after = f.backend.list().await.unwrap();
+            assert_eq!(after.len(), before.len());
+            for entry in before {
+                assert_eq!(store.blob.get(&entry.key).await.unwrap(), BODY);
+            }
+            store
+                .write(ALICE, Bytes::from_static(BODY), "text/plain")
+                .await
+                .unwrap();
+            assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+            let records = store.blob.records.all().await.unwrap();
+            assert_eq!(records.iter().filter(|r| r.current).count(), 1);
+            assert!(records.iter().all(|r| r.reserved_seals > 0));
+        }
+    }
+}
+
+#[tokio::test]
+async fn cancelled_first_writer_recovers_its_committed_key_without_regenerating() {
+    let f = Fixture::new();
+    let index = ControlledIndex::default();
+    let store = Arc::new(
+        CompositeStore::with_body_cache(index.clone(), f.backend.clone(), BodyCache::disabled())
+            .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, f.options())
+            .await
+            .unwrap(),
+    );
+    index.fault.store(3, Ordering::SeqCst);
+    let writer = store.clone();
+    let task = tokio::spawn(async move {
+        writer
+            .write(ALICE, Bytes::from_static(BODY), "text/plain")
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), index.committed.notified())
+        .await
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(f.backend.list().await.unwrap().is_empty());
+    let records = store.blob.records.all().await.unwrap();
+    assert_eq!(records.len(), 1);
+    let id = records[0].id().unwrap();
+    assert_eq!(records[0].reserved_seals, BLOCK);
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let records = store.blob.records.all().await.unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].reserved_seals, 2 * BLOCK);
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 2);
+    let slot = store.blob.key_slot(id).await;
+    assert_eq!(
+        slot.lock().await.value.as_ref().unwrap().dek.seal_count(),
+        BLOCK + 1
+    );
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+}
+
+#[tokio::test]
 async fn rotation_uses_a_new_current_key_and_old_bytes_stay_readable() {
     let f = Fixture::new();
     let mut options = f.options();
@@ -535,6 +725,90 @@ async fn ttl_and_single_flight_bound_provider_calls_for_mixed_reads_and_writes()
 }
 
 #[tokio::test]
+async fn failed_unwrap_is_shared_by_queued_reads_and_writes_then_retried() {
+    async fn access(store: &Encrypted, write: bool) -> crate::error::ServerResult<()> {
+        if write {
+            store
+                .write(ALICE, Bytes::from_static(BODY), "text/plain")
+                .await
+                .map(|_| ())
+        } else {
+            store.read(ALICE).await.map(|_| ())
+        }
+    }
+    for first_writes in [false, true] {
+        let f = Fixture::new();
+        let store = f.encrypted().await;
+        let meta = store
+            .write(ALICE, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        f.clock.0.store(DEFAULT_DEK_TTL.as_secs(), Ordering::SeqCst);
+        f.provider.refuse.store(true, Ordering::SeqCst);
+        f.provider.pause.store(true, Ordering::SeqCst);
+        let mut first = Box::pin(access(&store, first_writes));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        f.provider.entered.notified().await;
+        // Poll every request into the held key/pod slots before ending the flight.
+        let mut joined = Vec::new();
+        for write in [false, true, false, true] {
+            let mut request = Box::pin(access(&store, write));
+            assert!(futures_util::poll!(request.as_mut()).is_pending());
+            joined.push(request);
+        }
+        f.provider.release.notify_one();
+        assert!(first.await.is_err());
+        for request in joined {
+            assert!(request.await.is_err());
+        }
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(f.index.get_meta(ALICE).await.unwrap(), meta);
+        assert_eq!(f.backend.list().await.unwrap().len(), 1);
+        f.provider.refuse.store(false, Ordering::SeqCst);
+        assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+        store
+            .write(ALICE, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 3);
+        assert_eq!(store.blob.records.all().await.unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn failed_generation_is_shared_by_queued_writers_then_retried() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    f.provider.refuse.store(true, Ordering::SeqCst);
+    f.provider.pause.store(true, Ordering::SeqCst);
+    let mut first = store.write(ALICE, Bytes::from_static(BODY), "text/plain");
+    assert!(futures_util::poll!(first.as_mut()).is_pending());
+    f.provider.entered.notified().await;
+    let mut joined = Vec::new();
+    for _ in 0..4 {
+        let mut request = store.write(ALICE, Bytes::from_static(BODY), "text/plain");
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        joined.push(request);
+    }
+    f.provider.release.notify_one();
+    assert!(first.await.is_err());
+    for request in joined {
+        assert!(request.await.is_err());
+    }
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
+    assert!(store.blob.records.all().await.unwrap().is_empty());
+    assert!(f.backend.list().await.unwrap().is_empty());
+    assert!(store.meta(ALICE).await.unwrap().is_none());
+    f.provider.refuse.store(false, Ordering::SeqCst);
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn mixed_legacy_and_unknown_or_malformed_envelopes_never_fall_back() {
     let f = Fixture::new();
     f.plain()
@@ -615,6 +889,10 @@ async fn key_records_stay_outside_resource_operations_and_the_reconciler() {
     assert!(store.meta(&iri).await.unwrap().is_none());
     assert!(!store.exists(&iri).await.unwrap());
     assert!(store.read_plan(&iri, &[]).await.is_err());
+    assert!(store
+        .read_plan(ALICE, std::slice::from_ref(&iri))
+        .await
+        .is_err());
     assert!(store.list_children(DATA_KEY_CONTAINER).await.is_err());
     assert!(store
         .list_children_within(DATA_KEY_CONTAINER, 10000)
@@ -867,6 +1145,7 @@ async fn directory_index_reopen_restores_wrapped_keys_and_reservations() {
             .await
             .lock()
             .await
+            .value
             .as_ref()
             .unwrap()
             .dek

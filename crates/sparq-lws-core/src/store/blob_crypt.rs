@@ -6,7 +6,10 @@
 
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -219,8 +222,51 @@ struct CachedDek {
     expires: Duration,
 }
 
-type KeySlot = Arc<Mutex<Option<CachedDek>>>;
-type PodSlot = Arc<Mutex<Option<[u8; 16]>>>;
+struct SlotState<T> {
+    value: Option<T>,
+    failure: Option<BlobError>,
+}
+
+struct Slot<T> {
+    state: Mutex<SlotState<T>>,
+    failure_epoch: AtomicU64,
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(SlotState {
+                value: None,
+                failure: None,
+            }),
+            failure_epoch: AtomicU64::new(0),
+        }
+    }
+}
+
+impl<T> Slot<T> {
+    fn observed(&self) -> u64 {
+        self.failure_epoch.load(Ordering::Acquire)
+    }
+
+    async fn lock(&self) -> tokio::sync::MutexGuard<'_, SlotState<T>> {
+        self.state.lock().await
+    }
+
+    fn joined_failure(&self, state: &SlotState<T>, observed: u64) -> Option<BlobError> {
+        (self.observed() != observed)
+            .then(|| state.failure.clone())
+            .flatten()
+    }
+
+    fn failed(&self, state: &mut SlotState<T>, error: &BlobError) {
+        state.failure = Some(error.clone());
+        self.failure_epoch.fetch_add(1, Ordering::Release);
+    }
+}
+
+type KeySlot = Arc<Slot<CachedDek>>;
+type PodSlot = Arc<Slot<[u8; 16]>>;
 
 /// Encrypt resource bodies under one current DEK per pod. Unscoped writes refuse.
 ///
@@ -264,7 +310,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             let id = record.id()?;
             if record.current {
                 let slot = this.pod_slot(&record.pod).await;
-                if slot.lock().await.replace(id).is_some() {
+                if slot.lock().await.value.replace(id).is_some() {
                     return Err(invalid_record());
                 }
             }
@@ -281,7 +327,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                 record,
                 expires: this.expires(),
             };
-            *this.key_slot(id).await.lock().await = Some(cached);
+            this.key_slot(id).await.lock().await.value = Some(cached);
         }
         // A directory has no byte-plane object. Reopening preserves its child edges.
         this.records
@@ -309,7 +355,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             .lock()
             .await
             .entry(id)
-            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .or_insert_with(|| Arc::new(Slot::default()))
             .clone()
     }
 
@@ -318,34 +364,57 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             .lock()
             .await
             .entry(pod.to_owned())
-            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .or_insert_with(|| Arc::new(Slot::default()))
             .clone()
     }
 
-    async fn refresh(&self, id: [u8; 16], cached: &mut Option<CachedDek>) -> Result<(), BlobError> {
+    async fn refresh(
+        &self,
+        id: [u8; 16],
+        slot: &Slot<CachedDek>,
+        cached: &mut SlotState<CachedDek>,
+        observed: u64,
+    ) -> Result<(), BlobError> {
         if cached
+            .value
             .as_ref()
             .is_some_and(|c| self.options.clock.now() < c.expires)
         {
             return Ok(());
         }
+        if let Some(error) = slot.joined_failure(cached, observed) {
+            return Err(error);
+        }
         // Drop the old secret even when the provider refuses the refresh.
-        *cached = None;
-        let record = self.records.load(&id).await?;
-        let key = self
-            .provider
-            .unwrap(
-                &WrappedKey::from_bytes(&record.wrapped).map_err(crypt_error)?,
-                &record.context(),
-            )
-            .await
-            .map_err(crypt_error)?;
-        *cached = Some(CachedDek {
-            dek: Dek::new(key, id, record.reserved_seals).map_err(crypt_error)?,
-            record,
-            expires: self.expires(),
-        });
-        Ok(())
+        cached.value = None;
+        cached.failure = None;
+        let refreshed = async {
+            let record = self.records.load(&id).await?;
+            let key = self
+                .provider
+                .unwrap(
+                    &WrappedKey::from_bytes(&record.wrapped).map_err(crypt_error)?,
+                    &record.context(),
+                )
+                .await
+                .map_err(crypt_error)?;
+            Ok(CachedDek {
+                dek: Dek::new(key, id, record.reserved_seals).map_err(crypt_error)?,
+                record,
+                expires: self.expires(),
+            })
+        }
+        .await;
+        match refreshed {
+            Ok(value) => {
+                cached.value = Some(value);
+                Ok(())
+            }
+            Err(error) => {
+                slot.failed(cached, &error);
+                Err(error)
+            }
+        }
     }
 
     async fn generate(&self, scope: &BlobScope) -> Result<[u8; 16], BlobError> {
@@ -384,7 +453,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         };
         // The reservation commits BEFORE a caller can use this key for its first seal.
         self.records.save(&record).await?;
-        *self.key_slot(id).await.lock().await = Some(CachedDek {
+        self.key_slot(id).await.lock().await.value = Some(CachedDek {
             dek: Dek::new(key, id, 0).map_err(crypt_error)?,
             record,
             expires: self.expires(),
@@ -397,7 +466,30 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             return Err(invalid_record());
         }
         let pod = self.pod_slot(&scope.0).await;
+        // Observe before waiting: only callers already queued on this flight share
+        // its failure. A later independent request can retry immediately.
+        let pod_observed = pod.observed();
         let mut current = pod.lock().await;
+        if let Some(error) = pod.joined_failure(&current, pod_observed) {
+            return Err(error);
+        }
+        let result = self
+            .encrypt_current(scope, key, body, &mut current.value)
+            .await;
+        match &result {
+            Ok(_) => current.failure = None,
+            Err(error) => pod.failed(&mut current, error),
+        }
+        result
+    }
+
+    async fn encrypt_current(
+        &self,
+        scope: &BlobScope,
+        key: &str,
+        body: Bytes,
+        current: &mut Option<[u8; 16]>,
+    ) -> Result<Bytes, BlobError> {
         loop {
             let id = match *current {
                 Some(id) => id,
@@ -422,9 +514,10 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                 }
             };
             let slot = self.key_slot(id).await;
+            let observed = slot.observed();
             let mut cached = slot.lock().await;
-            self.refresh(id, &mut cached).await?;
-            let c = cached.as_mut().ok_or_else(invalid_record)?;
+            self.refresh(id, &slot, &mut cached, observed).await?;
+            let c = cached.value.as_mut().ok_or_else(invalid_record)?;
             if c.record.pod != scope.0 || c.record.scheme != self.scheme.as_str() {
                 return Err(invalid_record());
             }
@@ -444,7 +537,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                     .ok_or_else(invalid_record)?
                     .min(self.options.rotate_at);
                 if let Err(e) = self.records.save(&raised).await {
-                    *cached = None;
+                    cached.value = None;
                     return Err(e);
                 }
                 c.record = raised;
@@ -467,14 +560,15 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
             .ok_or_else(|| crypt_error(sparq_lws_crypt::Error::MalformedInput))?
             .dek_id;
         let slot = self.key_slot(id).await;
+        let observed = slot.observed();
         let mut cached = slot.lock().await;
-        if let Err(e) = self.refresh(id, &mut cached).await {
+        if let Err(e) = self.refresh(id, &slot, &mut cached, observed).await {
             if matches!(e, BlobError::UnknownDataKey) {
                 eprintln!("UnknownDataKey blob={key}");
             }
             return Err(e);
         }
-        let c = cached.as_ref().ok_or_else(invalid_record)?;
+        let c = cached.value.as_ref().ok_or_else(invalid_record)?;
         open(&c.dek, key, &body)
             .map(Bytes::from)
             .map_err(crypt_error)

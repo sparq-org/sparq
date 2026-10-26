@@ -17,7 +17,7 @@ use bytes::Bytes;
 use super::{InMemoryStoreLimits, StoreUsage};
 
 /// A blob-store error (kept opaque so it never leaks backend detail to a client).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum BlobError {
     #[error("blob not found")]
     NotFound,

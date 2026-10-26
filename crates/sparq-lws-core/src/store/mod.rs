@@ -1390,7 +1390,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
     }
 
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {
-        if limits::is_data_key_record(target) {
+        if limits::is_data_key_record(target)
+            || acl_candidates.iter().any(|iri| limits::is_data_key_record(iri))
+        {
             return Err(ServerError::NotFound);
         }
         // Delegate to the SparqClient seam: the live HTTP client answers this with ONE combined
