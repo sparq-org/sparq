@@ -468,7 +468,7 @@ mod tests {
         }
 
         fn terms(g: &Graph, hits: &[(sparq_core::dict::Id, f32)]) -> Vec<String> {
-            hits.iter().map(|&(id, _)| g.dict.term(id).to_string()).collect()
+            hits.iter().map(|&(id, _)| g.dict().term(id).to_string()).collect()
         }
 
         const TEN: &str = "\"10\"^^<http://www.w3.org/2001/XMLSchema#integer>";

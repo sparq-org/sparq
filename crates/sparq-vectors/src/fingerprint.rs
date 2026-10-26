@@ -16,7 +16,7 @@
 //! # What is fingerprinted (the exact inputs — keep this comment in sync with [`Fingerprint::of`])
 //!
 //! Three fields, all cheap to compute at build time and on open:
-//!   1. **`dict_len`** — `graph.dict.len()`, the number of real dictionary terms. O(1).
+//!   1. **`dict_len`** — `graph.dict().len()`, the number of real dictionary terms. O(1).
 //!   2. **`triple_count`** — `graph.len()`, the number of triples in the default graph. O(1).
 //!   3. **`content_hash`** — a 64-bit hash over **the dictionary term SET, folded in a
 //!      dict-id-order-INDEPENDENT order** (sorted), not in id order. For each real term we
@@ -106,7 +106,7 @@ pub const FINGERPRINT_LEN: usize = 24;
 /// mask changes the fingerprint (and thus the key), so a stale mask is never served.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Fingerprint {
-    /// `graph.dict.len()` at build time.
+    /// `graph.dict().len()` at build time.
     pub dict_len: u64,
     /// `graph.len()` (default-graph triple count) at build time.
     pub triple_count: u64,
@@ -122,7 +122,7 @@ impl Fingerprint {
     /// count — see the sq-xhiv note in the module docs). The exact inputs are documented at the
     /// module level — keep the two in sync.
     pub fn of(graph: &Graph) -> Fingerprint {
-        let dict = &graph.dict;
+        let dict = graph.dict();
         let dict_len = dict.len() as u64;
         let triple_count = graph.len() as u64;
         // (sq-xhiv) Hash every real term by its LEXICAL content (id-order-independent),
@@ -417,7 +417,7 @@ mod tests {
                ex:bbb ex:p ex:aaa ."#,
         );
         // Same term set and same triple count; only the interning order differs.
-        assert_eq!(g1.dict.len(), g2.dict.len());
+        assert_eq!(g1.dict().len(), g2.dict().len());
         assert_eq!(g1.len(), g2.len());
         assert_eq!(
             Fingerprint::of(&g1),
@@ -451,7 +451,11 @@ mod tests {
             r#"@prefix ex: <http://example.org/> .
                ex:aaa ex:p ex:zzz ."#,
         );
-        assert_eq!(base.dict.len(), edited.dict.len(), "same number of terms");
+        assert_eq!(
+            base.dict().len(),
+            edited.dict().len(),
+            "same number of terms"
+        );
         assert_eq!(base.len(), edited.len(), "same triple count");
         assert_ne!(
             Fingerprint::of(&base).content_hash,
@@ -495,8 +499,13 @@ mod tests {
         let g8 = load_in_pool(8);
         // Sanity: the dict-ids genuinely permuted between the two thread counts (otherwise the
         // test would pass trivially and not guard anything). Find an id whose term differs.
-        assert_eq!(g2.dict.len(), g8.dict.len(), "same term set, just permuted");
-        let permuted = (1..=g2.dict.len() as u32).any(|id| g2.dict.term(id) != g8.dict.term(id));
+        assert_eq!(
+            g2.dict().len(),
+            g8.dict().len(),
+            "same term set, just permuted"
+        );
+        let permuted =
+            (1..=g2.dict().len() as u32).any(|id| g2.dict().term(id) != g8.dict().term(id));
         assert!(
             permuted,
             "expected the parallel sharded merge to assign different dict-ids at 2 vs 8 threads; \
@@ -545,7 +554,7 @@ mod tests {
         };
         let g2 = load_in_pool(2);
         let g8 = load_in_pool(8);
-        assert!(!g2.dict.is_empty() && g2.dict.len() == g8.dict.len());
+        assert!(!g2.dict().is_empty() && g2.dict().len() == g8.dict().len());
         assert_eq!(
             Fingerprint::of(&g2),
             Fingerprint::of(&g8),

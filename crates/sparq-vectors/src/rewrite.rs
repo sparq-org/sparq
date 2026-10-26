@@ -660,7 +660,7 @@ fn rewrite_bgp(
                 // Neighbour ids resolve to graph nodes (IRIs/literals); a blank
                 // node cannot appear in a VALUES row, so skip it (entities embed
                 // as IRIs in practice).
-                let node = term_to_ground(graph.dict.term(id))?;
+                let node = term_to_ground(graph.dict().term(id))?;
                 let mut row = vec![Some(node)];
                 if score_wanted {
                     row.push(Some(GroundTerm::Literal(Literal::from(f64::from(score)))));
@@ -695,7 +695,7 @@ fn rewrite_bgp(
                 // Same rule as the k-NN path: a neighbour that resolves to a blank node cannot appear
                 // in a VALUES row, so it is skipped — and `?rank` is assigned over the SURVIVING rows
                 // so the bound ranks stay a gap-free 1..n.
-                let Some(node) = term_to_ground(graph.dict.term(hit.id)) else {
+                let Some(node) = term_to_ground(graph.dict().term(hit.id)) else {
                     continue;
                 };
                 let mut row = vec![Some(node)];
@@ -1340,7 +1340,7 @@ fn run_aux_arms(
     // be an inline one; `dict.len()` alone is NOT that domain. But that domain is ~1.07e9 wide and
     // every request costs a materialized `Vec`, so the SAFETY cap wins: escalation stops at
     // `MAX_ARM_PAGE`, and only the caller's own `candidates` page may exceed it.
-    let domain = graph.dict.len().saturating_add(INLINE_DOMAIN);
+    let domain = graph.dict().len().saturating_add(INLINE_DOMAIN);
     let ceiling = candidates.max(MAX_ARM_PAGE.min(domain));
     (0..cfg.arm_count())
         .map(|i| {
@@ -1385,14 +1385,14 @@ fn run_aux_arms(
 ///
 /// An arm is a caller closure, so its ids are untrusted: an out-of-process service answering from
 /// a stale or foreign index can return anything. Left unchecked such an id flows all the way to
-/// `graph.dict.term(id)`, which resolves an out-of-domain id to the dictionary's wrong-but-safe
+/// `graph.dict().term(id)`, which resolves an out-of-domain id to the dictionary's wrong-but-safe
 /// OUT-OF-RANGE PLACEHOLDER (a blank node) — and a blank node cannot appear in a `VALUES` row, so
 /// the hit is silently dropped from the inlined table. That is exactly the failure mode
 /// [`validate_arms`](crate::hybrid::validate_arms) already refuses for a duplicated id: a
 /// malformed arm response quietly changing the answer. Fail closed instead, naming the arm so the
 /// operator knows which service to fix.
 fn check_arm_ids(graph: &Graph, arm: &ArmRanking) -> Result<(), String> {
-    let len = graph.dict.len();
+    let len = graph.dict().len();
     for &(id, _) in &arm.ranked {
         // An inline-integer id encodes its literal value directly and is resolvable against any
         // dictionary; every other id must index a stored term.

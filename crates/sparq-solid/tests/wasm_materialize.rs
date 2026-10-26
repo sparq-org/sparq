@@ -53,7 +53,7 @@ fn wac_materialize_does_not_trap_on_wasm32() {
     assert_eq!(stats.millis, 0.0, "wasm32 reports no wall-clock timing");
     // The view is installed as an ordinary named graph.
     assert!(
-        graph.named.iter().any(|(name, _)| matches!(
+        graph.named().iter().any(|(name, _)| matches!(
             name, oxrdf::Term::NamedNode(n) if n.as_str() == AUTH_GRAPH)),
         "auth graph must be installed"
     );

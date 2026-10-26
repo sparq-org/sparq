@@ -120,8 +120,8 @@ fn graph_of(literals: &[String]) -> Graph {
 /// exactly what `TextIndex::build` indexes (plain `xsd:string` + lang-tagged).
 fn corpus(graph: &Graph) -> Vec<(Id, Vec<String>)> {
     let mut out = Vec::new();
-    for id in 1..=graph.dict.len() as Id {
-        if let Term::Literal(l) = graph.dict.term(id) {
+    for id in 1..=graph.dict().len() as Id {
+        if let Term::Literal(l) = graph.dict().term(id) {
             let is_string = l.language().is_some()
                 || l.datatype().as_str() == "http://www.w3.org/2001/XMLSchema#string";
             if is_string {
@@ -444,7 +444,7 @@ fn bm25_hand_pinned_cross_check() {
 
     // Map hand scores onto the actual ids by literal value, bit-exact.
     for h in &hits {
-        let want = match g.dict.term(h.id) {
+        let want = match g.dict().term(h.id) {
             Term::Literal(l) => match l.value() {
                 "fox" => s_a,
                 "fox tail" => s_b,
@@ -457,7 +457,7 @@ fn bm25_hand_pinned_cross_check() {
             h.score.to_bits(),
             want.to_bits(),
             "hand-pinned BM25 for {:?} mismatched",
-            g.dict.term(h.id)
+            g.dict().term(h.id)
         );
     }
 
@@ -467,7 +467,7 @@ fn bm25_hand_pinned_cross_check() {
     assert!(s_a > s_b, "shorter doc must outrank a longer one at equal tf");
     let ranked: Vec<String> = hits
         .iter()
-        .map(|h| match g.dict.term(h.id) {
+        .map(|h| match g.dict().term(h.id) {
             Term::Literal(l) => l.value().to_string(),
             _ => unreachable!(),
         })

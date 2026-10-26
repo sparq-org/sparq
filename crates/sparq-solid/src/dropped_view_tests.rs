@@ -81,22 +81,22 @@ mod odrl {
         let deny = policy("prohibition");
         let req = request();
         assert_guarded("materialize_odrl_permission", true, |s| {
-            s.materialize_odrl_permission(&permit, &req).granted
+            s.materialize_odrl_permission(&permit, &req).unwrap().granted
         });
         assert_guarded("materialize_odrl_policy", true, |s| {
-            s.materialize_odrl_policy(&permit, &req).granted
+            s.materialize_odrl_policy(&permit, &req).unwrap().granted
         });
         assert_guarded("materialize_odrl_policy_for_each", true, |s| {
-            s.materialize_odrl_policy_for_each(&permit, std::slice::from_ref(&req))[0].granted
+            s.materialize_odrl_policy_for_each(&permit, std::slice::from_ref(&req)).unwrap()[0].granted
         });
         assert_guarded("materialize_odrl_permission_conditional", true, |s| {
-            s.materialize_odrl_permission_conditional(&permit, &req).granted
+            s.materialize_odrl_permission_conditional(&permit, &req).unwrap().granted
         });
         assert_guarded("materialize_odrl_prohibition", false, |s| {
-            s.materialize_odrl_prohibition(&deny, &req).prohibited
+            s.materialize_odrl_prohibition(&deny, &req).unwrap().prohibited
         });
         assert_guarded("materialize_odrl_prohibition_conditional", false, |s| {
-            s.materialize_odrl_prohibition_conditional(&deny, &req).prohibited
+            s.materialize_odrl_prohibition_conditional(&deny, &req).unwrap().prohibited
         });
     }
 
@@ -108,7 +108,7 @@ mod odrl {
         let counter: Arc<dyn sparq_policy::UsageCounterStore + Send + Sync> =
             Arc::new(sparq_policy::InMemoryCounterStore::new());
         assert_guarded("materialize_odrl_permission_counted", true, |s| {
-            s.materialize_odrl_permission_counted(&permit, &req, &counter).granted
+            s.materialize_odrl_permission_counted(&permit, &req, &counter).unwrap().granted
         });
     }
 
@@ -120,16 +120,16 @@ mod odrl {
         let req = request();
         let bridged = || {
             let mut store = pod();
-            assert!(store.materialize_odrl_permission(&permit, &req).granted);
+            assert!(store.materialize_odrl_permission(&permit, &req).unwrap().granted);
             store
         };
         type Refresh<'a> = &'a dyn Fn(&mut PodStore);
         let refreshes: [(&str, Refresh<'_>); 2] = [
             ("refresh_odrl_grants", &|s| {
-                s.refresh_odrl_grants();
+                s.refresh_odrl_grants().unwrap();
             }),
             ("refresh_odrl_grant", &|s| {
-                s.refresh_odrl_grant(&permit, &req, odrl_bridge::BridgeKind::Permission);
+                s.refresh_odrl_grant(&permit, &req, odrl_bridge::BridgeKind::Permission).unwrap();
             }),
         ];
         for (name, refresh) in refreshes {
@@ -237,4 +237,33 @@ mod trust {
         // `admit_trust_credential_and_materialize` is `admit_trust_credential_with_rule`
         // with the store's own rule, so the check above covers it.
     }
+
+    #[test]
+    fn trust_view_write_failures_return_errors_and_disable_authorization() {
+        let (credential, rules) = credential_and_rules();
+        let session = TrustSession { agent: iri(JESSE), now_unix_secs: NOW };
+        for static_grant in [false, true] {
+            let dir = std::env::temp_dir().join(format!("sparq-trust-write-{static_grant}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            pod().graph.save(&dir).unwrap();
+            let mut store = PodStore::new(Graph::open(&dir).unwrap());
+            store.materialize_wac().unwrap();
+            loader::FAIL_ALL_VIEW_WRITES.set(true);
+            let error = if static_grant {
+                store.admit_trust_credential_static(&credential, &rules, &iri(N1), RULE).unwrap_err()
+            } else {
+                store.admit_trust_credential_with_rule(&credential, &rules, &session, &iri(N1), RULE).unwrap_err()
+            };
+            assert!(error.contains("injected authorization view write failure"));
+            loader::FAIL_ALL_VIEW_WRITES.set(false);
+            assert!(store.graph.named_graph(&Term::NamedNode(iri(AUTH_GRAPH))).is_some(), "cleanup must also have been refused");
+            assert!(store.view_dropped && !store.may_install_grants());
+            assert!(!reads(&store, JESSE, N1) && !reads(&store, BOB, N1));
+            store.materialize_wac().unwrap();
+            assert!(reads(&store, BOB, N1));
+            drop(store);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
 }

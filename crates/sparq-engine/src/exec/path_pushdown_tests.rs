@@ -232,7 +232,7 @@ fn bench_bound_endpoint_pushdown_1m_edges() {
     }
     let t = Instant::now();
     let g = Graph::load_str(&ttl, "turtle").unwrap();
-    eprintln!("loaded {} triples in {:.2?}", g.store.len(), t.elapsed());
+    eprintln!("loaded {} triples in {:.2?}", g.store().len(), t.elapsed());
 
     let knows = PropertyPathExpression::NamedNode(oxrdf::NamedNode::new("http://ex/knows").unwrap());
     let plus = PropertyPathExpression::OneOrMore(Box::new(knows.clone()));

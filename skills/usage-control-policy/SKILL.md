@@ -310,7 +310,7 @@ use sparq_policy::Request;
 let req = Request::new("http://www.w3.org/ns/odrl/2/read")
     .on("https://pod.ex/notes/n1").by("https://alice.ex/card#me");
 // On a definite Permit, appends `alice auth:read n1` to the auth view, then reindexes.
-let out = store.materialize_odrl_permission(&policy, &req);
+let out = store.materialize_odrl_permission(&policy, &req)?;
 assert!(out.granted);
 // …now honoured by the unchanged enforcement path:
 assert!(!store.accessible(&Session { agent: Some("https://alice.ex/card#me"), client: None, issuer: None, now: None }, Mode::Read).is_empty());
@@ -340,13 +340,20 @@ A matched ODRL **Prohibition** is materialized as the dual triple — `principal
 // Prohibition side: appends `alice auth:denyWrite n1`, then reindexes.
 let dreq = Request::new("http://www.w3.org/ns/odrl/2/modify")
     .on("https://pod.ex/notes/n1").by("https://alice.ex/card#me");
-let out = store.materialize_odrl_prohibition(&policy, &dreq);
+let out = store.materialize_odrl_prohibition(&policy, &dreq)?;
 assert!(out.prohibited);
 // Both sides of a policy at once (permit grant + matched-prohibition deny):
-let out = store.materialize_odrl_policy(&policy, &req);
+let out = store.materialize_odrl_policy(&policy, &req)?;
 ```
 
 **Deny-overrides:** the deny is honoured by the **existing, unchanged** enforcement — the session layer already computes `∪ allow ∖ ∪ deny` (`AuthIndex::accessible`) and `Mode::from_pred` already parses `auth:deny*`, so a materialized deny **beats any allow grant** for the same principal+target+mode. No new enforcement engine; the bridge only emits the triple. (Within one policy the ODRL evaluator *also* applies deny-overrides upstream, so the permit allow triple is never even emitted when a prohibition carves the request out.)
+
+Bridge materialization functions and `PodStore::materialize_odrl_*` return
+`Result<BridgeOutcome, String>` (the batch method returns `Result<Vec<BridgeOutcome>, String>`).
+`BridgeLedger::refresh` and `PodStore::refresh_odrl_grants` return `Result<usize, String>`;
+`refresh_odrl_grant` returns `Result<(bool, usize), String>`. Propagate these with `?`.
+A storage error disables the store's authorization view until static materialization
+succeeds; semantic policy refusals remain `Ok(BridgeOutcome { refused: true, .. })`.
 
 **Loud refusal of an unimplementable conflict strategy** (sq-ihqbl): the bridge implements only `odrl:conflict odrl:prohibit` (deny-overrides). Every `materialize_*` entry point first runs `sparq_policy::conflict_admissibility(policy)`; a policy declaring a strategy the bridge cannot honour (`odrl:perm`, `odrl:invalid` **with** a detected conflict, or an unknown `odrl:conflict` IRI) materializes **NOTHING** — neither grant nor deny — and the returned `BridgeOutcome` carries `refused = true` plus a `REFUSED (odrl:conflict): …` reason. This is fail-closed and *distinct from a plain deny* (`refused` vs `granted == false`): silently coercing `odrl:perm` into deny-overrides would mis-apply the author's intent. An unset `odrl:conflict` is treated as `prohibit` and is **not** refused (the common case).
 
@@ -424,12 +431,12 @@ So deny retraction consults `sparq_policy::prohibition_status`, a three-valued r
 ```rust,ignore
 // alice was bridged a read grant; the policy then WITHDRAWS the permission.
 let (matched, retracted) =
-    store.refresh_odrl_grant(&withdrawn_policy, &req, BridgeKind::Permission);
+    store.refresh_odrl_grant(&withdrawn_policy, &req, BridgeKind::Permission)?;
 // matched == true, retracted == 1 → alice can no longer read (through accessible/query_as).
 
 // A bridged DENY is the dual: retracted only when the Prohibition is DEFINITELY gone.
 let (matched, retracted) =
-    store.refresh_odrl_grant(&withdrawn_prohibition, &write_req, BridgeKind::Prohibition);
+    store.refresh_odrl_grant(&withdrawn_prohibition, &write_req, BridgeKind::Prohibition)?;
 // definite withdrawal → retracted == 1 (deny gone, access restored if an allow exists);
 // ambiguous re-eval (no constraint evidence) → retracted == 0 (deny KEPT, fail-closed).
 ```

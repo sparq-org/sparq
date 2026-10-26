@@ -632,7 +632,7 @@ impl McpServer {
             .take(limit)
             .map(|h| {
                 json!({
-                    "literal": self.graph.dict.term(h.id).to_string(),
+                    "literal": self.graph.dict().term(h.id).to_string(),
                     "score": h.score,
                 })
             })

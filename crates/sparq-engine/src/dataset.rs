@@ -26,12 +26,16 @@ pub(crate) type TripleSet = FxHashSet<TripleTerms>;
 /// The triples of one graph as ground term-triples (decoded from its dictionary).
 pub(crate) fn decode_triples(g: &Graph) -> TripleSet {
     let pat: IdPattern = [None, None, None];
-    let scan = g.store.scan(&pat);
+    let scan = g.store().scan(&pat);
     scan.rows
         .iter()
         .map(|r| {
             let t = scan.to_spo(r);
-            [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])]
+            [
+                g.dict().term(t[0]),
+                g.dict().term(t[1]),
+                g.dict().term(t[2]),
+            ]
         })
         .collect()
 }
@@ -53,7 +57,7 @@ pub(crate) fn empty_graph() -> Graph {
 
 /// The store's named graph called `name`, if it holds one.
 fn find_named<'a>(graph: &'a Graph, name: &NamedNode) -> Option<&'a Graph> {
-    graph.named.iter().find_map(|(g, sub)| match g {
+    graph.named().iter().find_map(|(g, sub)| match g {
         Term::NamedNode(n) if n == name => Some(sub),
         _ => None,
     })
@@ -102,7 +106,8 @@ pub(crate) fn build_active(graph: &Graph, ds: &QueryDataset) -> Graph {
         }
     }
     let mut out = build(&default);
-    out.named = named.into_iter().map(|(n, triples)| (Term::NamedNode(n), build(&triples))).collect();
+    out.extend_named(named.into_iter().map(|(n, triples)| (Term::NamedNode(n), build(&triples))))
+        .expect("fresh in-memory graphs always take in-memory named graphs");
     out
 }
 
@@ -131,7 +136,7 @@ mod tests {
         let g = store();
         let active = build_active(&g, &ds(&["http://ex/g1", "http://ex/g2"], &[]));
         assert_eq!(active.len(), 3); // g1 ∪ g2; the store's default graph is gone
-        assert!(active.named.is_empty()); // no FROM NAMED -> no named graphs
+        assert!(active.named().is_empty()); // no FROM NAMED -> no named graphs
     }
 
     #[test]
@@ -139,8 +144,8 @@ mod tests {
         let g = store();
         let active = build_active(&g, &ds(&[], &["http://ex/g2"]));
         assert_eq!(active.len(), 0); // no FROM -> empty default graph
-        assert_eq!(active.named.len(), 1);
-        assert_eq!(active.named[0].1.len(), 1);
+        assert_eq!(active.named().len(), 1);
+        assert_eq!(active.named()[0].1.len(), 1);
     }
 
     #[test]
@@ -149,8 +154,8 @@ mod tests {
         let active =
             build_active(&g, &ds(&["http://ex/nope"], &["http://ex/g1", "http://ex/g1", "http://ex/nope"]));
         assert_eq!(active.len(), 0); // FROM of an absent graph contributes nothing
-        assert_eq!(active.named.len(), 2); // g1 once, plus the absent one as EMPTY
-        assert_eq!(active.named[0].1.len(), 2);
-        assert_eq!(active.named[1].1.len(), 0);
+        assert_eq!(active.named().len(), 2); // g1 once, plus the absent one as EMPTY
+        assert_eq!(active.named()[0].1.len(), 2);
+        assert_eq!(active.named()[1].1.len(), 0);
     }
 }

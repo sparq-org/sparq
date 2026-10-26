@@ -202,9 +202,9 @@ fn bridged_denies_cover_every_decide_deny() {
                                 let mut store = public_store();
                                 assert!(reads(&mut store, party), "public grant in force");
                                 if conditional {
-                                    store.materialize_odrl_prohibition_conditional(&pol, &req);
+                                    store.materialize_odrl_prohibition_conditional(&pol, &req).unwrap();
                                 } else {
-                                    store.materialize_odrl_prohibition(&pol, &req);
+                                    store.materialize_odrl_prohibition(&pol, &req).unwrap();
                                 }
                                 cases += 1;
                                 check(
@@ -215,7 +215,7 @@ fn bridged_denies_cover_every_decide_deny() {
                                     "after materialize",
                                     &case,
                                 );
-                                store.refresh_odrl_grants();
+                                store.refresh_odrl_grants().unwrap();
                                 check(&mut store, &pol, &req, conditional, "after refresh", &case);
                                 store.materialize_wac().expect("wac");
                                 check(&mut store, &pol, &req, conditional, "after replay", &case);

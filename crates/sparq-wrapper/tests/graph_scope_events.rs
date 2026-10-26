@@ -28,7 +28,7 @@ fn record(dataset: &mut ObservableDataset, projection: Projection) -> Seen {
         seen_by_observer.borrow_mut().push((
             event.kind,
             projection.clone(),
-            committed.named.iter().map(|(_, graph)| graph.len()).sum(),
+            committed.named().iter().map(|(_, graph)| graph.len()).sum(),
         ));
     });
     seen
@@ -140,13 +140,13 @@ fn absent_graphs_are_not_created_and_literal_subjects_are_rejected() {
             value.clone()
         )
         .unwrap());
-    assert!(dataset.graph().named.is_empty());
+    assert!(dataset.graph().named().is_empty());
     assert_eq!(
         dataset.insert(Some(&graph_term("g1")), value.clone(), iri("tag"), value),
         Err(ObserveError::LiteralSubject)
     );
     assert!(seen.borrow().is_empty());
-    assert!(dataset.into_graph().named.is_empty());
+    assert!(dataset.into_graph().named().is_empty());
 }
 
 #[test]
@@ -165,6 +165,6 @@ fn literal_graph_names_are_rejected_before_a_graph_is_created() {
         dataset.remove(Some(&literal_name), iri("alice"), iri("tag"), value),
         rejected
     );
-    assert!(dataset.graph().named.is_empty());
+    assert!(dataset.graph().named().is_empty());
     assert!(seen.borrow().is_empty());
 }

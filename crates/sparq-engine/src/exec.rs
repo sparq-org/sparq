@@ -471,7 +471,7 @@ fn term_of(graph: &Graph, local: &LocalVocab, id: Id) -> Option<Term> {
     } else if is_local(id) {
         Some(local.term(id).clone())
     } else {
-        Some(graph.dict.term(id))
+        Some(graph.dict().term(id))
     }
 }
 

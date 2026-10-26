@@ -394,7 +394,7 @@ impl AuthIndex {
     pub fn from_graph(graph: &Graph) -> AuthIndex {
         let mut ix = AuthIndex::default();
         let auth_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-        let Some((_, sub)) = graph.named.iter().find(|(n, _)| *n == auth_name) else {
+        let Some((_, sub)) = graph.named().iter().find(|(n, _)| *n == auth_name) else {
             return ix;
         };
         let mut cond: FxHashMap<String, ConditionalGrant> = FxHashMap::default();

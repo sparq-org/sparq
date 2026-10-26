@@ -1,0 +1,136 @@
+# windows-store: RUN sparq-core's store tests (locking, save, build, compaction and restore
+# swaps) on a real Windows host.
+#
+# Why: the store's durable-write path differs per platform (sparq-core/src/lib.rs:
+# `publish_rename` uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` on
+# Windows, and `fsync_dir` does nothing there), and so do the lock and the hard-link check. A
+# Windows type-check (`cargo check --target x86_64-pc-windows-msvc`) cannot catch a call that
+# compiles and then fails at run time, such as opening a directory without
+# `FILE_FLAG_BACKUP_SEMANTICS`. Every other lane that runs these tests is Linux.
+#
+# Not a required check (the only required PR check is ci-fast, docs/branch-protection.md).
+# It runs on pull requests and pushes to main that touch sparq-core or this file, and on
+# dispatch.
+#
+# Third-party actions are pinned by full commit SHA; the trailing `# vX.Y.Z` comment is what
+# Dependabot follows to bump the pin.
+name: windows-store
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Duplicated under `push` below (Actions has no YAML anchors): keep the two identical.
+    paths:
+      - "crates/sparq-core/**"
+      - ".github/workflows/windows-store.yml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/sparq-core/**"
+      - ".github/workflows/windows-store.yml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-store-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  store-tests:
+    name: sparq-core store tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # rust-toolchain.toml selects the pinned compiler; this only shows which one ran.
+      - name: Rust (pinned by rust-toolchain.toml)
+        shell: bash
+        run: rustup show active-toolchain
+
+      - name: Cache cargo (Windows)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-store-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            windows-store-
+
+      # The log viewer is not always reachable, so a failing test step reports each failing
+      # test as an annotation (readable through the check-run API) and the output's tail in
+      # the step summary. Written here so the workflow stays one file.
+      - name: Test-output annotator
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/annotate.sh" <<'ANNOTATE'
+          # Runs the command given as arguments, keeping its output in a log. When it fails, each
+          # failing test's `---- <name> stdout ----` block (first 15 lines) becomes an `::error`
+          # annotation, and the tail of the output goes to the step summary. Exits with the command's status.
+          set -uo pipefail
+          log="${RUNNER_TEMP:-/tmp}/test-output-$$.log"
+          "$@" 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' -e 's/\r$//' "$log" | awk -v status="$status" '
+              function esc(s) { gsub(/%/, "%25", s); gsub(/\r/, "%0D", s); return s }
+              function prop(s) { s = esc(s); gsub(/:/, "%3A", s); gsub(/,/, "%2C", s); return s }
+              function flush() {
+                if (name != "") { printf "::error title=%s::%s\n", prop(name), msg; found++ }
+                name = ""; msg = ""; n = 0
+              }
+              { tail[NR % 15] = $0 }
+              /^---- .* stdout ----$/ {
+                flush(); name = $0; sub(/^---- /, "", name); sub(/ stdout ----$/, "", name); next
+              }
+              name != "" && (/^failures:$/ || /^test result:/) { flush(); next }
+              name != "" && n < 15 { msg = (n ? msg "%0A" : "") esc($0); n++ }
+              END {
+                flush()
+                if (!found) {
+                  m = ""
+                  for (i = NR - 14; i <= NR; i++) if (i > 0) m = (m == "" ? "" : m "%0A") esc(tail[i % 15])
+                  printf "::error title=exit %s::%s\n", status, m
+                }
+              }'
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                printf '### `%s` failed (exit %s)\n\n```text\n' "$*" "$status"
+                sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | tail -n 100
+                printf '```\n'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          exit "$status"
+          ANNOTATE
+
+      # The integration tests of the directory lock and of claiming, saving, building and
+      # restoring a store.
+      - name: dir_lock integration tests
+        shell: bash
+        run: bash "$RUNNER_TEMP/annotate.sh" cargo test --locked -p sparq-core --features mmap --test dir_lock
+
+      # The library's own tests of saving, building, compacting, vacuuming, restoring and
+      # dropping named graphs, of the logs, of a frozen (detached) graph, of the fault-injected
+      # swap failures and crashes (`swap_tests`), and of the fresh-file publish step (libtest
+      # runs every test whose name contains any of these words). Runs even when the step above
+      # failed, so one run reports both.
+      - name: library save / build / swap tests
+        if: always()
+        shell: bash
+        run: >-
+          bash "$RUNNER_TEMP/annotate.sh"
+          cargo test --locked -p sparq-core --features mmap --lib --
+          save build compact restore named fresh lock swap vacuum detach frozen log wal

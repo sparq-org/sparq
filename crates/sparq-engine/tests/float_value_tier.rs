@@ -289,7 +289,7 @@ fn reopened_pre_header_store_values_floats_as_f32() {
     let float = Term::Literal(Literal::new_typed_literal("0.1", NamedNode::new_unchecked(format!("{XSD}float"))));
     let fid = g.id_of(&float).unwrap();
     // The pre-header layout: `n` native f64, the float at the nearest f64 of its lexical.
-    let old: Vec<u8> = (1..=g.dict.len() as u32)
+    let old: Vec<u8> = (1..=g.dict().len() as u32)
         .map(|id| if id == fid { 0.1f64 } else { g.numeric_value(id).unwrap_or(f64::NAN) })
         .flat_map(f64::to_ne_bytes)
         .collect();
