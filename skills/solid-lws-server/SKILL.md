@@ -118,6 +118,25 @@ blobs and is unsuitable for durable production data.
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
 
+### Backup and restore
+
+Offline backup applies to the durable `SOLID_SERVER_DATA_DIR` contract once the
+adapter integration described above is available. Stop the server with SIGTERM
+and wait for exit status zero: shutdown has drained requests and completed
+compaction. Then archive the **whole** data directory, including `format.json`,
+`index/`, `blobs/` and the advisory lock files (harmless to copy).
+
+Restore by unpacking into an **empty** directory and starting the server with
+`SOLID_SERVER_DATA_DIR` pointing at it. Retain the public base URL and external
+configuration/signing keys. Online or hot backup is unsupported; copying a
+running data directory is unsafe. A backup is only as consistent as the stop
+that preceded it.
+
+In a container or Kubernetes, stop the container or scale the workload to zero,
+wait for clean exit and volume detachment, then snapshot the detached volume.
+See the [offline backup and restore procedure](references/native-storage.md#backup-and-restore)
+for commands, refusal cases and recovery limits.
+
 ### Filesystem blobs in library integrations
 
 The default-on native `blob-fs` feature implements `BlobStore` for
