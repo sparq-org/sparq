@@ -3,7 +3,7 @@
 The default-off `sparq-lws-core/crypt` library layer uses the `e1` format from
 [sparq-lws-crypt](../../../crates/sparq-lws-crypt/README.md). Runtime activation is
 the final P1-2 stage of [#7189](https://github.com/sparq-org/sparq/issues/7189),
-after the D1 reference audit and
+following the storage-runtime integration in
 [#7232](https://github.com/sparq-org/sparq/pull/7232). These settings are reserved
 for that integration; the current binary does not read them.
 
@@ -22,6 +22,19 @@ set `ttl` and inject a `CryptClock`. The protocol scheme is the fixed string `lw
 or `solid` and forms part of the wrapping context. Subscription-pool records
 use their storage root even with a fixed Solid scope override. Changing a record's context
 prevents unwrapping.
+
+Resource reads compare the DEK record's pod with the requested resource's pod
+after opening the envelope. A mismatch returns an error without returning bytes.
+The body cache stores the pod authenticated for each entry; a lookup from another
+pod returns an error and evicts the entry. Inserting a DEK sweeps expired cached
+keys; active key flights keep their shared slots.
+
+Reinstate restores a held record only to its original resource. This integrity
+rule applies with or without `crypt`: the held directory's metadata stores the
+original IRI in its entity-tag field, while each child hold keeps its holder in
+its own entity-tag field. An older held directory with no recorded original IRI
+cannot be reinstated and returns a clear storage error; its holds can still be
+released. Same-resource reinstatement preserves the held bytes and validators.
 
 Wrapped keys live in index records below `urn:x-sparq-lws:data-keys/`, with empty
 blob pointers, following the internal hold-record pattern. Each record's metadata

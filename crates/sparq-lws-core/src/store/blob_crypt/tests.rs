@@ -268,6 +268,135 @@ async fn seal_count(store: &Encrypted, id: [u8; 16]) -> u64 {
 }
 
 #[tokio::test]
+async fn pod_reads_require_the_original_pod_with_cold_and_warm_body_cache() {
+    use crate::{
+        acl_cache::AclCache,
+        authz::{AccessMode, WacAuthorizer},
+        error::ServerError,
+    };
+
+    for path in ["read", "read_at", "acl"] {
+        for warm in [false, true] {
+            let f = Fixture::new();
+            let mut store = f.encrypted().await;
+            store.body_cache = BodyCache::new(65536);
+            let source = if path == "acl" {
+                "https://pod.example/alice/file.acl"
+            } else {
+                ALICE
+            };
+            let target = if path == "acl" {
+                "https://pod.example/bob/file.acl"
+            } else {
+                BOB
+            };
+            let original = store
+                .write(source, Bytes::from_static(BODY), "text/plain")
+                .await
+                .unwrap();
+            if warm {
+                assert_eq!(store.read(source).await.unwrap().body, BODY);
+                assert!(store
+                    .body_cache
+                    .get_for_pod(
+                        "https://pod.example/alice/",
+                        &original.blob_key,
+                        &original.etag
+                    )
+                    .unwrap()
+                    .is_some());
+            }
+            // The index edit is confined to this test.
+            f.index
+                .replace_meta(target, original.clone())
+                .await
+                .unwrap();
+            let result = match path {
+                "read" => store.read(target).await.map(|_| ()),
+                "read_at" => {
+                    let plan = store.read_plan(target, &[]).await.unwrap();
+                    store
+                        .read_at(target, &plan.target.unwrap())
+                        .await
+                        .map(|_| ())
+                }
+                "acl" => {
+                    let acl_cache = AclCache::new(16);
+                    let auth =
+                        WacAuthorizer::with_cache(&store, "https://pod.example/", &acl_cache);
+                    let candidates = auth.read_plan_candidates(BOB);
+                    let iris = candidates.iter().map(|c| c.acl.clone()).collect::<Vec<_>>();
+                    let plan = store.read_plan(BOB, &iris).await.unwrap();
+                    auth.authorize_read_planned(
+                        AccessMode::Read,
+                        None,
+                        None,
+                        &candidates,
+                        &plan.acls,
+                    )
+                    .await
+                    .map(|_| ())
+                }
+                _ => unreachable!(),
+            };
+            let expected = if warm {
+                "cached body pod"
+            } else {
+                "data-key pod"
+            };
+            assert!(
+                matches!(result, Err(ServerError::Storage(ref e)) if e.contains(expected)),
+                "{path} warm={warm}: {result:?}"
+            );
+            assert!(store
+                .body_cache
+                .get_for_pod(
+                    "https://pod.example/alice/",
+                    &original.blob_key,
+                    &original.etag
+                )
+                .unwrap()
+                .is_none());
+            assert_eq!(store.read(source).await.unwrap().body, BODY);
+        }
+    }
+}
+
+#[tokio::test]
+async fn inserting_a_dek_sweeps_expired_keys_without_regenerating_them() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let alice = current(&store, "https://pod.example/alice/")
+        .await
+        .id()
+        .unwrap();
+    f.clock.0.store(DEFAULT_DEK_TTL.as_secs(), Ordering::SeqCst);
+    store
+        .write(BOB, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert!(!store.blob.keys.lock().await.contains_key(&alice));
+    let bob = current(&store, "https://pod.example/bob/")
+        .await
+        .id()
+        .unwrap();
+    assert!(store.blob.keys.lock().await.contains_key(&bob));
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+    assert_eq!(
+        current(&store, "https://pod.example/alice/")
+            .await
+            .id()
+            .unwrap(),
+        alice
+    );
+    assert_eq!(store.blob.records.all().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn composite_write_paths_are_scoped_and_etags_remain_plaintext_derived() {
     let f = Fixture::new();
     let plain = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
@@ -319,7 +448,15 @@ async fn composite_write_paths_are_scoped_and_etags_remain_plaintext_derived() {
         .await
         .unwrap();
     let held = store.hold(ALICE, "urn:holder").await.unwrap().unwrap();
+    assert!(store.reinstate(BOB, None, &held).await.is_err());
+    assert!(!store.exists(BOB).await.unwrap());
+    assert!(matches!(
+        store.read(BOB).await,
+        Err(crate::error::ServerError::NotFound)
+    ));
+    store.delete(ALICE, None).await.unwrap();
     store.reinstate(ALICE, None, &held).await.unwrap();
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
     store.release(&held, "urn:holder").await.unwrap();
     store
         .write(
@@ -354,6 +491,11 @@ async fn composite_write_paths_are_scoped_and_etags_remain_plaintext_derived() {
         .await
         .unwrap();
     assert_eq!(counters.snapshot().blob_puts, 1);
+    let meta = counted.meta(ALICE).await.unwrap().unwrap();
+    counted.sparq.replace_meta(BOB, meta).await.unwrap();
+    assert!(
+        matches!(counted.read(BOB).await, Err(crate::error::ServerError::Storage(e)) if e.contains("data-key pod"))
+    );
 }
 
 #[tokio::test]

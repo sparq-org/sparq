@@ -94,7 +94,7 @@ index record outside HTTP and blob GC, with `WrappedKey::to_bytes()`, random
 It durably reserves `2^16` attempts before use; restart/expiry skips unused attempts,
 and rotation starts a fresh key at `2^31`. Per-pod reservations and per-id unwraps
 are serialized under one TTL policy. Back up index, blobs and KEK together. Runtime
-activation is held for the reference audit and storage-runtime stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+activation awaits the storage-runtime stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
 
 ### Threat model
 

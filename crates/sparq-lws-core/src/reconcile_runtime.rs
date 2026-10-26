@@ -154,6 +154,14 @@ impl<T: BlobStore> BlobStore for SharedStore<T> {
         self.0.get(key).await
     }
 
+    async fn get_scoped(
+        &self,
+        scope: &sparq_lws_core::store::BlobScope,
+        key: &str,
+    ) -> Result<Bytes, BlobError> {
+        self.0.get_scoped(scope, key).await
+    }
+
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
         self.0.put(key, body).await
     }

@@ -335,10 +335,19 @@ async fn shared_blob_adapter_preserves_scoped_encryption_writes() {
     )
     .await
     .unwrap();
-    let store = CompositeStore::new(index, SharedStore::new(encrypted));
+    let store = CompositeStore::with_body_cache(
+        index.clone(),
+        SharedStore::new(encrypted),
+        sparq_lws_core::store::BodyCache::disabled(),
+    );
     let iri = "https://pod.example/alice/shared";
     let body = Bytes::from_static(b"a scoped shared resource");
     let meta = store.write(iri, body.clone(), "text/plain").await.unwrap();
     assert!(raw.get(&meta.blob_key).await.unwrap().starts_with(b"SQLB"));
     assert_eq!(store.read(iri).await.unwrap().body, body);
+    let other = "https://pod.example/bob/shared";
+    index.replace_meta(other, meta).await.unwrap();
+    assert!(
+        matches!(store.read(other).await, Err(sparq_lws_core::error::ServerError::Storage(e)) if e.contains("data-key pod"))
+    );
 }

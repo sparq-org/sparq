@@ -31,7 +31,7 @@ pub enum BlobError {
     Backend(String),
 }
 
-/// The stable pod identity supplied by the resource write path.
+/// The stable pod identity supplied by the resource read and write paths.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BlobScope(pub String);
 
@@ -79,6 +79,12 @@ pub struct BlobEntry {
 pub trait BlobStore: Send + Sync {
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
+
+    /// Read resource bytes for a pod. Ordinary backends ignore the scope;
+    /// decorators must forward it to their inner store.
+    async fn get_scoped(&self, _scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        self.get(key).await
+    }
 
     /// Write (create-or-replace) the bytes for a storage key.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;

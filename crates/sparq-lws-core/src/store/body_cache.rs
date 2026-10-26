@@ -72,7 +72,9 @@ const ENTRY_OVERHEAD_BYTES: usize = 64;
 /// One cached body: the bytes, what they are charged against the budget, and an LRU recency tick.
 struct BodyEntry {
     body: Bytes,
-    /// `body.len() + key lengths + ENTRY_OVERHEAD_BYTES` — subtracted back on eviction/replacement.
+    /// Pod authenticated when the body was fetched.
+    pod: String,
+    /// Body, key and pod lengths plus overhead, subtracted on eviction/replacement.
     charge: usize,
     /// Monotonic last-access tick (higher = more recently used).
     last_access: u64,
@@ -160,18 +162,38 @@ impl BodyCache {
     /// a remembered pointer. Under that contract a hit returns exactly the bytes that metadata
     /// committed with (see the module docs' staleness argument).
     pub fn get(&self, blob_key: &str, etag: &str) -> Option<Bytes> {
-        let inner = self.inner.as_ref()?;
+        self.get_for_pod("", blob_key, etag).ok().flatten()
+    }
+
+    pub(super) fn get_for_pod(
+        &self,
+        pod: &str,
+        blob_key: &str,
+        etag: &str,
+    ) -> Result<Option<Bytes>, super::BlobError> {
+        let Some(inner) = self.inner.as_ref() else {
+            return Ok(None);
+        };
         let mut guard = match inner.lock() {
             Ok(g) => g,
             // A poisoned lock must never turn into a hit; treat as a miss (the blob fetch is paid).
-            Err(_) => return None,
+            Err(_) => return Ok(None),
         };
         let tick = self.clock.fetch_add(1, Ordering::Relaxed) + 1;
-        let entry = guard
-            .map
-            .get_mut(&(blob_key.to_string(), etag.to_string()))?;
+        let key = (blob_key.to_string(), etag.to_string());
+        if guard.map.get(&key).is_some_and(|entry| entry.pod != pod) {
+            if let Some(entry) = guard.map.remove(&key) {
+                guard.total_charged = guard.total_charged.saturating_sub(entry.charge);
+            }
+            return Err(super::BlobError::Backend(
+                "cached body pod does not match resource pod".into(),
+            ));
+        }
+        let Some(entry) = guard.map.get_mut(&key) else {
+            return Ok(None);
+        };
         entry.last_access = tick;
-        Some(entry.body.clone())
+        Ok(Some(entry.body.clone()))
     }
 
     /// Cache the body fetched for `(blob_key, etag)` — called after a MISS's blob fetch so the next
@@ -180,6 +202,10 @@ impl BodyCache {
     /// budget, least-recently-used entries are evicted until the new entry fits. No-op on a disabled
     /// cache. The stored [`Bytes`] is a refcount clone of `body`.
     pub fn insert(&self, blob_key: &str, etag: &str, body: &Bytes) {
+        self.insert_for_pod("", blob_key, etag, body);
+    }
+
+    pub(super) fn insert_for_pod(&self, pod: &str, blob_key: &str, etag: &str, body: &Bytes) {
         let Some(inner) = self.inner.as_ref() else {
             return; // disabled: never cache.
         };
@@ -187,6 +213,7 @@ impl BodyCache {
             .len()
             .saturating_add(blob_key.len())
             .saturating_add(etag.len())
+            .saturating_add(pod.len())
             .saturating_add(ENTRY_OVERHEAD_BYTES);
         if charge > self.max_entry_bytes {
             return; // oversize: bypass — served, never stored.
@@ -219,6 +246,7 @@ impl BodyCache {
             key,
             BodyEntry {
                 body: body.clone(),
+                pod: pod.to_owned(),
                 charge,
                 last_access: tick,
             },
@@ -279,6 +307,20 @@ mod tests {
 
     fn body(s: &str) -> Bytes {
         Bytes::copy_from_slice(s.as_bytes())
+    }
+
+    #[test]
+    fn pod_mismatch_refuses_and_evicts_the_cached_body() {
+        let c = BodyCache::new(4096);
+        c.insert_for_pod("alice", "key", "etag", &body("alice"));
+        assert_eq!(
+            c.get_for_pod("alice", "key", "etag").unwrap(),
+            Some(body("alice"))
+        );
+        assert!(c.get_for_pod("bob", "key", "etag").is_err());
+        assert_eq!(c.len(), 0);
+        assert_eq!(c.total_charged(), 0);
+        assert!(c.get_for_pod("alice", "key", "etag").unwrap().is_none());
     }
 
     #[test]

@@ -268,6 +268,8 @@ pub trait Store: Send + Sync {
     /// [`create_in_container`](Store::create_in_container) path), in place otherwise (the
     /// [`write`](Store::write) path). The hold stays until released. A record that is put back
     /// this way may be removed or rewritten again, and put back again, as long as the hold stands.
+    /// Reinstate restores a held record only to its original resource. A hold without a
+    /// recorded original IRI cannot be reinstated.
     ///
     /// The default refuses (see [`hold`](Store::hold)).
     async fn reinstate(
@@ -630,11 +632,16 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// 1 → 0), never a decision — authorization has already run upstream of every caller (see
     /// [`body_cache`]'s no-bypass argument). `Ok(None)` means the blob is absent — see
     /// [`read_through`](Self::read_through) for why that is usually a benign race.
-    async fn try_fetch_body(&self, meta: &ResourceMeta) -> ServerResult<Option<Bytes>> {
-        if let Some(body) = self.body_cache.get(&meta.blob_key, &meta.etag) {
+    async fn try_fetch_body(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Option<Bytes>> {
+        let scope = self.blob_scope.scope(iri);
+        if let Some(body) = self
+            .body_cache
+            .get_for_pod(&scope.0, &meta.blob_key, &meta.etag)
+            .map_err(|e| ServerError::Storage(e.to_string()))?
+        {
             return Ok(Some(body));
         }
-        let body = match self.blob.get(&meta.blob_key).await {
+        let body = match self.blob.get_scoped(&scope, &meta.blob_key).await {
             Ok(body) => body,
             Err(BlobError::NotFound) => return Ok(None),
             Err(BlobError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
@@ -643,7 +650,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
                 return Err(ServerError::Storage("UnknownDataKey".into()));
             }
         };
-        self.body_cache.insert(&meta.blob_key, &meta.etag, &body);
+        self.body_cache
+            .insert_for_pod(&scope.0, &meta.blob_key, &meta.etag, &body);
         Ok(Some(body))
     }
 
@@ -663,7 +671,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     async fn read_through(&self, iri: &str, mut meta: ResourceMeta) -> ServerResult<Resource> {
         let mut retries = 0;
         loop {
-            if let Some(body) = self.try_fetch_body(&meta).await? {
+            if let Some(body) = self.try_fetch_body(iri, &meta).await? {
                 return Ok(Resource { body, meta });
             }
             if retries == READ_RACE_RETRIES {
@@ -739,11 +747,11 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     }
 
     /// Commit `holder`'s record of a hold on `key`, creating the holds' containers when absent.
-    async fn publish_hold(&self, key: &str, holder: &str) -> ServerResult<()> {
+    async fn publish_hold(&self, key: &str, holder: &str, iri: &str) -> ServerResult<()> {
         let record = |blob_key: &str, etag: &str| ResourceMeta {
             content_type: HELD_TYPE.to_string(),
             blob_key: blob_key.to_string(),
-            // The holder, so a start can tell whose it is (see `Store::holds`).
+            // A child records its holder; its directory records the original resource.
             etag: etag.to_string(),
             last_modified: None,
         };
@@ -763,7 +771,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             match self
                 .sparq
                 // It names no bytes: only its records keep them from the orphan sweep.
-                .create_child(HELD_CONTAINER, &dir, record("", ""))
+                // Its metadata records the original resource for reinstatement.
+                .create_child(HELD_CONTAINER, &dir, record("", iri))
                 .await
             {
                 Ok(()) => {}
@@ -1169,7 +1178,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // Counted before it is published, so no reclaim through this instance meanwhile
             // misses it.
             self.count_hold(&meta.blob_key, true);
-            if let Err(e) = self.publish_hold(&meta.blob_key, holder).await {
+            if let Err(e) = self.publish_hold(&meta.blob_key, holder, iri).await {
                 // It may have landed (a lost reply): released, best effort, as the holder is
                 // told nothing is held (else the next start's sweep releases it). Released, not
                 // only withdrawn: a reclaim through this instance meanwhile skipped these bytes
@@ -1199,6 +1208,29 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         held: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         refuse_marker(&[Some(iri), container])?;
+        let origin = self
+            .sparq
+            .get_meta(&held_dir(&held.blob_key))
+            .await
+            .map_err(|e| match e {
+                SparqError::NotFound => {
+                    ServerError::Storage("held record has no recorded original IRI".into())
+                }
+                other => map_sparq(other),
+            })?;
+        if origin.content_type != HELD_TYPE
+            || !origin.blob_key.is_empty()
+            || origin.etag.is_empty()
+        {
+            return Err(ServerError::Storage(
+                "held record has no recorded original IRI".into(),
+            ));
+        }
+        if origin.etag != iri {
+            return Err(ServerError::Storage(
+                "reinstate restores a held record only to its original resource".into(),
+            ));
+        }
         // As `restore`, pointing at the held bytes rather than a copy: the hold keeps them.
         let committed = match container {
             Some(c) => self
@@ -1417,7 +1449,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // path — through the read-4 body cache: the held `(blob_key, etag)` came from THIS request's
         // authoritative read-plan round, so a hit is exactly the bytes that metadata committed with
         // (the unique-per-write blob key names an immutable object).
-        if let Some(body) = self.try_fetch_body(meta).await? {
+        if let Some(body) = self.try_fetch_body(iri, meta).await? {
             return Ok(body);
         }
         // The blob is gone. Only now (the race path) re-read the index to say why — and NEVER serve
@@ -1729,6 +1761,70 @@ mod tests {
         assert_eq!(&store.read(x).await.unwrap().body[..], b"three");
     }
 
+    #[tokio::test]
+    async fn reinstate_restores_only_the_original_resource() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let alice = "https://pod.example/alice/file";
+        let bob = "https://pod.example/bob/file";
+        let original = store
+            .write(alice, Bytes::from_static(b"alice"), "text/plain")
+            .await
+            .unwrap();
+        let held = store.hold(alice, "urn:holder").await.unwrap().unwrap();
+        assert_eq!(
+            store
+                .sparq
+                .get_meta(&held_dir(&held.blob_key))
+                .await
+                .unwrap()
+                .etag,
+            alice
+        );
+        store
+            .write(bob, Bytes::from_static(b"bob"), "text/plain")
+            .await
+            .unwrap();
+        for container in [None, Some("https://pod.example/bob/")] {
+            let result = store.reinstate(bob, container, &held).await;
+            assert!(
+                matches!(result, Err(ServerError::Storage(ref e)) if e.contains("original resource")),
+                "{result:?}"
+            );
+            assert_eq!(store.read(bob).await.unwrap().body, b"bob"[..]);
+        }
+        store.delete(alice, None).await.unwrap();
+        store.reinstate(alice, None, &held).await.unwrap();
+        let restored = store.read(alice).await.unwrap();
+        assert_eq!(restored.body, b"alice"[..]);
+        assert_eq!(restored.meta, original);
+        store.release(&held, "urn:holder").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reinstate_requires_a_recorded_original_iri() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let iri = "https://pod.example/alice/file";
+        store
+            .write(iri, Bytes::from_static(b"alice"), "text/plain")
+            .await
+            .unwrap();
+        let held = store.hold(iri, "urn:holder").await.unwrap().unwrap();
+        let dir = held_dir(&held.blob_key);
+        let mut legacy = store.sparq.get_meta(&dir).await.unwrap();
+        legacy.etag.clear();
+        store.sparq.replace_meta(&dir, legacy).await.unwrap();
+        store.delete(iri, None).await.unwrap();
+        let result = store.reinstate(iri, None, &held).await;
+        assert!(
+            matches!(result, Err(ServerError::Storage(ref e)) if e.contains("no recorded original IRI")),
+            "{result:?}"
+        );
+        assert!(!store.exists(iri).await.unwrap());
+        assert_eq!(store.holds().await.unwrap().len(), 1);
+        store.release(&held, "urn:holder").await.unwrap();
+        assert!(!store.blob.exists(&held.blob_key).await.unwrap());
+    }
+
     /// A release cut short after its record went leaves the key's container: it names no bytes
     /// (so the orphan sweep may collect them), and a start's listing of the holds removes it.
     #[tokio::test]
@@ -2016,6 +2112,9 @@ mod tests {
     impl<T: BlobStore> BlobStore for Shared<T> {
         async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
             self.0.get(key).await
+        }
+        async fn get_scoped(&self, scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+            self.0.get_scoped(scope, key).await
         }
         async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
             self.0.put(key, body).await

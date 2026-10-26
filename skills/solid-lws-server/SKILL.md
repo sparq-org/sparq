@@ -124,7 +124,12 @@ The native, default-off `crypt` feature adds the P1-2 library decorator
 [envelope and key-provider API](../../crates/sparq-lws-crypt/README.md).
 `BlobStore::put_scoped(&BlobScope, key, body)` defaults to `put` for ordinary
 backends; `CompositeStore` uses it for every body write. The decorator refuses
-plain `put`. `BlobScopePolicy` selects the storage root for LWS, the first path
+plain `put`. `BlobStore::get_scoped(&BlobScope, key)` defaults to `get` for ordinary
+backends; resource reads use it to require the authenticated DEK pod to match the
+resource pod. Blob-store adapters must forward scoped reads and writes.
+Body-cache entries retain that pod; a different pod refuses the read
+and evicts the entry. Each DEK-cache insert sweeps expired entries.
+`BlobScopePolicy` selects the storage root for LWS, the first path
 segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
 seal reservations live in reserved index records, outside HTTP resources.
 Resource read plans refuse this namespace in both target and ACL-candidate
@@ -133,7 +138,11 @@ Queued requests share a key-provider result, including a failed unwrap or initia
 generation. A later independent request can retry after a failed call.
 
 This is the library stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
-Runtime activation is held for the D1 reference audit and the
+Reinstate restores a held record only to its original resource, with or without
+`crypt`. Holds record that IRI in their internal directory metadata. Older holds
+without a recorded original IRI fail with a storage error when reinstated;
+they remain available for release.
+Runtime activation awaits the
 [#7232](https://github.com/sparq-org/sparq/pull/7232) storage-runtime integration;
 the binary accepts no encryption environment configuration at this stage.
 The [integration reference](references/blob-encryption.md) records the reserved

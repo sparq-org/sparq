@@ -328,6 +328,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                 expires: this.expires(),
             };
             this.key_slot(id).await.lock().await.value = Some(cached);
+            this.sweep_expired_keys().await;
         }
         // A directory has no byte-plane object. Reopening preserves its child edges.
         this.records
@@ -348,6 +349,21 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
 
     fn expires(&self) -> Duration {
         self.options.clock.now().saturating_add(self.options.ttl)
+    }
+
+    async fn sweep_expired_keys(&self) {
+        let now = self.options.clock.now();
+        self.keys.lock().await.retain(|_, slot| {
+            let Ok(mut state) = slot.state.try_lock() else {
+                return true;
+            };
+            if state.value.as_ref().is_some_and(|c| now >= c.expires) {
+                state.value = None;
+                // Keep slots that have active or queued callers on the same flight.
+                return Arc::strong_count(slot) > 1;
+            }
+            true
+        });
     }
 
     async fn key_slot(&self, id: [u8; 16]) -> KeySlot {
@@ -408,6 +424,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         match refreshed {
             Ok(value) => {
                 cached.value = Some(value);
+                self.sweep_expired_keys().await;
                 Ok(())
             }
             Err(error) => {
@@ -458,6 +475,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             record,
             expires: self.expires(),
         });
+        self.sweep_expired_keys().await;
         Ok(id)
     }
 
@@ -547,11 +565,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                 .map_err(crypt_error);
         }
     }
-}
-
-#[async_trait]
-impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
-    async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+    async fn decrypt(&self, scope: Option<&BlobScope>, key: &str) -> Result<Bytes, BlobError> {
         let body = self.inner.get(key).await?;
         if !is_envelope(&body) {
             return Ok(body);
@@ -569,9 +583,24 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
             return Err(e);
         }
         let c = cached.value.as_ref().ok_or_else(invalid_record)?;
-        open(&c.dek, key, &body)
-            .map(Bytes::from)
-            .map_err(crypt_error)
+        let plaintext = open(&c.dek, key, &body).map_err(crypt_error)?;
+        if scope.is_some_and(|scope| c.record.pod != scope.0) {
+            return Err(BlobError::Backend(
+                "data-key pod does not match resource pod".into(),
+            ));
+        }
+        Ok(Bytes::from(plaintext))
+    }
+}
+
+#[async_trait]
+impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
+    async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        self.decrypt(None, key).await
+    }
+
+    async fn get_scoped(&self, scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        self.decrypt(Some(scope), key).await
     }
 
     async fn put(&self, _: &str, _: Bytes) -> Result<(), BlobError> {
