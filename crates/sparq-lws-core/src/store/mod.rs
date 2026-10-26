@@ -7,6 +7,8 @@
 //! whole stack is testable without a running SPARQ or S3.
 
 pub mod blob;
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+pub mod blob_fs;
 // The blob-body LRU cache (read-4 — backend-read-path.md §3.4): `(blob_key, etag)`-keyed,
 // byte-budgeted, sat in front of BlobStore::get inside CompositeStore so a hot unchanged
 // resource's repeat read pays zero blob round-trips. Immutable-by-construction (unique-per-write
@@ -814,9 +816,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// forcing the elaborate `generation`-CAS + grace-window + snapshot-threading machinery in
     /// [`super::blob`] and [`super::reconcile`] to exist purely to make a reused key safe.
     ///
-    /// This mints a NEW key on EVERY write: an IRI-derived prefix (kept for operator-debuggability — a
-    /// key still traces back to its resource) plus a hyphen-joined **128-bit cryptographically-random
-    /// suffix** from the OS RNG. So:
+    /// This mints a NEW opaque key on EVERY write: `b1-` followed by a
+    /// **128-bit cryptographically-random suffix** from the OS RNG. No resource IRI is
+    /// encoded in the key. Service-pool keys retain their `$pool$` mark. So:
     ///
     /// - **Two concurrent writes to the same IRI get DIFFERENT keys** — they write to disjoint blob
     ///   objects and can never collide or interleave. The "latest committed" winner is decided solely by
@@ -834,7 +836,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; the IRI prefix is cosmetic (debuggability) and carries no uniqueness requirement.
+    /// negligible; no IRI-derived component is needed.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -847,9 +849,6 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
     fn mint_blob_key(iri: &str) -> ServerResult<String> {
-        // The IRI-derived prefix is for human/operator traceability only; uniqueness comes entirely from
-        // the random suffix, so the prefix need not be collision-free.
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -869,9 +868,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
         if limits::in_service_pool(iri) {
-            return Ok(format!("{}{prefix}-{hex}", limits::POOLED_BLOB_KEY_MARK));
+            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
         }
-        Ok(format!("{prefix}-{hex}"))
+        Ok(format!("b1-{hex}"))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -2372,61 +2371,60 @@ mod tests {
     }
 
     #[test]
-    fn mint_blob_key_keeps_an_iri_derived_prefix_for_traceability() {
-        // Uniqueness comes from the random suffix; the IRI-derived prefix is retained (cosmetic) so an
-        // operator can still trace a key back to its resource. The minted key must START with the
-        // percent-flattened IRI followed by the `-` separator.
-        let iri = "https://pod.example/alice/data";
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        let key = S::mint_blob_key(iri).expect("the OS RNG must be available in tests");
-        assert!(
-            key.starts_with(&format!("{prefix}-")),
-            "minted key {key:?} must keep the IRI-derived prefix {prefix:?} for traceability"
-        );
-        // ...and the suffix is the 32-hex-char (128-bit) random tail.
-        let suffix = &key[prefix.len() + 1..];
-        assert_eq!(
-            suffix.len(),
-            32,
-            "the random suffix is 16 bytes = 32 hex chars"
-        );
-        assert!(
-            suffix.bytes().all(|b| b.is_ascii_hexdigit()),
-            "the suffix must be lowercase hex"
-        );
+    fn mint_blob_key_has_an_opaque_versioned_format() {
+        for (iri, pooled) in [
+            (
+                "https://pod.example/alice/private-report?secret=yes#section",
+                false,
+            ),
+            ("https://pod.example/.lws/subscriptions/private-topic", true),
+        ] {
+            let key = S::mint_blob_key(iri).expect("OS RNG available");
+            let opaque = if pooled {
+                key.strip_prefix("$pool$").expect("pool mark retained")
+            } else {
+                key.as_str()
+            };
+            assert_eq!(opaque.len(), 35);
+            assert!(opaque.starts_with("b1-"));
+            assert!(opaque[3..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            for part in [
+                "https",
+                "pod.example",
+                "alice",
+                "private",
+                "secret",
+                "section",
+                "subscriptions",
+            ] {
+                assert!(!key.contains(part), "resource information in blob key");
+            }
+        }
     }
 
     #[test]
-    fn mint_blob_key_is_fallible_and_succeeds_on_a_working_os_rng() {
-        // The Medium fix: `mint_blob_key` is FALLIBLE — it propagates an RNG failure (fails closed) rather
-        // than minting a weak, possibly-colliding key from a timestamp-only fallback. On every supported
-        // platform the OS RNG IS available, so it returns `Ok`; the contract this pins is that the return
-        // type is a `Result` carrying a `ServerError::Storage` on the (unreachable here) RNG-failure path —
-        // verified by the `?` propagation at the `write`/`create_in_container` call sites compiling, and by
-        // the success here. There is NO infallible fallback that could mint a same-tick-colliding key.
-        let iri = "https://pod.example/alice/data";
-        let key =
-            S::mint_blob_key(iri).expect("the OS RNG is available on every supported platform");
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        assert!(
-            key.starts_with(&format!("{prefix}-")) && key.len() == prefix.len() + 1 + 32,
-            "the success path still mints a prefix + 32-hex-char random suffix"
-        );
-
-        // And a write through the public API succeeds end-to-end (the fallible mint does not regress the
-        // happy path): the resource is then readable, its bytes resolved through the minted blob key.
+    fn write_persists_an_opaque_blob_pointer() {
+        let iri = "https://pod.example/alice/private-report";
         let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
         tokio_test_block_on(async {
             let meta = store
                 .write(iri, Bytes::from_static(b"body"), "text/turtle")
                 .await
-                .expect("a write with a working RNG must succeed");
-            assert!(
-                meta.blob_key.starts_with(&format!("{prefix}-")),
-                "the persisted pointer names the minted unique key"
+                .expect("write with a working RNG");
+            assert_eq!(meta.blob_key.len(), 35);
+            assert!(meta.blob_key.starts_with("b1-"));
+            assert!(meta.blob_key[3..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            for part in ["https", "pod.example", "alice", "private-report"] {
+                assert!(!meta.blob_key.contains(part));
+            }
+            assert_eq!(
+                store.read(iri).await.unwrap().body,
+                Bytes::from_static(b"body")
             );
-            let resource = store.read(iri).await.expect("read-after-write");
-            assert_eq!(resource.body, Bytes::from_static(b"body"));
         });
     }
 

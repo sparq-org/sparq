@@ -29,6 +29,7 @@ cargo run -p sparq-lws-core
 It listens on `127.0.0.1:3000` and uses `http://localhost:3000` as its public
 base URL unless configured otherwise. The default Cargo features are:
 
+- `blob-fs`, the native filesystem `BlobStore` adapter (excluded on wasm32).
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
 - `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
@@ -134,6 +135,31 @@ The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
 present the native image as a durable production data service.
 
+### Filesystem blobs in library integrations
+
+The default-on native `blob-fs` feature implements `BlobStore` for
+`store::blob_fs::FsBlobStore`, re-exported from the std-only
+[`sparq-lws-blob-fs`](../../crates/sparq-lws-blob-fs/README.md) crate. It is absent
+on wasm32 and with `--no-default-features`. Acquire the exclusive data-directory
+lock before `FsBlobStore::open(root)` and retain it through all handles and pending
+operations: open sweeps `tmp/`. The caller must control this directory.
+
+Construct `CompositeStore::new(index, blobs)` with that store. The standalone API
+is synchronous; qualify async calls as `BlobStore::get(&blobs, key).await` so they
+use the blocking pool. Keys must match `($pool$)?b1-[0-9a-f]{32}` and never be
+rewritten or reused, even after deletion; composite writes mint opaque keys with
+no resource IRI embedded. Existing keys fail. The filesystem must support hard
+links and directory sync. Fan-out initialization is synced on first use per open
+store and shared across clones; reopening clears that record. The standalone
+`list()` returns `Listing { blobs, foreign }`, excluding `tmp/`. Invalid names,
+misplaced keys and non-files are reported as foreign entries. The async adapter
+warns once per listing and returns the valid blobs, so foreign entries do not
+stop reconciliation. Filesystem I/O errors still propagate. Blobs report
+`Some(file mtime)` with `generation = None`; reconciliation deletes unconditionally
+under the unique-key contract. `delete_if_unchanged` returns an error without a generation
+witness. See the crate README for layout and sync semantics. The native binary
+still selects in-memory blobs; this adapter alone does not enable durable boot.
+
 The seed variables are test-only:
 
 - `SOLID_SERVER_SEED_CONFORMANCE=1` provisions conformance fixtures.
@@ -143,6 +169,24 @@ The seed variables are test-only:
 They are refused on non-memory backends unless
 `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` is explicitly set. Use that escape hatch
 only for an ephemeral test instance.
+
+## Encryption at rest (in progress)
+
+`sparq-lws-crypt` is the native, unpublished P1-1 crate for key providers and the
+versioned `e1` blob envelope. It provides a local KEK provider with context-bound
+AES-256-GCM wrapping, zeroizing secret keys and a per-DEK seal counter. See its
+[format and API reference](../../crates/sparq-lws-crypt/README.md).
+Nothing is wired into the server yet; the blob-store decorator and environment
+configuration belong to P1-2 of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+
+Once integrated, blob encryption protects lost/stolen volumes and snapshots,
+cloud/backup operators with byte-plane access and no KMS grant, and storage admins
+without the KEK. It does not protect a root admin dumping process memory or reading
+the mmap'd index on the running host (P3 scope). The sparq index directory holds
+the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
+(EBS/Azure Disk/dm-crypt). Application-level index encryption is research
+([#2567](https://github.com/sparq-org/sparq/issues/2567)).
+ETags derive from plaintext, so equal bodies get equal ETags across pods.
 
 ## Authenticate requests
 

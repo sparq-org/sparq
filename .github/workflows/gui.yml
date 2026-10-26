@@ -5,7 +5,7 @@
 # NON-merge-queue lane modelled on site-e2e.yml / js.yml. It validates the things a dev box
 # without the webview system libraries (webkit2gtk / WebView2 / WKWebView) cannot:
 #   1. the shared framework-agnostic TS client (packages/sparq-client) typechecks,
-#   2. the site still builds AND typechecks (next lint + tsc) consuming that shared package,
+#   2. the site still builds AND typechecks (ESLint CLI + tsc) consuming that shared package,
 #   3. the Tauri crate (gui/src-tauri) compiles + clippies CLEAN against the real engine, on
 #      EVERY desktop platform the release matrix ships (macOS / Linux x64 + arm64 / Windows).
 #

@@ -23,6 +23,7 @@ pub(crate) trait Context: Sync {
     async fn read(&self, original: &str) -> ServerResult<()>;
     async fn move_to_trash(&self, path: &str, headers: &HeaderMap) -> ServerResult<Response>;
     async fn trash(&self, entry: &TrashEntry) -> ServerResult<bool>;
+    async fn purge(&self, entry: &TrashEntry) -> ServerResult<()>;
     async fn restore(&self, member: &str, target: &str, parent: &str) -> ServerResult<()>;
 }
 fn prefix(lws: bool, versions: bool) -> &'static str {
@@ -330,6 +331,10 @@ pub(crate) async fn serve<C: Context>(
         .trash_entry(&member)
         .await?
         .ok_or(ServerError::NotFound)?;
+    if method == Method::DELETE && !linkset {
+        ctx.purge(&t).await?;
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
     if !ctx.trash(&t).await? {
         return Err(ServerError::Forbidden);
     }
@@ -346,10 +351,6 @@ pub(crate) async fn serve<C: Context>(
             false,
         )
         .await;
-    }
-    if method == Method::DELETE {
-        ctx.store().purge_trash(&member).await?;
-        return Ok(StatusCode::NO_CONTENT.into_response());
     }
     if method != Method::GET && method != Method::HEAD {
         return Err(ServerError::MethodNotAllowed);
@@ -466,7 +467,19 @@ impl<S: Store> Context for Solid<'_, S> {
                 && self.token.web_id.is_some()
                 && entry.fields.deleted_by == self.token.web_id))
     }
+    async fn purge(&self, entry: &TrashEntry) -> ServerResult<()> {
+        #[cfg(feature = "sparql-endpoint")]
+        let _snapshot_guard = self.state.sparql_snapshot_write().await;
+
+        if !self.trash(entry).await? {
+            return Err(ServerError::Forbidden);
+        }
+        self.store().purge_trash(&entry.member).await
+    }
     async fn restore(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        #[cfg(feature = "sparql-endpoint")]
+        let _snapshot_guard = self.state.sparql_snapshot_write().await;
+
         self.state
             .authorize_iri(
                 parent,
@@ -576,6 +589,12 @@ impl<S: Store + 'static> Context for Lws<'_, S> {
                 && self.agent.subject.is_some()
                 && entry.fields.deleted_by == self.agent.subject))
     }
+    async fn purge(&self, entry: &TrashEntry) -> ServerResult<()> {
+        if !self.trash(entry).await? {
+            return Err(ServerError::Forbidden);
+        }
+        self.store().purge_trash(&entry.member).await
+    }
     async fn restore(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
         crate::lws::resources::restore_history(
             self.state, self.req, self.agent, member, target, parent,
@@ -653,9 +672,15 @@ pub(crate) fn spawn_solid_sweep<S: Store + 'static>(
             };
             let _ = tokio::time::timeout(
                 HISTORY_SWEEP_TIMEOUT,
-                state
-                    .store
-                    .sweep_history(crate::clock::now(), HISTORY_SWEEP_BATCH),
+                async {
+                    #[cfg(feature = "sparql-endpoint")]
+                    let _snapshot_guard = state.sparql_snapshot_write().await;
+
+                    state
+                        .store
+                        .sweep_history(crate::clock::now(), HISTORY_SWEEP_BATCH)
+                        .await
+                },
             )
             .await;
         }
@@ -701,4 +726,187 @@ async fn retained_linkset<C: Context>(
         "application/linkset+json",
         &json!({"linkset":[{"anchor":url,"original":[{"href":original}],"self":[{"href":url,"format":[meta.content_type],"size":[size],"modified":[date(modified)]}]}]}),
     ))
+}
+
+#[cfg(all(test, feature = "sparql-endpoint"))]
+mod tests {
+    use super::*;
+    use crate::{
+        auth::VerifiedToken,
+        ldp::handler::LdpState,
+        store::{BodyCache, CompositeStore, InMemoryBlobStore, InMemorySparqClient},
+    };
+    use std::{future::Future, sync::Arc};
+
+    const BASE: &str = "https://pod.example";
+    const PARENT: &str = "https://pod.example/";
+    const ORIGINAL: &str = "https://pod.example/document";
+    const OWNER: &str = "https://alice.example/#me";
+    const BODY: &[u8] = b"<urn:document> <urn:predicate> \"retained\" .";
+    type TestStore = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
+
+    async fn trashed_resource() -> (Arc<LdpState<TestStore>>, VerifiedToken, String) {
+        // Read assertions observe the byte store directly after retention changes.
+        let store = CompositeStore::with_body_cache(
+            InMemorySparqClient::new(),
+            InMemoryBlobStore::new(),
+            BodyCache::new(0),
+        )
+        .with_history(history::HistoryConfig {
+            versions: true,
+            trash: true,
+            ..Default::default()
+        })
+        .unwrap();
+        store
+            .write(PARENT, Bytes::new(), "text/turtle")
+            .await
+            .unwrap();
+        let acl = format!(
+            "@prefix acl: <http://www.w3.org/ns/auth/acl#>. <#owner> a acl:Authorization; \
+             acl:agent <{OWNER}>; acl:accessTo <{PARENT}>; acl:default <{PARENT}>; \
+             acl:mode acl:Read, acl:Write, acl:Control."
+        );
+        store
+            .write(&format!("{BASE}/.acl"), Bytes::from(acl), "text/turtle")
+            .await
+            .unwrap();
+        store
+            .write(ORIGINAL, Bytes::from_static(BODY), "text/turtle")
+            .await
+            .unwrap();
+        let member = store
+            .trash_resource(
+                ORIGINAL,
+                Some(PARENT),
+                history::TrashFields {
+                    original: ORIGINAL.into(),
+                    trashed_at: std::time::SystemTime::UNIX_EPOCH,
+                    deleted_by: Some(OWNER.into()),
+                    deleter_could_read: true,
+                },
+            )
+            .await
+            .unwrap();
+        let state = Arc::new(LdpState::new(store, BASE));
+        let token = VerifiedToken {
+            web_id: Some(OWNER.into()),
+            ..Default::default()
+        };
+        (state, token, member)
+    }
+
+    #[tokio::test]
+    async fn solid_restore_waits_for_sparql_snapshot() {
+        let (state, token, member) = trashed_resource().await;
+        let read = state.sparql_snapshot_read().await;
+        let source = public_url(BASE, false, &member, false);
+        let req = axum::http::Request::builder()
+            .method(Method::POST)
+            .uri("/.trash/")
+            .body(axum::body::Body::from(
+                json!({"restore": source}).to_string(),
+            ))
+            .unwrap();
+        let mut restore = std::pin::pin!(solid_handler(
+            axum::extract::State(Arc::clone(&state)),
+            axum::Extension(token),
+            req,
+        ));
+
+        // Poll the real handler while the query holds its read guard. The in-memory
+        // backend completes synchronously when the snapshot write guard is omitted.
+        let poll =
+            std::future::poll_fn(|cx| std::task::Poll::Ready(restore.as_mut().poll(cx))).await;
+        assert!(
+            poll.is_pending(),
+            "restore must wait for the query snapshot"
+        );
+        assert!(state.store.meta(ORIGINAL).await.unwrap().is_none());
+        assert!(state.store.trash_entry(&member).await.unwrap().is_some());
+
+        drop(read);
+        let response = tokio::time::timeout(std::time::Duration::from_secs(1), restore)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(response.headers()[header::LOCATION], ORIGINAL);
+        assert!(state.store.trash_entry(&member).await.unwrap().is_none());
+        assert_eq!(state.store.read(ORIGINAL).await.unwrap().body, BODY);
+        assert!(state
+            .store
+            .list_children(PARENT)
+            .await
+            .unwrap()
+            .iter()
+            .any(|c| c.as_str() == ORIGINAL));
+    }
+
+    #[tokio::test]
+    async fn solid_purge_waits_for_sparql_snapshot() {
+        let (state, token, member) = trashed_resource().await;
+        let entry = state.store.trash_entry(&member).await.unwrap().unwrap();
+        let read = state.sparql_snapshot_read().await;
+        let path = public_url(BASE, false, &member, false);
+        let req = axum::http::Request::builder()
+            .method(Method::DELETE)
+            .uri(path.strip_prefix(BASE).unwrap())
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let mut purge = std::pin::pin!(solid_handler(
+            axum::extract::State(Arc::clone(&state)),
+            axum::Extension(token),
+            req,
+        ));
+        let poll = std::future::poll_fn(|cx| std::task::Poll::Ready(purge.as_mut().poll(cx))).await;
+        assert!(poll.is_pending(), "purge must wait for the query snapshot");
+        assert_eq!(
+            state.store.trash_entry(&member).await.unwrap(),
+            Some(entry.clone())
+        );
+        assert_eq!(
+            state.store.read_at(&member, &entry.meta).await.unwrap(),
+            BODY
+        );
+
+        drop(read);
+        let response = tokio::time::timeout(std::time::Duration::from_secs(1), purge)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(state.store.trash_entry(&member).await.unwrap().is_none());
+        assert!(state.store.read_at(&member, &entry.meta).await.is_err());
+        assert!(state.store.meta(ORIGINAL).await.unwrap().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn solid_history_sweep_waits_for_sparql_snapshot() {
+        let (state, _, member) = trashed_resource().await;
+        let entry = state.store.trash_entry(&member).await.unwrap().unwrap();
+        let read = state.sparql_snapshot_read().await;
+        spawn_solid_sweep(&state);
+        // Paused time lets the actual maintenance task reach its first tick.
+        tokio::time::sleep(HISTORY_SWEEP_EVERY + std::time::Duration::from_millis(1)).await;
+        assert_eq!(
+            state.store.trash_entry(&member).await.unwrap(),
+            Some(entry.clone()),
+            "history sweep must wait for the query snapshot"
+        );
+        assert_eq!(
+            state.store.read_at(&member, &entry.meta).await.unwrap(),
+            BODY
+        );
+
+        drop(read);
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        assert!(
+            state.store.trash_entry(&member).await.unwrap().is_none(),
+            "history sweep resumes after the snapshot is released"
+        );
+        assert!(state.store.read_at(&member, &entry.meta).await.is_err());
+        assert!(state.store.meta(ORIGINAL).await.unwrap().is_none());
+        assert!(state.store.meta(PARENT).await.unwrap().is_some());
+    }
 }

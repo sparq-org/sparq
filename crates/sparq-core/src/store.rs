@@ -483,7 +483,7 @@ fn radix_sort_rows_by_col0(v: &mut Vec<[Id; 3]>) {
 /// re-map plus a stable sort on its new leading column alone ([`radix_sort_rows_by_col0`]).
 ///
 /// Pairs within a wave are independent (their sources are all already materialised) and so
-/// run concurrently; the waves themselves are ordered. Depth is 2 derivations, so the
+/// may run concurrently; the waves themselves are ordered. Depth is 2 derivations, so the
 /// critical path is `full-sort + 2 single-column sorts` rather than six full sorts.
 ///
 /// Every pair must satisfy the derivability invariant asserted in
@@ -501,10 +501,19 @@ const DERIVE_PLAN: &[&[(Perm, Perm)]] = &[
 #[cfg(any(target_arch = "wasm32", feature = "compact-index"))]
 const DERIVE_PLAN: &[&[(Perm, Perm)]] = &[&[(Perm::Spo, Perm::Osp)], &[(Perm::Osp, Perm::Pos)]];
 
+/// Row cutoff for deriving permutation waves without a pool handoff.
+///
+/// Recalibrate with the `measure_derived_vs_radix_all_build` store-build benchmark,
+/// adapting its input sweep to compare forced serial and parallel waves at fixed worker
+/// counts. Use interleaved pairs and an identical-arm control; keep serial below the crossover.
+#[cfg(any(feature = "parallel", test))]
+const SERIAL_PERM_ROWS: usize = 3072;
+
 impl TripleStore {
     /// Builds the [`BUILT`] permutation indexes from canonical s,p,o triples (all
-    /// six by default; just SPO/POS/OSP under `compact-index`). SPO is sorted (in
-    /// parallel) and deduplicated first; the rest are independent and built concurrently.
+    /// six by default; just SPO/POS/OSP under `compact-index`). SPO is sorted and
+    /// deduplicated first; the rest derive in ordered waves. With the `parallel` feature,
+    /// larger stores use parallel work within each wave.
     pub fn from_triples(triples: Vec<[Id; 3]>) -> Self {
         let perms = Self::build_raw_perms(triples);
         let pred_stats = Self::compute_pred_stats(&perms);
@@ -550,9 +559,9 @@ impl TripleStore {
 
     /// Builds the [`BUILT`] raw permutation indexes from canonical [s,p,o] triples (all six
     /// by default; just SPO/POS/OSP under `compact-index`). Two `cfg`-selected bodies — the
-    /// PARALLEL build runs each [`DERIVE_PLAN`] wave concurrently, the NO-THREADS build runs
-    /// the same plan in order — kept as separate `fn` definitions so the wasm codegen carries
-    /// no rayon shape at all.
+    /// PARALLEL build runs large [`DERIVE_PLAN`] waves concurrently and small stores serially;
+    /// the NO-THREADS build runs the same plan in order — kept as separate `fn` definitions
+    /// so the wasm codegen carries no rayon shape at all.
     ///
     /// [sq-dzfzq] DERIVED build. One full 12-digit [`radix_sort_rows`] + ONE dedup
     /// produces SPO; every other permutation is then [derived](Self::derive_perm) from an
@@ -619,15 +628,20 @@ impl TripleStore {
         // construction (an ExactSize map-collect, then a same-length radix double-buffer).
         triples.shrink_to_fit();
 
+        let serial = triples.len() < SERIAL_PERM_ROWS;
         let mut perms: [PermData; 6] = std::array::from_fn(|_| PermData::default());
         perms[Perm::Spo as usize] = PermData::Owned(triples);
         for wave in DERIVE_PLAN {
-            // Sources are materialised by an earlier wave, so the pairs inside a wave are
-            // independent and derive concurrently.
-            let built: Vec<(Perm, Vec<[Id; 3]>)> = wave
-                .par_iter()
-                .map(|&(src, dst)| (dst, Self::derive_perm(perms[src as usize].as_slice(), src, dst)))
-                .collect();
+            // Sources are materialised by an earlier wave. Small stores avoid the pool
+            // handoff; larger stores overlap the independent pairs within each wave.
+            let derive = |&(src, dst): &(Perm, Perm)| {
+                (dst, Self::derive_perm(perms[src as usize].as_slice(), src, dst))
+            };
+            let built: Vec<(Perm, Vec<[Id; 3]>)> = if serial {
+                wave.iter().map(derive).collect()
+            } else {
+                wave.par_iter().map(derive).collect()
+            };
             for (p, v) in built {
                 perms[p as usize] = PermData::Owned(v);
             }
@@ -1330,6 +1344,23 @@ mod tests {
     /// of the store). Runs across both index sets (`compact-index` builds three perms).
     #[test]
     fn from_triples_perms_match_reference_sort() {
+        for n in [SERIAL_PERM_ROWS - 1, SERIAL_PERM_ROWS] {
+            let triples: Vec<[Id; 3]> = (0..n as Id)
+                .rev()
+                .map(|i| [i, i % 17, i % 257])
+                .collect();
+            let store = TripleStore::from_triples(triples.clone());
+            assert_eq!(store.len(), n, "boundary input must remain unique after dedup");
+            for &perm in BUILT {
+                let order = perm.order();
+                let mut want: Vec<_> = triples
+                    .iter()
+                    .map(|t| [t[order[0]], t[order[1]], t[order[2]]])
+                    .collect();
+                want.sort_unstable();
+                assert_eq!(store.perms[perm as usize].as_slice(), want, "boundary {n}, {perm:?}");
+            }
+        }
         let mut st = 0xC0FFEEu32;
         let mut rng = || {
             st ^= st << 13;
@@ -1433,6 +1464,18 @@ mod tests {
     /// and the id-space boundaries.
     #[test]
     fn derived_perms_match_radix_all_build() {
+        for n in [SERIAL_PERM_ROWS - 1, SERIAL_PERM_ROWS] {
+            let triples: Vec<[Id; 3]> = (0..n as Id)
+                .rev()
+                .map(|i| [i, i % 17, i % 257])
+                .collect();
+            let want = build_raw_perms_radix_all(&triples);
+            let store = TripleStore::from_triples(triples);
+            assert_eq!(store.len(), n, "boundary input must remain unique after dedup");
+            for (perm, rows) in want {
+                assert_eq!(store.perms[perm as usize].as_slice(), rows, "boundary {n}, {perm:?}");
+            }
+        }
         let mut st = 0x5EEDBEEFu32;
         let mut rng = || {
             st ^= st << 13;

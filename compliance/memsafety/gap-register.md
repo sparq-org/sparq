@@ -19,8 +19,8 @@ now CLOSED** by `.github/workflows/asan.yml` (sq-hybl).
 
 | ID | What | Evidence it is closed |
 |---|---|---|
-| GX-5a | No per-site unsafe justification register | `compliance/memsafety/unsafe-register.md` — 118 rows, 100% of first-party sites. |
-| GX-5b | cargo-geiger informational only (no gating ratchet) | `scripts/unsafe-gate.py` + `bench/unsafe-snapshot.json` + the **gating** `unsafe-register (count ratchet)` CI lane in `ci.yml`. cargo-geiger stays as a separate visibility lane. |
+| GX-5a | No per-site unsafe justification register or mechanical site correspondence | `compliance/memsafety/unsafe-register.md` records the safety arguments. `python3 scripts/unsafe-gate.py --verify-register` requires exactly one row per live site from `--list` and rejects every stale File:line cell, missing row and duplicate row. Descriptions and safety arguments remain reviewed. `--self-test` exercises those failures and requires the real register to pass. |
+| GX-5b | cargo-geiger informational only (no failing ratchet) | `scripts/unsafe-gate.py --check` + `bench/unsafe-snapshot.json` bound per-crate counts; `--verify-register` checks site correspondence even when counts are unchanged. Both commands and `--self-test` run without `continue-on-error` in the `unsafe-register (count ratchet)` job in `ci.yml` (nightly + dispatch, not a required PR merge check). cargo-geiger stays a separate visibility lane; the cited commands determine live compliance. |
 | GX-5c | B5 mmap sites "not attested in one place" | The coverage matrix in `controls.md` + the oracle (`mmap_corruption_oracle.rs`) + fuzz (`graph_open.rs`) citations attest each B5 site. |
 | **MS-G2** | First-party `clippy::undocumented_unsafe_blocks` lint missing (the `// SAFETY:` token was enforced by review + register, not mechanically) | **CLOSED (sq-8wbn, [OPUS-4.8]).** `#![warn(clippy::undocumented_unsafe_blocks)]` is a crate-root attribute on unsafe-bearing libraries, including `sparq-engine`; unsafe-bearing test/example crates set it locally. The 6 sites the lint originally flagged were normalised to a literal `// SAFETY:` comment immediately preceding each `unsafe` block/impl (the two `SlotPtr` `Send`/`Sync` pairs in `dict.rs`/`dictspill.rs`, plus `lib.rs` `from_raw_parts_mut` over `MmapMut` and the test `remove_var`). The existing `clippy --all-targets -D warnings` gate mechanically rejects any new undocumented `unsafe`. |
 
@@ -89,9 +89,10 @@ remain external by definition; the AUDIT-READY label stands.
 
 ## Honest overall posture
 
-The memsafety framework is **substantively PASS**: the unsafe surface is confined (31 forbid
-crates), fully enumerated + justified (59-site register), gated by a merge-blocking ratchet,
-and covered by a Miri+oracle+fuzz+ASan matrix with the B5 boundary explicitly handled. The
+The memsafety framework confines the unsafe surface, records per-site justifications,
+and checks counts and live site correspondence in the nightly/dispatch ratchet job.
+The verifier determines current register coverage; equal counts alone do not establish it.
+The Miri+oracle+fuzz+ASan matrix handles the B5 boundary explicitly. The
 open gaps are **not** missing safety — they are (a) [CLOSED] the first-party
 `undocumented_unsafe_blocks` lint, now enforced on all 5 unsafe crates (MS-G2, sq-8wbn),
 (b) one remaining *deeper-assurance* lane that is deferred-but-tracked (MS-G4 formal proof —

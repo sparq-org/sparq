@@ -305,7 +305,7 @@ impl<S: Store> LdpState<S> {
 
     /// Serialize an LDP mutation against in-flight SPARQL dataset snapshots.
     #[cfg(feature = "sparql-endpoint")]
-    async fn sparql_snapshot_write(&self) -> async_lock::RwLockWriteGuard<'_, ()> {
+    pub(crate) async fn sparql_snapshot_write(&self) -> async_lock::RwLockWriteGuard<'_, ()> {
         self.sparql_snapshot.write().await
     }
 
