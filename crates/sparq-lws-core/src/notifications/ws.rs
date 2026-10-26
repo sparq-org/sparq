@@ -125,8 +125,10 @@ fn authorization_unavailable() -> Response {
 pub struct NotifyState<S: Store> {
     pub hub: NotificationHub,
     pub base_url: String,
-    /// The services mounted by this host.
+    /// The services mounted by this host, snapshotted in the description at construction.
     pub catalog: crate::describe::ServiceCatalog,
+    description_jsonld: CachedDescription,
+    description_turtle: CachedDescription,
     /// The LDP state — the store + ACL cache the [`WacAuthorizer`] reads `.acl` resources through.
     ldp: Arc<LdpState<S>>,
     /// How often an open socket's subscriber is checked for read access apart from any event
@@ -147,13 +149,55 @@ pub struct NotifyState<S: Store> {
 /// may not read.
 pub const ACCESS_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// One representation of the static storage description, rendered before serving requests.
+struct CachedDescription {
+    body: bytes::Bytes,
+    etag: axum::http::HeaderValue,
+}
+
+impl CachedDescription {
+    fn render(
+        catalog: &crate::describe::ServiceCatalog,
+        storage: &str,
+        format: crate::ldp::content::RdfFormat,
+    ) -> Result<Self, crate::error::ServerError> {
+        use sha2::{Digest, Sha256};
+        let body = bytes::Bytes::from(catalog.solid(storage, format)?);
+        let etag = format!(
+            "\"sd-{}\"",
+            crate::lws::jose::b64url(&Sha256::digest(&body))
+        )
+        .parse()
+        .expect("valid description ETag");
+        Ok(Self { body, etag })
+    }
+}
+
 impl<S: Store> NotifyState<S> {
     /// Derive the notification state from the LDP state: the hub and base URL are TAKEN from it
     /// (single-sourced), so a subscriber registered via `…/receive` is on the same registry the LDP
     /// emit path fans to and the advertised URLs match the LDP layer's own base.
+    ///
+    /// # Panics
+    /// Panics if the static storage description cannot be rendered.
     pub fn new(ldp: Arc<LdpState<S>>) -> Self {
+        Self::with_catalog(ldp, crate::describe::ServiceCatalog::default())
+    }
+
+    pub(crate) fn with_catalog(
+        ldp: Arc<LdpState<S>>,
+        catalog: crate::describe::ServiceCatalog,
+    ) -> Self {
+        use crate::ldp::content::RdfFormat;
+        let storage = format!("{}/", ldp.base_url().trim_end_matches('/'));
+        let description_jsonld = CachedDescription::render(&catalog, &storage, RdfFormat::JsonLd)
+            .expect("render static JSON-LD storage description before boot");
+        let description_turtle = CachedDescription::render(&catalog, &storage, RdfFormat::Turtle)
+            .expect("render static Turtle storage description before boot");
         Self {
-            catalog: crate::describe::ServiceCatalog::default(),
+            catalog,
+            description_jsonld,
+            description_turtle,
             hub: ldp.notifications.clone(),
             base_url: ldp.base_url().to_string(),
             ldp,
@@ -794,7 +838,6 @@ pub async fn storage_description_handler<S: Store>(
     State(state): State<Arc<NotifyState<S>>>,
     headers: HeaderMap,
 ) -> Response {
-    use crate::ldp::content::RdfFormat;
     use crate::lws::resources::negotiate;
     let Some(media) = negotiate(
         headers
@@ -808,43 +851,39 @@ pub async fn storage_description_handler<S: Store>(
         )
             .into_response();
     };
-    let format = if media == "text/turtle" {
-        RdfFormat::Turtle
+    let description = if media == "text/turtle" {
+        &state.description_turtle
     } else {
-        RdfFormat::JsonLd
+        &state.description_jsonld
     };
-    let storage = format!("{}/", state.base_url.trim_end_matches('/'));
-    let body = match state.catalog.solid(&storage, format) {
-        Ok(body) => body,
-        Err(error) => return error.into_response(),
+    let etag = description.etag.to_str().expect("valid description ETag");
+    use crate::ldp::conditional::{
+        evaluate_read, evaluate_read_guard, Precondition, ReadPrecondition,
     };
-    use sha2::{Digest, Sha256};
-    let etag = format!(
-        "\"sd-{}\"",
-        crate::lws::jose::b64url(&Sha256::digest(&body))
-    );
-    use crate::ldp::conditional::{evaluate_read, evaluate_read_guard, Precondition, ReadPrecondition};
     let if_match = crate::entity_tag::field(&headers, axum::http::header::IF_MATCH);
     let if_none_match = crate::entity_tag::field(&headers, axum::http::header::IF_NONE_MATCH);
-    let status = if evaluate_read_guard(if_match.as_deref(), None, &etag, None)
-        == Precondition::Failed
-    {
-        StatusCode::PRECONDITION_FAILED
-    } else if evaluate_read(if_none_match.as_deref(), None, &etag, None)
-        == ReadPrecondition::NotModified
-    {
-        StatusCode::NOT_MODIFIED
+    let status =
+        if evaluate_read_guard(if_match.as_deref(), None, etag, None) == Precondition::Failed {
+            StatusCode::PRECONDITION_FAILED
+        } else if evaluate_read(if_none_match.as_deref(), None, etag, None)
+            == ReadPrecondition::NotModified
+        {
+            StatusCode::NOT_MODIFIED
+        } else {
+            StatusCode::OK
+        };
+    let body = if status == StatusCode::OK {
+        description.body.clone()
     } else {
-        StatusCode::OK
+        bytes::Bytes::new()
     };
     let mut response = (status, body).into_response();
-    if status != StatusCode::OK {
-        *response.body_mut() = axum::body::Body::empty();
-    }
+    response
+        .headers_mut()
+        .insert(axum::http::header::ETAG, description.etag.clone());
     for (name, value) in [
-        (axum::http::header::CONTENT_TYPE, media),
-        (axum::http::header::ETAG, etag),
-        (axum::http::header::VARY, "Accept".into()),
+        (axum::http::header::CONTENT_TYPE, media.as_str()),
+        (axum::http::header::VARY, "Accept"),
     ] {
         response
             .headers_mut()
@@ -1475,6 +1514,10 @@ mod tests {
             json!({"@id": WEBSOCKET_CHANNEL_2023_TYPE}),
         );
         Arc::get_mut(&mut state).unwrap().catalog.service(service);
+        let state = Arc::new(NotifyState::with_catalog(
+            state.ldp.clone(),
+            state.catalog.clone(),
+        ));
         let app = axum::Router::new()
             .route(
                 SUBSCRIPTION_PATH,

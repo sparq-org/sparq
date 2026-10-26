@@ -1439,7 +1439,7 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
         "@context": [CID_CONTEXT, LWS_CONTEXT, crate::describe::extension_context()],
         "id": storage,
         "type": "Storage",
-        "conformsTo": ["https://www.w3.org/TR/lws10-core/"],
+        "conformsTo": [crate::describe::LWS_CORE_SPEC],
         "service": state.catalog.services_json(&storage),
         "capability": state.catalog.capabilities_json(),
         "verificationMethod": [{

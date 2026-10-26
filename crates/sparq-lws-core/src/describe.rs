@@ -14,6 +14,8 @@ pub const SPARQL_ENDPOINT: &str = "http://www.w3.org/ns/solid/sparql#endpoint";
 const NOTIFICATIONS_CONTEXT: &str = "https://www.w3.org/ns/solid/notifications-context/v1";
 const NOTIFY: &str = "http://www.w3.org/ns/solid/notifications#";
 const LWS: &str = "https://www.w3.org/ns/lws#";
+/// LWS Core specification advertised by the storage description.
+pub(crate) const LWS_CORE_SPEC: &str = "https://www.w3.org/TR/lws10-core/";
 
 /// A deployed service and its description properties.
 #[derive(Clone, Debug)]

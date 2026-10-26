@@ -308,6 +308,69 @@ async fn lws_public_catalog_and_shape() {
 }
 
 #[tokio::test]
+async fn solid_cached_descriptions_are_stable_per_format() {
+    let app = solid(ServiceCatalog::default(), false).await;
+    let mut previous: Option<String> = None;
+    for media in ["application/ld+json", "text/turtle", "application/ld+json"] {
+        let (status, headers, body) =
+            call(&app, "GET", "/.well-known/solid", &[("accept", media)], "").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers["content-type"], media);
+        assert!(!body.is_empty());
+        // A cache entry must contain the bytes of its negotiated format.
+        if media == "application/ld+json" {
+            serde_json::from_slice::<Value>(&body).unwrap();
+        } else {
+            assert!(!triples(RdfFormat::Turtle, &body).is_empty());
+        }
+        let (status, again_headers, again_body) =
+            call(&app, "GET", "/.well-known/solid", &[("accept", media)], "").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(again_body, body);
+        assert_eq!(again_headers["etag"], headers["etag"]);
+        let tag = headers["etag"].to_str().unwrap();
+        let (status, cached_headers, cached_body) = call(
+            &app,
+            "GET",
+            "/.well-known/solid",
+            &[("accept", media), ("if-none-match", tag)],
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_MODIFIED);
+        assert_eq!(cached_headers["etag"], headers["etag"]);
+        assert!(cached_body.is_empty());
+        if let Some(other_tag) = previous {
+            assert_ne!(tag, other_tag);
+            let (status, _, other_body) = call(
+                &app,
+                "GET",
+                "/.well-known/solid",
+                &[("accept", media), ("if-none-match", &other_tag)],
+                "",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(other_body, body);
+        }
+        previous = Some(tag.to_owned());
+    }
+}
+
+#[tokio::test]
+#[should_panic(expected = "render static JSON-LD storage description before boot")]
+async fn solid_rejects_an_unrenderable_catalog_at_boot() {
+    let mut catalog = extra();
+    catalog.service(ServiceEntry {
+        fragment: "invalid-service".into(),
+        type_term: "urn:test:Service".into(),
+        endpoint: "https://pod.example/invalid".into(),
+        extras: serde_json::from_value(json!({"@value": "invalid node object"})).unwrap(),
+    });
+    let _ = solid(catalog, false).await;
+}
+
+#[tokio::test]
 async fn solid_negotiation_graph_and_goldens() {
     let app = solid(ServiceCatalog::default(), false).await;
     let (status, json_headers, json_body) = call(&app, "GET", "/.well-known/solid", &[], "").await;

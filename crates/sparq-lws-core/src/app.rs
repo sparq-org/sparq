@@ -169,6 +169,9 @@ where
 /// Build the Solid router with entries for additional routes mounted by the caller.
 ///
 /// The caller must mount every endpoint registered in `catalog` on the returned router.
+///
+/// # Panics
+/// Panics if the static storage description cannot be rendered.
 pub fn build_router_with_catalog<J, R, S>(
     state: AppState<J, R, S>,
     catalog: crate::describe::ServiceCatalog,
@@ -421,9 +424,7 @@ where
         endpoint,
         crate::describe::root_discovery,
     ));
-    let mut notify_state = NotifyState::new(ldp.clone());
-    notify_state.catalog = catalog;
-    let notify_state = Arc::new(notify_state);
+    let notify_state = Arc::new(NotifyState::with_catalog(ldp.clone(), catalog));
 
     // The AUTH-GATED subscribe route: behind the SAME DPoP middleware so the handler sees a
     // VerifiedToken (fail-closed on anonymous).

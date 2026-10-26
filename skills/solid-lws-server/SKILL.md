@@ -303,7 +303,9 @@ support byte-range reads.
 
 ## Discover deployed services and capabilities
 
-Both modes expose a public catalog built with their mounted routes. Solid serves
+Both modes expose a public catalog built with their mounted routes. The Solid router
+renders both description formats and their ETags at construction; a rendering failure
+prevents startup. Requests reuse the cached representation. Solid serves
 `/.well-known/solid` as JSON-LD by default (`Accept: */*` included) or Turtle with
 `Accept: text/turtle`; unsupported types, including `application/lws+cid`, get `406`.
 JSON-LD keeps the compact `notificationChannel` discovery array and names the
