@@ -31,6 +31,29 @@ import { webTest as test, webExpect as expect } from "../support/index.ts";
 test.describe("web-persona", () => {
   // The webPersona auto-fixture navigates to "/" and waits for engine ready before each test.
 
+  test("theme toggle hydrates with its icon and no hydration warnings", async ({ page }) => {
+    const hydrationErrors: string[] = [];
+    page.on("console", (message) => {
+      if (/hydrat|Minified React error #(418|423|425)/i.test(message.text())) {
+        hydrationErrors.push(message.text());
+      }
+    });
+    page.on("pageerror", (error) => {
+      if (/hydrat|Minified React error #(418|423|425)/i.test(error.message)) {
+        hydrationErrors.push(error.message);
+      }
+    });
+    // Observe a full load, including the initial server markup and client hydration.
+    await page.reload();
+    const toggle = page.getByRole("button", { name: "Toggle theme", exact: true });
+    await expect(toggle.locator("svg")).toBeVisible();
+    await expect(page.getByText("Engine ready", { exact: true })).toBeVisible();
+    await toggle.click();
+    await expect(page.locator("html")).toHaveClass(/light/);
+    await expect(toggle.locator("svg")).toBeVisible();
+    expect(hydrationErrors).toEqual([]);
+  });
+
   test("workbench boots and the Query tool runs against the in-tab engine", async ({ page }) => {
     // The workbench shell is up: the SPARQL editor and its run trigger render.
     const editor = page.locator("#repl-query");

@@ -1871,12 +1871,16 @@ pub fn materialize_odrl_n3_with_budget(
     request: &Request,
     budget: crate::AuthBudget,
 ) -> Result<BridgeOutcome, String> {
+    let deadline = crate::budget::MaterializeDeadline::new(budget);
+    deadline.check()?;
     // 0. STRICT Turtle parse + ground-term re-serialization (injection guard), then
     //    the canonical-dateTime / prohibition-scope validation (fail-closed).
     let policy_graph = Graph::load_dataset(policy_ttl, "turtle").map_err(|e| {
         format!("policy is not strict Turtle (N3/Turtle-extension constructs are rejected): {}", e)
     })?;
+    deadline.check()?;
     let policy_triples = crate::loader::graph_triples(&policy_graph);
+    deadline.check()?;
 
     // 0a. Run the SAME `odrl:conflict` admissibility guard every Rust
     //     materialise entry point runs, FIRST. This call previously skipped it entirely,
@@ -1903,6 +1907,7 @@ pub fn materialize_odrl_n3_with_budget(
     }
 
     validate_policy_for_n3(&policy_triples)?;
+    deadline.check()?;
     let policy_facts = triples_to_n3(&policy_triples);
     let req_n3 = serialize_request_n3(request)?;
 
@@ -1932,7 +1937,7 @@ pub fn materialize_odrl_n3_with_budget(
     // charges go into one whole-decision ledger that bounds their aggregate
     // (`crate::AuthBudget`); otherwise this lane could spend five times the allowance a
     // single-stratum WAC view can.
-    let mut work = crate::budget::DecisionWork::new(budget);
+    let mut work = crate::budget::DecisionWork::new(budget, deadline);
     for stratum in rules {
         closure = crate::materialize::auth_eval(
             &mut dict,
@@ -1989,6 +1994,7 @@ pub fn materialize_odrl_n3_with_budget(
         }
     }
 
+    deadline.check()?;
     if !deny_triples.is_empty() {
         append_bridged_triples(graph, &deny_triples)?;
     }

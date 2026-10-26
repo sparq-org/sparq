@@ -661,7 +661,10 @@ fn commit_canonical(
         leaves.push(leaf);
     }
     let commitment = poseidon2::hash(&leaves);
-    Ok(DualGraphCommitment { canonical, leaves, commitment, salt })
+    Ok(DualGraphCommitment {
+        method: crate::commit::CommitmentMethod::DualLeafV2,
+        canonical, leaves, commitment, salt,
+    })
 }
 
 #[cfg(test)]
