@@ -621,8 +621,8 @@ mod embedded {
             .find(|path| fs::metadata(path).unwrap().len() > 0)
             .unwrap();
         let bytes = fs::read(&journal).unwrap();
-        // The core refuses an unexpected swap staging path without deleting its contents.
-        let staging = journal.parent().unwrap().with_extension("compact-new");
+        // Compaction swaps the whole index tree; block its root staging sibling.
+        let staging = dir.0.join("index.compact-new");
         fs::create_dir(&staging).unwrap();
         fs::write(staging.join("foreign"), b"preserve").unwrap();
         let mut shutdown = StorageShutdown::default();
