@@ -244,8 +244,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   issuer signed unbound messages over string-canonical commitments alone. A dual-leaf
   commitment signed unbound cannot use the V2 members, and its opaque presentations
   are not sound. Under the default policy,
-  unbound attestations are refused upstream. Orphan sub-proofs alone require
-  method-independent members. A sub-proof bound to a commitment covered only by a hidden-issuer
+  unbound attestations are refused upstream. Under `dual-leaf`, orphan sub-proofs require
+  method-independent members; without it, they retain their declared member.
+  A sub-proof bound to a commitment covered only by a hidden-issuer
   proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
   method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
   revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
@@ -258,13 +259,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose methods disagree on the pattern-constant ENCODER, so what is newly refused there is the
   pairing of a method-UNBOUND commitment with a `StringCanonicalV1` one, which share one encoder.
   A `Filter*` and a `JoinEq` had no such check. An edge-less FILTER over a member legal under
-  every admissible method still verifies. **Scope:** the member resolution and all of its
-  refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
-  decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
-  `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
-  state. Of the five refusals above, the first four compile only with `dual-leaf`;
-  `CheckError::MemberNotForFixedRole` is UNCONDITIONAL, as are `FixedMemberRole` and the
-  per-role `fixed_member` selection path that raises it, which run in every feature state.
+  every admissible method still verifies. **Scope:** method folding and both resolution
+  passes now run in every build. The dispatch matrix and `MemberNotLegalForMethod` remain
+  behind the OFF-by-default `dual-leaf` feature. Without it, a successful fold retains the
+  declared member under the existing method-policy and encoder checks. The other four
+  refusals above, the stage 2g′ endpoint gate, `CheckError::JoinProofNotBoundToAnEdge`,
+  `FixedMemberRole` and its per-role selection path are unconditional.
   Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
   achieved.
 
@@ -835,6 +835,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-zk-compose:** hardening: method-fold refusals now apply in every build.
+  Default builds now return `SubProofCommitmentNotAuthenticated` for a bound
+  commitment absent from the authenticated-method map, and `SubProofMethodUnresolved`
+  when bound commitments disagree or deferred resolution cannot complete after the
+  hidden-issuer gate. The `dual-leaf` dispatch matrix remains opt-in.
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
   while a request waits on it tries each step up to three times, each attempt waiting for a
   fence two seconds at most (counted from the store's answer); a step whose write failed

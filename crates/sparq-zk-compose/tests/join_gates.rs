@@ -940,9 +940,9 @@ fn nonce_for(hex: &str) -> VerifierNonce {
             Runs via `cargo nextest run -p sparq-zk-compose --run-ignored all` (or \
             `cargo test -- --ignored`) on a box with nargo+bb; sq-r2s8."]
 fn full_bb_join_accept_real_proof() {
-    if !support::require_toolchain("full_bb_join_accept_real_proof", &["nargo", "bb"]) {
+    let Some(live) = support::gate("full_bb_join_accept_real_proof", &["nargo", "bb"]) else {
         return;
-    }
+    };
 
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
@@ -1072,6 +1072,7 @@ fn full_bb_join_accept_real_proof() {
         &InMemorySeenNonces::new(),
     )
     .expect("a real join_eq proof (canonical VK + pubinput + bb verify + bind_joins) must verify");
+    support::complete(live);
 }
 
 // === The per-sub-proof member resolution, through `verify_manifest` ==========
