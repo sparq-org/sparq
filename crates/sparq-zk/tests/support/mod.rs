@@ -66,7 +66,7 @@ fn allow_missing() -> bool {
 /// gate call site in the ZK test sources left BOTH lines:
 ///
 /// * `enter <file>:<line>` — written by the gate when it lets the body run;
-/// * `complete <file>:<line>` — written by [`complete`] / [`complete_required`],
+/// * `complete <file>:<line>` — written by [`complete`],
 ///   which each live test calls as its LAST statement, after its assertions. The key
 ///   is the GATE's call site, carried from the gate to the completion call, so the
 ///   two lines of one test are matched by construction.
@@ -176,16 +176,6 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-// The gate sites [`require_toolchain`] let through on THIS thread and that no
-// [`complete_required`] has closed yet, newest last. Thread-local because libtest
-// runs one test per thread at a time; a site left here by a test that returned
-// early is never closed, which is exactly the missing completion the verify step
-// reports.
-thread_local! {
-    static PENDING: std::cell::RefCell<Vec<&'static std::panic::Location<'static>>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
 /// A [`std::process::Command`] for a live tool.
 ///
 /// Takes a [`LiveToolchain`], which only [`gate`] mints, so the gate cannot be
@@ -266,60 +256,20 @@ pub fn complete(mut token: LiveToolchain) {
     token.completed = true;
 }
 
-/// [`gate`] as a boolean, for the call sites that do not spawn a tool themselves.
-/// `#[track_caller]` so the ledger key is the TEST's line, not this forwarding
-/// call's line inside the gate module.
-///
-/// A `true` result leaves the gate site OPEN on this thread; the test closes it with
-/// [`complete_required`] as its last statement. There is no token to drop, so an
-/// early return is not reported where it runs: it is reported by the verify step
-/// (an `enter` line with no `complete` line) and statically by
-/// `scripts/check-zk-toolchain-gate.py`, which requires the completion call to be
-/// the function's last statement.
-#[allow(dead_code)]
-#[track_caller]
-pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
-    match gate(test, tools) {
-        Some(mut token) => {
-            token.completed = true;
-            PENDING.with(|cell| cell.borrow_mut().push(token.site));
-            true
-        }
-        None => false,
-    }
-}
-
-/// Close the newest gate site [`require_toolchain`] opened on this thread: append
-/// `complete <file>:<line>` for THAT site. Panics when no site is open, so a
-/// completion call cannot stand in for a gate call that never happened.
-#[allow(dead_code)]
-pub fn complete_required() {
-    let site = PENDING.with(|cell| cell.borrow_mut().pop());
-    match site {
-        Some(site) => record("complete", site),
-        None => panic!(
-            "`support::complete_required()` was called with no open gate site on this \
-             thread; it must follow a passing `support::require_toolchain(..)`"
-        ),
-    }
-}
-
 // --------------------------------------------------------------------------- #
 // The gate's own identity tests.
 //
 // Compiled into every binary that declares `mod support;` and into the crate's lib
 // target (which includes this same file with `#[path]`), so they run wherever the
 // gate does. They are about the LEDGER KEY: that it is the caller's own line, that
-// `#[track_caller]` carries that line through the `require_toolchain` wrapper, that
+// the token carries that line to completion, that
 // the completion line carries the GATE's key, that an uncompleted token fails, and
 // that nothing is recorded on the skip or panic paths.
 // --------------------------------------------------------------------------- #
 
 #[cfg(test)]
 mod gate_identity_tests {
-    use super::{
-        complete, complete_required, gate, require_toolchain, ALLOW_MISSING_ENV, TEST_LEDGER,
-    };
+    use super::{complete, gate, ALLOW_MISSING_ENV, TEST_LEDGER};
 
     /// A name no executable resolves to, so the gate takes a non-recording path.
     const ABSENT: &str = "sparq-zk-gate-identity-no-such-tool-xyzzy";
@@ -382,21 +332,6 @@ mod gate_identity_tests {
         );
     }
 
-    /// `require_toolchain` forwards the caller's location, so a test that uses the
-    /// boolean wrapper is recorded at ITS line and not at the wrapper's, and its
-    /// companion completion call closes that same site.
-    #[test]
-    fn require_toolchain_records_its_own_caller_not_the_wrapper() {
-        let path = scratch("wrapper");
-        let line = line!() + 1;
-        let ok = redirected(&path, || require_toolchain("wrapper probe", &["cargo"]));
-        assert!(ok, "cargo must be on PATH for this test to mean anything");
-        let key = format!("{}:{}", file!().replace('\\', "/"), line);
-        assert_eq!(ledger(&path), format!("enter {key}\n"));
-        redirected(&path, complete_required);
-        assert_eq!(ledger(&path), format!("enter {key}\ncomplete {key}\n"));
-    }
-
     /// A token dropped without `complete` PANICS and records no completion: the
     /// shape of a test that returns early after its gate.
     #[test]
@@ -448,15 +383,6 @@ mod gate_identity_tests {
         );
     }
 
-    /// A completion call with no open boolean gate site is refused.
-    #[test]
-    fn a_completion_with_no_open_gate_site_panics() {
-        let path = scratch("orphan");
-        let out = redirected(&path, || std::panic::catch_unwind(complete_required));
-        assert!(out.is_err(), "an orphan completion must panic");
-        assert_eq!(ledger(&path), "", "an orphan completion records nothing");
-    }
-
     /// A missing tool records NOTHING — on the declared-skip path and on the panic
     /// path alike. A ledger entry therefore means the body was allowed to run.
     #[test]
@@ -464,11 +390,11 @@ mod gate_identity_tests {
         let skipped = scratch("skip");
         let declared = std::env::var_os(ALLOW_MISSING_ENV).is_some();
         let out = redirected(&skipped, || {
-            std::panic::catch_unwind(|| require_toolchain("absent probe", &[ABSENT]))
+            std::panic::catch_unwind(|| gate("absent probe", &[ABSENT]))
         });
         match out {
             Ok(allowed) => assert!(
-                !allowed && declared,
+                allowed.is_none() && declared,
                 "an absent tool must not pass the gate"
             ),
             Err(_) => assert!(!declared, "the panic path is the undeclared one"),

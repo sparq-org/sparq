@@ -47,7 +47,7 @@ exercised through the CLI, so this maps them to their covering test):
   * `static_findings`  -> all of the above; it is the aggregator they share
 
 Mutations of the gate that turn this file red, each verified by running it:
-dropping `#[track_caller]` from `gate` or from `require_toolchain` (the gate module's
+dropping `#[track_caller]` from `gate` (the gate module's
 own `gate_identity_tests`, which run in every binary that declares the module);
 recording on the skip path (same); deleting CHECK A8, CHECK F, the `src` scan trees,
 the annotation's line scope, or the call-site key (`--self-test`).
@@ -61,12 +61,14 @@ pass (`GateIsTheOnlyPath`, `AcquisitionLint`).
 from __future__ import annotations
 
 import re
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+import importlib.util
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _yaml_seam import yaml_or_local_skip  # noqa: E402
@@ -75,6 +77,10 @@ yaml_or_local_skip()
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/check-zk-toolchain-gate.py"
+_spec = importlib.util.spec_from_file_location("zk_toolchain_gate", SCRIPT)
+checker = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = checker
+_spec.loader.exec_module(checker)
 WORKFLOW = "/".join([".github", "workflows", "zk-toolchain.yml"])
 VERIFY_STEP = "Verify every live ZK test ran"
 LEDGER_ENV = "SPARQ_ZK_LIVE_LEDGER"
@@ -239,13 +245,10 @@ def copy_tree(tmp: str, full_src: bool = False) -> Path:
         src, dst = REPO / rel, root / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
-    if full_src:
-        for rel in SRC_TREES:
-            shutil.copytree(REPO / rel, root / rel)
-    else:
-        for rel in LIB_ROOTS:
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(REPO / rel, root / rel)
+    # The declared inventory includes src tests, so a copied tree must include
+    # those definitions even when a fixture only mutates an integration test.
+    for rel in SRC_TREES:
+        shutil.copytree(REPO / rel, root / rel)
     return root
 
 
@@ -395,7 +398,7 @@ class LedgerVerification(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp, full_src=True)
             first = self.a_real_key(root)
-            p = self._ledger(root, [first])
+            p = self._ledger(root, [f"enter {first}"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 1)
             self.assertIn("left no ledger entry", proc.stderr)
@@ -416,7 +419,7 @@ class LedgerVerification(unittest.TestCase):
             ]
             self.assertFalse(keys, "an empty ledger short-circuits before the key list")
             # Instead, take the keys from a one-entry run, which does reach the list.
-            p = self._ledger(root, [self.a_real_key(root)])
+            p = self._ledger(root, [f"enter {self.a_real_key(root)}"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             keys = [
                 line.strip().split("  ")[0]
@@ -424,7 +427,8 @@ class LedgerVerification(unittest.TestCase):
                 if line.strip().startswith("crates/")
             ]
             self.assertGreater(len(keys), 50, proc.stderr)
-            p = self._ledger(root, keys)
+            p = self._ledger(root, [f"{kind} {key}" for key in keys
+                                    for kind in ("enter", "complete")])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 0, f"{proc.stdout}\n{proc.stderr}")
 
@@ -433,7 +437,7 @@ class LedgerVerification(unittest.TestCase):
         alias, or a file outside the scan trees."""
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp, full_src=True)
-            p = self._ledger(root, ["crates/sparq-zk/tests/plain.rs:999"])
+            p = self._ledger(root, ["enter crates/sparq-zk/tests/plain.rs:999"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 1)
             self.assertIn("match no inventoried gate call site", proc.stderr)
@@ -445,10 +449,139 @@ class LedgerVerification(unittest.TestCase):
             (root / "crates/sparq-zk-compose/tests/planted_dup.rs").write_text(
                 EVASIONS["two gate calls on one line"], encoding="utf-8"
             )
-            p = self._ledger(root, ["crates/sparq-zk/tests/plain.rs:1"])
+            p = self._ledger(root, ["enter crates/sparq-zk/tests/plain.rs:1"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 1)
             self.assertIn("does not parse", proc.stderr)
+
+
+class CompletionAndInventory(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        self.exclusions = patch.object(checker, "LEDGER_EXCLUSIONS", {})
+        self.ratchet = patch.object(checker, "ALLOW_RATCHET", {})
+        self.exclusions.start()
+        self.ratchet.start()
+        self.addCleanup(self.exclusions.stop)
+        self.addCleanup(self.ratchet.stop)
+
+    def fixture(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        checker._write_fixture(root)
+        return root
+
+    def findings(self, root):
+        return checker.static_findings(root)[0]
+
+    def test_status_assertion_must_reference_the_spawned_value(self):
+        self.assertTrue(checker._asserts_status("assert!(out.status.success());", "out"))
+        self.assertFalse(checker._asserts_status("assert!(other.status.success());", "out"))
+        self.assertFalse(checker._asserts_status("out.unwrap();", "out"))
+        self.assertTrue(checker._asserts_status(
+            "assert!(String::from_utf8_lossy(&out.stderr).contains(EXPECTED));", "out"))
+        self.assertFalse(checker._asserts_status(
+            "assert!(String::from_utf8_lossy(&other.stderr).contains(EXPECTED));", "out"))
+
+    def test_completion_and_declared_checks_reject_missing_obligations(self):
+        root = self.fixture()
+        trees = checker.collect(root)
+        sites, _ = checker.inventory(trees)
+        self.assertEqual(checker.check_completion(trees, sites), [])
+        self.assertEqual(checker.check_declared(root, trees), [])
+        path = root / "crates/sparq-zk-compose/tests/live.rs"
+        path.write_text(checker._GOOD_LIVE.replace("    support::complete(gate);\n", ""))
+        trees = checker.collect(root)
+        sites, _ = checker.inventory(trees)
+        self.assertTrue(checker.check_completion(trees, sites))
+        declared = root / checker.DECLARED_REL["sparq-zk-compose"]
+        declared.write_text(declared.read_text().replace("live tests/live.rs::live_case\n", ""))
+        self.assertTrue(checker.check_declared(root, trees))
+
+    def test_complete_must_follow_the_assertions_and_consume_the_token(self):
+        for label, old, new in (
+            ("deleted", "    support::complete(gate);\n", ""),
+            ("before assertions", "    assert!(out.status.success());\n    support::complete(gate);",
+             "    support::complete(gate);\n    assert!(out.status.success());"),
+            ("wrong token", "support::complete(gate)", "support::complete(other)"),
+            ("should_panic", "#[test]", "#[test]\n#[should_panic]"),
+        ):
+            with self.subTest(label):
+                root = self.fixture()
+                path = root / "crates/sparq-zk-compose/tests/live.rs"
+                path.write_text(checker._GOOD_LIVE.replace(old, new))
+                self.assertIn("G", {f.rule for f in self.findings(root)})
+
+    def test_declared_inventory_agrees_in_both_directions(self):
+        for addition in (False, True):
+            with self.subTest(addition=addition):
+                root = self.fixture()
+                if addition:
+                    (root / "crates/sparq-zk-compose/tests/extra.rs").write_text(
+                        checker._GOOD_LIVE.replace("live_case", "extra_case"))
+                else:
+                    path = root / checker.DECLARED_REL["sparq-zk-compose"]
+                    path.write_text(path.read_text().replace("live tests/live.rs::live_case\n", ""))
+                self.assertIn("L", {f.rule for f in self.findings(root)})
+
+    def test_entry_without_completion_and_completion_without_entry_are_red(self):
+        for kind in ("enter", "complete"):
+            with self.subTest(kind=kind):
+                root = self.fixture()
+                lines = checker._ledger_lines(checker._FIXTURE_KEYS)
+                other = "complete" if kind == "enter" else "enter"
+                lines.remove(f"{other} {checker._FIXTURE_KEYS[0]}")
+                path = root / "ledger.txt"
+                path.write_text("\n".join(lines) + "\n")
+                self.assertEqual(checker.verify_ledger(root, path), 1)
+
+    def test_statement_aliases_launchers_and_unrelated_assertions_are_red(self):
+        for text, rule in (
+            ('#[test] fn case() { Command::new("env").args(["nargo", "execute"]); }', "A1"),
+            ('#[cfg(feature="x")]\n#[test] fn case() { use crate::support::{\n gate as g}; }', "A8"),
+            ('pub(crate) use support::{gate as g};', "A8"),
+            ('#[cfg(test)] pub(in crate) use support::{gate as g};', "A8"),
+            (checker._GOOD_LIVE.replace('assert!(out.status.success())',
+                                       'assert!(other.status.success())'), "C3"),
+            ('#[test] fn case() { match run() { Err(DriverError::Spawn { .. })\n => {}, _ => {} } }', "C2"),
+        ):
+            with self.subTest(text=text):
+                self.assertIn(rule, {f.rule for f in checker.lint_file("fixture.rs", text)})
+
+    def test_inline_module_paths_ignore_multiline_noncode(self):
+        root = self.fixture()
+        rel = "crates/sparq-zk-compose/src/tree.rs"
+        path = root / "crates/sparq-zk-compose/src/tree/outer/inner.rs"
+        path.parent.mkdir(parents=True)
+        path.write_text("#[test] fn hidden() {}")
+        source = '/*\nmod absent;\n*/\nconst TEXT: &str = r"mod missing;";\nmod outer { mod inner; }'
+        trees = checker.Trees()
+        self.assertEqual(checker._mod_targets(root, rel, source, trees),
+                         [str(path.relative_to(root))])
+        self.assertEqual(trees.findings, [])
+        scope, extra = checker._src_scope(root, "sparq-zk-compose", rel,
+            "#[cfg(test)]\nmod outer { mod inner; }", trees)
+        self.assertIn(2, scope)
+        self.assertEqual(extra, [str(path.relative_to(root))])
+        self.assertEqual(trees.findings, [])
+
+    def test_relative_root_is_resolved_before_module_collection(self):
+        import contextlib
+        import io
+        root = self.fixture()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            result = checker.main(["--check", "--root", os.path.relpath(root, Path.cwd())])
+        self.assertEqual(result, 0, output.getvalue())
+
+    def test_verification_rejects_static_completion_errors(self):
+        root = self.fixture()
+        (root / "crates/sparq-zk-compose/tests/live.rs").write_text(
+            checker._GOOD_LIVE.replace("    support::complete(gate);\n", ""))
+        ledger = root / "ledger.txt"
+        ledger.write_text("\n".join(checker._ledger_lines(checker._FIXTURE_KEYS)) + "\n")
+        self.assertEqual(checker.verify_ledger(root, ledger), 1)
 
 
 class GateSource(unittest.TestCase):
@@ -481,9 +614,9 @@ class GateSource(unittest.TestCase):
         self.assertIn(".append(true)", self.text, "the append must be O_APPEND")
         self.assertIn("write_all(line.as_bytes())", self.text, "one write per line")
         body = self.text.split("pub fn gate(", 1)[1]
-        allowed, rest = body.split("record(&path, std::panic::Location::caller());", 1)
+        allowed, rest = body.split('record("enter", site);', 1)
         self.assertIn("missing.is_empty()", allowed, "recording happens on the run path")
-        self.assertNotIn("record(", rest.split("pub fn require_toolchain", 1)[0],
+        self.assertNotIn("record(", rest.split("pub fn complete", 1)[0],
                          "a skip or a panic must record nothing")
 
     def test_no_orphaned_doc_block(self):
@@ -520,7 +653,7 @@ class GateSource(unittest.TestCase):
         `gate_identity_tests`, which run in every binary that declares the module."""
         self.assertIn('format!("{}:{}", loc.file().replace(\'\\\\\', "/"), loc.line())',
                       self.text)
-        for fn in ("pub fn gate(", "pub fn require_toolchain("):
+        for fn in ("pub fn gate(",):
             head = self.text.rsplit(fn, 1)[0]
             self.assertTrue(
                 head.rstrip().endswith("#[track_caller]"),
@@ -530,7 +663,6 @@ class GateSource(unittest.TestCase):
         self.assertIn("mod gate_identity_tests", self.text)
         for name in (
             "fn the_recorded_key_is_the_call_site_of_the_gate_call",
-            "fn require_toolchain_records_its_own_caller_not_the_wrapper",
             "fn a_missing_tool_records_nothing_on_either_path",
         ):
             self.assertIn(name, self.text)
@@ -759,7 +891,7 @@ class SrcTestRegions(unittest.TestCase):
         missing-list instead of short-circuiting on an unknown entry."""
         p = root / "ledger.txt"
         p.write_text(
-            LedgerVerification.a_real_key(root) + "\n", encoding="utf-8"
+            "enter " + LedgerVerification.a_real_key(root) + "\n", encoding="utf-8"
         )
         return p
 

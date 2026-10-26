@@ -280,6 +280,8 @@ struct FuzzCounts {
     scans: u64,
     /// FILTER legs whose honest verdict produced a witness.
     filters: u64,
+    /// Honest FILTER results that exclude the matched row.
+    false_verdicts: u64,
     /// Flipped verdicts nargo refused with [`VERDICT_DIAGNOSTIC`].
     lies_refused: u64,
     /// Heavy only: `bb prove` runs of an honest FILTER.
@@ -314,7 +316,7 @@ fn run_differential(iters: u64, full_prove: bool) -> FuzzCounts {
     let mut counts = FuzzCounts::default();
 
     for i in 0..iters * MAX_DRAWS_PER_ITER {
-        let enough = counts.filters > 0 && (!full_prove || counts.proofs > 0);
+        let enough = counts.false_verdicts > 0 && (!full_prove || counts.proofs > 0);
         if i >= iters && enough {
             break;
         }
@@ -408,6 +410,7 @@ fn run_differential(iters: u64, full_prove: bool) -> FuzzCounts {
                     });
 
                 counts.filters += 1;
+                counts.false_verdicts += u64::from(!expected);
 
                 // ...and the FLIPPED verdict must be UNPROVABLE (soundness: the
                 // circuit must not let a lie pass), refused on the verdict
@@ -471,9 +474,9 @@ fn run_differential(iters: u64, full_prove: bool) -> FuzzCounts {
 /// verdict is UNprovable (soundness), refused on the verdict constraint.
 #[test]
 fn differential_fuzz_witness_path() {
-    if !support::require_toolchain("differential_fuzz_witness_path", &["nargo", "bb"]) {
+    let Some(live) = support::gate("differential_fuzz_witness_path", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let n = run_differential(DEFAULT_ITERS, false);
     eprintln!("differential_fuzz_witness_path: {n:?}");
     assert!(
@@ -481,11 +484,11 @@ fn differential_fuzz_witness_path() {
         "no in-family fuzz cases were exercised — generator is broken"
     );
     assert!(
-        n.filters > 0 && n.lies_refused == n.filters,
+        n.false_verdicts > 0 && n.lies_refused == n.filters,
         "every exercised FILTER leg must refuse its flipped verdict, and at least one \
          must run: {n:?}"
     );
-    support::complete_required();
+    support::complete(live);
 }
 
 /// sq-61g (heavy) — the full prove→verify→compare-to-cleartext fuzzer. Each case
@@ -500,9 +503,9 @@ fn differential_fuzz_witness_path() {
 #[test]
 #[ignore = "slow: full bb prove per fuzz case (sq-61g heavy variant)"]
 fn differential_fuzz_full_prove() {
-    if !support::require_toolchain("differential_fuzz_full_prove", &["nargo", "bb"]) {
+    let Some(live) = support::gate("differential_fuzz_full_prove", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let n = run_differential(HEAVY_ITERS, true);
     eprintln!("differential_fuzz_full_prove: {n:?}");
     assert!(
@@ -512,11 +515,14 @@ fn differential_fuzz_full_prove() {
     // The proof count is what this variant exists for: a stream with no matched
     // FILTER would otherwise pass after scans alone.
     assert!(
-        n.proofs > 0 && n.verified == n.proofs && n.lies_unproved == n.proofs,
+        n.false_verdicts > 0
+            && n.proofs > 0
+            && n.verified == n.proofs
+            && n.lies_unproved == n.proofs,
         "the heavy fuzzer must prove AND verify at least one honest FILTER, and refuse \
          to prove each flipped verdict: {n:?}"
     );
-    support::complete_required();
+    support::complete(live);
 }
 
 // --- sq-wto: the FILTER digit-bucket completeness fix --------------------------
@@ -547,9 +553,12 @@ use sparq_zk_compose::manifest::CircuitId;
 /// preserved by the new member).
 #[test]
 fn sq_wto_three_digit_operand_proves_not_silently_unprovable() {
-    if !support::require_toolchain("sq_wto_three_digit_operand_proves_not_silently_unprovable", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "sq_wto_three_digit_operand_proves_not_silently_unprovable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let value: u64 = 123; // 3 digits — the old smallest-bucket bug's witness.
     // Derivation picks the EXACT d=3 member (not the old wrong d=4).
     assert_eq!(
@@ -586,7 +595,7 @@ fn sq_wto_three_digit_operand_proves_not_silently_unprovable() {
         lie.is_err(),
         "sq-wto: the FALSE verdict over a 3-digit operand must remain UNprovable"
     );
-    support::complete_required();
+    support::complete(live);
 }
 
 /// A 5-digit operand: out of the compiled family, so `build_filter_int` must

@@ -583,9 +583,12 @@ fn manifest_with_scan_and_set(
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_in_set_verifies_end_to_end() {
-    if !support::require_toolchain("hidden_holder_set_in_set_verifies_end_to_end", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_holder_set_in_set_verifies_end_to_end",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let depth = HOLDER_SET_DEPTH;
     let holders = holder_set_keys();
@@ -625,7 +628,7 @@ fn hidden_holder_set_in_set_verifies_end_to_end() {
         &InMemorySeenNonces::new(),
     )
     .expect("an in-set holder's set-membership proof verifies end-to-end");
-    support::complete_required();
+    support::complete(live);
 }
 
 /// NEGATIVE end-to-end (the trust anchor): the SAME in-set holder's proof, but the
@@ -635,9 +638,12 @@ fn hidden_holder_set_in_set_verifies_end_to_end() {
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
-    if !support::require_toolchain("hidden_holder_set_forged_set_root_rejected_end_to_end", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_holder_set_forged_set_root_rejected_end_to_end",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let depth = HOLDER_SET_DEPTH;
     // The PROVER's set (includes the in-set holder) and its root.
@@ -688,7 +694,7 @@ fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
         Err(CheckError::HolderSetRootMismatch) => {}
         other => panic!("expected HolderSetRootMismatch (forged set), got {other:?}"),
     }
-    support::complete_required();
+    support::complete(live);
 }
 
 /// NEGATIVE end-to-end (unprovable witness): an OUT-OF-SET holder cannot produce a
@@ -701,9 +707,12 @@ fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
-    if !support::require_toolchain("hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let depth = HOLDER_SET_DEPTH;
     let holders = holder_set_keys();
@@ -743,5 +752,5 @@ fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
             "an out-of-set holder must NOT be able to produce a holder_set proof against the trusted root"
         ),
     }
-    support::complete_required();
+    support::complete(live);
 }

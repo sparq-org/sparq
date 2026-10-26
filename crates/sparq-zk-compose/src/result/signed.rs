@@ -435,12 +435,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; proves a version-three member and verifies it through verify_signed_result"]
     fn signed_real_legacy_member_verifies_only_under_the_written_down_downgrade() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "signed_real_legacy_member_verifies_only_under_the_written_down_downgrade",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         crate::result::pinned_toolchain().unwrap();
         let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);
         let q = query("?v >= 18");
@@ -484,7 +484,7 @@ mod tests {
         )
         .expect("the written-down downgrade verifies already-issued version-three material");
         assert_eq!(checked.rows, rows);
-        crate::support::complete_required();
+        crate::support::complete(live);
     }
 
     /// VERIFICATION side, version-three family: a `result_v3_*` member folds the
@@ -537,19 +537,20 @@ mod tests {
         for version in [0, 1, 2, 4] {
             let mut wrong = presentation(&p);
             wrong.version = version;
-            assert!(verify_signed_result(
+            let result = verify_signed_result(
                 &q,
                 &wrong,
                 &policy,
                 &nonce,
                 &InMemorySeenNonces::default(),
                 &driver,
-                Path::new("unused")
-            )
-            // zk-toolchain-gate: allow the wrong-VERSION refusals are reached before any proof
-            //   verification; traced with a recording nargo/bb shim on PATH, this test spawns
-            //   nothing, so no missing tool can satisfy these arms
-            .is_err());
+                Path::new("unused"),
+            );
+            assert!(
+                matches!(result, Err(ResultError::Rejected(ref reason))
+                if reason == "version or challenge mismatch"),
+                "wrong version {version} must be refused before proof work: {result:?}"
+            );
         }
     }
 
@@ -581,12 +582,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo; executes every signed wrapper and boundary witness"]
     fn signed_relation_executes_capacity_matrix_and_rejects_bias_tampering() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "signed_relation_executes_capacity_matrix_and_rejects_bias_tampering",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         crate::result::pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         for depth in [10, 17, 20] {
@@ -653,18 +654,18 @@ mod tests {
                 _ => panic!("wrong signed bias must fail the literal-binding constraint"),
             }
         }
-        crate::support::complete_required();
+        crate::support::complete(live);
     }
 
     #[test]
     #[ignore = "requires pinned nargo and bb; genuine signed boundaries, predicate-free proof, and cross-contract rejection"]
     fn signed_real_proofs_bind_version_policy_and_signed_order() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "signed_real_proofs_bind_version_policy_and_signed_order",
             &["nargo", "bb"],
-        ) {
+        ) else {
             return;
-        }
+        };
         crate::result::pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         let directory =
@@ -783,6 +784,6 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(directory).unwrap();
-        crate::support::complete_required();
+        crate::support::complete(live);
     }
 }

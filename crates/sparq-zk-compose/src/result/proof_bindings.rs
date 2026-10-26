@@ -634,8 +634,12 @@ fn run_job() -> Fallible<()> {
         output.join("outcome.json").is_file(),
         "the corpus job wrote no outcome"
     );
-    let proved = outcome["proof_count"].as_u64();
-    let verified = outcome["verified_count"].as_u64();
+    let proved = outcome["proof_count"]
+        .as_u64()
+        .expect("the corpus job reports its proof count");
+    let verified = outcome["verified_count"]
+        .as_u64()
+        .expect("the corpus job reports its verification count");
     assert_eq!(
         proved, verified,
         "every proof the corpus job made must have been verified"

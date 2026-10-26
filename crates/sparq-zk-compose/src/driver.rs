@@ -951,12 +951,12 @@ mod driver_glue_tests {
     #[test]
     #[ignore = "requires pinned nargo; stresses shared compiler cache and immutable snapshots"]
     fn real_concurrent_compile_returns_immutable_complete_acir() {
-        if !crate::support::require_toolchain(
+        let Some(live) = crate::support::gate(
             "real_concurrent_compile_returns_immutable_complete_acir",
             &["nargo"],
-        ) {
+        ) else {
             return;
-        }
+        };
         let id = CircuitId::FilterInt { d: 1 };
         let prover = CircuitProver::from_crate_root();
         let expected = std::fs::read(prover.compile(&id).unwrap()).unwrap();
@@ -984,7 +984,7 @@ mod driver_glue_tests {
                 job.join().unwrap();
             }
         });
-        crate::support::complete_required();
+        crate::support::complete(live);
     }
 
     /// A name no executable on a sane PATH resolves to — drives the `Spawn` arm

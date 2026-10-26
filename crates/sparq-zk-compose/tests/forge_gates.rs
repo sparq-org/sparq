@@ -586,16 +586,17 @@ fn composed_manifest(
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (sq-ajl byte-binding control)"]
 fn forge_pubinput_positive_control_verifies() {
-    if !support::require_toolchain("forge_pubinput_positive_control_verifies", &["nargo", "bb"]) {
+    let Some(live) = support::gate("forge_pubinput_positive_control_verifies", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "fg_pub_pos_scan");
     let (filter, art) = honest_filter_d1(5, FilterOp::Lt, 10, true, &challenge, &prover, "fg_pub_pos");
     let m = composed_manifest(scan_inputs, scan_hex, filter, encode_artifacts(&art));
     verify_full(&m, "fg_pub_pos_verify").expect("honest composed manifest verifies");
-    support::complete_required();
+    support::complete(live);
 }
 
 /// BINDING 6 forge: a GENUINE proof of `5 < 10 = true` presented under a manifest
@@ -604,9 +605,12 @@ fn forge_pubinput_positive_control_verifies() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (sq-ajl byte-binding forge)"]
 fn forge_pubinput_statement_substitution_rejected() {
-    if !support::require_toolchain("forge_pubinput_statement_substitution_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "forge_pubinput_statement_substitution_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "fg_pub_sub_scan");
@@ -621,7 +625,7 @@ fn forge_pubinput_statement_substitution_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("statement substitution must be PublicInputMismatch, got {other:?}"),
     }
-    support::complete_required();
+    support::complete(live);
 }
 
 /// BINDING 6 forge (verdict): a genuine proof of the FALSE verdict
@@ -630,9 +634,12 @@ fn forge_pubinput_statement_substitution_rejected() {
 #[test]
 #[ignore = "slow: full bb prove (sq-ajl byte-binding verdict forge)"]
 fn forge_pubinput_verdict_substitution_rejected() {
-    if !support::require_toolchain("forge_pubinput_verdict_substitution_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "forge_pubinput_verdict_substitution_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "fg_pub_verdict_scan");
@@ -648,7 +655,7 @@ fn forge_pubinput_verdict_substitution_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("verdict substitution must be PublicInputMismatch, got {other:?}"),
     }
-    support::complete_required();
+    support::complete(live);
 }
 
 // === BINDING 7: distinct-graph strict ordering (duplicate-inclusion / COUNT) ===
@@ -845,9 +852,12 @@ fn honest_k2_scan_passes_strict_ordering_structural() {
 #[test]
 #[ignore = "slow/toolchain: real nargo witness-gen of a k=2 scan (sq-vxq8 strict-ordering circuit forge)"]
 fn forge_scan_duplicate_commitment_circuit_rejected() {
-    if !support::require_toolchain("forge_scan_duplicate_commitment_circuit_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "forge_scan_duplicate_commitment_circuit_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (c0, _s0, _c1, _s1) = two_distinct_p_graphs();
@@ -881,7 +891,7 @@ fn forge_scan_duplicate_commitment_circuit_rejected() {
         res.is_err(),
         "a duplicate-commitment k=2 scan witness must be UNSATISFIABLE (strict-ordering gate), but nargo produced a witness"
     );
-    support::complete_required();
+    support::complete(live);
 }
 
 /// CIRCUIT-LEVEL positive control (FULL toolchain): an HONEST k=2 scan over two
@@ -891,9 +901,12 @@ fn forge_scan_duplicate_commitment_circuit_rejected() {
 #[test]
 #[ignore = "slow/toolchain: real bb prove+verify of an honest k=2 scan (sq-vxq8 strict-ordering positive control)"]
 fn honest_k2_distinct_scan_proves_and_verifies() {
-    if !support::require_toolchain("honest_k2_distinct_scan_proves_and_verifies", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "honest_k2_distinct_scan_proves_and_verifies",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let challenge = FieldHex(CHALLENGE_HEX.into());
     let prover = CircuitProver::from_crate_root();
     let (c0, salt0, c1, salt1) = two_distinct_p_graphs();
@@ -923,5 +936,5 @@ fn honest_k2_distinct_scan_proves_and_verifies() {
     m.sub_proofs[0].proof_hex = encode_artifacts(&art);
     verify_full(&m, "honest_k2_distinct_verify")
         .expect("honest distinct k=2 scan VERIFIES through verify_manifest");
-    support::complete_required();
+    support::complete(live);
 }

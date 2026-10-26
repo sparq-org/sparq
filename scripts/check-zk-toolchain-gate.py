@@ -38,9 +38,8 @@ THE LEDGER
     single write:
 
       enter <file>:<line>     by the gate, when it lets the body run;
-      complete <file>:<line>  by `support::complete(token)` (or, for the boolean
-                              form, `support::complete_required()`), which each live
-                              test calls as its LAST statement, after its assertions.
+      complete <file>:<line>  by `support::complete(token)`, which each live test
+                              calls as its LAST statement, after its assertions.
 
     The key is the GATE's call site, taken from `#[track_caller]` +
     `std::panic::Location::caller()` and carried by the token to the completion
@@ -146,18 +145,20 @@ CHECK C - the driver route and the spawn result
           the call's statement binds it (`let out = ...output().expect(..);`) and a
           later statement of the same block is an `assert!` / `assert_eq!` /
           `assert_ne!` on `out.status` / `out.success()` / `out.code()` (or the call
-          sits inside such an assertion). `let _ = ...`, an expression statement, and
+          sits inside such an assertion). An assertion matching an expected diagnostic
+          in the same value's `stdout` / `stderr` is also accepted. `let _ = ...`, an
+          expression statement, and
           an unwrap with no status assertion are reported: an unwrap proves only
           that the process started.
 
 CHECK G - completion placement
     Every inventoried gate call sits directly in a `#[test]` function, one per
     function, and that function's LAST statement (before a tail `Ok(())`) is the
-    completion call for its form: `support::complete(<the token the gate
-    returned>)` for `gate`, `support::complete_required()` for `require_toolchain`.
+    completion call `support::complete(<the token the gate returned>)`. Legacy
+    boolean gates are rejected because they carry no owned completion obligation.
     There is exactly one completion call, and no `return` or `?` between the gate
     statement and it. A completion moved before the assertions, deleted, duplicated,
-    applied to another value, or bypassed by an early exit is reported before any
+    applied to another value, or skipped by an early exit is reported before any
     lane runs; the ledger reports the same at run time.
 
 CHECK L - the declared inventory
@@ -245,7 +246,7 @@ SCAN TREES
 LIMITATIONS, stated rather than implied
     * Discovery (CHECK L) and C1 follow only functions defined in the SAME file; a
       test that reaches nargo/bb through a helper in another module or crate, or a
-      macro, is not discovered, and a `structural` declaration is a reviewed claim
+      macro, is not discovered, and a `structural` declaration is an explicit claim
       that the test spawns nothing, not a proof of it. The ledger is the backstop
       for a live test that is gated; an ungated test that spawns through such a
       helper is not seen by either.
@@ -260,9 +261,6 @@ LIMITATIONS, stated rather than implied
     * C3 recognises the exit-status assertion only in the statements that follow
       the spawn in the SAME block; an assertion made by a caller on a returned
       value is reported.
-    * The boolean form `require_toolchain` carries no token, so an early return
-      after it is reported by CHECK G and by the ledger, not by a panic where it
-      runs; the token form `gate` reports it in all three places.
     * The completion line proves the body reached the call after its assertions.
       It does not grade what those assertions check.
 
@@ -375,9 +373,9 @@ ALLOW_RATCHET: dict[str, int] = {
     "crates/sparq-zk-compose/src/driver.rs": 9,
     "crates/sparq-zk-compose/src/result.rs": 3,
     "crates/sparq-zk-compose/src/result/proof_bindings.rs": 1,
-    "crates/sparq-zk-compose/src/result/signed.rs": 3,
-    "crates/sparq-zk-compose/tests/e2e.rs": 1,
-    "crates/sparq-zk-compose/tests/holder_pok_binding.rs": 1,
+    "crates/sparq-zk-compose/src/result/signed.rs": 2,
+    "crates/sparq-zk-compose/tests/e2e.rs": 0,
+    "crates/sparq-zk-compose/tests/holder_pok_binding.rs": 0,
     "crates/sparq-zk-compose/tests/coverage_direct.rs": 2,
     "crates/sparq-zk-compose/tests/host_helpers.rs": 2,
     "crates/sparq-zk-compose/tests/toolchain_gate.rs": 1,
@@ -734,15 +732,16 @@ def _item_span(lines: list[str], code_lines: list[str],
 
 
 def _mod_file(root: Path, rel: str, name: str,
-              explicit_path: str | None) -> Path | None:
+              explicit_path: str | None, inline: tuple[str, ...] = ()) -> Path | None:
     """The file a `mod NAME;` in `rel` resolves to, or None."""
     here = (root / rel).parent
     if explicit_path is not None:
-        cand = here / explicit_path
+        cand = here.joinpath(*inline, explicit_path)
         return cand if cand.is_file() else None
     stem = Path(rel).stem
     if stem not in ("lib", "mod", "main"):
         here = here / stem
+    here = here.joinpath(*inline)
     for cand in (here / f"{name}.rs", here / name / "mod.rs"):
         if cand.is_file():
             return cand
@@ -767,24 +766,28 @@ def _mod_targets(root: Path, rel: str, text: str, out: Trees) -> list[str]:
     them carries a `cfg(test)` attribute of its own to find them by.
     """
     found: list[str] = []
-    pending_path: str | None = None
-    for i, line in enumerate(text.splitlines()):
-        code = code_of(line)
-        pm = PATH_ATTR_RE.match(code)
-        if pm:
-            pending_path = pm.group(1)
+    code = strip_noncode(text)
+    # Each inline module adds a directory to the ordinary Rust module path.
+    # Read the whole blanked file so raw strings and block comments cannot invent
+    # modules, and declarations on the same line retain their nesting.
+    parents: list[tuple[str, int]] = []
+    decl = re.compile(r"((?:\#\s*\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?"
+                      r"\bmod\s+(\w+)\s*([;{])")
+    for m in decl.finditer(code):
+        parents = [(name, end) for name, end in parents if end > m.start()]
+        name = m.group(2)
+        if m.group(3) == "{":
+            _, end = enclosing_block(code, m.end())
+            parents.append((name, end))
             continue
-        m = MOD_DECL_RE.match(code)
-        if not m:
-            if code.strip() and not code.lstrip().startswith("#"):
-                pending_path = None
-            continue
-        target = _mod_file(root, rel, m.group(1), pending_path)
-        pending_path = None
+        attrs = text[m.start(1):m.end(1)]
+        pm = re.search(r'\#\[path\s*=\s*"([^"]+)"\]', attrs)
+        target = _mod_file(root, rel, name, pm.group(1) if pm else None,
+                           tuple(n for n, _ in parents))
         if target is None:
             out.findings.append(
-                Finding(f"{rel}:{i + 1}", "SCAN",
-                        f"`mod {m.group(1)};` in a test-only file resolves to no "
+                Finding(f"{rel}:{line_of(code, m.start()) + 1}", "SCAN",
+                        f"`mod {name};` in a test-only file resolves to no "
                         "file; the module's tests would not be scanned")
             )
             continue
@@ -849,6 +852,11 @@ def _src_scope(root: Path, pkg: str, rel: str, text: str,
                 )
             else:
                 extra.append(erel)
+        else:
+            # Inline test modules can themselves declare external children.
+            # Keep original line offsets for diagnostics and nested module paths.
+            region_text = "\n" * (start + 1) + "\n".join(region)
+            extra.extend(_mod_targets(root, rel, region_text, out))
         scope.update(range(start + 1, end + 2))
     return scope, extra
 
@@ -1194,10 +1202,15 @@ def _paren_args(code: str, open_paren: int) -> str:
 
 
 def _asserts_status(code: str, name: str) -> bool:
-    """Does `code` hold an assertion on the exit status of the value `name`?"""
+    """Does an assertion inspect this spawn's exit status or failure diagnostic?"""
     status = re.compile(rf"\b{re.escape(name)}\s*\.\s*(?:status\b|success\s*\(|code\s*\()")
+    diagnostic = re.compile(rf"\b{re.escape(name)}\s*\.\s*(?:stdout|stderr)\b")
     for m in ASSERT_MACRO_RE.finditer(code):
-        if status.search(_paren_args(code, m.end() - 1)):
+        args = _paren_args(code, m.end() - 1)
+        if status.search(args):
+            return True
+        if diagnostic.search(args) and re.search(
+                r"\.\s*(?:contains|starts_with|ends_with)\s*\(", args):
             return True
     return bool(re.search(
         rf"\bif\s+!\s*{re.escape(name)}\s*\.\s*status\s*\.\s*success\s*\(\s*\)\s*\{{[^{{}}]*panic!",
@@ -1287,6 +1300,12 @@ def lint_file(rel: str, text: str, honour_exempt: bool = True) -> list[Finding]:
         if LEDGER_ENV in c:
             report(i, "A7", f"only the gate module may touch {LEDGER_ENV}; a test must "
                    "not be able to redirect the ledger")
+
+    for m in re.finditer(r"\brequire_toolchain\s*\(", code):
+        report(line_of(code, m.start()), "G",
+               "the boolean gate has no owned completion obligation; use "
+               "`let Some(token) = support::gate(..) else { return; };` and "
+               "`support::complete(token)` after the assertions")
 
     # C2: the spawn-failure variant used as a PATTERN, across line breaks.
     for rx in SPAWN_PATTERN_RES:
@@ -1384,6 +1403,10 @@ def check_completion(trees: Trees, sites: list["Site"]) -> list[Finding]:
             per_fn.setdefault(owner[0][0], []).append(site)
         for head, fsites in sorted(per_fn.items()):
             name = next(n for a, _b, n in spans if a == head)
+            if re.search(r"#\[\s*should_panic\b", test_attrs(lines, head)):
+                findings.append(Finding(fsites[0].key, "G",
+                                        "a live test must assert the expected error, not use "
+                                        "#[should_panic]: an uncompleted token also panics"))
             if len(fsites) > 1:
                 findings.append(
                     Finding(fsites[1].key, "G",
@@ -1962,9 +1985,9 @@ def report_check(root: Path) -> int:
 
 def verify_ledger(root: Path, ledger: Path) -> int:
     findings, sites = static_findings(root)
-    blocking = [f for f in findings if f.rule in ("INV", "SCAN")]
+    blocking = findings
     if blocking:
-        print("FAIL: the inventory does not parse, so the ledger cannot be verified:",
+        print("FAIL: the static inventory does not parse or its checks fail, so the ledger cannot be verified:",
               file=sys.stderr)
         for f in blocking:
             print(f"  {f}", file=sys.stderr)
@@ -2120,13 +2143,7 @@ pub fn gate(_test: &str, _tools: &[&str]) -> Option<LiveToolchain> {
     Some(LiveToolchain { _seal: () })
 }
 
-pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
-    gate(test, tools).is_some()
-}
-
 pub fn complete(_token: LiveToolchain) {}
-
-pub fn complete_required() {}
 '''
 
 # A crate root that declares the shared gate module the way CHECK F requires, and a
@@ -2180,11 +2197,9 @@ mod support;
 
 #[test]
 fn plain_case() {
-    if !support::require_toolchain("plain_case", &["nargo"]) {
-        return;
-    }
+    let Some(token) = support::gate("plain_case", &["nargo"]) else { return; };
     assert_eq!(2 + 2, 4);
-    support::complete_required();
+    support::complete(token);
 }
 '''
 
@@ -2536,8 +2551,36 @@ def _completion_and_inventory_fixtures(fresh, expect_red, expect_clean) -> None:
 
     root = fresh()
     plant(root, "crates/sparq-zk/tests/plain.rs",
-          _GOOD_PLAIN.replace("    support::complete_required();\n", ""))
+          _GOOD_PLAIN.replace("    support::complete(token);\n", ""))
     expect_red(root, "completion: the boolean form with no companion call", "G")
+
+    root = fresh()
+    plant(root, live, _GOOD_LIVE.replace("#[test]", "#[test]\n#[should_panic]"))
+    expect_red(root, "completion: should_panic can accept the token's Drop panic", "G")
+
+    for label, body, rule in (
+        ("an env nargo execute launcher",
+         '#[test] fn launched() { let _ = Command::new("env")\n'
+         '    .args(["nargo", "execute"]).output().unwrap(); }', "A1"),
+        ("a split renamed gate import in a feature-gated test",
+         '#[cfg(feature = "optional")]\n#[test]\nfn renamed() {\n'
+         '    use crate::support::{\n        gate as g\n    };\n'
+         '    let _ = g("renamed", &["nargo"]);\n}', "A8"),
+        ("a pub(crate) gate import", 'pub(crate) use support::{gate as g};', "A8"),
+        ("an attributed pub(in) gate import",
+         '#[cfg(test)] pub(in crate::tests) use crate::support::{gate as g};', "A8"),
+        ("an assertion on a different spawn value",
+         _GOOD_LIVE.replace('assert!(out.status.success())',
+                            'assert!(other.status.success())'), "C3"),
+    ):
+        root = fresh()
+        plant(root, live, body)
+        expect_red(root, label, rule)
+
+    root = fresh()
+    plant(root, live, _GOOD_LIVE.replace("assert!(out.status.success())",
+          'assert!(String::from_utf8_lossy(&out.stderr).contains("expected constraint"))'))
+    expect_clean(root, "a spawn's own failure diagnostic is asserted")
 
     # CHECK L, both directions.
     root = fresh()
@@ -2812,10 +2855,13 @@ def self_test() -> int:
     sub.mkdir()
     (sub / "main.rs").write_text(
         'mod nothing;\nfn main() {}\n#[test]\nfn sub_case() {\n'
-        '    let _ = require_toolchain("sub_case", &["nargo"]);\n}\n',
+        '    let Some(token) = support::gate("sub_case", &["nargo"]) else { return; };\n'
+        '    assert_eq!(2 + 2, 4);\n    support::complete(token);\n}\n',
         encoding="utf-8",
     )
     (sub / "nothing.rs").write_text("// module of the subdir target\n", encoding="utf-8")
+    declared = root / DECLARED_REL["sparq-zk-compose"]
+    declared.write_text(declared.read_text() + "live tests/subdir_target/main.rs::sub_case\n")
     expect_ledger(
         root,
         _ledger_lines(
@@ -2953,7 +2999,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
-    root = Path(args.root) if args.root else Path(__file__).resolve().parent.parent
+    root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
     if args.verify_ledger:
         return verify_ledger(root, Path(args.verify_ledger))
     return report_check(root)

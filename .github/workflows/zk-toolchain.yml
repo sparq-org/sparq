@@ -671,7 +671,7 @@ jobs:
 
       # The ledger check: the proof that the live tests above RAN to the end.
       #
-      # Every `gate()`/`require_toolchain()` call site in crates/sparq-zk*/tests/ AND in
+      # Every `gate()` call site in crates/sparq-zk*/tests/ AND in
       # those crates' `src/` test code — including the corpus adapter
       # `result::proof_bindings::run_job`, which the binding-corpus step runs and which
       # inherits the job-level ledger variable — must have written TWO lines to

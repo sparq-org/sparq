@@ -89,7 +89,7 @@ fn decimal_toml(
 enum Witness {
     /// Execute exited 0 and wrote the witness: the relation is satisfiable.
     Satisfied,
-    /// Execute exited non-zero and wrote no witness; carries its stderr.
+    /// Execute wrote no witness; carries its constraint diagnostic.
     Unsatisfied(String),
 }
 
@@ -135,16 +135,25 @@ fn witness(gate: &support::LiveToolchain, pkg: &str, toml: &str, tag: &str) -> W
     let produced = witness_path.exists();
     let _ = std::fs::remove_file(&witness_path);
     let _ = std::fs::remove_file(&toml_path);
-    let stderr = String::from_utf8_lossy(&execute.stderr).into_owned();
-    assert_eq!(
-        execute.status.success(),
-        produced,
-        "nargo execute's exit status and its witness file disagree:\n{stderr}"
+    let diagnostic = format!(
+        "{}{}",
+        String::from_utf8_lossy(&execute.stdout),
+        String::from_utf8_lossy(&execute.stderr)
     );
     if produced {
+        assert!(
+            execute.status.success(),
+            "nargo wrote a witness but exited unsuccessfully: {diagnostic}"
+        );
         Witness::Satisfied
     } else {
-        Witness::Unsatisfied(stderr)
+        // Pinned nargo can exit successfully on an unsatisfied relation. Require
+        // its constraint diagnostic as well as the absence of a witness.
+        assert!(
+            diagnostic.contains(BINDING_DIAGNOSTIC),
+            "nargo produced no witness without the expected binding diagnostic: {diagnostic}"
+        );
+        Witness::Unsatisfied(diagnostic)
     }
 }
 

@@ -660,19 +660,30 @@ fn raw_datetime_toml(
 
 mod support;
 
-/// What nargo prints when a witness violates a constraint: an `assert` with a
-/// message, one without, or an unsatisfiable range/bit constraint.
-const CONSTRAINT_REFUSALS: [&str; 3] = [
-    "Assertion failed",
-    "Failed constraint",
-    "Cannot satisfy constraint",
-];
+/// Require the constraint diagnostic for this assignment; process and file errors
+/// remain distinct from a refusal of the witness.
+fn assert_refused(
+    result: Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError>,
+    diagnostic: &str,
+) {
+    match result {
+        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr }) => assert!(
+            tool.starts_with("nargo") && stderr.contains(diagnostic),
+            "expected nargo constraint `{diagnostic}`, got `{tool}`:\n{stderr}"
+        ),
+        Err(other) => panic!("expected a constraint refusal, got {other}"),
+        Ok(path) => panic!(
+            "expected a constraint refusal, got witness {}",
+            path.display()
+        ),
+    }
+}
 
 /// Solve `filter_value_dl_datetime`'s witness for the given public/private
 /// assignment. `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
-/// A nargo constraint refusal is `false`; any other failure panics.
+/// Preserve the driver error so each negative case asserts its own diagnostic.
 #[allow(clippy::too_many_arguments)]
-fn member_accepts(
+fn member_witness(
     tag: &str,
     operand_enc: &FieldHex,
     op: FilterOp,
@@ -683,7 +694,7 @@ fn member_accepts(
     value_neg: bool,
     value_hook_scaled: &FieldHex,
     lexical_component: &FieldHex,
-) -> bool {
+) -> Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError> {
     let toml = raw_datetime_toml(
         &FieldHex(field_to_hex(&Fr::from(1u64))),
         operand_enc,
@@ -696,28 +707,19 @@ fn member_accepts(
         value_hook_scaled,
         lexical_component,
     );
-    match sparq_zk_compose::driver::CircuitProver::from_crate_root().gen_witness_tagged(
+    sparq_zk_compose::driver::CircuitProver::from_crate_root().gen_witness_tagged(
         &CircuitId::FilterValueDlDateTime,
         &toml,
         tag,
-    ) {
-        Ok(_) => true,
-        // A refusal counts only when nargo rejected the witness on a constraint; a
-        // spawn, I/O or compile failure leaves no witness either, and must not be
-        // read as the member refusing.
-        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr })
-            if tool.starts_with("nargo")
-                && CONSTRAINT_REFUSALS.iter().any(|m| stderr.contains(m)) =>
-        {
-            false
-        }
-        Err(other) => panic!("{tag}: infrastructure failure, not a constraint refusal: {other}"),
-    }
+    )
 }
 
-fn accepts(tag: &str, built: &BuiltFilterValueDlDateTime) -> bool {
+fn witness_for(
+    tag: &str,
+    built: &BuiltFilterValueDlDateTime,
+) -> Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError> {
     let p = unpack(&built.inputs);
-    member_accepts(
+    member_witness(
         tag,
         p.operand_enc,
         p.op,
@@ -741,9 +743,12 @@ fn accepts(tag: &str, built: &BuiltFilterValueDlDateTime) -> bool {
 ///       This is THE §13.3 lane-separation claim, in-circuit.
 #[test]
 fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
-    if !support::require_toolchain("in_circuit_datetime_lane_accepts_honest_and_rejects_lies", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_datetime_lane_accepts_honest_and_rejects_lies",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
 
     // (a) honest, post-epoch.
     let post = build_filter_value_dl_datetime(
@@ -753,10 +758,7 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
             )
     .unwrap();
     assert!(unpack(&post.inputs).expected);
-    assert!(
-        accepts("sqwz99x_post", &post),
-        "the honest post-epoch witness must be provable"
-    );
+    witness_for("sqwz99x_post", &post).expect("the honest witness must satisfy the relation");
 
     // (a') honest, PRE-epoch — the sign-folded half of the domain.
     let pre = build_filter_value_dl_datetime(
@@ -766,15 +768,12 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
             )
     .unwrap();
     assert!(pre.value_neg && unpack(&pre.inputs).expected);
-    assert!(
-        accepts("sqwz99x_pre", &pre),
-        "the honest pre-epoch witness must be provable"
-    );
+    witness_for("sqwz99x_pre", &pre).expect("the honest witness must satisfy the relation");
 
     // (b) lying verdict — the ONLY change is `expected`.
     let p = unpack(&post.inputs);
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             "sqwz99x_lie",
             p.operand_enc,
             p.op,
@@ -786,12 +785,12 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
             &post.value_hook_scaled,
             &post.lexical_component,
         ),
-        "a flipped disclosed verdict must be unprovable"
+        "filter verdict mismatch",
     );
 
     // (c) sign flip — the ONLY change is `value_neg`.
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             "sqwz99x_signflip",
             p.operand_enc,
             p.op,
@@ -803,7 +802,7 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
             &post.value_hook_scaled,
             &post.lexical_component,
         ),
-        "flipping the witnessed sign must break the leaf binding"
+        "dual-leaf operand encoding mismatch",
     );
 
     // (d) THE lane separation, in-circuit. `"1970-01-02Z"` and
@@ -822,12 +821,9 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
         instant.value_hook,
         "precondition: the two lanes share the raw hook"
     );
-    assert!(
-        accepts("sqwz99x_date_ok", &date),
-        "control: the date witness IS provable on its OWN lane"
-    );
-    assert!(
-        !member_accepts(
+    witness_for("sqwz99x_date_ok", &date).expect("the honest witness must satisfy the relation");
+    assert_refused(
+        member_witness(
             "sqwz99x_date_on_dt",
             dp.operand_enc,
             dp.op,
@@ -839,10 +835,10 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
             &date.value_hook_scaled,
             &date.lexical_component,
         ),
-        "an xsd:date leaf must be unprovable under the xsd:dateTime datatype_const"
+        "dual-leaf operand encoding mismatch",
     );
-    assert!(
-        !member_accepts(
+    assert_refused(
+        member_witness(
             "sqwz99x_dt_on_date",
             &FieldHex(field_to_hex(&instant.leaf())),
             dp.op,
@@ -854,9 +850,9 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
             &FieldHex(field_to_hex(&instant.value_hook)),
             &FieldHex(field_to_hex(&instant.lexical_component)),
         ),
-        "an xsd:dateTime leaf must be unprovable under the xsd:date datatype_const"
+        "dual-leaf operand encoding mismatch",
     );
-    support::complete_required();
+    support::complete(live);
 }
 
 /// A V1 temporal lane is reachable ONLY through the legacy names. The ordinary
