@@ -97,6 +97,7 @@ async fn drop_then_reopen_while_spawning_child_processes() {
     }
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stopped = stop.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
     let child_thread = std::thread::spawn(move || {
         let mut spawned = 0;
         while !stopped.load(Ordering::Relaxed) {
@@ -105,9 +106,14 @@ async fn drop_then_reopen_while_spawning_child_processes() {
                 .unwrap()
                 .success());
             spawned += 1;
+            if spawned == 1 {
+                ready_tx.send(()).unwrap();
+            }
         }
         spawned
     });
+    // Establish that child spawning has started before the first directory open.
+    ready_rx.recv().unwrap();
     let result = tokio::spawn(drop_then_reopen_loop()).await;
     stop.store(true, Ordering::Relaxed);
     assert!(child_thread.join().unwrap() > 0);
@@ -141,7 +147,8 @@ async fn directory_open_retries_both_lock_files_after_transient_contention() {
             result
         })
         .unwrap();
-        assert_eq!(attempts, 2, "the entire open must be tried again");
+        // Other tests can fork while `held` is live, retaining its descriptor past drop.
+        assert!(attempts >= 2, "the entire open must be tried again");
         let c = EmbeddedSparqClient::over(graph).unwrap();
         c.put_meta(CHILD, meta("after-contention")).await.unwrap();
         drop(c);

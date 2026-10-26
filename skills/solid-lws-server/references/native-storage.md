@@ -20,6 +20,9 @@ return immediately. This is a synchronous open and can block its calling thread
 for that retry budget, subject to filesystem and scheduler delays. It does not
 wait indefinitely for another server to stop.
 
+An inherited descriptor retained beyond the budget can still cause `WouldBlock`;
+the bound covers transient contention without promising that every reopen succeeds.
+
 The lower-level `Graph::open` and `DirLock` APIs retain their immediate refusal
 on contention. No directory-lock protocol or stored-file format changes.
 
