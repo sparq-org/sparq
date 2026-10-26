@@ -119,7 +119,6 @@ survive reopening. Resource-slot tools (`resource_put`, `resource_delete`, and
 `container_create`, including ACL slot edits) return a clear error on such stores;
 their replacement and rollback require an in-memory dataset.
 
-
 | tool | wraps | notes |
 | --- | --- | --- |
 | `query` | `wrap_for_view_opt_in` + `query_json_view_with_budget` | session-scoped; empty default graph, union opt-in via the reserved `FROM` IRI |
