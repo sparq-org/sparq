@@ -18,10 +18,27 @@ MODULE=${1:-all}
 PORT=${PORT:-3917}
 FIXTURES_PORT=${FIXTURES_PORT:-3918}
 OUT=${OUT:-$repo/target/lws-touchstone}
-BIN=${BIN:-$repo/target/debug/sparq-lws-core}
+BIN=${BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/sparq-lws-core}
+SERVER_BIN=$BIN
+SPARQ_BACKEND=${PSS_SPARQ_BACKEND:-memory}
+case "$SPARQ_BACKEND" in
+  memory|embedded|durable) ;;
+  *) echo "ERROR: expected memory, embedded or durable" >&2; exit 1 ;;
+esac
+if [ "$SPARQ_BACKEND" = durable ] && [ "$MODULE" != all ]; then
+  echo "ERROR: durable conformance requires the full suite" >&2
+  exit 1
+fi
+# shellcheck source=crates/sparq-lws-core/conformance/server-lifecycle.sh
+source "$here/../server-lifecycle.sh"
 mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
 key="$OUT/as-key.json"
 rm -f "$key"
+if [ "$SPARQ_BACKEND" = durable ]; then
+  rm -f "$OUT/persistence.json" "$OUT/server-term.log" "$OUT/server-kill.log"
+  rm -rf -- "$OUT/post-term" "$OUT/post-kill"
+fi
 [ -x "$BIN" ] || cargo build -q -p sparq-lws-core --features authn-saml --manifest-path "$repo/Cargo.toml"
 
 fixtures="http://localhost:$FIXTURES_PORT/"
@@ -54,23 +71,43 @@ print(json.dumps(jwk))
     "${fixtures}idp" "$OUT/saml-idp.pub.pem" > "$saml_idps"
   capabilities="$capabilities, SamlTrust"
 fi
-SOLID_SERVER_PROTOCOL=lws \
-SOLID_SERVER_BIND=127.0.0.1:$PORT \
-SOLID_SERVER_BASE_URL=http://localhost:$PORT \
-SOLID_SERVER_LWS_OWNER="${fixtures}agents/alice" \
-SOLID_SERVER_LWS_AS_KEY_FILE="$key" \
-SOLID_SERVER_LWS_PAGE_SIZE=${PAGE_SIZE:-4} \
-SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1 \
-SOLID_SERVER_LWS_SAML_IDPS_FILE="$([ -s "$saml_idps" ] && echo "$saml_idps")" \
-  "$BIN" > "$OUT/server.log" 2>&1 &
-pid=$!
-trap 'kill $pid 2>/dev/null || true' EXIT
-for _ in $(seq 1 100); do
-  [ -s "$key" ] && curl -s -o /dev/null "http://localhost:$PORT/" && break
-  sleep 0.2
-done
-signing_key=$(cat "$key")
-cat > "$OUT/targets.yaml" <<YAML
+server_env() {
+  unset PSS_SPARQ_BACKEND SOLID_SERVER_DATA_DIR SOLID_SERVER_SPARQ_DIR
+  unset SOLID_SERVER_WAIT_FOR_LOCK_SECS SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY SOLID_SERVER_LWS_OPEN
+  unset SOLID_SERVER_SEED_CONFORMANCE SOLID_SERVER_SEED_DEMO SOLID_SERVER_SEED_BENCH
+  unset SOLID_SERVER_ALLOW_SEED_NONMEMORY
+  if [ "$SPARQ_BACKEND" = durable ]; then
+    export SOLID_SERVER_DATA_DIR="$DATA_DIR" SOLID_SERVER_WAIT_FOR_LOCK_SECS=10
+  else
+    export PSS_SPARQ_BACKEND="$SPARQ_BACKEND"
+  fi
+  SOLID_SERVER_PROTOCOL=lws \
+  SOLID_SERVER_BIND=127.0.0.1:$PORT \
+  SOLID_SERVER_BASE_URL=http://localhost:$PORT \
+  SOLID_SERVER_LWS_OWNER="${fixtures}agents/alice" \
+  SOLID_SERVER_LWS_AS_KEY_FILE="$key" \
+  SOLID_SERVER_LWS_PAGE_SIZE=${PAGE_SIZE:-4} \
+  SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1 \
+  SOLID_SERVER_LWS_SAML_IDPS_FILE="$([ -s "$saml_idps" ] && echo "$saml_idps")" \
+    "$@"
+}
+server_ready() {
+  [ -s "$key" ] && [ "$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' \
+    "http://localhost:$PORT/.well-known/lws-configuration")" = 200 ]
+}
+trap cleanup_server EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ "$SPARQ_BACKEND" = durable ]; then make_data_dir; fi
+start_server "$OUT/server.log"
+
+run_touchstone() {
+  local output=$1 status=0
+  mkdir -p "$output"
+  # The floor reader must never accept the previous invocation's report.
+  rm -rf -- "$output/runs"
+  signing_key=$(cat "$key")
+  cat > "$output/targets.yaml" <<YAML
 targets:
   sparq:
     baseUrl: http://localhost:$PORT/
@@ -83,9 +120,30 @@ targets:
       webid.alice: '${fixtures}agents/alice'
       webid.bob: '${fixtures}agents/bob'
 YAML
-cd "$TOUCHSTONE"
-set +e
-java -jar harness-cli/target/touchstone.jar run --target sparq --targets "$OUT/targets.yaml" \
-  --module "$MODULE" --report-dir "$OUT/runs" 2>&1 | grep -v '^Picked up JAVA_TOOL_OPTIONS'
-status=${PIPESTATUS[0]}
-exit "$status"
+  cd "$TOUCHSTONE"
+  java -jar harness-cli/target/touchstone.jar run --target sparq --targets "$output/targets.yaml" \
+    --module "$MODULE" --report-dir "$output/runs" 2>&1 | grep -v '^Picked up JAVA_TOOL_OPTIONS' || status=${PIPESTATUS[0]}
+  return "$status"
+}
+
+if [ "$SPARQ_BACKEND" != durable ]; then
+  run_touchstone "$OUT"
+  exit 0
+fi
+
+run_touchstone "$OUT" || true
+python3 "$here/check-floor.py" "$OUT/runs"
+previous_runs="$OUT/runs"
+for phase in term kill; do
+  python3 "$here/../durable-check.py" capture --protocol lws --base "http://localhost:$PORT" \
+    --key "$key" --owner "${fixtures}agents/alice" --runs "$previous_runs" \
+    --manifest "$OUT/persistence.json" --phase "$phase"
+  # All PUTs have completed and the suite has exited: the kill is mid-idle.
+  if [ "$phase" = term ]; then stop_server TERM; else stop_server KILL; fi
+  start_server "$OUT/server-$phase.log"
+  python3 "$here/../durable-check.py" check --protocol lws --base "http://localhost:$PORT" \
+    --key "$key" --owner "${fixtures}agents/alice" --manifest "$OUT/persistence.json"
+  run_touchstone "$OUT/post-$phase" || true
+  python3 "$here/check-floor.py" "$OUT/post-$phase/runs"
+  previous_runs="$OUT/post-$phase/runs"
+done
