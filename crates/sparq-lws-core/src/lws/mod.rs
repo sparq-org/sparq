@@ -3094,6 +3094,7 @@ pub(crate) mod test_store {
         /// Hold ordinary create replies, without making their outcome unknown.
         pub hold_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         pub creates_waiting: Arc<std::sync::atomic::AtomicUsize>,
+        pub creates_started: Arc<std::sync::atomic::AtomicUsize>,
         /// Refuse a create as a generic storage ceiling or the typed service pool ceiling.
         pub refuse_creates: Arc<std::sync::Mutex<Option<bool>>>,
         /// As `hold_next_create`, for the next `write` of the IRI named.
@@ -3232,6 +3233,7 @@ pub(crate) mod test_store {
                 hold_next_create: Default::default(),
                 hold_creates: Default::default(),
                 creates_waiting: Default::default(),
+                creates_started: Default::default(),
                 refuse_creates: Default::default(),
                 hold_next_write_of: Default::default(),
                 hold_next_read_reply_of: Default::default(),
@@ -3511,6 +3513,7 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
+            self.creates_started.fetch_add(1, Ordering::SeqCst);
             if let Some(pool) = *self.refuse_creates.lock().unwrap() {
                 return Err(if pool {
                     ServerError::ServicePoolFull

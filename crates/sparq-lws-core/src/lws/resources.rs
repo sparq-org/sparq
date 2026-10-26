@@ -1874,7 +1874,7 @@ async fn create<S: Store + 'static>(
             req.admission.clone(),
         );
         tokio::spawn(async move {
-            // Held through the write, then passed to the notification task through queueing:
+            // Held through the write, then passed through selection and webhook queueing:
             // both still count against the concurrency ceiling after the response.
             let _admission = admission;
             let locks = (child_guards, parent_guard);
@@ -2402,7 +2402,8 @@ async fn stored_meta<S: Store + 'static>(
 /// on the resource until the writes are over, and none of them is cut off half way. The task
 /// holds `admission`, the request's share of its admission permit, so a write that outlives its
 /// request still counts against the concurrency ceiling. Successful notification work takes
-/// the slot on through selection and queueing, without delaying the response.
+/// the slot on through selection and webhook queueing, without delaying the response;
+/// stream publication waits happen after the slot is released.
 ///
 /// When the writes failed and could not be put back (`writes` yields what is left), the task
 /// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
@@ -2423,7 +2424,7 @@ where
     L: Send + 'static,
     T: Send + 'static,
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
-    C: FnOnce(&T) -> (Option<String>, Option<(Event, access::Snapshot)>) + Send + 'static,
+    C: FnOnce(&T) -> (Option<String>, Option<(Event, CommitSnapshot)>) + Send + 'static,
 {
     let state = state.detached();
     tokio::spawn(async move {
@@ -2435,7 +2436,12 @@ where
                     // Capture commit state while its locks are held. Selection is scheduled
                     // after releasing them and is never awaited by this task.
                     let pending = match event {
-                        Some((event, snapshot)) => state.notify.commit(&state, event, snapshot),
+                        Some((event, CommitSnapshot::Ready(snapshot))) => {
+                            state.notify.commit(&state, event, snapshot)
+                        }
+                        Some((event, CommitSnapshot::Patch(format))) => {
+                            state.notify.commit_patch(&state, event, format).await
+                        }
                         None => Default::default(),
                     };
                     match container {
@@ -2456,9 +2462,14 @@ where
     .map_err(|e| ServerError::Storage(format!("the request failed: {e}")))
 }
 
+enum CommitSnapshot {
+    Ready(access::Snapshot),
+    Patch(Option<String>),
+}
+
 enum ContentMetadata {
     Replace(ResourceMeta, Option<ResourceMeta>),
-    Unchanged(ResourceMeta),
+    Unchanged(Option<ResourceMeta>),
 }
 
 /// Write new content for `uri` and optionally replace its metadata, keeping the prior state so a
@@ -2510,24 +2521,25 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
         ContentMetadata::Replace(mut new, old) => {
             new.pending = false;
             let changed = (old.clone().unwrap_or_default() != new).then(|| (new.clone(), old));
-            (new, changed)
+            (Some(new), changed)
         }
         ContentMetadata::Unchanged(meta) => (meta, None),
     };
     // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
     // metadata was modified"); none of one that may not have happened.
     let update = {
-        let snapshot = access::Snapshot::from_parts(
-            snapshot_meta,
-            Some(
-                if uri.ends_with('/') {
-                    LWS_JSON
-                } else {
-                    content_type
-                }
-                .to_string(),
-            ),
+        let format = Some(
+            if uri.ends_with('/') {
+                LWS_JSON
+            } else {
+                content_type
+            }
+            .to_string(),
         );
+        let snapshot = match snapshot_meta {
+            Some(meta) => CommitSnapshot::Ready(access::Snapshot::from_parts(meta, format)),
+            None => CommitSnapshot::Patch(format),
+        };
         let uri = uri.to_string();
         move |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>| {
             outcome.is_ok().then(|| (updated(&uri), snapshot))
@@ -3703,18 +3715,14 @@ async fn patch<S: Store + 'static>(
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
     let rmeta = match authorization_meta {
-        Some(meta) => meta,
-        // Open mode and owner-only subscribers need no metadata decision. The indexed
-        // non-owner count includes pending registrations, avoiding a lookup only when no
-        // other reader can enter before this capture.
-        None if state.cfg.open || !state.notify.has_non_owner_subscriptions() => ResourceMeta {
+        Some(meta) => Some(meta),
+        // Skip the early read when possible. Commit captures eligibility and checks again,
+        // since ancestor and parent subscriptions can register during the content write.
+        None if state.cfg.open || !state.notify.has_non_owner_subscriptions() => None,
+        None => Some(state.resource_meta(uri).await.unwrap_or(ResourceMeta {
             pending: true,
             ..ResourceMeta::default()
-        },
-        None => state.resource_meta(uri).await.unwrap_or(ResourceMeta {
-            pending: true,
-            ..ResourceMeta::default()
-        }),
+        })),
     };
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
@@ -5183,7 +5191,8 @@ where
         );
         (
             parent.filter(|_| landed),
-            w.is_ok().then_some((event, snapshot)),
+            w.is_ok()
+                .then_some((event, CommitSnapshot::Ready(snapshot))),
         )
     };
     match hold_locks(state, locks, req.admission.clone(), after, write).await {

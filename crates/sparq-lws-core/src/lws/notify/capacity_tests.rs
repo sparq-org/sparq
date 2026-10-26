@@ -1264,3 +1264,499 @@ async fn anonymous_subscription_creates_keep_their_existing_quota_in_open_mode()
     assert_eq!(created, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
     assert_eq!(quota_full, 64 - MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
 }
+
+#[tokio::test]
+async fn a_principal_wait_releases_shared_gates_for_another_creator() {
+    use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
+    let (state, store) = test_store::closed_state(100).await;
+    let a = "https://a.example/";
+    let topic = state.cfg.storage();
+    test_store::grant_read(&state, a, &[&topic]).await;
+    run_ready().await;
+    let unknown = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.unsettle_creates.lock().unwrap() = Some(unknown.clone());
+    store.fail_fence.store(true, Ordering::SeqCst);
+    let request = grant_body(&state).replace("AccessGrant", "AccessRequest");
+    for _ in 0..MAX_SETTLING_PER_PRINCIPAL - 1 {
+        assert_eq!(
+            call(&state, "POST", crate::lws::REQUESTS_PATH, Some(a), &request)
+                .await
+                .status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+    // Both changes reserve their shared places before either unknown answer takes A's last
+    // principal permit. Only the subscription holds the global high-water writing gate.
+    let sending = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.hold_creates.lock().unwrap() = Some(sending.clone());
+    let first = tokio::spawn({
+        let (state, body) = (state.clone(), request.clone());
+        async move {
+            call(&state, "POST", crate::lws::REQUESTS_PATH, Some(a), &body)
+                .await
+                .status()
+        }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while store.creates_waiting.load(Ordering::SeqCst) != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let second = tokio::spawn({
+        let state = state.clone();
+        let body = subscription_body(&state, &topic);
+        async move {
+            call(&state, "POST", SUBSCRIPTIONS_PATH, Some(a), &body)
+                .await
+                .status()
+        }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while store.creates_waiting.load(Ordering::SeqCst) != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    sending.add_permits(1);
+    assert_eq!(first.await.unwrap(), StatusCode::INTERNAL_SERVER_ERROR);
+    sending.add_permits(1);
+    tokio::time::timeout(LOCK_WAIT, async {
+        while state.settlements.principal_waits() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!second.is_finished());
+    let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+    assert!(
+        state.locks.try_lock(&container).is_some(),
+        "principal wait kept the container listing lock"
+    );
+    assert!(
+        state
+            .locks
+            .try_lock(&listing_lock(&container, Some(a)))
+            .is_some(),
+        "principal wait kept the subscriber listing lock"
+    );
+    *store.unsettle_creates.lock().unwrap() = None;
+    *store.hold_creates.lock().unwrap() = None;
+    let before = store.creates_started.load(Ordering::SeqCst);
+    let body = subscription_body(&state, &topic);
+    let response = call(
+        &state,
+        "POST",
+        SUBSCRIPTIONS_PATH,
+        Some(test_store::OWNER),
+        &body,
+    )
+    .await;
+    assert_eq!(
+        store.creates_started.load(Ordering::SeqCst),
+        before + 1,
+        "another principal's create never reached the store"
+    );
+    assert_eq!(response.status(), StatusCode::CREATED);
+    // A tag comparison must still wait for the unknown listing change, despite its released
+    // physical locks. An unconditional create above has no such comparison.
+    let listing = call(
+        &state,
+        "GET",
+        SUBSCRIPTIONS_PATH,
+        Some(test_store::OWNER),
+        "",
+    )
+    .await;
+    let tag = listing.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_string();
+    use tower::ServiceExt;
+    let token = crate::lws::tokens::mint(
+        &state.cfg,
+        test_store::OWNER,
+        "https://app.example/",
+        &state.cfg.realm(),
+    );
+    let conditional = axum::http::Request::builder()
+        .method("POST")
+        .uri(SUBSCRIPTIONS_PATH)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", LWS_JSON)
+        .header("if-match", tag)
+        .body(axum::body::Body::from(body.clone()))
+        .unwrap();
+    let before = store.creates_started.load(Ordering::SeqCst);
+    let response = axum::Router::new()
+        .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+        .with_state(state.clone())
+        .oneshot(conditional)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(store.creates_started.load(Ordering::SeqCst), before);
+    store.fail_fence.store(false, Ordering::SeqCst);
+    unknown.add_permits(MAX_SETTLING_PER_PRINCIPAL + 1);
+    let _ = tokio::time::timeout(LOCK_WAIT * 8, second)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(LOCK_WAIT * 8, async {
+        while state.settlements.pending() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let listing = call(
+        &state,
+        "GET",
+        SUBSCRIPTIONS_PATH,
+        Some(test_store::OWNER),
+        "",
+    )
+    .await;
+    let tag = listing.headers()[header::ETAG].to_str().unwrap();
+    let conditional = axum::http::Request::builder()
+        .method("POST")
+        .uri(SUBSCRIPTIONS_PATH)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", LWS_JSON)
+        .header("if-match", tag)
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    let before = store.creates_started.load(Ordering::SeqCst);
+    let response = axum::Router::new()
+        .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+        .with_state(state)
+        .oneshot(conditional)
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "a confirmed outcome retained a listing claim"
+    );
+    assert_eq!(store.creates_started.load(Ordering::SeqCst), before + 1);
+}
+
+async fn owner_patch_with_a_container_subscription_during_the_write(parent: bool) {
+    use tower::ServiceExt;
+    let (state, store) = test_store::closed_state(100).await;
+    let ancestor = test_store::data(&state, "a/").await;
+    let container = test_store::data(&state, "a/p/").await;
+    let topic = test_store::data(&state, "a/p/r").await;
+    store
+        .write(
+            &topic,
+            Bytes::from_static(br#"{"value":0}"#),
+            "application/json",
+        )
+        .await
+        .unwrap();
+    let reader = "https://reader.example/";
+    test_store::grant_read(&state, reader, &[&ancestor, &container, &topic]).await;
+    run_ready().await;
+    *store.trace.lock().unwrap() = Some(Vec::new());
+    let writing = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.hold_next_write_of.lock().unwrap() = Some((topic.clone(), writing.clone()));
+    let patching = tokio::spawn({
+        let state = state.clone();
+        async move {
+            let token = crate::lws::tokens::mint(
+                &state.cfg,
+                test_store::OWNER,
+                "https://app.example/",
+                &state.cfg.realm(),
+            );
+            let request = axum::http::Request::builder()
+                .method("PATCH")
+                .uri("/a/p/r")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", crate::lws::JSON_PATCH)
+                .body(axum::body::Body::from(
+                    r#"[{"op":"replace","path":"/value","value":1}]"#,
+                ))
+                .unwrap();
+            axum::Router::new()
+                .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+                .with_state(state)
+                .oneshot(request)
+                .await
+                .unwrap()
+                .status()
+        }
+    });
+    tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+        while store.hold_next_write_of.lock().unwrap().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !store
+            .trace
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .contains(&format!("read {topic}.meta")),
+        "an idle owner PATCH must start without a metadata read"
+    );
+    let response = call(
+        &state,
+        "POST",
+        SUBSCRIPTIONS_PATH,
+        Some(reader),
+        &json!({"type": streams::SSE, "topic": [if parent { container } else { ancestor }]})
+            .to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let doc = test_store::body_json(response).await;
+    let mut received = stream(&state, &doc).await;
+    assert_eq!(
+        state.notify.registering_non_owners.load(Ordering::SeqCst),
+        0
+    );
+    writing.add_permits(1);
+    assert_eq!(patching.await.unwrap(), StatusCode::NO_CONTENT);
+    let notification = next_notification(&mut received).await;
+    assert!(notification.contains("Update"));
+    assert!(notification.contains(&topic));
+}
+
+#[tokio::test]
+async fn owner_patch_includes_an_ancestor_subscription_registered_during_the_write() {
+    owner_patch_with_a_container_subscription_during_the_write(false).await;
+}
+
+#[tokio::test]
+async fn owner_patch_includes_a_parent_subscription_registered_during_the_write() {
+    owner_patch_with_a_container_subscription_during_the_write(true).await;
+}
+
+#[tokio::test]
+async fn a_stalled_stream_publication_releases_the_write_s_admission_slot() {
+    use futures_util::FutureExt;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let (state, _) = test_store::state(100).await;
+    let topic = test_store::data(&state, "r").await;
+    let response = call(
+        &state,
+        "POST",
+        SUBSCRIPTIONS_PATH,
+        Some("https://reader.example/"),
+        &json!({"type": streams::SSE, "topic": [topic]}).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let doc = test_store::body_json(response).await;
+    let mut received = stream(&state, &doc).await;
+    let id = doc["id"].as_str().unwrap().rsplit('/').next().unwrap();
+    let publication = state.notify.streams.hold_publication(id).await;
+    run_ready().await;
+    let before = state.notify.selected.load(Ordering::SeqCst);
+    let selection = Arc::new(tokio::sync::Semaphore::new(0));
+    *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+    let app = crate::app::with_overload_layers(
+        axum::Router::new()
+            .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+            .with_state(state.clone()),
+        crate::app::OverloadConfig::new(1, None),
+    );
+    let request = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/r")
+        .header("content-type", LWS_JSON)
+        .body(axum::body::Body::from("changed"))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+    let get = || {
+        axum::http::Request::builder()
+            .uri("/r")
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(get()).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    selection.add_permits(1);
+    tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+        while state.notify.selected.load(Ordering::SeqCst) == before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        app.oneshot(get()).await.unwrap().status(),
+        StatusCode::OK,
+        "stream publication retained the write's admission slot"
+    );
+    assert!(received.frame().now_or_never().is_none());
+    drop(publication);
+    assert!(next_notification(&mut received).await.contains("Update"));
+}
+
+#[tokio::test]
+async fn a_stalled_stream_publication_releases_a_delayed_announcement_s_place() {
+    use crate::lws::records::{LOCK_WAIT, MAX_SETTLING};
+    let (state, store) = test_store::state(100).await;
+    let container = state.cfg.absolute(crate::lws::GRANTS_PATH);
+    let response = call(
+        &state,
+        "POST",
+        SUBSCRIPTIONS_PATH,
+        Some("https://reader.example/"),
+        &json!({"type": streams::SSE, "topic": [container]}).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let doc = test_store::body_json(response).await;
+    let mut received = stream(&state, &doc).await;
+    let id = doc["id"].as_str().unwrap().rsplit('/').next().unwrap();
+    let publication = state.notify.streams.hold_publication(id).await;
+    run_ready().await;
+    let before = state.notify.selected.load(Ordering::SeqCst);
+    let selection = Arc::new(tokio::sync::Semaphore::new(0));
+    *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+    let writing = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.unsettle_creates.lock().unwrap() = Some(writing.clone());
+    store.fail_fence.store(true, Ordering::SeqCst);
+    let body = grant_body(&state);
+    assert_eq!(
+        call(&state, "POST", crate::lws::GRANTS_PATH, None, &body)
+            .await
+            .status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    *store.unsettle_creates.lock().unwrap() = None;
+    writing.add_permits(1);
+    tokio::time::timeout(LOCK_WAIT, async {
+        while store.list_children(&container).await.unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // Keep every other shared place occupied; only the delayed announcement can free room.
+    let mut places = Vec::new();
+    for _ in 0..MAX_SETTLING - 1 {
+        places.push(state.settlements.reserve(None).unwrap());
+    }
+    store.fail_fence.store(false, Ordering::SeqCst);
+    assert_eq!(
+        call(&state, "POST", crate::lws::GRANTS_PATH, None, &body)
+            .await
+            .status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    selection.add_permits(1);
+    tokio::time::timeout(LOCK_WAIT * 8, async {
+        while state.notify.selected.load(Ordering::SeqCst) == before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        call(&state, "POST", crate::lws::GRANTS_PATH, None, &body)
+            .await
+            .status(),
+        StatusCode::CREATED,
+        "stream publication retained the delayed announcement's shared place"
+    );
+    drop(publication);
+    assert!(next_notification(&mut received).await.contains("Create"));
+    drop(places);
+    selection.add_permits(1);
+}
+
+#[tokio::test]
+async fn stalled_stream_publications_have_a_storage_wide_bound() {
+    use futures_util::FutureExt;
+    use http_body_util::BodyExt;
+    let mut cfg = LwsConfig::new("http://localhost:3000");
+    cfg.open = true;
+    cfg.allow_insecure_fetch = true;
+    cfg.delivery.queue = 2;
+    let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+        .await
+        .unwrap();
+    let mut received = Vec::new();
+    let mut publications = Vec::new();
+    for name in ["r", "s"] {
+        let topic = test_store::data(&state, name).await;
+        let response = call(
+            &state,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            Some("https://reader.example/"),
+            &json!({"type": streams::SSE, "topic": [topic]}).to_string(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let doc = test_store::body_json(response).await;
+        received.push(stream(&state, &doc).await);
+        let id = doc["id"].as_str().unwrap().rsplit('/').next().unwrap();
+        publications.push(state.notify.streams.hold_publication(id).await);
+    }
+    run_ready().await;
+    // A full webhook queue must leave the independent stream capacity available.
+    let lookups = Arc::new(tokio::sync::Semaphore::new(0));
+    for _ in 0..2 {
+        let lookups = lookups.clone();
+        state.notify.deliver_found(&state, json!({}), async move {
+            lookups.acquire().await.unwrap().forget();
+            None
+        });
+    }
+    state.notify.deliver_found(&state, json!({}), async {
+        panic!("the webhook queue admitted a lookup past its bound")
+    });
+    let dropped_before = state.notify.dropped();
+    assert_eq!(dropped_before, 1);
+    let before = state.notify.selected.load(Ordering::SeqCst);
+    for (i, path) in ["/r", "/s", "/r", "/s"].into_iter().enumerate() {
+        assert_eq!(
+            call(&state, "PUT", path, None, "changed").await.status(),
+            StatusCode::NO_CONTENT
+        );
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+            while state.notify.selected.load(Ordering::SeqCst) < before + i + 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        state.notify.dropped() - dropped_before,
+        2,
+        "publications past the storage-wide queue bound must be dropped"
+    );
+    drop(publications);
+    for body in &mut received {
+        assert!(next_notification(body).await.contains("Update"));
+        assert!(body.frame().now_or_never().is_none());
+    }
+    // Finished publications give their own places back, independently of request admission.
+    assert_eq!(
+        call(&state, "PUT", "/r", None, "again").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(next_notification(&mut received[0]).await.contains("Update"));
+    assert_eq!(state.notify.dropped() - dropped_before, 2);
+    lookups.add_permits(2);
+}

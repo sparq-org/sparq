@@ -68,15 +68,15 @@ async fn delete_record_by<S: Store>(
     iri: &str,
     container: &str,
     within: Option<std::time::Duration>,
-    mut place: Option<&mut SettlementPlace>,
+    mut place: Option<(&mut SettlementPlace, &mut SettlementLocks<()>)>,
 ) -> Result<(), Undeleted> {
     match remove_member(store, iri, Some(container)).await {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
         Err(crate::error::ServerError::Unsettled { fence, detail }) => {
             // Count from the store's answer, including any wait for a principal place.
             let deadline = within.map(deadline_after);
-            if let Some(place) = place.as_mut() {
-                place.unsettled().await;
+            if let Some((place, locks)) = place.as_mut() {
+                place.unsettled(locks).await;
             }
             if !fenced_by(store, &fence, deadline).await {
                 return Err(Undeleted::Unfenced { fence, detail });
@@ -95,8 +95,8 @@ async fn delete_record_by<S: Store>(
         Err(e) => match store.exists(iri).await {
             Ok(false) => Ok(()),
             Err(_) if matches!(e, crate::error::ServerError::Storage(_)) => {
-                if let Some(place) = place.as_mut() {
-                    place.unsettled().await;
+                if let Some((place, locks)) = place.as_mut() {
+                    place.unsettled(locks).await;
                 }
                 Err(Undeleted::Unread(e))
             }
@@ -227,17 +227,20 @@ pub(crate) async fn within_wait<T>(
 ///   worker may still be running) is fenced first ([`Store::fence`]), so a listing that does not
 ///   show it is final: its quota place is released only once it can no longer commit. A start
 ///   loads whatever the listing holds.
+/// - A principal permit is tried without waiting on an unknown answer. When none is free,
+///   the shared gate and all listing locks are released before waiting; a listing claim
+///   preserves conditional checks, and the record's own lock still protects its outcome.
 /// - The change holds a place among those being made or settled ([`Settlements`]) from the
 ///   request until it is settled: `503` when there is none. The task that settles one is the
 ///   state's, and ends when the state is dropped.
 /// - `gate` runs once the listing locks and the record's own lock are held, and before anything
 ///   is stored: it may refuse the create (its answer is the create's), and what it yields (a
 ///   subscription's: the notification service's raise lock, see `notify::HighWater`) is held
-///   until the create's answer is decided: through the write, the listing read after a failed
-///   one, and the registration. A create whose outcome is not known gives it up as it answers
-///   so, before it is settled: that settling waits on the store for as long as the store does
-///   not answer, and holds no other change to the record's listings back but a conditional
-///   create's.
+///   through the write, the listing read after a failed one, and the registration, except
+///   that a principal permit wait releases it first. A create whose outcome is not known also
+///   gives it up before background settlement: that settling waits on the store for as long as
+///   the store does not answer, and holds no other change to the record's listings back but a
+///   conditional create's.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F, G, C>(
     state: &LwsState<S>,
@@ -300,13 +303,10 @@ where
         )));
     };
     let gate = gate.await?;
+    let mut held = state.settlements.locks(container, listed, held, gate);
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let ListingLocks {
-            own: own_listing,
-            container: container_lock,
-        } = held;
         // Under the lock, the name must not be stored either (a quarantined record holds its
         // name, and no lock).
         match state.store.exists(&iri).await {
@@ -320,7 +320,6 @@ where
             .await;
         let Err(e) = written else {
             register(&state, _admission.clone(), None);
-            drop(gate);
             return Ok(());
         };
         // A record listed is stored for good (its lock keeps a revocation of it out). One not
@@ -332,20 +331,21 @@ where
             _ => None,
         };
         if unsettled.is_some() {
-            place.unsettled().await;
+            place.unsettled(&mut held).await;
         }
         match still_listed(&state.store, &iri, &container).await {
             Ok(true) => {
                 place.settled();
+                let _reheld = held.relock(&state.locks).await;
                 register(&state, _admission.clone(), None);
                 Ok(())
             }
             Ok(false) if unsettled.is_none() => Err(e),
             Ok(false) | Err(_) => {
-                place.unsettled().await;
+                place.unsettled(&mut held).await;
                 // Settled by a task the state owns, holding the record's own lock (a
-                // revocation of it waits), the quota place (`register` holds it), the lock of
-                // the narrowest listing that shows it, shared, and this change's place among
+                // revocation of it waits), the quota place (`register` holds it), the narrowest
+                // listing's shared lock (or a claim after a principal wait), and its place among
                 // those being settled. A subscription listed to its subscriber keeps that
                 // listing's lock (so the subscriber's conditional creates wait for it, and
                 // nobody else's, while its other changes go on), and the container's lock is
@@ -354,6 +354,10 @@ where
                 // owner's) waits for the outcome, as a subscriber's waits on its own, so two
                 // with one entity tag cannot both register. An unsettled write is fenced first,
                 // so the listing it then reads is final.
+                let ListingLocks {
+                    own: own_listing,
+                    container: container_lock,
+                } = held.listings.take().unwrap_or_default();
                 let (own_listing, container_lock) = match own_listing {
                     Some(own) => {
                         drop(container_lock);
@@ -361,7 +365,7 @@ where
                     }
                     None => (None, container_lock.map(ListingGuard::shared)),
                 };
-                drop(gate);
+                drop(held.gate.take());
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {
@@ -380,11 +384,17 @@ where
                     // as a revocation takes them, unless still held), so no conditional create
                     // sees the listing change between its check and its own registration. This
                     // task holds no admission, so it may wait for it.
-                    let _listing = match container_lock {
-                        Some(held) => held,
-                        None => ListingGuard::Shared(
-                            until_done(|| async { locks.read(&container).await.ok_or(()) }).await,
-                        ),
+                    let _reheld = held.relock(&locks).await;
+                    let _listing = if held.claim.is_some() {
+                        None
+                    } else {
+                        Some(match container_lock {
+                            Some(held) => held,
+                            None => ListingGuard::Shared(
+                                until_done(|| async { locks.read(&container).await.ok_or(()) })
+                                    .await,
+                            ),
+                        })
                     };
                     if let Some(state) = weak.upgrade() {
                         register(&state, None, Some(place));
@@ -409,8 +419,9 @@ where
 /// conditional create evaluated on one of them, holding that listing's lock alone
 /// ([`service_preconditions`]), sees nothing change in it between its check and its own
 /// registration, and waits on nothing that changes only other listings. A create whose outcome
-/// the store leaves unknown keeps that listing only shared while it is settled: the
-/// subscriber's other conditional creates still wait for the outcome, but its unconditional
+/// the store leaves unknown normally keeps that listing shared. A principal permit wait
+/// substitutes a listing claim while all listing locks are released: conditional comparisons
+/// are refused until the outcome is known. The subscriber's unconditional
 /// creates and removals go on, so the registration that settles it may follow them.
 #[derive(Clone, Copy)]
 pub(crate) enum Listed<'a> {
@@ -426,8 +437,10 @@ pub(crate) enum Listed<'a> {
 }
 
 /// The listing locks a create or removal holds (see [`Listed`]): its own listing's, and the
-/// container's. A listing lock is taken before any IRI lock and never while one is held, so it
-/// takes no part in the IRI lock order.
+/// container's. The subscriber's listing is taken before the record lock. Reacquiring released
+/// listings takes only shared locks; conditional creates holding listings never wait on record
+/// locks (they only try them), so confirmation cannot form a lock cycle with them.
+#[derive(Default)]
 pub(crate) struct ListingLocks {
     own: Option<ListingGuard>,
     container: Option<ListingGuard>,
@@ -472,6 +485,78 @@ impl ListingLocks {
             )),
         };
         Ok(Self { own, container })
+    }
+}
+
+type ListingCounts = Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>;
+
+/// Retains conditional-listing exclusion while a principal wait holds no listing locks.
+struct ListingClaim {
+    counts: ListingCounts,
+    names: Vec<String>,
+}
+
+impl Drop for ListingClaim {
+    fn drop(&mut self) {
+        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        for name in &self.names {
+            let count = counts.get_mut(name).expect("claimed listing");
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(name);
+            }
+        }
+    }
+}
+
+/// Only the record's own lock and admission remain across a principal permit wait.
+struct SettlementLocks<C> {
+    listings: Option<ListingLocks>,
+    gate: Option<C>,
+    counts: ListingCounts,
+    names: Vec<String>,
+    claim: Option<ListingClaim>,
+    #[cfg(test)]
+    waits: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl<C> SettlementLocks<C> {
+    fn release_for_wait(&mut self) {
+        if self.claim.is_none() {
+            let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+            for name in &self.names {
+                *counts.entry(name.clone()).or_default() += 1;
+            }
+            self.claim = Some(ListingClaim {
+                counts: self.counts.clone(),
+                names: self.names.clone(),
+            });
+        }
+        // Publish the claim before releasing locks so conditional checks see no gap.
+        drop(self.gate.take());
+        drop(self.listings.take());
+        #[cfg(test)]
+        self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn relock(
+        &self,
+        locks: &Arc<resources::IriLocks>,
+    ) -> impl std::future::Future<Output = Vec<tokio::sync::OwnedRwLockReadGuard<()>>> + Send + 'static
+    {
+        let names = self
+            .claim
+            .as_ref()
+            .map(|claim| claim.names.clone())
+            .unwrap_or_default();
+        let locks = locks.clone();
+        async move {
+            let mut held = Vec::new();
+            for name in names {
+                held.push(until_done(|| async { locks.read(&name).await.ok_or(()) }).await);
+            }
+            held
+        }
     }
 }
 
@@ -531,6 +616,11 @@ where
             )),
         },
     };
+    // A principal wait releases physical listing locks, but its unknown outcome still
+    // excludes tag comparisons. Unconditional changes do not inspect these claims.
+    if state.settlements.listing_claimed(own.unwrap_or(container)) {
+        return Err(resources::retry_later("the resource is busy"));
+    }
     // Read only now, with the locks held: what it shows (and leaves out) is decided after every
     // change it waited on.
     let current = listing(resources::plain_get(req)).await;
@@ -572,13 +662,14 @@ pub(crate) enum Removed {
 /// - A delete that failed [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that
 ///   timed out) can still land, so no listing read is final until its fence ([`Store::fence`])
 ///   has succeeded, whatever the listing shows. The fence is tried in the steps, and once it
-///   succeeds the listing read after it settles the removal, every lock still held. One that
+///   succeeds the listing read after it settles the removal, its record lock still held. One that
 ///   does not succeed within [`LOCK_WAIT`] (counted from the store's answer to the delete), or
 ///   whose outcome cannot be read after it has succeeded, is settled in the background (a fence
 ///   not yet succeeded is tried there first, each attempt allowed longer, up to the store's own
 ///   call timeout, [`fence_in_background`]; one that has succeeded is not tried again): the record stays out of force, and its own lock, its
-///   own listing's and the container's (shared, unless it is listed nowhere) stay held, never
-///   given up and taken again, until the delete is fenced and the listing read again; `settle` is then
+///   listing locks normally stay held until the delete is fenced and the listing read again.
+///   A principal permit wait first substitutes listing claims and releases all listing locks;
+///   those are reacquired after confirmation, before `settle` is
 ///   told the outcome, and a record gone is announced. The answer is `500`, saying this is not
 ///   known yet, and it does not wait on a fence that stalls.
 /// - As for a create, the removal holds a place among those being made or settled
@@ -628,6 +719,15 @@ where
             Some(within_wait(state.locks.read(container)).await?)
         }
     };
+    let mut held_locks = state.settlements.locks(
+        container,
+        listed,
+        ListingLocks {
+            own: own_listing.map(ListingGuard::Shared),
+            container: listing.map(ListingGuard::Shared),
+        },
+        None::<()>,
+    );
     let sweeper = by == Remover::Sweeper;
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
@@ -645,7 +745,7 @@ where
             &iri,
             &container,
             Some(LOCK_WAIT),
-            Some(&mut place),
+            Some((&mut place, &mut held_locks)),
         )
         .await
         {
@@ -679,27 +779,27 @@ where
             }
             // `fence` is the delete's, when it has not succeeded yet.
             Err(fence) => {
-                place.unsettled().await;
+                place.unsettled(&mut held_locks).await;
                 // Settled by a task the state owns, holding the record's own lock, its own
                 // listing's, the container's (shared) and this change's place among those being
-                // settled, with the record out of force until then: the container's lock is
-                // held through the fence and the settling, never given up and taken again, so
-                // no conditional create evaluated on the whole listing is decided while the
-                // removal may still land.
-                let (weak, store) = (state.downgrade(), state.store.clone());
+                // settled, with the record out of force until then. Listing locks, or claims
+                // after a principal wait, exclude conditional tag checks until its outcome
+                // is known. Released listing locks are reacquired before memory is updated.
+                let (weak, store, locks) =
+                    (state.downgrade(), state.store.clone(), state.locks.clone());
                 let (iri, container) = (iri.clone(), container.clone());
                 state.settlements.spawn(async move {
-                    let _held = own_listing;
                     if let Some(fence) = fence {
                         fence_in_background(&store, &fence).await;
                     }
                     let listed = until_done(|| still_listed(&store, &iri, &container)).await;
                     place.settled();
+                    let reheld = held_locks.relock(&locks).await;
                     let Some(state) = weak.upgrade() else {
                         return;
                     };
                     let author = settle(&state, !listed, held);
-                    drop((own, listing));
+                    drop((own, held_locks, reheld));
                     if !listed {
                         announce_record(
                             &state,
@@ -721,9 +821,11 @@ where
                 ));
             }
         };
-        let author = settle(&state, gone == Some(true), held);
+        // Confirmation may wait on a listing lock, but its outcome is already known.
         place.settled();
-        drop((own, listing, own_listing));
+        let reheld = held_locks.relock(&state.locks).await;
+        let author = settle(&state, gone == Some(true), held);
+        drop((own, held_locks, reheld));
         match gone {
             Some(true) => {
                 announce_record(
@@ -817,6 +919,9 @@ pub(crate) const MAINTENANCE_PLACES: usize = 16;
 pub(crate) struct Settlements {
     places: Arc<tokio::sync::Semaphore>,
     principals: PrincipalCounts,
+    listings: ListingCounts,
+    #[cfg(test)]
+    waits: Arc<std::sync::atomic::AtomicUsize>,
     /// The places reserved for the expiry sweeper's removals ([`Remover::Sweeper`]).
     maintenance: Arc<tokio::sync::Semaphore>,
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
@@ -842,20 +947,33 @@ impl SettlementPlace {
         drop(self.settling.take());
     }
 
-    async fn unsettled(&mut self) {
-        if self.settling.is_none() {
-            if let Some((_, _, places)) = &self.principal {
-                // Already-running changes can fail together. Until one of the principal's
-                // settlement places is free, this change keeps its shared place, locks and
-                // admission on its existing task; it starts no extra settlement task.
-                self.settling = Some(
-                    places
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .expect("open semaphore"),
-                );
+    fn try_unsettled(&mut self) -> bool {
+        if self.settling.is_some() {
+            return true;
+        }
+        let Some((_, _, places)) = &self.principal else {
+            return true;
+        };
+        match places.clone().try_acquire_owned() {
+            Ok(place) => {
+                self.settling = Some(place);
+                true
             }
+            Err(_) => false,
+        }
+    }
+
+    async fn unsettled<C: Send>(&mut self, locks: &mut SettlementLocks<C>) {
+        if !self.try_unsettled() {
+            locks.release_for_wait();
+            let places = &self.principal.as_ref().expect("principal ceiling").2;
+            self.settling = Some(
+                places
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("open semaphore"),
+            );
         }
     }
 }
@@ -888,9 +1006,47 @@ impl Settlements {
         Self {
             places: Arc::new(tokio::sync::Semaphore::new(places)),
             principals: Default::default(),
+            listings: Default::default(),
+            #[cfg(test)]
+            waits: Default::default(),
             maintenance: Arc::new(tokio::sync::Semaphore::new(MAINTENANCE_PLACES)),
             tasks: Default::default(),
         }
+    }
+
+    fn locks<C>(
+        &self,
+        container: &str,
+        listed: Listed<'_>,
+        listings: ListingLocks,
+        gate: Option<C>,
+    ) -> SettlementLocks<C> {
+        let names = match listed {
+            Listed::Nowhere => Vec::new(),
+            Listed::InContainer => vec![container.to_string()],
+            Listed::AlsoIn(own) => vec![own.to_string(), container.to_string()],
+        };
+        SettlementLocks {
+            listings: Some(listings),
+            gate,
+            names,
+            counts: self.listings.clone(),
+            claim: None,
+            #[cfg(test)]
+            waits: self.waits.clone(),
+        }
+    }
+
+    fn listing_claimed(&self, name: &str) -> bool {
+        self.listings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(name)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn principal_waits(&self) -> usize {
+        self.waits.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// A place reserved for one of the expiry sweeper's removals: `None` when they are all
@@ -1012,6 +1168,102 @@ mod tests {
     /// A gate that is never opened: the unsettled write it holds is still to come.
     fn shut() -> Arc<tokio::sync::Semaphore> {
         Arc::new(tokio::sync::Semaphore::new(0))
+    }
+
+    #[tokio::test]
+    async fn confirmed_removals_waiting_for_listing_locks_release_principal_places() {
+        use super::super::test_store::{self, call};
+        let (state, store) = test_store::closed_state(100).await;
+        let container = state.cfg.absolute(super::super::REQUESTS_PATH);
+        let iri = format!("{container}pending");
+        store
+            .create_in_container(&container, &iri, Bytes::from_static(b"{}"), LWS_JSON)
+            .await
+            .unwrap();
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        let starting = shut();
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let removing = tokio::spawn({
+            let (state, container, starting) = (state.clone(), container.clone(), starting.clone());
+            async move {
+                remove_record(
+                    &state,
+                    &container,
+                    &iri,
+                    "request",
+                    Listed::InContainer,
+                    Remover::Request(Some(test_store::OWNER.into())),
+                    None,
+                    move || async move {
+                        entered.send(()).unwrap();
+                        starting.acquire().await.unwrap().forget();
+                        Some(())
+                    },
+                    |_, gone, ()| {
+                        assert!(!gone, "the fence cancelled the delayed deletion");
+                        None
+                    },
+                )
+                .await
+            }
+        });
+        waiting.await.unwrap();
+        // The removal is already admitted. Give its principal sixteen other unknowns so
+        // this one must release its listing before waiting for a principal permit.
+        let mut places = Vec::new();
+        for _ in 0..MAX_SETTLING_PER_PRINCIPAL {
+            let mut place = state.settlements.reserve(Some(test_store::OWNER)).unwrap();
+            assert!(place.try_unsettled());
+            places.push(place);
+        }
+        starting.add_permits(1);
+        tokio::time::timeout(LOCK_WAIT, async {
+            while state.settlements.principal_waits() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let listing = state.locks.try_lock(&container).expect("released listing");
+        drop(places.pop());
+        // The fence can now finish, but updating memory must wait on this listing guard.
+        // A different container still accepts an HTTP create by the same principal.
+        let place = tokio::time::timeout(LOCK_WAIT, async {
+            loop {
+                if store.fences_tried.load(Ordering::SeqCst) != 0 {
+                    if let Some(place) = state.settlements.reserve(Some(test_store::OWNER)) {
+                        break place;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a known removal retained its principal permit during the listing wait");
+        drop(place);
+        assert!(!removing.is_finished());
+        assert_eq!(
+            state.settlements.pending(),
+            0,
+            "exercise inline confirmation"
+        );
+        let body = serde_json::json!({"@context": [super::super::LWS_CONTEXT],
+            "type": "AccessGrant", "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://reader.example/"}]});
+        assert_eq!(
+            call(
+                &state,
+                "POST",
+                super::super::GRANTS_PATH,
+                Some(test_store::OWNER),
+                &body.to_string(),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        drop(listing);
+        assert!(removing.await.unwrap().is_err());
     }
 
     #[tokio::test]

@@ -72,19 +72,20 @@ const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Consecutive failed deliveries before a subscription is deactivated.
 const MAX_DELIVERY_FAILURES: u32 = 5;
 
-/// Bounds on outgoing webhook deliveries, so many subscriptions times many changes cannot exhaust
-/// sockets or memory.
+/// Bounds on webhook deliveries and pending stream publications.
 ///
 /// A delivery is admitted while fewer than `queue` are waiting or in flight; past that it is
 /// dropped (and logged), which counts toward no subscription's failures. At most `workers` are in
 /// flight at once, and at most `per_inbox` to any one inbox origin (scheme, host and port, so
 /// many paths on one host share a limit). A delivery waits for its inbox's turn before it takes a
 /// worker, so a slow inbox holds back only its own deliveries.
+/// Stream publications have a separate storage-wide queue of at most `queue` events,
+/// including events waiting on a publication gate or a delivery-time access check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeliveryLimits {
-    /// Deliveries waiting or in flight (`SOLID_SERVER_LWS_DELIVERY_QUEUE`, default 1024).
+    /// Capacity of each delivery queue (`SOLID_SERVER_LWS_DELIVERY_QUEUE`, default 1024).
     pub queue: usize,
-    /// Deliveries in flight (`SOLID_SERVER_LWS_DELIVERY_WORKERS`, default 16).
+    /// Webhook deliveries in flight (`SOLID_SERVER_LWS_DELIVERY_WORKERS`, default 16).
     pub workers: usize,
     /// Deliveries in flight to one inbox origin (`SOLID_SERVER_LWS_DELIVERY_PER_INBOX`, default 2).
     pub per_inbox: usize,
@@ -637,6 +638,8 @@ pub struct Notifier {
     limits: DeliveryLimits,
     /// Deliveries admitted and not yet finished.
     admitted: Arc<AtomicUsize>,
+    /// Stream publications admitted and not yet finished, independent of webhook capacity.
+    stream_admitted: Arc<AtomicUsize>,
     /// Notifications dropped for want of queue room, each one known to be owed: authorized for
     /// its subscriber, or belonging to no subscription.
     dropped: AtomicU64,
@@ -900,6 +903,7 @@ impl Notifier {
             client,
             limits: cfg.delivery,
             admitted: Arc::new(AtomicUsize::new(0)),
+            stream_admitted: Arc::new(AtomicUsize::new(0)),
             dropped: AtomicU64::new(0),
             unprepared: AtomicU64::new(0),
             seq: AtomicU64::new(0),
@@ -1544,6 +1548,29 @@ impl Notifier {
         }
     }
 
+    /// Owner PATCH can start without a snapshot. Capture registration eligibility first,
+    /// then recheck pending/live readers while the writer still holds its resource locks.
+    pub(crate) async fn commit_patch<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: Event,
+        format: Option<String>,
+    ) -> Committed {
+        let mut committed = self.commit(state, event, access::Snapshot::unreadable());
+        if let Some(event) = committed
+            .event
+            .as_ref()
+            .filter(|_| !state.cfg.open && self.has_non_owner_subscriptions())
+        {
+            let snapshot = match state.resource_meta(&event.uri).await {
+                Ok(meta) => access::Snapshot::from_parts(meta, format),
+                Err(_) => access::Snapshot::unreadable(),
+            };
+            committed.snapshot = Arc::new(snapshot);
+        }
+        committed
+    }
+
     /// Capture a service-record change at registration/removal, before scheduling selection.
     pub fn announce_service<S: Store + 'static>(
         &self,
@@ -1772,9 +1799,13 @@ impl Notifier {
                 state.notify.count_prepared(&prepared);
                 pending.extend(prepared.pending);
             }
-            state.notify.queue_prepared(&state, pending).await;
+            let streams = state.notify.queue_webhooks(&state, pending);
+            // Only selection and webhook admission retain these places. A stream's own
+            // publication gate must not retain a writer's or delayed announcement's place.
+            drop((_admission, _settlement));
             #[cfg(test)]
             state.notify.selected.fetch_add(1, Ordering::SeqCst);
+            state.notify.publish_streams(&state, streams).await;
         });
     }
 
@@ -1796,7 +1827,17 @@ impl Notifier {
         });
     }
 
+    #[cfg(test)]
     async fn queue_prepared<S: Store + 'static>(&self, state: &LwsState<S>, pending: Vec<Pending>) {
+        let streams = self.queue_webhooks(state, pending);
+        self.publish_streams(state, streams).await;
+    }
+
+    fn queue_webhooks<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        pending: Vec<Pending>,
+    ) -> Vec<(Pending, Admitted)> {
         let mut streams = Vec::new();
         for p in pending {
             if p.kind == SubscriptionKind::Webhook {
@@ -1805,7 +1846,26 @@ impl Notifier {
                 streams.push(p);
             }
         }
-        for p in streams {
+        // Bound pending stream work across commits before releasing request/record places.
+        // Webhooks have already queued, and keep their independent delivery capacity.
+        streams
+            .into_iter()
+            .filter_map(|pending| match self.admit_to(&self.stream_admitted) {
+                Some(place) => Some((pending, place)),
+                None => {
+                    self.note_dropped(1, &pending.watch.uri);
+                    None
+                }
+            })
+            .collect()
+    }
+
+    async fn publish_streams<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        streams: Vec<(Pending, Admitted)>,
+    ) {
+        for (p, _publication) in streams {
             streams::publish(state, p).await;
         }
     }
@@ -1868,7 +1928,7 @@ impl Notifier {
         let after = before + n as u64;
         if before == 0 || before.ilog2() != after.ilog2() {
             eprintln!(
-                "lws: webhook delivery queue full ({} waiting or in flight); dropped {n} \
+                "lws: notification delivery queue full ({} waiting or in flight); dropped {n} \
                  notification(s) for {target} ({after} dropped so far)",
                 self.limits.queue
             );
@@ -1964,13 +2024,17 @@ impl Notifier {
 impl Notifier {
     /// A place in the delivery queue, or `None` when it is full.
     fn admit(&self) -> Option<Admitted> {
+        self.admit_to(&self.admitted)
+    }
+
+    fn admit_to(&self, count: &Arc<AtomicUsize>) -> Option<Admitted> {
         let limit = self.limits.queue;
-        self.admitted
+        count
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < limit).then_some(n + 1)
             })
             .ok()
-            .map(|_| Admitted(self.admitted.clone()))
+            .map(|_| Admitted(count.clone()))
     }
 
     /// The limit shared by every delivery to `target`'s origin.
@@ -2544,10 +2608,11 @@ async fn purge_own_expired<S: Store + 'static>(
 
 /// The gate a subscription create passes once its listing locks are held, before anything is
 /// stored ([`super::records::create_record`]): the high water's raise lock
-/// ([`HighWater::writing`], so the lock order is listing, then raise), held until the create is
-/// settled. Under it the create is refused, `503`, while the service is halted, and `400` when
-/// its expiry (`expires_at`) is no longer after the clock and the stored high water: no raise
-/// can fail, nor the high water pass the expiry, between that check and the registration.
+/// ([`HighWater::writing`], so the lock order is listing, then raise), held through the initial
+/// store answer and confirmation. A principal permit wait or background settlement releases it.
+/// Under it the create is refused, `503`, while the service is halted, and `400` when
+/// its expiry (`expires_at`) is no longer after the clock and the stored high water. Delivery
+/// rechecks expiry, including for a create confirmed after releasing the gate.
 async fn commit_gate<S: Store + 'static>(
     state: &LwsState<S>,
     expires_at: Option<i64>,
@@ -2986,8 +3051,9 @@ async fn subscribe<S: Store + 'static>(
                 && state.store.exists(&resource).await.unwrap_or(false)
         }
     };
-    // Start before releasing any topic lock. A later owner PATCH may skip metadata only
-    // if nobody can register from an earlier topic check while that PATCH holds its lock.
+    // Count registrations through confirmation, including ancestor/container topics whose
+    // locks do not exclude a descendant PATCH. PATCH rechecks this count after capturing
+    // its registration sequence at commit, while its resource locks are still held.
     let registering = (!access::is_owner(state, agent)).then(|| {
         let count = state.notify.registering_non_owners.clone();
         count.fetch_add(1, Ordering::SeqCst);

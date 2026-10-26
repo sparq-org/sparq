@@ -178,6 +178,11 @@ impl Streams {
             .clone()
     }
 
+    #[cfg(test)]
+    pub(super) async fn hold_publication(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        self.slot(id).gate.clone().lock_owned().await
+    }
+
     pub(super) fn register(&self, id: &str) {
         self.slot(id);
     }
