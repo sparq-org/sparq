@@ -58,6 +58,7 @@ import {
 // query engine pays nothing until a workspace turns inference on.
 import { loadReasoner, modeToProfile, type WasmReasoner } from "@/lib/reason-wasm";
 import { classifyQuery } from "@/lib/query-form";
+import { sameN3Rules } from "@/lib/n3-rules";
 // [FABLE-5] sq-ixc3.20 — canonical triple identity for the inferred-fact affordance (the
 // entailed fact cache the results views consult) + the shared N-Triples term writer (moved out
 // of this file so the click-to-explain path and the snapshot writer share ONE writer).
@@ -714,7 +715,7 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
 
   // [sq-glo5r] — the active workspace's N3 rule documents (pushed by setN3Rules / N3RulesBridge).
   // Held in a ref so buildReasonedStore always reads the latest docs without adding them to its
-  // useCallback deps; `rulesEpoch` bumps on every setN3Rules call to trigger the applyInferenceMode
+  // useCallback deps; `rulesEpoch` bumps when the documents change to trigger the applyInferenceMode
   // effect and rebuild the N3 closure when rules change while N3 is active.
   const n3RulesRef = React.useRef<WorkspaceRulesDoc[]>([]);
   const rulesEpochRef = React.useRef(0);
@@ -1097,6 +1098,7 @@ export function EngineProvider({ children }: { children: React.ReactNode }) {
   // [sq-glo5r] — push updated N3 rules to the engine; bumps rulesEpoch so the
   // applyInferenceMode effect fires and rebuilds the N3 closure when rules change.
   const setN3Rules = React.useCallback((docs: WorkspaceRulesDoc[]) => {
+    if (sameN3Rules(n3RulesRef.current, docs)) return;
     n3RulesRef.current = docs;
     rulesEpochRef.current += 1;
     setRulesEpoch(rulesEpochRef.current);

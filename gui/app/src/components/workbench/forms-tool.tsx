@@ -12,6 +12,7 @@ import { FormRenderer } from "@/components/workbench/form-renderer";
 import { useEngine, type FormResource } from "@/lib/engine-context";
 import {
   deriveForm,
+  formWorkspaceSnapshot,
   FormsBridgeUnavailableError,
   type DeriveFormResult,
 } from "@/lib/forms-bridge";
@@ -71,17 +72,16 @@ export function FormsTool() {
       return {
         storeEpoch,
         resources: ready ? listFormResources() : [],
-        snapshot: ready ? snapshotStore() : null,
         error: null,
       };
     } catch (cause) {
       return {
-        storeEpoch, resources: [], snapshot: null,
+        storeEpoch, resources: [],
         error: cause instanceof Error ? cause.message : String(cause),
       };
     }
-  }, [ready, storeEpoch, listFormResources, snapshotStore]);
-  const { resources, snapshot } = candidates;
+  }, [ready, storeEpoch, listFormResources]);
+  const { resources } = candidates;
   const [previousCandidates, setPreviousCandidates] = React.useState<typeof candidates | null>(null);
   if (previousCandidates !== candidates) {
     setPreviousCandidates(candidates);
@@ -100,9 +100,20 @@ export function FormsTool() {
       }
     }
   }
+  // Resolve resources and selection first; an unselected/manual form needs no dataset copy.
+  // Wait for candidate reconciliation so a store epoch serializes only the resolved selection.
+  const { snapshot, error: snapshotError } = React.useMemo(
+    () => formWorkspaceSnapshot(
+      ready && previousCandidates === candidates && candidates.error === null,
+      selection,
+      snapshotStore,
+    ),
+    [ready, previousCandidates, candidates, selection, snapshotStore],
+  );
   let deriveState: DeriveState = { kind: "idle" };
-  if (candidates.error !== null) {
-    deriveState = { kind: "error", message: candidates.error };
+  const error = candidates.error ?? snapshotError;
+  if (error !== null) {
+    deriveState = { kind: "error", message: error };
   } else if (ready && selection !== null) {
     deriveState = snapshot === null ? {
       kind: "error", message: "The active workspace could not be serialized for form derivation.",

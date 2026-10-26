@@ -48,6 +48,7 @@ import { DEFAULT_QUERY } from "@/data/sample-graph";
 // workspace opens with the SAME editor content the Query tool shows before restore — the editor
 // now round-trips through the workspace (sq-lcd6e), so this is the single source of that default.
 const STARTER_QUERY = DEFAULT_QUERY;
+const EMPTY_RULES_DOCS: WorkspaceRulesDoc[] = [];
 
 export interface WorkspaceContextValue {
   /** The active workspace, or `null` until the store + workspace are restored on mount. */
@@ -489,7 +490,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     // Re-apply the target's inference regime.
     engineRef.current.setInferenceMode(ws.inference ?? "off");
     // [sq-glo5r] — push the target workspace's N3 rules so the engine rebuilds the N3 closure.
-    engineRef.current.setN3Rules(ws.rulesDocs ?? []);
+    engineRef.current.setN3Rules(ws.rulesDocs ?? EMPTY_RULES_DOCS);
     // [FABLE-5] sq-ixc3.14 — push the target workspace's federation egress allowlist so a
     // SERVICE run never dials under a PREVIOUS workspace's policy (fail-closed lockstep).
     engineRef.current.setServiceAllowlist(ws.serviceAllowlist ?? []);
@@ -598,7 +599,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setInference,
       serviceAllowlist: workspace?.serviceAllowlist ?? [],
       setServiceAllowlist,
-      rulesDocs: workspace?.rulesDocs ?? [],
+      rulesDocs: workspace?.rulesDocs ?? EMPTY_RULES_DOCS,
       addRulesDocs,
       removeRulesDoc,
       setRulesDocEnabled,
