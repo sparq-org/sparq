@@ -150,6 +150,28 @@ Without a data directory, the native binary uses in-memory blobs.
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
 
+### Backup and restore
+
+Offline backup applies to the durable `SOLID_SERVER_DATA_DIR` contract in both
+Solid and LWS modes. Stop the server with SIGTERM
+and wait for exit status zero: shutdown has drained requests and completed
+compaction. Then archive the **whole** data directory, including `format.json`,
+`index/`, `blobs/` and the advisory lock files (harmless to copy).
+
+Restore by unpacking into an **empty** directory and starting the server with
+`SOLID_SERVER_DATA_DIR` pointing at it. Retain the public base URL and external
+configuration/signing keys. Online or hot backup is unsupported; copying a
+running data directory is unsafe. A backup is only as consistent as the stop
+that preceded it.
+
+Archive the whole directory rather than picking files: a crash can leave
+unreferenced blob files until the reconciler runs, and they belong in the copy.
+
+In a container or Kubernetes, stop the container or scale the workload to zero,
+wait for clean exit and volume detachment, then snapshot the detached volume.
+See the [offline backup and restore procedure](references/native-storage.md#backup-and-restore)
+for commands, refusal cases, deployment references and recovery limits.
+
 ### Child record replacement
 
 `SparqClient::replace_child(container, child, meta)` commits the child record and

@@ -108,14 +108,14 @@ jobs:
       # `--profile ci` = the retry policy in .config/nextest.toml (a retried-then-passed
       # test is reported FLAKY in the summary, a test failing every attempt reds the job).
       - name: Tests (nextest)
-        run: cargo nextest run $CORE_CRATES --profile ci --no-fail-fast -E 'not binary(durable_restart)'
+        run: cargo nextest run $CORE_CRATES --profile ci --no-fail-fast -E 'not binary(durable_restart) and not binary(backup_restore)'
       - name: Tests (LWS server with the SAML suite)
-        run: cargo nextest run -p sparq-lws-core --features authn-saml --profile ci --no-fail-fast -E 'not binary(durable_restart)'
+        run: cargo nextest run -p sparq-lws-core --features authn-saml --profile ci --no-fail-fast -E 'not binary(durable_restart) and not binary(backup_restore)'
       # Real Unix processes: one crash run in each protocol mode, with no nextest retries.
       # The shared boot helpers remain covered by storage_boot in the nextest steps above.
-      - name: Durable restart and SIGKILL (Solid and LWS)
+      - name: Durable restart, SIGKILL and offline restore (Solid and LWS)
         timeout-minutes: 15
-        run: cargo test -p sparq-lws-core --test durable_restart -- --test-threads=1
+        run: cargo test -p sparq-lws-core --test durable_restart --test backup_restore --no-fail-fast -- --test-threads=1
       - name: Doctests (nextest does not run these)
         run: cargo test $CORE_CRATES --doc
 

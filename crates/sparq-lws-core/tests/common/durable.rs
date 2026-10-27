@@ -25,9 +25,15 @@ pub enum Mode {
     Lws,
 }
 
+pub fn local_endpoint() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    format!("http://{}", listener.local_addr().unwrap())
+}
+
 pub struct Fixture {
     pub directory: Directory,
     pub base: String,
+    pub endpoint: String,
     pub mode: Mode,
     pub client: Client,
     pub key: EcKey,
@@ -44,11 +50,10 @@ impl Fixture {
         )
         .unwrap();
         // Let the OS choose a port. Reuse the origin across restarts: IRIs are persisted.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        drop(listener);
+        let base = local_endpoint();
         let fixture = Self {
             directory,
+            endpoint: base.clone(),
             base,
             mode,
             key,
@@ -93,7 +98,7 @@ impl Fixture {
     }
 
     pub async fn boot(&self) -> Process {
-        let address = self.base.strip_prefix("http://").unwrap();
+        let address = self.endpoint.strip_prefix("http://").unwrap();
         let data = self.data();
         let key = self.directory.0.join("as-key.json");
         let notify_key = self.directory.0.join("notify-key.json");
@@ -120,7 +125,7 @@ impl Fixture {
             ]);
         }
         let mut process = Process::start(env!("CARGO_BIN_EXE_sparq-lws-core"), &values);
-        process.wait_ready(&self.client, &self.base).await;
+        process.wait_ready(&self.client, &self.endpoint).await;
         process
     }
 
@@ -137,7 +142,7 @@ impl Fixture {
     }
 
     pub fn request_as(&self, method: Method, path: &str, subject: Option<&str>) -> RequestBuilder {
-        let request = self.client.request(method, format!("{}{path}", self.base));
+        let request = self.client.request(method, format!("{}{path}", self.endpoint));
         match subject {
             Some(subject) if self.mode == Mode::Lws => request.bearer_auth(self.token(subject)),
             _ => request,

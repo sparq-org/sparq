@@ -47,3 +47,98 @@ stopped and awaited before `EmbeddedSparqClient::compact()` runs on the embedded
 actor for a directory-backed index. Successful compaction empties its journals;
 a failure is logged and returns a non-zero exit while retaining recovery data.
 Dropping the final client joins its actor and releases the index lock.
+
+## Backup and restore
+
+This procedure uses the durable `SOLID_SERVER_DATA_DIR` contract with the default
+native build described above. It applies to both Solid
+and LWS protocol modes. It does not back up ephemeral in-memory storage or a
+remote SPARQ service.
+
+### Make an offline backup
+
+1. Send SIGTERM to the server and **wait for the process to exit successfully**.
+   Exit status zero means requests have drained, the reconciler has stopped and
+   shutdown compaction has completed. Sending the signal alone is insufficient.
+   Run `wait` in the shell that owns the server process, or use the service
+   manager's stop-and-wait operation and inspect the exit status.
+2. With the server stopped, archive the **whole data directory**, including
+   `format.json`, `index/` and `blobs/`. Include all blob subdirectories and any
+   remaining journal/recovery files. The lock files are advisory and harmless to
+   copy: a copied file does not carry the original process's OS lock.
+
+For example, in the shell that launched the server in the background (and saved
+its PID in `server_pid`):
+
+```sh
+set -eu
+kill -TERM "$server_pid"
+if ! wait "$server_pid"; then
+  echo 'Server did not stop cleanly; do not treat this as a clean backup' >&2
+  exit 1
+fi
+data_dir=/srv/solid/data
+archive=/srv/backups/solid-data.tar
+tar -cpf "$archive" -C "$data_dir" .
+```
+
+Keep the archive outside the data directory, check `tar`'s exit status, and keep
+the source stopped until archiving finishes. Back up deployment configuration
+and external secrets separately, including any AS and notification signing-key
+files configured outside the data directory. The directory archive contains
+only files under that directory. Protect both the archive and the key backups
+as private data.
+
+### Restore an offline backup
+
+1. Unpack a trusted archive into a new, **empty** directory. Do not overlay an
+   existing store or unrelated files. `mktemp -d` creates an empty destination:
+
+   ```sh
+   set -eu
+   archive=/srv/backups/solid-data.tar
+   restored_dir=$(mktemp -d /srv/solid/restored.XXXXXXXX)
+   tar -xpf "$archive" -C "$restored_dir"
+   ```
+
+2. Check extraction succeeded and the root contains `format.json`, `index/`
+   and `blobs/`. Restore external configuration and signing keys, use a
+   compatible server build, and retain `SOLID_SERVER_BASE_URL`: stored resource
+   and grant IRIs are not rewritten to a new origin. Ensure the server's OS
+   user can read and write the restored directory.
+3. Start with `SOLID_SERVER_DATA_DIR` pointing at that directory. For example,
+   with the other settings restored in the environment:
+
+   ```sh
+   SOLID_SERVER_DATA_DIR="$restored_dir" /usr/local/bin/sparq-lws-core
+   ```
+
+Boot refuses populated `index/` or `blobs/` directories without `format.json`
+as foreign data, and refuses an unsupported marker schema or index/blob major.
+Do not remove or edit the marker to bypass a refusal. These are boot guards;
+they cannot stop `tar` overwriting files in a non-empty destination, so always
+extract into an empty directory. A copy in its own directory has independent
+locks and can boot while the original runs, using a separate listener. Preserve
+the public origin when checking it through that listener.
+
+### Consistency limits and volume snapshots
+
+Online or hot backup is unsupported. Copying or snapshotting a running data
+directory is unsafe: the index and blob planes can come from different writes.
+A backup is only as consistent as the stop that preceded it. A SIGKILL, forced
+container termination, failed compaction or non-zero exit is not a clean stop;
+retain the original files for recovery rather than labelling their copy clean.
+
+A crash can leave unreferenced blob files until the reconciler runs. The
+offline archive preserves them with the rest of the directory; do not omit
+blobs from the backup or delete files by guessing which keys are live.
+
+For a container, stop it and wait for clean exit before detaching the data
+volume. On Kubernetes, scale the workload to zero, wait for its pod to finish
+cleanly and for the volume to detach, then snapshot the detached volume. Ensure
+the orchestrator allows shutdown to finish rather than escalating to SIGKILL.
+Snapshot the volume holding the **whole** data directory, not just one plane.
+Restore its snapshot into a fresh volume before starting the workload.
+See the [native container configuration](../../../crates/sparq-lws-core/README.md)
+and [Helm persistence settings](../../helm-deploy/SKILL.md#use-persistence-and-private-images)
+for the deployment configuration to restore alongside the volume.
