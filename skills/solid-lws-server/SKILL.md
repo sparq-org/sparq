@@ -150,6 +150,20 @@ Without a data directory, the native binary uses in-memory blobs.
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
 
+### Child record replacement
+
+`SparqClient::replace_child(container, child, meta)` commits the child record and
+containment together, reporting the previous metadata when supported. The in-memory
+and embedded clients return it in the same index operation. The default calls
+`create_child` without reading the previous record and returns `None`; clients without
+an override, such as the remote HTTP client, leave any superseded blob key to the
+reconciler.
+`CompositeStore` uses this for contained creates, restores and reinstatements,
+reclaiming replaced bytes through the existing hold-aware path. A settled failed
+write also attempts to reclaim its unreferenced candidate; a committed reference
+or hold preserves it. Unsettled writes retain their bytes until their outcome is
+settled. Reclamation remains best effort when a backend fails.
+
 ### Filesystem blobs in library integrations
 
 The default-on native `blob-fs` feature implements `BlobStore` for
@@ -203,6 +217,9 @@ sequential and planned authorization. A new pointer is read through the store.
 `BlobScopePolicy` selects the storage root for LWS, the first path
 segment for Solid, or a fixed Solid identity. Wrapped keys and conservative
 seal reservations live in reserved index records, outside HTTP resources.
+Native LWS assembly uses its configured storage URL, including any path prefix.
+Library callers with such a prefix select `BlobScopePolicy::LwsStorage(BlobScope(root))`
+before `encrypt_blobs`; `BlobScopePolicy::Lws` infers an origin root.
 Resource read plans refuse this namespace in both target and ACL-candidate
 positions. With native `crypt,blob-fs`, the decorator encrypts bytes before the
 filesystem adapter publishes them; its default scoped methods store and read

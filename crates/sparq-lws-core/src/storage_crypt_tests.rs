@@ -105,7 +105,7 @@ mod durable {
         let (index, raw) = raw_boot(cfg).await.unwrap();
         let blobs = cfg.encrypt(Arc::new(index.clone()), raw).await.unwrap();
         let store = CompositeStore::with_body_cache(index.clone(), blobs, BodyCache::disabled())
-            .with_blob_scope(cfg.blob_scope());
+            .with_blob_scope(cfg.blob_scope(BASE));
         (index, store)
     }
 
@@ -600,6 +600,39 @@ mod durable {
                     .iter()
                     .any(|record| record["pod"] == format!("{BASE}/")));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn lws_path_prefix_is_part_of_the_authenticated_pod() {
+        for storage in ["https://pod.example/", "https://pod.example/storage/"] {
+            let dir = Directory::new();
+            let key = kek(&dir, "key", 37);
+            let cfg = local(
+                &dir,
+                &key,
+                &[
+                    ("SOLID_SERVER_PROTOCOL", "lws"),
+                    (ENV_CRYPT_SCOPE, "ignored-in-lws"),
+                ],
+            );
+            let (index, raw) = raw_boot(&cfg).await.unwrap();
+            let encrypted = cfg.encrypt(Arc::new(index.clone()), raw).await.unwrap();
+            let store =
+                CompositeStore::with_body_cache(index.clone(), encrypted, BodyCache::disabled())
+                    .with_blob_scope(cfg.blob_scope(storage));
+            for path in ["alice/file", "bob/file", ".lws/subscriptions/item"] {
+                let iri = format!("{storage}{path}");
+                store
+                    .write(&iri, Bytes::from_static(BODY), "application/octet-stream")
+                    .await
+                    .unwrap();
+                assert_eq!(store.read(&iri).await.unwrap().body, BODY);
+            }
+            let keys = records(&index).await;
+            assert_eq!(keys.len(), 1);
+            assert_eq!(keys[0]["pod"], storage);
+            assert_eq!(keys[0]["scheme"], "lws");
         }
     }
 

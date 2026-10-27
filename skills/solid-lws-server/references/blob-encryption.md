@@ -29,6 +29,9 @@ set `ttl` and inject a `CryptClock`. The protocol scheme is the fixed string `lw
 or `solid` and forms part of the wrapping context. Subscription-pool records
 use their storage root even with a fixed Solid scope override. Changing a record's context
 prevents unwrapping.
+Native LWS scope is the full configured storage URL, including a path prefix.
+For library assembly, select `BlobScopePolicy::LwsStorage(BlobScope(root))` before
+`encrypt_blobs` to supply that root explicitly; `BlobScopePolicy::Lws` infers the origin.
 
 Resource reads compare the DEK record's pod with the requested resource's pod
 after opening the envelope. A mismatch returns an error without returning bytes.

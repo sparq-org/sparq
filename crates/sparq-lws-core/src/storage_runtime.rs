@@ -178,12 +178,17 @@ impl StorageConfig {
         false
     }
 
-    pub fn blob_scope(&self) -> sparq_lws_core::store::BlobScopePolicy {
+    pub fn blob_scope(&self, base_url: &str) -> sparq_lws_core::store::BlobScopePolicy {
         use sparq_lws_core::store::BlobScopePolicy;
+        #[cfg(not(feature = "crypt"))]
+        let _ = base_url;
         #[cfg(feature = "crypt")]
         if let Some(crypt) = &self.crypt {
             if crypt.lws {
-                return BlobScopePolicy::Lws;
+                return BlobScopePolicy::LwsStorage(sparq_lws_core::store::BlobScope(format!(
+                    "{}/",
+                    base_url.trim_end_matches('/')
+                )));
             }
             if let Some(pod) = &crypt.pod {
                 return BlobScopePolicy::Fixed(sparq_lws_core::store::BlobScope(pod.clone()));

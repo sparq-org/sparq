@@ -644,6 +644,9 @@ impl<S: SparqClient + 'static, B: BlobStore> CompositeStore<S, B> {
         options: CryptOptions,
     ) -> Result<CompositeStore<S, EncryptingBlobStore<B, K>>, BlobError> {
         let policy = match scheme {
+            CryptScheme::Lws if matches!(self.blob_scope, BlobScopePolicy::LwsStorage(_)) => {
+                self.blob_scope
+            }
             CryptScheme::Lws => BlobScopePolicy::Lws,
             CryptScheme::Solid => self.blob_scope,
         };

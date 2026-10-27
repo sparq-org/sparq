@@ -1072,7 +1072,7 @@ where
             blob.clone(),
             body_cache_from_env(),
         )
-        .with_blob_scope(storage.blob_scope());
+        .with_blob_scope(storage.blob_scope(base_url));
         let app = build_app_for_store(
             store,
             base_url,
@@ -1087,7 +1087,7 @@ where
         Ok((app, task))
     } else {
         let store = CompositeStore::with_body_cache(sparq, blob, body_cache_from_env())
-            .with_blob_scope(storage.blob_scope());
+            .with_blob_scope(storage.blob_scope(base_url));
         let app = build_app_for_store(
             store,
             base_url,

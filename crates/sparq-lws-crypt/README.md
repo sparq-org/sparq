@@ -2,7 +2,7 @@
 
 Native, unpublished workspace crate for key providers and the `e1` encrypted blob
 format (P1-1 of [#7189](https://github.com/sparq-org/sparq/issues/7189)), consumed by the default-off
-native `sparq-lws-core/crypt` decorator. Server and environment wiring follow separately.
+native `sparq-lws-core/crypt` decorator and its server environment configuration.
 Its API and dependencies are absent on wasm32. Runtime dependencies are the existing
 `aws-lc-rs`, `zeroize` and `async-trait` crates; no cloud SDK is included.
 

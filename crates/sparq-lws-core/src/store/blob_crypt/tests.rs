@@ -11,8 +11,7 @@ use crate::store::{
 };
 use sparq_lws_crypt::{LocalKeyProvider, SecretKey};
 
-#[path = "../../../tests/common/mod.rs"]
-mod common;
+use crate::store::tests::common;
 
 #[derive(Default)]
 struct ManualClock(AtomicU64);
@@ -618,6 +617,11 @@ async fn protocols_and_fixed_scope_select_the_expected_context() {
             "https://pod.example/alice/",
         ),
         (
+            CryptScheme::Lws,
+            BlobScopePolicy::LwsStorage(BlobScope("https://pod.example/storage/".into())),
+            "https://pod.example/storage/",
+        ),
+        (
             CryptScheme::Solid,
             BlobScopePolicy::Fixed(BlobScope("https://single.example/".into())),
             "https://single.example/",
@@ -645,7 +649,16 @@ async fn protocols_and_fixed_scope_select_the_expected_context() {
             .await
             .unwrap();
         assert_eq!(
-            current(&store, "https://pod.example/").await.scheme,
+            current(
+                &store,
+                if matches!(store.blob_scope, BlobScopePolicy::LwsStorage(_)) {
+                    expected
+                } else {
+                    "https://pod.example/"
+                },
+            )
+            .await
+            .scheme,
             scheme.as_str()
         );
     }
