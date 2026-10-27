@@ -40,11 +40,15 @@ pub struct AuthBudget {
     /// input: its terms' lexical bytes plus a fixed cost per term.
     pub max_document_bytes: usize,
     /// The same bytes summed over EVERY document the input is assembled from, plus the
-    /// generated lexical strings and prefix strings of the resource enumeration (see
+    /// prefix strings of the resource enumeration (see
     /// [`AuthBudget::max_resource_iri_bytes`]).
     pub max_input_bytes: usize,
-    /// Stored rows read and generated structural/provenance/credential facts admitted.
-    /// Read rows remain charged when their document is later rejected.
+    /// Generated lexical bytes admitted before allocation, independently of source and
+    /// resource-enumeration bytes. Default: 64 GiB on 64-bit targets; unbounded on
+    /// narrower targets. Lower it to constrain generated input separately.
+    pub max_generated_bytes: usize,
+    /// Facts in the assembled input, including accepted source rows and generated facts.
+    /// Rejected documents and filtered group rows do not consume this allowance.
     pub max_input_facts: usize,
     /// Approximate bytes of ONE stored input term — the counterpart of
     /// [`sparq_reason::ClosureLimits::max_term_bytes`], which bounds only derived terms.
@@ -92,8 +96,9 @@ impl AuthBudget {
 /// The input and whole-decision budget every authorization materialization runs under
 /// unless the store is given another one ([`crate::PodStore::set_auth_budget`]).
 ///
-/// Count and size defaults are unchanged by the shared ledger. Generated lexical
-/// strings and read rows are admitted before allocation, and each closure runs under
+/// Existing count and size defaults are unchanged. Generated lexical strings have
+/// a separate allowance; source rows and generated strings are admitted before
+/// allocation, and each closure runs under
 /// the remaining whole-decision allowance. Fixture parity is checked against the
 /// baseline views, decisions and closure charges.
 ///
@@ -103,6 +108,7 @@ pub fn default_auth_budget() -> AuthBudget {
     AuthBudget {
         max_document_bytes: AUTH_MAX_DOCUMENT_BYTES,
         max_input_bytes: AUTH_MAX_INPUT_BYTES,
+        max_generated_bytes: AUTH_MAX_GENERATED_BYTES,
         max_input_facts: AUTH_MAX_INPUT_FACTS,
         max_input_term_bytes: AUTH_MAX_INPUT_TERM_BYTES,
         max_resource_iri_bytes: AUTH_MAX_RESOURCE_IRI_BYTES,
@@ -115,9 +121,15 @@ pub fn default_auth_budget() -> AuthBudget {
 
 /// Approximate stored-term bytes contributed by one source document.
 const AUTH_MAX_DOCUMENT_BYTES: usize = 64 << 10;
-/// Aggregate source, resource-enumeration and generated lexical bytes.
+/// Aggregate source and resource-enumeration bytes.
 const AUTH_MAX_INPUT_BYTES: usize = 1 << 20;
-/// Stored rows read and generated input facts admitted.
+/// Generated lexical bytes; narrower targets cannot represent this finite limit.
+const AUTH_MAX_GENERATED_BYTES: usize = if usize::BITS >= 64 {
+    (64u64 << 30) as usize
+} else {
+    usize::MAX
+};
+/// Accepted source rows and generated input facts admitted.
 const AUTH_MAX_INPUT_FACTS: usize = 32_000;
 /// Approximate bytes of one stored input term.
 const AUTH_MAX_INPUT_TERM_BYTES: usize = 4 << 10;
@@ -197,6 +209,7 @@ impl AuthLedger {
         let mut limits = Limits::default();
         limits.document_bytes = budget.max_document_bytes;
         limits.bytes = budget.max_input_bytes;
+        limits.generated_bytes = budget.max_generated_bytes;
         limits.term_bytes = budget.max_input_term_bytes;
         limits.facts = budget.max_input_facts;
         limits.join_rows = budget.max_decision_join_rows;
@@ -244,6 +257,37 @@ impl AuthLedger {
         })
     }
 
+    /// Reject an impossible source byte contribution before reserving its rows.
+    /// Every stored triple contributes at least three fixed term-node costs. Facts
+    /// are charged only when accepted rows enter the assembled input.
+    pub(crate) fn document_rows<T>(
+        &mut self,
+        out: &mut Vec<T>,
+        n: usize,
+        iri: &str,
+    ) -> Result<(), String> {
+        let row_bytes = 3 * sparq_core::meter::TERM_NODE_BYTES;
+        for (dim, limit) in [
+            (Dim::DocumentBytes, self.budget.max_document_bytes),
+            (Dim::Bytes, self.budget.max_input_bytes),
+        ] {
+            if limit != usize::MAX && n > self.core.remaining(dim) / row_bytes {
+                return Err(self.refusal(
+                    Exceeded::new(
+                        dim,
+                        limit,
+                        self.core
+                            .spent(dim)
+                            .saturating_add(n.saturating_mul(row_bytes)),
+                    ),
+                    dim,
+                    iri,
+                ));
+            }
+        }
+        self.reserve(out, n, Dim::Nodes)
+    }
+
     /// Fallible input-sized vector growth, charged before reserving memory.
     pub(crate) fn reserve<T>(
         &mut self,
@@ -258,12 +302,12 @@ impl AuthLedger {
 
     /// Size one generated IRI before allocating any of its lexical parts.
     pub(crate) fn mint(&mut self, parts: &[&str]) -> Result<String, String> {
-        // Generated strings use the aggregate byte cap. Source-document and stored-term
-        // caps retain their existing scope.
+        // Generated strings have their own dimension; existing source, document and
+        // stored-term caps retain their scope.
         self.core.close_document();
         self.core
-            .mint(parts)
-            .map_err(|e| self.refusal(e, Dim::Bytes, "generated input"))
+            .mint_generated(parts)
+            .map_err(|e| self.refusal(e, Dim::GeneratedBytes, "generated input"))
     }
 
     pub(crate) fn resource_name(&mut self, iri: &str) -> Result<(), String> {
@@ -332,15 +376,36 @@ impl AuthLedger {
                     .saturating_add(literal.language().map_or(0, str::len));
                 self.core.close_document();
                 self.core
-                    .charge(Dim::Bytes, bytes)
-                    .map_err(|e| self.refusal(e, Dim::Bytes, "generated input"))?;
+                    .charge(Dim::GeneratedBytes, bytes)
+                    .map_err(|e| self.refusal(e, Dim::GeneratedBytes, "generated input"))?;
                 Ok(term.clone())
             }
             _ => {
-                self.core.close_document();
+                let mut current = Some(term);
+                let mut bytes = 0usize;
+                while let Some(term) = current.take() {
+                    let lexical = match term {
+                        oxrdf::Term::NamedNode(n) => n.as_str().len(),
+                        oxrdf::Term::BlankNode(b) => b.as_str().len(),
+                        oxrdf::Term::Literal(l) => l
+                            .value()
+                            .len()
+                            .saturating_add(l.datatype().as_str().len())
+                            .saturating_add(l.language().map_or(0, str::len)),
+                        oxrdf::Term::Triple(t) => {
+                            current = Some(&t.object);
+                            let subject = match &t.subject {
+                                oxrdf::NamedOrBlankNode::NamedNode(n) => n.as_str().len(),
+                                oxrdf::NamedOrBlankNode::BlankNode(b) => b.as_str().len(),
+                            };
+                            subject.saturating_add(t.predicate.as_str().len())
+                        }
+                    };
+                    bytes = bytes.saturating_add(lexical);
+                }
                 self.core
-                    .term(term.into())
-                    .map_err(|e| self.refusal(e, Dim::TermBytes, "generated input"))?;
+                    .charge(Dim::GeneratedBytes, bytes)
+                    .map_err(|e| self.refusal(e, Dim::GeneratedBytes, "generated input"))?;
                 Ok(term.clone())
             }
         }
@@ -370,13 +435,13 @@ impl AuthLedger {
             .saturating_add(extra);
         self.core.close_document();
         self.core
-            .charge(Dim::Bytes, extra)
-            .map_err(|e| self.refusal(e, Dim::Bytes, graph))?;
+            .charge(Dim::GeneratedBytes, extra)
+            .map_err(|e| self.refusal(e, Dim::GeneratedBytes, graph))?;
         let mut out = self.mint(&[prefix, "graph:", graph, ":", label])?;
         out.try_reserve_exact(extra).map_err(|_| {
             self.refusal(
                 Exceeded::new(Dim::Alloc, usize::MAX, size),
-                Dim::Bytes,
+                Dim::GeneratedBytes,
                 graph,
             )
         })?;
@@ -441,6 +506,14 @@ impl AuthLedger {
                  max_input_bytes ({}) to the reasoning input (reached while reading <{}>); \
                  the authorization view is not built (fail-closed)",
                     self.budget.max_input_bytes, iri
+                ),
+            ),
+            Dim::GeneratedBytes => (
+                AuthAllowance::GeneratedBytes,
+                format!(
+                    "generated lexical strings contribute more than max_generated_bytes ({}); \
+                     the authorization view is not built (fail-closed)",
+                    self.budget.max_generated_bytes
                 ),
             ),
             Dim::JoinRows => (
@@ -523,6 +596,19 @@ mod tests {
             .into();
         }
         let object = dict.intern(&term);
+        // Main already bounds reconstruction at this depth. Even its bounded
+        // placeholder reconstruction exceeds the unchanged default term-byte cap.
+        let reconstructed = dict.term(object);
+        let mut fixed_nodes = 1usize;
+        let mut cursor = &reconstructed;
+        while let Term::Triple(triple) = cursor {
+            fixed_nodes += 3;
+            cursor = &triple.object;
+        }
+        assert!(
+            fixed_nodes * sparq_core::meter::TERM_NODE_BYTES
+                > default_auth_budget().max_input_term_bytes
+        );
         let mut ledger = AuthLedger::new(default_auth_budget());
         let error = ledger
             .stored_term("https://pod.ex/.acl", &dict, object)

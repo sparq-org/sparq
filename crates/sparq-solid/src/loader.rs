@@ -561,8 +561,8 @@ pub(crate) fn graph_triples_metered(
     let pat: sparq_core::store::Pattern = [None, None, None];
     let scan = g.store().scan(&pat);
     let mut out = Vec::new();
-    // Admit the row count before reserving a document-sized vector.
-    meter.reserve(&mut out, scan.rows.len(), Dim::Facts)?;
+    // The existing byte caps also bound the row vector before allocation.
+    meter.document_rows(&mut out, scan.rows.len(), iri)?;
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);
         for id in t {
@@ -725,7 +725,7 @@ pub(crate) fn assemble_facts(
     }
     macro_rules! copied {
         ($triple:expr) => {{
-            meter.reserve(&mut out, 1, Dim::Nodes)?;
+            meter.reserve(&mut out, 1, Dim::Facts)?;
             out.push($triple);
         }};
     }

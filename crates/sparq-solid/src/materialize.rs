@@ -60,6 +60,8 @@ pub enum AuthAllowance {
     /// `max_document_bytes` or `max_input_bytes`: the bytes one control document, or all
     /// of them together, contribute to the reasoning INPUT ([`crate::AuthBudget`]).
     InputBytes,
+    /// `max_generated_bytes`: lexical strings generated while assembling the input.
+    GeneratedBytes,
     /// `max_input_facts`: the facts of the assembled reasoning input.
     InputFacts,
     /// `max_input_term_bytes`: a term of the reasoning INPUT, as opposed to
@@ -90,6 +92,7 @@ impl AuthAllowance {
             AuthAllowance::RoundsOrFacts => "max_rounds/max_facts",
             AuthAllowance::TermBytes => "max_term_bytes",
             AuthAllowance::InputBytes => "max_document_bytes/max_input_bytes",
+            AuthAllowance::GeneratedBytes => "max_generated_bytes",
             AuthAllowance::InputFacts => "max_input_facts",
             AuthAllowance::InputTermBytes => "max_input_term_bytes",
             AuthAllowance::ResourceIri => "max_resource_iri_bytes/max_resource_path_depth",
@@ -107,6 +110,7 @@ impl AuthAllowance {
             AuthAllowance::RoundsOrFacts => "rounds-or-facts",
             AuthAllowance::TermBytes => "term-bytes",
             AuthAllowance::InputBytes => "input-bytes",
+            AuthAllowance::GeneratedBytes => "generated-bytes",
             AuthAllowance::InputFacts => "input-facts",
             AuthAllowance::InputTermBytes => "input-term-bytes",
             AuthAllowance::ResourceIri => "resource-iri",
@@ -125,6 +129,7 @@ impl AuthAllowance {
             AuthAllowance::RoundsOrFacts,
             AuthAllowance::TermBytes,
             AuthAllowance::InputBytes,
+            AuthAllowance::GeneratedBytes,
             AuthAllowance::InputFacts,
             AuthAllowance::InputTermBytes,
             AuthAllowance::ResourceIri,
