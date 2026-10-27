@@ -5,17 +5,16 @@
 //!
 //! The lock is an advisory lock ([`fs4::FileExt::try_lock`] / `try_lock_shared`: `flock` on
 //! Unix, `LockFileEx` on Windows) on a lock file. It is held as long as its [`DirLock`] lives
-//! (for a graph: while the graph, or any named graph taken out of it, lives) and released by
-//! the operating system when its last descriptor closes, including when a process ends.
-//! On Unix, a child between fork and exec can briefly retain an inherited descriptor even
-//! after the parent's holder is dropped: close-on-exec takes effect at exec, not fork.
+//! (for a graph: while the graph, or any mapped view of it, lives). The owning process
+//! explicitly unlocks both files before closing them. On Unix, `flock` belongs to an open file
+//! description: forked or duplicated descriptors share its lock, so closing the parent's file
+//! alone would leave it held until every duplicate closes. Explicit unlock releases that shared
+//! lock immediately, even while a child is between fork and exec. An inherited guard skips
+//! unlocking when dropped in a forked child, so it cannot release the parent's live lock.
+//! The operating system also releases the lock when its final descriptor closes.
 //! A second attempt fails at once ([`std::io::ErrorKind::WouldBlock`]) rather than wait.
-//! Callers that expect to reopen a just-dropped holder amid child-process creation may use
-//! a bounded retry of the whole open on `WouldBlock`; the embedded LWS client allows 250 ms.
-//! The lock itself never waits or bypasses a live holder. The retry budget is subject to
-//! filesystem and scheduler delays; it cannot guarantee a reopen when an inherited descriptor
-//! is retained beyond that budget. Advisory locks over network file systems (NFS and the like)
-//! are not relied on: such directories are not supported.
+//! The lock never waits or bypasses a live holder. Advisory locks over network file systems
+//! (NFS and the like) are not relied on: such directories are not supported.
 //!
 //! A store's lock is two lock files ([`DirLock`]): `<dir>.lock` beside the directory, taken
 //! when it exists or can be created, then `sparq.lock` inside it, always. A store whose parent
@@ -374,9 +373,63 @@ pub struct DirLock {
     outside: Option<File>,
     location: LockLocation,
     shared: bool,
+    process: u32,
     /// The store directory and the lock held on its inside lock file (`None` for a staging
     /// path's lock, which has no inside lock; the file is `None` while a swap has let go of it).
-    inside: Option<(PathBuf, std::sync::Mutex<Option<File>>)>,
+    inside: Option<(PathBuf, std::sync::Mutex<Option<InsideLock>>)>,
+}
+
+impl Drop for DirLock {
+    fn drop(&mut self) {
+        if self.process != std::process::id() {
+            return;
+        }
+        // Unlock before closing: fork/dup copies share the same Unix lock.
+        if let Some((_, held)) = &mut self.inside {
+            if let Some(file) = held
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_mut()
+            {
+                file.unlock();
+            }
+        }
+        if let Some(file) = &self.outside {
+            let _ = fs4::FileExt::unlock(file);
+        }
+    }
+}
+
+/// An inside lock may move between a staged base and its directory guard during a swap.
+/// Keep the same owner-aware release on every exit, including failed swaps and recovery.
+#[derive(Debug)]
+pub(crate) struct InsideLock {
+    file: File,
+    process: u32,
+    unlocked: bool,
+}
+
+impl InsideLock {
+    pub(crate) fn new(file: File) -> Self {
+        Self {
+            file,
+            process: std::process::id(),
+            unlocked: false,
+        }
+    }
+
+    fn unlock(&mut self) {
+        if !self.unlocked && self.process == std::process::id() {
+            // Drop cannot report errors. Closing the file remains the fallback.
+            self.unlocked = fs4::FileExt::unlock(&self.file).is_ok();
+        }
+    }
+}
+
+impl Drop for InsideLock {
+    fn drop(&mut self) {
+        self.unlock();
+    }
 }
 
 /// Whether `e` says a file cannot be created or written here (as opposed to some other error).
@@ -507,7 +560,7 @@ fn try_lock(file: &File, path: &Path, shared: bool) -> io::Result<()> {
 /// created, when it is held, or when the
 /// file locked is no longer the one at `<dir>/sparq.lock` (a swap renamed it away meanwhile:
 /// `WouldBlock`, retry).
-pub(crate) fn lock_inside(dir: &Path, shared: bool) -> io::Result<Option<File>> {
+pub(crate) fn lock_inside(dir: &Path, shared: bool) -> io::Result<Option<InsideLock>> {
     let path = dir.join(INSIDE_LOCK);
     let Some(file) = open_lock_file(&path, true)? else {
         return Err(io::Error::new(
@@ -521,7 +574,8 @@ pub(crate) fn lock_inside(dir: &Path, shared: bool) -> io::Result<Option<File>> 
         ));
     };
     try_lock(&file, &path, shared)?;
-    let same = same_file::Handle::from_file(file.try_clone()?)
+    let file = InsideLock::new(file);
+    let same = same_file::Handle::from_file(file.file.try_clone()?)
         .and_then(|held| Ok(held == same_file::Handle::from_path(&path)?))
         .unwrap_or(false);
     if !same {
@@ -553,6 +607,7 @@ impl DirLock {
             outside: Some(file),
             location,
             shared: false,
+            process: std::process::id(),
             inside: None,
         })
     }
@@ -584,6 +639,7 @@ impl DirLock {
             outside,
             location,
             shared,
+            process: std::process::id(),
             inside: Some((dir.to_path_buf(), std::sync::Mutex::new(None))),
         })
     }
@@ -609,7 +665,7 @@ impl DirLock {
         };
         let mut held = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(file) = held.as_ref() {
-            let current = same_file::Handle::from_file(file.try_clone()?)
+            let current = same_file::Handle::from_file(file.file.try_clone()?)
                 .and_then(|h| Ok(h == same_file::Handle::from_path(dir.join(INSIDE_LOCK))?))
                 .unwrap_or(false);
             if current {
@@ -635,7 +691,7 @@ impl DirLock {
     /// the inside lock held now, which is returned (for the caller to keep until the old
     /// directory is gone). Unix only: Windows takes the new lock after the renames.
     #[cfg(not(windows))]
-    pub(crate) fn replace_inside(&self, file: Option<File>) -> Option<File> {
+    pub(crate) fn replace_inside(&self, file: Option<InsideLock>) -> Option<InsideLock> {
         match &self.inside {
             Some((_, held)) => std::mem::replace(
                 &mut *held.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
@@ -657,7 +713,10 @@ impl DirLock {
         check_regular_lock_file(path)?;
         let file = File::open(path)?;
         match fs4::FileExt::try_lock(&file) {
-            Ok(()) => Ok(false),
+            Ok(()) => {
+                fs4::FileExt::unlock(&file)?;
+                Ok(false)
+            }
             Err(fs4::TryLockError::WouldBlock) => Ok(true),
             Err(fs4::TryLockError::Error(e)) => Err(e),
         }

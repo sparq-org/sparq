@@ -99,7 +99,7 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
 
-const OPEN_RETRY_TIMEOUT: Duration = Duration::from_millis(250);
+const OPEN_RETRY_TIMEOUT: Duration = Duration::ZERO;
 
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
 /// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
