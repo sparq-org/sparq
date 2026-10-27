@@ -650,3 +650,39 @@ mod tests {
         assert_eq!(base64url_nopad(&[0xfb, 0xff]), "-_8");
     }
 }
+
+#[cfg(test)]
+mod receive_window_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn receive_socket_claims_use_the_current_token_window() {
+        let hub = NotificationHub::new();
+        let topic = "https://pod.example/a";
+        let token = hub
+            .mint_receive_token("https://alice.example/#me", topic)
+            .await;
+        drop(
+            hub.claim_receive_socket(&token, topic)
+                .await
+                .expect("initial claim"),
+        );
+        assert!(hub.claim_receive_socket(&token, topic).await.is_some());
+        hub.receive_tokens
+            .lock()
+            .await
+            .get_mut(&token)
+            .expect("token present")
+            .expiry
+            .at = Instant::now() - Duration::from_secs(1);
+        assert!(hub.claim_receive_socket(&token, topic).await.is_none());
+        hub.receive_tokens
+            .lock()
+            .await
+            .get_mut(&token)
+            .expect("token present")
+            .expiry
+            .at = Instant::now() + Duration::from_secs(60);
+        assert!(hub.claim_receive_socket(&token, topic).await.is_none());
+    }
+}

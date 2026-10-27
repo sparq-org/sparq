@@ -1060,3 +1060,26 @@ async fn malformed_records_of_every_kind_remain_quarantined() {
         );
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn stream_subscription_expiry_defaults_and_overrides() {
+    let h = Harness::new().await;
+    let root = h.state.cfg.storage();
+    let reference = h.state.notify.high_water();
+    assert!(reference > 0);
+    h.state.notify.clock_offset.store(-3600, Ordering::SeqCst);
+    let default_until = reference + 86_400;
+    let specified_until = reference + 172_800;
+    for kind in [SSE, WEBSOCKET] {
+        let default = h.subscribe(kind, OWNER, &[&root]).await;
+        assert_eq!(default["expires"], format_rfc3339(default_until));
+        let response = h
+            .subscribe_as(kind, OWNER, &[&root], Some(specified_until))
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let specified = test_store::body_json(response).await;
+        assert_eq!(specified["expires"], format_rfc3339(specified_until));
+    }
+    let webhook = h.subscribe(WEBHOOK, OWNER, &[&root]).await;
+    assert!(webhook.get("expires").is_none());
+}

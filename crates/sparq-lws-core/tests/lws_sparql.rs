@@ -735,3 +735,25 @@ async fn malformed_rdf_has_an_empty_graph_and_anonymous_queries_use_their_view()
     assert_eq!(response.status(), StatusCode::OK);
     assert!(values(&body_json(response).await, "g").is_empty());
 }
+
+#[tokio::test]
+async fn document_blank_node_references_support_joins() {
+    let h = Harness::new(|_| {}).await;
+    h.create(
+        "shared",
+        "text/turtle",
+        "_:node <urn:p> \"value\"; <urn:self> _:node .",
+    )
+    .await;
+    let result = h
+        .query(
+            OWNER,
+            &format!(
+                "SELECT ?value {{ GRAPH <{BASE}/shared> {{
+                    ?node <urn:p> ?value; <urn:self> ?node
+                }} }}"
+            ),
+        )
+        .await;
+    assert_eq!(values(&result, "value"), BTreeSet::from(["value".into()]));
+}
