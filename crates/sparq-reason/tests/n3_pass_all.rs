@@ -3,9 +3,11 @@
 //!
 //! The load-bearing invariant is that the rules SURVIVE the round trip: under
 //! [`RuleVars::N3`] the emitted document re-parses to the same rule set, so re-running the
-//! reasoner over it is a fixpoint. That is what distinguishes `--pass-all` from `--pass`
-//! (whose output can derive nothing further) and it is what the eye-js `…_plus_rules`
-//! output modes buy.
+//! reasoner over it reaches a fixpoint when conclusions mint no fresh existentials and
+//! the output retains no unbound backward variables. Existentials get fresh labels on
+//! re-run; written unbound backward names become ordinary source variables on re-read,
+//! so re-deriving their formulas can add a distinct fact on each pass. Keeping the rules
+//! distinguishes `--pass-all` from `--pass` and supports the eye-js `…_plus_rules` modes.
 
 use sparq_reason::n3::{parser, Term};
 use sparq_reason::{reason_n3_pass_all, reason_n3_query_terms, reason_n3_terms, RuleVars};
@@ -370,4 +372,76 @@ fn an_annotation_on_an_exported_runtime_blank_joins_the_reparsed_node() {
     let annotated = format!("{once}\n_:{l} <http://ex/note> \"n\" .\n");
     assert_eq!(subjects(&annotated, "http://ex/joined"), derived, "{annotated}");
     assert_eq!(subjects(&annotated, "http://ex/derived"), derived, "{annotated}");
+}
+
+#[test]
+fn unbound_backward_output_grows_by_one_formula_per_pass() {
+    let src = "@prefix : <http://ex/> . :s :p :v .\n\
+               { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n\
+               { :s :has ?f } => { :out :got ?f } .";
+    let mut doc = src.to_string();
+    let mut names = Vec::new();
+    for pass in 1..=3 {
+        doc = reason_n3_pass_all(&doc, RuleVars::N3).expect("unbound backward pass-all");
+        assert_eq!(
+            doc.lines().count(),
+            pass + 3,
+            "one additional formula per pass: {doc}"
+        );
+        let parsed = parser::parse(&doc).expect("output parses");
+        let mut got: Vec<String> = parsed
+            .facts
+            .iter()
+            .filter_map(|t| {
+                if t[0] != Term::Iri("http://ex/out".into()) {
+                    return None;
+                }
+                let Term::Formula(ts) = &t[2] else {
+                    panic!("{t:?}")
+                };
+                assert_eq!(ts.len(), 1);
+                assert_eq!(ts[0][0], Term::Iri("http://ex/v".into()));
+                assert_eq!(ts[0][1], Term::Iri("http://ex/inner".into()));
+                let Term::Var(name) = &ts[0][2] else {
+                    panic!("{t:?}")
+                };
+                Some(name.clone())
+            })
+            .collect();
+        got.sort();
+        if pass == 1 {
+            assert_eq!(got.len(), 1);
+            assert!(
+                got[0].starts_with("__bx") && got[0].ends_with("_z"),
+                "{got:?}"
+            );
+            names.push(got[0].clone());
+        } else {
+            names.push(format!("{}_{}", names[0], pass));
+        }
+        assert_eq!(got, names, "the exact exported names grow deliberately");
+    }
+}
+
+#[test]
+fn fully_bound_backward_output_reaches_a_fixpoint() {
+    let src = "@prefix : <http://ex/> . :s :p ( :v :A ) .\n\
+               { ?x :has { ?y :inner ?z } } <= { ?x :p ( ?y ?z ) } .\n\
+               { :s :has ?f } => { :out :got ?f } .";
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("ground backward pass-all");
+    assert!(
+        doc.contains(
+            "<http://ex/out> <http://ex/got> { <http://ex/v> <http://ex/inner> <http://ex/A> . } ."
+        ),
+        "the returned formula is fully bound: {doc}"
+    );
+    assert_eq!(
+        doc.lines().count(),
+        4,
+        "one base fact, one answer and both rules"
+    );
+    let again = reason_n3_pass_all(&doc, RuleVars::N3).expect("second pass");
+    let third = reason_n3_pass_all(&again, RuleVars::N3).expect("third pass");
+    assert_eq!(again, doc);
+    assert_eq!(third, doc);
 }

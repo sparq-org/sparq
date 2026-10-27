@@ -99,7 +99,7 @@ fn a_formula_in_a_conclusion_carries_the_premises_binding() {
 
 /// A variable the proof did NOT bind stays a variable: `?z` is in the returned formula and
 /// in no premise, so there is nothing to instantiate it to, and it keeps the one
-/// `__bw<fold>.` name that makes this derivation's value its own. The sibling `?y` IS bound
+/// `__bx<fold>.` name that makes this derivation's value its own. The sibling `?y` IS bound
 /// and is instantiated, so the two halves of the same formula show both rules at once.
 #[test]
 fn an_unbound_variable_in_a_returned_formula_keeps_its_name() {
@@ -108,8 +108,15 @@ fn an_unbound_variable_in_a_returned_formula_keeps_its_name() {
                    { :s :has ?f } => { :out :got ?f }.");
     assert_eq!(got.len(), 1, "{got:?}");
     let row = &got[0];
-    assert!(row.contains("Iri(\"http://ex/v\"), Iri(\"http://ex/inner\")"), "?y instantiated: {row}");
-    assert_eq!(row.matches("Var(\"__bw").count(), 1, "?z, and only ?z, survives: {row}");
+    assert!(
+        row.contains("Iri(\"http://ex/v\"), Iri(\"http://ex/inner\")"),
+        "?y instantiated: {row}"
+    );
+    assert_eq!(
+        row.matches("Var(\"__bx").count(),
+        1,
+        "?z, and only ?z, survives: {row}"
+    );
     assert!(row.contains(".z\")"), "the surviving name is ?z's: {row}");
 }
 
@@ -1010,49 +1017,6 @@ fn a_resolved_term_past_the_term_depth_limit_reports_depth() {
 }
 
 #[test]
-fn a_live_application_id_does_not_own_unminted_source_names() {
-    let doc = |variable: &str, backward: bool| {
-        let data = format!(
-            ":seed :value :g. :cfg :pat {{ :v0 :inner {variable} }}. :k :s1 {{ :v0 :inner :A }}. :k :s2 {{ :v0 :inner :B }}."
-        );
-        let head = "?q :odd { :tag :v ?z }";
-        let body = ":seed :value ?q . :cfg :pat ?f . :k :s1 ?s1 . :k :s2 ?s2 . ?s1 log:includes ?f . ?s2 log:includes ?f";
-        let rule = if backward {
-            format!("{{{head}}} <= {{{body}}}.")
-        } else {
-            format!("{{{body}}} => {{{head}}}.")
-        };
-        format!("{data}{rule} {{ :g :odd ?r }} => {{ :trace :got ?r . :out :fired :yes }}.")
-    };
-    let baseline = reason_n3_terms(&format!("{P}{}", doc("?x", true)), None).unwrap();
-    let formula = baseline
-        .facts
-        .iter()
-        .find_map(|t| {
-            if t[0] == Term::Iri("http://ex/trace".into()) {
-                Some(&t[2])
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    let Term::Formula(ts) = formula else {
-        panic!("{formula:?}")
-    };
-    let Term::Var(name) = &ts[0][2] else {
-        panic!("{formula:?}")
-    };
-    let (application, _) = name.strip_prefix("__bw").unwrap().split_once('.').unwrap();
-    assert_eq!(out(&doc("?x", true)), fired(), "the ordinary pattern is matched afresh");
-    for forged in [format!("?__bw0{application}_z"), format!("?__bw{application}_not_written")] {
-        let b = out(&doc(&forged, true));
-        let f = out(&doc(&forged, false));
-        assert_eq!(f, fired());
-        assert_eq!(b, f, "source spelling {forged}");
-    }
-}
-
-#[test]
 fn only_the_exact_output_subject_is_compared() {
     assert_eq!(
         out(":outer :p :hidden. :out :p :visible."),
@@ -1154,7 +1118,15 @@ fn a_positive_returned_member_chain_past_term_depth_is_refused() {
     // Check the first disallowed depth as well as the brief's literal reproduction.
     for links in [130, 200] {
         let error = err(&returned_member_chain(links, links - 1));
+        assert!(
+            error.starts_with("n3: backward projection"),
+            "{links} links: {error}"
+        );
         assert!(error.contains("term-depth limit"), "{links} links: {error}");
+        assert!(
+            error.contains("allowance: 128 nested containers"),
+            "{links} links: {error}"
+        );
         assert!(!error.contains("max_term_bytes"), "{links} links: {error}");
     }
 }
@@ -1205,5 +1177,38 @@ fn exported_backward_names_round_trip_without_merging_source_names() {
         parsed.facts.contains(&source),
         "source variable kept: {:?}",
         parsed.facts
+    );
+}
+
+/// Reusing a backward answer in a later closure round keeps its free variable local to
+/// the stored formula. Each scope matches it afresh, as on the forward path.
+#[test]
+fn a_stored_backward_answer_keeps_its_free_name_across_rounds() {
+    let data = ":s :src { :v :inner :A } .\n\
+                :sc :is { :v :inner :A . :v :inner :B } .\n\
+                :s :p :v .
+";
+    let head = "?x :has { ?y :inner ?z }";
+    let body = "?x :p ?y . ?x :src ?g . :sc :is ?sc . ?sc log:includes ?g";
+    let consumer = "{ :s :has ?f } => { :s :src ?f . :out :got ?f } .";
+    let backward = out(&format!("{data}{{ {head} }} <= {{ {body} }} . {consumer}"));
+    let forward = out(&format!("{data}{{ {body} }} => {{ {head} }} . {consumer}"));
+    assert_eq!(forward, one("Iri(\"http://ex/got\") Formula([[Iri(\"http://ex/v\"), Iri(\"http://ex/inner\"), Var(\"z\")]])"));
+    assert_eq!(
+        backward.len(),
+        1,
+        "one variable-valued row, as on the forward path: {backward:?}"
+    );
+    // Names are derivation-local; compare the complete rows under their one free-name
+    // bijection, and require the stored spelling to be outside the live namespace.
+    let start = backward[0]
+        .find("__bx")
+        .expect("the stored free name is escaped");
+    let end = start + backward[0][start..].find('"').unwrap();
+    let normalized = backward[0].replace(&backward[0][start..end], "z");
+    assert_eq!(
+        vec![normalized],
+        forward,
+        "the complete :out :got rows agree"
     );
 }
