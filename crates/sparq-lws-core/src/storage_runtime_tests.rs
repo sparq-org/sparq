@@ -616,21 +616,37 @@ mod embedded {
             .await
             .unwrap();
         drop(store);
-        let journal = logs(&dir.0.join("index"))
+        let journals: Vec<_> = logs(&dir.0.join("index"))
             .into_iter()
-            .find(|path| fs::metadata(path).unwrap().len() > 0)
-            .unwrap();
-        let bytes = fs::read(&journal).unwrap();
-        // Durable compaction swaps the whole index, rather than each named graph separately.
-        // The core refuses an unexpected swap staging path without deleting its contents.
+            .map(|path| {
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect();
+        assert!(journals.iter().any(|(_, bytes)| !bytes.is_empty()));
+        // Compaction swaps the complete index tree at its root, even when the pending
+        // writes live in named graphs. Block that swap, independent of journal order.
         let staging = dir.0.join("index.compact-new");
         fs::create_dir(&staging).unwrap();
         fs::write(staging.join("foreign"), b"preserve").unwrap();
         let mut shutdown = StorageShutdown::default();
         shutdown.retain(&dir.config(), &client);
         drop(client);
-        assert!(shutdown.run(async { Ok(()) }, None).await.is_err());
-        assert_eq!(fs::read(&journal).unwrap(), bytes);
+        let failure = shutdown
+            .run(async { Ok(()) }, None)
+            .await
+            .expect_err("foreign staging must refuse shutdown compaction");
+        let message = failure.to_string();
+        assert!(message.contains("embedded engine compact"), "{message}");
+        assert!(message.contains(staging.to_str().unwrap()), "{message}");
+        for (path, bytes) in journals {
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                bytes,
+                "changed {}",
+                path.display()
+            );
+        }
         assert_eq!(fs::read(staging.join("foreign")).unwrap(), b"preserve");
         fs::remove_dir_all(staging).unwrap();
         let (client, blobs) = boot(&dir.config()).await.unwrap();
