@@ -35,7 +35,7 @@
 //!   (`read_plan` is the ONE combined read-plan SELECT on the live client — §3.1; the in-memory
 //!   double answers it in one atomic index pass, so the 1-query model holds for it too).
 //! - `put_meta` / `delete_meta` / `remove_child`: **1 update**.
-//! - `create_child`: **1 update + 1 query** (the guarded insert, then the create-marker ASK).
+//! - `create_child` / `replace_child`: **1 update + 1 query** (the guarded insert, then the create-marker ASK).
 //! - `delete_meta_if_empty`: **1 update**, then **1 query** (marker ASK) when the outcome is
 //!   `Deleted`, else **2 queries** (marker ASK + exists ASK).
 //!
@@ -454,6 +454,20 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.counters.count_update();
         self.counters.count_queries(1);
         self.inner.create_child(container, child, meta).await
+    }
+
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        let _g = self.counters.op_guard();
+        // Model the HTTP default's single create_child (guarded update + create-marker ASK), while
+        // preserving the inner client's atomic replacement.
+        self.counters.count_update();
+        self.counters.count_queries(1);
+        self.inner.replace_child(container, child, meta).await
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {

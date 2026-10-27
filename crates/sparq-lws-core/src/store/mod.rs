@@ -702,6 +702,15 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         }
     }
 
+    // A settled failure cannot publish another reference later. The index's reclaim
+    // guard preserves a record that committed before an error reply, and any holds.
+    // An unsettled commit may still publish the key, so its bytes must remain.
+    async fn reclaim_failed_write(&self, key: &str, error: &SparqError) {
+        if !matches!(error, SparqError::Unsettled { .. }) {
+            self.reclaim_blob(key).await;
+        }
+    }
+
     /// Whether a hold taken through this instance on the bytes under `key` stands.
     fn holds_locally(&self, key: &str) -> bool {
         self.holding
@@ -995,14 +1004,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // bumps it, so a later conditional GET correctly re-serves the changed representation.
             last_modified: Some(crate::clock::now()),
         };
-        let previous = self
-            .sparq
-            .replace_meta(iri, meta.clone())
-            .await
-            .map_err(|e| match e {
-                SparqError::QuotaExceeded => ServerError::InsufficientStorage,
-                other => ServerError::Storage(format!("{other}")),
-            })?;
+        let previous = match self.sparq.replace_meta(iri, meta.clone()).await {
+            Ok(previous) => previous,
+            Err(e) => {
+                self.reclaim_failed_write(&meta.blob_key, &e).await;
+                return Err(map_sparq(e));
+            }
+        };
         // The index now points at `blob_key`; the superseded body is unreferenced. Reclaim it so
         // sustained rewrites cannot fill the blob store with dead versions.
         if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
@@ -1019,21 +1027,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
         refuse_marker(&[Some(container), Some(child)])?;
-        // Write the bytes FIRST (content-addressed by key; idempotent), then commit the child's
-        // metadata AND its containment edge in ONE atomic index operation (`create_child`). Because
-        // the metadata + the edge commit together, there is no window in which the edge exists
-        // without backing metadata — so the POST path needs NO removal-based compensation and a
-        // concurrent same-IRI creator can never observe or tear down a half-built containment. A
-        // missing container ⇒ 404; the bytes written above are then orphaned and GC'd by the
-        // reconciler — the same crash-consistency model `write` documents. (The handler only takes
-        // this path for an absent child; a concurrent same-IRI create that wins the race overwrites
-        // this record, and the key it replaced is left for the reconciler, as `create_child` does not
-        // report the record it replaced.)
-        //
-        // The child's blob key is minted UNIQUE PER WRITE (`mint_blob_key`), so a concurrent same-IRI
-        // create writes a disjoint object and cannot collide with this one on a shared key. Minting FAILS
-        // CLOSED on an unavailable OS RNG (the create errors rather than minting a weak, possibly-colliding
-        // key), so the no-shared-key invariant holds even then.
+        // Publish bytes before committing the child record and containment together. The
+        // native indexes report the replaced record so its bytes can be reclaimed; remote
+        // clients leave any superseded key to the reconciler.
         let blob_key = Self::mint_blob_key(child)?;
         let etag = Self::etag_for(content_type, &body);
         self.blob.put(&blob_key, body).await.map_err(|e| match e {
@@ -1050,16 +1046,18 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         match self
             .sparq
-            .create_child(container, child, meta.clone())
+            .replace_child(container, child, meta.clone())
             .await
         {
-            Ok(()) => Ok(meta),
-            Err(SparqError::NotFound) => Err(ServerError::NotFound),
-            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
-            // Its bytes stay: the record may still commit pointing at them.
-            Err(SparqError::Unsettled { detail, fence }) => {
-                Err(ServerError::Unsettled { detail, fence })
+            Ok(previous) => {
+                if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
+                    self.reclaim_blob(&old.blob_key).await;
+                }
+                Ok(meta)
+            }
+            Err(e) => {
+                self.reclaim_failed_write(&meta.blob_key, &e).await;
+                Err(map_sparq(e))
             }
         }
     }
@@ -1083,11 +1081,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             ..meta.clone()
         };
         let committed = match container {
-            Some(c) => self
-                .sparq
-                .create_child(c, iri, meta.clone())
-                .await
-                .map(|()| None),
+            Some(c) => self.sparq.replace_child(c, iri, meta.clone()).await,
             None => self.sparq.replace_meta(iri, meta.clone()).await,
         };
         match committed {
@@ -1167,11 +1161,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         refuse_marker(&[Some(iri), container])?;
         // As `restore`, pointing at the held bytes rather than a copy: the hold keeps them.
         let committed = match container {
-            Some(c) => self
-                .sparq
-                .create_child(c, iri, held.clone())
-                .await
-                .map(|()| None),
+            Some(c) => self.sparq.replace_child(c, iri, held.clone()).await,
             None => self.sparq.replace_meta(iri, held.clone()).await,
         };
         let previous = committed.map_err(map_sparq)?;
@@ -1457,6 +1447,8 @@ fn fnv1a_chain<'a>(bytes: impl Iterator<Item = &'a u8>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    mod blob_lifecycle;
     use super::*;
     use crate::store::blob::InMemoryBlobStore;
     use crate::store::sparq::InMemorySparqClient;
@@ -2039,6 +2031,14 @@ mod tests {
             meta: ResourceMeta,
         ) -> Result<(), SparqError> {
             self.0.create_child(container, child, meta).await
+        }
+        async fn replace_child(
+            &self,
+            container: &str,
+            child: &str,
+            meta: ResourceMeta,
+        ) -> Result<Option<ResourceMeta>, SparqError> {
+            self.0.replace_child(container, child, meta).await
         }
         async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
             self.0.remove_child(container, child).await
