@@ -100,6 +100,9 @@ LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
 
 ## Choose a data backend
 
+For embedded directory opens, lock lifetimes, and the optional boot-time wait for
+another live holder, see [native storage](references/native-storage.md).
+
 Set `PSS_SPARQ_BACKEND` to one of:
 
 - `memory` (default): an ephemeral in-memory test double.
@@ -117,8 +120,11 @@ Set `PSS_SPARQ_BACKEND` to one of:
   a missing outside lock or poisoned transaction journal), or stopped actor returns a
   backend error. After an indeterminate commit or job panic, the actor closes its queue and
   drops pending jobs, including sends already in flight; their callers receive the stopped-actor
-  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
-  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  error and must restart to recover. Dropping the last client joins its actor thread and drops
+  its directory locks before returning. Explicit unlock prevents descriptor copies inherited
+  between fork and exec from extending that lifetime. Embedded opens attempt once and refuse
+  live holders immediately; see [native storage](references/native-storage.md).
+  A refused compaction that leaves the graph unfrozen keeps reads and
   writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must

@@ -62,7 +62,9 @@
 //! the one strict improvement: `Mutex` wakeups were arbitrary, so a caller could be starved.
 //!
 //! Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the actor thread.
-//! Its graph and directory lock are released before drop returns.
+//! Its graph explicitly unlocks the directory before drop returns, even if a child between fork
+//! and exec still holds inherited descriptors. [`EmbeddedSparqClient::open`] attempts the open
+//! once and immediately refuses a directory held by another live holder.
 //!
 //! ## Persistence
 //! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
@@ -139,8 +141,9 @@ struct GraphActor {
 impl GraphActor {
     /// Move `graph` onto a fresh dedicated OS thread and start serving jobs.
     ///
-    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread, releasing
-    /// the graph's directory lock before returning. A spawn failure is a backend error.
+    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread,
+    /// dropping the graph and releasing its directory locks before returning, including when a
+    /// child retains inherited descriptors. A spawn failure is a backend error.
     fn spawn(graph: Graph) -> Result<Self, SparqError> {
         let (tx, rx) = mpsc::unbounded_channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -289,6 +292,9 @@ impl EmbeddedSparqClient {
 
     /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
     /// snapshot). The on-disk path the persistence option selects.
+    ///
+    /// Attempts the open once. A live holder is refused immediately; a dropped graph explicitly
+    /// releases its locks even when a child still holds inherited descriptors.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
         let graph = Graph::open(dir).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))

@@ -686,7 +686,12 @@ are crate-internal), and every memory-mapped part of a graph carries the lock: i
 the graph, any mapped `fork()`/`snapshot()`, or a graph rebuilt
 around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the graphs `compact`,
 `vacuum` and `restore_in_place` swap in. A second holder, in another process or this one, gets
-`WouldBlock` at once. Rules that follow:
+`WouldBlock` at once. When the final graph or mapped view drops, its owning process explicitly
+unlocks the inside and outside files before closing them. Temporary descriptor copies,
+including those inherited by a child between fork and exec, do not extend that lock lifetime.
+A guard inherited by a forked child skips explicit unlock on drop, preserving the parent's
+live lock. Independent shared readers and mapped views continue to hold their own locks.
+Rules that follow:
 
 - **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
   from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused

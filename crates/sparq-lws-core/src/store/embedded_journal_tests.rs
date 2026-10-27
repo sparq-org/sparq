@@ -44,6 +44,198 @@ impl Drop for Directory {
     }
 }
 
+async fn drop_then_reopen_loop(dir: Directory) {
+    for i in 0..500 {
+        let open = |phase| {
+            EmbeddedSparqClient::open(&dir.0).unwrap_or_else(|error| {
+                panic!("iteration {i}, {phase}({}) failed: {error}", dir.0.display())
+            })
+        };
+        let c = open("open before write");
+        c.put_meta(CHILD, meta(&format!("record-{i}")))
+            .await
+            .unwrap();
+        assert_eq!(Arc::strong_count(&c.actor), 1);
+        let actor = Arc::downgrade(&c.actor);
+        drop(c);
+        assert!(
+            actor.upgrade().is_none(),
+            "the actor must not outlive its last client"
+        );
+        let reopened = open("reopen after drop");
+        assert_eq!(
+            reopened.get_meta(CHILD).await.unwrap(),
+            meta(&format!("record-{i}"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn drop_then_reopen_without_child_processes() {
+    drop_then_reopen_loop(Directory::empty()).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn drop_then_reopen_while_spawning_child_processes() {
+    // Keep the fork stress in its own process: it must not inject inherited lock handles
+    // into unrelated tests of Graph's intentionally immediate lock-refusal contract.
+    const STRESS_CHILD: &str = "SPARQ_REOPEN_STRESS_CHILD";
+    if std::env::var_os(STRESS_CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "store::embedded::journal_tests::drop_then_reopen_while_spawning_child_processes",
+                "--nocapture",
+            ])
+            .env(STRESS_CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    // Finish creating the empty store before any fork can inherit its save's locks.
+    let dir = Directory::empty();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = stop.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+    let child_thread = std::thread::spawn(move || {
+        let mut spawned = 0;
+        while !stopped.load(Ordering::Relaxed) {
+            assert!(std::process::Command::new("true")
+                .status()
+                .unwrap()
+                .success());
+            spawned += 1;
+            if spawned == 1 {
+                ready_tx.send(()).unwrap();
+            }
+        }
+        spawned
+    });
+    // Establish that child spawning has started before the first directory open.
+    ready_rx.recv().unwrap();
+    let result = tokio::spawn(drop_then_reopen_loop(dir)).await;
+    stop.store(true, Ordering::Relaxed);
+    assert!(child_thread.join().unwrap() > 0);
+    result.unwrap();
+}
+
+#[tokio::test]
+async fn directory_open_refuses_both_live_lock_files_and_reopens_after_drop() {
+    use sparq_core::dir_lock::{DirLock, LockLocation};
+
+    for inside in [false, true] {
+        let dir = Directory::empty();
+        // The sibling of the dummy path `sparq` is the store's inside `sparq.lock`.
+        let target = if inside {
+            dir.0.join("sparq")
+        } else {
+            dir.0.clone()
+        };
+        let held = DirLock::acquire(LockLocation::sibling_of(&target).unwrap()).unwrap();
+        let error = EmbeddedSparqClient::open(&dir.0)
+            .err()
+            .expect("a live lock holder must be refused");
+        assert!(
+            matches!(error, SparqError::Backend(ref message) if message.contains("is locked:")),
+            "{error}"
+        );
+        drop(held);
+        let c = dir.open();
+        c.put_meta(CHILD, meta("after-contention")).await.unwrap();
+        drop(c);
+        assert_eq!(
+            dir.open().get_meta(CHILD).await.unwrap(),
+            meta("after-contention")
+        );
+    }
+}
+
+const HOLDER_DIRECTORY: &str = "SPARQ_REOPEN_HOLDER_DIRECTORY";
+
+#[test]
+fn embedded_lock_holder_process() {
+    use std::io::{Read, Write};
+
+    let Some(dir) = std::env::var_os(HOLDER_DIRECTORY) else {
+        return;
+    };
+    let _held = Graph::open(std::path::Path::new(&dir)).unwrap();
+    println!("store lock ready");
+    std::io::stdout().flush().unwrap();
+    let mut release = [0];
+    // EOF also releases the holder if the parent test panics or is terminated.
+    let _ = std::io::stdin().read(&mut release).unwrap();
+}
+
+#[test]
+fn a_live_process_holder_is_refused() {
+    use std::io::{BufRead, Write};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct Holder(Child);
+    impl Drop for Holder {
+        fn drop(&mut self) {
+            if let Some(mut stdin) = self.0.stdin.take() {
+                let _ = stdin.write_all(b"x");
+            }
+            self.0.wait().unwrap();
+        }
+    }
+
+    let dir = Directory::empty();
+    let mut holder = Holder(
+        Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "store::embedded::journal_tests::embedded_lock_holder_process",
+                "--nocapture",
+            ])
+            .env(HOLDER_DIRECTORY, &dir.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdout = std::io::BufReader::new(holder.0.stdout.take().unwrap());
+    loop {
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "holder exited before locking"
+        );
+        if line.trim() == "store lock ready" {
+            break;
+        }
+    }
+    let started = Instant::now();
+    let error = EmbeddedSparqClient::open(&dir.0)
+        .err()
+        .expect("a live holder must be refused");
+    assert!(
+        matches!(error, SparqError::Backend(ref message) if message.contains("is locked:")),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "open must return while the holder is still alive"
+    );
+    assert!(
+        holder.0.try_wait().unwrap().is_none(),
+        "the holder must still be alive"
+    );
+    drop(holder);
+    drop(dir.open());
+}
+
 #[test]
 fn every_embedded_update_uses_the_commit_helper() {
     let source = include_str!("embedded.rs");

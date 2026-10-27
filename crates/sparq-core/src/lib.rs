@@ -6696,7 +6696,7 @@ struct StagedBase {
     old_dir: std::path::PathBuf,
     id: String,
     role: Role,
-    new_inside: Option<std::fs::File>,
+    new_inside: Option<dir_lock::InsideLock>,
     _locks: (dir_lock::DirLock, dir_lock::DirLock),
 }
 
@@ -6762,7 +6762,7 @@ where
 /// swap until the new base is in place, then by the graph); on Windows only created (a file held
 /// open inside the directory would block its rename), and locked after the renames.
 #[cfg(feature = "mmap")]
-fn new_inside_lock(new_dir: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+fn new_inside_lock(new_dir: &std::path::Path) -> std::io::Result<Option<dir_lock::InsideLock>> {
     #[cfg(not(windows))]
     {
         let file = std::fs::OpenOptions::new()
@@ -6774,7 +6774,7 @@ fn new_inside_lock(new_dir: &std::path::Path) -> std::io::Result<Option<std::fs:
             fs4::TryLockError::WouldBlock => std::io::Error::from(std::io::ErrorKind::WouldBlock),
             fs4::TryLockError::Error(e) => e,
         })?;
-        Ok(Some(file))
+        Ok(Some(dir_lock::InsideLock::new(file)))
     }
     #[cfg(windows)]
     {
@@ -6855,7 +6855,7 @@ impl StagedBase {
         #[cfg(not(windows))]
         let old_inside = root_lock.map(|lock| lock.replace_inside(new_inside));
         #[cfg(windows)]
-        let old_inside: Option<Option<std::fs::File>> = {
+        let old_inside: Option<Option<dir_lock::InsideLock>> = {
             let _ = new_inside;
             if let Some(lock) = root_lock {
                 lock.lock_inside().map_err(changed)?;
