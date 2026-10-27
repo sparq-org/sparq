@@ -546,9 +546,9 @@ fn structure_rejects_cross_graph_bnode_join() {
 
 #[test]
 fn witness_gen_filter_int_satisfiable() {
-    if !support::require_toolchain("witness_gen_filter_int_satisfiable", &["nargo", "bb"]) {
+    let Some(live) = support::gate("witness_gen_filter_int_satisfiable", &["nargo", "bb"]) else {
         return;
-    }
+    };
     // tag-isolated witness gen: previously this relied on targeting a
     // member (filter_int_d4) no other concurrent test touches, because the
     // witness path was shared per package. The driver now isolates the
@@ -569,13 +569,17 @@ fn witness_gen_filter_int_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "wg_filter_d4")
         .expect("witness satisfiable");
+    support::complete(live);
 }
 
 #[test]
 fn witness_gen_filter_int_rejects_false_verdict() {
-    if !support::require_toolchain("witness_gen_filter_int_rejects_false_verdict", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "witness_gen_filter_int_rejects_false_verdict",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // 17 >= 18 is false; claim true -> witness generation must fail.
     // tag-isolated: this targets filter_int_d1, shared with the
     // forge/full-prove tests, so it MUST NOT use the shared witness path.
@@ -590,6 +594,7 @@ fn witness_gen_filter_int_rejects_false_verdict() {
         prover.gen_witness_tagged(&id, &toml, "wg_filter_d1_false").is_err(),
         "a lying verdict must be unsatisfiable"
     );
+    support::complete(live);
 }
 
 // roborev codex 2207: end-to-end `!=` (FilterCmp/FilterOp::Ne).
@@ -598,9 +603,10 @@ fn witness_gen_filter_int_rejects_false_verdict() {
 // `filter_int` circuit's `!eq` verdict branch through the engine seam.
 #[test]
 fn witness_gen_filter_int_ne_satisfiable() {
-    if !support::require_toolchain("witness_gen_filter_int_ne_satisfiable", &["nargo", "bb"]) {
+    let Some(live) = support::gate("witness_gen_filter_int_ne_satisfiable", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     // 30 != 18 is true. Tag-isolated witness gen (filter_int_d2, value "30").
     let operand_enc = encode_int_literal(30);
     let (filter, digits) =
@@ -612,13 +618,17 @@ fn witness_gen_filter_int_ne_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "wg_filter_ne_d2")
         .expect("30 != 18 witness satisfiable");
+    support::complete(live);
 }
 
 #[test]
 fn witness_gen_filter_int_ne_rejects_false_verdict() {
-    if !support::require_toolchain("witness_gen_filter_int_ne_rejects_false_verdict", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "witness_gen_filter_int_ne_rejects_false_verdict",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // Forge: 18 != 18 is FALSE; claim the `!=` verdict is true -> witness
     // generation must fail (the circuit's `!eq` branch cannot be satisfied).
     // Tag-isolated (filter_int_d2, value "18"), distinct from the satisfiable
@@ -634,13 +644,14 @@ fn witness_gen_filter_int_ne_rejects_false_verdict() {
         prover.gen_witness_tagged(&id, &toml, "wg_filter_ne_d2_false").is_err(),
         "a lying `!=` verdict (18 != 18 claimed true) must be unsatisfiable"
     );
+    support::complete(live);
 }
 
 #[test]
 fn witness_gen_scan_satisfiable() {
-    if !support::require_toolchain("witness_gen_scan_satisfiable", &["nargo", "bb"]) {
+    let Some(live) = support::gate("witness_gen_scan_satisfiable", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let salt = salt_from_bytes(&[7u8; 32]);
     let commit = commit_triples(&credential_graph(), salt).unwrap();
     let pattern = Pattern {
@@ -662,6 +673,7 @@ fn witness_gen_scan_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "wg_scan")
         .expect("scan witness satisfiable");
+    support::complete(live);
 }
 
 // --- full bb prove -> verify ---------------------------------------------
@@ -669,9 +681,9 @@ fn witness_gen_scan_satisfiable() {
 /// NON-ignored full prove+verify on the smallest member (gated on toolchain).
 #[test]
 fn full_prove_verify_filter_int_d1() {
-    if !support::require_toolchain("full_prove_verify_filter_int_d1", &["nargo", "bb"]) {
+    let Some(live) = support::gate("full_prove_verify_filter_int_d1", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let operand_enc = encode_int_literal(5);
     let (filter, digits) =
         build_filter_int(operand_enc, 5, FilterOp::Lt, 10, true).unwrap();
@@ -695,6 +707,7 @@ fn full_prove_verify_filter_int_d1() {
         .verify(&bad, &out.join("verify_bad"))
         .expect("verify runs");
     assert!(!rejected, "tampered proof must be rejected");
+    support::complete(live);
 }
 
 /// roborev codex 2207: NON-ignored full prove+verify of a `Ne`
@@ -704,9 +717,9 @@ fn full_prove_verify_filter_int_d1() {
 /// Tag-isolated (shares filter_int_d1 with the other full-prove/forge tests).
 #[test]
 fn full_prove_verify_filter_int_ne_d1() {
-    if !support::require_toolchain("full_prove_verify_filter_int_ne_d1", &["nargo", "bb"]) {
+    let Some(live) = support::gate("full_prove_verify_filter_int_ne_d1", &["nargo", "bb"]) else {
         return;
-    }
+    };
     // 5 != 9 is true.
     let operand_enc = encode_int_literal(5);
     let (filter, digits) =
@@ -730,15 +743,16 @@ fn full_prove_verify_filter_int_ne_d1() {
         .verify(&bad, &out.join("verify_bad"))
         .expect("verify runs");
     assert!(!rejected, "tampered `!=` proof must be rejected");
+    support::complete(live);
 }
 
 /// Full manifest prove -> verify with the artifact-bundling path.
 #[test]
 #[ignore = "slow: full bb prove of a scan member"]
 fn full_manifest_prove_verify_scan() {
-    if !support::require_toolchain("full_manifest_prove_verify_scan", &["nargo", "bb"]) {
+    let Some(live) = support::gate("full_manifest_prove_verify_scan", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let salt = salt_from_bytes(&[7u8; 32]);
     let commit = commit_triples(&credential_graph(), salt).unwrap();
     let pattern = Pattern {
@@ -803,6 +817,7 @@ fn full_manifest_prove_verify_scan() {
         &InMemorySeenNonces::new(),
     )
     .expect("manifest verifies");
+    support::complete(live);
 }
 
 // --- forge-and-verify NEGATIVE tests (audit #1/#2) ------------------------
@@ -926,9 +941,10 @@ fn filter_manifest(
 /// verify_manifest path (reconstruction byte-matches, canonical vk verifies).
 #[test]
 fn forge_positive_honest_filter_verifies() {
-    if !support::require_toolchain("forge_positive_honest_filter_verifies", &["nargo", "bb"]) {
+    let Some(live) = support::gate("forge_positive_honest_filter_verifies", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let challenge = FieldHex("0x2a".into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "forge_pos_scan");
@@ -949,6 +965,7 @@ fn forge_positive_honest_filter_verifies() {
         &InMemorySeenNonces::new(),
     )
     .expect("honest manifest verifies");
+    support::complete(live);
 }
 
 /// Audit #1: a GENUINE proof over statement A (5 < 10 = true) presented under a
@@ -958,9 +975,9 @@ fn forge_positive_honest_filter_verifies() {
 /// (bound=10) => PublicInputMismatch. Before #1 this returned Ok(()).
 #[test]
 fn forge_reject_statement_substitution() {
-    if !support::require_toolchain("forge_reject_statement_substitution", &["nargo", "bb"]) {
+    let Some(live) = support::gate("forge_reject_statement_substitution", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let challenge = FieldHex("0x2a".into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "forge_sub_scan");
@@ -986,15 +1003,16 @@ fn forge_reject_statement_substitution() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("expected PublicInputMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// Audit #1: substituting the declared verdict (claim 5 >= 10 is true, while the
 /// proof is for the genuine false verdict) is rejected by the byte-compare.
 #[test]
 fn forge_reject_verdict_substitution() {
-    if !support::require_toolchain("forge_reject_verdict_substitution", &["nargo", "bb"]) {
+    let Some(live) = support::gate("forge_reject_verdict_substitution", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let challenge = FieldHex("0x2a".into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "forge_verdict_scan");
@@ -1021,6 +1039,7 @@ fn forge_reject_verdict_substitution() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("expected PublicInputMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// Audit #4 (challenge byte-binding): a proof committed under challenge 0x2a,
@@ -1031,9 +1050,9 @@ fn forge_reject_verdict_substitution() {
 /// #4 replay defence: a captured proof cannot be replayed under a fresh nonce.
 #[test]
 fn forge_reject_challenge_rebind() {
-    if !support::require_toolchain("forge_reject_challenge_rebind", &["nargo", "bb"]) {
+    let Some(live) = support::gate("forge_reject_challenge_rebind", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let proof_challenge = FieldHex("0x2a".into());
     let (scan_inputs, scan_hex) = honest_age_scan(&proof_challenge, &prover, "forge_chal_scan");
@@ -1058,6 +1077,7 @@ fn forge_reject_challenge_rebind() {
         Err(CheckError::PublicInputMismatch { proof: 0 }) => {}
         other => panic!("expected PublicInputMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
 // --- audit #4: replay / freshness / single-use end-to-end tests -----------
@@ -1093,9 +1113,10 @@ fn honest_nonce_manifest(
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (audit #4 happy path)"]
 fn nonce_happy_path_fresh_nonce_verifies() {
-    if !support::require_toolchain("nonce_happy_path_fresh_nonce_verifies", &["nargo", "bb"]) {
+    let Some(live) = support::gate("nonce_happy_path_fresh_nonce_verifies", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     // The relying party's fresh nonce for THIS session. The prover proves under
     // it (challenge == the nonce) and the binding declares it.
@@ -1115,6 +1136,7 @@ fn nonce_happy_path_fresh_nonce_verifies() {
         &InMemorySeenNonces::new(),
     )
     .expect("fresh-nonce honest manifest verifies");
+    support::complete(live);
 }
 
 /// Audit #4 (a) REPLAY UNDER A NEW NONCE: a manifest+proof captured from an
@@ -1126,9 +1148,10 @@ fn nonce_happy_path_fresh_nonce_verifies() {
 #[test]
 #[ignore = "slow: full bb prove (audit #4 replay-under-new-nonce)"]
 fn nonce_replay_under_new_nonce_rejected() {
-    if !support::require_toolchain("nonce_replay_under_new_nonce_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("nonce_replay_under_new_nonce_rejected", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     // Captured proof: committed challenge 0x2a. The adversary re-presents it to a
     // fresh verifier whose nonce is 0xbeef, forging a consistent 0xbeef binding.
@@ -1156,6 +1179,7 @@ fn nonce_replay_under_new_nonce_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 0 }) => {}
         other => panic!("expected PublicInputMismatch (replay under fresh nonce), got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// Audit #4 (b) SINGLE-USE: the SAME (nonce, manifest) presented twice to the
@@ -1165,9 +1189,12 @@ fn nonce_replay_under_new_nonce_rejected() {
 #[test]
 #[ignore = "slow: full bb prove (audit #4 single-use store)"]
 fn nonce_single_use_second_presentation_rejected() {
-    if !support::require_toolchain("nonce_single_use_second_presentation_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "nonce_single_use_second_presentation_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let nonce_hex = "0x2a";
     let challenge = FieldHex(nonce_hex.into());
@@ -1205,6 +1232,7 @@ fn nonce_single_use_second_presentation_rejected() {
         Err(CheckError::NonceReplay) => {}
         other => panic!("expected NonceReplay on the second presentation, got {other:?}"),
     }
+    support::complete(live);
 }
 
 /// Audit #4 (consistency + replay policy): a manifest whose declared binding
@@ -1972,9 +2000,9 @@ fn holder_binding_unrelated_attestation_does_not_satisfy_scoped_check() {
 #[test]
 #[ignore = "slow: full bb prove of a scan member under a HolderPop binding (sq-cwq)"]
 fn holder_pop_valid_verifies_end_to_end() {
-    if !support::require_toolchain("holder_pop_valid_verifies_end_to_end", &["nargo", "bb"]) {
+    let Some(live) = support::gate("holder_pop_valid_verifies_end_to_end", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let salt = salt_from_bytes(&[7u8; 32]);
     let commit = commit_triples(&credential_graph(), salt).unwrap();
     let pattern = Pattern {
@@ -2041,6 +2069,7 @@ fn holder_pop_valid_verifies_end_to_end() {
         &InMemorySeenNonces::new(),
     )
     .expect("a valid HolderPop manifest must verify end-to-end");
+    support::complete(live);
 }
 
 /// sq-dua (audit hardening): a MALFORMED `proof_hex` blob is prover-controlled and
@@ -2166,6 +2195,7 @@ fn forge_reject_noncanonical_vk() {
         Err(CheckError::ProofRejected { proof: 1 }) => {}
         other => panic!("expected ProofRejected (canonical vk defeats attacker vk), got {other:?}"),
     }
+    support::complete(gate);
 }
 
 /// Audit #2 corollary: the prover-supplied `art.vk` is genuinely IGNORED — an
@@ -2174,9 +2204,9 @@ fn forge_reject_noncanonical_vk() {
 /// vk, not art.vk, is the one bb uses.)
 #[test]
 fn forge_artvk_is_ignored() {
-    if !support::require_toolchain("forge_artvk_is_ignored", &["nargo", "bb"]) {
+    let Some(live) = support::gate("forge_artvk_is_ignored", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let challenge = FieldHex("0x2a".into());
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "forge_ignorevk_scan");
@@ -2200,6 +2230,7 @@ fn forge_artvk_is_ignored() {
         &InMemorySeenNonces::new(),
     )
     .expect("honest proof verifies despite a garbage bundled vk (canonical vk is used)");
+    support::complete(live);
 }
 
 /// Compile + prove a trivial ATTACKER circuit that has the same 5 public inputs
@@ -4282,9 +4313,9 @@ fn forge_wrong_length_attribution_rejected() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the scan reconstruct unit test"]
 fn probe_scan_public_inputs_hex() {
-    if !support::require_toolchain("probe_scan_public_inputs_hex", &["nargo", "bb"]) {
+    let Some(live) = support::gate("probe_scan_public_inputs_hex", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let salt = salt_from_bytes(&[7u8; 32]);
     let commit = commit_triples(&credential_graph(), salt).unwrap();
     let pattern = Pattern {
@@ -4303,6 +4334,46 @@ fn probe_scan_public_inputs_hex() {
     eprintln!("SCAN_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("SCAN_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("SCAN_INPUTS_JSON={}", serde_json::to_string(&scan.inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::Scan {
+        commitments,
+        pattern_is_const,
+        pattern_const_enc,
+        rows,
+        row_count,
+        attribution,
+        ..
+    } = &scan.inputs
+    else {
+        panic!("scan_k1: scan inputs");
+    };
+    // zk/compose/scan_k1_n16_r4/src/main.nr: challenge, commitments, pattern_is_const,
+    // pattern_const_enc, rows, row_count, attribution.
+    let mut want = vec![field(&challenge)];
+    want.extend(commitments.iter().map(field));
+    want.extend(pattern_is_const.iter().map(|b| small(u64::from(*b))));
+    want.extend(pattern_const_enc.iter().map(field));
+    let CircuitId::Scan { r, .. } = scan.inputs.circuit_id() else {
+        panic!("scan probe requires a scan circuit id");
+    };
+    assert!(rows.len() <= *r as usize, "scan rows exceed circuit capacity");
+    want.extend(rows.iter().flatten().map(field));
+    want.extend(std::iter::repeat_n([0; 32], (*r as usize - rows.len()) * 3));
+    want.push(small(u64::from(*row_count)));
+    want.extend(attribution.iter().map(|b| small(u64::from(*b))));
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "scan_k1: bb public_inputs differ from the scan_k1_n16_r4 ABI reconstruction"
+    );
+    support::complete(live);
 }
 
 /// sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
@@ -4315,9 +4386,9 @@ fn probe_scan_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the filter_f64 reconstruct unit test"]
 fn probe_filter_f64_public_inputs_hex() {
-    if !support::require_toolchain("probe_filter_f64_public_inputs_hex", &["nargo", "bb"]) {
+    let Some(live) = support::gate("probe_filter_f64_public_inputs_hex", &["nargo", "bb"]) else {
         return;
-    }
+    };
     // operand = 25.0 (xsd:double), FILTER(?o >= 18.0) -> true. value has 2
     // digits => filter_f64_d2 member.
     let value: u64 = 25;
@@ -4334,6 +4405,38 @@ fn probe_filter_f64_public_inputs_hex() {
     eprintln!("FILTER_F64_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("FILTER_F64_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("FILTER_F64_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::FilterF64 {
+        operand_enc,
+        op,
+        b_bits,
+        expected,
+        ..
+    } = &inputs
+    else {
+        panic!("filter_f64 inputs");
+    };
+    // zk/compose/filter_f64_d2/src/main.nr: challenge, operand_enc, op, b_bits, expected.
+    let want = [
+        field(&challenge),
+        field(operand_enc),
+        small(u64::from(op.code())),
+        small(*b_bits),
+        small(u64::from(*expected)),
+    ];
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "filter_f64: bb public_inputs differ from the filter_f64_d2 ABI reconstruction"
+    );
+    support::complete(live);
 }
 
 /// sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
@@ -4345,9 +4448,12 @@ fn probe_filter_f64_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the filter_signed_int reconstruct unit test"]
 fn probe_filter_signed_int_public_inputs_hex() {
-    if !support::require_toolchain("probe_filter_signed_int_public_inputs_hex", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "probe_filter_signed_int_public_inputs_hex",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // operand = -42 (xsd:integer, md=2), FILTER(?o < 1) -> true.
     let operand_enc = encode_signed_int_literal(-42);
     let (inputs, witness) =
@@ -4363,6 +4469,42 @@ fn probe_filter_signed_int_public_inputs_hex() {
     eprintln!("FILTER_SIGNED_INT_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("FILTER_SIGNED_INT_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("FILTER_SIGNED_INT_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::FilterSignedInt {
+        operand_enc,
+        op,
+        bound_neg,
+        bound,
+        expected,
+        ..
+    } = &inputs
+    else {
+        panic!("filter_signed_int inputs");
+    };
+    // zk/compose/filter_signed_int_d2/src/main.nr: challenge, operand_enc, op,
+    // bound_neg, bound, expected.
+    let want = [
+        field(&challenge),
+        field(operand_enc),
+        small(u64::from(op.code())),
+        small(u64::from(*bound_neg)),
+        small(*bound),
+        small(u64::from(*expected)),
+    ];
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "filter_signed_int: bb public_inputs differ from the filter_signed_int_d2 ABI \
+         reconstruction"
+    );
+    support::complete(live);
 }
 
 /// sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
@@ -4372,9 +4514,10 @@ fn probe_filter_signed_int_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the filter_decimal reconstruct unit test"]
 fn probe_filter_decimal_public_inputs_hex() {
-    if !support::require_toolchain("probe_filter_decimal_public_inputs_hex", &["nargo", "bb"]) {
+    let Some(live) = support::gate("probe_filter_decimal_public_inputs_hex", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     // operand = 123.45 (xsd:decimal, i3 f2), FILTER(?o > 123.40) -> true.
     // bound_scaled = round(123.40 * 100) = 12340.
     let operand_enc = encode_decimal_literal(false, 123, "45");
@@ -4392,6 +4535,42 @@ fn probe_filter_decimal_public_inputs_hex() {
     eprintln!("FILTER_DECIMAL_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("FILTER_DECIMAL_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("FILTER_DECIMAL_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::FilterDecimal {
+        operand_enc,
+        op,
+        bound_neg,
+        bound_scaled,
+        expected,
+        ..
+    } = &inputs
+    else {
+        panic!("filter_decimal inputs");
+    };
+    // zk/compose/filter_decimal_i3_f2/src/main.nr: challenge, operand_enc, op,
+    // bound_neg, bound_scaled, expected.
+    let want = [
+        field(&challenge),
+        field(operand_enc),
+        small(u64::from(op.code())),
+        small(u64::from(*bound_neg)),
+        small(*bound_scaled),
+        small(u64::from(*expected)),
+    ];
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "filter_decimal: bb public_inputs differ from the filter_decimal_i3_f2 ABI \
+         reconstruction"
+    );
+    support::complete(live);
 }
 
 /// sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
@@ -4405,9 +4584,9 @@ fn probe_filter_decimal_public_inputs_hex() {
 #[test]
 #[ignore = "probe: prints real bb public_inputs hex for the scan_k2 reconstruct unit test"]
 fn probe_scan_k2_public_inputs_hex() {
-    if !support::require_toolchain("probe_scan_k2_public_inputs_hex", &["nargo", "bb"]) {
+    let Some(live) = support::gate("probe_scan_k2_public_inputs_hex", &["nargo", "bb"]) else {
         return;
-    }
+    };
     // Two distinct named-graph credentials, each committed under its OWN salt
     // (mirrors real ingest), each carrying SEVERAL `ex:age` triples so the union
     // of matched rows exceeds the r=4 bucket and the build derives the r=8 member
@@ -4444,6 +4623,46 @@ fn probe_scan_k2_public_inputs_hex() {
     eprintln!("SCAN_K2_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("SCAN_K2_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("SCAN_K2_INPUTS_JSON={}", serde_json::to_string(&scan.inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::Scan {
+        commitments,
+        pattern_is_const,
+        pattern_const_enc,
+        rows,
+        row_count,
+        attribution,
+        ..
+    } = &scan.inputs
+    else {
+        panic!("scan_k2: scan inputs");
+    };
+    // zk/compose/scan_k2_n16_r8/src/main.nr: challenge, commitments, pattern_is_const,
+    // pattern_const_enc, rows, row_count, attribution.
+    let mut want = vec![field(&challenge)];
+    want.extend(commitments.iter().map(field));
+    want.extend(pattern_is_const.iter().map(|b| small(u64::from(*b))));
+    want.extend(pattern_const_enc.iter().map(field));
+    let CircuitId::Scan { r, .. } = scan.inputs.circuit_id() else {
+        panic!("scan probe requires a scan circuit id");
+    };
+    assert!(rows.len() <= *r as usize, "scan rows exceed circuit capacity");
+    want.extend(rows.iter().flatten().map(field));
+    want.extend(std::iter::repeat_n([0; 32], (*r as usize - rows.len()) * 3));
+    want.push(small(u64::from(*row_count)));
+    want.extend(attribution.iter().map(|b| small(u64::from(*b))));
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "scan_k2: bb public_inputs differ from the scan_k2_n16_r8 ABI reconstruction"
+    );
+    support::complete(live);
 }
 
 // ===========================================================================
@@ -4858,9 +5077,12 @@ fn revocation_within_window_verifies() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (audit #12 happy path)"]
 fn revocation_full_prove_verify_non_revoked_verifies() {
-    if !support::require_toolchain("revocation_full_prove_verify_non_revoked_verifies", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "revocation_full_prove_verify_non_revoked_verifies",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let challenge = FieldHex("0x2a".into());
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "rev_happy_scan");
@@ -4882,6 +5104,7 @@ fn revocation_full_prove_verify_non_revoked_verifies() {
         &InMemorySeenNonces::new(),
     )
     .expect("non-revoked, fresh credential verifies through the full pipeline");
+    support::complete(live);
 }
 
 /// (6) FORGE (slow, real bb prove+verify): a REVOKED credential presented with a
@@ -4899,9 +5122,12 @@ fn revocation_full_prove_verify_non_revoked_verifies() {
 #[test]
 #[ignore = "slow: full bb prove (audit #12 revoked-end-to-end forge)"]
 fn revocation_full_prove_verify_revoked_rejected() {
-    if !support::require_toolchain("revocation_full_prove_verify_revoked_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "revocation_full_prove_verify_revoked_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let challenge = FieldHex("0x2a".into());
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "rev_forge_scan");
@@ -4926,6 +5152,7 @@ fn revocation_full_prove_verify_revoked_rejected() {
         Err(CheckError::CredentialRevoked { .. }) => {}
         other => panic!("expected CredentialRevoked end-to-end (authoritative bit set), got {other:?}"),
     }
+    support::complete(live);
 }
 
 // ===========================================================================
@@ -5177,9 +5404,12 @@ fn committed_index_disclosed_commitment_mismatch_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + the hidden-revocation member"]
 fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
-    if !support::require_toolchain("hidden_revocation_unrevoked_verifies_and_index_is_private", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_revocation_unrevoked_verifies_and_index_is_private",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let (mut manifest, _salt) = hidden_scan_manifest(&prover, "hidden_scan_ok");
     let challenge = Fr::from(0x2au64); // the proof commits 0x2a as field 0
@@ -5237,17 +5467,22 @@ fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
         &InMemorySeenNonces::new(),
     )
     .expect("unrevoked hidden-index credential verifies end-to-end (clear index withheld)");
+    support::complete(live);
 }
 
 /// REVOKED index: the holder of a REVOKED credential CANNOT produce the proof.
 /// `revoke_unset_d10` asserts the leaf bit is 0; for a set bit the witness is
-/// unsatisfiable, so `prove_in` (nargo execute) fails to produce a witness.
+/// unsatisfiable, so `nargo execute` fails to produce a witness.
 #[test]
-#[ignore = "slow: attempts a bb prove that must be unsatisfiable"]
+#[ignore = "requires pinned nargo and bb; executes honest and revoked witnesses"]
 fn hidden_revocation_revoked_index_is_unprovable() {
-    if !support::require_toolchain("hidden_revocation_revoked_index_is_unprovable", &["nargo", "bb"]) {
+    use sparq_zk_compose::driver::DriverError;
+    let Some(live) = support::gate(
+        "hidden_revocation_revoked_index_is_unprovable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let challenge = Fr::from(0x2au64);
     // Authoritative snapshot with index 3 SET (revoked).
@@ -5259,16 +5494,33 @@ fn hidden_revocation_revoked_index_is_unprovable() {
     assert_eq!(witness.bit, Fr::from(1u64), "revoked index has bit set");
     let blinding = fixture_blinding();
     let index_commitment = sparq_zk::sig::status_index_commitment(FIXTURE_STATUS_INDEX, &blinding);
+    let honest_snapshot = hidden_snapshot(false);
+    let honest_root = merkle_root(&honest_snapshot, HIDDEN_DEPTH).unwrap();
+    let honest_witness = merkle_witness(&honest_snapshot, HIDDEN_DEPTH, FIXTURE_STATUS_INDEX).unwrap();
+    assert_eq!(honest_witness.bit, Fr::from(0u64), "honest index has bit unset");
+    let honest_toml = revoke_prover_toml(
+        &challenge, &honest_root, &index_commitment, FIXTURE_STATUS_INDEX, &blinding, &honest_witness,
+    );
+    let honest_id = CircuitId::RevokeUnset { depth: HIDDEN_DEPTH };
+    prover.compile(&honest_id).expect("hidden-index revocation member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "hidden_revoked_control")
+        .expect("honest unrevoked hidden-index witness executes");
+    assert!(control.is_file(), "honest hidden-index assignment must produce a witness");
     let toml = revoke_prover_toml(
         &challenge, &root, &index_commitment, FIXTURE_STATUS_INDEX, &blinding, &witness,
     );
     let id = CircuitId::RevokeUnset { depth: HIDDEN_DEPTH };
-    let out = scratch("hidden_revoked");
-    let res = prover.prove_in(&id, &toml, &out, "hidden_revoked");
-    assert!(
-        res.is_err(),
-        "a REVOKED credential's hidden-index bit-unset proof must be unprovable (the in-circuit bit==0 assertion fails)"
-    );
+    assert_eq!(id, honest_id, "control and revoked index must use the same member");
+    // revoke_unset_check_committed calls the bit-unset assert before any path or opening checks.
+    match prover.gen_witness_tagged(&id, &toml, "hidden_revoked") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("credential is revoked: status bit is set"),
+            "revoked index must fail the bit-unset constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the revoked-status-bit diagnostic, got {other:?}"),
+    }
+    support::complete(live);
 }
 
 /// FORGED ROOT: a prover proves bit-unset against its OWN all-zero tree (a forged
@@ -5278,9 +5530,10 @@ fn hidden_revocation_revoked_index_is_unprovable() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + a forged-root hidden-revocation proof"]
 fn hidden_revocation_forged_root_rejected() {
-    if !support::require_toolchain("hidden_revocation_forged_root_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("hidden_revocation_forged_root_rejected", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let (mut manifest, _salt) = hidden_scan_manifest(&prover, "hidden_scan_forge");
     let challenge = Fr::from(0x2au64);
@@ -5319,6 +5572,7 @@ fn hidden_revocation_forged_root_rejected() {
         Err(CheckError::HiddenRevocationRootMismatch) => {}
         other => panic!("a forged-root hidden-revocation proof must be HiddenRevocationRootMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
 // ===========================================================================
@@ -5542,9 +5796,10 @@ fn prove_fully_hidden_revocation(
 #[test]
 #[ignore = "slow: full bb prove of a scan + a fully-hidden revocation proof"]
 fn full_manifest_fully_hidden_revocation() {
-    if !support::require_toolchain("full_manifest_fully_hidden_revocation", &["nargo", "bb"]) {
+    let Some(live) = support::gate("full_manifest_fully_hidden_revocation", &["nargo", "bb"])
+    else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let (mut manifest, _salt) = fully_hidden_scan_manifest(&prover, "fh_scan", "0x2a");
     let policy = fully_hidden_policy(false);
@@ -5590,16 +5845,21 @@ fn full_manifest_fully_hidden_revocation() {
         &InMemorySeenNonces::new(),
     )
     .expect("a well-formed fully-hidden revocation presentation verifies");
+    support::complete(live);
 }
 
 /// A REVOKED credential cannot even PRODUCE the proof: the in-circuit `bit == 0`
 /// assertion is unsatisfiable. The liveness fact is cryptographic, not advisory.
 #[test]
-#[ignore = "slow: full bb prove attempt of a revoked fully-hidden proof"]
+#[ignore = "requires pinned nargo and bb; executes honest and revoked fully-hidden witnesses"]
 fn fully_hidden_revocation_revoked_credential_unprovable() {
-    if !support::require_toolchain("fully_hidden_revocation_revoked_credential_unprovable", &["nargo", "bb"]) {
+    use sparq_zk_compose::driver::DriverError;
+    let Some(live) = support::gate(
+        "fully_hidden_revocation_revoked_credential_unprovable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let policy = fully_hidden_policy(true); // authoritative snapshot has the bit SET
     let snapshot = hidden_snapshot(true);
@@ -5610,17 +5870,43 @@ fn fully_hidden_revocation_revoked_credential_unprovable() {
     let ic = fixture_index_commitment();
     let anchor = policy.accepted_set_root().expect("anchor");
     let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
+    let honest_policy = fully_hidden_policy(false);
+    let honest_snapshot = hidden_snapshot(false);
+    let honest_entries = honest_policy.accepted_entries().expect("honest entries");
+    let honest_witness = hidden_ref_witness(
+        &honest_entries, FH_SET_DEPTH, &honest_snapshot, HIDDEN_DEPTH, FIXTURE_STATUS_INDEX,
+    ).expect("honest witness");
+    assert_eq!(honest_witness.merkle.bit, Fr::from(0u64), "honest index has bit unset");
+    assert_eq!(witness.merkle.bit, Fr::from(1u64), "revoked index has bit set");
+    let honest_anchor = honest_policy.accepted_set_root().expect("honest anchor");
+    let honest_toml = revoke_hidden_ref_prover_toml(
+        &Fr::from(0x2au64), &rc, &ic, &honest_anchor, honest_policy.min_version(),
+        &list_id, FIXTURE_STATUS_VERSION, &fixture_ref_blinding(),
+        FIXTURE_STATUS_INDEX, &fixture_blinding(), &honest_witness,
+    );
+    let honest_id = CircuitId::RevokeHiddenRef { depth: HIDDEN_DEPTH, set_depth: FH_SET_DEPTH };
+    prover.compile(&honest_id).expect("fully-hidden revocation member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "fh_revoked_control")
+        .expect("honest unrevoked fully-hidden witness executes");
+    assert!(control.is_file(), "honest fully-hidden assignment must produce a witness");
     let toml = revoke_hidden_ref_prover_toml(
         &Fr::from(0x2au64), &rc, &ic, &anchor, policy.min_version(),
         &list_id, FIXTURE_STATUS_VERSION, &fixture_ref_blinding(),
         FIXTURE_STATUS_INDEX, &fixture_blinding(), &witness,
     );
     let id = CircuitId::RevokeHiddenRef { depth: HIDDEN_DEPTH, set_depth: FH_SET_DEPTH };
-    let out = scratch("fh_revoked");
-    assert!(
-        prover.prove_in(&id, &toml, &out, "fh_revoked").is_err(),
-        "a REVOKED credential's fully-hidden proof must be unprovable (the in-circuit bit==0 assertion fails)"
-    );
+    assert_eq!(id, honest_id, "control and revoked credential must use the same member");
+    // The revoked snapshot has matching ref opening, fresh version and accepted-set path;
+    // revoke_hidden_ref_check then fails at revoke_unset_check_committed's bit-unset assert.
+    match prover.gen_witness_tagged(&id, &toml, "fh_revoked") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("credential is revoked: status bit is set"),
+            "revoked credential must fail the bit-unset constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the revoked-status-bit diagnostic, got {other:?}"),
+    }
+    support::complete(live);
 }
 
 /// FORGED ANCHOR: a prover proves membership in its OWN accepted set (one whose
@@ -5632,9 +5918,12 @@ fn fully_hidden_revocation_revoked_credential_unprovable() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + a forged-anchor fully-hidden proof"]
 fn fully_hidden_revocation_forged_anchor_rejected() {
-    if !support::require_toolchain("fully_hidden_revocation_forged_anchor_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "fully_hidden_revocation_forged_anchor_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let (mut manifest, _salt) = fully_hidden_scan_manifest(&prover, "fh_scan_forge", "0x2a");
     // The prover's OWN policy over a FORGED all-active status list -- same (list,
@@ -5677,6 +5966,7 @@ fn fully_hidden_revocation_forged_anchor_rejected() {
             "a forged-anchor fully-hidden proof must be FullyHiddenRevocationAnchorMismatch, got {other:?}"
         ),
     }
+    support::complete(live);
 }
 
 /// RE-BLINDING ENFORCEMENT (design sec 4, the single most important operational
@@ -5688,9 +5978,12 @@ fn fully_hidden_revocation_forged_anchor_rejected() {
 #[test]
 #[ignore = "slow: two full bb proves of a scan + fully-hidden revocation proof"]
 fn fully_hidden_revocation_linkage_reuse_rejected() {
-    if !support::require_toolchain("fully_hidden_revocation_linkage_reuse_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "fully_hidden_revocation_linkage_reuse_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let policy = fully_hidden_policy(false);
     let seen = InMemorySeenNonces::new();
@@ -5721,6 +6014,7 @@ fn fully_hidden_revocation_linkage_reuse_rejected() {
             "re-presenting the SAME (ref_commitment, index_commitment) pair under a fresh nonce must be FullyHiddenRevocationLinkageReplay (the holder must re-blind), got {other:?}"
         ),
     }
+    support::complete(live);
 }
 
 // --- structural (no bb) fully-hidden gates --------------------------------
@@ -6289,9 +6583,12 @@ fn hi_canonical_signers() -> Vec<SecretKey> {
 #[test]
 #[ignore = "slow: full bb prove of a scan + the hidden-issuer member"]
 fn hidden_issuer_in_set_verifies_and_key_is_private() {
-    if !support::require_toolchain("hidden_issuer_in_set_verifies_and_key_is_private", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_issuer_in_set_verifies_and_key_is_private",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let signer = test_issuer_sk(1); // the fixture issuer, a member of K
     let (mut manifest, c, salt) = hi_scan_manifest(&prover, &signer, "hi_scan_ok");
@@ -6334,6 +6631,7 @@ fn hidden_issuer_in_set_verifies_and_key_is_private() {
         &keyset, &fresh_policy(), &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(), &nonce_for("0x2a"), &InMemorySeenNonces::new(),
     )
     .expect("in-set hidden-issuer attestation verifies end-to-end");
+    support::complete(live);
 }
 
 /// Build a scan manifest with NO clear `commitment_attestations` and NO declared
@@ -6394,9 +6692,12 @@ fn hi_scan_manifest_no_clear_attestation(
 #[test]
 #[ignore = "slow: full bb prove of a scan + the hidden-issuer member (sq-xxg hidden-only)"]
 fn hidden_issuer_only_verifies_with_clear_key_absent() {
-    if !support::require_toolchain("hidden_issuer_only_verifies_with_clear_key_absent", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_issuer_only_verifies_with_clear_key_absent",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let signer = test_issuer_sk(1); // a member of K; WHICH is hidden by the proof
     let (mut manifest, c, salt) =
@@ -6436,6 +6737,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
         !json.to_ascii_lowercase().contains(&signer_hex_norm),
         "the clear issuer key must not appear anywhere in the hidden-only manifest"
     );
+    support::complete(live);
 }
 
 /// HIDDEN-ONLY, METHOD POLICY: the manifest's `hidden_issuer_attestations[i].message`
@@ -6453,9 +6755,12 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
 #[ignore = "slow: full bb prove of a scan + the hidden-issuer member (hidden-only method policy)"]
 fn hidden_issuer_only_message_is_held_to_the_method_policy() {
     use sparq_zk_compose::MethodPolicy;
-    if !support::require_toolchain("hidden_issuer_only_message_is_held_to_the_method_policy", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "hidden_issuer_only_message_is_held_to_the_method_policy",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let signer = test_issuer_sk(1);
     let (mut manifest, c, salt) =
@@ -6506,6 +6811,7 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
             other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
         }
     }
+    support::complete(live);
 }
 
 /// OUT-OF-SET KEY: a REAL signature by an issuer NOT in K. Its signature is valid
@@ -6514,11 +6820,15 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
 /// proof is UNPROVABLE (nargo produces no witness). This is the in-circuit analogue
 /// of the clear-path IssuerKeyNotInKeySet forge.
 #[test]
-#[ignore = "slow: attempts a bb prove that must be unsatisfiable (out-of-set key)"]
+#[ignore = "requires pinned nargo and bb; executes honest and out-of-set issuer witnesses"]
 fn hidden_issuer_out_of_set_key_is_unprovable() {
-    if !support::require_toolchain("hidden_issuer_out_of_set_key_is_unprovable", &["nargo", "bb"]) {
+    use sparq_zk_compose::driver::DriverError;
+    let Some(live) = support::gate(
+        "hidden_issuer_out_of_set_key_is_unprovable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let outsider = test_issuer_sk(99); // NOT in K
     let signers = hi_canonical_signers();
@@ -6539,25 +6849,47 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
     let pks: Vec<_> = signers.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).unwrap();
     let siblings = key_membership_witness(&pks, HI_DEPTH, 0).unwrap();
+    // Canonical slot 0's own signer is the honest control for this same path.
+    let signer = &signers[0];
+    let honest_sig = sparq_zk::sig::signature_from_hex(
+        &signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme()),
+    ).unwrap();
+    let honest_schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &honest_sig).unwrap();
+    let honest_witness = HiddenIssuerWitness { schnorr: honest_schnorr, index: 0, siblings: siblings.clone() };
+    let honest_toml = hidden_issuer_prover_toml(&challenge, &m, &root, &honest_witness);
+    let honest_id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
+    prover.compile(&honest_id).expect("hidden-issuer member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "hi_outset_control")
+        .expect("honest in-set issuer witness executes");
+    assert!(control.is_file(), "honest in-set issuer must produce a witness");
     let witness = HiddenIssuerWitness { schnorr, index: 0, siblings };
     let toml = hidden_issuer_prover_toml(&challenge, &m, &root, &witness);
     let id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
-    let out = scratch("hi_outset");
-    let res = prover.prove_in(&id, &toml, &out, "hi_outset");
-    assert!(
-        res.is_err(),
-        "an out-of-set issuer's hidden-issuer proof must be unprovable (the in-circuit membership assertion fails)"
-    );
+    assert_eq!(id, honest_id, "control and out-of-set issuer must use the same member");
+    // The outsider's valid signature passes schnorr_verify before key_set_membership fails.
+    match prover.gen_witness_tagged(&id, &toml, "hi_outset") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("issuer key is not a member of the committed key set"),
+            "out-of-set issuer must fail the membership constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the issuer-key membership diagnostic, got {other:?}"),
+    }
+    support::complete(live);
 }
 
 /// FORGED SIGNATURE: a tampered signature scalar makes the in-circuit verification
 /// equation s*G == R + e*pk unsatisfiable, so the proof is UNPROVABLE.
 #[test]
-#[ignore = "slow: attempts a bb prove that must be unsatisfiable (forged sig)"]
+#[ignore = "requires pinned nargo and bb; executes honest and forged signature witnesses"]
 fn hidden_issuer_forged_signature_is_unprovable() {
-    if !support::require_toolchain("hidden_issuer_forged_signature_is_unprovable", &["nargo", "bb"]) {
+    use sparq_zk_compose::driver::DriverError;
+    let Some(live) = support::gate(
+        "hidden_issuer_forged_signature_is_unprovable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let signer = test_issuer_sk(1);
     let signers = hi_canonical_signers();
@@ -6571,19 +6903,33 @@ fn hidden_issuer_forged_signature_is_unprovable() {
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
     let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
-    let mut schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
-    // Tamper s: now s*G != R + e*pk, the in-circuit equation is unsatisfiable.
-    schnorr.s += Fr::from(1u64);
+    let schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     let signer_index = keyset.member_index(&public_key_to_hex(&signer.public_key())).unwrap() as u64;
     let pks: Vec<_> = signers.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).unwrap();
     let siblings = key_membership_witness(&pks, HI_DEPTH, signer_index).unwrap();
-    let witness = HiddenIssuerWitness { schnorr, index: signer_index, siblings };
+    let mut witness = HiddenIssuerWitness { schnorr, index: signer_index, siblings };
+    let honest_toml = hidden_issuer_prover_toml(&challenge, &m, &root, &witness);
+    let honest_id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
+    prover.compile(&honest_id).expect("hidden-issuer member compiles");
+    let control = prover.gen_witness_tagged(&honest_id, &honest_toml, "hi_forgesig_control")
+        .expect("honest issuer signature witness executes");
+    assert!(control.is_file(), "honest issuer signature must produce a witness");
+    // Tamper only s after the honest assignment has executed.
+    // This fixture's s + 1 is still canonical; pk, R and the challenge are unchanged.
+    witness.schnorr.s += Fr::from(1u64);
     let toml = hidden_issuer_prover_toml(&challenge, &m, &root, &witness);
     let id = CircuitId::HiddenIssuer { depth: HI_DEPTH };
-    let out = scratch("hi_forgesig");
-    let res = prover.prove_in(&id, &toml, &out, "hi_forgesig");
-    assert!(res.is_err(), "a forged signature must be unprovable (s*G != R + e*pk)");
+    assert_eq!(id, honest_id, "control and forged signature must use the same member");
+    match prover.gen_witness_tagged(&id, &toml, "hi_forgesig") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute"
+                && stderr.contains("schnorr verification equation failed"),
+            "forged signature must fail the Schnorr equation, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the Schnorr-equation diagnostic, got {other:?}"),
+    }
+    support::complete(live);
 }
 
 /// FORGED KEY-SET ROOT: a prover proves membership in its OWN (forged) key set
@@ -6593,9 +6939,9 @@ fn hidden_issuer_forged_signature_is_unprovable() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + a forged-root hidden-issuer proof"]
 fn hidden_issuer_forged_root_rejected() {
-    if !support::require_toolchain("hidden_issuer_forged_root_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate("hidden_issuer_forged_root_rejected", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let signer = test_issuer_sk(1);
     let (mut manifest, c, salt) = hi_scan_manifest(&prover, &signer, "hi_scan_forge");
@@ -6639,23 +6985,14 @@ fn hidden_issuer_forged_root_rejected() {
         Err(CheckError::HiddenIssuerRootMismatch) => {}
         other => panic!("a forged-root hidden-issuer proof must be HiddenIssuerRootMismatch, got {other:?}"),
     }
+    support::complete(live);
 }
 
-/// FAIL-CLOSED: a hidden-issuer attestation present but the relying party did NOT
-/// enable the path (no with_hidden_issuer_depth) is rejected -- the verifier will
-/// not accept a root it cannot itself derive. (Fast: structural reject before bb.)
+/// Empty sub-proof bytes are refused before hidden-issuer policy checks or tools.
 #[test]
-fn hidden_issuer_not_enabled_rejected() {
+fn missing_subproof_precedes_hidden_issuer_policy_check() {
     let prover = CircuitProver::from_crate_root();
-    // A manifest with a (dummy-proof) hidden-issuer attestation.
     let mut m = sample_manifest();
-    // sample_manifest has 2 sub-proofs with empty proof_hex; we only need the
-    // STRUCTURAL path to reach bind_hidden_issuer_attestations, but verify_manifest
-    // runs the sub-proof bb loop first. Use a scan-only manifest with a real proof
-    // is heavy; instead assert the gate directly is exercised by the depth opt-in.
-    // Here we just confirm the KeySet without the opt-in rejects at the gate by
-    // calling with a manifest whose sub-proofs are empty -> MissingProof first.
-    // So this test asserts the policy plumbing via a unit-level check below.
     m.hidden_issuer_attestations = vec![HiddenIssuerAttestation {
         commitment: FieldHex("0x1".into()),
         depth: HI_DEPTH,
@@ -6666,17 +7003,16 @@ fn hidden_issuer_not_enabled_rejected() {
     }];
     // KeySet WITHOUT the hidden-issuer opt-in.
     let k = KeySet::from_hex_keys([public_key_to_hex(&test_issuer_sk(1).public_key())]);
-    // The sub-proof loop rejects MissingProof first (empty proof_hex), which still
-    // proves the path is wired; the dedicated NotEnabled assertion is exercised by
-    // the unit test in verifier.rs. We assert SOME rejection here (fail-closed).
+    // This pins only the earlier empty-proof refusal; it does not reach the
+    // hidden-issuer policy check.
     let res = verify_manifest(
         &m, &prover, &scratch("hi_notenabled"),
         &k, &fresh_policy(), &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(), &nonce_for("0x2a"), &InMemorySeenNonces::new(),
     );
-    // zk-toolchain-gate: allow deliberately broad (`SOME rejection`, per the comment above):
-    //   the empty sub-proofs are refused as MissingProof before the bb loop, and tracing this
-    //   test with a recording nargo/bb shim on PATH records no spawn
-    assert!(res.is_err(), "a manifest with hidden-issuer attestation under a non-opted-in KeySet must be rejected");
+    assert!(
+        matches!(res, Err(CheckError::MissingProof { .. })),
+        "empty sub-proof bytes must be refused as MissingProof before tool use: {res:?}"
+    );
 }
 
 // --- sq-q7e + sq-tat: MANIFEST-COMPOSABLE xsd:double FILTER ---------------------
@@ -6712,9 +7048,12 @@ fn double_credential_graph(score: u64) -> Vec<Triple> {
 /// operand, not a free input). Toolchain-gated (real nargo execute).
 #[test]
 fn filter_f64_witness_honest_proves_lie_rejected() {
-    if !support::require_toolchain("filter_f64_witness_honest_proves_lie_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "filter_f64_witness_honest_proves_lie_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // operand = 25.0 (xsd:double), FILTER(?o >= 18.0) — true.
     let value: u64 = 25;
     let operand_enc = encode_double_literal(value);
@@ -6739,6 +7078,7 @@ fn filter_f64_witness_honest_proves_lie_rejected() {
         lie.is_err(),
         "SOUNDNESS: a FALSE xsd:double FILTER verdict (25.0 >= 18.0 = false) must be UNprovable"
     );
+    support::complete(live);
 }
 
 /// sq-q7e/sq-tat (soundness): a prover cannot substitute a DIFFERENT operand than
@@ -6747,9 +7087,12 @@ fn filter_f64_witness_honest_proves_lie_rejected() {
 /// `operand_enc` encodes fails the in-circuit `operand encoding mismatch` assert.
 #[test]
 fn filter_f64_operand_binding_rejects_substituted_value() {
-    if !support::require_toolchain("filter_f64_operand_binding_rejects_substituted_value", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "filter_f64_operand_binding_rejects_substituted_value",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // operand_enc is for 25.0, but the prover witnesses digits for 99 (two digits,
     // same member d=2) and claims 99 >= 18 = true. The token rebuilt from "99"
     // hashes to a DIFFERENT operand_enc than the committed "25", so the binding
@@ -6769,6 +7112,7 @@ fn filter_f64_operand_binding_rejects_substituted_value() {
         "SOUNDNESS: witnessing a value (99) different from the operand_enc the scan \
          committed (25) must fail the canonical-token binding (operand encoding mismatch)"
     );
+    support::complete(live);
 }
 
 /// sq-7lrq (soundness, composable path): the COMPOSABLE signed-int host
@@ -6779,9 +7123,12 @@ fn filter_f64_operand_binding_rejects_substituted_value() {
 /// pins — but exercising the host build/render path the manifest actually uses.
 #[test]
 fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
-    if !support::require_toolchain("filter_signed_int_composable_witness_honest_proves_lie_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "filter_signed_int_composable_witness_honest_proves_lie_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // operand = -42 (xsd:integer, md=2), FILTER(?o < 1) — true (a negative is < +1).
     let operand_enc = encode_signed_int_literal(-42);
     let (inputs, witness) =
@@ -6806,6 +7153,7 @@ fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
         lie.is_err(),
         "SOUNDNESS: a FALSE signed-int FILTER verdict (-42 < 1 = false) must be UNprovable"
     );
+    support::complete(live);
 }
 
 /// sq-7lrq (soundness, composable path): the COMPOSABLE decimal host
@@ -6814,9 +7162,12 @@ fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
 /// manifest-composable wiring against the real decimal token binding.
 #[test]
 fn filter_decimal_composable_witness_honest_proves_lie_rejected() {
-    if !support::require_toolchain("filter_decimal_composable_witness_honest_proves_lie_rejected", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "filter_decimal_composable_witness_honest_proves_lie_rejected",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // operand = 123.45 (xsd:decimal, i3 f2), FILTER(?o > 123.40) — true.
     // bound_scaled = round(123.40 * 100) = 12340.
     let operand_enc = encode_decimal_literal(false, 123, "45");
@@ -6843,6 +7194,7 @@ fn filter_decimal_composable_witness_honest_proves_lie_rejected() {
         lie.is_err(),
         "SOUNDNESS: a FALSE decimal FILTER verdict (123.45 > 123.40 = false) must be UNprovable"
     );
+    support::complete(live);
 }
 
 /// sq-q7e/sq-tat (END-TO-END composition): a float-FILTER sub-proof participates in
@@ -6854,9 +7206,9 @@ fn filter_decimal_composable_witness_honest_proves_lie_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + composable filter_f64 member (sq-q7e/sq-tat)"]
 fn filter_f64_composes_end_to_end() {
-    if !support::require_toolchain("filter_f64_composes_end_to_end", &["nargo", "bb"]) {
+    let Some(live) = support::gate("filter_f64_composes_end_to_end", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let salt = salt_from_bytes(&[7u8; 32]);
     let score: u64 = 25;
     let commit = commit_triples(&double_credential_graph(score), salt).unwrap();
@@ -6935,6 +7287,7 @@ fn filter_f64_composes_end_to_end() {
         &InMemorySeenNonces::new(),
     )
     .expect("a composed manifest with a float-FILTER sub-proof must verify end-to-end");
+    support::complete(live);
 }
 
 /// sq-q7e/sq-tat: a 5-digit (out-of-family) integer-valued double operand errors
@@ -7294,12 +7647,12 @@ fn completeness_demand_leaves_simple_regime_verifiable() {
             (the deferred member resolution)"]
 fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
     use sparq_zk_compose::MethodPolicy;
-    if !support::require_toolchain(
+    let Some(live) = support::gate(
         "a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate",
         &["nargo", "bb"],
-    ) {
+    ) else {
         return;
-    }
+    };
     let prover = CircuitProver::from_crate_root();
     let signer = test_issuer_sk(1);
     let challenge_hex = FieldHex("0x2a".into());
@@ -7438,6 +7791,7 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
              different methods, got {other:?}"
         ),
     }
+    support::complete(live);
 }
 
 #[cfg(feature = "dual-leaf")]
@@ -7453,39 +7807,54 @@ mod v2_members_live {
     #[test]
     #[ignore = "real V2 scan proof and full manifest verification"]
     fn live_v2_scan_verifies_end_to_end() {
-        if !support::require_toolchain("live_v2_scan_verifies_end_to_end", &["nargo", "bb"]) { return; }
+        let Some(live) = support::gate("live_v2_scan_verifies_end_to_end", &["nargo", "bb"]) else {
+            return;
+        };
         let (mut m, graphs) = fixture(true, false);
         prove_all(&mut m, &graphs, false, "live_v2_scan");
         check(&m, "live_v2_scan_verify").expect("honest V2 scan verifies end to end");
+        support::complete(live);
     }
 
     #[test]
     #[ignore = "real V2 scan and join proofs and full manifest verification"]
     fn live_v2_join_verifies_end_to_end() {
-        if !support::require_toolchain("live_v2_join_verifies_end_to_end", &["nargo", "bb"]) { return; }
+        let Some(live) = support::gate("live_v2_join_verifies_end_to_end", &["nargo", "bb"]) else {
+            return;
+        };
         let (mut m, graphs) = fixture(true, true);
         prove_all(&mut m, &graphs, true, "live_v2_join");
         check(&m, "live_v2_join_verify").expect("honest V2 join verifies end to end");
+        support::complete(live);
     }
 
     #[test]
     #[ignore = "real V2 scan proof checked directly against the opaque member VK"]
     fn live_v2_scan_cross_vk_is_refused() {
-        if !support::require_toolchain("live_v2_scan_cross_vk_is_refused", &["nargo", "bb"]) { return; }
+        let Some(live) = support::gate("live_v2_scan_cross_vk_is_refused", &["nargo", "bb"]) else {
+            return;
+        };
         cross_vk(true);
+        support::complete(live);
     }
 
     #[test]
     #[ignore = "real V2 join proof checked directly against the opaque member VK"]
     fn live_v2_join_cross_vk_is_refused() {
-        if !support::require_toolchain("live_v2_join_cross_vk_is_refused", &["nargo", "bb"]) { return; }
+        let Some(live) = support::gate("live_v2_join_cross_vk_is_refused", &["nargo", "bb"]) else {
+            return;
+        };
         cross_vk(false);
+        support::complete(live);
     }
 
     #[test]
     #[ignore = "real opaque scan over V2 encodings checked against the V2 member VK"]
     fn live_opaque_scan_cross_v2_vk_is_refused() {
-        if !support::require_toolchain("live_opaque_scan_cross_v2_vk_is_refused", &["nargo", "bb"]) { return; }
+        let Some(live) = support::gate("live_opaque_scan_cross_v2_vk_is_refused", &["nargo", "bb"])
+        else {
+            return;
+        };
         let (m, graphs) = fixture(true, false);
         let p = CircuitProver::from_crate_root();
         let opaque = CircuitId::Scan { k: 1, n: 16, r: 4 };
@@ -7498,6 +7867,7 @@ mod v2_members_live {
             &scratch("opaque_v2_wrong_vk")).unwrap();
         assert!(!p.verify_with(&art.proof, &art.public_inputs, &wrong_vk,
             &scratch("opaque_v2_wrong")).unwrap(), "bb must refuse the V2 VK for an opaque proof");
+        support::complete(live);
     }
 }
 

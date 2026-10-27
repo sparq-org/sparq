@@ -13,7 +13,8 @@ dependency, and the default server dependency graph excludes `object_store`.
 does not fsync file data or directories, so it is not crash-durable. For durable
 local storage in library integrations, use `store::blob_fs::FsBlobStore` with
 the native `blob-fs` feature and hold the exclusive data-directory lock.
-Native server boot still selects in-memory blobs.
+Native server boot uses filesystem blobs with `SOLID_SERVER_DATA_DIR` and
+in-memory blobs otherwise; see [native storage](native-storage.md).
 
 ```rust,no_run
 use sparq_lws_core::store::blob_object::{ObjectBlobAdapter, ObjectBlobStore};
