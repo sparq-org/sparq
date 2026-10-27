@@ -62,7 +62,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on
   by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or
   `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
-- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above. The `http` and `redis-replay` backends require opt-in features.
+- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above and [running durably in a container](../../skills/solid-lws-server/SKILL.md#running-durably-in-a-container) (volume, Helm, block storage, one replica). The `http` and `redis-replay` backends require opt-in features.
 
 ## ✨ Features
 

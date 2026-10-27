@@ -1,13 +1,13 @@
 ---
 name: helm-deploy
-description: Deploy sparq-server or configure the planned native sparq-lws-core deployment on Kubernetes with the in-repo Helm chart or plain quickstart manifest. Use when installing, configuring, exposing, upgrading, or validating deploy/helm/sparq, including existing-Secret auth, ingress-nginx TLS, selector-dependent images/ports/probes, persistent data, and single-replica safety constraints.
+description: Deploy sparq-server or the native sparq-lws-core server on Kubernetes with the in-repo Helm chart or plain quickstart manifest. Use when installing, configuring, exposing, upgrading, or validating deploy/helm/sparq, including existing-Secret auth, ingress-nginx TLS, selector-dependent images/ports/probes, persistent data, and single-replica safety constraints.
 ---
 
 # Deploy sparq with Helm
 
 > Verified against `deploy/helm/sparq` on 2026-07-15. The chart targets
 > Kubernetes 1.20 or later and does not build images. The `sparq-server` GHCR image
-> is published; the LWS selector becomes runnable only after sq-lmz40 publishes its image.
+> is published; choose a release tag containing native data-directory support for LWS.
 
 ## Preserve the security boundary
 
@@ -22,8 +22,8 @@ Treat these as invariants:
 - Use `/health` on port 3030 for `sparq-server`; use `/livez` and `/readyz` on
   port 3000 for `lws`.
 - Run exactly one replica of either server. `sparq-server` has an
-  unreplicated writable in-memory store. The planned canonical LWS image lacks
-  its opt-in Redis replay backend, and Redis alone would not provide a shared blob store.
+  unreplicated writable in-memory store. The LWS index and blob store are
+  single-instance; Redis replay protection does not make their directory safe to share.
 
 The `sparq-server` image is open by default at the image layer because it bakes
 `SPARQ_ALLOW_REMOTE=1`. The chart refuses to render that server without an auth
@@ -74,7 +74,7 @@ and create a controller-specific HTTPS-only route to the `ClusterIP` Service.
 
 ## Install LWS
 
-Use this path only after sq-lmz40 publishes `ghcr.io/sparq-org/sparq-lws-core`.
+Use the native `ghcr.io/sparq-org/sparq-lws-core` image with its default features.
 Supply HTTPS URLs for the public base URL and trusted OIDC issuer. Selecting
 `server=lws` automatically selects `ghcr.io/sparq-org/sparq-lws-core`, port
 3000, `SOLID_SERVER_BIND=0.0.0.0:3000`, `/livez`, and `/readyz`.
@@ -100,7 +100,17 @@ raising `replicaCount`.
 
 - Set `persistence.enabled=true` to create a PVC mounted at `/data`, or also set
   `persistence.existingClaim` to use a pre-provisioned PVC.
-- With the read-only root filesystem, give `--persist` a subdirectory of the
+- For LWS, the shared top-level `persistence` block also sets
+  `SOLID_SERVER_DATA_DIR=/data` and `Recreate` so
+  upgrades stop the old pod before opening the same index. The environment
+  variable is unset and storage stays in-memory when persistence is disabled.
+- LWS requires `persistence.accessMode=ReadWriteOnce` and a filesystem on a block
+  volume (EBS, PD, Azure Disk). Network filesystems (EFS, Azure Files, NFS) are
+  unsupported because the index depends on file locking and fsync semantics.
+  Verify the StorageClass or existing claim; the access mode alone is insufficient.
+  Stop the single replica before backing up all of `index/`, `blobs/`, and
+  `format.json` (backup procedure: #7188 P0-8).
+- For `sparq-server`, with the read-only root filesystem, give `--persist` a subdirectory of the
   volume (`/data/store`): a compaction or restore renames the store directory and
   needs the lock file beside it, so with `--persist /data` (lock file in `/`) the
   server starts, but `/admin/compact` and durable restores are refused.

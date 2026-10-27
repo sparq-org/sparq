@@ -135,7 +135,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
 ### Native data-directory boot
 
 `SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
-implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
+implies `PSS_SPARQ_BACKEND=embedded`, and refuses any other explicit backend or
+a non-empty `SOLID_SERVER_SPARQ_DIR`.
 The default native build opens the filesystem blob store after acquiring the
 index lock. Builds without `embedded-sparq` or `blob-fs` refuse data-directory boot.
 Without a data directory, the native binary uses in-memory blobs.
@@ -149,6 +150,37 @@ Without a data directory, the native binary uses in-memory blobs.
 
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
+
+### Running durably in a container
+
+Mount a named volume and enable the data-directory contract:
+
+```sh
+docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
+  -v data:/data -e SOLID_SERVER_DATA_DIR=/data \
+  -e SOLID_SERVER_BASE_URL=https://solid.example \
+  -e SOLID_SERVER_TRUSTED_ISSUER=https://idp.example \
+  ghcr.io/sparq-org/sparq-lws-core:X.Y.Z
+```
+
+The image's empty `/data` is owned by `65532:65532`; a fresh named volume
+inherits that ownership. Mounting it alone keeps storage in-memory. Setting
+`SOLID_SERVER_DATA_DIR=/data` opts in to the boot contract above, including
+`/data/index`, `/data/blobs`, and `/data/format.json`.
+
+Building the image behind a TLS-intercepting proxy: pass
+`--secret id=build_ca,src=/path/to/ca-bundle.crt` (the bundle never enters a layer),
+and `--build-arg BUILD_JOBS=N` to cap cargo on a memory-limited builder.
+
+For Helm set `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and
+`persistence.accessMode=ReadWriteOnce`; optionally choose `persistence.storageClass`
+or `persistence.existingClaim`. The shared top-level persistence block mounts
+`/data`, sets the environment variable, and uses `Recreate` for upgrades.
+
+Use a filesystem on a **block volume** (EBS, PD, Azure Disk), never a network
+filesystem (EFS, Azure Files, NFS): the index relies on file locking and fsync
+semantics. Keep **one replica**; this is a single-instance index and blob store.
+**Stop the server before backing up** the whole volume (backup procedure: #7188 P0-8).
 
 ### Child record replacement
 
