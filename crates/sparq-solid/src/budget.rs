@@ -22,15 +22,14 @@
 //! [`crate::PodStore::set_auth_budget`].
 
 use crate::materialize::{allowance_refusal, AuthAllowance};
-use oxrdf::Term;
-use sparq_reason::n3::compiled::ClosureCharge;
+use sparq_core::dict::{Dict, Id};
+use sparq_core::meter::{Dim, Exceeded, Ledger, Limits};
 
 /// The input and whole-decision budget one authorization materialization runs under,
 /// alongside the per-closure reasoning allowance ([`crate::default_auth_limits`]).
 ///
 /// [`default_auth_budget`] is what a [`crate::PodStore`] applies until it is given
-/// another one ([`crate::PodStore::set_auth_budget`]); that function's docs record how
-/// each value was measured.
+/// another one ([`crate::PodStore::set_auth_budget`]).
 ///
 /// The struct is `#[non_exhaustive]`: start from [`default_auth_budget`] and set the
 /// fields to change.
@@ -41,13 +40,13 @@ pub struct AuthBudget {
     /// input: its terms' lexical bytes plus a fixed cost per term.
     pub max_document_bytes: usize,
     /// The same bytes summed over EVERY document the input is assembled from, plus the
-    /// prefix strings of the resource enumeration (see
+    /// generated lexical strings and prefix strings of the resource enumeration (see
     /// [`AuthBudget::max_resource_iri_bytes`]).
     pub max_input_bytes: usize,
-    /// Facts the assembled reasoning input may carry, document content and the
-    /// structural/provenance/credential facts together.
+    /// Stored rows read and generated structural/provenance/credential facts admitted.
+    /// Read rows remain charged when their document is later rejected.
     pub max_input_facts: usize,
-    /// Approximate bytes of ONE term of the input — the counterpart of
+    /// Approximate bytes of ONE stored input term — the counterpart of
     /// [`sparq_reason::ClosureLimits::max_term_bytes`], which bounds only derived terms.
     pub max_input_term_bytes: usize,
     /// Bytes of ONE resource IRI the input's resource enumeration may walk. A resource of
@@ -71,8 +70,8 @@ pub struct AuthBudget {
     /// materialization (`ClosureLimits::max_facts` bounds one closure).
     pub max_decision_facts: usize,
     /// Wall-clock allowance for one materialization, including input assembly, every
-    /// stratum and replacement-view assembly. Default: five seconds; `None` disables it. Checked at coarse boundaries,
-    /// never per rule row, so a running stratum can overrun before it is refused.
+    /// stratum and replacement-view assembly. Default: five seconds; `None` disables it.
+    /// Checked at coarse boundaries and once per closure round, never per rule row.
     /// Rollback and post-commit rebuilds omit this deadline while retaining count/size caps.
     /// Ignored on wasm32, where no monotonic clock is available.
     pub max_materialize_time: Option<std::time::Duration>,
@@ -93,33 +92,13 @@ impl AuthBudget {
 /// The input and whole-decision budget every authorization materialization runs under
 /// unless the store is given another one ([`crate::PodStore::set_auth_budget`]).
 ///
-/// # How the values were chosen
+/// Count and size defaults are unchanged by the shared ledger. Generated lexical
+/// strings and read rows are admitted before allocation, and each closure runs under
+/// the remaining whole-decision allowance. Fixture parity is checked against the
+/// baseline views, decisions and closure charges.
 ///
-/// Measured, not guessed, the same way [`crate::default_auth_limits`] was: over the
-/// largest fixtures this crate has — `crate::wac_fixture`, the same fixture with filler
-/// content (`crate::fixture::wac_fixture_sized(50)`) and `crate::acp_fixture` across all
-/// its strata — the SMALLEST value each field could take while the view still
-/// materialized was found by bisection, and each value here is about ten times the largest
-/// of those, rounded up. Those minima are recorded in the per-constant docs below rather
-/// than in any markdown, since they are specific to these fixtures and this box.
-///
-/// The two resource-enumeration fields are sized the same way against the same fixtures,
-/// but from their MAXIMA rather than by bisection: a resource IRI's length and its
-/// container depth are properties of the pod's names, so what the fixtures need is the
-/// longest and the deepest name they hold, not a value a run either fits in or does not.
-///
-/// (A cross-check on the whole-decision figure: WAC runs ONE closure, and its measured
-/// `max_decision_join_rows` minimum is exactly the `max_total_join_rows` minimum
-/// [`crate::default_auth_limits`] records for the same fixture — the aggregate ledger and
-/// the per-closure allowance count the same rows.)
-///
-/// The margins are deliberate but not open-ended: an untrusted writer of a control
-/// document chooses how large and how multiplying its policies are, so these ceilings are
-/// what they can spend. A pod that genuinely needs more raises them.
-///
-/// The wall-clock allowance is five seconds on native targets. It is shared by input
-/// assembly and all strata and sampled at coarse boundaries; a running stratum is not
-/// interrupted. `None` disables this clock, and wasm32 ignores it entirely.
+/// The native clock is shared by input assembly and all strata, sampled at coarse
+/// boundaries and once per closure round. `None` disables it; wasm32 ignores it.
 pub fn default_auth_budget() -> AuthBudget {
     AuthBudget {
         max_document_bytes: AUTH_MAX_DOCUMENT_BYTES,
@@ -134,42 +113,21 @@ pub fn default_auth_budget() -> AuthBudget {
     }
 }
 
-/// Bytes one control or group document may contribute to the reasoning input. Smallest
-/// value the fixtures still materialize under: 3,568; this is ~18x it.
+/// Approximate stored-term bytes contributed by one source document.
 const AUTH_MAX_DOCUMENT_BYTES: usize = 64 << 10;
-/// Bytes all documents AND the resource enumeration together may contribute. Fixture
-/// minimum 98,054; ~10x it.
+/// Aggregate source, resource-enumeration and generated lexical bytes.
 const AUTH_MAX_INPUT_BYTES: usize = 1 << 20;
-/// Facts the assembled input may carry. Fixture minimum 2,520; ~13x it.
+/// Stored rows read and generated input facts admitted.
 const AUTH_MAX_INPUT_FACTS: usize = 32_000;
-/// Bytes of one input term. Fixture minimum 114; ~36x it — a legitimate ACL can carry a
-/// long IRI or a long literal, and this dimension costs nothing to leave roomy.
+/// Approximate bytes of one stored input term.
 const AUTH_MAX_INPUT_TERM_BYTES: usize = 4 << 10;
-/// Bytes of one resource IRI the enumeration may walk. Longest resource IRI over the
-/// fixtures: 36 bytes; this is ~56x it — the dimension a legitimate pod is likeliest to
-/// want room in (a long percent-encoded name), and the enumeration's real bound is the
-/// aggregate [`AUTH_MAX_INPUT_BYTES`] rather than this.
+/// Bytes of one resource IRI admitted before walking its containers.
 const AUTH_MAX_RESOURCE_IRI_BYTES: usize = 2 << 10;
-/// Containers one resource IRI's chain may have. Deepest over the fixtures: 4; this is 16x
-/// it. The product with [`AUTH_MAX_RESOURCE_IRI_BYTES`] is what one resource's chain may
-/// own (128 KiB), and the aggregate caps the sum of those at [`AUTH_MAX_INPUT_BYTES`].
+/// Containers on one resource IRI's chain, checked before walking it.
 const AUTH_MAX_RESOURCE_PATH_DEPTH: usize = 64;
-/// Binding rows and firings over ALL closures of one materialization. Fixture minimum
-/// 357,200; ~11x it. Deliberately the same value as one closure's `max_total_join_rows`,
-/// so the ACCEPTED aggregate of an ACP view's three strata is no looser than what a
-/// single-stratum WAC view may spend.
-///
-/// The ledger is charged when a closure RETURNS ([`DecisionWork::charge`]), so the closure
-/// that pushes the aggregate past this has already run to completion under its own
-/// per-closure cap: the PEAK a refused decision reaches is this value plus one closure's
-/// `max_total_join_rows`, and this bounds exactly the work of a decision that is accepted.
-/// Both are finite, since every closure is independently capped.
+/// Binding rows and rule firings across all closures, bounded before each runs.
 const AUTH_MAX_DECISION_JOIN_ROWS: usize = 4_000_000;
-/// Facts over all closures' fixpoints of one materialization. Fixture minimum 34,603;
-/// ~15x it, and 2x one closure's `max_facts`, so the strata of an ACP view may not each
-/// hold a full closure's worth. As with [`AUTH_MAX_DECISION_JOIN_ROWS`], this is the
-/// accepted aggregate: a refused decision's peak is this plus the one closure's `max_facts`
-/// that crossed it.
+/// Facts summed across successful closure fixpoints.
 const AUTH_MAX_DECISION_FACTS: usize = 512_000;
 
 /// One clock shared by input assembly and all strata of a materialization.
@@ -193,6 +151,19 @@ impl MaterializeDeadline {
         }
     }
 
+    pub(crate) fn instant(&self) -> Option<std::time::Instant> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.started
+                .zip(self.limit)
+                .and_then(|(start, limit)| start.checked_add(limit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            None
+        }
+    }
+
     /// Coarse cooperative check; wasm32 has no monotonic clock and does no timing.
     pub(crate) fn check(&self) -> Result<(), String> {
         #[cfg(not(target_arch = "wasm32"))]
@@ -210,138 +181,92 @@ impl MaterializeDeadline {
     }
 }
 
-/// The fixed cost [`term_bytes`] charges per term node, on top of its lexical bytes — the
-/// same shape the reasoner's own term sizing uses.
-const TERM_NODE_BYTES: usize = std::mem::size_of::<Term>();
-
-/// The approximate bytes of `t` the input budget charges: the UTF-8 bytes of its lexical
-/// components (IRI, blank-node label, or a literal's value plus datatype plus language
-/// tag) plus [`TERM_NODE_BYTES`] per node, walked through quoted triples with an explicit
-/// stack so a deeply-nested term cannot overflow one.
-pub(crate) fn term_bytes(t: &Term) -> usize {
-    let mut total: usize = 0;
-    let mut stack: Vec<&Term> = vec![t];
-    while let Some(t) = stack.pop() {
-        total = total.saturating_add(TERM_NODE_BYTES);
-        match t {
-            Term::NamedNode(n) => total = total.saturating_add(n.as_str().len()),
-            Term::BlankNode(b) => total = total.saturating_add(b.as_str().len()),
-            Term::Literal(l) => {
-                total = total.saturating_add(l.value().len());
-                total = total.saturating_add(l.datatype().as_str().len());
-                total = total.saturating_add(l.language().map_or(0, str::len));
-            }
-            // A quoted triple: its subject and predicate are node types with no `Term`
-            // to borrow, so they are sized directly; only the object can nest further.
-            Term::Triple(tr) => {
-                total = total.saturating_add(2 * TERM_NODE_BYTES);
-                total = total.saturating_add(match &tr.subject {
-                    oxrdf::NamedOrBlankNode::NamedNode(n) => n.as_str().len(),
-                    oxrdf::NamedOrBlankNode::BlankNode(b) => b.as_str().len(),
-                });
-                total = total.saturating_add(tr.predicate.as_str().len());
-                stack.push(&tr.object);
-            }
-            #[allow(unreachable_patterns)]
-            _ => {}
-        }
-    }
-    total
-}
-
-/// The input budget of one authorization materialization, charged while the input is
-/// READ: each term is sized as it is materialized, so a document set past the budget stops
-/// being read at the limit instead of being held whole and checked afterwards.
-///
-/// Every refusal carries the typed [`AuthAllowance`] kind, so a caller tells "this pod's
-/// control documents are too big for the budget in force" from any other materialization
-/// failure exactly as it does for the reasoning allowance.
-pub(crate) struct InputMeter {
+/// One ledger for input assembly and every closure of a materialization.
+pub(crate) struct AuthLedger {
     budget: AuthBudget,
     deadline: MaterializeDeadline,
-    /// Bytes charged over all documents so far.
-    bytes: usize,
-    /// Bytes charged for the document being read.
-    doc_bytes: usize,
+    core: Ledger,
 }
 
-impl InputMeter {
-    pub(crate) fn new(budget: AuthBudget) -> InputMeter {
+impl AuthLedger {
+    pub(crate) fn new(budget: AuthBudget) -> Self {
         Self::with_deadline(budget, MaterializeDeadline::new(budget))
     }
 
     pub(crate) fn with_deadline(budget: AuthBudget, deadline: MaterializeDeadline) -> Self {
-        InputMeter {
+        let mut limits = Limits::default();
+        limits.document_bytes = budget.max_document_bytes;
+        limits.bytes = budget.max_input_bytes;
+        limits.term_bytes = budget.max_input_term_bytes;
+        limits.facts = budget.max_input_facts;
+        limits.join_rows = budget.max_decision_join_rows;
+        limits.closure_facts = budget.max_decision_facts;
+        Self {
             budget,
             deadline,
-            bytes: 0,
-            doc_bytes: 0,
+            core: Ledger::new(limits),
         }
     }
 
-    /// Begin reading the document `iri`: its per-document allowance starts afresh, while
-    /// the aggregate carries over.
-    pub(crate) fn open(&mut self) -> Result<(), String> {
-        self.deadline.check()?;
-        self.doc_bytes = 0;
-        Ok(())
+    pub(crate) fn core(&mut self) -> &mut Ledger {
+        &mut self.core
+    }
+
+    pub(crate) fn deadline(&self) -> Option<std::time::Instant> {
+        self.deadline.instant()
     }
 
     pub(crate) fn checkpoint(&self) -> Result<(), String> {
         self.deadline.check()
     }
 
-    /// Charge one term of the document being read: its length against
-    /// [`AuthBudget::max_input_term_bytes`], and its bytes against the per-document and
-    /// aggregate byte budgets.
-    pub(crate) fn term(&mut self, iri: &str, t: &Term) -> Result<(), String> {
-        let n = term_bytes(t);
-        if n > self.budget.max_input_term_bytes {
-            return Err(allowance_refusal(
-                AuthAllowance::InputTermBytes,
-                &format!(
-                    "a term of the access-control document <{}> is about {} bytes, past the \
-                     max_input_term_bytes budget ({}); the authorization view is not built \
-                     (fail-closed)",
-                    iri, n, self.budget.max_input_term_bytes
-                ),
-            ));
-        }
-        self.doc_bytes = self.doc_bytes.saturating_add(n);
-        if self.doc_bytes > self.budget.max_document_bytes {
-            return Err(allowance_refusal(
-                AuthAllowance::InputBytes,
-                &format!(
-                    "the access-control document <{}> contributes more than \
-                     max_document_bytes ({}) to the reasoning input; the authorization view \
-                     is not built (fail-closed)",
-                    iri, self.budget.max_document_bytes
-                ),
-            ));
-        }
-        self.bytes = self.bytes.saturating_add(n);
-        if self.bytes > self.budget.max_input_bytes {
-            return Err(allowance_refusal(
-                AuthAllowance::InputBytes,
-                &format!(
-                    "the access-control documents together contribute more than \
-                     max_input_bytes ({}) to the reasoning input (reached while reading <{}>); \
-                     the authorization view is not built (fail-closed)",
-                    self.budget.max_input_bytes, iri
-                ),
-            ));
-        }
+    pub(crate) fn open(&mut self) -> Result<(), String> {
+        self.checkpoint()?;
+        self.core.open_document();
         Ok(())
     }
 
-    /// Admit `iri` into the resource enumeration: its length against
-    /// [`AuthBudget::max_resource_iri_bytes`] and its container depth against
-    /// [`AuthBudget::max_resource_path_depth`], BEFORE anything that grows with that depth
-    /// is allocated.
-    ///
-    /// The length is checked first, so the depth walk that follows it is itself bounded
-    /// (it stops one step past the depth cap, over an IRI already known to be short).
-    pub(crate) fn resource(&mut self, iri: &str) -> Result<(), String> {
+    /// Stored parts are checked before dictionary reconstruction allocates them.
+    pub(crate) fn stored_term(&mut self, iri: &str, dict: &Dict, id: Id) -> Result<(), String> {
+        self.core.stored_term(dict, id).map(drop).map_err(|mut e| {
+            // The document refusal historically takes precedence over the aggregate.
+            if e.dim == Dim::Bytes {
+                let n = e.reached.saturating_sub(self.core.spent(Dim::Bytes));
+                if n > self.core.remaining(Dim::DocumentBytes) {
+                    e = Exceeded::new(
+                        Dim::DocumentBytes,
+                        self.budget.max_document_bytes,
+                        self.core.spent(Dim::DocumentBytes).saturating_add(n),
+                    );
+                }
+            }
+            self.refusal(e, Dim::TermBytes, iri)
+        })
+    }
+
+    /// Fallible input-sized vector growth, charged before reserving memory.
+    pub(crate) fn reserve<T>(
+        &mut self,
+        out: &mut Vec<T>,
+        n: usize,
+        dim: Dim,
+    ) -> Result<(), String> {
+        self.core
+            .reserve(out, n, dim)
+            .map_err(|e| self.refusal(e, dim, "generated input"))
+    }
+
+    /// Size one generated IRI before allocating any of its lexical parts.
+    pub(crate) fn mint(&mut self, parts: &[&str]) -> Result<String, String> {
+        // Generated strings use the aggregate byte cap. Source-document and stored-term
+        // caps retain their existing scope.
+        self.core.close_document();
+        self.core
+            .mint(parts)
+            .map_err(|e| self.refusal(e, Dim::Bytes, "generated input"))
+    }
+
+    pub(crate) fn resource_name(&mut self, iri: &str) -> Result<(), String> {
         if iri.len() > self.budget.max_resource_iri_bytes {
             return Err(allowance_refusal(
                 AuthAllowance::ResourceIri,
@@ -373,104 +298,244 @@ impl InputMeter {
         Ok(())
     }
 
-    /// Charge `n` bytes of the resource enumeration — one resource or container string —
-    /// against the AGGREGATE [`AuthBudget::max_input_bytes`], before that string is owned.
-    ///
-    /// Per-resource caps bound one chain; this is what bounds the sum of them, so the
-    /// enumeration of a whole pod cannot cost more than the input budget whatever shape
-    /// its names have.
+    /// A resource is admitted by length, depth, then its aggregate byte charge.
+    pub(crate) fn resource(&mut self, iri: &str) -> Result<(), String> {
+        self.resource_name(iri)?;
+        self.resource_bytes(iri.len())
+    }
+
     pub(crate) fn resource_bytes(&mut self, n: usize) -> Result<(), String> {
-        self.bytes = self.bytes.saturating_add(n);
-        if self.bytes > self.budget.max_input_bytes {
-            return Err(allowance_refusal(
+        self.core.close_document();
+        self.core.charge(Dim::Bytes, n).map_err(|_| {
+            allowance_refusal(
                 AuthAllowance::InputBytes,
                 &format!(
                     "this pod's resources and their containers contribute more than \
-                     max_input_bytes ({}) to the reasoning input; the authorization view is \
-                     not built (fail-closed)",
+                 max_input_bytes ({}) to the reasoning input; the authorization view is \
+                 not built (fail-closed)",
                     self.budget.max_input_bytes
                 ),
-            ));
-        }
-        Ok(())
+            )
+        })
     }
 
-    /// Check the ASSEMBLED input — the document content plus the structural, provenance
-    /// and credential facts — against [`AuthBudget::max_input_facts`], before it is
-    /// interned into a closure's dictionary.
-    pub(crate) fn facts(&self, facts: usize) -> Result<(), String> {
-        self.deadline.check()?;
-        if facts <= self.budget.max_input_facts {
-            return Ok(());
+    pub(crate) fn copied_term(&mut self, term: &oxrdf::Term) -> Result<oxrdf::Term, String> {
+        match term {
+            oxrdf::Term::NamedNode(n) => self
+                .mint(&[n.as_str()])
+                .map(|s| oxrdf::NamedNode::new_unchecked(s).into()),
+            oxrdf::Term::Literal(literal) => {
+                let bytes = literal
+                    .value()
+                    .len()
+                    .saturating_add(literal.datatype().as_str().len())
+                    .saturating_add(literal.language().map_or(0, str::len));
+                self.core.close_document();
+                self.core
+                    .charge(Dim::Bytes, bytes)
+                    .map_err(|e| self.refusal(e, Dim::Bytes, "generated input"))?;
+                Ok(term.clone())
+            }
+            _ => {
+                self.core.close_document();
+                self.core
+                    .term(term.into())
+                    .map_err(|e| self.refusal(e, Dim::TermBytes, "generated input"))?;
+                Ok(term.clone())
+            }
         }
-        Err(allowance_refusal(
-            AuthAllowance::InputFacts,
-            &format!(
-                "the assembled reasoning input is {} facts, past the max_input_facts budget \
-                 ({}); the authorization view is not built (fail-closed)",
-                facts, self.budget.max_input_facts
+    }
+
+    /// Percent-encode into a single fallibly reserved string, after its full charge.
+    pub(crate) fn skolem(
+        &mut self,
+        prefix: &str,
+        graph: &str,
+        label: &str,
+    ) -> Result<String, String> {
+        let unreserved =
+            |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~');
+        let extra = graph
+            .bytes()
+            .chain(label.bytes())
+            .filter(|b| !unreserved(*b))
+            .count()
+            .saturating_mul(2);
+        let size = prefix
+            .len()
+            .saturating_add("graph:".len())
+            .saturating_add(graph.len())
+            .saturating_add(1)
+            .saturating_add(label.len())
+            .saturating_add(extra);
+        self.core.close_document();
+        self.core
+            .charge(Dim::Bytes, extra)
+            .map_err(|e| self.refusal(e, Dim::Bytes, graph))?;
+        let mut out = self.mint(&[prefix, "graph:", graph, ":", label])?;
+        out.try_reserve_exact(extra).map_err(|_| {
+            self.refusal(
+                Exceeded::new(Dim::Alloc, usize::MAX, size),
+                Dim::Bytes,
+                graph,
+            )
+        })?;
+        out.clear();
+        out.push_str(prefix);
+        out.push_str("graph:");
+        for (i, part) in [graph, label].iter().enumerate() {
+            if i == 1 {
+                out.push(':');
+            }
+            for b in part.bytes() {
+                if unreserved(b) {
+                    out.push(char::from(b));
+                } else {
+                    const HEX: &[u8] = b"0123456789ABCDEF";
+                    out.push('%');
+                    out.push(char::from(HEX[usize::from(b >> 4)]));
+                    out.push(char::from(HEX[usize::from(b & 15)]));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn refusal(&self, e: Exceeded, reserving: Dim, iri: &str) -> String {
+        let dim = if e.dim == Dim::Alloc {
+            reserving
+        } else {
+            e.dim
+        };
+        let (kind, detail) = match dim {
+            Dim::TermDepth => (
+                AuthAllowance::InputTermBytes,
+                format!(
+                    "a term of the access-control document <{}> exceeds the stored triple term \
+                     nesting guard ({}); the authorization view is not built (fail-closed)",
+                    iri, e.limit
+                ),
             ),
-        ))
-    }
-}
-
-/// The whole-decision work ledger of one authorization materialization: the charges of
-/// every closure it runs, added up and capped
-/// ([`AuthBudget::max_decision_join_rows`], [`AuthBudget::max_decision_facts`]).
-///
-/// [`sparq_reason::ClosureLimits`] gives each closure its rounds, its per-round join-row
-/// allowance and its `max_total_join_rows` AFRESH, so a materialization that runs n
-/// closures may otherwise spend n times each of them — three for ACP's strata, five for
-/// the ODRL bridge's. This is the one number that bounds a whole decision.
-pub(crate) struct DecisionWork {
-    budget: AuthBudget,
-    deadline: MaterializeDeadline,
-    join_rows: usize,
-    facts: usize,
-}
-
-impl DecisionWork {
-    pub(crate) fn new(budget: AuthBudget, deadline: MaterializeDeadline) -> DecisionWork {
-        DecisionWork {
-            budget,
-            deadline,
-            join_rows: 0,
-            facts: 0,
-        }
-    }
-
-    pub(crate) fn checkpoint(&self) -> Result<(), String> {
-        self.deadline.check()
-    }
-
-    /// Add one closure's charge, refusing when the decision's aggregate is past either
-    /// cap. A closure whose `max_total_join_rows` was left unbounded reports no join rows
-    /// (there is nothing to count then), so only its facts are charged.
-    pub(crate) fn charge(&mut self, c: ClosureCharge) -> Result<(), String> {
-        self.facts = self.facts.saturating_add(c.facts);
-        if self.facts > self.budget.max_decision_facts {
-            return Err(allowance_refusal(
-                AuthAllowance::DecisionWork,
-                &format!(
-                    "the closures of this authorization materialization have held {} facts \
-                     between them, past the max_decision_facts budget ({}); no view is \
-                     installed (fail-closed)",
-                    self.facts, self.budget.max_decision_facts
+            Dim::TermBytes => (
+                AuthAllowance::InputTermBytes,
+                format!(
+                    "a term of the access-control document <{}> is about {} bytes, past the \
+                 max_input_term_bytes budget ({}); the authorization view is not built \
+                 (fail-closed)",
+                    iri, e.reached, self.budget.max_input_term_bytes
                 ),
-            ));
-        }
-        self.join_rows = self.join_rows.saturating_add(c.join_rows.unwrap_or(0));
-        if self.join_rows > self.budget.max_decision_join_rows {
-            return Err(allowance_refusal(
+            ),
+            Dim::DocumentBytes => (
+                AuthAllowance::InputBytes,
+                format!(
+                    "the access-control document <{}> contributes more than \
+                 max_document_bytes ({}) to the reasoning input; the authorization view \
+                 is not built (fail-closed)",
+                    iri, self.budget.max_document_bytes
+                ),
+            ),
+            Dim::Bytes | Dim::SourceBytes => (
+                AuthAllowance::InputBytes,
+                format!(
+                    "the access-control documents together contribute more than \
+                 max_input_bytes ({}) to the reasoning input (reached while reading <{}>); \
+                 the authorization view is not built (fail-closed)",
+                    self.budget.max_input_bytes, iri
+                ),
+            ),
+            Dim::JoinRows => (
                 AuthAllowance::DecisionWork,
-                &format!(
+                format!(
                     "the closures of this authorization materialization have produced {} \
-                     binding rows and rule firings between them, past the \
-                     max_decision_join_rows budget ({}); no view is installed (fail-closed)",
-                    self.join_rows, self.budget.max_decision_join_rows
+                 binding rows and rule firings between them, past the \
+                 max_decision_join_rows budget ({}); no view is installed (fail-closed)",
+                    e.reached, self.budget.max_decision_join_rows
                 ),
-            ));
+            ),
+            Dim::ClosureFacts => (
+                AuthAllowance::DecisionWork,
+                format!(
+                    "the closures of this authorization materialization have held {} facts \
+                 between them, past the max_decision_facts budget ({}); no view is \
+                 installed (fail-closed)",
+                    e.reached, self.budget.max_decision_facts
+                ),
+            ),
+            Dim::Deadline => (
+                AuthAllowance::Deadline,
+                "max_materialize_time elapsed; no authorization view is installed (fail-closed)"
+                    .into(),
+            ),
+            _ => (
+                AuthAllowance::InputFacts,
+                format!(
+                    "the assembled reasoning input is {} facts, past the max_input_facts budget \
+                 ({}); the authorization view is not built (fail-closed)",
+                    e.reached, self.budget.max_input_facts
+                ),
+            ),
+        };
+        let detail = if e.dim == Dim::Alloc {
+            format!("{e}; no authorization view is installed (fail-closed)")
+        } else {
+            detail
+        };
+        allowance_refusal(kind, &detail)
+    }
+}
+
+/// Temporarily omit the request clock while rebuilding committed or restored content.
+/// Drop restores it even when the rebuild unwinds.
+pub(crate) fn untimed_rebuild<T>(
+    store: &mut crate::PodStore,
+    rebuild: impl FnOnce(&mut crate::PodStore) -> T,
+) -> T {
+    struct Restore<'a> {
+        store: &'a mut crate::PodStore,
+        budget: AuthBudget,
+    }
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            self.store.auth_budget = self.budget;
         }
-        Ok(())
+    }
+    let budget = store.auth_budget;
+    store.auth_budget = budget.without_deadline();
+    let scope = Restore { store, budget };
+    rebuild(scope.store)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxrdf::{Literal, NamedNode, Term, Triple};
+
+    #[test]
+    fn stored_depth_refusal_reports_nesting_without_debiting_bytes() {
+        let mut dict = Dict::new();
+        let mut term: Term = Literal::new_simple_literal("v").into();
+        for _ in 0..=sparq_core::meter::MAX_TRIPLE_DEPTH {
+            term = Triple::new(
+                NamedNode::new_unchecked("urn:s"),
+                NamedNode::new_unchecked("urn:p"),
+                term,
+            )
+            .into();
+        }
+        let object = dict.intern(&term);
+        let mut ledger = AuthLedger::new(default_auth_budget());
+        let error = ledger
+            .stored_term("https://pod.ex/.acl", &dict, object)
+            .unwrap_err();
+        assert_eq!(
+            crate::auth_allowance_refusal(&error),
+            Some(AuthAllowance::InputTermBytes)
+        );
+        assert!(error.contains("nesting guard"), "{error}");
+        assert!(
+            !error.contains("is about"),
+            "depth is not a byte count: {error}"
+        );
+        assert_eq!(ledger.core().spent(Dim::Bytes), 0);
     }
 }

@@ -685,3 +685,86 @@ fn removing_the_deadline_preserves_configured_count_and_size_caps() {
     budget.max_materialize_time = None;
     assert_eq!(copy, budget);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn acp_rule_update_admission_keeps_its_deadline() {
+    let mut source = crate::acp_fixture();
+    // The ACR has its own explicit policy granting Alice Write on that document.
+    let doc = "https://pod.ex/.acr.acr";
+    for triple in [
+        format!("<{doc}> <http://www.w3.org/ns/solid/acp#accessControl> <{doc}#c>"),
+        format!("<{doc}#c> <http://www.w3.org/ns/solid/acp#apply> <{doc}#p>"),
+        format!("<{doc}#p> <http://www.w3.org/ns/solid/acp#allow> <http://www.w3.org/ns/auth/acl#Write>"),
+        format!("<{doc}#p> <http://www.w3.org/ns/solid/acp#anyOf> <{doc}#m>"),
+        format!("<{doc}#m> <http://www.w3.org/ns/solid/acp#agent> <{ALICE}>"),
+    ] { source.push_str(&format!("{triple} <{doc}> .\n")); }
+    let mut store = PodStore::new(Graph::load_dataset(&source, "nquads").unwrap());
+    store.materialize_acp().unwrap();
+    let before = snapshot(store.graph());
+    let budget = AuthBudget {
+        max_materialize_time: Some(std::time::Duration::ZERO),
+        ..default_auth_budget()
+    };
+    store.set_auth_budget(budget);
+    let edit = "INSERT DATA { GRAPH <https://pod.ex/.acr> { <https://pod.ex/.acr#extra> <https://ex.dev/label> \"new\" } }";
+    let error = store.update_as_acp(&session(ALICE), edit).unwrap_err();
+    assert_eq!(
+        auth_allowance_refusal(&error),
+        Some(AuthAllowance::Deadline),
+        "{error}"
+    );
+    assert_eq!(snapshot(store.graph()), before, "admission changes nothing");
+    assert!(
+        store
+            .decide(&session(ALICE), "https://pod.ex/", Mode::Control)
+            .allow
+    );
+    assert_eq!(store.auth_budget(), budget);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn panicking_rebuild_hook(rollback: bool) {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    {
+        let mut store = pod();
+        let mut budget = default_auth_budget();
+        budget.max_materialize_time = if rollback {
+            Some(std::time::Duration::ZERO)
+        } else {
+            None
+        };
+        // Keep a distinguishable configured value for the committed rebuild too.
+        if !rollback {
+            budget.max_materialize_time = Some(std::time::Duration::from_secs(30));
+        }
+        store.set_auth_budget(budget);
+        crate::materialize::STRATUM_PANIC_AFTER.with(|n| n.set(Some(if rollback { 0 } else { 2 })));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            if rollback {
+                let _ = store.put_acl(ACL, "", "ntriples");
+            } else {
+                let edit = format!("DELETE DATA {{ GRAPH <{ACL}> {{ <{ACL}#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> }} }}");
+                let _ = store.update_as(&session(ALICE), &edit);
+            }
+        }));
+        assert!(result.is_err(), "the rebuild hook must panic");
+        assert_eq!(
+            store.auth_budget(),
+            budget,
+            "unwinding must restore the request budget"
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn panicking_rollback_hook_restores_the_request_budget() {
+    panicking_rebuild_hook(true);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn panicking_post_commit_hook_restores_the_request_budget() {
+    panicking_rebuild_hook(false);
+}

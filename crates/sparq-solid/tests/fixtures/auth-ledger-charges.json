@@ -1,0 +1,632 @@
+{
+  "acp/acr-document-control-gate": {
+    "facts": 235,
+    "joins": 1200,
+    "strata": 3
+  },
+  "acp/agent-anyOf-allow": {
+    "facts": 146,
+    "joins": 657,
+    "strata": 3
+  },
+  "acp/allOf-single-matcher-pair": {
+    "facts": 194,
+    "joins": 1110,
+    "strata": 3
+  },
+  "acp/allOf-user-app-pair": {
+    "facts": 239,
+    "joins": 1487,
+    "strata": 3
+  },
+  "acp/anyOf-disjunction": {
+    "facts": 216,
+    "joins": 1092,
+    "strata": 3
+  },
+  "acp/authenticated-agent": {
+    "facts": 140,
+    "joins": 582,
+    "strata": 3
+  },
+  "acp/cumulative-inheritance": {
+    "facts": 287,
+    "joins": 1399,
+    "strata": 3
+  },
+  "acp/deny-overrides": {
+    "facts": 241,
+    "joins": 1280,
+    "strata": 3
+  },
+  "acp/fail-closed-no-policy": {
+    "facts": 32,
+    "joins": 30,
+    "strata": 3
+  },
+  "acp/memberAccessControl-inheritance": {
+    "facts": 165,
+    "joins": 734,
+    "strata": 3
+  },
+  "acp/mode-independence": {
+    "facts": 270,
+    "joins": 1302,
+    "strata": 3
+  },
+  "acp/noneOf-public-except-carol": {
+    "facts": 173,
+    "joins": 588,
+    "strata": 3
+  },
+  "acp/public-agent": {
+    "facts": 130,
+    "joins": 423,
+    "strata": 3
+  },
+  "fixture/acp": {
+    "facts": 34603,
+    "joins": 197677,
+    "strata": 3
+  },
+  "fixture/acp-context": {
+    "facts": 41356,
+    "joins": 197677,
+    "strata": 3
+  },
+  "fixture/wac": {
+    "facts": 14350,
+    "joins": 357200,
+    "strata": 1
+  },
+  "fixture/wac-content": {
+    "facts": 14350,
+    "joins": 357200,
+    "strata": 1
+  },
+  "odrl/A1/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A1/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/A1/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 146,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/A1/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 44,
+      "strata": 5
+    }
+  },
+  "odrl/A3/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A3/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A3/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 146,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/A3/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 146,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/A4/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A4/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A4/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 43,
+      "strata": 5
+    }
+  },
+  "odrl/A4/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 43,
+      "strata": 5
+    }
+  },
+  "odrl/A6/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A6/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 147,
+      "joins": 85,
+      "strata": 5
+    }
+  },
+  "odrl/A6/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 45,
+      "strata": 5
+    }
+  },
+  "odrl/A6/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 45,
+      "strata": 5
+    }
+  },
+  "odrl/B1/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 123,
+      "joins": 36,
+      "strata": 5
+    }
+  },
+  "odrl/B1/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 123,
+      "joins": 36,
+      "strata": 5
+    }
+  },
+  "odrl/B1/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 122,
+      "joins": 16,
+      "strata": 5
+    }
+  },
+  "odrl/B1/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 122,
+      "joins": 16,
+      "strata": 5
+    }
+  },
+  "odrl/C1/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 128,
+      "joins": 30,
+      "strata": 5
+    }
+  },
+  "odrl/C1/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 128,
+      "joins": 30,
+      "strata": 5
+    }
+  },
+  "odrl/C1/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 122,
+      "joins": 16,
+      "strata": 5
+    }
+  },
+  "odrl/C1/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 122,
+      "joins": 16,
+      "strata": 5
+    }
+  },
+  "odrl/C2/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 148,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/C2/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 148,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/C2/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 142,
+      "joins": 32,
+      "strata": 5
+    }
+  },
+  "odrl/C2/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 142,
+      "joins": 32,
+      "strata": 5
+    }
+  },
+  "odrl/D1/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 185,
+      "joins": 129,
+      "strata": 5
+    }
+  },
+  "odrl/D1/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 181,
+      "joins": 122,
+      "strata": 5
+    }
+  },
+  "odrl/D1/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 180,
+      "joins": 88,
+      "strata": 5
+    }
+  },
+  "odrl/D1/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 172,
+      "joins": 50,
+      "strata": 5
+    }
+  },
+  "odrl/D3/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 172,
+      "joins": 52,
+      "strata": 5
+    }
+  },
+  "odrl/D3/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 172,
+      "joins": 52,
+      "strata": 5
+    }
+  },
+  "odrl/D3/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 180,
+      "joins": 91,
+      "strata": 5
+    }
+  },
+  "odrl/D3/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 180,
+      "joins": 91,
+      "strata": 5
+    }
+  },
+  "odrl/D4/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 183,
+      "joins": 117,
+      "strata": 5
+    }
+  },
+  "odrl/D4/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 179,
+      "joins": 82,
+      "strata": 5
+    }
+  },
+  "odrl/D4/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 182,
+      "joins": 86,
+      "strata": 5
+    }
+  },
+  "odrl/D4/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 179,
+      "joins": 80,
+      "strata": 5
+    }
+  },
+  "odrl/D5/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 179,
+      "joins": 80,
+      "strata": 5
+    }
+  },
+  "odrl/D5/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 179,
+      "joins": 80,
+      "strata": 5
+    }
+  },
+  "odrl/D5/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 182,
+      "joins": 86,
+      "strata": 5
+    }
+  },
+  "odrl/D5/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 182,
+      "joins": 86,
+      "strata": 5
+    }
+  },
+  "odrl/E1/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 150,
+      "joins": 77,
+      "strata": 5
+    }
+  },
+  "odrl/E1/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 58,
+      "strata": 5
+    }
+  },
+  "odrl/E1/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 146,
+      "joins": 48,
+      "strata": 5
+    }
+  },
+  "odrl/E1/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 145,
+      "joins": 52,
+      "strata": 5
+    }
+  },
+  "odrl/E2/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 170,
+      "joins": 95,
+      "strata": 5
+    }
+  },
+  "odrl/E2/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 166,
+      "joins": 94,
+      "strata": 5
+    }
+  },
+  "odrl/E2/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 166,
+      "joins": 64,
+      "strata": 5
+    }
+  },
+  "odrl/E2/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 165,
+      "joins": 68,
+      "strata": 5
+    }
+  },
+  "odrl/E3/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 186,
+      "joins": 125,
+      "strata": 5
+    }
+  },
+  "odrl/E3/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 179,
+      "joins": 92,
+      "strata": 5
+    }
+  },
+  "odrl/E3/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 182,
+      "joins": 96,
+      "strata": 5
+    }
+  },
+  "odrl/E3/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 179,
+      "joins": 88,
+      "strata": 5
+    }
+  },
+  "odrl/E4/urn:alice/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 172,
+      "joins": 52,
+      "strata": 5
+    }
+  },
+  "odrl/E4/urn:alice/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 172,
+      "joins": 52,
+      "strata": 5
+    }
+  },
+  "odrl/E4/urn:bob/2026-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 180,
+      "joins": 91,
+      "strata": 5
+    }
+  },
+  "odrl/E4/urn:bob/2027-01-01T00:00:00Z": {
+    "accepted": true,
+    "charge": {
+      "facts": 180,
+      "joins": 91,
+      "strata": 5
+    }
+  },
+  "wac/acl-document-control-gate": {
+    "facts": 23,
+    "joins": 198,
+    "strata": 1
+  },
+  "wac/agent-accessTo": {
+    "facts": 18,
+    "joins": 129,
+    "strata": 1
+  },
+  "wac/agentClass-AuthenticatedAgent": {
+    "facts": 17,
+    "joins": 129,
+    "strata": 1
+  },
+  "wac/agentClass-foaf-Agent-public": {
+    "facts": 17,
+    "joins": 129,
+    "strata": 1
+  },
+  "wac/agentGroup-vcard-members": {
+    "facts": 33,
+    "joins": 202,
+    "strata": 1
+  },
+  "wac/control-governs-acl-document": {
+    "facts": 22,
+    "joins": 188,
+    "strata": 1
+  },
+  "wac/default-inheritance-vs-accessTo": {
+    "facts": 29,
+    "joins": 399,
+    "strata": 1
+  },
+  "wac/fail-closed-no-acl": {
+    "facts": 8,
+    "joins": 24,
+    "strata": 1
+  },
+  "wac/mode-independence": {
+    "facts": 33,
+    "joins": 251,
+    "strata": 1
+  },
+  "wac/multi-agent-union": {
+    "facts": 25,
+    "joins": 175,
+    "strata": 1
+  },
+  "wac/nearest-acl-shadows-ancestor": {
+    "facts": 37,
+    "joins": 462,
+    "strata": 1
+  },
+  "wac/origin-user-app-pair": {
+    "facts": 19,
+    "joins": 149,
+    "strata": 1
+  },
+  "wac/resource-specific-override": {
+    "facts": 34,
+    "joins": 363,
+    "strata": 1
+  }
+}

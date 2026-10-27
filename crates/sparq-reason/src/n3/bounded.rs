@@ -68,11 +68,18 @@ impl<T> Bounded<T> {
 /// Where [`settle`] records a cut.
 pub(crate) trait Sink {
     fn record(&self, why: &'static str);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn deadline(&self) {
+        self.record("forward closure deadline elapsed");
+    }
 }
 
 /// Typed cause recorded beside a closure refusal message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CutKind {
+    #[cfg(not(target_arch = "wasm32"))]
+    Deadline,
     TotalJoinRows,
     JoinRows,
     #[cfg(feature = "compiled-rules")]
@@ -202,6 +209,13 @@ impl Truncation {
 }
 
 impl Sink for Truncation {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn deadline(&self) {
+        self.refuse(CutKind::Deadline, || {
+            "n3: forward closure deadline elapsed".into()
+        });
+    }
+
     fn record(&self, why: &'static str) {
         if self.cut.get().is_none() {
             self.cut.set(Some(why));
@@ -617,6 +631,9 @@ pub struct ClosureLimits {
     /// A nested closure gets its own total afresh, as it does its rounds and its per-round
     /// allowance.
     pub max_total_join_rows: usize,
+    /// Optional absolute deadline, sampled once at the start of each closure round.
+    /// Default `None`; ignored on wasm32. Nested closures inherit this deadline.
+    pub deadline: Option<std::time::Instant>,
 }
 
 impl Default for ClosureLimits {
@@ -629,6 +646,7 @@ impl Default for ClosureLimits {
             max_term_bytes: CLOSURE_TERM_BYTES,
             max_join_rows: CLOSURE_JOIN_ROWS,
             max_total_join_rows: CLOSURE_TOTAL_JOIN_ROWS,
+            deadline: None,
         }
     }
 }
@@ -1253,6 +1271,15 @@ impl ClosureRounds {
     /// negation gate refuses to read it) and the closure fails with an error, so no
     /// caller takes the truncated fact set for a fixpoint.
     pub(crate) fn round(&mut self, facts: usize, cuts: &impl Sink) -> Result<(), String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self
+            .limits
+            .deadline
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+        {
+            cuts.deadline();
+            return Err("n3: forward closure deadline elapsed".into());
+        }
         match self.left.checked_sub(1) {
             Some(left) if facts <= self.limits.max_facts => {
                 self.left = left;
@@ -2046,6 +2073,7 @@ mod tests {
                 max_term_bytes: 16 << 20,
                 max_join_rows: usize::MAX,
                 max_total_join_rows: usize::MAX,
+                deadline: None,
             }
         );
         let sink = Cell::new(false);
@@ -2565,5 +2593,29 @@ mod tests {
         // A SINGLE term past the limit is still refused.
         let big = [lit(3_000), goal[1].clone(), goal[2].clone()];
         assert_eq!(walked_atom(&big, &Binding::default(), &run), None, "one term too large");
+    }
+}
+
+#[cfg(all(test, feature = "compiled-rules", not(target_arch = "wasm32")))]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn expiry_refuses_the_first_round_after_the_deadline() {
+        let mut limits = ClosureLimits::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+        limits.deadline = Some(deadline);
+        let run = Truncation::top_level_with(limits);
+        let mut rounds = ClosureRounds::forward(&run);
+        for _ in 0..8 {
+            rounds.round(1, &run).unwrap();
+        }
+        let left = rounds.left;
+        std::thread::sleep(deadline.saturating_duration_since(std::time::Instant::now()));
+        for _ in 0..3 {
+            assert!(rounds.round(1, &run).is_err());
+            assert_eq!(rounds.left, left, "no round may start after expiry");
+            assert_eq!(run.kind(), Some(CutKind::Deadline));
+        }
     }
 }

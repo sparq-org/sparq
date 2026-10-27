@@ -1,0 +1,521 @@
+{
+  "A1/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A1/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A1/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A1/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A3/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A3/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A3/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A3/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A4/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A4/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A4/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A4/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A6/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A6/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A6/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "A6/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "B1/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#read",
+        "urn:t/1"
+      ]
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+      ]
+    }
+  },
+  "B1/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#read",
+        "urn:t/1"
+      ]
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+      ]
+    }
+  },
+  "B1/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "B1/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "C1/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "C1/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "C1/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "C1/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "C2/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "C2/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "C2/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "C2/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D1/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D1/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D1/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D1/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D3/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D3/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D3/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D3/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D4/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D4/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D4/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D4/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D5/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D5/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D5/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "D5/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E1/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "E1/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E1/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E1/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E2/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "E2/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E2/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E2/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E3/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": [
+        "urn:alice",
+        "https://sparq.dev/ns/auth#denyRead",
+        "urn:t/1"
+      ],
+      "grant": null
+    },
+    "views": {
+      "urn:sparq:auth": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ],
+      "urn:sparq:auth-bridged": [
+        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+      ]
+    }
+  },
+  "E3/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E3/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E3/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E4/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E4/urn:alice/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E4/urn:bob/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  },
+  "E4/urn:bob/2027-01-01T00:00:00Z": {
+    "outcome": {
+      "deny": null,
+      "grant": null
+    },
+    "views": {}
+  }
+}

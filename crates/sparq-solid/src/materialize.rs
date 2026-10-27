@@ -16,14 +16,14 @@
 //! reference, and the tests below assert the two produce the SAME `<urn:sparq:auth>`
 //! triple set on the WAC/ACP fixtures.
 
-use crate::budget::{default_auth_budget, AuthBudget, DecisionWork, MaterializeDeadline};
+use crate::budget::{default_auth_budget, AuthBudget, AuthLedger, MaterializeDeadline};
 use crate::loader::{assemble_input_ids, strip_reserved_graphs, System};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_GRAPH, AUTH_NS};
 use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval_charged, CompiledRuleSet};
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval_metered, CompiledRuleSet, MeteredError};
 use sparq_reason::{ClosureLimits, NegationCycles};
 use std::sync::OnceLock;
 // `std::time::Instant` is unusable on `wasm32-unknown-unknown` — `Instant::now()`
@@ -280,29 +280,47 @@ const AUTH_MAX_TOTAL_JOIN_ROWS: usize = 4_000_000;
 /// The tag is added here, at the one seam every authorization closure in this crate goes
 /// through, so no stratum can return an untagged allowance refusal.
 ///
-/// `work` is the materialization's whole-decision ledger: what this closure charged is
-/// added to it and the aggregate re-checked, because `limits` applies per CLOSURE and a
-/// materialization runs several (three ACP strata, five ODRL ones) — see
-/// [`crate::AuthBudget`].
+/// `work` is shared by input assembly and every stratum. The remaining aggregate
+/// allowance narrows this closure's caps before evaluation; only a successful closure
+/// debits its charge. `limits` applies per closure, while ACP and ODRL run several
+/// (see [`crate::AuthBudget`]).
 pub(crate) fn auth_eval(
     dict: &mut Dict,
     facts: &[[sparq_core::dict::Id; 3]],
     rules: &CompiledRuleSet,
-    limits: ClosureLimits,
-    work: &mut DecisionWork,
+    mut limits: ClosureLimits,
+    work: &mut AuthLedger,
 ) -> Result<Vec<[sparq_core::dict::Id; 3]>, String> {
     stratum_boundary(work)?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
     STRATA_EVALUATED.with(|count| count.set(count.get() + 1));
+    limits.deadline = limits.deadline.into_iter().chain(work.deadline()).min();
     let (closure, charge) =
-        eval_charged(dict, facts, rules, limits).map_err(tag_allowance_refusal)?;
-    work.charge(charge)?;
+        eval_metered(dict, facts, rules, limits, work.core()).map_err(|error| match error {
+            MeteredError::Ledger(e) => format!(
+                "{} (authorization closure)",
+                work.refusal(e, e.dim, "authorization closure")
+            ),
+            MeteredError::Closure(e) => tag_allowance_refusal(e),
+            other => other.to_string(),
+        })?;
+    #[cfg(test)]
+    record_charge(charge);
+    #[cfg(not(test))]
+    let _ = charge;
     stratum_boundary(work)?;
     Ok(closure)
 }
 
 /// Sample at stratum boundaries, including after the final stratum before installation.
-fn stratum_boundary(work: &DecisionWork) -> Result<(), String> {
+fn stratum_boundary(work: &AuthLedger) -> Result<(), String> {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    STRATUM_PANIC_AFTER.with(|remaining| {
+        if let Some(n) = remaining.get() {
+            remaining.set(n.checked_sub(1));
+            assert!(n != 0, "injected stratum hook panic");
+        }
+    });
     #[cfg(all(test, not(target_arch = "wasm32")))]
     STRATUM_DELAY_AFTER.with(|remaining| {
         if remaining.get() == 0 {
@@ -316,6 +334,7 @@ fn stratum_boundary(work: &DecisionWork) -> Result<(), String> {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 std::thread_local! {
+    pub(crate) static STRATUM_PANIC_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     static STRATA_EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static STRATUM_DELAY_AFTER: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static STRATUM_DELAY: std::cell::Cell<std::time::Duration> = const {
@@ -508,6 +527,16 @@ pub(crate) fn materialize_wac_with_deadline(
     budget: AuthBudget,
     deadline: MaterializeDeadline,
 ) -> Result<MaterializeStats, String> {
+    materialize_wac_rules(graph, limits, budget, deadline, wac_rules)
+}
+
+fn materialize_wac_rules<'rules>(
+    graph: &mut Graph,
+    limits: ClosureLimits,
+    budget: AuthBudget,
+    deadline: MaterializeDeadline,
+    rules: impl FnOnce() -> Result<&'rules CompiledRuleSet, String>,
+) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Every fallible step runs BEFORE the first mutation of `graph`, so an `Err` leaves
@@ -515,19 +544,18 @@ pub(crate) fn materialize_wac_with_deadline(
     // byte-for-byte untouched, as the contract above promises. Assembly ignores the
     // reserved graph space itself, so it does not depend on the strip having run.
     crate::loader::require_writable(graph)?;
-    let rules = wac_rules()?;
+    let rules = rules()?;
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
+    let mut work = AuthLedger::with_deadline(budget, deadline);
     let facts = assemble_input_ids(
         &mut dict,
         graph,
         System::Wac,
         &AccessProvenance::new(),
         &VerifiedCredentials::new(),
-        budget,
-        deadline,
+        &mut work,
     )?;
-    let mut work = DecisionWork::new(budget, deadline);
     let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
     let mut stats = install_auth_view(graph, &dict, &closure, deadline)?;
     stats.strata_facts = vec![closure.len()];
@@ -643,7 +671,7 @@ pub fn materialize_acp_with_credentials(
 ///
 /// Every stratum runs under the same `limits`, and each gets them afresh (they bound one
 /// closure, so a later stratum is not charged for an earlier one). `budget` is what bounds
-/// the three strata TOGETHER: each closure's charge goes into one [`DecisionWork`] ledger,
+/// the three strata TOGETHER: each closure's charge goes into one [`AuthLedger`] ledger,
 /// which refuses once their aggregate is past
 /// [`AuthBudget::max_decision_join_rows`] / [`AuthBudget::max_decision_facts`].
 pub(crate) fn materialize_acp_limited(
@@ -678,16 +706,15 @@ pub(crate) fn materialize_acp_with_deadline(
     crate::loader::require_writable(graph)?;
     let rules = acp_rules()?;
     let mut dict = Dict::new();
+    let mut work = AuthLedger::with_deadline(budget, deadline);
     let facts = assemble_input_ids(
         &mut dict,
         graph,
         System::Acp,
         provenance,
         credentials,
-        budget,
-        deadline,
+        &mut work,
     )?;
-    let mut work = DecisionWork::new(budget, deadline);
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
     // closure is the next one's fact set, so a negated predicate is complete before the
     // stratum that negates it runs (design doc §3.5) and nothing round-trips through text.
@@ -1119,8 +1146,7 @@ mod tests {
                 system,
                 &prov,
                 &VerifiedCredentials::new(),
-                default_auth_budget(),
-                MaterializeDeadline::new(default_auth_budget()),
+                &mut AuthLedger::new(default_auth_budget()),
             )
             .expect("id facts");
             let direct: BTreeSet<String> = ids
@@ -1205,4 +1231,190 @@ mod tests {
         assert_eq!(acp.len(), 3);
         assert!(acp.iter().all(|s| s.n_rules() > 0), "every ACP stratum carries rules");
     }
+}
+
+#[cfg(test)]
+mod ledger_tests {
+    use super::*;
+    use sparq_core::meter::Dim;
+
+    #[test]
+    fn acp_closures_share_the_remaining_ledger_even_with_unbounded_own_limits() {
+        let graph = Graph::load_dataset(&crate::acp_fixture(), "nquads").unwrap();
+        let mut dict = Dict::new();
+        let mut ledger = AuthLedger::new(default_auth_budget());
+        let mut facts = assemble_input_ids(
+            &mut dict,
+            &graph,
+            System::Acp,
+            &AccessProvenance::new(),
+            &VerifiedCredentials::new(),
+            &mut ledger,
+        )
+        .unwrap();
+        let initial = facts.clone();
+        let mut charges = Vec::new();
+        for rules in acp_rules().unwrap() {
+            let before = ledger.core().spent(Dim::JoinRows);
+            facts = auth_eval(
+                &mut dict,
+                &facts,
+                rules,
+                ClosureLimits::default(),
+                &mut ledger,
+            )
+            .unwrap();
+            charges.push(ledger.core().spent(Dim::JoinRows) - before);
+        }
+        let sum: usize = charges.iter().sum();
+        let maximum = *charges.iter().max().unwrap();
+        assert!(sum > maximum);
+        let mut budget = default_auth_budget();
+        budget.max_decision_join_rows = sum - 1;
+        assert!(charges
+            .iter()
+            .all(|charge| *charge <= budget.max_decision_join_rows));
+        let mut ledger = AuthLedger::new(budget);
+        let mut facts = initial;
+        let mut refused = false;
+        for rules in acp_rules().unwrap() {
+            let before = ledger.core().spent(Dim::JoinRows);
+            match auth_eval(
+                &mut dict,
+                &facts,
+                rules,
+                ClosureLimits::default(),
+                &mut ledger,
+            ) {
+                Ok(next) => facts = next,
+                Err(error) => {
+                    assert_eq!(
+                        auth_allowance_refusal(&error),
+                        Some(AuthAllowance::DecisionWork)
+                    );
+                    assert_eq!(
+                        ledger.core().spent(Dim::JoinRows),
+                        before,
+                        "a refused closure debits nothing"
+                    );
+                    refused = true;
+                    break;
+                }
+            }
+            assert!(ledger.core().spent(Dim::JoinRows) <= budget.max_decision_join_rows);
+        }
+        assert!(refused);
+        assert!(ledger.core().spent(Dim::JoinRows) <= budget.max_decision_join_rows);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_round_deadline_refuses_before_installing_a_replacement_view() {
+        let mut graph = Graph::load_dataset(
+            r#"<https://pod.ex/d#it> <https://ex.dev/p> "v" <https://pod.ex/d> .
+<https://pod.ex/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> ."#,
+            "nquads",
+        ).unwrap();
+        materialize_wac(&mut graph).unwrap();
+        let view = |graph: &Graph| {
+            let g = graph
+                .named_graph(&NamedNode::new_unchecked(AUTH_GRAPH).into())
+                .unwrap();
+            let mut triples: Vec<_> = crate::loader::graph_triples(g)
+                .iter()
+                .map(|t| format!("{} {} {}", t[0], t[1], t[2]))
+                .collect();
+            triples.sort();
+            triples
+        };
+        let before = view(&graph);
+        assert!(!before.is_empty());
+        let rules = compile("@prefix : <urn:> . @prefix string: <http://www.w3.org/2000/10/swap/string#> . :s :p \"x\" . { ?s :p ?v . (?v \"x\") string:concatenation ?next } => { ?s :p ?next } .").unwrap();
+        let mut budget = default_auth_budget();
+        budget.max_materialize_time = Some(std::time::Duration::from_millis(50));
+        let mut limits = ClosureLimits::default();
+        // A finite fallback keeps a missing deadline mutation reviewable.
+        limits.max_rounds = 20_000;
+        let error = materialize_wac_rules(
+            &mut graph,
+            limits,
+            budget,
+            MaterializeDeadline::new(budget),
+            || Ok(&rules),
+        )
+        .unwrap_err();
+        assert_eq!(
+            auth_allowance_refusal(&error),
+            Some(AuthAllowance::Deadline),
+            "{error}"
+        );
+        assert!(
+            error.contains("authorization closure"),
+            "expiry must be observed inside a round: {error}"
+        );
+        assert_eq!(view(&graph), before);
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static OBSERVED_CHARGES: std::cell::RefCell<Option<Vec<sparq_reason::n3::compiled::ClosureCharge>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn record_charge(charge: sparq_reason::n3::compiled::ClosureCharge) {
+    OBSERVED_CHARGES.with_borrow_mut(|charges| {
+        if let Some(charges) = charges {
+            charges.push(charge);
+        }
+    });
+}
+
+#[cfg(test)]
+#[test]
+fn closure_charges_match_the_baseline() {
+    use serde_json::json;
+    let mut snapshots = std::collections::BTreeMap::new();
+    let capture = || {
+        OBSERVED_CHARGES.with_borrow_mut(|charges| {
+            let charges = charges.take().unwrap();
+            let joins: usize = charges.iter().map(|c| c.join_rows.unwrap()).sum();
+            let facts: usize = charges.iter().map(|c| c.facts).sum();
+            json!({"joins":joins,"facts":facts,"strata":charges.len()})
+        })
+    };
+    for case in crate::ledger_equivalence::cases() {
+        OBSERVED_CHARGES.with_borrow_mut(|charges| *charges = Some(Vec::new()));
+        let _ = case.run();
+        snapshots.insert(case.name, capture());
+    }
+    #[cfg(feature = "odrl-bridge")]
+    for (name, policy, request) in crate::ledger_equivalence::odrl_cases() {
+        OBSERVED_CHARGES.with_borrow_mut(|charges| *charges = Some(Vec::new()));
+        let result = crate::odrl_bridge::materialize_odrl_n3(&mut Graph::new(), &policy, &request);
+        let charges = capture();
+        snapshots.insert(
+            format!("odrl/{name}"),
+            json!({"accepted":result.is_ok(),"charge":charges}),
+        );
+    }
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/fixtures/auth-ledger-charges.json")).unwrap();
+    #[cfg(not(feature = "odrl-bridge"))]
+    let expected = {
+        let mut expected = expected;
+        expected
+            .as_object_mut()
+            .unwrap()
+            .retain(|name, _| !name.starts_with("odrl/"));
+        expected
+    };
+    crate::ledger_equivalence::assert_golden(
+        "auth-ledger-charges.json",
+        &json!(snapshots),
+        &expected.to_string(),
+    );
 }

@@ -360,10 +360,7 @@ impl PodStore {
                 );
             }
         }
-        let budget = self.auth_budget;
-        self.auth_budget = budget.without_deadline();
-        let rebuilt = self.rematerialize(acp);
-        self.auth_budget = budget;
+        let rebuilt = crate::budget::untimed_rebuild(self, |store| store.rematerialize(acp));
         match rebuilt {
             Ok(()) => failed,
             Err(e) => {
