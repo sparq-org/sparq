@@ -127,7 +127,7 @@ async fn drop_then_reopen_while_spawning_child_processes() {
 }
 
 #[tokio::test]
-async fn directory_open_retries_both_lock_files_after_transient_contention() {
+async fn directory_open_refuses_both_live_lock_files_and_reopens_after_drop() {
     use sparq_core::dir_lock::{DirLock, LockLocation};
 
     for inside in [false, true] {
@@ -138,29 +138,16 @@ async fn directory_open_retries_both_lock_files_after_transient_contention() {
         } else {
             dir.0.clone()
         };
-        let mut held = Some(DirLock::acquire(LockLocation::sibling_of(&target).unwrap()).unwrap());
-        let mut attempts = 0;
-        let graph = open_with_retry(
-            OPEN_RETRY_TIMEOUT,
-            Duration::from_millis(1),
-            Duration::from_millis(1),
-            || {
-                attempts += 1;
-                let result = Graph::open(&dir.0);
-                if let Some(lock) = held.take() {
-                    assert_eq!(
-                        result.as_ref().err().unwrap().kind(),
-                        std::io::ErrorKind::WouldBlock
-                    );
-                    drop(lock);
-                }
-                result
-            },
-        )
-        .unwrap();
-        // Other tests can fork while `held` is live, retaining its descriptor past drop.
-        assert!(attempts >= 2, "the entire open must be tried again");
-        let c = EmbeddedSparqClient::over(graph).unwrap();
+        let held = DirLock::acquire(LockLocation::sibling_of(&target).unwrap()).unwrap();
+        let error = EmbeddedSparqClient::open(&dir.0)
+            .err()
+            .expect("a live lock holder must be refused");
+        assert!(
+            matches!(error, SparqError::Backend(ref message) if message.contains("is locked:")),
+            "{error}"
+        );
+        drop(held);
+        let c = dir.open();
         c.put_meta(CHILD, meta("after-contention")).await.unwrap();
         drop(c);
         assert_eq!(
@@ -188,7 +175,7 @@ fn embedded_lock_holder_process() {
 }
 
 #[test]
-fn a_live_process_holder_is_refused_after_the_open_retry_bound() {
+fn a_live_process_holder_is_refused() {
     use std::io::{BufRead, Write};
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
@@ -238,12 +225,8 @@ fn a_live_process_holder_is_refused_after_the_open_retry_bound() {
         "{error}"
     );
     assert!(
-        started.elapsed() >= OPEN_RETRY_TIMEOUT,
-        "lock contention must use the retry budget"
-    );
-    assert!(
         started.elapsed() < Duration::from_secs(5),
-        "the retry must be bounded"
+        "open must return while the holder is still alive"
     );
     assert!(
         holder.0.try_wait().unwrap().is_none(),

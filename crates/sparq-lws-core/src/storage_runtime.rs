@@ -126,7 +126,7 @@ impl StorageConfig {
             use sparq_lws_core::store::EmbeddedSparqClient;
             if let Some(data) = data_dir {
                 prepare_format(&data)?;
-                open_index_with_retry(
+                open_with_retry(
                     &data.join("index"),
                     wait,
                     EmbeddedSparqClient::open_or_create,
@@ -252,31 +252,34 @@ pub(super) fn make_blobs(path: Option<&std::path::Path>) -> io::Result<NativeBlo
 }
 
 #[cfg(feature = "embedded-sparq")]
-fn open_index_with_retry<T>(
+fn open_with_retry<T>(
     dir: &std::path::Path,
     wait: Duration,
     mut open: impl FnMut(&std::path::Path) -> io::Result<T>,
 ) -> io::Result<T> {
-    crate::open_retry::open_with_retry(
-        wait,
-        Duration::from_millis(10),
-        Duration::from_millis(250),
-        || open(dir),
-    )
-    .map_err(|error| {
-        if error.kind() == io::ErrorKind::WouldBlock {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                format!(
-                    "cannot acquire data-directory index lock {} (inside {}/sparq.lock): {error}",
-                    dir.with_extension("lock").display(),
-                    dir.display()
-                ),
-            )
-        } else {
-            error
+    let started = std::time::Instant::now();
+    let mut backoff = Duration::from_millis(10);
+    loop {
+        match open(dir) {
+            Ok(value) => return Ok(value),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                let remaining = wait.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        format!(
+                            "cannot acquire data-directory index lock {} (inside {}/sparq.lock): {error}",
+                            dir.with_extension("lock").display(),
+                            dir.display()
+                        ),
+                    ));
+                }
+                std::thread::sleep(backoff.min(remaining));
+                backoff = (backoff * 2).min(Duration::from_millis(250));
+            }
+            Err(error) => return Err(error),
         }
-    })
+    }
 }
 
 #[cfg(feature = "embedded-sparq")]

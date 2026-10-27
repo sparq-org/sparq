@@ -62,9 +62,9 @@
 //! the one strict improvement: `Mutex` wakeups were arbitrary, so a caller could be starved.
 //!
 //! Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the actor thread.
-//! Its graph and this process's lock handles are dropped before drop returns. On Unix, a child
-//! between fork and exec can briefly retain inherited handles; [`EmbeddedSparqClient::open`]
-//! gives that transient contention a bounded retry budget.
+//! Its graph explicitly unlocks the directory before drop returns, even if a child between fork
+//! and exec still holds inherited descriptors. [`EmbeddedSparqClient::open`] attempts the open
+//! once and immediately refuses a directory held by another live holder.
 //!
 //! ## Persistence
 //! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
@@ -79,13 +79,11 @@ use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use sparq_core::Graph;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::open_retry::open_with_retry;
 use super::sparq::{DeleteOutcome, ReadPlan, ResourceMeta, SparqClient, SparqError};
 use super::sparql;
 use super::timestamp;
@@ -98,8 +96,6 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// The fail-closed error after a panic, indeterminate commit, or actor thread failure.
 /// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
-
-const OPEN_RETRY_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
 /// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
@@ -146,8 +142,8 @@ impl GraphActor {
     /// Move `graph` onto a fresh dedicated OS thread and start serving jobs.
     ///
     /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread,
-    /// dropping the graph and this process's lock handles before returning. A child can briefly
-    /// retain inherited handles between fork and exec. A spawn failure is a backend error.
+    /// dropping the graph and releasing its directory locks before returning, including when a
+    /// child retains inherited descriptors. A spawn failure is a backend error.
     fn spawn(graph: Graph) -> Result<Self, SparqError> {
         let (tx, rx) = mpsc::unbounded_channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -297,17 +293,10 @@ impl EmbeddedSparqClient {
     /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
     /// snapshot). The on-disk path the persistence option selects.
     ///
-    /// Retries `WouldBlock` with a 250 ms budget: on Unix, a child between fork and exec can briefly
-    /// retain a dropped graph's lock descriptors. A holder that remains live is still refused
-    /// once that retry budget expires; other I/O errors are returned immediately.
+    /// Attempts the open once. A live holder is refused immediately; a dropped graph explicitly
+    /// releases its locks even when a child still holds inherited descriptors.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
-        let graph = open_with_retry(
-            OPEN_RETRY_TIMEOUT,
-            Duration::from_millis(1),
-            Duration::from_millis(1),
-            || Graph::open(dir),
-        )
-        .map_err(|e| {
+        let graph = Graph::open(dir).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
         })?;
         Self::over(graph)

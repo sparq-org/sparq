@@ -48,21 +48,21 @@ inside it. An inside-only holder can serve a store whose parent is not writable,
 but cannot compact by renaming the root directory. Never remove these lock files
 while the directory may be in use.
 
-On Unix, child-process creation can briefly retain the graph's lock descriptors
-between fork and exec, even after the parent's graph has been dropped.
-Close-on-exec only closes them at exec. The embedded snapshot opener therefore
-retries only `WouldBlock`, with a **250 ms retry budget** and waits of at most
-**1 ms** between attempts. Each attempt runs the whole graph open, including both
-locks. A holder that remains live is refused when the budget expires; other I/O
-errors return immediately. This synchronous open can block its calling thread
-for that budget, subject to filesystem and scheduler delays. An inherited handle
-retained beyond the budget can still cause refusal.
+On Unix, forked or duplicated descriptors share one open file description and its
+advisory lock. Closing the parent's descriptor alone can leave that lock held by a
+child between fork and exec. The owning process now explicitly unlocks both files
+before closing them, releasing the shared lock even while inherited descriptors
+remain open. A guard records its owning process and skips explicit unlock if it is
+dropped in a forked child, preserving the parent's live lock. Staging locks and
+inside locks moved during a swap use the same release rule. Independent shared
+readers and mapped views retain their locks until their final owners drop.
 
-Data-directory boot keeps its separate configured wait, including the default
+The embedded snapshot opener attempts the graph open once and immediately refuses
+contention from a live holder. It needs no retry for a just-dropped graph's inherited
+handles. Data-directory boot keeps its separate configured wait, including the default
 zero wait, and exponential backoff starting at 10 ms and capped at 250 ms.
-`EmbeddedSparqClient::open_or_create`, `Graph::open`, and `DirLock` themselves keep
-immediate refusal on contention. No directory-lock protocol or stored-file format
-changes.
+`EmbeddedSparqClient::open_or_create`, `Graph::open`, and `DirLock` also keep immediate
+refusal on contention. No directory-lock protocol or stored-file format changes.
 
 The descriptor lifetime follows the documented
 [Linux `flock` semantics](https://man7.org/linux/man-pages/man2/flock.2.html) and
@@ -80,4 +80,4 @@ SIGTERM or Ctrl-C stops accepting and drains requests. The periodic reconciler i
 stopped and awaited before `EmbeddedSparqClient::compact()` runs on the embedded
 actor for a directory-backed index. Successful compaction empties its journals;
 a failure is logged and returns a non-zero exit while retaining recovery data.
-Dropping the final client joins its actor and closes this process's index-lock handles.
+Dropping the final client joins its actor and explicitly releases its index locks.

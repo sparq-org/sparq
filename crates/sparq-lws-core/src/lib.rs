@@ -87,8 +87,6 @@ pub mod authz;
 pub(crate) mod accept;
 pub mod body_limit;
 mod clock;
-#[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
-mod open_retry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod describe;
 pub mod error;
