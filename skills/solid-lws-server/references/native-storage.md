@@ -1,4 +1,42 @@
-# Native embedded directory storage
+# Native data-directory boot
+
+`SOLID_SERVER_DATA_DIR` (unset by default) selects a data root with the RDF index
+at `<data>/index` and resource bytes at `<data>/blobs`. It implies
+`PSS_SPARQ_BACKEND=embedded`; explicitly selecting any other backend refuses boot.
+Setting it together with a non-empty `SOLID_SERVER_SPARQ_DIR` also refuses boot.
+The legacy `SOLID_SERVER_SPARQ_DIR` setting still opens an existing snapshot and
+retains the durable-index/in-memory-blob refusal. A directory-backed index opened
+through this legacy path also compacts on graceful shutdown.
+
+The default native build opens `FsBlobStore` at `<data>/blobs`. Both
+`embedded-sparq` and `blob-fs` are required; a build without either feature refuses
+data-directory boot with a message naming the missing feature. Without a data
+directory, the native binary uses in-memory blobs.
+
+The boot contract checks `<data>/format.json` before opening either plane:
+
+```json
+{"schema":1,"index":{"major":1},"blobs":{"major":1}}
+```
+
+An absent marker is published atomically (temporary file, file sync, rename,
+data-directory sync) only if both plane directories are absent or empty. Existing
+plane content without the marker is refused as a foreign directory. An unknown
+schema, incompatible index/blob major, or malformed marker refuses boot. A marker
+without an index resumes first boot. Do not remove the marker from an existing store.
+
+`EmbeddedSparqClient::open_or_create(dir)` delegates empty-store creation,
+interrupted-swap recovery and exclusive locking to the core. Its I/O result preserves
+`WouldBlock` when another holder owns the directory. The index's `<data>/index.lock`
+and `<data>/index/sparq.lock` guard the data root; there is no separate `LOCK` file.
+The index lock is held before the blob constructor opens the store and sweeps
+abandoned writes from `blobs/tmp/`. A second boot that cannot acquire the index
+lock never opens or sweeps blobs. `SOLID_SERVER_WAIT_FOR_LOCK_SECS`
+(default `0`) is a non-negative integer: data-directory boot retries only
+`WouldBlock` with bounded backoff until that duration, then reports the lock path.
+Other errors fail immediately.
+
+## Embedded snapshot reopen and lock handles
 
 With `embedded-sparq`, `EmbeddedSparqClient::open(dir)` opens a saved graph and
 keeps its directory locks on the graph's actor thread. Dropping the last client
@@ -12,20 +50,34 @@ while the directory may be in use.
 
 On Unix, child-process creation can briefly retain the graph's lock descriptors
 between fork and exec, even after the parent's graph has been dropped.
-Close-on-exec only closes them at exec. The embedded opener therefore retries
-only `WouldBlock`, with a **250 ms retry budget** and waits of at most **1 ms**
-between attempts. Each attempt runs the whole graph open, including both locks.
-A holder that remains live is refused when the budget expires; other I/O errors
-return immediately. This is a synchronous open and can block its calling thread
-for that retry budget, subject to filesystem and scheduler delays. It does not
-wait indefinitely for another server to stop.
+Close-on-exec only closes them at exec. The embedded snapshot opener therefore
+retries only `WouldBlock`, with a **250 ms retry budget** and waits of at most
+**1 ms** between attempts. Each attempt runs the whole graph open, including both
+locks. A holder that remains live is refused when the budget expires; other I/O
+errors return immediately. This synchronous open can block its calling thread
+for that budget, subject to filesystem and scheduler delays. An inherited handle
+retained beyond the budget can still cause refusal.
 
-An inherited descriptor retained beyond the budget can still cause `WouldBlock`;
-the bound covers transient contention without promising that every reopen succeeds.
-
-The lower-level `Graph::open` and `DirLock` APIs retain their immediate refusal
-on contention. No directory-lock protocol or stored-file format changes.
+Data-directory boot keeps its separate configured wait, including the default
+zero wait, and exponential backoff starting at 10 ms and capped at 250 ms.
+`EmbeddedSparqClient::open_or_create`, `Graph::open`, and `DirLock` themselves keep
+immediate refusal on contention. No directory-lock protocol or stored-file format
+changes.
 
 The descriptor lifetime follows the documented
 [Linux `flock` semantics](https://man7.org/linux/man-pages/man2/flock.2.html) and
 [macOS `flock` semantics](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html).
+
+## Durability and shutdown
+
+Durability is checked in both directions. A durable/shared index with in-memory
+blobs refuses boot. Durable blobs with an ephemeral index also refuse unless
+`SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY=1` (default unset) explicitly allows
+that inconsistent combination; this override never permits a durable index with
+ephemeral bytes.
+
+SIGTERM or Ctrl-C stops accepting and drains requests. The periodic reconciler is
+stopped and awaited before `EmbeddedSparqClient::compact()` runs on the embedded
+actor for a directory-backed index. Successful compaction empties its journals;
+a failure is logged and returns a non-zero exit while retaining recovery data.
+Dropping the final client joins its actor and closes this process's index-lock handles.

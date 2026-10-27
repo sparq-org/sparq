@@ -787,10 +787,9 @@ async fn materialization_failure_stops_the_actor_and_reopens_the_committed_frame
     let dir = Directory::empty();
     let c = dir.open();
     c.put_meta(PARENT, meta("parent")).await.unwrap();
-    // The parent occupies named/0. Refuse creation of the child's named/1 directory
-    // after the engine has committed the whole transaction frame.
-    let blocker = dir.0.join("named/1");
-    std::fs::write(&blocker, b"refuse child materialization").unwrap();
+    // Refuse manifest publication after the transaction frame is committed.
+    let blocker = dir.0.join("named.bin.tmp");
+    std::fs::create_dir(&blocker).unwrap();
     let error = c.create_child(PARENT, CHILD, meta("committed")).await;
     assert!(matches!(
         error,
@@ -806,7 +805,7 @@ async fn materialization_failure_stops_the_actor_and_reopens_the_committed_frame
         assert!(matches!(error, SparqError::Backend(ref e) if e.contains("restart to recover")));
     }
     drop(c);
-    std::fs::remove_file(blocker).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
     for _ in 0..2 {
         let c = dir.open();
         assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("committed"));

@@ -70,6 +70,24 @@ pub struct AuthBudget {
     /// Facts summed over the fixpoints of all closures of one authorization
     /// materialization (`ClosureLimits::max_facts` bounds one closure).
     pub max_decision_facts: usize,
+    /// Wall-clock allowance for one materialization, including input assembly, every
+    /// stratum and replacement-view assembly. Default: five seconds; `None` disables it. Checked at coarse boundaries,
+    /// never per rule row, so a running stratum can overrun before it is refused.
+    /// Rollback and post-commit rebuilds omit this deadline while retaining count/size caps.
+    /// Ignored on wasm32, where no monotonic clock is available.
+    pub max_materialize_time: Option<std::time::Duration>,
+}
+
+impl AuthBudget {
+    /// Copy this budget without its elapsed-time limit, preserving all count and size caps.
+    /// Rollback and post-commit rebuilds use this budget; request admission keeps the
+    /// configured deadline. The original budget is unchanged.
+    pub fn without_deadline(&self) -> Self {
+        Self {
+            max_materialize_time: None,
+            ..*self
+        }
+    }
 }
 
 /// The input and whole-decision budget every authorization materialization runs under
@@ -98,6 +116,10 @@ pub struct AuthBudget {
 /// The margins are deliberate but not open-ended: an untrusted writer of a control
 /// document chooses how large and how multiplying its policies are, so these ceilings are
 /// what they can spend. A pod that genuinely needs more raises them.
+///
+/// The wall-clock allowance is five seconds on native targets. It is shared by input
+/// assembly and all strata and sampled at coarse boundaries; a running stratum is not
+/// interrupted. `None` disables this clock, and wasm32 ignores it entirely.
 pub fn default_auth_budget() -> AuthBudget {
     AuthBudget {
         max_document_bytes: AUTH_MAX_DOCUMENT_BYTES,
@@ -108,6 +130,7 @@ pub fn default_auth_budget() -> AuthBudget {
         max_resource_path_depth: AUTH_MAX_RESOURCE_PATH_DEPTH,
         max_decision_join_rows: AUTH_MAX_DECISION_JOIN_ROWS,
         max_decision_facts: AUTH_MAX_DECISION_FACTS,
+        max_materialize_time: Some(std::time::Duration::from_secs(5)),
     }
 }
 
@@ -148,6 +171,44 @@ const AUTH_MAX_DECISION_JOIN_ROWS: usize = 4_000_000;
 /// accepted aggregate: a refused decision's peak is this plus the one closure's `max_facts`
 /// that crossed it.
 const AUTH_MAX_DECISION_FACTS: usize = 512_000;
+
+/// One clock shared by input assembly and all strata of a materialization.
+#[derive(Clone, Copy)]
+pub(crate) struct MaterializeDeadline {
+    #[cfg(not(target_arch = "wasm32"))]
+    started: Option<std::time::Instant>,
+    #[cfg(not(target_arch = "wasm32"))]
+    limit: Option<std::time::Duration>,
+}
+
+impl MaterializeDeadline {
+    pub(crate) fn new(_budget: AuthBudget) -> Self {
+        Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            started: _budget
+                .max_materialize_time
+                .map(|_| std::time::Instant::now()),
+            #[cfg(not(target_arch = "wasm32"))]
+            limit: _budget.max_materialize_time,
+        }
+    }
+
+    /// Coarse cooperative check; wasm32 has no monotonic clock and does no timing.
+    pub(crate) fn check(&self) -> Result<(), String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self
+            .limit
+            .zip(self.started)
+            .is_some_and(|(limit, started)| started.elapsed() >= limit)
+        {
+            return Err(allowance_refusal(
+                AuthAllowance::Deadline,
+                "max_materialize_time elapsed; no authorization view is installed (fail-closed)",
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// The fixed cost [`term_bytes`] charges per term node, on top of its lexical bytes — the
 /// same shape the reasoner's own term sizing uses.
@@ -197,6 +258,7 @@ pub(crate) fn term_bytes(t: &Term) -> usize {
 /// failure exactly as it does for the reasoning allowance.
 pub(crate) struct InputMeter {
     budget: AuthBudget,
+    deadline: MaterializeDeadline,
     /// Bytes charged over all documents so far.
     bytes: usize,
     /// Bytes charged for the document being read.
@@ -205,8 +267,13 @@ pub(crate) struct InputMeter {
 
 impl InputMeter {
     pub(crate) fn new(budget: AuthBudget) -> InputMeter {
+        Self::with_deadline(budget, MaterializeDeadline::new(budget))
+    }
+
+    pub(crate) fn with_deadline(budget: AuthBudget, deadline: MaterializeDeadline) -> Self {
         InputMeter {
             budget,
+            deadline,
             bytes: 0,
             doc_bytes: 0,
         }
@@ -214,8 +281,14 @@ impl InputMeter {
 
     /// Begin reading the document `iri`: its per-document allowance starts afresh, while
     /// the aggregate carries over.
-    pub(crate) fn open(&mut self) {
+    pub(crate) fn open(&mut self) -> Result<(), String> {
+        self.deadline.check()?;
         self.doc_bytes = 0;
+        Ok(())
+    }
+
+    pub(crate) fn checkpoint(&self) -> Result<(), String> {
+        self.deadline.check()
     }
 
     /// Charge one term of the document being read: its length against
@@ -326,6 +399,7 @@ impl InputMeter {
     /// and credential facts — against [`AuthBudget::max_input_facts`], before it is
     /// interned into a closure's dictionary.
     pub(crate) fn facts(&self, facts: usize) -> Result<(), String> {
+        self.deadline.check()?;
         if facts <= self.budget.max_input_facts {
             return Ok(());
         }
@@ -350,17 +424,23 @@ impl InputMeter {
 /// the ODRL bridge's. This is the one number that bounds a whole decision.
 pub(crate) struct DecisionWork {
     budget: AuthBudget,
+    deadline: MaterializeDeadline,
     join_rows: usize,
     facts: usize,
 }
 
 impl DecisionWork {
-    pub(crate) fn new(budget: AuthBudget) -> DecisionWork {
+    pub(crate) fn new(budget: AuthBudget, deadline: MaterializeDeadline) -> DecisionWork {
         DecisionWork {
             budget,
+            deadline,
             join_rows: 0,
             facts: 0,
         }
+    }
+
+    pub(crate) fn checkpoint(&self) -> Result<(), String> {
+        self.deadline.check()
     }
 
     /// Add one closure's charge, refusing when the decision's aggregate is past either

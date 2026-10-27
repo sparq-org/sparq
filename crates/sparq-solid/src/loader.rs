@@ -22,7 +22,7 @@
 //! (see [`assemble_facts`]). Principal values in the view's reserved spaces are refused
 //! ([`validate_principal_iri`]).
 
-use crate::budget::{AuthBudget, InputMeter};
+use crate::budget::{AuthBudget, InputMeter, MaterializeDeadline};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -536,9 +536,9 @@ pub(crate) fn graph_triples_metered(
     iri: &str,
     meter: &mut InputMeter,
 ) -> Result<Vec<[Term; 3]>, String> {
+    meter.open()?;
     let pat: sparq_core::store::Pattern = [None, None, None];
     let scan = g.store().scan(&pat);
-    meter.open();
     let mut out = Vec::with_capacity(scan.rows.len());
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);
@@ -625,8 +625,10 @@ pub(crate) fn assemble_facts(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
     budget: AuthBudget,
+    deadline: MaterializeDeadline,
 ) -> Result<Vec<[Term; 3]>, String> {
-    let mut meter = InputMeter::new(budget);
+    let mut meter = InputMeter::with_deadline(budget, deadline);
+    meter.checkpoint()?;
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
     let own_pred = if system == System::Wac { "ownAcl" } else { "ownAcr" };
@@ -654,6 +656,7 @@ pub(crate) fn assemble_facts(
     // below them, get no grants at all: a deny or exception it held can never be lost
     // while an allow elsewhere still applies. A rejected WAC ACL keeps governing its
     // resource with no authorizations, so no ancestor's default takes over.
+    meter.checkpoint()?;
     let rejected = document_view(&control_graphs, system).rejected;
     let blocked: FxHashSet<&str> = if system == System::Acp {
         rejected.iter().map(|iri| &iri[..iri.len() - suffix.len()]).collect()
@@ -670,7 +673,10 @@ pub(crate) fn assemble_facts(
     // container traversal ([`parent_iri`]) the store and the MCP server use, so the rules
     // walk exactly the containers the resource enumeration made.
     let parent_p = named(&format!("{SOLIDX_NS}parent"));
-    for r in &resources {
+    for (batch, r) in resources.iter().enumerate() {
+        if batch % 64 == 0 {
+            meter.checkpoint()?;
+        }
         if !is_blocked(r) {
             out.push([named(r), is_resource.clone(), xsd_true()]);
             if let Some(p) = parent_iri(r).filter(|p| resources.contains(*p) && !is_blocked(p)) {
@@ -699,9 +705,11 @@ pub(crate) fn assemble_facts(
         }
     }
 
+    meter.checkpoint()?;
     // 2) control-document linkage by naming convention: <R + ".acl"> controls <R>.
     //    The .acl/.acr graphs are themselves resources too (Control gates them).
     for (iri, _) in &control_graphs {
+        meter.checkpoint()?;
         let r = &iri[..iri.len() - suffix.len()];
         if !is_blocked(r) {
             out.push([named(r), owns.clone(), named(iri)]);
@@ -714,6 +722,7 @@ pub(crate) fn assemble_facts(
     let mut webids: FxHashSet<String> = FxHashSet::default();
     let mut principal_iris: FxHashSet<String> = FxHashSet::default();
     for (iri, triples) in &control_graphs {
+        meter.checkpoint()?;
         if rejected.contains(iri) {
             continue;
         }
@@ -729,7 +738,10 @@ pub(crate) fn assemble_facts(
         }
     }
     if system == System::Wac {
-        for (name, sub) in graph.named() {
+        for (batch, (name, sub)) in graph.named().iter().enumerate() {
+            if batch % 64 == 0 {
+                meter.checkpoint()?;
+            }
             let Some(iri) = graph_iri(name) else { continue };
             // Same reserved-space skip as the resource pass above: a forged
             // `<urn:sparq:…>` graph named by an `acl:agentGroup` must never be read.
@@ -769,7 +781,10 @@ pub(crate) fn assemble_facts(
     // (they become candidate agents in the rules) and are marked isWebId so the
     // candidate-generation lattice picks them up.
     if system == System::Acp {
-        for (resource, creator, owner) in provenance.iter() {
+        for (batch, (resource, creator, owner)) in provenance.iter().enumerate() {
+            if batch % 64 == 0 {
+                meter.checkpoint()?;
+            }
             // Every fact is validated, emitted or not: the store keeps the facts of a
             // resource that does not exist while its own `.acr` is stored, so a later rebuild
             // must not be the first to refuse one.
@@ -799,7 +814,10 @@ pub(crate) fn assemble_facts(
         // top of this pass drops any forged `holdsVc` smuggled into a control document).
         // A holder becomes a candidate agent, so its WebID goes through the SAME
         // reserved-encoding validation and is marked isWebId.
-        for (agent, requirement) in credentials.iter() {
+        for (batch, (agent, requirement)) in credentials.iter().enumerate() {
+            if batch % 64 == 0 {
+                meter.checkpoint()?;
+            }
             validate_principal_iri(agent)?;
             webids.insert(agent.to_owned());
             out.push([named(agent), named(&format!("{SOLIDX_NS}holdsVc")), named(requirement)]);
@@ -829,6 +847,7 @@ pub(crate) fn assemble_facts_default(
         provenance,
         credentials,
         crate::default_auth_budget(),
+        MaterializeDeadline::new(crate::default_auth_budget()),
     )
 }
 
@@ -845,16 +864,24 @@ pub(crate) fn assemble_input_ids(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
     budget: AuthBudget,
+    deadline: MaterializeDeadline,
 ) -> Result<Vec<[Id; 3]>, String> {
-    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
+    let facts = assemble_facts(graph, system, provenance, credentials, budget, deadline)?;
     // The fact count is re-checked HERE, immediately before interning: this is the point
     // the input is copied into the closure's dictionary, and `assemble_facts` is also
     // reached by the text differential path, so the guard sits on both sides of the seam.
-    InputMeter::new(budget).facts(facts.len())?;
-    Ok(facts
-        .iter()
-        .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
-        .collect())
+    InputMeter::with_deadline(budget, deadline).facts(facts.len())?;
+    let mut ids = Vec::with_capacity(facts.len());
+    for batch in facts.chunks(256) {
+        deadline.check()?;
+        ids.extend(
+            batch
+                .iter()
+                .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])]),
+        );
+    }
+    deadline.check()?;
+    Ok(ids)
 }
 
 /// The reasoning input as N3 source — the DEV-ONLY differential reference path
@@ -874,7 +901,14 @@ pub(crate) fn assemble_input(
     budget: AuthBudget,
 ) -> Result<String, String> {
     use std::fmt::Write;
-    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
+    let facts = assemble_facts(
+        graph,
+        system,
+        provenance,
+        credentials,
+        budget,
+        MaterializeDeadline::new(budget),
+    )?;
     let mut out = String::new();
     for t in &facts {
         let _ = writeln!(out, "{} {} {} .", t[0], t[1], t[2]);
@@ -1008,7 +1042,12 @@ fn enumerate<'g>(
 ) -> Result<Enumerated<'g>, String> {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
-    for (name, sub) in graph.named() {
+    for (batch, (name, sub)) in graph.named().iter().enumerate() {
+        if batch % 64 == 0 {
+            if let Some(meter) = meter.as_deref() {
+                meter.checkpoint()?;
+            }
+        }
         let Some(iri) = graph_iri(name) else { continue };
         // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
         // never reasoning input. [`strip_reserved_graphs`] also drops these from the
