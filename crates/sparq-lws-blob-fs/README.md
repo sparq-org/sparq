@@ -25,9 +25,7 @@ store.delete(key)?;
 ## ✨ Features
 
 - Synchronous `open`, `put`, `get`, `exists`, `delete`, `stat` and `list`, using
-  `std::io::Result`. Keys are validated by the shared
-  [`sparq-lws-blob-key`](../sparq-lws-blob-key) parser; invalid keys retain
-  `std::io::ErrorKind::InvalidInput`. `POOLED_BLOB_KEY_MARK` aliases its `POOL_MARK`.
+  `std::io::Result`. Only `($pool$)?b1-[0-9a-f]{32}` keys are accepted.
 - Ordinary layout: `objects/<first hex pair>/<second hex pair>/<key>`; pooled
   layout: `pool/<first hex pair>/<key>`. Hex pairs come from the random key part.
 - An exclusive temporary file is written and synced before hard-link publication

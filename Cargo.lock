@@ -5407,13 +5407,6 @@ dependencies = [
 [[package]]
 name = "sparq-lws-blob-fs"
 version = "0.1.0"
-dependencies = [
- "sparq-lws-blob-key",
-]
-
-[[package]]
-name = "sparq-lws-blob-key"
-version = "0.1.0"
 
 [[package]]
 name = "sparq-lws-blob-object"
@@ -5423,7 +5416,6 @@ dependencies = [
  "bytes",
  "futures-util",
  "object_store",
- "sparq-lws-blob-key",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -5480,7 +5472,6 @@ dependencies = [
  "sparq-lws-authn-saml",
  "sparq-lws-authn-ssi",
  "sparq-lws-blob-fs",
- "sparq-lws-blob-key",
  "sparq-lws-blob-object",
  "sparq-policy",
  "sparq-shacl",

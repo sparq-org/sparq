@@ -10,6 +10,41 @@ use sparq_lws_blob_object::{Error, ObjectBlobStore};
 const KEY: &str = "b1-0123456789abcdef0123456789abcdef";
 
 #[tokio::test]
+async fn invalid_keys_are_refused_by_local_filesystem() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ObjectBlobStore::new(
+        Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap()),
+        "blobs",
+    )
+    .unwrap();
+    for key in [
+        "",
+        "b1-0",
+        "0123456789abcdef0123456789abcdef",
+        "b1-0123456789abcdef0123456789abcde",
+        "b1-0123456789abcdef0123456789abcdef0",
+        "b1-0123456789abcdef0123456789abcdeA",
+        "b1-0123456789abcdef0123456789abcdeg",
+        "b1-0123456789abcdef0123456789abcdé",
+        "b1-0123456789abcdef0123456789abcdef\n",
+        "../outside",
+        "$pool$../outside",
+        "$pool$$pool$b1-0123456789abcdef0123456789abcdef",
+        "$pool$0123456789abcdef0123456789abcdef",
+        "b1-0123456789abcdef0123456789abcdef/x",
+        "pool/b1-0123456789abcdef0123456789abcdef",
+    ] {
+        assert_eq!(store.put(key, Bytes::new()).await, Err(Error::InvalidKey));
+        assert_eq!(store.get(key).await, Err(Error::InvalidKey));
+        assert_eq!(store.exists(key).await, Err(Error::InvalidKey));
+        assert_eq!(store.delete(key).await, Err(Error::InvalidKey));
+        assert!(matches!(store.stat(key).await, Err(Error::InvalidKey)));
+    }
+    assert!(store.list().next().await.is_none());
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+}
+
+#[tokio::test]
 async fn create_only_pool_layout_and_foreign_objects() {
     let dir = tempfile::tempdir().unwrap();
     let raw = Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());

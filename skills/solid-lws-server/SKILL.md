@@ -137,15 +137,12 @@ Set `PSS_SPARQ_BACKEND` to one of:
 `SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
 implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
 The default native build opens the filesystem blob store after acquiring the
-index lock. Builds without `embedded-sparq` refuse data-directory boot; `blob-fs` is required
-when no object URL is configured.
+index lock. Builds without `embedded-sparq` or `blob-fs` refuse data-directory boot.
 Without a data directory, the native binary uses in-memory blobs.
 
 | Variable | Meaning |
 |---|---|
-| `SOLID_SERVER_DATA_DIR` | Data root (default unset); opens a durable embedded index and filesystem blobs unless `SOLID_SERVER_BLOB_URL` selects object storage. |
-| `SOLID_SERVER_BLOB_URL` | Object backend URL (default unset); requires `blob-object` and `SOLID_SERVER_DATA_DIR`. Accepts `file://`, `s3://`, `az://`, `gs://` with the corresponding provider feature; no user information, query or fragment. Exact URL and backend are pinned in `format.json`; changes require migration. |
-| `SOLID_SERVER_BLOB_OPTIONS` | JSON object of provider option names to string values (default unset, empty map); requires `SOLID_SERVER_BLOB_URL`. Unknown keys fail startup. Credentials belong here or in provider-default discovery, never in the URL. Values are never logged or recorded in the marker. |
+| `SOLID_SERVER_DATA_DIR` | Data root (default unset); opens a durable embedded index and filesystem blobs. |
 | `SOLID_SERVER_SPARQ_DIR` | Legacy existing index snapshot (default unset); retains the durable-index/in-memory-blob refusal. A directory-backed index opened through this path also compacts on graceful shutdown. |
 | `SOLID_SERVER_WAIT_FOR_LOCK_SECS` | Non-negative integer seconds to retry the data-directory index lock (default `0`). |
 | `SOLID_SERVER_ALLOW_INCONSISTENT_DURABILITY` | `1` permits only the durable-blob/ephemeral-index mismatch (default unset). |
@@ -155,26 +152,23 @@ See [native storage](references/native-storage.md) for the `format.json` contrac
 
 ### Object-store blob plane
 
-Status: **wired**. `SOLID_SERVER_BLOB_URL` selects the native-only
-`sparq-lws-blob-object` backend through the default-off `sparq-lws-core/blob-object`
-feature; setting a URL without that feature is a startup error. The index stays
-in the data directory. LocalFileSystem is included; AWS, Azure and GCP are
-separate opt-in crate features. See the [object-store reference](references/blob-object.md)
-for constructors, immutable keys, streaming listings, and the reusable backend
-contract suite exposed by `test-support`. The same create-only contract runs over
-`InMemoryBlobStore::with_immutable_keys()` (under `test-support`), the object
-adapter, and `FsBlobStore` (in the `blob-fs` tests). Legacy in-memory constructors
-keep their replacement semantics.
+Status: **crate available; server wiring pending**. The native-only
+`sparq-lws-blob-object` crate supplies LocalFileSystem plus separate default-off
+`aws`, `azure` and `gcp` provider features. The default-off
+`sparq-lws-core/blob-object` feature exposes `store::blob_object::ObjectBlobAdapter`
+for library integrations; it does not change native server boot.
+See the [object-store reference](references/blob-object.md) for constructors,
+immutable keys, streaming listings and the reusable backend contract suite.
+Enable `test-support` to call `store::blob_contract::run(&backend)` on an empty,
+isolated backend. `InMemoryBlobStore::with_immutable_keys()` provides a validated,
+create-only fixture; legacy constructors retain replacement semantics.
 
-The dependency-free `sparq-lws-blob-key` crate shares `POOL_MARK`, `PREFIX`,
-`parse(&str) -> Option<(&str, bool)>` (bare key and pool flag), and
-`format([u8; 16], bool) -> String` across key minting and validation in both
-filesystem and object backends. The object adapter advertises no generation and rejects `delete_if_unchanged`; the
-reconciler uses `BlobStore::delete` for these entries. Its `file://` backend is
-for tests and development only; see the reference for local durability limits.
-The native backend wrapper and periodic reconciler's shared handle forward
-`list_stream`, preserving backend
-streaming when the compatibility snapshot is unavailable or exceeds its limit.
+`BlobStore::list_stream` preserves modification times and exposes no generation
+for the object adapter. Conditional deletion returns a backend error; the
+reconciler uses unconditional `delete` for these unique-per-write keys.
+Periodic reconciliation and counting wrappers forward the stream. A listing
+error aborts its current batch immediately; earlier batches may have completed.
+The `file://` backend is for development; see the reference for durability limits.
 
 ### Filesystem blobs in library integrations
 
