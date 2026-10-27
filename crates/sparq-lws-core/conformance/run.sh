@@ -341,3 +341,4 @@ if [ "$SPARQ_BACKEND" = durable ]; then
     run_harness "$REPORTS/post-$phase"
   done
 fi
+stop_server TERM

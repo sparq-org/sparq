@@ -33,9 +33,11 @@ start_server() {
 }
 
 stop_server() {
-  local signal=$1 status=0
+  local signal=$1 status=0 polls=150
+  # Graceful exit includes index compaction; forced exit has no storage work to drain.
+  if [ "$signal" = TERM ]; then polls=1500; fi
   kill "-$signal" "$SERVER_PID"
-  for _ in $(seq 1 150); do
+  for _ in $(seq 1 "$polls"); do
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
     sleep 0.2
   done

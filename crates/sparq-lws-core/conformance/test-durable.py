@@ -40,6 +40,10 @@ def fixture_server():
         Path(key).write_text('{"fixture":true}')
     def terminate(*_):
         event({"term": os.getpid()})
+        if os.environ.get("FIXTURE_BAD_SHUTDOWN"):
+            rows = [json.loads(line) for line in Path(os.environ["FIXTURE_TRACE"]).read_text().splitlines()]
+            if sum("boot" in row for row in rows) == int(os.environ["FIXTURE_BAD_SHUTDOWN"]):
+                sys.exit(7)
         sys.exit(0)
     signal.signal(signal.SIGTERM, terminate)
     while True:
@@ -47,7 +51,12 @@ def fixture_server():
 
 
 def fixture_suite(kind, argv):
-    event({"suite": kind})
+    details = {"suite": kind}
+    if kind == "touchstone":
+        targets = Path(argv[argv.index("--targets") + 1]).read_text()
+        match = re.search(r"^      parallelism: '([0-9]+)'$", targets, re.M)
+        details["parallelism"] = match[1] if match else None
+    event(details)
     bad_phase = os.environ.get("FIXTURE_BAD_FLOOR", "")
     if kind == "cth":
         mount = next(value for value in argv if value.endswith(":/reports"))
@@ -113,6 +122,8 @@ class ResourceTests(unittest.TestCase):
         self.etag_override = None
         self.omit_etag = False
         self.put_status = 201
+        self.post_status = 201
+        self.omit_location = False
         self.allowed = {}
         outer = self
 
@@ -120,25 +131,37 @@ class ResourceTests(unittest.TestCase):
             def log_message(self, *_):
                 pass
 
-            def answer(self, status, body=b"", etag=True):
+            def answer(self, status, body=b"", etag=True, headers=None):
                 self.send_response(status)
                 self.send_header("Content-Length", str(len(body)))
                 if etag and not outer.omit_etag:
                     self.send_header("ETag", outer.etag_override or '"' + hashlib.sha256(body).hexdigest() + '"')
+                for key, value in (headers or {}).items():
+                    self.send_header(key, value)
                 self.end_headers()
                 self.wfile.write(body)
 
             def do_PUT(self):
                 outer.requests.append(("PUT", self.path, dict(self.headers)))
-                outer.resources[self.path] = self.rfile.read(int(self.headers["Content-Length"]))
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                if not self.path.startswith("/alice/") and self.path not in outer.resources:
+                    self.answer(404)
+                    return
+                outer.resources[self.path] = body
                 self.answer(outer.put_status)
 
             def do_POST(self):
                 outer.requests.append(("POST", self.path, dict(self.headers)))
-                self.rfile.read(int(self.headers["Content-Length"]))
-                credentials = base64.b64decode(self.headers["Authorization"].split()[1]).decode()
-                identity = credentials.split(":")[0]
-                self.answer(200, json.dumps({"access_token": identity + "-token"}).encode())
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                if self.path == "/token":
+                    credentials = base64.b64decode(self.headers["Authorization"].split()[1]).decode()
+                    identity = credentials.split(":")[0]
+                    self.answer(200, json.dumps({"access_token": identity + "-token"}).encode())
+                else:
+                    path = "/created-" + str(len(outer.resources))
+                    outer.resources[path] = body
+                    headers = {} if outer.omit_location else {"Location": outer.base + path}
+                    self.answer(outer.post_status, headers=headers)
 
             def do_GET(self):
                 outer.requests.append(("GET", self.path, dict(self.headers)))
@@ -201,7 +224,7 @@ class ResourceTests(unittest.TestCase):
         urls = {row["url"] for row in saved["resources"]}
         self.assertIn(self.base + "/suite.bin", urls)
         self.assertIn(self.base + "/deleted.bin", urls)
-        blob = next(row for row in saved["resources"] if row["url"].endswith("blob.bin"))
+        blob = next(row for row in saved["resources"] if row["url"] == saved["probes"][1])
         self.assertEqual(durable.unb64(blob["body"]), bytes(range(256)) + b"\x00\xff\r\n")
         self.requests.clear()
         self.cli("check")
@@ -211,12 +234,30 @@ class ResourceTests(unittest.TestCase):
 
     def test_second_capture_retains_old_and_new_writes(self):
         self.cli("capture")
+        original = set(json.loads(self.manifest.read_text())["probes"])
         self.cli("capture", phase="kill")
         probes = json.loads(self.manifest.read_text())["probes"]
         self.assertEqual(len(set(probes)), 4)
-        self.assertTrue(any("/term/" in url for url in probes))
-        self.assertTrue(any("/kill/" in url for url in probes))
+        self.assertTrue(original.issubset(probes))
+        self.assertEqual(len(set(probes) - original), 2)
         self.cli("check")
+
+    def test_lws_creates_before_put_and_uses_the_returned_location(self):
+        self.cli("capture")
+        probes = json.loads(self.manifest.read_text())["probes"]
+        self.assertTrue(all(url.startswith(self.base + "/created-") for url in probes))
+        methods = [(method, path) for method, path, _ in self.requests if method in ("POST", "PUT")]
+        self.assertEqual(methods, [("POST", "/"), ("PUT", "/created-2"),
+                                   ("POST", "/"), ("PUT", "/created-3"), ("PUT", "/created-3")])
+        self.assertEqual(self.resources["/created-2"], b'<urn:durable:s> <urn:durable:p> "persisted" .\n')
+        self.assertEqual(self.resources["/created-3"], bytes(range(256)) + b"\x00\xff\r\n")
+
+    def test_lws_requires_successful_create_and_location(self):
+        self.post_status = 503
+        self.assertIn("POST", self.cli("capture", success=False).stderr)
+        self.post_status = 201
+        self.omit_location = True
+        self.assertIn("Location", self.cli("capture", success=False).stderr)
 
     def test_changed_bytes_fail(self):
         self.cli("capture")
@@ -253,6 +294,20 @@ class ResourceTests(unittest.TestCase):
 
     def test_capture_requires_suite_put_evidence(self):
         (self.root / "runs/one/run.json").write_text('{"tests":[]}')
+        self.assertIn("no successful PUT", self.cli("capture", success=False).stderr)
+
+    def test_lws_filters_fixture_puts_before_reading_resources(self):
+        evidence = self.root / "runs/one/run.json"
+        report = json.loads(evidence.read_text())
+        report["fixtures"] = [{"method": "PUT", "status": 201, "uri": "http://localhost:1/identity"},
+                              {"method": "PUT", "status": 204, "uri": "https://fixtures.invalid/inbox"}]
+        evidence.write_text(json.dumps(report))
+        self.cli("capture")
+        saved = json.loads(self.manifest.read_text())
+        self.assertIn(self.base + "/suite.bin", {row["url"] for row in saved["resources"]})
+        self.assertTrue(all(row["url"].startswith(self.base + "/") for row in saved["resources"]))
+        self.cli("check")
+        evidence.write_text(json.dumps({"fixtures": report["fixtures"]}))
         self.assertIn("no successful PUT", self.cli("capture", success=False).stderr)
 
     def test_fixture_jwt_signatures_verify(self):
@@ -319,7 +374,7 @@ class ResourceTests(unittest.TestCase):
 
 
 class DriverTests(unittest.TestCase):
-    def run_driver(self, protocol, bad_floor=False, mode="durable"):
+    def run_driver(self, protocol, bad_floor=False, mode="durable", bad_shutdown=False):
         with tempfile.TemporaryDirectory(prefix="sparq-driver-test-") as directory:
             root = Path(directory)
             harness = root / "conformance"
@@ -339,6 +394,8 @@ class DriverTests(unittest.TestCase):
                    "SOLID_SERVER_SEED_DEMO": "1", "SOLID_SERVER_SPARQ_DIR": str(root / "wrong-index")}
             if bad_floor:
                 env["FIXTURE_BAD_FLOOR"] = bad_floor
+            if bad_shutdown:
+                env["FIXTURE_BAD_SHUTDOWN"] = "3" if mode == "durable" else "1"
             script = harness / ("run.sh" if protocol == "solid" else "lws/touchstone.sh")
             try:
                 result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=45)
@@ -353,9 +410,12 @@ class DriverTests(unittest.TestCase):
                         except ProcessLookupError:
                             pass
             self.assertFalse(lingering, "driver left a fixture server alive")
-            self.assertEqual(result.returncode == 0, not bad_floor, result.stdout + result.stderr)
+            self.assertEqual(result.returncode == 0, not bad_floor and not bad_shutdown, result.stdout + result.stderr)
             self.assertTrue(trace.exists(), result.stdout + result.stderr)
             boots = [row for row in events if "boot" in row]
+            if protocol == "lws":
+                expected = "1" if mode == "durable" else "16"
+                self.assertTrue(all(row["parallelism"] == expected for row in events if "suite" in row), events)
             if mode != "durable":
                 self.assertEqual(len(boots), 1)
                 self.assertIsNone(boots[0]["boot"])
@@ -395,6 +455,36 @@ class DriverTests(unittest.TestCase):
     def test_touchstone_driver(self):
         self.run_driver("lws")
 
+    def test_final_shutdown_failure_fails_both_drivers(self):
+        for protocol in ("solid", "lws"):
+            for mode in ("durable", "memory", "embedded"):
+                with self.subTest(protocol=protocol, mode=mode):
+                    self.run_driver(protocol, mode=mode, bad_shutdown=True)
+
+    def test_graceful_shutdown_allows_compaction_to_finish(self):
+        script = '''set -euo pipefail
+SERVER_BIN=/unused
+source "$1"
+SERVER_PID=424242
+checks=0
+kill() {
+  if [ "$1" = -0 ]; then
+    checks=$((checks + 1))
+    [ "$checks" -le 200 ]
+  else
+    [ "$1" = -TERM ]
+  fi
+}
+sleep() { :; }
+wait() { return 0; }
+stop_server TERM
+[ "$checks" -gt 200 ]
+[ -z "$SERVER_PID" ]
+'''
+        result = subprocess.run(["bash", "-c", script, "lifecycle-test", str(HERE / "server-lifecycle.sh")],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_existing_ephemeral_modes(self):
         for protocol, mode in (("solid", "memory"), ("solid", "embedded"), ("lws", "memory"), ("lws", "embedded")):
             with self.subTest(protocol=protocol, mode=mode):
@@ -428,15 +518,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(preamble, """    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - backend: memory
             name: lws touchstone
+            timeout: 45
           - backend: durable
             name: lws touchstone durable
+            timeout: 135
     env:
       PSS_SPARQ_BACKEND: ${{ matrix.backend }}
       OUT: ${{ github.workspace }}/target/lws-touchstone-${{ matrix.backend }}""")
@@ -444,12 +536,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(run_step, "Touchstone workflow invocation is absent")
         self.assertEqual(run_step.group(1), """        env:
           TOUCHSTONE: ${{ github.workspace }}/touchstone
-        run: |
-          if [ "$PSS_SPARQ_BACKEND" = durable ]; then
-            crates/sparq-lws-core/conformance/lws/touchstone.sh all
-          else
-            crates/sparq-lws-core/conformance/lws/touchstone.sh all || true
-          fi
+        run: crates/sparq-lws-core/conformance/lws/touchstone.sh all
 """)
 
 

@@ -102,7 +102,9 @@ if [ "$SPARQ_BACKEND" = durable ]; then make_data_dir; fi
 start_server "$OUT/server.log"
 
 run_touchstone() {
-  local output=$1 status=0
+  local output=$1 status=0 parallelism=16
+  # Keep the root-listing probe stable and avoid competing durable mutations.
+  if [ "$SPARQ_BACKEND" = durable ]; then parallelism=1; fi
   mkdir -p "$output"
   # The floor reader must never accept the previous invocation's report.
   rm -rf -- "$output/runs"
@@ -114,6 +116,7 @@ targets:
     adapter: env
     capabilities: [$capabilities]
     properties:
+      parallelism: '$parallelism'
       saml.idpKey: '$saml_jwk'
       as.signingKey: '$signing_key'
       fixtures.baseUrl: '$fixtures'
@@ -127,7 +130,9 @@ YAML
 }
 
 if [ "$SPARQ_BACKEND" != durable ]; then
-  run_touchstone "$OUT"
+  # The floor check gates suite outcomes; only harness and shutdown failures fail here.
+  run_touchstone "$OUT" || true
+  stop_server TERM
   exit 0
 fi
 
@@ -147,3 +152,4 @@ for phase in term kill; do
   python3 "$here/check-floor.py" "$OUT/post-$phase/runs"
   previous_runs="$OUT/post-$phase/runs"
 done
+stop_server TERM

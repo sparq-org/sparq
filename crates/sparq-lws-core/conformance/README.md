@@ -105,11 +105,20 @@ PUT targets from the current Touchstone `run.json`; surviving targets must retai
 and ETags, and targets deleted by the suite must remain absent. The independent RDF and binary
 fixtures ensure that cleanup cannot make the check empty. The unchanged `lws/floor.json` is
 checked before restarting and after each full rerun. Durable mode requires `all`.
+Its tests run serially so other tests cannot keep changing the root during its listing check.
+The durable workflow leg has a separate job budget for its three full suite runs;
+the memory leg retains its single-run budget.
+Independent LWS probes are created by POST to the storage root, using the returned Location,
+before PUT replaces their contents; LWS PUT does not create missing resources.
+Only successful suite PUTs on the storage origin count as persistence evidence; writes to
+the identity and webhook fixture host are excluded before any resources are read.
 
 Initial reports keep their usual location. Restart reports are separated into `post-term/` and
 `post-kill/`, with distinct server logs. The drivers remove their temporary stores on exit and
 only signal their own child process. Touchstone's generated key files and target configurations
 contain private fixture keys and must stay out of uploaded artifacts.
+Normal completion checks the final graceful shutdown explicitly. Its bounded wait allows index
+compaction to finish; a shutdown failure fails the driver instead of being hidden by exit cleanup.
 
 `python3 -B crates/sparq-lws-core/conformance/test-durable.py` exercises the HTTP capture/check
 commands against a loopback fixture and both complete shell drivers with local process and suite

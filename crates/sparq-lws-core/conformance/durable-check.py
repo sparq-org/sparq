@@ -203,16 +203,19 @@ def solid_tree(client, roots):
     return seen
 
 
-def touchstone_puts(runs):
+def touchstone_puts(runs, base):
     reports = sorted(Path(runs).glob("*/run.json"))
     if not reports:
         raise ValueError("no fresh Touchstone evidence")
     urls = set()
+    origin = urlsplit(base)[:2]
 
     def visit(node):
         if isinstance(node, dict):
             if node.get("method") == "PUT" and isinstance(node.get("status"), int) and 200 <= node["status"] < 300:
-                urls.add(node["uri"])
+                # Reports also contain writes to the identity and webhook fixture host.
+                if urlsplit(node["uri"])[:2] == origin:
+                    urls.add(node["uri"])
             for value in node.values():
                 visit(value)
         elif isinstance(node, list):
@@ -236,6 +239,15 @@ def capture(client, args):
         ("nested/blob.bin", "application/octet-stream", bytes(range(256)) + b"\x00\xff\r\n"),
     ):
         url = args.base + parent + args.phase + "/" + name
+        if args.protocol == "lws":
+            # LWS creates through POST; PUT replaces a resource that already exists.
+            status, headers, _ = client.send("POST", args.base + "/",
+                                             headers={"Content-Type": content_type,
+                                                      "Slug": "durable-recheck-" + args.phase + "-" + name.replace("/", "-")},
+                                             body=payload)
+            if status != 201 or not headers.get("location"):
+                raise ValueError(f"probe POST returned {status}; expected 201 with Location")
+            url = urljoin(args.base + "/", headers["location"])
         for body in (b"replaced", payload) if name.endswith(".bin") else (payload,):
             status, _, _ = client.send("PUT", url, headers={"Content-Type": content_type}, body=body)
             if status not in (200, 201, 204):
@@ -245,7 +257,7 @@ def capture(client, args):
         roots = [args.base + "/" + user + "/" + args.test_container for user in ("alice", "bob")]
         records = solid_tree(client, roots)
     else:
-        records = {url: record(client, url, optional=True) for url in touchstone_puts(args.runs)}
+        records = {url: record(client, url, optional=True) for url in touchstone_puts(args.runs, args.base)}
     for url in probes:
         records[url] = record(client, url)
     manifest.write_text(json.dumps({"probes": probes, "resources": list(records.values())}, indent=2) + "\n")

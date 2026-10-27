@@ -43,15 +43,18 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - backend: memory
             name: lws touchstone
+            timeout: 45
           - backend: durable
             name: lws touchstone durable
+            # Initial, post-SIGTERM and post-SIGKILL full suites.
+            timeout: 135
     env:
       PSS_SPARQ_BACKEND: ${{ matrix.backend }}
       OUT: ${{ github.workspace }}/target/lws-touchstone-${{ matrix.backend }}
@@ -85,12 +88,7 @@ jobs:
       - name: run touchstone
         env:
           TOUCHSTONE: ${{ github.workspace }}/touchstone
-        run: |
-          if [ "$PSS_SPARQ_BACKEND" = durable ]; then
-            crates/sparq-lws-core/conformance/lws/touchstone.sh all
-          else
-            crates/sparq-lws-core/conformance/lws/touchstone.sh all || true
-          fi
+        run: crates/sparq-lws-core/conformance/lws/touchstone.sh all
       - name: check the floor
         run: python3 crates/sparq-lws-core/conformance/lws/check-floor.py "$OUT/runs"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
