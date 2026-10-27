@@ -537,3 +537,151 @@ fn a_failed_update_leaves_no_fact_of_a_resource_it_touched_for_provenance_passed
     assert_eq!(store.acp_provenance().creator(D0), None);
     assert!(!reads_d0(&store, ALICE), "no creator grant");
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ResetStratumDelay;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for ResetStratumDelay {
+    fn drop(&mut self) {
+        crate::materialize::STRATUM_DELAY.with(|delay| delay.set(std::time::Duration::ZERO));
+        crate::materialize::STRATUM_DELAY_AFTER.with(|after| after.set(0));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn refused_acl_put_rebuilds_the_prior_view_without_a_deadline() {
+    let mut store = pod();
+    let before = snapshot(store.graph()).0;
+    let mut budget = default_auth_budget();
+    budget.max_materialize_time = Some(std::time::Duration::from_millis(50));
+    store.set_auth_budget(budget);
+    let _reset = ResetStratumDelay;
+    crate::materialize::STRATUM_DELAY
+        .with(|delay| delay.set(std::time::Duration::from_millis(100)));
+    let error = store.put_acl(ACL, "", "ntriples").unwrap_err();
+    assert_eq!(
+        auth_allowance_refusal(&error),
+        Some(AuthAllowance::Deadline)
+    );
+    assert_eq!(
+        snapshot(store.graph()).0,
+        before,
+        "rollback must restore the installed view"
+    );
+    assert!(store.decide(&session(ALICE), N1, Mode::Read).allow);
+    assert!(store.decide(&session(BOB), N1, Mode::Read).allow);
+    assert_eq!(
+        store.auth_budget(),
+        budget,
+        "the request budget is restored"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn rule_update_admission_keeps_its_deadline() {
+    let mut store = pod();
+    let before = snapshot(store.graph());
+    let mut budget = default_auth_budget();
+    budget.max_materialize_time = Some(std::time::Duration::ZERO);
+    store.set_auth_budget(budget);
+    let edit = format!("DELETE DATA {{ GRAPH <{ACL}> {{ <{ACL}#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> }} }}");
+    let error = store.update_as(&session(ALICE), &edit).unwrap_err();
+    assert_eq!(
+        auth_allowance_refusal(&error),
+        Some(AuthAllowance::Deadline)
+    );
+    assert_eq!(snapshot(store.graph()), before, "admission changes nothing");
+    assert!(store.decide(&session(ALICE), N1, Mode::Read).allow);
+    assert!(store.decide(&session(BOB), N1, Mode::Read).allow);
+    assert_eq!(store.auth_budget(), budget);
+}
+
+#[test]
+fn a_post_commit_cap_refusal_disables_authorization_until_rebuilt() {
+    let mut store = creator_pod();
+    let remaining = "https://pod.ex/docs/d1";
+    store
+        .graph_unchecked_mut()
+        .add_named(
+            Term::NamedNode(NamedNode::new(remaining).unwrap()),
+            Graph::load_str(
+                &format!("<{remaining}#it> <{TITLE}> \"kept\" ."),
+                "ntriples",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    store.materialize_acp().unwrap();
+    assert!(store.decide(&session(ADMIN), remaining, Mode::Write).allow);
+    let mut budget = default_auth_budget();
+    budget.max_input_facts = 0;
+    store.set_auth_budget(budget);
+    // Dropping the graph stages provenance and requires an ACP rebuild without changing
+    // any control document, so no candidate materialization precedes this commit.
+    let edit = format!("DROP GRAPH <{D0}>");
+    let error = store.update_as_acp(&session(ADMIN), &edit).unwrap_err();
+    assert_eq!(
+        auth_allowance_refusal(&error),
+        Some(AuthAllowance::InputFacts)
+    );
+    assert!(error.contains("the update was applied"), "{error}");
+    assert_eq!(store.auth_budget(), budget);
+    let document = store
+        .graph()
+        .named_graph(&Term::NamedNode(NamedNode::new(D0).unwrap()));
+    assert!(document.is_none(), "the edit is committed");
+    for agent in [ALICE, ADMIN] {
+        for mode in [Mode::Read, Mode::Write, Mode::Control] {
+            assert!(store.accessible(&session(agent), mode).is_empty());
+        }
+    }
+    store.set_auth_budget(default_auth_budget());
+    store.materialize_acp().unwrap();
+    assert!(store.decide(&session(ADMIN), remaining, Mode::Write).allow);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn admitted_update_installs_its_view_without_a_post_commit_deadline() {
+    let mut store = pod();
+    let mut budget = default_auth_budget();
+    budget.max_materialize_time = Some(std::time::Duration::from_millis(50));
+    store.set_auth_budget(budget);
+    let _reset = ResetStratumDelay;
+    // WAC admission observes two boundaries; delay only the committed rebuild.
+    crate::materialize::STRATUM_DELAY_AFTER.with(|after| after.set(2));
+    crate::materialize::STRATUM_DELAY
+        .with(|delay| delay.set(std::time::Duration::from_millis(100)));
+    let edit = format!("DELETE DATA {{ GRAPH <{ACL}> {{ <{ACL}#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> }} }}");
+    store.update_as(&session(ALICE), &edit).unwrap();
+    assert!(store.decide(&session(ALICE), N1, Mode::Read).allow);
+    assert!(
+        !store.decide(&session(BOB), N1, Mode::Read).allow,
+        "the committed rule edit must be enforced"
+    );
+    assert_eq!(
+        store.auth_budget(),
+        budget,
+        "the request budget is restored"
+    );
+}
+
+#[test]
+fn removing_the_deadline_preserves_configured_count_and_size_caps() {
+    let mut budget = default_auth_budget();
+    budget.max_document_bytes = 17;
+    budget.max_input_bytes = 31;
+    budget.max_input_facts = 7;
+    budget.max_input_term_bytes = 11;
+    budget.max_resource_iri_bytes = 23;
+    budget.max_resource_path_depth = 3;
+    budget.max_decision_join_rows = 47;
+    budget.max_decision_facts = 13;
+    let copy = budget.without_deadline();
+    assert!(budget.max_materialize_time.is_some());
+    budget.max_materialize_time = None;
+    assert_eq!(copy, budget);
+}

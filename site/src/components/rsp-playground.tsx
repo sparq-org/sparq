@@ -9,6 +9,7 @@
 // (registerRsp -> Rsp.select/push/flush); nothing is sent to a server.
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import {
   Play,
   SkipForward,
@@ -48,7 +49,9 @@ const DEFAULT = RSP_EXAMPLES[0];
 
 export function RspPlayground() {
   const [example, setExample] = React.useState<RspExample>(DEFAULT);
-  const [engine, setEngine] = React.useState<EngineState>("cold");
+  const [engineState, setEngine] = React.useState<EngineState>("cold");
+  const hydrated = useHydrated();
+  const engine = hydrated && engineState === "cold" ? "warming" : engineState;
   // Window controls (seeded from the example, then user-tunable via the sliders).
   const [range, setRange] = React.useState(DEFAULT.range);
   const [step, setStep] = React.useState(DEFAULT.step);
@@ -59,14 +62,17 @@ export function RspPlayground() {
   const [windows, setWindows] = React.useState<ClosedWindow[]>([]);
   const [lateDropped, setLateDropped] = React.useState(0);
   const [flushed, setFlushed] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const configuration = React.useMemo(() => ({ example, range, step }), [example, range, step]);
+  const [registered, setRegistered] = React.useState<typeof configuration | null>(null);
+  const [resetting, setResetting] = React.useState(false);
+  const [registrationError, setError] = React.useState<string | null>(null);
+  const busy = resetting || (hydrated && registered !== configuration);
+  const error = registered === configuration ? registrationError : null;
 
   // Pre-warm the (separate) streaming wasm bundle on mount so the first push pays no
   // cold start. A failure resets the indicator; the first register retries the load.
   React.useEffect(() => {
     let cancelled = false;
-    setEngine("warming");
     prewarmRsp()
       .then(() => {
         if (!cancelled) setEngine("ready");
@@ -86,38 +92,38 @@ export function RspPlayground() {
   // Re-register the continuous query with the current window when the example, RANGE or
   // STEP changes. Re-registering resets the stream (a fresh logical clock), so we also
   // clear the replay state. The wasm handle is stateful; we keep one live per config.
-  const reset = React.useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const h = await registerRsp(
-        example.query,
-        range,
-        step,
-        example.maxDelay,
-        example.r2s,
-      );
-      setEngine("ready");
-      setHandle(h);
-      setCursor(0);
-      setWindows([]);
-      setLateDropped(0);
-      setFlushed(false);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setError(message);
-      setHandle(null);
-      toast.error("Could not register the continuous query", {
-        description: message,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }, [example, range, step]);
+  const reset = React.useCallback((isCancelled: () => boolean = () => false) => {
+    const { example, range, step } = configuration;
+    return registerRsp(example.query, range, step, example.maxDelay, example.r2s).then(
+      (h) => {
+        if (isCancelled()) return;
+        setEngine("ready");
+        setError(null);
+        setHandle(h);
+        setCursor(0);
+        setWindows([]);
+        setLateDropped(0);
+        setFlushed(false);
+        setRegistered(configuration);
+        setResetting(false);
+      },
+      (e) => {
+        if (isCancelled()) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        setHandle(null);
+        setRegistered(configuration);
+        setResetting(false);
+        toast.error("Could not register the continuous query", { description: message });
+      },
+    );
+  }, [configuration]);
 
-  // (Re)register whenever the configuration changes.
+  // Register the external wasm query; only its completion callbacks update React state.
   React.useEffect(() => {
-    void reset();
+    let cancelled = false;
+    void reset(() => cancelled);
+    return () => { cancelled = true; };
   }, [reset]);
 
   const selectExample = React.useCallback((id: string) => {
@@ -267,7 +273,11 @@ export function RspPlayground() {
             <Flag className="size-4" />
             Flush
           </Button>
-          <Button variant="ghost" onClick={() => void reset()} disabled={busy}>
+          <Button variant="ghost" onClick={() => {
+            setResetting(true);
+            setError(null);
+            void reset();
+          }} disabled={busy}>
             <RotateCcw className="size-4" />
             Reset
           </Button>

@@ -353,6 +353,13 @@ jobs:
       - name: no-dyn-dispatch (substrate) — GATING
         run: python3 scripts/check-no-dyn-dispatch.py
 
+      # Issuance hardening: audit every crate's non-test raw signer calls on
+      # every PR, independently of the path-filtered ZK toolchain workflow.
+      - name: Raw commitment signer inventory — GATING
+        run: python3 scripts/check-raw-commitment-signers.py
+      - name: Self-test raw commitment signer inventory
+        run: python3 scripts/tests/test_raw_commitment_signers.py
+
       # ---- former job: readme-template (template) ----
       # sq-8ic6 (deferred half): PROMOTED to a HARD gate. The README-overhaul epic
       # (sq-9jw5) cleared the backlog — sq-inzv (#751) brought 20 publish=true crate READMEs to
@@ -915,6 +922,8 @@ jobs:
       # Hermetic + stdlib-only (no PyYAML needed).
       - name: Cache/artifact posture (save-if + shared-key + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
+      - name: Heavy workflow label-event posture
+        run: python3 scripts/tests/test_heavy_workflow_labels.py
       # Hosted PR previews: the publisher extracts PR-built archives into a public site, so
       # its archive confinement (atomic, budgeted) and build selection are pinned by tests.
       - name: Site-preview publisher (archive confinement + build selection)

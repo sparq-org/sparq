@@ -7,6 +7,7 @@
 // Nothing is sent to a server.
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { Play, Loader2, Search, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,14 +44,15 @@ export function TextPlayground() {
   const [example, setExample] = React.useState<TextExample>(DEFAULT);
   const [data, setData] = React.useState(DEFAULT.data);
   const [query, setQuery] = React.useState(DEFAULT.query);
-  const [engine, setEngine] = React.useState<EngineState>("cold");
+  const [engineState, setEngine] = React.useState<EngineState>("cold");
+  const hydrated = useHydrated();
+  const engine = hydrated && engineState === "cold" ? "warming" : engineState;
   const [state, setState] = React.useState<RunState>({ kind: "idle" });
 
   // Pre-warm the (separate) full-text wasm bundle on mount so the first "Search" pays no
   // cold start. A failure flips the indicator; the first query retries the load.
   React.useEffect(() => {
     let cancelled = false;
-    setEngine("warming");
     prewarmText()
       .then(() => {
         if (!cancelled) setEngine("ready");

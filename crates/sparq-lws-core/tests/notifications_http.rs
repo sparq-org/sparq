@@ -72,6 +72,7 @@ impl Harness {
             auth: Arc::new(ctx),
             ldp: Arc::new(ldp),
             identity: None,
+            cors: Default::default(),
         });
         Self {
             app,
@@ -428,6 +429,7 @@ async fn bind_live_server() -> (String, KeyKit, KeyKit, NotificationHub) {
         auth: Arc::new(ctx),
         ldp: Arc::new(ldp),
         identity: None,
+        cors: Default::default(),
     });
 
     tokio::spawn(async move {

@@ -54,6 +54,85 @@ const RULE_A_TO_B = "@prefix ex: <http://example.org/> . { ?s a ex:A } => { ?s a
 const DATA_X_A = "@prefix ex: <http://example.org/> . ex:x a ex:A .";
 const ASK_DERIVED = "PREFIX ex: <http://example.org/> ASK { ex:x a ex:B }";
 
+/** Record even a loading state that begins and ends between Playwright assertions. */
+async function observeInferenceStatus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const states: (string | null)[] = [];
+    (window as unknown as { inferenceStates: (string | null)[] }).inferenceStates = states;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes") {
+          states.push(record.oldValue, (record.target as Element).getAttribute("data-inference-status"));
+        } else {
+          for (const node of [...record.addedNodes, ...record.removedNodes]) {
+            if (!(node instanceof Element)) continue;
+            if (node.matches("[data-inference-status]")) states.push(node.getAttribute("data-inference-status"));
+            for (const pill of node.querySelectorAll("[data-inference-status]")) {
+              states.push(pill.getAttribute("data-inference-status"));
+            }
+          }
+        }
+      }
+    }).observe(document.body, {
+      subtree: true, childList: true, attributes: true,
+      attributeFilter: ["data-inference-status"], attributeOldValue: true,
+    });
+  });
+}
+
+/** Fail even if React removes and restores the why affordance within one autosave. */
+async function observeWhyMarker(row: Locator): Promise<void> {
+  await row.evaluate((element) => {
+    const history = { lost: false };
+    (window as unknown as { whyMarkerHistory: typeof history }).whyMarkerHistory = history;
+    new MutationObserver((records) => {
+      if (!element.hasAttribute("data-inferred-row") || !element.querySelector("[data-explain-trigger]")) {
+        history.lost = true;
+      }
+      for (const record of records) {
+        if (record.type === "attributes" && record.target === element && record.oldValue === null) {
+          history.lost = true;
+        }
+        for (const node of record.removedNodes) {
+          if (node.contains(element) ||
+              (element.contains(record.target) && node instanceof Element &&
+                (node.matches("[data-explain-trigger]") || node.querySelector("[data-explain-trigger]")))) {
+            history.lost = true;
+          }
+        }
+      }
+    }).observe(document.body, {
+      subtree: true, childList: true, attributes: true,
+      attributeFilter: ["data-inferred-row"], attributeOldValue: true,
+    });
+  });
+}
+
+async function autosaveQuery(page: Page, query: string): Promise<void> {
+  await fillReactTextarea(page, "#repl-query", query);
+  await expect.poll(() => page.evaluate((text) => {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith("sparq.workspace.v1.")) continue;
+      if (key.endsWith("__last__") || key.endsWith("__index__")) continue;
+      const workspace = JSON.parse(localStorage.getItem(key) ?? "{}");
+      if (workspace.editor?.query === text) return true;
+    }
+    return false;
+  }, query)).toBe(true);
+  // Let post-save React effects and the mutation observer drain before checking the history.
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const states = await page.evaluate(() =>
+    (window as unknown as { inferenceStates: (string | null)[] }).inferenceStates,
+  );
+  expect(states).not.toContain("loading");
+  expect(states).not.toContain("error");
+  await expect(page.locator('[data-tab="query"] [data-inference-status]')).toHaveAttribute(
+    "data-inference-status", "ready",
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------
@@ -131,6 +210,38 @@ async function runAsk(page: Page, query: string, expected: "true" | "false"): Pr
 
 test.describe("n3-inference", () => {
   // The webPersona auto-fixture navigates to "/" and waits for engine ready before each test.
+
+  test("fresh workspace N3 stays ready through editor autosaves without rule documents", async ({ page }) => {
+    await page.locator('[data-tab="query"] [data-inference-mode="n3"]').click();
+    await expect(page.locator('[data-tab="query"] [data-inference-status="ready"]')).toBeVisible();
+    await observeInferenceStatus(page);
+    await autosaveQuery(page, "SELECT ?s ?p ?o WHERE { ?s ?p ?o } # first autosave");
+    await autosaveQuery(page, "SELECT ?s ?p ?o WHERE { ?s ?p ?o } # second autosave");
+  });
+
+  test("N3 entailed keys keep why markers available through an editor autosave", async ({ page }) => {
+    await importPasteReplace(page, DATA_X_A);
+    const panel = await selectN3(page);
+    await authorRule(page, "autosave-rule", RULE_A_TO_B);
+    await expect(panel.locator('[data-inference-status="ready"]')).toBeVisible();
+    await page.locator('[data-tool="query"]').click();
+    const query = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
+    await fillReactTextarea(page, "#repl-query", query);
+    await page.getByRole("button", { name: "Run query" }).click();
+    const inferredRow = page.locator("[data-inferred-row]").filter({
+      has: page.getByRole("cell", { name: "<http://example.org/B>", exact: true }),
+    });
+    await expect(inferredRow).toHaveCount(1);
+    await expect(inferredRow.locator("[data-explain-trigger]")).toBeVisible();
+    await observeInferenceStatus(page);
+    await observeWhyMarker(inferredRow);
+    await autosaveQuery(page, `${query} # keep the entailment cache`);
+    expect(await page.evaluate(() =>
+      (window as unknown as { whyMarkerHistory: { lost: boolean } }).whyMarkerHistory.lost,
+    )).toBe(false);
+    await expect(inferredRow).toHaveCount(1);
+    await expect(inferredRow.locator("[data-explain-trigger]")).toBeVisible();
+  });
 
   test("(a) data + an N3 rule derives a specific triple visible to queries", async ({ page }) => {
     // 1. Replace the store with exactly one asserted triple: ex:x a ex:A.

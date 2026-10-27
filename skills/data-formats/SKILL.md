@@ -5,6 +5,10 @@ description: Parse and load RDF into a sparq Graph (Turtle/N-Triples/N-Quads/Tri
 
 # sparq data formats
 
+For named graph access, durable create/drop, and layout recovery, see
+[named graph accessors](named-accessors.md), including cleanup after the complete declared
+tree opens and durable journal format upgrades.
+
 How to get RDF *into* a sparq `Graph` and how to snapshot one cheaply. Text formats
 (Turtle / N-Triples / N-Quads / TriG) and the in-memory + streaming + external-memory
 loaders live in `sparq-core`; the binary HDT archive format (including content-sniffed
@@ -60,9 +64,13 @@ graphs: use a dataset `fork()` for views, or logged insertion through `ensure_na
 Use `ensure_named` and `apply_delta_to_named(index, inserts, deletes)` for logged
 updates, and `clear_named_durable`, `drop_named_durable`, or
 `drop_all_named_durable` for durable removal. Frozen and read-only graphs refuse
-mutations. `rebuild_default` and `replace_default` keep named members and mapping
+mutations. Durable drops check removal safety before publishing the manifest;
+protected residue in the tree being removed leaves the manifest unchanged and
+returns an error naming the residue. Reopen after a refused durable drop before
+writing again. `rebuild_default` and `replace_default` keep named members and mapping
 locks while replacing the default graph with an in-memory view; that view's later
-updates are not logged. See [the accessor example](named-accessors.md).
+updates are not logged. See [named accessors and durable layout operations](named-accessors.md)
+for slot persistence, journal operations and recovery methods.
 
 ## Quickstart
 

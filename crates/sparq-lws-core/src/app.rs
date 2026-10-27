@@ -35,7 +35,7 @@ use tower_http::timeout::TimeoutLayer;
 
 use crate::auth::{auth_middleware, AuthContext};
 use crate::identity::{identity_gate_middleware, IdentityConfig, IdentityGate};
-use crate::ldp::cors::cors_middleware;
+use crate::ldp::cors::{cors_middleware_with_policy as cors_middleware, CorsPolicy};
 use crate::ldp::handler::{
     delete_handler, get_handler, head_handler, options_handler, patch_handler, post_handler,
     put_handler, LdpState,
@@ -100,6 +100,8 @@ pub struct AppState<J: JwksProvider, R: ReplayStore, S: Store> {
     /// keeps serving off — but the gate's unconditional refusal of the reserved `/.identity/**`
     /// namespace is mounted REGARDLESS (flag-independent, per the design's security property).
     pub identity: Option<IdentityConfig>,
+    /// Browser origin policy; defaults to reflecting any Origin.
+    pub cors: CorsPolicy,
 }
 
 impl<J, R, S> AppState<J, R, S>
@@ -116,6 +118,7 @@ where
             auth: Arc::new(auth),
             ldp: Arc::new(ldp),
             identity: None,
+            cors: CorsPolicy::default(),
         }
     }
 
@@ -159,11 +162,7 @@ where
     // relying on axum's implicit default (which a dependency bump could silently change). The binary's
     // [`build_router_with_overload`] applies the CONFIGURABLE value instead. Health routes are merged
     // OUTSIDE the layer (they carry no body).
-    build_app_routes(state, crate::describe::ServiceCatalog::default())
-        .layer(crate::body_limit::layer(
-            crate::body_limit::DEFAULT_MAX_BODY_BYTES,
-        ))
-        .merge(health_routes())
+    build_router_with_catalog(state, crate::describe::ServiceCatalog::default())
 }
 
 /// Build the Solid router with entries for additional routes mounted by the caller.
@@ -181,11 +180,21 @@ where
     R: ReplayStore + Send + Sync + 'static,
     S: Store + 'static,
 {
-    build_app_routes(state, catalog)
-        .layer(crate::body_limit::layer(
-            crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+    let cors = state.cors.clone();
+    let app = build_app_routes(state, catalog).layer(crate::body_limit::layer(
+        crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+    ));
+    // A configured policy also covers public routes outside the inner LDP middleware,
+    // including identity documents. Preserve the default standalone router's headers.
+    let app = if cors.is_restricted() {
+        app.layer(axum::middleware::from_fn_with_state(
+            cors,
+            crate::ldp::cors::cors_response_middleware,
         ))
-        .merge(health_routes())
+    } else {
+        app
+    };
+    app.merge(health_routes())
 }
 
 /// Build the router WITH overload protection (the binary's path): admission control (load shedding)
@@ -202,9 +211,11 @@ where
     R: ReplayStore + Send + Sync + 'static,
     S: Store + 'static,
 {
-    with_overload_layers(
+    let cors = state.cors.clone();
+    with_overload_layers_and_cors(
         build_app_routes(state, crate::describe::ServiceCatalog::default()),
         overload,
+        cors,
     )
 }
 
@@ -214,10 +225,23 @@ where
 /// Linked Web Storage router, so both protocol surfaces carry the same DoS protections.
 /// A decorate-only CORS layer outside the stack makes rejections readable by browser clients;
 /// preflight handling stays inside the stack and remains subject to admission and rate limits.
+/// Completed inner CORS decisions are preserved; the default reflection policy applies to
+/// responses that have not passed through an inner CORS layer.
 ///
 /// The body-limit layer sets the `DefaultBodyLimit` that axum's extractors read; a handler that
 /// reads the body itself (the LWS dispatcher) must apply `overload.body_limit_bytes` on its own.
 pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
+    with_overload_layers_and_cors(app, overload, CorsPolicy::default())
+}
+
+/// Wrap application routes in the overload stack with an explicit browser origin policy.
+/// Completed inner CORS decisions are preserved. This policy governs responses that have not
+/// passed through an inner CORS layer; pass the router's policy to use it for overload rejections too.
+pub fn with_overload_layers_and_cors(
+    app: Router,
+    overload: OverloadConfig,
+    cors: CorsPolicy,
+) -> Router {
     let mut app = app;
 
     // INNERMOST (app routes): the explicit, configurable request-body ceiling (a body over the limit ⇒
@@ -266,7 +290,8 @@ pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
     }
 
     // Response decoration must surround every rejecting layer, but must never answer a preflight.
-    app = app.layer(axum::middleware::from_fn(
+    app = app.layer(axum::middleware::from_fn_with_state(
+        cors,
         crate::ldp::cors::cors_response_middleware,
     ));
 
@@ -290,6 +315,7 @@ where
         auth,
         ldp,
         identity,
+        cors,
     } = state;
 
     // A handle for the identity gate (mounted last, below) — taken before `ldp` is moved into the
@@ -367,7 +393,10 @@ where
             crate::ldp::public_read_skip::public_read_skip_middleware::<S>,
         ))
         // OUTERMOST: CORS (preflight short-circuit + the Access-Control-* headers on every response).
-        .layer(axum::middleware::from_fn(cors_middleware));
+        .layer(axum::middleware::from_fn_with_state(
+            cors.clone(),
+            cors_middleware,
+        ));
     let protected = protected.with_state(ldp.clone());
 
     let mut router = Router::new();
@@ -375,13 +404,21 @@ where
     {
         crate::crdt::register(&mut catalog, base, true);
         let crdt = crate::crdt::CrdtState::solid(ldp.clone());
-        router = router.merge(Router::new()
-            .route(crate::crdt::SOLID_TICKETS, post(crate::crdt::solid_ticket::<S>)
-                .layer(axum::middleware::from_fn_with_state(auth.clone(), auth_middleware::<J, R>)))
-            .route(crate::crdt::SOLID_SOCKET, get(crate::crdt::solid_socket::<S>))
-            .with_state(crdt)
-            .layer(axum::extract::DefaultBodyLimit::max(8192))
-            .layer(axum::middleware::from_fn(cors_middleware)));
+        router = router.merge(
+            Router::new()
+                .route(
+                    crate::crdt::SOLID_TICKETS,
+                    post(crate::crdt::solid_ticket::<S>).layer(
+                        axum::middleware::from_fn_with_state(
+                            auth.clone(), auth_middleware::<J, R>,
+                        ),
+                    ),
+                )
+                .route(crate::crdt::SOLID_SOCKET, get(crate::crdt::solid_socket::<S>))
+                .with_state(crdt)
+                .layer(axum::extract::DefaultBodyLimit::max(8192))
+                .layer(axum::middleware::from_fn_with_state(cors.clone(), cors_middleware)),
+        );
     }
 
 
@@ -413,7 +450,10 @@ where
                 auth.clone(),
                 auth_middleware::<J, R>,
             ))
-            .layer(axum::middleware::from_fn(cors_middleware))
+            .layer(axum::middleware::from_fn_with_state(
+                cors.clone(),
+                cors_middleware,
+            ))
             .with_state(ldp.clone());
         router = router.merge(sparql);
     }
