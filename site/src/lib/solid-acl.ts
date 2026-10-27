@@ -39,21 +39,14 @@ export function rewriteForGraphs(sparql: string, allowed: string[]): string {
 
 /** Locate WHERE or ASK's group, ignoring comments, IRIs, literals and nested expressions. */
 function findWhereIndex(sparql: string): number {
-  // This scans boundaries, not highlighting tokens: comparison '<' is not an IRI,
-  // and escaped punctuation in prefixed names must not open strings or comments.
-  const iri = /<[^\u0000-\u0020<>"{}|^`\\]*>/y;
+  // Match IRIREF greedily, as the engine does, before scanning for boundary words.
+  // Escaped punctuation in prefixed names must not open strings or comments.
+  const iri = /<(?:[^\u0000-\u0020<>"{}|^`\\]|\\u[\da-fA-F]{4}|\\U[\da-fA-F]{8})*>/y;
   const word = /[?$]?(?:\\[^\r\n]|[^ \t\r\n{}()[\]<>"';,=!?$+*/|&^#\\])+/y;
-  const scopes = [{ expression: false, projection: false }];
-  let value = false;
-  let constraint = false;
+  let depth = 0;
   let ask = false;
   for (let offset = 0; offset < sparql.length;) {
     const char = sparql[offset];
-    const scope = scopes[scopes.length - 1];
-    if (/[ \t\r\n]/.test(char)) {
-      offset += 1;
-      continue;
-    }
     if (char === "#") {
       while (offset < sparql.length && !/[\r\n]/.test(sparql[offset])) offset += 1;
       continue;
@@ -68,43 +61,27 @@ function findWhereIndex(sparql: string): number {
           break;
         } else offset += 1;
       }
-      value = true;
       continue;
     }
     iri.lastIndex = offset;
-    // Parentheses and commas are legal IRI characters, so the character class alone
-    // also matches comparisons like ?a<(1),1,2>. After an expression value, '<' is
-    // an operator. Group/collection scopes still allow adjacent RDF terms and IRIs.
-    if (char === "<" && !(scope.expression && value) && iri.test(sparql)) {
+    if (char === "<" && iri.test(sparql)) {
       offset = iri.lastIndex;
-      value = true;
       continue;
     }
     word.lastIndex = offset;
     const token = word.exec(sparql);
     if (token) {
-      const keyword = token[0].toUpperCase();
-      if (scopes.length === 1) {
+      if (depth === 0) {
+        const keyword = token[0].toUpperCase();
         if (keyword === "ASK") ask = true;
         if (keyword === "WHERE") return offset;
       }
-      if (keyword === "SELECT") scope.projection = true;
-      if (keyword === "WHERE") scope.projection = false;
-      if (keyword === "FILTER" || keyword === "BIND") constraint = true;
-      value = /^[?$@]|:|^(?:true|false)$|^[+-]?(?:\d|\.\d)/i.test(token[0]);
       offset = word.lastIndex;
       continue;
     }
-    if (char === "{" && scopes.length === 1 && ask) return offset;
-    if (char === "{" || char === "(") {
-      scopes.push({
-        expression: char === "(" && (scope.expression || scope.projection || constraint),
-        projection: false,
-      });
-      constraint = false;
-    }
-    if ((char === "}" || char === ")") && scopes.length > 1) scopes.pop();
-    value = char === ")" || char === "]" || char === "}";
+    if (char === "{" && depth === 0 && ask) return offset;
+    if (char === "{" || char === "(") depth += 1;
+    if (char === "}" || char === ")") depth -= 1;
     offset += 1;
   }
   return -1;
