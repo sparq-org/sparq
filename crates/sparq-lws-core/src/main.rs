@@ -31,8 +31,8 @@
 //! exactly `[h2, http/1.1]`; only the cloned QUIC configuration advertises `h3`.
 //!
 //! ## Still seamed (not in this slice)
-//! - The live SPARQ HTTP client + the `object_store`-backed blob store (the binary still boots the
-//!   in-memory store doubles so it runs without SPARQ / S3; swapping in `HttpSparqClient` is wiring).
+//! Native storage selects filesystem bytes by default in a data directory, or the optional
+//! object backend through `SOLID_SERVER_BLOB_URL`; see `storage_runtime`.
 //! - WAC authorization (gated on sparq#992 — the LDP layer is fail-closed: mutations need an
 //!   authenticated caller, reads are public since no ACLs exist yet).
 //!
@@ -106,8 +106,6 @@ use sparq_lws_core::tls::{self, TlsMode};
 use sparq_lws_core::transport::{ConnectionLimiter, TransportConfig};
 
 use crate::storage_runtime::{StorageConfig, StorageShutdown};
-#[cfg(feature = "embedded-sparq")]
-use crate::storage_runtime::make_blobs;
 #[cfg(test)]
 use crate::storage_runtime::{sparq_backend_is_durable, reject_durable_sparq_with_inmem_blob};
 
@@ -630,8 +628,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // HttpSparqClient (opt-in `http-sparq` feature — the remote shared-service shape). See
     // `research/lws-design-records.md` §3.
     let storage = StorageConfig::from_env()?;
-    // Data-directory boot pairs the durable index with filesystem bytes.
-    // Legacy backends retain the in-memory blob guard.
+    // Data-directory boot pairs the durable index with the configured native bytes.
     storage.check_durability(storage.has_data_dir())?;
     let backend = &storage.backend;
 
@@ -706,9 +703,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         #[cfg(feature = "embedded-sparq")]
         "embedded" => {
-            let (sparq, blob) = storage
-                .open_embedded_with(storage.has_data_dir(), make_blobs)
-                .await?;
+            let (sparq, blob) = storage.open_embedded().await?;
             storage_shutdown.retain(&storage, &sparq);
             build_app_for_backend(
                 sparq,

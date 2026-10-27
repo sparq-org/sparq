@@ -8,9 +8,11 @@ The legacy `SOLID_SERVER_SPARQ_DIR` setting still opens an existing snapshot and
 retains the durable-index/in-memory-blob refusal. A directory-backed index opened
 through this legacy path also compacts on graceful shutdown.
 
-The default native build opens `FsBlobStore` at `<data>/blobs`. Both
-`embedded-sparq` and `blob-fs` are required; a build without either feature refuses
-data-directory boot with a message naming the missing feature. Without a data
+The default native build opens `FsBlobStore` at `<data>/blobs`. `embedded-sparq` is required; `blob-fs` is required when no object URL is set.
+A missing feature refuses boot with a message naming it.
+The default-off `blob-object` feature lets `SOLID_SERVER_BLOB_URL` replace only
+the byte plane; its URL and provider options are described in
+[object storage](blob-object.md). Without a data
 directory, the native binary uses in-memory blobs.
 
 The boot contract checks `<data>/format.json` before opening either plane:
@@ -20,10 +22,16 @@ The boot contract checks `<data>/format.json` before opening either plane:
 ```
 
 An absent marker is published atomically (temporary file, file sync, rename,
-data-directory sync) only if both plane directories are absent or empty. Existing
+data-directory sync) only if both plane directories are absent or empty. Publication
+never replaces a concurrently created marker; that marker is validated instead. Existing
 plane content without the marker is refused as a foreign directory. An unknown
 schema, incompatible index/blob major, or malformed marker refuses boot. A marker
-without an index resumes first boot. Do not remove the marker from an existing store.
+without an index resumes first boot. An absent `blobs.backend` denotes
+`"filesystem"` for compatibility. Object boot writes
+`"blobs":{"major":1,"backend":"object","url":"s3://bucket/prefix"}`.
+The backend and exact URL must match on every reopen, including a marker-only
+first boot. Backend/location changes require migration; credentials and provider
+options are not recorded and may rotate without changing the namespace. Do not remove the marker from an existing store.
 
 `EmbeddedSparqClient::open_or_create(dir)` delegates empty-store creation,
 interrupted-swap recovery and exclusive locking to the core. Its I/O result preserves
