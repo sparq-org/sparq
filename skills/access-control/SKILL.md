@@ -969,22 +969,33 @@ resource enumeration, `max_generated_bytes` separately for generated lexical str
 per-term dimensions are checked against stored dictionary parts **before a term is
 reconstructed**. The existing byte caps bound a document's row count before its vector
 is reserved: each
-row contributes at least three fixed term-node costs. Every accepted source or generated
-fact is charged before reserving its assembled output row. Control documents and WAC
-group documents use the same path. Rejected control-document rows and filtered group
+row contributes at least three fixed term-node costs. This pre-check reports
+`InputBytes` before inspecting individual terms, so an oversized document containing
+an oversized term can report `InputBytes` where reconstruction-first assembly reported
+`InputTermBytes`. Every accepted source or generated
+fact is charged before reserving its assembled output row. Consequently, `InputFacts`
+can take precedence over a later principal-IRI validation or generated-byte refusal;
+this ordering changes the reported kind without changing acceptance under the defaults.
+Control documents and WAC group documents use the same path. Rejected control-document rows and filtered group
 rows consume source byte allowance,
 while only rows actually assembled consume input-fact allowance. Skolem names,
 structural and `inDoc` facts, trusted
 provenance, credential holdings and WebID facts charge their generated lexical strings
-before allocation. Generated strings use `max_generated_bytes`, independently of
+before allocation. Discovered principal, WebID and group-document names also charge
+before their lexical copies are allocated; repeated names already in a discovery set
+need no new copy. Generated strings use `max_generated_bytes`, independently of
 `max_input_bytes`; existing source, document and term caps retain their scope. The new
 allowance defaults to 64 GiB on 64-bit targets and is unbounded on narrower targets. Set
 `AuthBudget::max_generated_bytes` through `PodStore::set_auth_budget` to lower it. Its
 refusal is `AuthAllowance::GeneratedBytes`, with `limit_name() == "max_generated_bytes"`
 and tag `[allowance=generated-bytes]`. It has no environment-variable exposure.
+Allocation failure during auxiliary `Nodes` vector reservation maps explicitly to
+`InputFacts`; its detail describes the allocation failure rather than a fact-cap excess.
 The fixed stored triple-term nesting guard
 also reports `InputTermBytes`; it matches the dictionary's existing reconstruction
-guard and is independent of the configurable byte cap. The generated-string default
+guard and is independent of the configurable byte cap. Under the default term-byte
+cap, main already refuses terms this deep. Raising `max_input_term_bytes` above its
+default can make the depth guard an additional refusal. The generated-string default
 sits beyond the baseline materializer's usable memory range; it does not reuse the
 source-byte default as a new generated-input limit.
 

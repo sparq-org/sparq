@@ -553,5 +553,12 @@
       "grant": null
     },
     "views": {}
+  },
+  "decision-cap/B1/urn:alice/2026-01-01T00:00:00Z": {
+    "outcome": {
+      "refusal_kind": "DecisionWork",
+      "refused": true
+    },
+    "views": {}
   }
 }

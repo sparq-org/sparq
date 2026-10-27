@@ -663,16 +663,8 @@ pub(crate) fn assemble_facts(
 ) -> Result<Vec<[Term; 3]>, String> {
     meter.checkpoint()?;
     let mut out: Vec<[Term; 3]> = Vec::new();
-    let suffix = if system == System::Wac {
-        ACL_SUFFIX
-    } else {
-        ACR_SUFFIX
-    };
-    let own_pred = if system == System::Wac {
-        "ownAcl"
-    } else {
-        "ownAcr"
-    };
+    let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
+    let own_pred = if system == System::Wac { "ownAcl" } else { "ownAcr" };
     let is_resource = named(&format!("{SOLIDX_NS}isResource"));
     let owns = named(&format!("{SOLIDX_NS}{own_pred}"));
     let in_doc_p = named(&format!("{SOLIDX_NS}inDoc"));
@@ -703,10 +695,7 @@ pub(crate) fn assemble_facts(
     meter.checkpoint()?;
     let rejected = document_view_metered(&control_graphs, system, Some(meter))?.rejected;
     let blocked: FxHashSet<&str> = if system == System::Acp {
-        rejected
-            .iter()
-            .map(|iri| &iri[..iri.len() - suffix.len()])
-            .collect()
+        rejected.iter().map(|iri| &iri[..iri.len() - suffix.len()]).collect()
     } else {
         FxHashSet::default()
     };
@@ -714,8 +703,7 @@ pub(crate) fn assemble_facts(
     let is_blocked = |r: &str| {
         !blocked.is_empty()
             && (blocked.contains(r)
-                || r.match_indices('/')
-                    .any(|(i, _)| blocked.contains(&r[..=i])))
+                || r.match_indices('/').any(|(i, _)| blocked.contains(&r[..=i])))
     };
     macro_rules! generated {
         ($triple:expr) => {{
@@ -817,7 +805,7 @@ pub(crate) fn assemble_facts(
                 skolemize_metered(&t[1], iri, meter)?,
                 skolemize_metered(&t[2], iri, meter)?
             ]);
-            collect_agents(t, &mut webids, &mut group_docs, &mut principal_iris);
+            collect_agents(t, &mut webids, &mut group_docs, &mut principal_iris, meter)?;
         }
         for s in in_doc {
             generated!([
@@ -855,8 +843,8 @@ pub(crate) fn assemble_facts(
                 ]);
                 if let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) {
                     if p.as_str() == VCARD_MEMBER {
-                        webids.insert(o.as_str().to_owned());
-                        principal_iris.insert(o.as_str().to_owned());
+                        insert_minted(&mut webids, o.as_str(), meter)?;
+                        insert_minted(&mut principal_iris, o.as_str(), meter)?;
                     }
                 }
             }
@@ -1069,6 +1057,18 @@ pub(crate) fn referenced_group_docs(graph: &Graph) -> FxHashSet<String> {
     docs
 }
 
+/// Admit the lexical copy before inserting a new generated name.
+fn insert_minted(
+    set: &mut FxHashSet<String>,
+    value: &str,
+    meter: &mut AuthLedger,
+) -> Result<(), String> {
+    if !set.contains(value) {
+        set.insert(meter.mint(&[value])?);
+    }
+    Ok(())
+}
+
 /// Concrete agents + group documents mentioned by an access-control triple; every
 /// pair/triple-principal ingredient (agents, group members, origins, clients, issuers)
 /// is recorded for reserved-encoding validation.
@@ -1077,25 +1077,28 @@ fn collect_agents(
     webids: &mut FxHashSet<String>,
     groups: &mut FxHashSet<String>,
     principal_iris: &mut FxHashSet<String>,
-) {
-    let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else { return };
+    meter: &mut AuthLedger,
+) -> Result<(), String> {
+    let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else {
+        return Ok(());
+    };
     match p.as_str() {
         ACL_AGENT | ACP_AGENT | VCARD_MEMBER => {
             if !SPECIAL_AGENTS.contains(&o.as_str()) {
-                webids.insert(o.as_str().to_owned());
+                insert_minted(webids, o.as_str(), meter)?;
             }
-            principal_iris.insert(o.as_str().to_owned());
+            insert_minted(principal_iris, o.as_str(), meter)?;
         }
         ACL_ORIGIN | ACP_CLIENT | ACP_ISSUER => {
-            principal_iris.insert(o.as_str().to_owned());
+            insert_minted(principal_iris, o.as_str(), meter)?;
         }
         ACL_AGENT_GROUP => {
-            groups.insert(group_doc_of(o.as_str()).to_owned());
+            insert_minted(groups, group_doc_of(o.as_str()), meter)?;
         }
         _ => {}
     }
+    Ok(())
 }
-
 /// The origin (`scheme://authority`) of an IRI — the coarse pod boundary used to bucket
 /// the auth index + session cache for an ACL-write invalidation (sq-b7k7u).
 /// `https://pod.ex/a/b` → `https://pod.ex`; an authority with no path (`https://pod.ex`)
@@ -1482,6 +1485,73 @@ mod tests {
     use oxrdf::{BlankNode, Literal, NamedNode, Term};
     use rustc_hash::FxHashSet;
     use sparq_core::Graph;
+
+    #[test]
+    fn principal_and_group_copies_are_charged_before_insertion() {
+        for (predicate, value, copies) in [
+            (super::ACL_AGENT, "https://alice.ex/me", 2),
+            (super::ACP_CLIENT, "https://app.ex/", 1),
+            (super::ACL_AGENT_GROUP, "https://groups.ex/team#group", 1),
+            (super::VCARD_MEMBER, "https://alice.ex/me", 2),
+        ] {
+            let charged = if predicate == super::ACL_AGENT_GROUP {
+                super::group_doc_of(value).len()
+            } else {
+                copies * value.len()
+            };
+            let triple = [
+                named("https://pod.ex/.acl#a"),
+                named(predicate),
+                named(value),
+            ];
+            let mut webids = FxHashSet::default();
+            let mut groups = FxHashSet::default();
+            let mut principals = FxHashSet::default();
+            let mut budget = crate::default_auth_budget();
+            budget.max_generated_bytes = charged - 1;
+            let mut ledger = crate::budget::AuthLedger::new(budget);
+            let error = super::collect_agents(
+                &triple,
+                &mut webids,
+                &mut groups,
+                &mut principals,
+                &mut ledger,
+            )
+            .unwrap_err();
+            assert_eq!(
+                crate::auth_allowance_refusal(&error),
+                Some(crate::AuthAllowance::GeneratedBytes)
+            );
+            assert!(principals.is_empty());
+            assert!(groups.is_empty());
+            let mut ledger = meter();
+            webids.clear();
+            super::collect_agents(
+                &triple,
+                &mut webids,
+                &mut groups,
+                &mut principals,
+                &mut ledger,
+            )
+            .unwrap();
+            assert_eq!(
+                ledger.core().spent(sparq_core::meter::Dim::GeneratedBytes),
+                charged
+            );
+            super::collect_agents(
+                &triple,
+                &mut webids,
+                &mut groups,
+                &mut principals,
+                &mut ledger,
+            )
+            .unwrap();
+            assert_eq!(
+                ledger.core().spent(sparq_core::meter::Dim::GeneratedBytes),
+                charged
+            );
+        }
+    }
 
     const ACR: &str = "https://pod.ex/doc.acr";
     const OTHER_ACR: &str = "https://other.ex/doc.acr";

@@ -23,7 +23,9 @@ use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval_metered, CompiledRuleSet, MeteredError};
+use sparq_reason::n3::compiled::{
+    compile, compile_with_cycles, eval_metered, CompiledRuleSet, MeteredError,
+};
 use sparq_reason::{ClosureLimits, NegationCycles};
 use std::sync::OnceLock;
 // `std::time::Instant` is unusable on `wasm32-unknown-unknown` — `Instant::now()`
@@ -1258,6 +1260,8 @@ mod ledger_tests {
         )
         .unwrap();
         let initial = facts.clone();
+        let mut limits = ClosureLimits::default();
+        limits.max_total_join_rows = usize::MAX;
         let mut charges = Vec::new();
         for rules in acp_rules().unwrap() {
             let before = ledger.core().spent(Dim::JoinRows);
@@ -1265,7 +1269,7 @@ mod ledger_tests {
                 &mut dict,
                 &facts,
                 rules,
-                ClosureLimits::default(),
+                limits,
                 &mut ledger,
             )
             .unwrap();
@@ -1288,7 +1292,7 @@ mod ledger_tests {
                 &mut dict,
                 &facts,
                 rules,
-                ClosureLimits::default(),
+                limits,
                 &mut ledger,
             ) {
                 Ok(next) => facts = next,

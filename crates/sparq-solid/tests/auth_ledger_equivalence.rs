@@ -1,12 +1,13 @@
-//! Baseline parity for installed views, fixture requests, and closure charges.
+//! Baseline parity for installed views, named fixture requests, and closure charges.
 //!
-//! Regenerate on the baseline revision: copy this harness and its charge observer into
-//! an archived source tree, then run the library test with AUTH_LEDGER_GOLDEN_DIR set
-//! to a scratch directory. Copy the resulting JSON fixtures here only after reviewing
-//! the source revision and the view/decision differences. The recorded revision is
-//! `4f9c392005490862aa4e2d0d8c632b933a5eb6a7`. Run
-//! `cargo test -p sparq-solid --all-features --lib baseline` with the scratch directory
-//! in `AUTH_LEDGER_GOLDEN_DIR`. Never regenerate on the implementation being checked.
+//! Source: `81df9457597ef8b81c384360349c94ef956b5220` (origin/main).
+//! Regenerate with `python3 crates/sparq-solid/tests/regenerate_auth_ledger.py OUTPUT_DIR`.
+//! The script archives that revision, installs this harness and a test-only charge
+//! observer, and runs the baseline library tests with AUTH_LEDGER_GOLDEN_DIR set.
+//! Review the resulting JSON before replacing the committed fixtures. Never capture
+//! expected data from the implementation being checked.
+//! Small views retain sorted canonical triples; larger views retain counts and an
+//! FNV-1a-128 digest, framing each triple's UTF-8 bytes with its little-endian u64 length.
 
 mod common;
 
@@ -406,13 +407,131 @@ fn odrl_views_and_decisions_match_the_baseline() {
         let result = sparq_solid::odrl_bridge::materialize_odrl_n3(&mut graph, &policy, &request);
         let outcome = match result {
             Ok(out) => json!({"grant":out.grant_triple,"deny":out.deny_triple}),
-            Err(_) => json!({"refused":true}),
+            Err(error) => json!({
+                "refused":true,
+                "refusal_kind":sparq_solid::auth_allowance_refusal(&error).map(|kind| format!("{kind:?}")),
+            }),
         };
         snapshots.insert(name, json!({"outcome":outcome,"views":views(&graph)}));
     }
+    let (name, policy, request) = odrl_cases().into_iter().next().unwrap();
+    let mut graph = Graph::new();
+    let mut budget = sparq_solid::default_auth_budget();
+    budget.max_decision_join_rows = 0;
+    let error = sparq_solid::odrl_bridge::materialize_odrl_n3_with_budget(
+        &mut graph, &policy, &request, budget,
+    )
+    .unwrap_err();
+    snapshots.insert(format!("decision-cap/{name}"), json!({
+        "outcome":{
+            "refused":true,
+            "refusal_kind":sparq_solid::auth_allowance_refusal(&error).map(|kind| format!("{kind:?}")),
+        },
+        "views":views(&graph),
+    }));
     assert_golden(
         "auth-ledger-odrl.json",
         &json!(snapshots),
         include_str!("fixtures/auth-ledger-odrl.json"),
+    );
+}
+
+fn resource_pod(names: impl IntoIterator<Item = String>) -> String {
+    use std::fmt::Write;
+    let mut source = String::new();
+    for name in names {
+        writeln!(source, "<{name}#it> <urn:p> \"v\" <{name}> .").unwrap();
+    }
+    source
+}
+
+fn cap_snapshot(source: &str) -> Value {
+    let mut store = PodStore::new(Graph::load_dataset(source, "nquads").unwrap());
+    match store.materialize_wac() {
+        Ok(_) => json!({"views": views(store.graph())}),
+        Err(error) => {
+            let kind = sparq_solid::auth_allowance_refusal(&error)
+                .unwrap_or_else(|| panic!("unexpected non-allowance refusal: {error}"));
+            json!({"refusal_kind":format!("{kind:?}"),"views":views(store.graph())})
+        }
+    }
+}
+
+#[test]
+fn near_fact_cap_matches_the_baseline() {
+    let cap = sparq_solid::default_auth_budget().max_input_facts;
+    let mut snapshots = BTreeMap::new();
+    // A flat content resource adds isResource and parent; the root adds one fact.
+    for (label, count) in [("below", cap / 2 - 1), ("above", cap / 2)] {
+        let source = resource_pod((0..count).map(|i| format!("https://pod.ex/d{i}")));
+        snapshots.insert(label, cap_snapshot(&source));
+    }
+    // An own-ACL row contributes ownership, content and inDoc: three more facts.
+    let mut source = resource_pod((0..cap / 2 - 2).map(|i| format!("https://pod.ex/d{i}")));
+    source.push_str("<https://pod.ex/.acl#a> <urn:p> \"v\" <https://pod.ex/.acl> .\n");
+    snapshots.insert("at", cap_snapshot(&source));
+    assert_golden(
+        "auth-ledger-fact-cap.json",
+        &json!(snapshots),
+        include_str!("fixtures/auth-ledger-fact-cap.json"),
+    );
+}
+
+#[test]
+fn near_byte_cap_matches_the_baseline() {
+    let cap = sparq_solid::default_auth_budget().max_input_bytes;
+    let root = "https://pod.ex/";
+    let mut snapshots = BTreeMap::new();
+    for (label, target) in [("below", cap - 1), ("at", cap), ("above", cap + 1)] {
+        let mut names = Vec::new();
+        let mut remaining = target - root.len();
+        while remaining > 0 {
+            let prefix = format!("{root}{:04}", names.len());
+            let bytes = remaining.min(1024);
+            names.push(format!("{prefix}{}", "x".repeat(bytes - prefix.len())));
+            remaining -= bytes;
+        }
+        snapshots.insert(label, cap_snapshot(&resource_pod(names)));
+    }
+    assert_golden(
+        "auth-ledger-byte-cap.json",
+        &json!(snapshots),
+        include_str!("fixtures/auth-ledger-byte-cap.json"),
+    );
+}
+
+#[test]
+fn near_term_cap_matches_the_baseline() {
+    let cap = sparq_solid::default_auth_budget().max_input_term_bytes;
+    // Literal source sizing includes its fixed node cost and xsd:string datatype.
+    let overhead = std::mem::size_of::<Term>() + "http://www.w3.org/2001/XMLSchema#string".len();
+    let mut snapshots = BTreeMap::new();
+    for (label, size) in [("below", cap - 1), ("at", cap), ("above", cap + 1)] {
+        let source = format!(
+            "<https://pod.ex/.acl#a> <urn:p> \"{}\" <https://pod.ex/.acl> .",
+            "x".repeat(size - overhead),
+        );
+        snapshots.insert(label, cap_snapshot(&source));
+    }
+    assert_golden(
+        "auth-ledger-term-cap.json",
+        &json!(snapshots),
+        include_str!("fixtures/auth-ledger-term-cap.json"),
+    );
+}
+
+#[test]
+fn nested_resource_counterexample_view_matches_the_baseline() {
+    let mut source = resource_pod((0..6_000).map(|i| format!("https://pod.ex/a{}/d{i}", i / 16)));
+    source.push_str(concat!(
+        "<https://pod.ex/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .\n",
+    ));
+    assert_golden(
+        "auth-ledger-nested.json",
+        &cap_snapshot(&source),
+        include_str!("fixtures/auth-ledger-nested.json"),
     );
 }
