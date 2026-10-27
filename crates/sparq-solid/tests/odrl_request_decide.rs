@@ -1067,6 +1067,29 @@ fn wac_allow_keeps_the_request_clock() {
     }
 }
 
+#[test]
+fn budgeted_json_query_observes_the_session_policy() {
+    let mut pod = store();
+    pod.attach_odrl_policy(policy("prohibition", "read", "", None, Some(N1)).unwrap())
+        .unwrap();
+    let alice = session(Some(ALICE), None);
+    let budget = QueryBudget {
+        max_rows: Some(8),
+        ..QueryBudget::unlimited()
+    };
+    for (resource, expected_rows) in [(N1, 0), (N2, 1)] {
+        let query = format!("SELECT ?s ?p ?o WHERE {{ GRAPH <{resource}> {{ ?s ?p ?o }} }}");
+        let json = pod
+            .query_json_as_with_budget(&alice, Mode::Read, &query, &budget)
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            result["results"]["bindings"].as_array().unwrap().len(),
+            expected_rows
+        );
+    }
+}
+
 /// Every public `sparq-solid` function that takes a [`Session`] is either gated (and
 /// exercised above) or named here with the reason it is not an access decision. A new
 /// entry point fails this test until it is classified.
@@ -1083,6 +1106,7 @@ fn every_session_entry_point_is_classified() {
         "view_for",
         "query_as",
         "query_json_as",
+        "query_json_as_with_budget",
         "ask_as",
         "query_as_rewrite",
         "update_as",

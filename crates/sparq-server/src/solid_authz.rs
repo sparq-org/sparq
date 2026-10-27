@@ -165,6 +165,10 @@ pub(crate) struct AuthBuildPool {
     #[cfg(test)]
     view_hook: std::sync::Mutex<Option<Arc<BuildHook>>>,
     #[cfg(test)]
+    query_hook: std::sync::Mutex<Option<Arc<BuildHook>>>,
+    #[cfg(test)]
+    hit_dispatches: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     view_budget: std::sync::Mutex<Option<sparq_solid::AuthBudget>>,
     #[cfg(test)]
     panic_next_view: std::sync::atomic::AtomicBool,
@@ -185,6 +189,9 @@ struct BuildHook {
     entered: tokio::sync::Notify,
     running: std::sync::atomic::AtomicUsize,
     release: (std::sync::Mutex<bool>, std::sync::Condvar),
+    completed: tokio::sync::Notify,
+    result: std::sync::Mutex<Option<Result<String, String>>>,
+    panic_after_release: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(test)]
@@ -223,6 +230,10 @@ impl AuthBuildPool {
             build_hook: std::sync::Mutex::new(None),
             #[cfg(test)]
             view_hook: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            query_hook: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            hit_dispatches: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             view_budget: std::sync::Mutex::new(None),
             #[cfg(test)]
@@ -340,6 +351,21 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    spawn_on_build_pool(state, work)
+        .await?
+        .await
+        .map_err(|_| BuildPoolError::Unavailable)
+}
+
+/// Start a permit-owning worker so view publication can precede request completion.
+async fn spawn_on_build_pool<T, F>(
+    state: &AppState,
+    work: F,
+) -> Result<tokio::task::JoinHandle<T>, BuildPoolError>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
     let pool = Arc::clone(state.authz_build_pool());
     let Some(permit) = pool.claim().await else {
         // At most one warning per second, with every shed since the preceding line.
@@ -365,7 +391,7 @@ where
         }
         work()
     });
-    task.await.map_err(|_| BuildPoolError::Unavailable)
+    Ok(task)
 }
 
 /// One generation's independent WAC, ACP and automatically selected build slots.
@@ -455,32 +481,6 @@ enum ServerViewError {
     /// whole request is refused (400) instead.
     #[cfg(feature = "odrl-authz")]
     Odrl,
-}
-
-/// (sq-snopa.8) The store an endpoint decides over: an owned per-request store
-/// (stateless lane) or the shared per-generation one (stateful lane). Both are read through
-/// [`get`](Self::get); only the owned variant can be mutated by the ODRL lane.
-///
-/// Both variants hold the store BEHIND A POINTER so neither arm pays for the other's payload:
-/// a bare `PodStore` inline would make every `ResolvedStore` — including the shared one, whose
-/// own payload is one `Arc` word — as large as a whole materialised store
-/// (`clippy::large_enum_variant`). The stateless lane's extra allocation is noise beside the
-/// N-Quads parse + materialisation it already paid to build that store.
-enum ResolvedStore {
-    /// Stateless: built from the request body's dataset, dies with the response.
-    Owned(Box<PodStore>),
-    /// Stateful: the lineage/generation view shared by requests of the same snapshot.
-    Shared(Arc<PodStore>),
-}
-
-impl ResolvedStore {
-    /// The store to decide against, whichever lane produced it.
-    fn get(&self) -> &PodStore {
-        match self {
-            ResolvedStore::Owned(s) => s,
-            ResolvedStore::Shared(s) => s,
-        }
-    }
 }
 
 /// A parsed `/authz/*` request envelope. The `session` fields are borrowed from the owned JSON
@@ -739,7 +739,7 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 /// caller that knows its model should set `"view"` explicitly.
 // `Response` is large; same `result_large_err` allow as `parse_request` / the crate's
 // other handler helpers. Only the trust lane and the tests take a whole request; the
-// stateless lane owns the fields instead ([`resolve_store`]).
+// stateless lane owns the fields instead ([`with_store_work`]).
 #[cfg(any(test, feature = "solid-authz-trust"))]
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
@@ -747,7 +747,7 @@ fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
 }
 
 /// [`build_store`] over the two fields it reads, so the blocking-pool lane
-/// ([`resolve_store`]) can own them for the task rather than borrow the request.
+/// ([`with_store_work`]) can own them for the task rather than borrow the request.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
 fn build_store_from(dataset: &str, requested_view: Option<AuthView>) -> Result<PodStore, Response> {
@@ -992,14 +992,11 @@ fn build_server_view(
     Ok(Arc::new(store))
 }
 
-/// Share one pool build per (serving lineage, generation, requested view kind).
-/// Waiters claim no pool permit. A detached task publishes the outcome even if the
-/// initiating handler is cancelled; the blocking task retains its permit until it exits.
-#[allow(clippy::result_large_err)]
-async fn server_store(
+/// The shared-lock lookup is the sole definition of a warm hit.
+fn cached_server_view(
     state: &AppState,
     requested_view: Option<AuthView>,
-) -> Result<Arc<PodStore>, Response> {
+) -> Option<ServerViewResult> {
     let index = view_slot(requested_view);
     {
         // Warm lookups share the read lock. Restore needs the write lock, so pinning
@@ -1023,11 +1020,40 @@ async fn server_store(
             if same_lineage && cached.generation == pinned.number() {
                 if let Some(slot) = &cached.slots[index] {
                     if let Some(outcome) = &*slot.outcome.borrow() {
-                        return outcome.clone().map_err(server_view_error_response);
+                        return Some(outcome.clone());
                     }
                 }
             }
         }
+    }
+    None
+}
+
+/// Share one pool build per (serving lineage, generation, requested view kind).
+/// Waiters claim no permit while awaiting the shared view. The leader's request work
+/// stays in its build closure; published-view waiters run decisions inline.
+/// A detached task publishes even if the initiating handler is cancelled. Warm
+/// decisions run inline; queries dispatch while retaining their query-worker permit.
+#[allow(clippy::result_large_err)]
+async fn server_store_with_work<T, F>(
+    state: &AppState,
+    requested_view: Option<AuthView>,
+    blocking_hit: bool,
+    mut work: Option<F>,
+) -> Result<(Arc<PodStore>, Option<T>), Response>
+where
+    T: Send + 'static,
+    F: FnOnce(Arc<PodStore>) -> T + Send + 'static,
+{
+    let index = view_slot(requested_view);
+    if let Some(outcome) = cached_server_view(state, requested_view) {
+        let store = outcome.map_err(server_view_error_response)?;
+        let result = if let Some(work) = work {
+            Some(published_view_work(state, store.clone(), blocking_hit, work).await?)
+        } else {
+            None
+        };
+        return Ok((store, result));
     }
     let slot;
     let build;
@@ -1066,10 +1092,7 @@ async fn server_store(
         }
         let cached = cache.as_mut().expect("generation cache was installed");
         if let Some(existing) = &cached.slots[index] {
-            // Warm hits return without spawning or claiming a pool slot.
-            if let Some(outcome) = &*existing.outcome.borrow() {
-                return outcome.clone().map_err(server_view_error_response);
-            }
+            // This request missed the read-lock lookup, even if publication raced it.
             slot = existing.clone();
             build = None;
         } else {
@@ -1080,7 +1103,11 @@ async fn server_store(
             build = Some(pinned);
         }
     }
+    let mut completed_work = None;
     if let Some(pinned) = build {
+        let build_work = work.take();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        completed_work = Some(receiver);
         let st = state.clone();
         let completion = AuthViewCompletion {
             state: st.clone(),
@@ -1096,22 +1123,36 @@ async fn server_store(
             let builder_state = st.clone();
             #[cfg(feature = "backup")]
             let pinned_core = build_core.clone();
-            let outcome = build_on_pool(&st, move || {
-                build_server_view(
+            let (view_sender, view_receiver) = tokio::sync::oneshot::channel();
+            let task = spawn_on_build_pool(&st, move || {
+                let outcome = build_server_view(
                     &builder_state,
                     requested_view,
                     #[cfg(feature = "backup")]
                     pinned_core,
                     pinned,
-                )
+                );
+                let store = outcome.as_ref().ok().cloned();
+                let _ = view_sender.send(outcome);
+                store.and_then(|store| build_work.map(|work| work(store)))
             })
-            .await
-            .unwrap_or_else(|error| {
-                Err(match error {
-                    BuildPoolError::Shed => ServerViewError::Shed,
-                    BuildPoolError::Unavailable => ServerViewError::Unavailable,
-                })
-            });
+            .await;
+            let (outcome, task) = match task {
+                Ok(task) => {
+                    let outcome = view_receiver
+                        .await
+                        .unwrap_or(Err(ServerViewError::Unavailable));
+                    if outcome.is_err() {
+                        // A failed build completes and releases its permit before publication.
+                        let _ = task.await;
+                        (outcome, None)
+                    } else {
+                        (outcome, Some(task))
+                    }
+                }
+                Err(BuildPoolError::Shed) => (Err(ServerViewError::Shed), None),
+                Err(BuildPoolError::Unavailable) => (Err(ServerViewError::Unavailable), None),
+            };
             #[cfg(test)]
             if st
                 .authz_build_pool()
@@ -1120,46 +1161,53 @@ async fn server_store(
             {
                 return;
             }
-            let mut cache = st
-                .authz_view_cache()
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            // Defence in depth: restore clears the cache and waiters re-check lineage.
-            #[cfg(feature = "backup")]
-            let outcome = if !Arc::ptr_eq(&st.authz_core(), &build_core) {
-                Err(ServerViewError::StaleLineage)
-            } else {
-                outcome
-            };
-            // Transient failures reach current waiters but leave the key retryable.
-            let retain = matches!(
-                outcome,
-                Ok(_)
-                    | Err(ServerViewError::Materialize(Some(
-                        AuthAllowance::TotalJoinRows
-                            | AuthAllowance::JoinRows
-                            | AuthAllowance::RoundsOrFacts
-                            | AuthAllowance::TermBytes
-                            | AuthAllowance::InputBytes
-                            | AuthAllowance::InputFacts
-                            | AuthAllowance::InputTermBytes
-                            | AuthAllowance::ResourceIri
-                            | AuthAllowance::DecisionWork
-                    )))
-            );
-            if !retain {
-                if let Some(cached) = cache.as_mut() {
-                    if cached.slots[index]
-                        .as_ref()
-                        .is_some_and(|s| Arc::ptr_eq(s, &building))
-                    {
-                        cached.slots[index] = None;
+            {
+                let mut cache = st
+                    .authz_view_cache()
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner());
+                // Defence in depth: restore clears the cache and waiters re-check lineage.
+                #[cfg(feature = "backup")]
+                let outcome = if !Arc::ptr_eq(&st.authz_core(), &build_core) {
+                    Err(ServerViewError::StaleLineage)
+                } else {
+                    outcome
+                };
+                // Transient failures reach current waiters but leave the key retryable.
+                let retain = matches!(
+                    outcome,
+                    Ok(_)
+                        | Err(ServerViewError::Materialize(Some(
+                            AuthAllowance::TotalJoinRows
+                                | AuthAllowance::JoinRows
+                                | AuthAllowance::RoundsOrFacts
+                                | AuthAllowance::TermBytes
+                                | AuthAllowance::InputBytes
+                                | AuthAllowance::InputFacts
+                                | AuthAllowance::InputTermBytes
+                                | AuthAllowance::ResourceIri
+                                | AuthAllowance::DecisionWork
+                        )))
+                );
+                if !retain {
+                    if let Some(cached) = cache.as_mut() {
+                        if cached.slots[index]
+                            .as_ref()
+                            .is_some_and(|s| Arc::ptr_eq(s, &building))
+                        {
+                            cached.slots[index] = None;
+                        }
                     }
                 }
+                // Holding the cache lock serializes publication with the restore swap.
+                building.outcome.send_replace(Some(outcome));
+                completion.published = true;
             }
-            // Holding the cache lock serializes publication with the restore swap.
-            building.outcome.send_replace(Some(outcome));
-            completion.published = true;
+            let result = match task {
+                Some(task) => task.await.map_err(|_| ServerViewError::Unavailable),
+                None => Ok(None),
+            };
+            let _ = sender.send(result);
         });
     }
     let mut receiver = slot.outcome.subscribe();
@@ -1170,20 +1218,81 @@ async fn server_store(
         .as_ref()
         .expect("completed slot")
         .clone();
-    // Restore may have happened after publication but before this waiter resumed.
-    let _cache = state
-        .authz_view_cache()
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
+    let store = {
+        // Restore may have happened after publication but before this waiter resumed.
+        let _cache = state
+            .authz_view_cache()
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        #[cfg(feature = "backup")]
+        if !Arc::ptr_eq(&state.authz_core(), &core) {
+            return Err(server_view_error_response(ServerViewError::StaleLineage));
+        }
+        outcome.map_err(server_view_error_response)?
+    };
+    let result = if let Some(receiver) = completed_work {
+        receiver
+            .await
+            .map_err(|_| server_view_error_response(ServerViewError::Unavailable))?
+            .map_err(server_view_error_response)?
+    } else if let Some(work) = work {
+        Some(published_view_work(state, store.clone(), blocking_hit, work).await?)
+    } else {
+        None
+    };
     #[cfg(feature = "backup")]
-    if !Arc::ptr_eq(&state.authz_core(), &core) {
-        return Err(server_view_error_response(ServerViewError::StaleLineage));
+    {
+        let _cache = state
+            .authz_view_cache()
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        if !Arc::ptr_eq(&state.authz_core(), &core) {
+            return Err(server_view_error_response(ServerViewError::StaleLineage));
+        }
     }
-    outcome.map_err(server_view_error_response)
+    Ok((store, result))
+}
+
+/// Decisions over a completed view are bounded inline work. Queries retain the
+/// worker permit captured by their endpoint and remain independently awaitable.
+#[allow(clippy::result_large_err)]
+async fn published_view_work<T, F>(
+    state: &AppState,
+    store: Arc<PodStore>,
+    blocking_query: bool,
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(Arc<PodStore>) -> T + Send + 'static,
+{
+    if !blocking_query {
+        return Ok(work(store));
+    }
+    #[cfg(not(test))]
+    let _ = state;
+    #[cfg(test)]
+    state
+        .authz_build_pool()
+        .hit_dispatches
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    tokio::task::spawn_blocking(move || work(store))
+        .await
+        .map_err(crate::http::query_worker_error)
+}
+
+#[cfg(test)]
+async fn server_store(
+    state: &AppState,
+    requested_view: Option<AuthView>,
+) -> Result<Arc<PodStore>, Response> {
+    server_store_with_work(state, requested_view, false, None::<fn(Arc<PodStore>)>)
+        .await
+        .map(|(store, _)| store)
 }
 
 /// [`build_store`] on the blocking pool — the STATELESS lane's counterpart of
-/// [`server_store`].
+/// [`server_store_with_work`].
 ///
 /// This lane parses and materialises the REQUEST's own dataset, so its cost is set by the
 /// body: the N-Quads parse, the resource enumeration and the N3 materialisation are all
@@ -1194,11 +1303,16 @@ async fn server_store(
 /// materialisation failure is: no decision is produced.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
-async fn body_store(
+async fn body_store<T, F>(
     state: &AppState,
     req: &AuthzRequest,
     mode: Mode,
-) -> Result<PodStore, Response> {
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(&PodStore, &AuthzRequest) -> T + Send + 'static,
+{
     let owned = req.clone();
     on_build_pool(state, move || {
         let store = build_store_from(&owned.dataset, owned.view)?;
@@ -1208,33 +1322,66 @@ async fn body_store(
             if owned.carries_odrl {
                 apply_odrl_lane(&mut store, &owned, mode)?;
             }
-            Ok(store)
+            Ok(work(&store, &owned))
         }
         #[cfg(not(feature = "odrl-authz"))]
         {
             let _ = mode;
-            Ok(store)
+            Ok(work(&store, &owned))
         }
     })
     .await?
 }
 
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
-/// per-request build ([`body_store`]) or the stateful per-generation view ([`server_store`]).
-/// Both lanes are fail-closed; neither can yield a store that silently grants.
+/// per-request build ([`body_store`]) or the stateful per-generation view ([`server_store_with_work`]).
+/// A leader's build and request work share one blocking closure and one permit.
+/// Other misses await the shared build and then use the same placement as cache hits:
+/// inline decisions, or a blocking query worker retaining the endpoint's worker permit.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
-async fn resolve_store(
+async fn with_store_work<T, F>(
     state: &AppState,
     req: &AuthzRequest,
     mode: Mode,
-) -> Result<ResolvedStore, Response> {
+    blocking_hit: bool,
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(&PodStore, &AuthzRequest) -> T + Send + 'static,
+{
     match req.source {
-        AuthzSource::Body => body_store(state, req, mode)
+        AuthzSource::Body => body_store(state, req, mode, work).await,
+        AuthzSource::Server => {
+            // Completed-view decisions borrow the request while running inline.
+            // Dispatched work below owns its request until the worker completes.
+            if !blocking_hit {
+                if let Some(outcome) = cached_server_view(state, req.view) {
+                    let store = outcome.map_err(server_view_error_response)?;
+                    return Ok(work(&store, req));
+                }
+            }
+            let owned = req.clone();
+            server_store_with_work(
+                state,
+                req.view,
+                blocking_hit,
+                Some(move |store: Arc<PodStore>| work(&store, &owned)),
+            )
             .await
-            .map(|s| ResolvedStore::Owned(Box::new(s))),
-        AuthzSource::Server => server_store(state, req.view).await.map(ResolvedStore::Shared),
+            .map(|(_, result)| result.expect("request work was supplied"))
+        }
     }
+}
+
+/// Refuse names outside the view's caps before ACL discovery, using the same
+/// allowance kind and response wording as resource enumeration.
+fn validate_request_resource(store: &PodStore, resource: &str) -> Result<(), ServerViewError> {
+    store
+        .auth_budget()
+        .validate_resource_iri(resource)
+        .map_err(|error| ServerViewError::Materialize(materialize_refusal_kind(&error)))
 }
 
 /// `POST /authz/decide` — the per-request WAC/ACP decision (FR-1/FR-4). Body:
@@ -1324,14 +1471,18 @@ pub(crate) async fn decide_endpoint(
             return trust_authz_decide(&state, trust_val.take(), req, resource, mode).await;
         }
     }
-    let store = match resolve_store(&state, &req, mode).await {
-        Ok(s) => s,
+    let decision = match with_store_work(&state, &req, mode, false, move |store, req| {
+        validate_request_resource(store, &resource)?;
+        Ok(store.decide(&req.session(), &resource, mode))
+    })
+    .await
+    {
+        Ok(Ok(d)) => d,
+        Ok(Err(error)) => return server_view_error_response(error),
         Err(resp) => return resp,
     };
     #[cfg(feature = "odrl-authz")]
     let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
-    // Deciding is CPU-light here (the materialise already ran), so it stays inline.
-    let decision = store.get().decide(&req.session(), &resource, mode);
     // sq-3mu76 — read-scoped advertisement (module doc): when the lane fired, mask
     // the advisory `grantedModes` to the requested (read) mode — the lane evidenced no other.
     #[cfg(feature = "odrl-authz")]
@@ -2112,6 +2263,9 @@ fn trust_authz_decide_blocking(
         Ok(store) => store,
         Err(response) => return response,
     };
+    if let Err(error) = validate_request_resource(&store, resource) {
+        return server_view_error_response(error);
+    }
     let decision = store.decide(&req.session(), resource, mode);
     let status = if decision.allow {
         StatusCode::OK
@@ -2273,7 +2427,10 @@ pub(crate) async fn wac_allow_endpoint(
     let resource_iri = match v.get("resource").and_then(|r| r.as_str()) {
         Some(r) => r.to_owned(),
         None => {
-            return json_error(StatusCode::BAD_REQUEST, "'resource' (IRI string) is required");
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "'resource' (IRI string) is required",
+            );
         }
     };
     // `wac_allow` takes a `NamedNode`; an un-IRI resource is a fail-closed 400 (never a grant).
@@ -2283,21 +2440,23 @@ pub(crate) async fn wac_allow_endpoint(
             return json_error(StatusCode::BAD_REQUEST, "'resource' is not a valid IRI");
         }
     };
-    let store = match resolve_store(&state, &req, Mode::Read).await {
-        Ok(s) => s,
-        Err(resp) => return resp,
-    };
+    let (acl_link, value) =
+        match with_store_work(&state, &req, Mode::Read, false, move |store, req| {
+            validate_request_resource(store, &resource_iri)?;
+            let acl_link = store
+                .resolve_acl(&resource_iri)
+                .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
+            let value = store.wac_allow(&req.session(), &resource);
+            Ok((acl_link, value))
+        })
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => return server_view_error_response(error),
+            Err(resp) => return resp,
+        };
     #[cfg(feature = "odrl-authz")]
     let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
-    // sq-snopa.7 FR-5: resolve the governing ACL for the Link header BEFORE
-    // `wac_allow` consumes the store. `resolve_acl` is a pure index lookup (no mode needed) and
-    // returns `None` when no ACL was discovered — fail-closed: no header emitted in that case.
-    // POSITIONAL format args (CodeQL rust/unused-variable guard).
-    let acl_link: Option<String> = store
-        .get()
-        .resolve_acl(&resource_iri)
-        .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
-    let value = store.get().wac_allow(&req.session(), &resource);
     // sq-3mu76 — read-scoped advertisement (module doc): the lane materialised
     // read-action outcomes only, so advertise at most `user="read"` and never a public mode
     // (an anonymous session is refused wherever the lane fires). Fail-closed: this can only
@@ -2550,11 +2709,21 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
     Ok(())
 }
 
+/// Owned by the handler, never the worker: dropping the request signals the engine's
+/// existing cooperative cancellation checks, including when no deadline is set.
+struct QueryCancellation(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for QueryCancellation {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// `POST /authz/query` — an ACCESS-CONTROLLED SPARQL query as `session` (FR-4). Body:
 /// `{ "dataset": nquads, "session": {..}, "mode"?: "read"|…, "query": sparql, "view"?: …,
 /// "source"?: "body"|"server" }` (sq-snopa.8: `"server"` omits `"dataset"` and
 /// queries the server's own loaded store through the same access-controlled view).
-/// Delegates to [`PodStore::query_json_as`] (the zero-copy authorised-graph-set view path) and
+/// Delegates to [`PodStore::query_json_as_with_budget`] (the zero-copy authorised-graph-set view path) and
 /// returns the SPARQL 1.1 JSON results serialisation. `mode` defaults to `read` (the query path).
 ///
 /// Fail-closed: a session with no grants sees an empty view (zero rows), never the whole store; an
@@ -2571,6 +2740,10 @@ pub(crate) async fn query_endpoint(
     if let Some(resp) = auth_gate(state.config(), &headers, Operation::Read) {
         return resp;
     }
+    let deadline = state
+        .config()
+        .query_timeout
+        .map(|t| std::time::Instant::now() + t);
     let req = match parse_request(&body) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -2582,7 +2755,10 @@ pub(crate) async fn query_endpoint(
     let query = match v.get("query").and_then(|q| q.as_str()) {
         Some(q) => q.to_owned(),
         None => {
-            return json_error(StatusCode::BAD_REQUEST, "'query' (SPARQL string) is required");
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "'query' (SPARQL string) is required",
+            );
         }
     };
     // A query is a READ; default the mode to Read. An explicit unknown mode is a fail-closed 400
@@ -2599,13 +2775,62 @@ pub(crate) async fn query_endpoint(
             }
         },
     };
-    let store = match resolve_store(&state, &req, mode).await {
-        Ok(s) => s,
+    #[cfg(test)]
+    let query_hook = state.authz_build_pool().query_hook.lock().unwrap().clone();
+    let Some(worker_permit) = state.try_stream_worker() else {
+        return crate::http::stream_workers_exhausted();
+    };
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _cancel_on_drop = QueryCancellation(cancel.clone());
+    let work = with_store_work(&state, &req, mode, true, move |store, req| {
+        let _worker_permit = worker_permit;
+        // Includes parsing, authorization rewrite, session view, and dataset setup.
+        let budget = sparq_engine::QueryBudget {
+            deadline,
+            ..sparq_engine::QueryBudget::unlimited()
+        }
+        .with_cancel(cancel);
+        #[cfg(test)]
+        if let Some(hook) = &query_hook {
+            hook.block();
+            assert!(!hook
+                .panic_after_release
+                .load(std::sync::atomic::Ordering::Relaxed));
+        }
+        let result = store.query_json_as_with_budget(&req.session(), mode, &query, &budget);
+        #[cfg(test)]
+        if let Some(hook) = &query_hook {
+            *hook.result.lock().unwrap() = Some(result.clone());
+            hook.completed.notify_one();
+        }
+        result
+    });
+    let result = match deadline {
+        Some(deadline) => {
+            let hard_deadline =
+                tokio::time::Instant::from_std(deadline + crate::http::TIMEOUT_GRACE);
+            match tokio::time::timeout_at(hard_deadline, work).await {
+                Ok(result) => result,
+                Err(_) => {
+                    return crate::http::engine_error_response(
+                        "query budget exceeded (timeout)",
+                        state.config(),
+                        false,
+                    )
+                }
+            }
+        }
+        None => work.await,
+    };
+    let result = match result {
+        Ok(result) => result,
         Err(resp) => return resp,
     };
-    match store.get().query_json_as(&req.session(), mode, &query) {
+    match result {
         Ok(json) => json_response(StatusCode::OK, json),
-        // The engine's parse/eval detail is withheld (info-leak posture); the class is enough.
+        Err(e) if e.contains("query budget exceeded (timeout)") => {
+            crate::http::engine_error_response(&e, state.config(), false)
+        }
         Err(_) => json_error(
             StatusCode::BAD_REQUEST,
             "query did not parse or could not be evaluated",
@@ -3583,6 +3808,445 @@ mod build_pool_tests {
     }
 
     #[tokio::test]
+    async fn stateless_decide_is_shed_while_the_only_build_is_blocked() {
+        let st = state(1, 0);
+        let hook = block_builds(&st);
+        let _release = ReleaseOnDrop(hook.clone());
+        let build_state = st.clone();
+        let blocked = tokio::spawn(async move {
+            on_build_pool(&build_state, || {
+                build_store_from(WAC_NQUADS, Some(AuthView::Wac)).expect("fixture builds")
+            })
+            .await
+        });
+        wait_for_running(&hook, 1).await;
+        let response = response_or_release_extra_build(start_build(&st), &hook, 1).await;
+        hook.release();
+        blocked.await.unwrap().unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+        assert_eq!(st.authz_build_pool().refused(), 1);
+        // Once admitted, the real decision must still execute on the worker while
+        // owning the slot. A build-only pool hop must not satisfy this test.
+        let caller = std::thread::current().id();
+        let request = parse_request(&body_lane_request()).unwrap();
+        let pool = st.authz_build_pool().clone();
+        let (decision, worker, available) =
+            with_store_work(&st, &request, Mode::Read, false, move |store, req| {
+                (
+                    store.decide(&req.session(), "https://pod.ex/n1", Mode::Read),
+                    std::thread::current().id(),
+                    pool.available(),
+                )
+            })
+            .await
+            .unwrap();
+        assert!(decision.allow);
+        assert_ne!(
+            worker, caller,
+            "stateless decision runs on the blocking worker"
+        );
+        assert_eq!(available, 0, "the decision holds its build slot");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn request_work_retains_the_build_slot() {
+        let st = state(1, 0);
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        let decision_hook = hook.clone();
+        let request_state = st.clone();
+        let first = tokio::spawn(async move {
+            let req = parse_request(&body_lane_request()).unwrap();
+            with_store_work(
+                &request_state,
+                &req,
+                Mode::Read,
+                false,
+                move |store, req| {
+                decision_hook.block();
+                store.decide(&req.session(), "https://pod.ex/n1", Mode::Read)
+            })
+            .await
+            .unwrap()
+        });
+        wait_for_running(&hook, 1).await;
+        let available = st.authz_build_pool().available();
+        let second =
+            decide_endpoint(State(st.clone()), HeaderMap::new(), body_lane_request()).await;
+        hook.release();
+        let decision = first.await.unwrap();
+        assert!(decision.allow);
+        assert_eq!(available, 0, "the decision still owns the build permit");
+        assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+    }
+
+    #[tokio::test]
+    async fn authz_query_uses_the_server_deadline_and_timeout_response() {
+        let st = AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                query_timeout: Some(Duration::from_millis(100)),
+                // These existing limits must not become additional authz query caps.
+                max_results: Some(1),
+                max_query_rows: Some(1),
+                max_query_bytes: Some(1),
+                ..ServerConfig::default()
+            },
+        );
+        let values = (0..32).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
+        let product = format!("SELECT (COUNT(*) AS ?n) WHERE {{ VALUES ?a {{ {values} }} VALUES ?b {{ {values} }} VALUES ?c {{ {values} }} VALUES ?d {{ {values} }} }}");
+        let request = |query: &str| {
+            decide_bytes(serde_json::json!({
+                "dataset": WAC_NQUADS,
+                "session": {"agent": "https://alice.ex/card#me"},
+                "query": query,
+            }))
+        };
+        let response = query_endpoint(State(st.clone()), HeaderMap::new(), request(&product)).await;
+        let expected = crate::http::engine_error_response(
+            "query budget exceeded (timeout)",
+            st.config(),
+            false,
+        );
+        assert_eq!(response.status(), expected.status());
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let expected_body = axum::body::to_bytes(expected.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body, expected_body);
+        let small = query_endpoint(
+            State(st),
+            HeaderMap::new(),
+            request("SELECT ?a WHERE { VALUES ?a { 1 2 } }"),
+        )
+        .await;
+        assert_eq!(
+            small.status(),
+            StatusCode::OK,
+            "only the deadline is applied"
+        );
+        let body = axum::body::to_bytes(small.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["results"]["bindings"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn warm_query_disconnect_cancels_without_a_timeout_and_retains_admission() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                query_timeout: None,
+                max_concurrent: 1,
+                ..ServerConfig::default()
+            },
+        );
+        server_store(&st, None).await.unwrap();
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook.clone());
+        let request = || {
+            decide_bytes(serde_json::json!({
+                "source": "server", "query": "SELECT (COUNT(*) AS ?n) WHERE { VALUES ?a { 1 2 3 4 } VALUES ?b { 1 2 3 4 } }"
+            }))
+        };
+        let handler = tokio::spawn(query_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            request(),
+        ));
+        wait_for_running(&hook, 1).await;
+        assert_eq!(st.stream_workers_in_flight(), 1);
+        handler.abort();
+        assert!(handler.await.unwrap_err().is_cancelled());
+        assert_eq!(
+            st.stream_workers_in_flight(),
+            1,
+            "the worker retains admission after handler drop"
+        );
+        let saturated = query_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        assert_eq!(saturated.status(), StatusCode::TOO_MANY_REQUESTS);
+        hook.release();
+        tokio::time::timeout(Duration::from_secs(2), hook.completed.notified())
+            .await
+            .expect("the disconnected request's worker completes");
+        let result = hook.result.lock().unwrap().take().unwrap();
+        assert!(result
+            .unwrap_err()
+            .contains("query budget exceeded (cancelled)"));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while st.stream_workers_in_flight() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the stopped worker releases admission");
+        *st.authz_build_pool().query_hook.lock().unwrap() = None;
+        let next = query_endpoint(State(st), HeaderMap::new(), request()).await;
+        assert_eq!(next.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_panicked_warm_query_uses_the_query_worker_error_response() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
+        server_store(&st, None).await.unwrap();
+        let hook = Arc::new(BuildHook::default());
+        hook.panic_after_release
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        hook.release();
+        *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook);
+        let response = query_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            decide_bytes(serde_json::json!({
+                "source": "server", "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"
+            })),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"], "query worker panicked");
+        assert_eq!(st.stream_workers_in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn request_name_caps_use_the_resource_refusal_before_acl_discovery() {
+        let budget = sparq_solid::default_auth_budget();
+        let long = format!(
+            "https://pod.ex/{}",
+            "x".repeat(budget.max_resource_iri_bytes + 1 - "https://pod.ex/".len())
+        );
+        let deep = format!(
+            "https://pod.ex/{}leaf",
+            "a/".repeat(budget.max_resource_path_depth)
+        );
+        for resource in [&long, &deep] {
+            for ancestor in [false, true] {
+                let mut dataset = format!(
+                    r#"
+<{resource}.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#accessTo> <{resource}> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#agentClass> <http://xmlns.com/foaf/0.1/Agent> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <{resource}.acl> .
+"#
+                );
+                if ancestor {
+                    dataset.push_str(WAC_NQUADS);
+                }
+                let st = AppState::with_config(
+                    sparq_core::Graph::load_dataset(&dataset, "nquads").unwrap(),
+                    ServerConfig {
+                        solid_authz: true,
+                        ..ServerConfig::default()
+                    },
+                );
+                for server in [false, true] {
+                    let mut value = serde_json::json!({"resource": resource, "mode": "read", "session": {"agent": "https://alice.ex/card#me"}});
+                    if server {
+                        value["source"] = "server".into();
+                    } else {
+                        value["dataset"] = dataset.clone().into();
+                    }
+                    let body = decide_bytes(value);
+                    let responses = [
+                        decide_endpoint(State(st.clone()), HeaderMap::new(), body.clone()).await,
+                        wac_allow_endpoint(State(st.clone()), HeaderMap::new(), body).await,
+                    ];
+                    for response in responses {
+                        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+                        assert!(!response.headers().contains_key(header::LINK));
+                        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                            .await
+                            .unwrap();
+                        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                        assert_eq!(
+                            body["error"],
+                            "could not materialise the authorization view"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn warm_decisions_run_inline_on_the_async_worker() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
+        let body = decide_bytes(serde_json::json!({
+            "source": "server", "resource": "https://pod.ex/n1", "mode": "read",
+            "session": { "agent": "https://alice.ex/card#me" }
+        }));
+        let request = parse_request(&body).unwrap();
+        let warm = decide_endpoint(State(st.clone()), HeaderMap::new(), body.clone()).await;
+        assert_eq!(warm.status(), StatusCode::OK);
+        let response = decide_endpoint(State(st.clone()), HeaderMap::new(), body.clone()).await;
+        let advertisement = wac_allow_endpoint(State(st.clone()), HeaderMap::new(), body).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(advertisement.status(), StatusCode::OK);
+        assert_eq!(
+            st.authz_build_pool()
+                .hit_dispatches
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the warm endpoint paths dispatch no blocking work"
+        );
+        let caller = std::thread::current().id();
+        let admitted = st.authz_build_pool().admitted();
+        let (decision, worker) = with_store_work(&st, &request, Mode::Read, false, |store, req| {
+            (
+                store.decide(&req.session(), "https://pod.ex/n1", Mode::Read),
+                std::thread::current().id(),
+            )
+        })
+        .await
+        .unwrap();
+        assert!(decision.allow);
+        assert_eq!(
+            worker, caller,
+            "a warm decision must not dispatch to the blocking pool"
+        );
+        assert_eq!(st.authz_build_pool().admitted(), admitted);
+    }
+
+    #[tokio::test]
+    async fn authz_query_deadline_includes_pre_evaluation_work() {
+        let st = AppState::with_config(
+            sparq_core::Graph::default(),
+            ServerConfig {
+                solid_authz: true,
+                query_timeout: Some(Duration::from_secs(1)),
+                ..ServerConfig::default()
+            },
+        );
+        let hook = Arc::new(BuildHook::default());
+        *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook.clone());
+        let _release = ReleaseOnDrop(hook.clone());
+        let request_state = st.clone();
+        let handler = tokio::spawn(async move {
+            query_endpoint(
+                State(request_state),
+                HeaderMap::new(),
+                decide_bytes(serde_json::json!({
+                    "dataset": WAC_NQUADS, "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"
+                })),
+            )
+            .await
+        });
+        wait_for_running(&hook, 1).await;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        hook.release();
+        let response = handler.await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "pre-evaluation work consumed the deadline"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn authz_query_await_is_bounded_during_pre_evaluation_work() {
+        query_await_is_bounded(false).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn warm_authz_query_await_is_bounded_during_pre_evaluation_work() {
+        query_await_is_bounded(true).await;
+    }
+
+    async fn query_await_is_bounded(server: bool) {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                query_timeout: Some(Duration::from_secs(1)),
+                ..ServerConfig::default()
+            },
+        );
+        if server {
+            server_store(&st, None).await.unwrap();
+        }
+        let hook = Arc::new(BuildHook::default());
+        *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook.clone());
+        let _release = ReleaseOnDrop(hook.clone());
+        let request_state = st.clone();
+        let handler = tokio::spawn(async move {
+            query_endpoint(
+                State(request_state),
+                HeaderMap::new(),
+                decide_bytes(if server {
+                    serde_json::json!({"source": "server", "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"})
+                } else {
+                    serde_json::json!({"dataset": WAC_NQUADS, "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"})
+                }),
+            )
+            .await
+        });
+        wait_for_running(&hook, 1).await;
+        let response = tokio::time::timeout(
+            Duration::from_secs(1) + crate::http::TIMEOUT_GRACE + Duration::from_millis(500),
+            handler,
+        )
+        .await;
+        let available = st.authz_build_pool().available();
+        let workers = st.stream_workers_in_flight();
+        hook.release();
+        let response = response
+            .expect("response arrives within the deadline and grace")
+            .unwrap();
+        assert_eq!(
+            available,
+            st.config().solid_authz_build_concurrency - usize::from(!server),
+            "unfinished miss work retains its build permit"
+        );
+        assert_eq!(
+            workers, 1,
+            "unfinished query work retains its worker permit"
+        );
+        assert_eq!(
+            st.authz_build_pool()
+                .hit_dispatches
+                .load(std::sync::atomic::Ordering::SeqCst),
+            usize::from(server)
+        );
+        let expected = crate::http::engine_error_response(
+            "query budget exceeded (timeout)",
+            st.config(),
+            false,
+        );
+        assert_eq!(response.status(), expected.status());
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+            axum::body::to_bytes(expected.into_body(), usize::MAX)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn build_pool_caps_running_builds_even_after_handler_cancellation() {
         let st = state(2, 50);
         let hook = block_builds(&st);
@@ -3654,9 +4318,18 @@ mod build_pool_tests {
         let blocked = start_build(&st);
         wait_for_running(&hook, 1).await;
         let response = decide_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        let advertisement =
+            wac_allow_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        let query = decide_bytes(serde_json::json!({
+            "source": "server", "session": {"agent": "https://alice.ex/card#me"},
+            "query": "SELECT ?s WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?o } }"
+        }));
+        let query_response = query_endpoint(State(st.clone()), HeaderMap::new(), query).await;
         hook.release();
         let _ = blocked.await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(advertisement.status(), StatusCode::OK);
+        assert_eq!(query_response.status(), StatusCode::OK);
         assert_eq!(
             st.authz_build_pool().admitted(),
             2,
@@ -3675,7 +4348,9 @@ mod build_pool_tests {
                 ..ServerConfig::default()
             },
         );
-        let explicit = server_store(&st, Some(AuthView::Wac)).await.unwrap();
+        let explicit = server_store(&st, Some(AuthView::Wac))
+            .await
+            .unwrap();
         let automatic = server_store(&st, None).await.unwrap();
         let session = Session {
             agent: Some("https://alice.ex/card#me"),
@@ -4035,6 +4710,229 @@ mod build_pool_tests {
     }
 
     #[tokio::test]
+    async fn published_view_waiter_decisions_need_no_build_permit() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_build_concurrency: 1,
+                solid_authz_build_wait: Duration::ZERO,
+                ..ServerConfig::default()
+            },
+        );
+        let view_hook = Arc::new(BuildHook::default());
+        let _release_view = ReleaseOnDrop(view_hook.clone());
+        *st.authz_build_pool().view_hook.lock().unwrap() = Some(view_hook.clone());
+        let work_hook = Arc::new(BuildHook::default());
+        let _release_work = ReleaseOnDrop(work_hook.clone());
+        let leader_state = st.clone();
+        let leader_hook = work_hook.clone();
+        let caller = std::thread::current().id();
+        let body = decide_bytes(serde_json::json!({
+            "source": "server", "resource": "https://pod.ex/n1", "mode": "read",
+            "session": {"agent": "https://alice.ex/card#me"}
+        }));
+        let leader_body = body.clone();
+        let leader = tokio::spawn(async move {
+            let req = parse_request(&leader_body).unwrap();
+            let pool = leader_state.authz_build_pool().clone();
+            with_store_work(&leader_state, &req, Mode::Read, false, move |store, req| {
+                leader_hook.block();
+                (
+                    store.decide(&req.session(), "https://pod.ex/n1", Mode::Read),
+                    std::thread::current().id(),
+                    pool.available(),
+                )
+            })
+            .await
+            .unwrap()
+        });
+        wait_for_running(&view_hook, 1).await;
+        let decide_state = st.clone();
+        let decide_body = body.clone();
+        let decision = tokio::spawn(decide_endpoint(
+            State(decide_state),
+            HeaderMap::new(),
+            decide_body,
+        ));
+        let advertisement = tokio::spawn(wac_allow_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            body,
+        ));
+        wait_for_waiters(&st, None, 3).await;
+        view_hook.release();
+        wait_for_running(&work_hook, 1).await;
+        let decision = tokio::time::timeout(Duration::from_secs(2), decision)
+            .await
+            .unwrap()
+            .unwrap();
+        let advertisement = tokio::time::timeout(Duration::from_secs(2), advertisement)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(st.authz_build_pool().available(), 0);
+        assert_eq!(decision.status(), StatusCode::OK);
+        assert_eq!(advertisement.status(), StatusCode::OK);
+        assert_eq!(
+            decision.headers()[header::LINK],
+            "<https://pod.ex/.acl>; rel=\"acl\""
+        );
+        let body = axum::body::to_bytes(advertisement.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["wacAllow"], r#"user="read",public="""#);
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+        assert_eq!(st.authz_build_pool().refused(), 0);
+        work_hook.release();
+        let (decision, worker, available) = leader.await.unwrap();
+        assert!(decision.allow);
+        assert_ne!(worker, caller, "leader work remains on the blocking worker");
+        assert_eq!(available, 0, "leader work retains its build permit");
+    }
+
+    #[tokio::test]
+    async fn a_completed_view_is_warm_while_the_miss_leader_still_holds_its_permit() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_build_concurrency: 1,
+                solid_authz_build_wait: Duration::ZERO,
+                ..ServerConfig::default()
+            },
+        );
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        let decision_hook = hook.clone();
+        let worker_state = st.clone();
+        let body = decide_bytes(serde_json::json!({
+            "source": "server", "resource": "https://pod.ex/n1", "mode": "read",
+            "session": { "agent": "https://alice.ex/card#me" }
+        }));
+        let req = parse_request(&body).unwrap();
+        let leader = tokio::spawn(async move {
+            with_store_work(&worker_state, &req, Mode::Read, false, move |store, req| {
+                decision_hook.block();
+                store.decide(&req.session(), "https://pod.ex/n1", Mode::Read)
+            })
+            .await
+            .unwrap()
+        });
+        wait_for_running(&hook, 1).await;
+        let warm = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(outcome) = cached_server_view(&st, None) {
+                    outcome.unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            decide_endpoint(State(st.clone()), HeaderMap::new(), body).await
+        })
+        .await;
+        let available = st.authz_build_pool().available();
+        hook.release();
+        assert!(leader.await.unwrap().allow);
+        assert_eq!(available, 0, "the leader still owns its build permit");
+        assert_eq!(
+            warm.expect("publication precedes request completion")
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+        assert_eq!(
+            st.authz_build_pool()
+                .hit_dispatches
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    #[cfg(feature = "backup")]
+    #[tokio::test]
+    async fn restore_during_miss_request_work_checks_the_completed_result_lineage() {
+        use std::future::Future;
+        use std::task::Poll;
+        let st = state(1, 50);
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        let decision_hook = hook.clone();
+        let mut leader = Box::pin(server_store_with_work(
+            &st,
+            None,
+            false,
+            Some(move |_: Arc<PodStore>| {
+                decision_hook.block();
+                true
+            }),
+        ));
+        assert!(
+            std::future::poll_fn(|cx| Poll::Ready(leader.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        wait_for_running(&hook, 1).await;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(outcome) = cached_server_view(&st, None) {
+                    outcome.unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("view is published before request work completes");
+        // Advance beyond the publication check while the request work is still held.
+        assert!(
+            std::future::poll_fn(|cx| Poll::Ready(leader.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        let source = state(1, 50);
+        let mut artifact = Vec::new();
+        source.export_backup(&mut artifact).unwrap();
+        st.restore_from(artifact.as_slice(), false).unwrap();
+        hook.release();
+        assert_eq!(
+            leader
+                .await
+                .err()
+                .expect("result checks its serving lineage")
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        server_store(&st, None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn request_work_failure_preserves_the_published_view() {
+        let st = state(1, 50);
+        let response = server_store_with_work(
+            &st,
+            None,
+            false,
+            Some(|_: Arc<PodStore>| {
+                panic!("injected request work panic");
+            }),
+        )
+        .await
+        .err()
+        .expect("request work failed");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let published = cached_server_view(&st, None)
+            .expect("view remains published")
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &published,
+            &server_store(&st, None).await.unwrap()
+        ));
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+    }
+
+    #[tokio::test]
     async fn requested_view_kinds_build_independently_and_stay_warm() {
         let st = state(3, 50);
         let hook = Arc::new(BuildHook::default());
@@ -4124,6 +5022,55 @@ mod build_pool_tests {
             .unwrap();
         assert!(Arc::ptr_eq(&warm, &again));
         assert_eq!(st.authz_build_pool().admitted(), 1);
+    }
+
+    #[test]
+    fn warm_decision_endpoints_complete_while_the_cache_is_read_locked() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
+        runtime.block_on(server_store(&st, None)).unwrap();
+        let guard = st.authz_view_cache().read().unwrap();
+        let worker_state = st.clone();
+        let handle = runtime.handle().clone();
+        let (done, completed) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = handle.block_on(async {
+                let body = decide_bytes(serde_json::json!({
+                    "source": "server", "resource": "https://pod.ex/n1", "mode": "read",
+                    "session": { "agent": "https://alice.ex/card#me" }
+                }));
+                let decision =
+                    decide_endpoint(State(worker_state.clone()), HeaderMap::new(), body.clone())
+                        .await;
+                let advertisement =
+                    wac_allow_endpoint(State(worker_state), HeaderMap::new(), body).await;
+                (decision.status(), advertisement.status())
+            });
+            done.send(result).unwrap();
+        });
+        let outcome = completed.recv_timeout(Duration::from_secs(2));
+        drop(guard);
+        worker.join().unwrap();
+        assert_eq!(
+            outcome.expect("warm endpoints need only the cache read lock"),
+            (StatusCode::OK, StatusCode::OK)
+        );
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+        assert_eq!(
+            st.authz_build_pool()
+                .hit_dispatches
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     #[tokio::test]

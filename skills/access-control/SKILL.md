@@ -143,6 +143,9 @@ Materialize the authorization view from the access-control documents, then enfor
   match `set_auth_limits`: from the NEXT
   materialization, WAC and ACP alike, every self-made rebuild included; the free
   `materialize_*` functions always use `default_auth_budget()`.
+- `budget.validate_resource_iri(iri) -> Result<(), String>` checks the per-resource
+  byte-length and container-depth caps before storing a resource or linking ancestors.
+  It returns the materializer's allowance refusal and charges no aggregate allowance.
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
   -> bool` — whether a materialization error is a refusal by that allowance or budget rather
   than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
@@ -261,7 +264,9 @@ Materialize the authorization view from the access-control documents, then enfor
 - `store.query_as(&Session, Mode, sparql)` → `QueryResult` (`.rows`);
   `store.query_json_as(...)` → JSON string; `store.ask_as(...)` → `bool`. These evaluate
   through the engine's **zero-copy `DatasetView`** filtered to the session's authorized
-  graphs (the default, fast path).
+  graphs (the default, fast path). `store.query_json_as_with_budget(&session, mode,
+  sparql, &QueryBudget)` uses the same authorized view and union-default rewrite with
+  an explicit cooperative engine budget; a refusal returns no result JSON.
 - **Empty default graph + union-default-graph opt-in — SPEC-COMPLIANT BY DEFAULT**
   (sq-gq28y, issue #1546; maintainer decision "spec compliant - empty by default").
   The read path (`query_as`/`query_json_as`/`ask_as`) implements the *Access-Controlled SPARQL
@@ -974,6 +979,30 @@ against the aggregate `max_input_bytes` before it is made — so the enumeration
 pod costs at most the input budget, whatever shape its names have. Past any of the three the
 whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
 `InputBytes` for the aggregate), fail-closed, with nothing installed.
+
+ACL discovery indexes control documents once per view by their target IRI, with `.acl`
+preceding `.acr`. Targets beyond that view's `max_resource_iri_bytes` or
+`max_resource_path_depth` are omitted: an admitted resource cannot name them. Each
+ancestor-prefix lookup hashes at most the byte cap, and prefixes deeper than the indexed
+targets are skipped. Resolution submits at most `max_resource_path_depth + 1`
+lookup keys in total, so the total lookup-key bytes are bounded
+by `(max_resource_path_depth + 1) * max_resource_iri_bytes`, including when the depth cap
+is zero. This counts the keys submitted to the hash table. The borrowed ancestor walks
+scan the resource linearly. Request names face the view's captured byte and depth caps
+before discovery: `decide` and `decide_batch` return a definitive `NoAcl` deny without a
+governing ACL, `resolve_acl` returns `None`, and `wac_allow` advertises empty modes.
+`AuthBudget::validate_resource_iri` returns the `AuthAllowance::ResourceIri` cap clause;
+callers add their operation's context, and materialization appends its view-build refusal.
+The HTTP server maps request-name cap refusals to its existing resource-budget refusal.
+
+The HTTP server runs warm stateful decisions and `WAC-Allow` calculation inline on the
+async worker. Waiters use that same placement after view publication without claiming
+a build permit. Stateless requests and stateful miss leaders retain their work on the
+bounded blocking pool. Queries run on a blocking worker even on a cache hit, under the
+request deadline and await grace. Every HTTP authorization query also holds a permit
+from the existing `max_concurrent` worker semaphore until its work finishes. Handler
+drop signals the query budget's cooperative cancellation flag, including with timeout
+disabled. Worker admission uses the existing concurrent-request-limit response.
 
 The store's provenance pruning owns container strings and uses the same three caps, with
 its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`
