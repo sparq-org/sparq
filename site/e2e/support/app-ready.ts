@@ -9,10 +9,10 @@
 //      (`navigator.serviceWorker.controller != null`) — that flips only AFTER the single reload,
 //      so the subsequent interaction lands on the live document, never a torn-down one. Wrapped so
 //      a spec that blocks the SW, or a browser without SW support, proceeds immediately.
-//   2. A hydration barrier: the app shell sets `[data-app-ready]` in a MOUNT EFFECT (see
+//   2. A hydration barrier: the app shell exposes `[data-app-ready]` from its client snapshot (see
 //      src/components/layout/app-shell.tsx), so its appearance means React has hydrated the shell
 //      AND the wrapping <CommandPalette>'s global ⌘K keydown effect is armed (the attribute is
-//      applied on the re-render AFTER the passive-effect batch). This is the deterministic
+//      applied on the hydration update AFTER the passive-effect batch). This is the deterministic
 //      replacement for the old fixed 500ms hydration beat — a mere server-rendered element's
 //      attachment would NOT do, since Next SSRs the whole shell (it is present pre-hydration).
 //      It re-resolves after a client redirect (the redirect-stub case).

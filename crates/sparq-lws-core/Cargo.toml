@@ -218,6 +218,7 @@ itoa = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sparq-lws-ysync = { path = "../sparq-lws-ysync", optional = true }
+sparq-lws-blob-fs = { path = "../sparq-lws-blob-fs", optional = true }
 # Existing default-member JSON-LD processor for compact storage-description output.
 sparq-jsonld = { path = "../sparq-jsonld" }
 # Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
@@ -381,7 +382,9 @@ authn-ssi = ["dep:sparq-lws-authn-ssi"]
 # in-workspace builds. Build with `--no-default-features` for the engine-free profile (the
 # in-memory double only — the former default), e.g. for an out-of-workspace consumer that wants
 # no engine dependency.
-default = ["embedded-sparq", "sparql-endpoint", "authn-openid", "authn-ssi"]
+default = ["blob-fs", "embedded-sparq", "sparql-endpoint", "authn-openid", "authn-ssi"]
+# Native filesystem blob adapter; unavailable on wasm32 even with this feature enabled.
+blob-fs = ["dep:sparq-lws-blob-fs"]
 # Opt-in: compile the distributed Redis-backed DPoP-`jti` replay store (`src/redis_replay.rs`) + its
 # `redis`/`r2d2` deps. OFF by default so the standard build, tests, and conformance are byte-identical
 # and carry no extra dependency. Enable for a horizontally-scaled deployment that shares one replay set

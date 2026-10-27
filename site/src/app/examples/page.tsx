@@ -54,32 +54,30 @@ export default function ExamplesPage() {
   );
 }
 
+// The separate /app build needs a full-page anchor; site routes use Next navigation.
+function ExampleCardLink({ card, children }: { card: ExampleCard; children: React.ReactNode }) {
+  const className = "group block focus-visible:outline-none";
+  const label = `Open demo: ${card.title}`;
+  return card.external ? (
+    <a
+      href={withBasePath(card.href.endsWith("/") ? card.href : `${card.href}/`)}
+      className={className}
+      aria-label={label}
+    >
+      {children}
+    </a>
+  ) : (
+    <Link href={card.href} className={className} aria-label={label}>
+      {children}
+    </Link>
+  );
+}
+
 /** A large demo card: a decorative still over title · outcome · tier badge · [Open demo]. */
 function ExampleCardItem({ card }: { card: ExampleCard }) {
   const Icon = card.icon;
-  // [OPUS-4.8] sq-4hiqe — a card targeting the separate overlaid /app must be a HARD full-page
-  // anchor (withBasePath + trailing slash); a next/link soft nav would fetch /app/index.txt.
-  const Wrapper = card.external
-    ? ({ children }: { children: React.ReactNode }) => (
-        <a
-          href={withBasePath(card.href.endsWith("/") ? card.href : `${card.href}/`)}
-          className="group block focus-visible:outline-none"
-          aria-label={`Open demo: ${card.title}`}
-        >
-          {children}
-        </a>
-      )
-    : ({ children }: { children: React.ReactNode }) => (
-        <Link
-          href={card.href}
-          className="group block focus-visible:outline-none"
-          aria-label={`Open demo: ${card.title}`}
-        >
-          {children}
-        </Link>
-      );
   return (
-    <Wrapper>
+    <ExampleCardLink card={card}>
       <Card className="h-full overflow-hidden pt-0 transition-colors group-hover:ring-primary/40 group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
         {/* The "still" — a dependency-free token gradient with the surface icon. */}
         <div
@@ -111,6 +109,6 @@ function ExampleCardItem({ card }: { card: ExampleCard }) {
           </span>
         </CardContent>
       </Card>
-    </Wrapper>
+    </ExampleCardLink>
   );
 }
