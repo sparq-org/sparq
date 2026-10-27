@@ -1265,8 +1265,12 @@ async fn anonymous_subscription_creates_keep_their_existing_quota_in_open_mode()
     assert_eq!(quota_full, 64 - MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
 }
 
-#[tokio::test]
-async fn a_principal_wait_releases_shared_gates_for_another_creator() {
+async fn waiting_unknown_subscription() -> (
+    LwsState<test_store::FlakyStore>,
+    test_store::FlakyStore,
+    Arc<tokio::sync::Semaphore>,
+    tokio::task::JoinHandle<StatusCode>,
+) {
     use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
     let (state, store) = test_store::closed_state(100).await;
     let a = "https://a.example/";
@@ -1331,6 +1335,45 @@ async fn a_principal_wait_releases_shared_gates_for_another_creator() {
     .await
     .unwrap();
     assert!(!second.is_finished());
+    (state, store, unknown, second)
+}
+
+async fn conditional_subscription(
+    state: &LwsState<test_store::FlakyStore>,
+    subject: &str,
+    body: &str,
+) -> Response {
+    use tower::ServiceExt;
+    let listing = call(state, "GET", SUBSCRIPTIONS_PATH, Some(subject), "").await;
+    assert_eq!(listing.status(), StatusCode::OK);
+    let token = crate::lws::tokens::mint(
+        &state.cfg,
+        subject,
+        "https://app.example/",
+        &state.cfg.realm(),
+    );
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(SUBSCRIPTIONS_PATH)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", LWS_JSON)
+        .header("if-match", &listing.headers()[header::ETAG])
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap();
+    axum::Router::new()
+        .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+        .with_state(state.clone())
+        .oneshot(request)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_principal_wait_releases_shared_gates_for_another_creator() {
+    use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
+    let (state, store, unknown, second) = waiting_unknown_subscription().await;
+    let a = "https://a.example/";
+    let topic = state.cfg.storage();
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
     assert!(
         state.locks.try_lock(&container).is_some(),
@@ -1361,43 +1404,19 @@ async fn a_principal_wait_releases_shared_gates_for_another_creator() {
         "another principal's create never reached the store"
     );
     assert_eq!(response.status(), StatusCode::CREATED);
-    // A tag comparison must still wait for the unknown listing change, despite its released
-    // physical locks. An unconditional create above has no such comparison.
-    let listing = call(
-        &state,
-        "GET",
-        SUBSCRIPTIONS_PATH,
-        Some(test_store::OWNER),
-        "",
-    )
-    .await;
-    let tag = listing.headers()[header::ETAG]
-        .to_str()
-        .unwrap()
-        .to_string();
-    use tower::ServiceExt;
-    let token = crate::lws::tokens::mint(
-        &state.cfg,
-        test_store::OWNER,
-        "https://app.example/",
-        &state.cfg.realm(),
-    );
-    let conditional = axum::http::Request::builder()
-        .method("POST")
-        .uri(SUBSCRIPTIONS_PATH)
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", LWS_JSON)
-        .header("if-match", tag)
-        .body(axum::body::Body::from(body.clone()))
-        .unwrap();
+    // Only A's listing is claimed: the owner's whole-listing conditional create proceeds.
     let before = store.creates_started.load(Ordering::SeqCst);
-    let response = axum::Router::new()
-        .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
-        .with_state(state.clone())
-        .oneshot(conditional)
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let response = conditional_subscription(&state, test_store::OWNER, &body).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(store.creates_started.load(Ordering::SeqCst), before + 1);
+    // A's own comparison is still deferred by its claim. Pin the detail so the principal's
+    // separate settlement refusal cannot mask a missing claim check.
+    let before = store.creates_started.load(Ordering::SeqCst);
+    let response = response_bytes(conditional_subscription(&state, a, &body).await).await;
+    assert_eq!(response.0, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(String::from_utf8(response.2.to_vec())
+        .unwrap()
+        .contains("the resource is busy"));
     assert_eq!(store.creates_started.load(Ordering::SeqCst), before);
     store.fail_fence.store(false, Ordering::SeqCst);
     unknown.add_permits(MAX_SETTLING_PER_PRINCIPAL + 1);
@@ -1412,36 +1431,84 @@ async fn a_principal_wait_releases_shared_gates_for_another_creator() {
     })
     .await
     .unwrap();
-    let listing = call(
-        &state,
-        "GET",
-        SUBSCRIPTIONS_PATH,
-        Some(test_store::OWNER),
-        "",
-    )
-    .await;
-    let tag = listing.headers()[header::ETAG].to_str().unwrap();
-    let conditional = axum::http::Request::builder()
-        .method("POST")
-        .uri(SUBSCRIPTIONS_PATH)
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", LWS_JSON)
-        .header("if-match", tag)
-        .body(axum::body::Body::from(body))
-        .unwrap();
     let before = store.creates_started.load(Ordering::SeqCst);
-    let response = axum::Router::new()
-        .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
-        .with_state(state)
-        .oneshot(conditional)
-        .await
-        .unwrap();
+    let response = conditional_subscription(&state, a, &body).await;
     assert_eq!(
         response.status(),
         StatusCode::CREATED,
         "a confirmed outcome retained a listing claim"
     );
     assert_eq!(store.creates_started.load(Ordering::SeqCst), before + 1);
+}
+
+#[tokio::test]
+async fn subscriber_confirmation_preserves_an_owner_s_conditional_create_window() {
+    use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
+    let (state, store, unknown, second) = waiting_unknown_subscription().await;
+    *store.unsettle_creates.lock().unwrap() = None;
+    let owner_gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.hold_creates.lock().unwrap() = Some(owner_gate.clone());
+    let creating = tokio::spawn({
+        let state = state.clone();
+        let body = subscription_body(&state, &state.cfg.storage());
+        async move {
+            conditional_subscription(&state, test_store::OWNER, &body)
+                .await
+                .status()
+        }
+    });
+    tokio::time::timeout(LOCK_WAIT, async {
+        while store.creates_waiting.load(Ordering::SeqCst) != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    *store.hold_creates.lock().unwrap() = None;
+    // Let A's backend write land while its principal wait is still stalled. Hold its
+    // confirmation read at the reply, so the next poll must reach publication.
+    unknown.add_permits(MAX_SETTLING_PER_PRINCIPAL + 1);
+    let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+    let iri = tokio::time::timeout(LOCK_WAIT, async {
+        loop {
+            if let Some(child) = store.list_children(&container).await.unwrap().first() {
+                break child.as_str().to_string();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let read_reply = Arc::new(tokio::sync::Semaphore::new(0));
+    *store.hold_next_read_reply_of.lock().unwrap() = Some((iri, read_reply.clone()));
+    store.fail_fence.store(false, Ordering::SeqCst);
+    tokio::time::timeout(LOCK_WAIT * 8, async {
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    read_reply.add_permits(1);
+    run_ready().await;
+    assert_eq!(store.creates_waiting.load(Ordering::SeqCst), 1);
+    assert!(
+        !creating.is_finished(),
+        "the owner's conditional window must still be open"
+    );
+    assert!(
+        !second.is_finished(),
+        "another subscriber registered inside the owner's conditional window"
+    );
+    owner_gate.add_permits(1);
+    assert_eq!(creating.await.unwrap(), StatusCode::CREATED);
+    assert_eq!(
+        tokio::time::timeout(LOCK_WAIT, second)
+            .await
+            .unwrap()
+            .unwrap(),
+        StatusCode::CREATED
+    );
 }
 
 async fn owner_patch_with_a_container_subscription_during_the_write(parent: bool) {
@@ -1763,7 +1830,7 @@ async fn stalled_stream_publications_have_a_storage_wide_bound() {
 
 #[cfg(feature = "sparql-endpoint")]
 #[tokio::test]
-async fn a_settlement_wait_and_relock_allow_sparql_barriers() {
+async fn a_principal_settlement_wait_allows_sparql_barriers() {
     use crate::lws::records::{LOCK_WAIT, MAX_SETTLING_PER_PRINCIPAL};
     async fn query_under_barrier(state: &LwsState<test_store::FlakyStore>) {
         // Force the real HTTP query through its fair barrier, rather than an optimistic read.
@@ -1885,10 +1952,14 @@ async fn a_settlement_wait_and_relock_allow_sparql_barriers() {
         "the principal wait must still be stalled"
     );
 
-    // Confirmation must take listing locks before taking a new change lease. Holding this
-    // physical listing must not prevent a second real query from passing its barrier.
+    // The subscriber claim excludes its conditional comparisons through publication. Its old
+    // physical listing guard must not be reacquired, even while that guard is held elsewhere.
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
-    let listing = state.locks.lock(&container).await.unwrap();
+    let listing = state
+        .locks
+        .lock(&listing_lock(&container, Some(a)))
+        .await
+        .unwrap();
     unknown.add_permits(MAX_SETTLING_PER_PRINCIPAL + 1);
     tokio::time::timeout(LOCK_WAIT * 4, async {
         while store.list_children(&container).await.unwrap().is_empty() {
@@ -1898,21 +1969,14 @@ async fn a_settlement_wait_and_relock_allow_sparql_barriers() {
     .await
     .unwrap();
     store.fail_fence.store(false, Ordering::SeqCst);
-    tokio::time::timeout(LOCK_WAIT * 8, async {
-        while state.settlements.listing_relocks() == 0 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert!(!second.is_finished());
-    query_under_barrier(&state).await;
-    drop(listing);
     assert_eq!(
         tokio::time::timeout(LOCK_WAIT * 8, second)
             .await
             .unwrap()
             .unwrap(),
-        StatusCode::CREATED
+        StatusCode::CREATED,
+        "confirmation waited to reacquire the claimed subscriber listing"
     );
+    query_under_barrier(&state).await;
+    drop(listing);
 }

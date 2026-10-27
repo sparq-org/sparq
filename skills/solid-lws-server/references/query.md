@@ -85,8 +85,10 @@ request expires.
 
 Record publication holds a mutation lease for its bounded store and memory
 steps. Record settlement fence waits, principal-permit waits and retry loops run outside that lease.
-Any released listing locks are reacquired before publication takes a fresh lease, so a listing
-wait does not retain query admission. A service-record fence
+Pending-listing claims remain through memory confirmation instead of reacquiring their listing
+locks. Subscriber records still take the container shared for an arrival or removal, preserving
+an owner's whole-listing conditional-create window; that guard precedes the fresh publication
+lease, so waiting for it retains no query admission. A service-record fence
 resolves its private record before publication and contributes no data graph.
 
 With `sparql-endpoint`, `LwsConfig::sparql_max_resources` defaults to 10000 and

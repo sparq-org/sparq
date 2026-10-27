@@ -784,20 +784,24 @@ What the server exposes, all discoverable from the storage description
   at most 16 unknown outcomes are being settled for one principal, identified by its subject
   (anonymous requests share one principal). Ordinary writes and lock waits consume only a
   shared place; the principal place starts at an unknown answer and lasts until its outcome is
-  known. A confirmed create waiting for its registration lock retains only the shared place.
+  known. Memory confirmation retains only the shared place.
   Open mode skips the principal ceiling. Already-running changes first try a principal permit
   without waiting. If none is free, they release the high-water gate and every listing lock
   before waiting, retaining only their shared change place, record lock and request admission.
-  A pending-listing claim preserves conditional tag checks: those answer `503` while the
-  outcome is unknown; unconditional creates continue. Listing locks are reacquired before
-  registration or removal is confirmed in memory. New changes by a principal already at its
-  unsettled ceiling are refused.
+  A pending-listing claim preserves conditional tag checks through memory confirmation.
+  A subscription claims only its subscriber's listing, so the owner's whole-listing conditional
+  creates continue; a record listed only in its container claims that container. Comparisons
+  on a claimed listing answer `503`; unconditional creates continue. Released subscriber and
+  container-only listing guards are not reacquired. Only a subscriber record's container is
+  held shared while its arrival or removal is confirmed, preserving the owner's whole-listing
+  conditional-create window. That guard is taken before the SPARQL publication lease.
+  New changes by a principal already at its unsettled ceiling are refused.
   Client changes use the requesting subject, including deletion of a quarantined record;
   automatic cancellation after a failed delivery uses the subscriber's subject.
   Both bounds answer the same `503` with `Retry-After`. Dropping a place releases every
   permit it holds. The expiry sweeper keeps its separate maintenance places.
-  Once an outcome is known, its principal permit is released before waiting to reacquire
-  listing locks. Its shared place follows
+  Once an outcome is known, its principal permit is released before memory confirmation.
+  The claim remains until that confirmation finishes. Its shared place follows
   the resulting notification through selection and webhook queueing; maintenance announcements
   retain their maintenance place through that work. Those places are released before waiting
   on any stream publication gate. Principal bookkeeping ends with the last change.

@@ -240,7 +240,9 @@ pub(crate) async fn within_wait<T>(
 ///   loads whatever the listing holds.
 /// - A principal permit is tried without waiting on an unknown answer. When none is free,
 ///   the shared gate and all listing locks are released before waiting; a listing claim
-///   preserves conditional checks, and the record's own lock still protects its outcome.
+///   preserves conditional checks through confirmation, and the record's own lock still
+///   protects its outcome. Subscriber records retain the container publication guard to
+///   preserve the owner's whole-listing conditional-create window.
 /// - The change holds a place among those being made or settled ([`Settlements`]) from the
 ///   request until it is settled: `503` when there is none. The task that settles one is the
 ///   state's, and ends when the state is dropped.
@@ -364,7 +366,7 @@ where
             return Ok(());
         };
         // No change lease is held here. The permit wait first gives up shared gates and
-        // listing locks; reacquire any released listing locks before publishing in memory.
+        // listing locks. The claim excludes comparisons until memory publication is complete.
         place.unsettled(&mut held).await;
         let listed = match observed {
             Some(listed) => listed,
@@ -373,7 +375,9 @@ where
         match listed {
             Ok(true) => {
                 place.settled();
-                let _reheld = held.relock(&state.locks).await;
+                let _listing = held
+                    .container_for_confirmation(&state.locks, &container)
+                    .await;
                 state
                     .store
                     .publish(async {
@@ -421,21 +425,18 @@ where
                     if !stored {
                         return;
                     }
-                    // Registered under the container's lock, shared (taken after the record's,
-                    // as a revocation takes them, unless still held), so no conditional create
-                    // sees the listing change between its check and its own registration. This
-                    // task holds no admission, so it may wait for it.
-                    let _reheld = held.relock(&locks).await;
-                    let _listing = if held.claim.is_some() {
-                        None
-                    } else {
-                        Some(match container_lock {
-                            Some(held) => held,
-                            None => ListingGuard::Shared(
-                                until_done(|| async { locks.read(&container).await.ok_or(()) })
-                                    .await,
-                            ),
-                        })
+                    // A container claim already excludes whole-listing comparisons. A subscriber
+                    // claim excludes only that subscriber's comparisons, so publication still
+                    // takes the container shared to preserve an owner's conditional-create window.
+                    let _listing = match container_lock {
+                        Some(held) => Some(held),
+                        None if held.claim.is_some() => held
+                            .container_for_confirmation(&locks, &container)
+                            .await
+                            .map(ListingGuard::Shared),
+                        None => Some(ListingGuard::Shared(
+                            until_done(|| async { locks.read(&container).await.ok_or(()) }).await,
+                        )),
                     };
                     if let Some(state) = weak.upgrade() {
                         state
@@ -467,7 +468,7 @@ where
 /// registration, and waits on nothing that changes only other listings. A create whose outcome
 /// the store leaves unknown normally keeps that listing shared. A principal permit wait
 /// substitutes a listing claim while all listing locks are released: conditional comparisons
-/// are refused until the outcome is known. The subscriber's unconditional
+/// on that listing are refused through memory confirmation. The subscriber's unconditional
 /// creates and removals go on, so the registration that settles it may follow them.
 #[derive(Clone, Copy)]
 pub(crate) enum Listed<'a> {
@@ -483,9 +484,10 @@ pub(crate) enum Listed<'a> {
 }
 
 /// The listing locks a create or removal holds (see [`Listed`]): its own listing's, and the
-/// container's. The subscriber's listing is taken before the record lock. Reacquiring released
-/// listings takes only shared locks; conditional creates holding listings never wait on record
-/// locks (they only try them), so confirmation cannot form a lock cycle with them.
+/// container's. The subscriber's listing is taken before the record lock. Released listing
+/// guards are replaced by claims through confirmation. Subscriber registration still takes the
+/// container shared: an owner's conditional create must see no arrival during its comparison
+/// and create. Conditional creates only try record locks, so this order cannot form a cycle.
 #[derive(Default)]
 pub(crate) struct ListingLocks {
     own: Option<ListingGuard>,
@@ -564,8 +566,6 @@ struct SettlementLocks<C> {
     claim: Option<ListingClaim>,
     #[cfg(test)]
     waits: Arc<std::sync::atomic::AtomicUsize>,
-    #[cfg(all(test, feature = "sparql-endpoint"))]
-    relocks: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl<C> SettlementLocks<C> {
@@ -587,29 +587,25 @@ impl<C> SettlementLocks<C> {
         self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn relock(
+    fn container_for_confirmation(
         &self,
         locks: &Arc<resources::IriLocks>,
-    ) -> impl std::future::Future<Output = Vec<tokio::sync::OwnedRwLockReadGuard<()>>> + Send + 'static
+        container: &str,
+    ) -> impl std::future::Future<Output = Option<tokio::sync::OwnedRwLockReadGuard<()>>> + Send + 'static
     {
-        let names = self
-            .claim
-            .as_ref()
-            .map(|claim| claim.names.clone())
-            .unwrap_or_default();
-        let locks = locks.clone();
-        #[cfg(all(test, feature = "sparql-endpoint"))]
-        let relocks = self.relocks.clone();
+        let needed =
+            self.claim.is_some() && self.names.first().is_some_and(|name| name != container);
+        let (locks, container) = (locks.clone(), container.to_string());
         async move {
-            #[cfg(all(test, feature = "sparql-endpoint"))]
-            if !names.is_empty() {
-                relocks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // The subscriber claim replaces its own listing guard, but does not exclude an
+            // owner's whole-listing conditional create. Only its container guard is needed at
+            // confirmation, before taking the publication lease. A container-only claim already
+            // supplies that exclusion and needs no physical lock.
+            if needed {
+                Some(until_done(|| async { locks.read(&container).await.ok_or(()) }).await)
+            } else {
+                None
             }
-            let mut held = Vec::new();
-            for name in names {
-                held.push(until_done(|| async { locks.read(&name).await.ok_or(()) }).await);
-            }
-            held
         }
     }
 }
@@ -723,8 +719,9 @@ pub(crate) enum Removed {
 ///   call timeout, [`fence_in_background`]; one that has succeeded is not tried again): the record stays out of force, and its own lock, its
 ///   listing locks normally stay held until the delete is fenced and the listing read again.
 ///   A principal permit wait first substitutes listing claims and releases all listing locks;
-///   those are reacquired after confirmation, before `settle` is
-///   told the outcome, and a record gone is announced. The answer is `500`, saying this is not
+///   the claims exclude their conditional comparisons through memory confirmation. Only a
+///   subscriber record's container guard is taken for a confirmed removal, preserving the
+///   owner's whole-listing conditional-create window. A record gone is announced. The answer is `500`, saying this is not
 ///   known yet, and it does not wait on a fence that stalls.
 /// - As for a create, the removal holds a place among those being made or settled
 ///   ([`Settlements`]) until it is settled (`503` when there is none), and the task that settles
@@ -799,7 +796,7 @@ where
             return Ok(Removed::Absent);
         };
         // The query lease ends with the initial answer. Fences and principal waits run
-        // outside it; final confirmation takes a fresh lease after listing locks.
+        // outside it; final confirmation takes a fresh lease while its listing claim remains.
         let mut refused = false;
         // The fence budget starts at the store's answer. Once spent, settlement continues
         // in the background; no second attempt is made against an expired deadline.
@@ -847,7 +844,7 @@ where
                 // listing's, the container's (shared) and this change's place among those being
                 // settled, with the record out of force until then. Listing locks, or claims
                 // after a principal wait, exclude conditional tag checks until its outcome
-                // is known. Released listing locks are reacquired before memory is updated.
+                // is published in memory. Claims replace released guards through that publication.
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 let (iri, container) = (iri.clone(), container.clone());
@@ -857,7 +854,13 @@ where
                     }
                     let listed = until_done(|| still_listed(&store, &iri, &container)).await;
                     place.settled();
-                    let reheld = held_locks.relock(&locks).await;
+                    let _listing = if !listed {
+                        held_locks
+                            .container_for_confirmation(&locks, &container)
+                            .await
+                    } else {
+                        None
+                    };
                     let Some(state) = weak.upgrade() else {
                         return;
                     };
@@ -865,7 +868,7 @@ where
                         .store
                         .publish(async { settle(&state, !listed, held) })
                         .await;
-                    drop((own, held_locks, reheld));
+                    drop((own, held_locks));
                     if !listed {
                         announce_record(
                             &state,
@@ -887,14 +890,22 @@ where
                 ));
             }
         };
-        // Confirmation may wait on a listing lock, but its outcome is already known.
+        // The claim replaces its listing guard through memory confirmation. Only a subscriber
+        // record leaving the whole listing needs the container publication guard; putting a
+        // failed removal back in force changes no listing.
         place.settled();
-        let reheld = held_locks.relock(&state.locks).await;
+        let _listing = if gone == Some(true) {
+            held_locks
+                .container_for_confirmation(&state.locks, &container)
+                .await
+        } else {
+            None
+        };
         let author = state
             .store
             .publish(async { settle(&state, gone == Some(true), held) })
             .await;
-        drop((own, held_locks, reheld));
+        drop((own, held_locks));
         match gone {
             Some(true) => {
                 announce_record(
@@ -991,8 +1002,6 @@ pub(crate) struct Settlements {
     listings: ListingCounts,
     #[cfg(test)]
     waits: Arc<std::sync::atomic::AtomicUsize>,
-    #[cfg(all(test, feature = "sparql-endpoint"))]
-    relocks: Arc<std::sync::atomic::AtomicUsize>,
     /// The places reserved for the expiry sweeper's removals ([`Remover::Sweeper`]).
     maintenance: Arc<tokio::sync::Semaphore>,
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
@@ -1080,8 +1089,6 @@ impl Settlements {
             listings: Default::default(),
             #[cfg(test)]
             waits: Default::default(),
-            #[cfg(all(test, feature = "sparql-endpoint"))]
-            relocks: Default::default(),
             maintenance: Arc::new(tokio::sync::Semaphore::new(MAINTENANCE_PLACES)),
             tasks: Default::default(),
         }
@@ -1097,7 +1104,7 @@ impl Settlements {
         let names = match listed {
             Listed::Nowhere => Vec::new(),
             Listed::InContainer => vec![container.to_string()],
-            Listed::AlsoIn(own) => vec![own.to_string(), container.to_string()],
+            Listed::AlsoIn(own) => vec![own.to_string()],
         };
         SettlementLocks {
             listings: Some(listings),
@@ -1107,14 +1114,7 @@ impl Settlements {
             claim: None,
             #[cfg(test)]
             waits: self.waits.clone(),
-            #[cfg(all(test, feature = "sparql-endpoint"))]
-            relocks: self.relocks.clone(),
         }
-    }
-
-    #[cfg(all(test, feature = "sparql-endpoint"))]
-    pub(crate) fn listing_relocks(&self) -> usize {
-        self.relocks.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn listing_claimed(&self, name: &str) -> bool {
@@ -1251,7 +1251,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn confirmed_removals_waiting_for_listing_locks_release_principal_places() {
+    async fn confirmed_removals_do_not_reacquire_claimed_listing_locks() {
         use super::super::test_store::{self, call};
         let (state, store) = test_store::closed_state(100).await;
         let container = state.cfg.absolute(super::super::REQUESTS_PATH);
@@ -1306,8 +1306,8 @@ mod tests {
         .unwrap();
         let listing = state.locks.try_lock(&container).expect("released listing");
         drop(places.pop());
-        // The fence can now finish, but updating memory must wait on this listing guard.
-        // A different container still accepts an HTTP create by the same principal.
+        // The claim excludes conditional comparisons through confirmation. Holding the old
+        // physical guard must not make a confirmed removal wait for that guard again.
         let place = tokio::time::timeout(LOCK_WAIT, async {
             loop {
                 if store.fences_tried.load(Ordering::SeqCst) != 0 {
@@ -1321,7 +1321,11 @@ mod tests {
         .await
         .expect("a known removal retained its principal permit during the listing wait");
         drop(place);
-        assert!(!removing.is_finished());
+        assert!(tokio::time::timeout(LOCK_WAIT, removing)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
         assert_eq!(
             state.settlements.pending(),
             0,
@@ -1343,7 +1347,6 @@ mod tests {
             StatusCode::CREATED
         );
         drop(listing);
-        assert!(removing.await.unwrap().is_err());
     }
 
     #[tokio::test]

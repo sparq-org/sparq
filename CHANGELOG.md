@@ -853,12 +853,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quarantined subscriptions count only against the owner's total. Record settlements reserve
   places per principal only for unknown outcomes in closed mode, while the shared bound
   covers each whole change. Principal permit waits release the high-water gate and listing
-  locks; pending-listing claims preserve conditional tag checks until outcomes are known.
+  locks; pending-listing claims preserve conditional tag checks through memory confirmation.
+  Subscriptions claim only their subscriber's listing, leaving whole-listing owner creates
+  available. Claims replace released listing guards; only the subscriber record's container
+  publication guard remains, preserving whole-listing conditional-create windows.
   Notification selection retains request admission through webhook queueing, and delayed
   record announcements retain a shared or maintenance place through that work. Those places
   are released before stream publication waits. Pending stream publications have a separate
-  storage-wide delivery bound. Known removal outcomes release their principal permit before
-  waiting to reacquire listing locks.
+  storage-wide delivery bound. Known outcomes release their principal permit before memory
+  confirmation.
   Principal bookkeeping ends with the last change; withdrawal eligibility uses the state
   captured at commit.
 
