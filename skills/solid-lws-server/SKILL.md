@@ -1112,6 +1112,10 @@ What the server exposes, all discoverable from the storage description
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
 `floor.json`) and run in `.github/workflows/lws-conformance.yml`.
+Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to test
+an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
+See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
+for the storage dependencies, byte/ETag checks and unchanged suite ratchets.
 
 ## Follow the normative specs, not this server
 

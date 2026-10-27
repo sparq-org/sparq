@@ -41,9 +41,23 @@ jobs:
   touchstone:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    name: lws touchstone
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: memory
+            name: lws touchstone
+            timeout: 45
+          - backend: durable
+            name: lws touchstone durable
+            # Initial, post-SIGTERM and post-SIGKILL full suites.
+            timeout: 135
+    env:
+      PSS_SPARQ_BACKEND: ${{ matrix.backend }}
+      OUT: ${{ github.workspace }}/target/lws-touchstone-${{ matrix.backend }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -63,6 +77,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: check the floor checker
         run: python3 -B crates/sparq-lws-core/conformance/lws/check-floor.py --self-test
+      - name: check restart and resource verification
+        run: python3 -B crates/sparq-lws-core/conformance/test-durable.py
       - name: build touchstone
         working-directory: touchstone
         run: ./mvnw -q -B -ntp -pl harness-cli -am -Dmaven.test.skip=true package
@@ -72,16 +88,17 @@ jobs:
       - name: run touchstone
         env:
           TOUCHSTONE: ${{ github.workspace }}/touchstone
-        run: crates/sparq-lws-core/conformance/lws/touchstone.sh all || true
+        run: crates/sparq-lws-core/conformance/lws/touchstone.sh all
       - name: check the floor
-        run: python3 crates/sparq-lws-core/conformance/lws/check-floor.py target/lws-touchstone/runs
+        run: python3 crates/sparq-lws-core/conformance/lws/check-floor.py "$OUT/runs"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: lws-touchstone-report
+          name: lws-touchstone-report-${{ matrix.backend }}
           path: |
-            target/lws-touchstone/runs
-            target/lws-touchstone/server.log
+            target/lws-touchstone-${{ matrix.backend }}/runs
+            target/lws-touchstone-${{ matrix.backend }}/post-*/runs
+            target/lws-touchstone-${{ matrix.backend }}/server*.log
           retention-days: 14
 
   lws-net:
