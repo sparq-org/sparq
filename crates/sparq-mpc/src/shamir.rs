@@ -164,6 +164,7 @@ pub struct ShamirBackend {
 
 impl ShamirBackend {
     /// Build a **production** honest-majority backend for `n` parties (`n >= 2`).
+    /// Refuses `n > crate::robust::MAX_ROBUST_SHARES` with [`MpcError::Protocol`].
     /// The privacy threshold is the honest-majority maximum `t = ⌊(n-1)/2⌋`: any
     /// `<= t` colluding parties learn nothing; reconstruction needs `>= t+1`.
     ///
@@ -181,6 +182,7 @@ impl ShamirBackend {
     /// `#[cfg(any(test, feature = "insecure-test-rng"))]` so the real protocol
     /// cannot construct it. The masks it produces are predictable; never use it
     /// for a real deployment (that is the sq-1vt weakness).
+    /// The party-count bounds are the same as [`Self::new`].
     #[cfg(any(test, feature = "insecure-test-rng"))]
     pub fn new_seeded(n: usize, seed: u64) -> Result<Self, MpcError> {
         Self::with_source(n, RngSource::InsecureSeed(seed))
@@ -192,8 +194,19 @@ impl ShamirBackend {
                 "Shamir honest-majority backend needs n >= 2 parties".into(),
             ));
         }
+        Self::check_share_count(n)?;
         let t = (n - 1) / 2;
         Ok(ShamirBackend { n, t, rng_source })
+    }
+
+    fn check_share_count(n: usize) -> Result<(), MpcError> {
+        let cap = crate::robust::MAX_ROBUST_SHARES;
+        if n > cap {
+            return Err(MpcError::Protocol(format!(
+                "Shamir backend: share count {n} exceeds MAX_ROBUST_SHARES={cap}"
+            )));
+        }
+        Ok(())
     }
 
     /// **Test-only escape hatch** that builds a backend with an EXPLICIT threshold
@@ -201,15 +214,17 @@ impl ShamirBackend {
     /// configurations (`n < 2t+1`, which the public constructors can never build)
     /// can be handed to the fail-closed precondition checks (e.g. the secure
     /// comparison's `n >= 2t+1` guard, sq-rrz4). It uses the seedable insecure RNG.
+    /// The reconstruction share cap is still enforced.
     /// NEVER a production path — it deliberately violates the security invariant the
     /// real constructors enforce. `[OPUS-4.8]`
     #[cfg(test)]
-    pub(crate) fn with_unchecked_threshold(n: usize, t: usize) -> Self {
-        ShamirBackend {
+    pub(crate) fn with_unchecked_threshold(n: usize, t: usize) -> Result<Self, MpcError> {
+        Self::check_share_count(n)?;
+        Ok(ShamirBackend {
             n,
             t,
             rng_source: RngSource::InsecureSeed(0xDEAD_BEEF),
-        }
+        })
     }
 
     /// Number of compute parties.
@@ -2135,7 +2150,59 @@ mod tests {
 
     #[test]
     fn n_too_small_is_a_protocol_error() {
-        assert!(matches!(ShamirBackend::new(1), Err(MpcError::Protocol(_))));
+        for n in [0, 1] {
+            for backend in [ShamirBackend::new(n), ShamirBackend::new_seeded(n, 7)] {
+                assert_eq!(
+                    backend.unwrap_err(),
+                    MpcError::Protocol(
+                        "Shamir honest-majority backend needs n >= 2 parties".into()
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn constructors_at_robust_share_cap_roundtrip() {
+        for backend in [
+            ShamirBackend::new(1024),
+            ShamirBackend::new_seeded(1024, 7),
+            ShamirBackend::with_unchecked_threshold(1024, 511),
+        ] {
+            let backend = backend.unwrap();
+            assert_eq!(backend.parties(), 1024);
+            assert_eq!(backend.threshold(), 511);
+            let secret = Fp::new(42);
+            let shares = backend.dealer().share(secret);
+            assert_eq!(shares.len(), 1024);
+            assert_eq!(backend.reconstruct(&shares).unwrap(), secret);
+            assert_eq!(backend.reconstruct(&shares[..512]).unwrap(), secret);
+        }
+    }
+
+    #[test]
+    fn constructors_above_robust_share_cap_are_protocol_errors() {
+        for n in [1025, usize::MAX] {
+            for backend in [
+                ShamirBackend::new(n),
+                ShamirBackend::new_seeded(n, 7),
+                ShamirBackend::with_unchecked_threshold(n, 0),
+            ] {
+                let err = backend.unwrap_err();
+                assert_eq!(
+                    err,
+                    MpcError::Protocol(format!(
+                        "Shamir backend: share count {n} exceeds MAX_ROBUST_SHARES=1024"
+                    ))
+                );
+                assert_eq!(
+                    err.to_string(),
+                    format!(
+                        "MPC protocol precondition violated: Shamir backend: share count {n} exceeds MAX_ROBUST_SHARES=1024"
+                    )
+                );
+            }
+        }
     }
 
     // ---- BGW degree-reduction round (sq-dvuc) [OPUS-4.8] ------------------
@@ -2625,7 +2692,7 @@ mod tests {
         // offsets from 2t+1 so each arithmetic variant (2*t → 2/t, 2+t; 2*t+1 →
         // 2*t-1, 2*t*1) diverges on at least one config.
         for &(n, t) in &[(3usize, 2usize), (4, 2), (5, 3), (6, 3)] {
-            let b = ShamirBackend::with_unchecked_threshold(n, t); // n < 2t+1
+            let b = ShamirBackend::with_unchecked_threshold(n, t).unwrap(); // n < 2t+1
             let mut dealer = b.dealer();
             let shares = dealer.share(Fp::new(42)); // the full n-party sharing
             assert_eq!(shares.len(), n);
@@ -2677,7 +2744,7 @@ mod tests {
         // exercises it. Pinned at the boundary n == t+1, where the guard's `t+1`
         // arithmetic is load-bearing: a `t+1`->`t` (or `t-1`) mutation moves n out
         // of the no-redundancy arm and mis-reports HonestMajorityAbort instead.
-        let b = ShamirBackend::with_unchecked_threshold(3, 2); // n = 3 = t+1
+        let b = ShamirBackend::with_unchecked_threshold(3, 2).unwrap(); // n = 3 = t+1
         assert_eq!(
             b.malicious_security(),
             MaliciousSecurity::SemiHonestOnly,
@@ -2685,7 +2752,7 @@ mod tests {
         );
         // One share more (n = t+2) DOES carry redundancy → detect-and-abort, so the
         // arm boundary is genuinely at t+1, not below it.
-        let b2 = ShamirBackend::with_unchecked_threshold(4, 2); // n = 4 = t+2
+        let b2 = ShamirBackend::with_unchecked_threshold(4, 2).unwrap(); // n = 4 = t+2
         assert_eq!(
             b2.malicious_security(),
             MaliciousSecurity::HonestMajorityAbort,
