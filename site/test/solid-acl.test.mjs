@@ -65,6 +65,50 @@ test("SELECT comparison operators do not swallow the outer WHERE", () => {
   assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
 });
 
+for (const [name, prefix] of [
+  ["compact IF comparison", "SELECT (IF(?a<(1),1,2)>0 AS ?x) "],
+  ["compact comparison with an EXISTS subselect", "SELECT ((?a<(((1)>2)))&&EXISTS{SELECT*WHERE{?s?p?o}} AS ?x) "],
+]) {
+  test(`${name} retains the outer WHERE`, () => {
+    const group = "WHERE {?s ?p ?o}";
+    assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+  });
+}
+
+test("comparison positions follow other values and ignore intervening comments", () => {
+  for (const prefix of [
+    "SELECT (IF(1<(2),1,2)>0 AS ?x) ",
+    "SELECT (IF((?a)<(1),1,2)>0 AS ?x) ",
+    'SELECT (IF("a"<(1),1,2)>0 AS ?x) ',
+    'SELECT (IF("a"@en<(1),1,2)>0 AS ?x) ',
+    "SELECT (IF(true<(1),1,2)>0 AS ?x) ",
+    "SELECT (IF(ex:a<(1),1,2)>0 AS ?x) ",
+    "SELECT (IF(<urn:a><(1),1,2)>0 AS ?x) ",
+    "SELECT (IF(?a # comparison follows\n <(1),1,2)>0 AS ?x) ",
+  ]) {
+    const group = "WHERE {?s ?p ?o}";
+    assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+  }
+});
+
+test("legal IRI punctuation stays opaque outside a comparison position", () => {
+  for (const prefix of [
+    "BASE <urn:WHERE(,> SELECT ?s ",
+    "PREFIX ex: <urn:WHERE),> SELECT ?s ",
+    "SELECT (<urn:WHERE(,> AS ?iri) ",
+    "SELECT ?s FROM NAMED <urn:WHERE(,> ",
+    "SELECT ?s FROM <urn:default> FROM NAMED <urn:existing> ",
+    "SELECT (EXISTS { ?s ?p <urn:WHERE(,> } AS ?x) ",
+    "SELECT (EXISTS { SELECT (IF(?a<(1),1,2)>0 AS ?x) WHERE {?s ?p ?o} } AS ?x) ",
+    "SELECT (EXISTS { FILTER IF(?a<(1),true,2>0) } AS ?x) ",
+    "SELECT (EXISTS { FILTER <urn:f>(?a<(1),true,2>0) } AS ?x) ",
+    "CONSTRUCT { ?s ?p (?o <urn:WHERE(,>) } ",
+  ]) {
+    const group = "WHERE {?s ?p ?o}";
+    assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+  }
+});
+
 test("escaped and long projection strings do not contribute pattern boundaries", () => {
   for (const literal of [
     String.raw`'WHERE \' {'`,
@@ -77,6 +121,17 @@ test("escaped and long projection strings do not contribute pattern boundaries",
     assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
   }
 });
+
+for (const [name, literal] of [
+  ["double-quoted", '"""a"b WHERE {"""'],
+  ["single-quoted", "'''a'b WHERE {'''"],
+]) {
+  test(`long ${name} strings retain isolated matching quotes before WHERE text`, () => {
+    const prefix = `SELECT (${literal} AS ?x) `;
+    const group = "WHERE {?s ?p ?o}";
+    assert.equal(rewriteForGraphs(prefix + group, [graph]), `${prefix}FROM NAMED <${graph}>\n${group}`);
+  });
+}
 
 test("Unicode name characters are not SPARQL token separators", () => {
   for (const name of ["ex:\u1680WHERE", "ex:\uFEFFWHERE", "ex:graph\uFEFF"]) {

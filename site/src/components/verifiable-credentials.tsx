@@ -63,6 +63,7 @@ import {
   VC_FORMAT_OPTIONS,
   vcFormatFromName,
   looksLikeJwtVc,
+  type SampleCredential,
   type VcFormat,
 } from "@/data/verifiable-credentials";
 
@@ -129,18 +130,22 @@ function nextKey(): string {
   return `vc-${Date.now()}-${importCounter}`;
 }
 
+function sampleCredential(sample: SampleCredential): ImportedCredential {
+  return {
+    key: `sample-${sample.id}`,
+    label: sample.label,
+    source: sample.source,
+    format: sample.format,
+    origin: "sample",
+    triples: 0,
+    issuer: null,
+    subject: null,
+  };
+}
+
 export function VerifiableCredentials() {
   const [creds, setCreds] = React.useState<ImportedCredential[]>(() =>
-    SAMPLE_CREDENTIALS.map((sample) => ({
-      key: `sample-${sample.id}`,
-      label: sample.label,
-      source: sample.source,
-      format: sample.format,
-      origin: "sample",
-      triples: 0,
-      issuer: null,
-      subject: null,
-    })),
+    SAMPLE_CREDENTIALS.map(sampleCredential),
   );
   const [query, setQuery] = React.useState<string>(SAMPLE_QUERIES[0].sparql);
   const [state, setState] = React.useState<QueryState>({ kind: "idle" });
@@ -174,19 +179,25 @@ export function VerifiableCredentials() {
   // surviving sample keys preserves imports and removals made while loading.
   React.useEffect(() => {
     let cancelled = false;
-    void Promise.all(SAMPLE_CREDENTIALS.map(async (sample) => ({
+    const seeds = SAMPLE_CREDENTIALS.map(sampleCredential);
+    void Promise.allSettled(seeds.map(async (sample) => ({
       ...await describe(sample.label, sample.source, sample.format, "sample"),
-      key: `sample-${sample.id}`,
-    }))).then((samples) => {
+      key: sample.key,
+    }))).then((results) => {
       if (cancelled) return;
-      setCreds((prev) => prev.map((cred) =>
-        samples.find((sample) => sample.key === cred.key) ?? cred,
-      ));
-    }).catch((e) => {
-      if (cancelled) return;
-      toast.error("Could not load sample credentials", {
-        description: e instanceof Error ? e.message : String(e),
-      });
+      const samples = new Map(seeds.map((sample, index) => [sample.key, results[index]]));
+      // A failed sample (including an engine-load failure) must leave no placeholder.
+      setCreds((prev) => prev.flatMap((cred) => {
+        const sample = samples.get(cred.key);
+        if (!sample) return [cred];
+        return [sample.status === "fulfilled" ? sample.value : cred];
+      }));
+      const failure = results.find((sample) => sample.status === "rejected");
+      if (failure?.status === "rejected") {
+        toast.error("Could not load sample credentials", {
+          description: failure.reason instanceof Error ? failure.reason.message : String(failure.reason),
+        });
+      }
     });
     return () => { cancelled = true; };
   }, [describe]);
