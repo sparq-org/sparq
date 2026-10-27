@@ -621,12 +621,14 @@ impl<S: Store> LdpState<S> {
     /// target (reading an `.acl`'s representation is itself a Control operation; `Control` does NOT imply
     /// `Read`, so the read-mode for an `.acl` is Control, not Read — else a Control-only holder, who IS
     /// entitled to the `.acl`'s ETag, would be wrongly denied a conditional `.acl` write). When the
-    /// request carries ANY conditional precondition AND the (already-authorized) requester's granted
+    /// request carries a conditional precondition other than a bare `*` AND the (already-authorized) requester's granted
     /// modes do NOT include that read-mode, return the requester's DENIAL code (401 anonymous / 403
     /// authenticated) INSTEAD of evaluating the precondition — so the conditional outcome reveals
     /// nothing. A requester WITHOUT a conditional header is unaffected (no validator is consulted on
     /// their path), and a requester who holds the read-mode keeps full conditional semantics. `granted`
     /// is the mode set the write authorization already returned (no extra ACL resolution).
+    /// Bare `*` is exempt: unconditional LDP PUT and DELETE already disclose existence, and
+    /// `If-None-Match: *` preserves a writer's ability to create without overwriting.
     fn guard_conditional_requires_read(
         &self,
         target_iri: &str,
@@ -634,22 +636,17 @@ impl<S: Store> LdpState<S> {
         granted: &std::collections::BTreeSet<AccessMode>,
         token: &VerifiedToken,
     ) -> Result<(), ServerError> {
-        // Only a CONCRETE entity-tag validator gates on Read. A bare `*` (`If-None-Match: *` safe-create
-        // / `If-Match: *` lost-update guard) carries NO content-derived ETag fingerprint — it tests only
-        // EXISTENCE, which a holder of the operation's required mode is already entitled to per this
-        // module's own invariant (and already learns from the unconditional 201-vs-204 write split). So a
-        // bare `*` is EXEMPT from this Read-gate: a `Write`-without-`Read` holder keeps the spec-
-        // recommended conditional safe-create / lost-update guards with ZERO non-disclosure loss. A
-        // QUOTED validator still leaks a content/membership ETag (and the response then carries the
-        // target's real ETag), so it still requires the read-mode. (This closed the V4-over-broad
-        // finding: bare `*` was previously 403'd for a Write-without-Read holder, breaking the standard
-        // Inrupt `PUT … If-None-Match: *` create pattern for no non-disclosure gain.)
-        // An `If-Unmodified-Since` the write will actually evaluate (no `If-Match`, a valid date, a
-        // plain-resource target) probes the target's modification time, which is just as much
-        // read-side state, so it is gated the same way. A container target is exempt because the
-        // write ignores the header there (`write_precondition_time`), so its outcome reveals nothing.
-        let has_etag_conditional = Self::conditional_carries_etag(headers, header::IF_MATCH)
-            || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH)
+        let names_tag = |name| {
+            headers.contains_key(&name)
+                && !crate::entity_tag::field(headers, name).is_some_and(|value| {
+                    matches!(
+                        crate::entity_tag::TagList::parse(&value),
+                        Ok(crate::entity_tag::TagList::Any)
+                    )
+                })
+        };
+        let has_etag_conditional = names_tag(header::IF_MATCH)
+            || names_tag(header::IF_NONE_MATCH)
             || (!target_iri.ends_with('/')
                 && conditional::unmodified_since_applies(
                     crate::entity_tag::field(headers, header::IF_MATCH).as_deref(),
@@ -731,16 +728,6 @@ impl<S: Store> LdpState<S> {
             });
         }
         Ok(())
-    }
-
-    /// Whether the conditional precondition header `name` carries a CONCRETE entity-tag validator (a
-    /// quoted ETag, or a list of them) rather than the bare `*` wildcard. An ABSENT header carries
-    /// none; a bare `*` is existence-only (not content-derived) so it is NOT ETag-bearing; anything
-    /// else — including a present-but-non-ASCII value that cannot be decoded — is treated as ETag-
-    /// bearing (fail-closed), keeping it subject to the V4 Read-gate. Used only by
-    /// [`guard_conditional_requires_read`](Self::guard_conditional_requires_read).
-    fn conditional_carries_etag(headers: &HeaderMap, name: HeaderName) -> bool {
-        crate::entity_tag::field(headers, name).is_some_and(|v| !crate::entity_tag::is_wildcard(&v))
     }
 
     /// The nearest EXISTING container at or above `target` (its parent, then grandparent, … up to the
@@ -1344,6 +1331,8 @@ pub async fn post_handler<S: Store>(
     // entitled to the target's state — gets the true 404 / the surfaced backend error. An EXISTING
     // container falls through to the 201 create below (an Append-only writer legitimately creates
     // members), so ONLY the non-create outcomes are gated — never the success path.
+    // Residual: CTH write-access-bob.feature "Bob can POST container no A" and Touchstone
+    // core/data_resources#create-in-missing-container-404 retain present success versus denial.
     match state.store.exists(&container.iri).await {
         // The container exists → fall through to the 201 create path below.
         Ok(true) => {}
@@ -1514,6 +1503,8 @@ pub async fn delete_handler<S: Store>(
     // outcome. Folded BEFORE the existence probe.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
+    // Residual: CTH write-access-bob.feature "Bob cannot DELETE fictive W inherited [403]"
+    // and "Bob can DELETE plain W inherited" retain absent denial versus present success.
     // Whether a container may go depends on what it holds (a non-empty one is a 409), so deleting
     // one also needs Read on it: without, the requester gets the denial, whatever it holds.
     if target.is_container && !may_read(&target.iri, &granted) {
@@ -2371,6 +2362,9 @@ fn may_read(target_iri: &str, granted: &std::collections::BTreeSet<AccessMode>) 
 
 /// The shared 201/204 + ETag (+ Location on create) response for PUT / PATCH writes.
 ///
+/// Residual: RFC 9110 section 9.3.4 and CTH write-access-bob.feature,
+/// "Bob can PUT fictive W inherited [201]", retain creation's distinct status and Location.
+///
 /// A container's validators are [`container_state_etag`]s, so a newly created (hence empty)
 /// container gets the empty-listing state tag. A replaced container gets no `ETag`: its current tag
 /// depends on a listing the writer may not be allowed to read, and its stored tag is not a
@@ -3092,10 +3086,17 @@ mod tests {
     /// handler ever (wrongly) treated the failed read as "missing" it would happily take the
     /// create/authorize path. The PATCH handler must instead PROPAGATE the `Storage` error (→ 500),
     /// never authorize.
-    struct FaultyReadStore;
+    #[derive(Default)]
+    struct FaultyReadStore {
+        lifecycle: std::sync::Arc<crate::store::Lifecycle>,
+    }
 
     #[async_trait]
     impl Store for FaultyReadStore {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            self.lifecycle.clone()
+        }
+
         async fn read(&self, _iri: &str) -> ServerResult<Resource> {
             // NON-`NotFound`: a real storage/blob inconsistency, not an absent resource.
             Err(ServerError::Storage(
@@ -3163,7 +3164,10 @@ mod tests {
         // unauthorized-caller-must-not-get-500 property is pinned by
         // `patch_unauthorized_caller_with_faulting_target_read_gets_uniform_denial_not_500`, where only
         // the TARGET read faults so authorization can reach a real decision.)
-        let state = Arc::new(LdpState::new(FaultyReadStore, "https://pod.example"));
+        let state = Arc::new(LdpState::new(
+            FaultyReadStore::default(),
+            "https://pod.example",
+        ));
         let token = VerifiedToken {
             web_id: Some("https://pod.example/alice/profile/card#me".into()),
             ..VerifiedToken::default()
@@ -3199,6 +3203,7 @@ mod tests {
     ///  - the target's `.acl` → an owner-only ACL granting [`OWNER`] Read/Write/Control (so authz runs);
     ///  - anything else (e.g. an ancestor `.acl`) → `NotFound` (no other ACL up the tree).
     struct TargetFaultyAclStore {
+        lifecycle: std::sync::Arc<crate::store::Lifecycle>,
         target: String,
     }
 
@@ -3206,6 +3211,7 @@ mod tests {
         fn new(target: &str) -> Self {
             Self {
                 target: target.to_string(),
+                lifecycle: Default::default(),
             }
         }
         fn acl_body(&self) -> String {
@@ -3222,6 +3228,10 @@ mod tests {
 
     #[async_trait]
     impl Store for TargetFaultyAclStore {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            self.lifecycle.clone()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             if iri == self.target {
                 // The inconsistency on the resource itself — a NON-NotFound error.
@@ -4556,7 +4566,10 @@ mod tests {
     /// container passes authorization (both hold Append via inherited default), THEN the existence probe
     /// faults: a no-Read Bob MUST be folded to 403 (never the 500), while the Read-holding owner gets the
     /// 500 surfaced post-auth (entitled to the target's state).
-    struct PostExistsFaultyStore;
+    #[derive(Default)]
+    struct PostExistsFaultyStore {
+        lifecycle: std::sync::Arc<crate::store::Lifecycle>,
+    }
 
     impl PostExistsFaultyStore {
         fn container_acl() -> String {
@@ -4578,6 +4591,10 @@ mod tests {
 
     #[async_trait]
     impl Store for PostExistsFaultyStore {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            self.lifecycle.clone()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             if iri == "https://pod.example/alice/c/.acl" {
                 return Ok(Resource {
@@ -4642,7 +4659,10 @@ mod tests {
         // container whose existence probe FAULTS must get the uniform denial (403), NOT a 500 — else the
         // backend fault is an existence/state oracle (an existing-but-forbidden sibling denies at
         // authorization with NO target probe, so it can never 500). The store PANICS if a write is reached.
-        let state = Arc::new(LdpState::new(PostExistsFaultyStore, "https://pod.example"));
+        let state = Arc::new(LdpState::new(
+            PostExistsFaultyStore::default(),
+            "https://pod.example",
+        ));
         let uri: axum::http::Uri = "/alice/c/ghost/".parse().unwrap();
         let err = post_handler(
             State(state),
@@ -4666,7 +4686,10 @@ mod tests {
         // the OWNER (Alice, inheritable Read) is ENTITLED to the target's state, so a faulting existence
         // probe surfaces the real 500 AFTER authorization — it is NOT folded. The store PANICS on write,
         // proving the error surfaced before any create.
-        let state = Arc::new(LdpState::new(PostExistsFaultyStore, "https://pod.example"));
+        let state = Arc::new(LdpState::new(
+            PostExistsFaultyStore::default(),
+            "https://pod.example",
+        ));
         let alice = VerifiedToken {
             web_id: Some(OWNER.into()),
             ..VerifiedToken::default()
@@ -4896,6 +4919,7 @@ mod tests {
     // Public read = a `foaf:Agent acl:Read` ACL served for the resource's `.acl`, so an anonymous GET
     // is authorized and reaches the precondition check.
     struct FixedTimeStore {
+        lifecycle: std::sync::Arc<crate::store::Lifecycle>,
         /// The modification time the index surfaces for the one served resource (`None` ⇒ untracked).
         last_modified: Option<std::time::SystemTime>,
     }
@@ -4936,6 +4960,10 @@ mod tests {
 
     #[async_trait]
     impl Store for FixedTimeStore {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            self.lifecycle.clone()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             if iri == FT_TARGET {
                 let body = AxBytes::from(
@@ -5004,7 +5032,10 @@ mod tests {
     /// Drive an anonymous GET of the fixed-time resource with one `If-Modified-Since` value.
     async fn get_fixed(last_modified: Option<std::time::SystemTime>, ims: &str) -> StatusCode {
         let state = Arc::new(LdpState::new(
-            FixedTimeStore { last_modified },
+            FixedTimeStore {
+                last_modified,
+                lifecycle: Default::default(),
+            },
             "https://pod.example",
         ));
         let mut headers = HeaderMap::new();
@@ -5070,6 +5101,7 @@ mod tests {
         // 200 GET carries Last-Modified.
         let state = Arc::new(LdpState::new(
             FixedTimeStore {
+                lifecycle: Default::default(),
                 last_modified: fixed,
             },
             "https://pod.example",
@@ -5121,6 +5153,7 @@ mod tests {
         // A None-time resource carries NO Last-Modified.
         let state_none = Arc::new(LdpState::new(
             FixedTimeStore {
+                lifecycle: Default::default(),
                 last_modified: None,
             },
             "https://pod.example",
@@ -7625,10 +7658,7 @@ mod tests {
     }
 
     // =====================================================================================
-    // V4 `*`-FORM CONDITIONAL EXEMPTION (PR #3 review finding [MEDIUM]) — a bare `If-None-Match: *` /
-    // `If-Match: *` carries no content-derived ETag (existence-only), so a Write-without-Read holder
-    // keeps the spec-recommended safe-create / lost-update guards. Only a QUOTED validator gates on Read.
-    // =====================================================================================
+    // LDP bare-star preconditions are exempt from the Read gate on named entity tags.
 
     /// `/alice/c/` + an existing member `/alice/c/existing`; the container `.acl` grants BOB `acl:default
     /// acl:Write` (inheritable member Write, NO Read) PLUS `acl:accessTo acl:Append` on the container
@@ -7671,61 +7701,47 @@ mod tests {
         Arc::new(LdpState::new(store, "https://pod.example"))
     }
 
+    /// LDP preserves existence-only preconditions for writers without Read.
     #[tokio::test]
-    async fn v4_star_if_none_match_safe_create_allowed_for_write_without_read() {
-        // A Write-without-Read Bob doing the standard `PUT … If-None-Match: *` safe-create of a FREE name
-        // must SUCCEED (201) — bare `*` reveals only existence (which the write's 201-vs-204 split already
-        // reveals to an authorized writer), so it is exempt from the V4 Read-gate. Pre-fix this was 403.
+    async fn ldp_bare_star_preconditions_work_without_read() {
         let state = store_bob_default_write_no_read_container().await;
-        let mut headers = turtle_headers();
-        headers.insert(header::IF_NONE_MATCH, HeaderValue::from_static("*"));
-        let got = observe(
-            put_handler(
-                State(state),
+        for (path, expected) in [("/alice/c/existing", 412), ("/alice/c/fresh", 201)] {
+            let mut headers = turtle_headers();
+            headers.insert(header::IF_NONE_MATCH, HeaderValue::from_static("*"));
+            let response = put_handler(
+                State(state.clone()),
                 Extension(bob()),
-                "/alice/c/fresh".parse().unwrap(),
+                path.parse().unwrap(),
                 headers,
                 request_body_bytes(),
             )
-            .await,
-        )
-        .await;
-        assert_eq!(
-            got.status, 201,
-            "a Write-without-Read `If-None-Match: *` safe-create must be allowed (bare * is exempt): {got:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn v4_star_if_match_lost_update_allowed_for_write_without_read() {
-        // The `If-Match: *` lost-update guard (overwrite only if it EXISTS) is likewise existence-only —
-        // a Write-without-Read Bob overwriting the existing member with `If-Match: *` must reach the write
-        // (204), not a V4 denial.
-        let state = store_bob_default_write_no_read_container().await;
+            .await;
+            assert_eq!(observe(response).await.status, expected, "{path}");
+        }
         let mut headers = turtle_headers();
         headers.insert(header::IF_MATCH, HeaderValue::from_static("*"));
-        let got = observe(
-            put_handler(
-                State(state),
-                Extension(bob()),
-                "/alice/c/existing".parse().unwrap(),
-                headers,
-                request_body_bytes(),
-            )
-            .await,
+        let response = put_handler(
+            State(state.clone()),
+            Extension(bob()),
+            "/alice/c/existing".parse().unwrap(),
+            headers.clone(),
+            request_body_bytes(),
         )
         .await;
-        assert_eq!(
-            got.status, 204,
-            "a Write-without-Read `If-Match: *` overwrite must be allowed (bare * is exempt): {got:?}"
-        );
+        assert_eq!(observe(response).await.status, 204);
+        let response = delete_handler(
+            State(state.clone()),
+            Extension(bob()),
+            "/alice/c/existing".parse().unwrap(),
+            headers,
+        )
+        .await;
+        assert_eq!(observe(response).await.status, 204);
     }
 
     #[tokio::test]
     async fn v4_concrete_if_none_match_still_denied_for_write_without_read() {
-        // The exemption is ONLY for bare `*`: a QUOTED validator DOES fingerprint content, so a
-        // Write-without-Read `If-None-Match: "etag"` still folds to the denial (403). This pins that
-        // finding-3's fix did not open the concrete-validator channel V4 exists to close.
+        // Named tags also require Read.
         let state = store_bob_default_write_no_read_container().await;
         let mut headers = turtle_headers();
         headers.insert(header::IF_NONE_MATCH, HeaderValue::from_static("\"abc\""));
@@ -7900,5 +7916,73 @@ mod tests {
             .await
             .unwrap());
         assert_eq!(state.store.raise_marker(marker, 7).await.unwrap(), 7);
+    }
+    /// RFC 9110 section 9.3.4 and CTH web-access-control/protected-operation/
+    /// write-access-bob.feature "Bob can PUT fictive W inherited [201]" pin this split.
+    #[tokio::test]
+    async fn residual_ldp_put_creation_status_and_location() {
+        let state = store_bob_default_write_no_read_container().await;
+        for (path, expected) in [
+            ("/alice/c/fresh", StatusCode::CREATED),
+            ("/alice/c/existing", StatusCode::NO_CONTENT),
+        ] {
+            let response = put_handler(
+                State(state.clone()),
+                Extension(bob()),
+                path.parse().unwrap(),
+                turtle_headers(),
+                request_body_bytes(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), expected);
+            if expected == StatusCode::CREATED {
+                assert!(response.headers().contains_key(header::LOCATION));
+            }
+        }
+    }
+
+    /// CTH write-access-bob.feature "Bob can POST container no A" pins successful POST;
+    /// Touchstone core/data_resources#create-in-missing-container-404 pins the owner's 404.
+    #[tokio::test]
+    async fn residual_ldp_post_into_an_unreadable_container() {
+        let state = store_bob_default_write_no_read_container().await;
+        for (path, token, expected) in [
+            ("/alice/c/", bob(), StatusCode::CREATED),
+            ("/alice/c/missing/", bob(), StatusCode::FORBIDDEN),
+            ("/alice/c/missing/", owner_token(), StatusCode::NOT_FOUND),
+        ] {
+            let response = post_handler(
+                State(state.clone()),
+                Extension(token),
+                path.parse().unwrap(),
+                turtle_headers(),
+                request_body_bytes(),
+            )
+            .await
+            .unwrap_or_else(IntoResponse::into_response);
+            assert_eq!(response.status(), expected, "{path}");
+        }
+    }
+
+    /// CTH write-access-bob.feature "Bob cannot DELETE fictive W inherited [403]"
+    /// and "Bob can DELETE plain W inherited" pin absent denial versus successful removal.
+    #[tokio::test]
+    async fn residual_ldp_delete_absent_denial_and_present_success() {
+        let state = store_bob_default_write_no_read_container().await;
+        for (path, expected) in [
+            ("/alice/c/missing", StatusCode::FORBIDDEN),
+            ("/alice/c/existing", StatusCode::NO_CONTENT),
+        ] {
+            let response = delete_handler(
+                State(state.clone()),
+                Extension(bob()),
+                path.parse().unwrap(),
+                HeaderMap::new(),
+            )
+            .await
+            .unwrap_or_else(IntoResponse::into_response);
+            assert_eq!(response.status(), expected, "{path}");
+        }
     }
 }

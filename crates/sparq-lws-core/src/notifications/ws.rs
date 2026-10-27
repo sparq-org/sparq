@@ -140,6 +140,8 @@ pub struct NotifyState<S: Store> {
     /// with it, so its phase is theirs).
     #[cfg(test)]
     recheck_now: Arc<tokio::sync::Notify>,
+    #[cfg(test)]
+    recheck_ticks: std::sync::atomic::AtomicUsize,
     /// Counts lag checks started by this state, independently of process-wide metrics.
     #[cfg(test)]
     lag_checks: Arc<AtomicU64>,
@@ -212,6 +214,8 @@ impl<S: Store> NotifyState<S> {
             access_recheck: ACCESS_RECHECK,
             #[cfg(test)]
             recheck_now: Default::default(),
+            #[cfg(test)]
+            recheck_ticks: Default::default(),
             #[cfg(test)]
             lag_checks: Default::default(),
             #[cfg(test)]
@@ -781,6 +785,8 @@ async fn stream_notifications<S: Store + 'static, W>(
             // A due tick pre-empts an event/lag check. A timer check already running
             // finishes (or times out) before another tick starts.
             () = state.next_tick(&mut recheck), if !matches!(check, Some((_, Due::Tick))) => {
+                #[cfg(test)]
+                state.recheck_ticks.fetch_add(1, Ordering::SeqCst);
                 if let Some((_, due)) = check.take() {
                     if let Due::Lag(skipped) = due {
                         preempted_lag += skipped;
@@ -991,6 +997,8 @@ fn hex_digit(n: u8) -> char {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+
     use super::*;
 
     use crate::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient};
@@ -2213,6 +2221,7 @@ mod tests {
     /// A finite, always-ready backlog avoids depending on TCP or cooperative I/O yielding.
     struct ReadyFrames {
         remaining: usize,
+        received: Arc<AtomicUsize>,
         sent: Arc<std::sync::Mutex<Vec<Message>>>,
     }
 
@@ -2222,6 +2231,7 @@ mod tests {
                 None
             } else {
                 self.remaining -= 1;
+                self.received.fetch_add(1, Ordering::SeqCst);
                 Some(Ok(Message::text("frame")))
             }
         }
@@ -2235,21 +2245,33 @@ mod tests {
     /// A ready timer and its decision outrank every frame in an already-buffered flood.
     #[tokio::test]
     async fn ready_frames_cannot_starve_a_revocation_close() {
-        let s = state_with_reader(BY_HAND).await;
-        let topic = format!("{BASE}/doc");
-        let token = s.hub.mint_receive_token(BOB, &topic).await;
-        let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
-        revoke_bob(&s).await;
-        s.tick_now();
-        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let socket = ReadyFrames {
-            remaining: 1024,
-            sent: sent.clone(),
-        };
-        stream_notifications(socket, s, topic, BOB.to_string(), None, claim).await;
-        assert!(matches!(sent.lock().unwrap().as_slice(),
-                         [Message::Close(Some(frame))] if frame.code == 1008 && frame.reason == REVOKED),
-                "a ready frame backlog starved the timer or its decision");
+        // Repeat with fresh sockets so an unbiased select cannot pass by choosing the timer
+        // and decision first by chance on one connection.
+        for _ in 0..32 {
+            let s = state_with_reader(BY_HAND).await;
+            let topic = format!("{BASE}/doc");
+            let token = s.hub.mint_receive_token(BOB, &topic).await;
+            let claim = s.hub.claim_receive_socket(&token, &topic).await.unwrap();
+            revoke_bob(&s).await;
+            s.tick_now();
+            let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let received = Arc::new(AtomicUsize::new(0));
+            let socket = ReadyFrames {
+                remaining: 1024,
+                received: received.clone(),
+                sent: sent.clone(),
+            };
+            stream_notifications(socket, s, topic, BOB.to_string(), None, claim).await;
+            assert!(matches!(sent.lock().unwrap().as_slice(),
+                             [Message::Close(Some(frame))]
+                                 if frame.code == 1008 && frame.reason == REVOKED),
+                    "a ready frame backlog starved the timer or its decision");
+            assert_eq!(
+                received.load(Ordering::SeqCst),
+                0,
+                "ready frames must not run before a ready timer and revocation decision"
+            );
+        }
     }
 
     /// A peer that never drains sends cannot retain a revoked connection.
@@ -2316,7 +2338,7 @@ mod tests {
 
     /// Inbound frames cannot starve the timer or its completed access decision.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_revoked_subscriber_flooding_frames_is_closed_within_two_periods() {
+    async fn a_revoked_subscriber_flooding_frames_is_closed_within_two_recheck_ticks() {
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message as M;
         let every = std::time::Duration::from_millis(500);
@@ -2337,7 +2359,8 @@ mod tests {
             }
         });
         revoke_bob(&s).await;
-        let close = tokio::time::timeout(every * 2, async {
+        let at_revoke = s.recheck_ticks.load(Ordering::SeqCst);
+        let close = tokio::time::timeout(std::time::Duration::from_secs(30), async {
             while let Some(frame) = rx.next().await {
                 if let M::Close(Some(frame)) = frame.unwrap() {
                     return frame;
@@ -2346,7 +2369,11 @@ mod tests {
             panic!("socket ended without a close");
         })
         .await
-        .expect("frame flood delayed the revocation close");
+        .expect("a_revoked_subscriber_flooding_frames_is_closed_within_two_recheck_ticks hung");
+        assert!(
+            s.recheck_ticks.load(Ordering::SeqCst) - at_revoke < 2,
+            "frame flood delayed the revocation close by two timer ticks"
+        );
         flood.abort();
         assert_eq!(u16::from(close.code), 1008);
         assert_eq!(close.reason, REVOKED);

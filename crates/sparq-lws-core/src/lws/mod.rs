@@ -793,7 +793,6 @@ impl<S: Store + 'static> LwsState<S> {
         let store = tracked::Tracked::new(store, cfg.storage());
         let lease = store
             .lifecycle()
-            .unwrap_or_default()
             .acquire()
             .ok_or("another LWS service is running over this store")?;
         let http = fetch_client(&cfg)?;
@@ -1909,6 +1908,12 @@ where
 }
 
 impl<'a, S: Store + 'static> Journal<'a, S> {
+    /// Simulate a stopped process, leaving durable holds without leaking the service lease.
+    #[cfg(test)]
+    pub(crate) fn abandon(mut self) {
+        self.holds.intended = true;
+    }
+
     pub(crate) fn new(state: &'a LwsState<S>, limit: usize) -> Self {
         Self {
             state,
@@ -3120,7 +3125,13 @@ pub(crate) mod test_store {
 
     #[derive(Clone)]
     pub struct FlakyStore {
-        inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
+        inner: Arc<
+            CompositeStore<
+                crate::store::CountingSparqClient<InMemorySparqClient>,
+                crate::store::CountingBlobStore<InMemoryBlobStore>,
+            >,
+        >,
+        pub counters: Arc<crate::store::BackendCounters>,
         pub fail_delete: Arc<AtomicBool>,
         pub write_cycles: Arc<std::sync::Mutex<Option<WriteCycles>>>,
         /// Every `release` fails with a backend error, releasing nothing.
@@ -3275,11 +3286,19 @@ pub(crate) mod test_store {
 
         /// Holding at most what `limits` allow.
         pub fn with_limits(limits: crate::store::InMemoryStoreLimits) -> Self {
+            let counters = Arc::new(crate::store::BackendCounters::default());
             Self {
                 inner: Arc::new(CompositeStore::new(
-                    InMemorySparqClient::with_limits(limits),
-                    InMemoryBlobStore::with_limits(limits),
+                    crate::store::CountingSparqClient::new(
+                        InMemorySparqClient::with_limits(limits),
+                        counters.clone(),
+                    ),
+                    crate::store::CountingBlobStore::new(
+                        InMemoryBlobStore::with_limits(limits),
+                        counters.clone(),
+                    ),
                 )),
+                counters,
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 write_cycles: Default::default(),
                 fail_exists: Arc::new(AtomicBool::new(false)),
@@ -3443,6 +3462,10 @@ pub(crate) mod test_store {
 
     #[async_trait]
     impl Store for FlakyStore {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            self.inner.lifecycle()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             self.traced("read", iri);
             if self.read_fails(iri) {
@@ -4008,6 +4031,48 @@ pub(crate) mod test_store {
         (state, store)
     }
 
+    /// Wait for detached maintenance tasks to release a stopped service's lease.
+    pub async fn wait_for_stop(store: &FlakyStore, caller: &str) {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            store.lifecycle().wait_for_release(caller),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{caller}: timed out waiting for the stopped service"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_stop_waits_for_the_actual_lease_release() {
+        let store = FlakyStore::new();
+        let lease = store.lifecycle().acquire().unwrap();
+        let released = std::sync::atomic::AtomicBool::new(false);
+        let ((), (), ()) = tokio::join!(
+            biased;
+            async {
+                wait_for_stop(&store, "wait_for_stop_waits_for_the_actual_lease_release").await;
+                assert!(
+                    released.load(std::sync::atomic::Ordering::Acquire),
+                    "the stop waiter returned before the lease was released"
+                );
+            },
+            async {
+                // The release timer also ensures the timer driver observes the old deadline.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                drop(lease);
+                released.store(true, std::sync::atomic::Ordering::Release);
+            },
+            tokio::time::advance(std::time::Duration::from_secs(3)),
+        );
+        assert!(store.lifecycle().acquire().is_some());
+    }
+
+    /// A closed state measuring both backend seams, including reads inside CompositeStore.
+    pub async fn counting_state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
+        let (state, store) = closed_state(page_size).await;
+        state.notify.pause_sweeper();
+        (state, store)
+    }
+
     /// The owner of a [`closed_state`]'s storage.
     pub const OWNER: &str = "https://owner.example/#me";
 
@@ -4544,9 +4609,11 @@ mod tests {
             .write(&at, serde_json::to_vec(&stored).unwrap().into(), LWS_JSON)
             .await
             .unwrap();
-        // Loaded over the backend itself: the running state holds the lease of its own handle.
-        notify::Notifier::load(&store, &state.cfg).await.unwrap();
-        assert!(!state.store.exists(&at).await.unwrap());
+        let cfg = state.cfg.clone();
+        drop(state);
+        test_store::wait_for_stop(&store, "every_removal_takes_one_step").await;
+        notify::Notifier::load(&store, &cfg).await.unwrap();
+        assert!(!store.exists(&at).await.unwrap());
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }
 

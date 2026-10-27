@@ -124,7 +124,7 @@ pub struct Tracked<S> {
     gens: std::sync::Arc<Generations>,
     #[cfg(feature = "sparql-endpoint")]
     snapshot: std::sync::Arc<super::snapshot::Gate>,
-    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one (so a
+    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own (so a
     /// `Tracked` over a `Tracked` shares its lease), shared by every clone, so a service built
     /// over a clone, or over a wrapper of one, is refused while this one runs.
     lifecycle: std::sync::Arc<crate::store::Lifecycle>,
@@ -143,12 +143,12 @@ impl<S> Clone for Tracked<S> {
 }
 
 impl<S: Store> Tracked<S> {
-    /// Track `inner`, whose storage root is `root`. Its backend's lease is `inner`'s own when it
-    /// keeps one ([`Store::lifecycle`]), and a new one otherwise: no caller chooses it, so
+    /// Track `inner`, whose storage root is `root`. Its backend's lease is always `inner`'s own
+    /// ([`Store::lifecycle`]): no caller chooses it, so
     /// wrapping a store that is already tracked keeps the lease of the service running over it.
     pub fn new(inner: S, root: String) -> Self {
         Self {
-            lifecycle: inner.lifecycle().unwrap_or_default(),
+            lifecycle: inner.lifecycle(),
             inner: std::sync::Arc::new(inner),
             gens: std::sync::Arc::new(Generations::new(root)),
             #[cfg(feature = "sparql-endpoint")]
@@ -365,8 +365,8 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.reset_marker(iri, value, lease).await
     }
 
-    fn lifecycle(&self) -> Option<std::sync::Arc<crate::store::Lifecycle>> {
-        Some(self.lifecycle.clone())
+    fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+        self.lifecycle.clone()
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

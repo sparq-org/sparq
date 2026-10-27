@@ -555,6 +555,25 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
 }
 
 impl EmbeddedSparqClient {
+    async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        // The SAME `update_put_meta` builder — a single `;`-joined update (3 targeted deletes + one
+        // insert). Capture the whole request before committing: the whole request commits
+        // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
+        // for a direct library consumer, per the sparq-engine docs).
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let u = sparql::update_put_meta(
+            iri,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+        )?;
+        self.dispatch(move |graph| {
+            commit(graph, &u, "put_meta")
+        })
+        .await
+    }
+
     async fn commit_child(
         &self,
         container: &str,
@@ -562,6 +581,7 @@ impl EmbeddedSparqClient {
         meta: ResourceMeta,
         return_previous: bool,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         // IN-PROCESS atomicity simplification: inside ONE actor job, verify the container exists, then
         // commit the child record + the containment edge atomically. No create-marker/follow-up-ASK
         // is needed (the HTTP path needs them only because an UPDATE over HTTP cannot report whether
@@ -628,22 +648,18 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
-        // The SAME `update_put_meta` builder — a single `;`-joined update (3 targeted deletes + one
-        // insert). Capture the whole request before committing: the whole request commits
-        // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
-        // for a direct library consumer, per the sparq-engine docs).
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
-            iri,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-        )?;
-        self.dispatch(move |graph| {
-            commit(graph, &u, "put_meta")
-        })
-        .await
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        self.put_meta_unchecked(iri, meta).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        _: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
+            .await
     }
 
     async fn replace_meta(
@@ -651,6 +667,7 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // The read of the previous record and the upsert run in ONE actor job, so no other index
         // operation can interleave: the returned record is exactly the one this update replaced.
         let q = sparql::select_meta(iri)?;
@@ -756,6 +773,7 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // DROP SILENT the resource's whole named graph (idempotent on an absent graph) — the SAME
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
@@ -770,6 +788,7 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let q = sparql::select_meta(iri)?;
         let u = sparql::update_delete_resource_with_parent(iri, parent)?;
         self.dispatch(move |graph| {
@@ -791,6 +810,7 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         // IN-PROCESS atomicity simplification (the documented difference from the HTTP impl): the
         // whole op is ONE indivisible actor job, so the existence + empty checks and the delete decide
         // their outcome DIRECTLY with no interleaving — NO marker/follow-up-ASK dance is needed. The
@@ -850,6 +870,7 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let u = sparql::update_remove_child(container, child)?;
         self.dispatch(move |graph| {
             commit(graph, &u, "remove_child")

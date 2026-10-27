@@ -191,6 +191,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
+  A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
+  and absent targets answer `204`, subject to the same full-budget and set-aside-parent checks.
+  Other `If-Match` values on DELETE, including malformed or empty lists, require Read too.
+  POST with either bare `*` works without Read. Concrete tags and
+  applicable dates require Read on every method. LDP exempts bare `*`, and LWS service
+  containers retain their existence-only handling. Conditional POST to the storage root
+  needs no Read when `Accept` selects its public description.
+- **Breaking — sparq-lws-core:** `Store::lifecycle` is required and returns `Arc<Lifecycle>`;
+  `CompositeStore` clones share it. `SparqClient::reset_marker` requires a lifecycle guard;
+  wrappers must forward it, or a marker reset is refused by the trait default.
 - **sparq-core (BREAKING API):** `Graph::dict` and `Graph::store` are no longer public fields;
   read them with `Graph::dict()` / `Graph::store()`, and take the dictionary out with
   `Graph::into_dict()` (rebuild with `Graph::from_parts`). These openers and writers of a
@@ -834,6 +845,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
+  subscription lookups clone only owned records. An unconditional LWS data DELETE allowed by an
+  unconstrained Delete grant without Read returns `204` for settled present or absent targets,
+  and for an absent prior during in-flight or set-aside creates, including anonymous callers
+  with public Delete grants. Read on an absent target is decided without stored metadata,
+  including partial create metadata and orphan creator records. Concurrent removals use the
+  settled-absent decision, including under the delete lock; a full set-aside budget returns
+  `503` with `Retry-After`, before checking whether the parent is set aside.
+  A set-aside change to a previously present resource retains `503`.
+  A set-aside parent container returns `503` for both present and absent children.
+  An absent delete changes and announces nothing. Pending metadata on a present resource and
+  type- or format-constrained Delete grants remain residual differences from absence.
+  Resource-linkset OPTIONS returns fixed `204` for every caller; unsupported methods return `405`,
+  both before backend reads, with `Allow`, `Accept-Patch` and the anchor `Link`. For readers too,
+  OPTIONS now returns `204` where an absent target previously returned `404` and a set-aside
+  target `503`. Anonymous grant denials skip metadata reads. For a non-creator, malformed
+  unrelated metadata fields such as `links` or `pending` no longer make `allowed()` answer `500`;
+  its fast path returns false. Raw index mutations refuse service-marker operands; marker resets
+  require a lifecycle guard.
 
 - **sparq-zk-compose:** hardening: method-fold refusals now apply in every build.
   Default builds now return `SubProofCommitmentNotAuthenticated` for a bound

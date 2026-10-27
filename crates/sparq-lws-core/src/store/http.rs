@@ -469,6 +469,22 @@ struct SelectResult {
     rows: Vec<std::collections::HashMap<String, String>>,
 }
 
+impl HttpSparqClient {
+    async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let u = sparql::update_put_meta(
+            iri,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+        )?;
+        self.update_raw(&u)
+            .await
+            .map_err(SparqHttpError::into_sparq)
+    }
+}
+
 #[async_trait]
 impl SparqClient for HttpSparqClient {
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
@@ -504,17 +520,18 @@ impl SparqClient for HttpSparqClient {
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
-            iri,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-        )?;
-        self.update_raw(&u)
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        self.put_meta_unchecked(iri, meta).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        _: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
-            .map_err(SparqHttpError::into_sparq)
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
@@ -560,6 +577,7 @@ impl SparqClient for HttpSparqClient {
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // DROP SILENT the resource's whole graph (idempotent on an absent graph).
         let u = sparql::update_delete_resource(iri)?;
         self.update_raw(&u)
@@ -572,6 +590,7 @@ impl SparqClient for HttpSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         // A per-operation nonce so the success confirm is RACE-RESISTANT — no concurrent op writes or
         // removes THIS delete marker, so a containment mutation between the update and the confirm
         // cannot flip the result (the same pattern as the create-marker).
@@ -628,6 +647,7 @@ impl SparqClient for HttpSparqClient {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         // A per-operation unique nonce written atomically with the guarded create, so the success
         // confirm is RACE-RESISTANT: no concurrent remove_child / sibling create ever touches this
         // marker, so a containment-edge mutation between the update and the confirm cannot flip the
@@ -687,6 +707,7 @@ impl SparqClient for HttpSparqClient {
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let u = sparql::update_remove_child(container, child)?;
         self.update_raw(&u)
             .await

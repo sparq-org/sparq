@@ -821,11 +821,17 @@ impl Notifier {
         self.subs.write().expect("lock").insert("test".into(), sub);
     }
 
+    /// Pause expiry maintenance while a test measures request-local backend work.
+    #[cfg(test)]
+    pub(crate) fn pause_sweeper(&self) {
+        self.sweeper_off.store(true, Ordering::SeqCst);
+    }
+
     /// Ensure the service container exists and load the subscriptions it holds, all visible.
     #[cfg(test)]
     pub async fn load<S: Store>(store: &S, cfg: &LwsConfig) -> Result<Self, String> {
         let me = Self::new(cfg)?;
-        let lease = store.lifecycle().unwrap_or_default();
+        let lease = store.lifecycle();
         me.hold(lease.acquire().ok_or("the store's lease is held")?);
         me.load_with(store, cfg, |_| true).await?;
         Ok(me)
@@ -1242,13 +1248,18 @@ impl Notifier {
     }
 
     /// Subscription `id`, unless it is expired by `now` ([`Notifier::decide`]).
-    fn get(&self, id: &str, now: i64) -> Option<Subscription> {
+    fn get(
+        &self,
+        id: &str,
+        now: i64,
+        owns: impl FnOnce(&Subscription) -> bool,
+    ) -> Option<Subscription> {
         let high_water = self.high_water();
         self.subs
             .read()
             .expect("lock")
             .get(id)
-            .filter(|s| !s.lapsing(high_water, now))
+            .filter(|s| owns(s) && !s.lapsing(high_water, now))
             .cloned()
     }
 
@@ -2153,11 +2164,10 @@ pub async fn handle<S: Store + 'static>(
         return quarantined(state, req, id).await;
     }
     // Who may see it is asked of what is stored; whether it expired is decided below.
-    let sub = state.notify.get(id, state.notify.high_water());
-    let mine = sub
-        .as_ref()
-        .is_some_and(|s| owner || (agent.subject.is_some() && agent.subject == s.subscriber));
-    let Some(sub) = sub.filter(|_| mine) else {
+    let sub = state.notify.get(id, state.notify.high_water(), |s| {
+        owner || (agent.subject.is_some() && agent.subject == s.subscriber)
+    });
+    let Some(sub) = sub else {
         // A subscription discloses its topics and inbox; to anyone else it does not exist.
         return if state.needs_auth(agent) {
             state.challenge(None)
@@ -2173,7 +2183,7 @@ pub async fn handle<S: Store + 'static>(
     else {
         return halted();
     };
-    if state.notify.get(id, now).is_none() {
+    if state.notify.get(id, now, |_| true).is_none() {
         return problem(StatusCode::NOT_FOUND, None);
     }
     if let Some(refused) = unavailable() {
@@ -3344,7 +3354,15 @@ mod tests {
         // it) and starts with its clock back before the expiry; the subscription stands again,
         // and nothing ever showed otherwise.
         store.fail_marker_write.store(false, Ordering::SeqCst);
-        let restarted = Notifier::load(&store, &state.cfg).await.unwrap();
+        let cfg = state.cfg.clone();
+        drop(sweeper);
+        drop(state);
+        test_store::wait_for_stop(
+            &store,
+            "nothing_shows_an_expiry_until_stored_and_a_restart_may_revive_it_as_documented",
+        )
+        .await;
+        let restarted = Notifier::load(&store, &cfg).await.unwrap();
         assert!(restarted.is_live("c"));
     }
 
@@ -3373,7 +3391,9 @@ mod tests {
         let kept = stored_sub(&state, "kept", sub_until(now + 1800)).await;
         stored_sub(&state, "later", sub_until(now + 7200)).await;
         *store.fail_delete_of.lock().unwrap() = Some(kept.clone());
-        let restarted = Notifier::load(&store, &state.cfg).await.unwrap();
+        let cfg = state.cfg.clone();
+        drop(state);
+        let restarted = Notifier::load(&store, &cfg).await.unwrap();
         assert!(!store.exists(&gone).await.unwrap(), "not purged");
         assert!(store.exists(&kept).await.unwrap());
         assert!(!restarted.is_live("kept"), "served again");
@@ -3387,9 +3407,9 @@ mod tests {
         assert_eq!(listed, ["later"]);
     }
 
-    /// A removal whose delete's outcome is unknown leaves the subscription expired: a start
-    /// meanwhile, its clock stepped back, still finds it so and removes it, and the removal is
-    /// settled later with nothing put back.
+    /// A removal whose outcome is unknown leaves the stored subscription expired: inspecting
+    /// its durable high water with the clock stepped back still removes it. The original
+    /// removal settles later without putting anything back; no second service is started.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_expired_subscription_whose_removal_is_unknown_stays_expired() {
         let (state, store) = test_store::state(100).await;
@@ -3420,7 +3440,11 @@ mod tests {
         let r = handle(&state, &get, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NOT_FOUND);
         // A start now, an hour behind what is stored, finds it expired and removes it.
-        let restarted = Notifier::load(&store, &state.cfg).await.unwrap();
+        let restarted = Notifier::new(&state.cfg).unwrap();
+        restarted
+            .load_with(&store, &state.cfg, |_| true)
+            .await
+            .unwrap();
         assert!(!restarted.is_live("u"), "served again");
         assert!(!store.exists(&iri).await.unwrap());
         // The first removal is settled once the store lets it: gone.
@@ -3494,6 +3518,7 @@ mod tests {
             );
             // Once it is removed, the next start stores one.
             *store.fail_delete_of.lock().unwrap() = None;
+            drop(loaded);
             let loaded = Notifier::load(&store, &cfg).await.unwrap();
             assert!(!store.exists(&stored[1]).await.unwrap(), "{corrupt:?}");
             assert!(loaded.is_live("open"));
@@ -4029,6 +4054,11 @@ mod tests {
         };
         assert!(why.contains("another LWS service"), "{why}");
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &_store,
+            "a_second_state_over_a_running_ones_store_is_refused",
+        )
+        .await;
         let state = LwsState::new(backend, cfg).await.unwrap();
         assert!(state.notify.lease().is_some());
     }
@@ -4286,6 +4316,11 @@ mod tests {
         // Once the running state is gone, a wrapper of its store may be served.
         let backend = state.store.clone();
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &_store,
+            "a_state_over_a_wrapper_of_a_running_ones_store_is_refused",
+        )
+        .await;
         let state = LwsState::new(Tracked::new(backend, root), cfg)
             .await
             .unwrap();
@@ -4430,6 +4465,8 @@ mod tests {
         assert!(store.exists(&stored[0]).await.unwrap());
         assert!(!restarted.is_live("before"));
         assert!(restarted.is_live("after"));
+        drop(restarted);
+        drop(loaded);
         // A start in the recovery mode fails while one with an expiry is left, and lowers
         // nothing (what it could remove is gone).
         let mut recovery = cfg.clone();
@@ -4452,6 +4489,7 @@ mod tests {
             .parse()
             .unwrap();
         assert!((now..now + 60).contains(&reset), "{reset}");
+        drop(recovered);
         let loaded = Notifier::load(&store, &cfg).await.unwrap();
         assert!(loaded.is_live("open"));
         assert!(!loaded.halted());
@@ -4491,9 +4529,11 @@ mod tests {
         let loaded = Notifier::load(&store, &cfg).await.unwrap();
         assert_eq!(loaded.subs.read().unwrap().len(), 1, "kept while stored");
         *store.fail_delete_of.lock().unwrap() = None;
+        drop(loaded);
         let loaded = Notifier::load(&store, &cfg).await.unwrap();
         assert!(loaded.subs.read().unwrap().is_empty(), "purged");
         assert!(!store.exists(&iri).await.unwrap());
+        drop(loaded);
         let unreadable = format!("{container}unreadable");
         store
             .create_in_container(&container, &unreadable, Bytes::from("{}"), LWS_JSON)
@@ -4861,14 +4901,20 @@ mod tests {
             |tag: &str| test_store::request(Method::DELETE, &path, &[("if-match", tag)], "");
         let r = handle(&state, &delete("\"other\""), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
-        assert!(state.notify.get("s1", state.notify.clock()).is_some());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_some());
         // A read is held to If-Match as well.
         let other = test_store::request(Method::GET, &path, &[("if-match", "\"other\"")], "");
         let r = handle(&state, &other, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
         let r = handle(&state, &delete(&tag), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
-        assert!(state.notify.get("s1", state.notify.clock()).is_none());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_none());
     }
 
     /// Review finding: a recursive delete prepared every notification for every descendant
@@ -5761,7 +5807,10 @@ mod tests {
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(!state.store.exists(&iri).await.unwrap());
-        assert!(state.notify.get("s1", state.notify.clock()).is_none());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_none());
     }
 
     #[tokio::test]
@@ -5773,13 +5822,19 @@ mod tests {
         store.fail_delete.store(true, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(state.notify.get("s1", state.notify.clock()).is_some());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_some());
         let iri = state.cfg.absolute(&path);
         assert!(state.store.exists(&iri).await.unwrap());
         store.fail_delete.store(false, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-        assert!(state.notify.get("s1", state.notify.clock()).is_none());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_none());
         assert!(!state.store.exists(&iri).await.unwrap());
     }
 
@@ -6439,9 +6494,14 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let state = LwsState::new(store.clone(), state.cfg.clone())
-            .await
-            .unwrap();
+        let cfg = state.cfg.clone();
+        drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more",
+        )
+        .await;
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
         assert_eq!(
             state.notify.subs.read().unwrap().len(),
             MAX_SUBSCRIPTIONS + 1,
@@ -6549,6 +6609,8 @@ mod tests {
                 .unwrap();
         }
         let cfg = state.cfg.clone();
+        drop(state);
+        test_store::wait_for_stop(&store, "state_with_other_subscribers").await;
         let state = LwsState::new(store, cfg).await.unwrap();
         (state, topic, ours)
     }
@@ -8119,8 +8181,8 @@ mod tests {
             let req = test_store::request(Method::GET, &grant_path, &[], "");
             async move { test_store::route_as(&state, req, &who).await.status() }
         };
-        assert_eq!(ask_grant(&reader).await, StatusCode::FORBIDDEN);
-        assert_eq!(ask_grant(&stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(ask_grant(&reader).await, StatusCode::NOT_FOUND);
+        assert_eq!(ask_grant(&stranger).await, StatusCode::NOT_FOUND);
         assert_eq!(ask_grant(&owner).await, StatusCode::SERVICE_UNAVAILABLE);
     }
 
@@ -8131,8 +8193,8 @@ mod tests {
     /// that is there, kept as it was, against a create of one that is not).
     #[tokio::test]
     async fn a_topic_the_subscriber_may_not_read_is_decided_the_same_whether_it_exists() {
-        use test_store::{agent, closed_state, data};
-        let (state, store) = closed_state(100).await;
+        use test_store::{agent, counting_state, data};
+        let (state, store) = counting_state(100).await;
         state.notify.sweeper_off.store(true, Ordering::SeqCst);
         let there = data(&state, "there").await;
         let gone = format!("{}gone", state.cfg.storage());
@@ -8175,6 +8237,8 @@ mod tests {
                     None => None,
                 };
                 *store.trace.lock().unwrap() = Some(Vec::new());
+                store.counters.take_methods();
+                let measured = store.counters.measure();
                 let r = test_store::route_as(&state, req, &who).await;
                 let trace = store.trace.lock().unwrap().take().unwrap();
                 if changing.is_some() {
@@ -8189,7 +8253,13 @@ mod tests {
                     .into_iter()
                     .map(|t| t.replace(&topic, "{topic}"))
                     .collect();
-                (status, body, trace)
+                (
+                    status,
+                    body,
+                    trace,
+                    measured.delta(),
+                    store.counters.take_methods(),
+                )
             }
         };
         for changing in [None, Some(super::super::Prior::default())] {

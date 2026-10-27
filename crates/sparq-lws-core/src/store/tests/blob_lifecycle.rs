@@ -443,7 +443,14 @@ async fn child_replacements_reclaim_versions_and_respect_holds() {
         !store.blob.exists(&held.blob_key).await.unwrap(),
         "unheld predecessor must be reclaimed"
     );
-    assert!(equal_keys(&store.sparq, &store.blob, "child replacements").await);
+    assert!(
+        equal_keys(
+            store.sparq.as_ref(),
+            store.blob.as_ref(),
+            "child replacements"
+        )
+        .await
+    );
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -594,8 +601,8 @@ async fn failed_commits_reclaim_only_settled_unreferenced_bytes() {
                 );
             } else {
                 all_equal &= equal_keys(
-                    &store.sparq,
-                    &store.blob,
+                    store.sparq.as_ref(),
+                    store.blob.as_ref(),
                     &format!("{operation} {failure:?}"),
                 )
                 .await;
@@ -650,7 +657,14 @@ async fn concurrent_replacements<S: SparqClient + 'static>(index: S) {
     let current = store.read(child).await.unwrap();
     assert_eq!(current.body.len(), 1);
     assert!(current.body[0] < 16);
-    assert!(equal_keys(&store.sparq, &store.blob, "concurrent replacements").await);
+    assert!(
+        equal_keys(
+            store.sparq.as_ref(),
+            store.blob.as_ref(),
+            "concurrent replacements"
+        )
+        .await
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -344,9 +344,15 @@ async fn persistence_refuses_unjournaled_markers() {
     use sparq_lws_wasm::persist::{Journal, PersistentStore};
     use std::{sync::Arc, time::Duration};
 
-    struct CapableStore;
+    #[derive(Default)]
+    struct CapableStore {
+        lifecycle: Arc<sparq_lws_core::store::Lifecycle>,
+    }
     #[async_trait]
     impl Store for CapableStore {
+        fn lifecycle(&self) -> Arc<sparq_lws_core::store::Lifecycle> {
+            self.lifecycle.clone()
+        }
         fn call_timeout(&self) -> Duration {
             Duration::from_secs(17)
         }
@@ -388,7 +394,7 @@ async fn persistence_refuses_unjournaled_markers() {
             Ok(Vec::new())
         }
     }
-    let store = PersistentStore::new(CapableStore, Arc::new(Journal::new()));
+    let store = PersistentStore::new(CapableStore::default(), Arc::new(Journal::new()));
     assert_eq!(store.call_timeout(), Duration::from_secs(17));
     assert!(!store.raises_markers());
     assert!(store.raise_marker("urn:high-water", 100).await.is_err());

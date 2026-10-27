@@ -717,7 +717,9 @@ async fn holds_intents_and_high_water_survive_recovery_and_further_writes() {
     }
     let marker = "https://pod.example/.lws/subscriptions/#high-water";
     store.raise_marker(marker, 42).await.unwrap();
-    let blob = store.blob;
+    let blob = std::sync::Arc::try_unwrap(store.blob)
+        .ok()
+        .expect("sole blob handle");
     drop(store.sparq);
     let store = CompositeStore::new(dir.open(), blob);
     assert_eq!(store.meta(CHILD).await.unwrap(), Some(current));
@@ -734,7 +736,9 @@ async fn holds_intents_and_high_water_survive_recovery_and_further_writes() {
     store.release(&held, "urn:holder").await.unwrap();
     store.delete(intent, Some(intents)).await.unwrap();
     store.raise_marker(marker, 84).await.unwrap();
-    let blob = store.blob;
+    let blob = std::sync::Arc::try_unwrap(store.blob)
+        .ok()
+        .expect("sole blob handle");
     drop(store.sparq);
     let store = CompositeStore::new(dir.open(), blob);
     assert!(store.holds().await.unwrap().is_empty());
