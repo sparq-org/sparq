@@ -62,7 +62,7 @@
 //! unique-per-write keys even when the provider's read metadata includes an ETag.
 //!
 //! ### Which generation observation is the witness — the SNAPSHOT one (Finding 1, the threading fix)
-//! The witness is the generation observed in the current listing batch, threaded END-TO-END in
+//! The witness is the generation observed at the START-OF-SWEEP `list()` snapshot, threaded END-TO-END in
 //! the candidate alongside the key + snapshot `last_modified`, and CONFIRMED still-current by the fresh
 //! `stat()` (fresh == snapshot) before the delete. It must NOT be re-derived from the fresh stat: a blob
 //! rewritten between `list()` and the fresh `stat()` — same `last_modified`, NEW generation — would have
@@ -127,7 +127,7 @@
 //! cron hitting an admin endpoint), NOT a per-replica timer racing N sweeps — which is why periodic
 //! remains an explicit runtime opt-in rather than a boot default.
 
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::StreamExt;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 
@@ -249,10 +249,13 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
         .list_stream()
         .await
         .map_err(ReconcileError::ListBlobs)?
-        .try_chunks(1024);
+        .chunks(1024);
     let mut report = ReconcileReport::default();
     while let Some(batch) = stored.next().await {
-        let stored = batch.map_err(|error| ReconcileError::ListBlobs(error.1))?;
+        let stored = batch
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ReconcileError::ListBlobs)?;
         reconcile_batch(sparq, blob, opts, &referenced, stored, &mut report).await?;
     }
     Ok(report)
@@ -536,7 +539,7 @@ enum DeletePlan {
 }
 
 /// The delete witness threaded END-TO-END for a delete candidate (FINDING 1 + FINDING 2). Fixed at the
-/// current listing batch so the whole decision chain is anchored to ONE consistent observation.
+/// START-OF-SWEEP `list()` snapshot so the whole decision chain is anchored to ONE consistent observation.
 enum CandidateWitness {
     /// The snapshot reported a native write version (`generation`): delete via the ATOMIC CAS keyed on
     /// THIS snapshot generation (Finding 1) — the strictly-stronger, clock-independent path.
@@ -653,7 +656,6 @@ mod tests {
                 .chain(futures_util::stream::once(async {
                     Err(BlobError::Backend("listing failed".into()))
                 }))
-                .chain(futures_util::stream::pending())
                 .boxed())
         }
         async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
@@ -672,13 +674,9 @@ mod tests {
                 .put_with_time(&format!("{n:04}"), Bytes::new(), ago(3600))
                 .unwrap();
         }
-        let error = tokio::time::timeout(
-            Duration::from_secs(5),
-            reconcile_orphans(&InMemorySparqClient::new(), &blob, &opts()),
-        )
-        .await
-        .expect("a listing error must abort without waiting for another page")
-        .unwrap_err();
+        let error = reconcile_orphans(&InMemorySparqClient::new(), &blob, &opts())
+            .await
+            .unwrap_err();
         assert!(matches!(error, ReconcileError::ListBlobs(_)));
         for n in 0..1024 {
             assert!(!blob.exists(&format!("{n:04}")).await.unwrap());

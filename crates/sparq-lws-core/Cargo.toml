@@ -13,6 +13,7 @@ readme = "README.md"
 publish = false
 
 [dependencies]
+sparq-lws-blob-key = { path = "../sparq-lws-blob-key" }
 futures-util = "0.3"
 # HTTP framework: axum on hyper 1.x + tokio (spike §4). The closest structural analogue to the
 # framework-agnostic LDP handler seam in prod-solid-server. The `ws` feature enables the

@@ -329,15 +329,8 @@ impl InMemoryBlobStore {
 
     #[cfg(any(test, feature = "test-support"))]
     fn validate_key(&self, key: &str) -> Result<(), BlobError> {
-        if self.immutable_keys {
-            let bare = key.strip_prefix("$pool$").unwrap_or(key);
-            let valid = bare.strip_prefix("b1-").is_some_and(|suffix| {
-                suffix.len() == 32
-                    && suffix.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-            });
-            if !valid {
-                return Err(BlobError::Backend("invalid blob key".into()));
-            }
+        if self.immutable_keys && sparq_lws_blob_key::parse(key).is_none() {
+            return Err(BlobError::Backend("invalid blob key".into()));
         }
         Ok(())
     }

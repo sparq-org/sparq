@@ -44,18 +44,7 @@ fn opaque_error(error: object_store::Error) -> Error {
 }
 
 fn validate_key(key: &str) -> Result<(&str, bool), Error> {
-    let (bare, pooled) = key
-        .strip_prefix("$pool$")
-        .map_or((key, false), |bare| (bare, true));
-    let suffix = bare.strip_prefix("b1-").ok_or(Error::InvalidKey)?;
-    if suffix.len() != 32
-        || !suffix
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-    {
-        return Err(Error::InvalidKey);
-    }
-    Ok((bare, pooled))
+    sparq_lws_blob_key::parse(key).ok_or(Error::InvalidKey)
 }
 
 /// A listed key and its backend-recorded modification time. No delete generation is advertised.
@@ -216,7 +205,7 @@ impl ObjectBlobStore {
         let mut parts = meta.location.prefix_match(&self.prefix)?;
         let first = parts.next()?;
         let key = if first.as_ref() == "pool" {
-            format!("$pool${}", parts.next()?.as_ref())
+            format!("{}{}", sparq_lws_blob_key::POOL_MARK, parts.next()?.as_ref())
         } else {
             first.as_ref().to_string()
         };

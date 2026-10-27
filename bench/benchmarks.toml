@@ -2052,6 +2052,20 @@ featured    = false
 status      = "planning"
 
 [[benchmark]]
+id          = "lws-blob-key"
+name        = "Shared blob-key grammar — registry stub"
+category    = "storage"
+measures    = "Correctness only: canonical formatting and strict parsing"
+invoke      = "cargo test -p sparq-lws-blob-key"
+source      = "crates/sparq-lws-blob-key"
+dataset     = "Deterministic suffix bytes and invalid key fixtures"
+quiet_box_sensitive = false
+pinning     = "Fixed grammar fixtures"
+records_to  = "Test output"
+featured    = false
+status      = "planning"
+
+[[benchmark]]
 id          = "lws-crypt"
 name        = "LWS encryption primitives — registry stub"
 category    = "serve"

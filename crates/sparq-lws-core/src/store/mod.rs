@@ -779,7 +779,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; no IRI-derived component is needed.
+    /// negligible; the fixed `b1-` prefix versions the opaque key format.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -802,18 +802,10 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         getrandom::getrandom(&mut suffix).map_err(|e| {
             ServerError::Storage(format!("OS RNG unavailable for blob-key minting: {e}"))
         })?;
-        let hex = suffix.iter().fold(String::with_capacity(32), |mut acc, b| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        });
         // A record in the service pool ([`in_service_pool`]) is marked here, where the IRI says
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
-        if limits::in_service_pool(iri) {
-            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
-        }
-        Ok(format!("b1-{hex}"))
+        Ok(sparq_lws_blob_key::format(suffix, limits::in_service_pool(iri)))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -2212,16 +2204,8 @@ mod tests {
             ("https://pod.example/.lws/subscriptions/private-topic", true),
         ] {
             let key = S::mint_blob_key(iri).expect("OS RNG available");
-            let opaque = if pooled {
-                key.strip_prefix("$pool$").expect("pool mark retained")
-            } else {
-                key.as_str()
-            };
-            assert_eq!(opaque.len(), 35);
-            assert!(opaque.starts_with("b1-"));
-            assert!(opaque[3..]
-                .bytes()
-                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            let (_, actual_pooled) = sparq_lws_blob_key::parse(&key).expect("canonical blob key");
+            assert_eq!(actual_pooled, pooled);
             for part in [
                 "https",
                 "pod.example",
@@ -2237,6 +2221,13 @@ mod tests {
     }
 
     #[test]
+    fn mint_blob_key_is_fallible_and_succeeds_on_a_working_os_rng() {
+        let result: Result<String, ServerError> = S::mint_blob_key("https://pod.example/alice/data");
+        let key = result.expect("the OS RNG must be available in tests");
+        assert_eq!(sparq_lws_blob_key::parse(&key), Some((key.as_str(), false)));
+    }
+
+    #[test]
     fn write_persists_an_opaque_blob_pointer() {
         let iri = "https://pod.example/alice/private-report";
         let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
@@ -2245,11 +2236,10 @@ mod tests {
                 .write(iri, Bytes::from_static(b"body"), "text/turtle")
                 .await
                 .expect("write with a working RNG");
-            assert_eq!(meta.blob_key.len(), 35);
-            assert!(meta.blob_key.starts_with("b1-"));
-            assert!(meta.blob_key[3..]
-                .bytes()
-                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            assert_eq!(
+                sparq_lws_blob_key::parse(&meta.blob_key),
+                Some((meta.blob_key.as_str(), false))
+            );
             for part in ["https", "pod.example", "alice", "private-report"] {
                 assert!(!meta.blob_key.contains(part));
             }
