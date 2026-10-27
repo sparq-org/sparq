@@ -239,9 +239,7 @@ mod embedded {
     type Boot = (EmbeddedSparqClient, NativeBlobs);
 
     async fn boot(config: &StorageConfig) -> io::Result<Boot> {
-        config
-            .open_embedded_with(config.has_data_dir(), make_blobs)
-            .await
+        config.open_embedded().await
     }
 
     fn error<B>(result: io::Result<(EmbeddedSparqClient, B)>) -> io::Error {
@@ -726,10 +724,20 @@ mod embedded {
             .unwrap()
     }
 
-    async fn restart_round_trip(lws: bool) {
+    pub(super) async fn restart_round_trip(lws: bool, object: bool) {
         const BODY: &[u8] = b"persisted bytes\0\xff\n";
         let dir = Directory::new();
-        let cfg = dir.config();
+        let object_dir = Directory::new();
+        let object_url = url::Url::from_directory_path(&object_dir.0).unwrap();
+        let cfg = if object {
+            config(&[
+                (ENV_DATA_DIR, dir.0.to_str().unwrap()),
+                (ENV_BLOB_URL, object_url.as_str()),
+            ])
+            .unwrap()
+        } else {
+            dir.config()
+        };
         let issuer = auth_fixture::KeyKit::generate();
         let key = auth_fixture::KeyKit::generate();
         let (client, blobs) = boot(&cfg).await.unwrap();
@@ -787,6 +795,21 @@ mod embedded {
         assert!(logs(&dir.0.join("index"))
             .iter()
             .any(|path| fs::metadata(path).unwrap().len() > 0));
+        let marker: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.0.join("format.json")).unwrap()).unwrap();
+        if object {
+            assert_eq!(marker["blobs"]["backend"], "object");
+            assert_eq!(marker["blobs"]["url"], object_url.as_str());
+            assert!(!dir.0.join("blobs").exists());
+            assert!(fs::read_dir(&object_dir.0).unwrap().next().is_some());
+        } else {
+            assert_eq!(
+                marker,
+                serde_json::from_str::<serde_json::Value>(FORMAT).unwrap()
+            );
+            assert!(dir.0.join("blobs").is_dir());
+            assert!(fs::read_dir(&object_dir.0).unwrap().next().is_none());
+        }
         // Drop without compaction: writes must recover from the actual journals.
         drop(app);
         // The LWS maintenance task holds only a transient lease; let its close notification run.
@@ -807,12 +830,12 @@ mod embedded {
 
     #[tokio::test]
     async fn solid_put_survives_restart_with_identical_bytes_etag_and_listing() {
-        restart_round_trip(false).await;
+        restart_round_trip(false, false).await;
     }
 
     #[tokio::test]
     async fn lws_put_survives_restart_with_identical_bytes_etag_and_listing() {
-        restart_round_trip(true).await;
+        restart_round_trip(true, false).await;
     }
 
     #[tokio::test]
@@ -893,4 +916,253 @@ mod embedded {
             b"drained request"[..]
         );
     }
+}
+
+#[cfg(not(feature = "blob-object"))]
+#[test]
+fn object_url_without_feature_is_a_startup_error() {
+    let failure = config(&[
+        (ENV_DATA_DIR, "unused-data"),
+        (ENV_BLOB_URL, "file:///unused-blobs"),
+    ])
+    .unwrap_err();
+    assert_eq!(failure.kind(), io::ErrorKind::InvalidInput);
+    assert!(failure.to_string().contains(ENV_BLOB_URL));
+    assert!(failure.to_string().contains("blob-object"));
+    assert!(!failure.to_string().contains("unused-blobs"));
+}
+
+#[test]
+fn object_options_without_url_are_refused() {
+    let failure = config(&[(ENV_BLOB_OPTIONS, "{}")]).unwrap_err();
+    assert!(failure.to_string().contains(ENV_BLOB_URL));
+}
+
+#[cfg(all(feature = "embedded-sparq", feature = "blob-object"))]
+#[test]
+fn object_configuration_is_explicit_and_redacted() {
+    let failure = config(&[(ENV_BLOB_URL, "file:///unused")]).unwrap_err();
+    assert!(failure.to_string().contains(ENV_DATA_DIR));
+    for url in [
+        "",
+        "not-a-url",
+        "https://bucket/path",
+        "s3://user:secret@bucket/path",
+        "s3://bucket/path?secret=value",
+        "gs://bucket/path#secret",
+    ] {
+        let failure = config(&[(ENV_DATA_DIR, "unused"), (ENV_BLOB_URL, url)]).unwrap_err();
+        assert!(failure.to_string().contains(ENV_BLOB_URL));
+        assert!(!failure.to_string().contains("secret"));
+    }
+    for options in ["secret", "[]", r#"{"token":123}"#] {
+        let failure = config(&[
+            (ENV_DATA_DIR, "unused"),
+            (ENV_BLOB_URL, "file:///unused"),
+            (ENV_BLOB_OPTIONS, options),
+        ])
+        .unwrap_err();
+        assert!(failure.to_string().contains(ENV_BLOB_OPTIONS));
+        assert!(!failure.to_string().contains("secret"));
+    }
+    let cfg = config(&[
+        (ENV_DATA_DIR, "unused"),
+        (ENV_BLOB_URL, "s3://private-bucket/path"),
+        (ENV_BLOB_OPTIONS, r#"{"aws_secret_access_key":"secret"}"#),
+    ])
+    .unwrap();
+    let diagnostic = format!("{cfg:?}");
+    assert!(!diagnostic.contains("secret"));
+    assert!(!diagnostic.contains("private-bucket"));
+}
+
+#[cfg(all(
+    feature = "embedded-sparq",
+    feature = "blob-object",
+    feature = "blob-fs"
+))]
+mod object_boot {
+    use super::*;
+    use futures_util::TryStreamExt;
+
+    fn object_config(data: &Directory, objects: &Directory) -> StorageConfig {
+        let url = url::Url::from_directory_path(&objects.0).unwrap();
+        config(&[
+            (ENV_DATA_DIR, data.0.to_str().unwrap()),
+            (ENV_BLOB_URL, url.as_str()),
+        ])
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn file_object_solid_put_get_survives_restart() {
+        embedded::restart_round_trip(false, true).await;
+    }
+
+    #[tokio::test]
+    async fn file_object_lws_put_get_survives_restart() {
+        embedded::restart_round_trip(true, true).await;
+    }
+
+    #[tokio::test]
+    async fn reopening_with_different_blob_backend_or_url_refuses_before_open() {
+        let objects = Directory::new();
+        let other_objects = Directory::new();
+        for original_object in [false, true] {
+            let data = Directory::new();
+            let original = if original_object {
+                object_config(&data, &objects)
+            } else {
+                data.config()
+            };
+            drop(original.open_embedded().await.unwrap());
+            let marker = fs::read(data.0.join("format.json")).unwrap();
+            let changed = if original_object {
+                data.config()
+            } else {
+                object_config(&data, &objects)
+            };
+            let failure = changed.open_embedded().await.err().unwrap();
+            assert!(failure.to_string().contains("blob backend mismatch"));
+            assert_eq!(fs::read(data.0.join("format.json")).unwrap(), marker);
+            if original_object {
+                let failure = object_config(&data, &other_objects)
+                    .open_embedded()
+                    .await
+                    .err()
+                    .unwrap();
+                assert!(failure.to_string().contains("blob URL mismatch"));
+                assert!(!failure
+                    .to_string()
+                    .contains(other_objects.0.to_str().unwrap()));
+                assert_eq!(fs::read(data.0.join("format.json")).unwrap(), marker);
+                assert!(fs::read_dir(&other_objects.0).unwrap().next().is_none());
+            }
+            drop(original.open_embedded().await.unwrap());
+        }
+        // Legacy markers have no backend field and denote filesystem blobs.
+        let data = Directory::new();
+        fs::write(
+            data.0.join("format.json"),
+            br#"{"schema":1,"index":{"major":1},"blobs":{"major":1}}"#,
+        )
+        .unwrap();
+        let failure = object_config(&data, &objects)
+            .open_embedded()
+            .await
+            .err()
+            .unwrap();
+        assert!(failure.to_string().contains("blob backend mismatch"));
+        assert!(!data.0.join("index").exists());
+    }
+
+    #[tokio::test]
+    async fn native_blobs_forwards_stream_beyond_object_snapshot_limit() {
+        let data = Directory::new();
+        let objects = Directory::new();
+        let cfg = object_config(&data, &objects);
+        let (_client, blobs) = cfg.open_embedded().await.unwrap();
+        let keys: std::collections::BTreeSet<_> =
+            (0..4097).map(|i| format!("b1-{i:032x}")).collect();
+        for key in &keys {
+            fs::write(objects.0.join(key), b"body").unwrap();
+        }
+        assert!(
+            blobs.list().await.is_err(),
+            "fixture must exceed snapshot limit"
+        );
+        let entries: Vec<_> = blobs
+            .list_stream()
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(entries
+            .iter()
+            .all(|entry| entry.last_modified.is_some() && entry.generation.is_none()));
+        assert_eq!(
+            entries
+                .into_iter()
+                .map(|entry| entry.key)
+                .collect::<std::collections::BTreeSet<_>>(),
+            keys
+        );
+    }
+
+    #[tokio::test]
+    async fn native_filesystem_stream_reports_stored_entries() {
+        let data = Directory::new();
+        let (_client, blobs) = data.config().open_embedded().await.unwrap();
+        let key = "b1-0123456789abcdef0123456789abcdef";
+        blobs
+            .put(key, bytes::Bytes::from_static(b"body"))
+            .await
+            .unwrap();
+        let entries: Vec<_> = blobs
+            .list_stream()
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, key);
+        assert!(entries[0].last_modified.is_some());
+    }
+
+    #[tokio::test]
+    async fn invalid_provider_options_fail_without_exposing_credentials() {
+        let data = Directory::new();
+        let objects = Directory::new();
+        let url = url::Url::from_directory_path(&objects.0).unwrap();
+        let cfg = config(&[
+            (ENV_DATA_DIR, data.0.to_str().unwrap()),
+            (ENV_BLOB_URL, url.as_str()),
+            (ENV_BLOB_OPTIONS, r#"{"private-option":"private-secret"}"#),
+        ])
+        .unwrap();
+        let failure = cfg.open_embedded().await.err().unwrap();
+        assert!(failure.to_string().contains(ENV_BLOB_OPTIONS));
+        assert!(!failure.to_string().contains("private-secret"));
+        assert!(!failure.to_string().contains(url.as_str()));
+        assert!(fs::read_dir(&objects.0).unwrap().next().is_none());
+        // Blob construction failed after opening the index; its lock was released.
+        drop(
+            object_config(&data, &objects)
+                .open_embedded()
+                .await
+                .unwrap(),
+        );
+    }
+}
+
+#[cfg(feature = "embedded-sparq")]
+#[test]
+fn format_publication_preserves_a_concurrent_winners_backend() {
+    let dir = Directory::new();
+    let marker = dir.0.join("format.json");
+    let tmp = dir.0.join("staged-format");
+    let existing = br#"{"schema":1,"index":{"major":1},"blobs":{"major":1}}"#;
+    fs::write(&marker, existing).unwrap();
+    fs::write(&tmp, br#"{"schema":1,"index":{"major":1},"blobs":{"major":1,"backend":"object","url":"file:///other"}}"#).unwrap();
+    assert!(publish_format(&tmp, &marker, Some("file:///other")).is_err());
+    assert_eq!(fs::read(&marker).unwrap(), existing);
+    fs::write(&tmp, existing).unwrap();
+    publish_format(&tmp, &marker, None).unwrap();
+    assert_eq!(fs::read(&marker).unwrap(), existing);
+    fs::remove_file(&marker).unwrap();
+    publish_format(&tmp, &marker, None).unwrap();
+    assert_eq!(fs::read(&marker).unwrap(), existing);
+}
+
+#[cfg(feature = "embedded-sparq")]
+#[test]
+fn format_backend_identity_is_checked_independently_of_url() {
+    let marker = br#"{"schema":1,"index":{"major":1},"blobs":{"major":1,"backend":"unknown"}}"#;
+    assert!(validate_format(marker, None).is_err());
+    let marker = br#"{"schema":1,"index":{"major":1},"blobs":{"major":1,"backend":"object","url":"s3://private/location"}}"#;
+    let failure = validate_format(marker, Some("s3://other/location")).unwrap_err();
+    assert!(failure.to_string().contains("blob URL mismatch"));
+    assert!(!failure.to_string().contains("private"));
 }

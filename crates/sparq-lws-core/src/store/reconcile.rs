@@ -17,10 +17,10 @@
 //! ## What it does — and the grace period (LOAD-BEARING)
 //! [`reconcile_orphans`]:
 //! 1. asks SPARQ for the WHOLE referenced-blob-key set ONCE ([`SparqClient::referenced_blob_keys`]),
-//! 2. lists the physically-stored blobs ([`BlobStore::list`]) — the START-OF-SWEEP snapshot,
+//! 2. streams physically-stored blobs ([`BlobStore::list_stream`]) into bounded batch snapshots,
 //! 3. classifies each stored blob against that snapshot (referenced / too-young / undated / a
 //!    delete candidate),
-//! 4. if there ARE delete candidates, re-fetches the referenced set ONCE more (skipped entirely when
+//! 4. if a batch has delete candidates, re-fetches the referenced set once for that batch (skipped when
 //!    there are none — see Finding 2), then for each delete candidate RE-CHECKS it against that fresh
 //!    set AND RE-STATS its current `last_modified` + `generation` ([`BlobStore::stat`]) — see the
 //!    snapshot-staleness race below,
@@ -43,8 +43,8 @@
 //! and (b) the final delete is an ATOMIC compare-and-delete — [`BlobStore::delete_if_unchanged`] removes
 //! the key ONLY while its current `generation` still equals the witness the fresh stat observed, with
 //! the compare + remove under a single critical section (no suspension point between them). That CLOSES
-//! the race for a [`BlobStore`] with an atomic `delete_if_unchanged` (the in-memory store, the only real
-//! impl): a concurrent rewrite either lands before the CAS (a new generation ⇒ CAS returns `false` ⇒ not
+//! the race for a [`BlobStore`] with an atomic `delete_if_unchanged` (such as the in-memory store):
+//! a concurrent rewrite either lands before the CAS (a new generation ⇒ CAS returns `false` ⇒ not
 //! deleted, recorded `skipped_revalidated`) or after it (the old bytes are already gone) — there is NO
 //! clobber window. A plain `stat()`-then-`delete()` could not close it (a gap always exists between the
 //! two calls); the atomic CAS can.
@@ -57,13 +57,12 @@
 //! the in-memory store's monotonic [`BlobEntry::generation`](crate::store::BlobEntry::generation) — strictly increasing on EVERY write, so a
 //! same-timestamp overwrite still has a strictly different generation and the CAS correctly refuses. The
 //! `last_modified` is still consulted, but ONLY for the time-based age/grace check (correct for "old
-//! enough" / inside-the-grace-window); it is NEVER the delete witness. A real `object_store` backend uses
-//! its native version/ETag/object-generation as the witness (the `M2-next:` seam on
-//! [`BlobStore::delete_if_unchanged`]); a backend with NO native write version (generation `None`) cannot
-//! do a safe CAS and must instead use unique-per-write keys.
+//! enough" / inside-the-grace-window); it is NEVER the delete witness. The native object adapter
+//! reports generation `None`, because its API has no conditional delete, and relies on
+//! unique-per-write keys even when the provider's read metadata includes an ETag.
 //!
 //! ### Which generation observation is the witness — the SNAPSHOT one (Finding 1, the threading fix)
-//! The witness is the generation observed at the START-OF-SWEEP `list()` snapshot, threaded END-TO-END in
+//! The witness is the generation observed in the current listing batch, threaded END-TO-END in
 //! the candidate alongside the key + snapshot `last_modified`, and CONFIRMED still-current by the fresh
 //! `stat()` (fresh == snapshot) before the delete. It must NOT be re-derived from the fresh stat: a blob
 //! rewritten between `list()` and the fresh `stat()` — same `last_modified`, NEW generation — would have
@@ -128,10 +127,11 @@
 //! cron hitting an admin endpoint), NOT a per-replica timer racing N sweeps — which is why periodic
 //! remains an explicit runtime opt-in rather than a boot default.
 
+use futures_util::{StreamExt, TryStreamExt};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 
-use super::blob::{BlobError, BlobStore};
+use super::blob::{BlobEntry, BlobError, BlobStore};
 use super::sparq::{SparqClient, SparqError};
 
 /// The default grace window: an unreferenced blob younger than this is PROTECTED (it may be a
@@ -190,7 +190,7 @@ pub struct ReconcileReport {
     pub too_young: usize,
     /// Orphans whose backend reported no `last_modified` — KEPT fail-closed (age unknowable).
     pub skipped_unknown_age: usize,
-    /// Orphans that looked deletable from the START-OF-SWEEP snapshot but turned out to be live again —
+    /// Orphans that looked deletable from the current batch snapshot but turned out to be live again —
     /// either now referenced by a freshly-committed index row, or rewritten. KEPT. This is the Finding-1
     /// defence-in-depth guard against clobbering a recreate that landed mid-sweep on a reused key (now
     /// closed at the root by unique-per-write keys, but retained as the strictly-stronger versioned path),
@@ -210,14 +210,15 @@ pub struct ReconcileReport {
     pub delete_errors: usize,
 }
 
-/// An error that ABORTS the whole sweep before (or independent of) any per-blob disposition.
+/// An error that aborts the sweep. Earlier streaming batches may have completed before a
+/// later listing or reference-query error; no further candidates are deleted after the error.
 #[derive(Debug, thiserror::Error)]
 pub enum ReconcileError {
-    /// The referenced-set query failed — we fail closed and do NOT delete anything (a missing
+    /// The referenced-set query failed — this batch deletes nothing (a missing
     /// referenced set must NEVER be read as "nothing is referenced").
     #[error("could not fetch the referenced-blob-key set: {0}")]
     ReferencedSet(#[source] SparqError),
-    /// Listing the blob store failed — nothing to reconcile against, so abort.
+    /// Listing the blob store failed — abort before processing any further batch.
     #[error("could not list the blob store: {0}")]
     ListBlobs(#[source] BlobError),
 }
@@ -241,16 +242,34 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
         .await
         .map_err(ReconcileError::ReferencedSet)?;
 
-    // 2. The physically-stored blobs.
-    let stored = blob.list().await.map_err(ReconcileError::ListBlobs)?;
+    // Keep object listing and candidate storage bounded. Each batch retains its listing-time
+    // witnesses and receives a fresh index check before deletion. A later listing error aborts
+    // the sweep; earlier batches may already have been reclaimed.
+    let mut stored = blob
+        .list_stream()
+        .await
+        .map_err(ReconcileError::ListBlobs)?
+        .try_chunks(1024);
+    let mut report = ReconcileReport::default();
+    while let Some(batch) = stored.next().await {
+        let stored = batch.map_err(|error| ReconcileError::ListBlobs(error.1))?;
+        reconcile_batch(sparq, blob, opts, &referenced, stored, &mut report).await?;
+    }
+    Ok(report)
+}
 
+async fn reconcile_batch<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
+    sparq: &S,
+    blob: &B,
+    opts: &ReconcileOptions,
+    referenced: &HashSet<String>,
+    stored: Vec<BlobEntry>,
+    report: &mut ReconcileReport,
+) -> Result<(), ReconcileError> {
     let now = crate::clock::now();
-    let mut report = ReconcileReport {
-        scanned: stored.len(),
-        ..Default::default()
-    };
+    report.scanned += stored.len();
 
-    // First pass — classify against the START-OF-SWEEP snapshot. Everything that is referenced,
+    // First pass — classify against the current batch snapshot. Everything that is referenced,
     // too-young, or undated is decided HERE (these dispositions need no fresh re-check: a referenced or
     // too-young or undated blob is never a delete candidate). The blobs that LOOK deletable from the
     // snapshot (old-enough + unreferenced) are collected — WITH the SNAPSHOT's `generation` (if any) as
@@ -324,11 +343,11 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
     // SPARQ query that could fail a sweep that had no work. Return the report (already fully partitioned
     // by the first pass — everything was referenced / too-young / undated) BEFORE the re-check.
     if candidates.is_empty() {
-        return Ok(report);
+        return Ok(());
     }
 
-    // RE-CHECK against the INDEX once, just before the delete pass (Finding 1, part a). The
-    // start-of-sweep `referenced` set can be stale. With unique-per-write keys a recreate gets a fresh
+    // RE-CHECK against the INDEX once per candidate batch, just before its delete pass (Finding 1, part a). The
+    // initial `referenced` set can be stale. With unique-per-write keys a recreate gets a fresh
     // key so it can no longer re-reference a candidate's key — but on a key-reusing backend a resource
     // recreated between the snapshot and now could commit a FRESH index row pointing at a candidate key,
     // and deleting it would clobber live bytes. Re-fetching the referenced set ONCE here (not per-key)
@@ -496,7 +515,7 @@ pub async fn reconcile_orphans<S: SparqClient + ?Sized, B: BlobStore + ?Sized>(
         }
     }
 
-    Ok(report)
+    Ok(())
 }
 
 /// The SHARED second-pass eligibility outcome — the SINGLE "would this candidate be deleted?" decision
@@ -517,7 +536,7 @@ enum DeletePlan {
 }
 
 /// The delete witness threaded END-TO-END for a delete candidate (FINDING 1 + FINDING 2). Fixed at the
-/// START-OF-SWEEP `list()` snapshot so the whole decision chain is anchored to ONE consistent observation.
+/// current listing batch so the whole decision chain is anchored to ONE consistent observation.
 enum CandidateWitness {
     /// The snapshot reported a native write version (`generation`): delete via the ATOMIC CAS keyed on
     /// THIS snapshot generation (Finding 1) — the strictly-stronger, clock-independent path.
@@ -533,7 +552,7 @@ enum CandidateWitness {
 struct Candidate {
     /// The blob key being considered for GC.
     key: String,
-    /// The `last_modified` the START-OF-SWEEP snapshot observed — the AGE anchor the fresh re-stat is
+    /// The `last_modified` the current batch snapshot observed — the AGE anchor the fresh re-stat is
     /// compared against (a newer fresh stamp ⇒ rewritten ⇒ kept).
     snapshot_ts: SystemTime,
     /// How to delete it: an atomic CAS on the snapshot generation (versioned) or an unconditional delete
@@ -605,6 +624,70 @@ mod tests {
     use crate::store::sparq::{InMemorySparqClient, ResourceMeta};
     use bytes::Bytes;
     use std::sync::Mutex;
+
+    struct LateListingFailure(InMemoryBlobStore);
+
+    #[async_trait::async_trait]
+    impl BlobStore for LateListingFailure {
+        async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+            self.0.get(key).await
+        }
+        async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+            self.0.put(key, body).await
+        }
+        async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+            self.0.exists(key).await
+        }
+        async fn delete(&self, key: &str) -> Result<(), BlobError> {
+            self.0.delete(key).await
+        }
+        async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+            panic!("reconciliation must consume the stream")
+        }
+        async fn list_stream(
+            &self,
+        ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+            let mut entries = self.0.list().await?;
+            entries.sort_by(|a, b| a.key.cmp(&b.key));
+            Ok(futures_util::stream::iter(entries.into_iter().map(Ok))
+                .chain(futures_util::stream::once(async {
+                    Err(BlobError::Backend("listing failed".into()))
+                }))
+                .chain(futures_util::stream::pending())
+                .boxed())
+        }
+        async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
+            self.0.stat(key).await
+        }
+        async fn delete_if_unchanged(&self, key: &str, generation: u64) -> Result<bool, BlobError> {
+            self.0.delete_if_unchanged(key, generation).await
+        }
+    }
+
+    #[tokio::test]
+    async fn late_listing_failure_aborts_the_current_batch() {
+        let blob = LateListingFailure(InMemoryBlobStore::new());
+        for n in 0..1025 {
+            blob.0
+                .put_with_time(&format!("{n:04}"), Bytes::new(), ago(3600))
+                .unwrap();
+        }
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            reconcile_orphans(&InMemorySparqClient::new(), &blob, &opts()),
+        )
+        .await
+        .expect("a listing error must abort without waiting for another page")
+        .unwrap_err();
+        assert!(matches!(error, ReconcileError::ListBlobs(_)));
+        for n in 0..1024 {
+            assert!(!blob.exists(&format!("{n:04}")).await.unwrap());
+        }
+        assert!(
+            blob.exists("1024").await.unwrap(),
+            "the failed batch must delete nothing"
+        );
+    }
 
     fn meta(blob_key: &str) -> ResourceMeta {
         ResourceMeta {

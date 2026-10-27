@@ -72,7 +72,8 @@ struct TestBlobState {
 
 /// A deterministic blob seam that can represent the backend's fail-closed `last_modified = None`
 /// case. Its compare-and-delete holds one mutex across the comparison and removal, matching the
-/// atomicity contract the production reconciler requires.
+/// atomicity contract the production reconciler requires. Only streaming enumeration is supported,
+/// so the periodic path must preserve the backend's stream override through its shared handle.
 #[derive(Default)]
 struct TestBlobStore {
     state: Mutex<TestBlobState>,
@@ -143,7 +144,14 @@ impl BlobStore for TestBlobStore {
     }
 
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
-        Ok(self
+        Err(BlobError::Backend("snapshot enumeration unsupported".into()))
+    }
+
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        use futures_util::StreamExt;
+        let entries: Vec<_> = self
             .state
             .lock()
             .map_err(|_| BlobError::Backend("poisoned".into()))?
@@ -154,7 +162,8 @@ impl BlobStore for TestBlobStore {
                 last_modified: entry.last_modified,
                 generation: Some(entry.generation),
             })
-            .collect())
+            .collect();
+        Ok(futures_util::stream::iter(entries.into_iter().map(Ok)).boxed())
     }
 
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
@@ -250,6 +259,10 @@ async fn runtime_flag_controls_periodic_sweep_without_weakening_delete_safety() 
         .insert("young-write-in-progress", Some(SystemTime::now()));
     blob.as_ref().insert("undated-orphan", None);
     blob.as_ref().insert("referenced-live", Some(old));
+    assert!(
+        blob.list().await.is_err(),
+        "this backend requires streaming enumeration"
+    );
     sparq
         .put_meta(
             "https://pod.example/live",

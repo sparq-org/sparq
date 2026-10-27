@@ -170,6 +170,12 @@ impl<T: BlobStore> BlobStore for SharedStore<T> {
         self.0.list().await
     }
 
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        self.0.list_stream().await
+    }
+
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
         self.0.stat(key).await
     }
