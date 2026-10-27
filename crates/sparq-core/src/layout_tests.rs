@@ -158,8 +158,11 @@ fn log_entries_are_synced_before_first_append_returns() {
             graph
                 .apply_delta(std::slice::from_ref(&update), &[])
                 .unwrap();
-            assert_entry_synced(&trace.take(), &slot, "wal.log");
+            assert!(!trace.take().iter().any(|(step, _)|
+                matches!(step.as_str(), "sync-data" | "log-file-synced" | "dir-synced")),
+                "journal-covered WAL writes defer sync");
             graph.clear_txn().unwrap();
+            assert_entry_synced(&trace.take(), &slot, "wal.log");
             graph.commit_txn(&[(true, None, later.clone())]).unwrap();
             graph
                 .apply_delta(std::slice::from_ref(&later), &[])
@@ -214,7 +217,7 @@ fn interrupted_replacement_log_append_keeps_acknowledged_data() {
                 );
                 assert!(hits > 0, "log sync crash point was not reached");
                 let pending = if log == "wal.log" {
-                    graph.wal.log().unwrap().needs_entry_sync
+                    *graph.wal.log().unwrap().needs_entry_sync.lock().unwrap()
                 } else {
                     assert!(graph.txn.as_ref().unwrap().poisoned());
                     graph.txn.as_ref().unwrap().needs_entry_sync
@@ -1078,8 +1081,10 @@ fn journal_clear_error_refuses_writes_across_the_tree() {
         target.commit_txn(&[(true, None, triple())]).unwrap();
         let log = target.wal.dir().unwrap().join("txn.log");
         let before = std::fs::read(&log).unwrap();
-        target.txn.as_mut().unwrap().file = std::fs::File::open(&log).unwrap();
+        let failing = log.clone();
+        fault::fail_when(move |step, path| step == "sync-data" && path == failing);
         assert!(target.clear_txn().is_err());
+        assert_eq!(fault::disarm(), 1);
         assert_eq!(std::fs::read(&log).unwrap(), before);
         assert!(root.is_frozen());
         assert!(root.apply_delta(&[triple()], &[]).is_err());
@@ -1524,4 +1529,30 @@ fn unsupported_directory_sync_is_an_error() {
         fsync_dir(Path::new("/dev/null")).unwrap_err().kind(),
         std::io::ErrorKind::InvalidInput
     );
+}
+
+#[test]
+fn journal_size_policy_checkpoints_after_materialization() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("store");
+    let mut graph = store(&path, 0);
+    let small = triple();
+    graph.commit_txn(&[(true, None, small.clone())]).unwrap();
+    graph.apply_delta(&[small], &[]).unwrap();
+    graph.finish_txn().unwrap();
+    let journal = TxnJournal::path(&path);
+    let retained = std::fs::read(&journal).unwrap();
+    assert!(!retained.is_empty());
+    graph.tree.checkpoint_if_due().unwrap();
+    assert_eq!(std::fs::read(&journal).unwrap(), retained);
+
+    let huge = Literal::new_simple_literal("x".repeat(4 * 1024 * 1024));
+    let triple = [name("large"), name("p"), huge.into()];
+    graph.commit_txn(&[(true, None, triple.clone())]).unwrap();
+    graph.apply_delta(&[triple], &[]).unwrap();
+    assert!(journal.metadata().unwrap().len() > 4 * 1024 * 1024);
+    graph.finish_txn().unwrap();
+    assert_eq!(journal.metadata().unwrap().len(), 0);
+    drop(graph);
+    assert_eq!(Graph::open(&path).unwrap().len(), 2);
 }

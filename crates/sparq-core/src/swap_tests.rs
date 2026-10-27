@@ -606,14 +606,18 @@ fn a_frozen_view_replays_root_and_named_transaction_logs_without_writing() {
     let root = scratch("frozen-transactions");
     let dir = root.join("g");
     let mut g = open_with_logged_update(&dir);
-    g.commit_txn(&[
-        (true, None, triple("root-txn")),
-        (true, Some(iri("g9")), triple("new-named-txn")),
+    // Construct a legacy recovery image, without starting a live materialization
+    // (which now refuses base rewrites until it is finished).
+    g.txn.as_mut().unwrap().append(&[
+        TxnOp::Insert { slot: None, triple: triple("root-txn") },
+        TxnOp::Insert { slot: Some(iri("g9")), triple: triple("new-named-txn") },
     ])
     .unwrap();
     g.named[0]
         .1
-        .commit_txn(&[(true, None, triple("child-txn"))])
+        .txn.as_mut().unwrap().append(&[TxnOp::Insert {
+            slot: None, triple: triple("child-txn"),
+        }])
         .unwrap();
     let paths = [
         dir.join("txn.log"),

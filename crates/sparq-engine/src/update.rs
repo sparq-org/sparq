@@ -1048,7 +1048,7 @@ fn apply_update_in_place(
 /// reproducing the exact committed state a [`update_in_place_capturing`] call applied to its
 /// (identically-seeded) in-memory working copy — WITHOUT re-parsing or re-evaluating the
 /// original update text. This is the durable mirror's apply path: each [`UpdateEffect::Delta`]
-/// goes through [`Graph::apply_delta`] (WAL-appended + fsync'd BEFORE it is applied on a
+/// goes through [`Graph::apply_delta`] (WAL-appended under the synced journal frame on a
 /// directory-backed graph), and the structural ops go through the same deterministic in-place
 /// machinery the data path uses, so the durable graph is byte-equivalent to the in-memory one.
 ///
@@ -1066,13 +1066,12 @@ fn apply_update_in_place(
 ///    CLEAR/DROP expand to the concrete retractions of the triples present NOW.
 /// 2. [`Graph::commit_txn`] writes that delta as ONE fsync'd `txn.log` frame — THE commit point
 ///    (a no-op for an in-memory graph and for an empty delta).
-/// 3. MATERIALISE via the existing per-effect loop; the per-graph WAL fsyncs here are now
-///    redundant-on-crash, not the commit point — correct, since `open` redoes the journal frame.
-/// 4. [`Graph::clear_txn`] empties the journal so the next body starts fresh.
+/// 3. MATERIALISE via the per-effect loop, deferring WAL and named-layout syncs.
+/// 4. [`Graph::finish_txn`] retains the journal until a size-triggered or explicit checkpoint
+///    durably flushes materialization before truncating it.
 ///
 /// For an IN-MEMORY graph (no journal/WAL) steps 2 & 4 are no-ops, so its behaviour is byte-for-byte
-/// unchanged. `DROP`'s manifest/sub-dir removal stays a materialisation concern (already crash-safe
-/// via `recover_named_drop`); the journal only carries the DATA retraction needed for atomicity.
+/// unchanged. Ordered CREATE/DROP records preserve graph existence across recovery.
 pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), String> {
     apply_effects_checked(graph, effects).map_err(|e| e.message)
 }
@@ -1159,9 +1158,8 @@ fn materialize_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<()
             }
         }
     }
-    // (sq-ycle) (4) The body is fully materialised into the per-graph state — clear the
-    // redo journal so the next body starts fresh and a clean reopen is a no-op (no-op in-memory).
-    graph.clear_txn()?;
+    // Keep the synced frame until checkpoint makes the materialization durable.
+    graph.finish_txn()?;
     Ok(())
 }
 
@@ -1610,6 +1608,65 @@ mod tests {
             "the acknowledged CREATE GRAPH survives the crash"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(feature = "parallel")] // mmap comes from the sparq-core dev-dep
+    #[test]
+    fn durable_effects_retain_frames_until_checkpoint() {
+        fn state(graph: &Graph) -> std::collections::BTreeMap<String, Vec<String>> {
+            fn triples(graph: &Graph) -> Vec<String> {
+                let mut triples: Vec<_> = graph
+                    .iter_ids()
+                    .map(|ids| ids.map(|id| graph.dict().term(id).to_string()).join(" "))
+                    .collect();
+                triples.sort();
+                triples
+            }
+            let mut state = std::collections::BTreeMap::from([(String::new(), triples(graph))]);
+            for (name, sub) in graph.named() {
+                state.insert(name.to_string(), triples(sub));
+            }
+            state
+        }
+        let dir =
+            std::env::temp_dir().join(format!("sparq_retained_frames_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::new().save(&dir).unwrap();
+        let mut durable = Graph::open(&dir).unwrap();
+        let mut working = Graph::new();
+        let mut previous = 0;
+        for query in [
+            "PREFIX : <http://ex/> INSERT DATA { :s :p :old . GRAPH :x { :s :p :old } }",
+            "PREFIX : <http://ex/> DROP GRAPH :x; CREATE GRAPH :x; INSERT DATA { GRAPH :x { :s :p :new } }; DELETE DATA { :s :p :old }; INSERT DATA { :s :p :new }",
+        ] {
+            let effects = update_in_place_capturing(&mut working, query, &crate::QueryBudget::unlimited()).unwrap();
+            apply_effects(&mut durable, &effects).unwrap();
+            let retained = std::fs::metadata(dir.join("txn.log")).unwrap().len();
+            assert!(retained > previous, "finish_txn must retain every committed frame");
+            previous = retained;
+        }
+        let copy = dir.with_extension("copy");
+        std::fs::remove_dir_all(&copy).ok();
+        durable
+            .save(&copy)
+            .expect("apply_effects must finish materialization before returning");
+        let effects = update_in_place_capturing(
+            &mut working,
+            "PREFIX : <http://ex/> INSERT DATA { :extra :p :new }",
+            &crate::QueryBudget::unlimited(),
+        )
+        .unwrap();
+        apply_effects(&mut durable, &effects).unwrap();
+        assert!(std::fs::metadata(dir.join("txn.log")).unwrap().len() > 0);
+        let expected = state(&working);
+        durable.poison_txn();
+        drop(durable);
+        let recovered = Graph::open(&dir).unwrap();
+        assert_eq!(state(&recovered), expected);
+        assert_eq!(std::fs::metadata(dir.join("txn.log")).unwrap().len(), 0);
+        drop(recovered);
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(copy).unwrap();
     }
 
     /// END-TO-END crash-recovery: build the resolved frame, COMMIT it to a durable store's redo

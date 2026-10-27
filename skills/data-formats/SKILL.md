@@ -76,6 +76,26 @@ Writable `wal.log` and `txn.log` handles defer entry sync until their first appe
 syncing the frame data, they sync the file and, on Unix, its parent directory before
 acknowledging that append. This also covers existing entries left by an interrupted open;
 opening a clean tree without writes does not sync logs or directories.
+Atomic updates use `commit_txn_ops(&ops)`, materialize through the durable methods,
+then call `finish_txn()`. The journal frame is synced before materialization; per-slot
+WAL appends and named-layout publication defer their syncs to checkpoint. Direct
+`apply_delta` calls outside a frame still sync before returning and checkpoint earlier
+frames first. `finish_txn()` checkpoints when retained journal bytes reach the internal
+`JOURNAL_CHECKPOINT_BYTES` limit (4 MiB), bounding recovery work while amortizing
+checkpoint writes across small updates. A single frame can exceed that limit.
+`clear_txn()` requests an immediate checkpoint: dirty WALs, new slot bases, manifest
+and directory entries become durable before the journal is truncated and synced.
+Base rewrites and saves checkpoint first and refuse unfinished materialization;
+writable open checkpoints after ordered replay. Switching between parent and child
+journals checkpoints the earlier completed transaction to preserve their recovery order.
+`close(self)` consumes the handle, refuses unfinished materialization and reports checkpoint errors;
+clean drop attempts the same checkpoint. A refused
+base rewrite during validation preserves its logs through drop; an explicit checkpoint or later successful
+write restores normal close behavior. A journal append or checkpoint sync
+failure freezes the shared tree until reopen, retaining the journal for recovery.
+After a successful journal commit, a later materialization/checkpoint error can still
+leave the whole update committed; callers must reopen before accepting further writes.
+
 Compaction packs sparse named slots throughout the tree even when no graph has pending
 triples, reclaiming both interior holes and the allocation cursor left by trailing drops.
 
