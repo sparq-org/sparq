@@ -139,6 +139,44 @@ fn offline(mut value: Value) -> Value {
     value
 }
 
+fn expected_description(name: &str, solid: bool) -> Value {
+    #[allow(unused_mut)]
+    let mut doc: Value = serde_json::from_slice(&fixture(name)).unwrap();
+    #[cfg(feature = "crdt-sync")]
+    {
+        let namespace = if solid { ".crdt" } else { ".lws/crdt" };
+        doc["service"].as_array_mut().unwrap().push(json!({
+            "id": format!("{ROOT}#crdt-sync"),
+            "type": format!("{SSD}CrdtSyncService"),
+            "serviceEndpoint": format!("{ROOT}{namespace}/tickets"),
+            "profile": format!("{SSD}y-protocol-v1"),
+            "roomTemplate": format!("wss://pod.example/{namespace}/socket?room={{room}}")
+        }));
+    }
+    let _ = solid;
+    doc
+}
+
+fn expected_solid_turtle(name: &str) -> Vec<Triple> {
+    #[allow(unused_mut)]
+    let mut graph = triples(RdfFormat::Turtle, &fixture(name));
+    #[cfg(feature = "crdt-sync")]
+    graph.extend(triples(
+        RdfFormat::Turtle,
+        format!(
+            r#"
+<{ROOT}> <{DID}service> <{ROOT}#crdt-sync>.
+<{ROOT}#crdt-sync> a <{SSD}CrdtSyncService>;
+ <{DID}serviceEndpoint> <https://pod.example/.crdt/tickets>;
+ <http://purl.org/dc/terms/conformsTo> <{SSD}y-protocol-v1>;
+ <{SSD}roomTemplate> "wss://pod.example/.crdt/socket?room={{room}}".
+"#
+        )
+        .as_bytes(),
+    ));
+    graph
+}
+
 fn triples(format: RdfFormat, body: &[u8]) -> Vec<Triple> {
     parse_to_triples(format, body, ROOT).unwrap()
 }
@@ -238,12 +276,14 @@ async fn lws_public_catalog_and_shape() {
     assert!(!String::from_utf8_lossy(&body).contains("MoveResource"));
     assert_eq!(
         doc,
-        serde_json::from_slice::<Value>(&fixture(if cfg!(feature = "sparql-endpoint") {
-            "lws.jsonld"
-        } else {
-            "lws-no-sparql.jsonld"
-        }))
-        .unwrap()
+        expected_description(
+            if cfg!(feature = "sparql-endpoint") {
+                "lws.jsonld"
+            } else {
+                "lws-no-sparql.jsonld"
+            },
+            false,
+        )
     );
     let open = lws(ServiceCatalog::default(), true).await;
     assert_eq!(
@@ -271,15 +311,18 @@ async fn lws_public_catalog_and_shape() {
             .as_array()
             .unwrap()
             .iter()
+            .any(|s| s["type"] == format!("{SSD}CrdtSyncService")),
+        cfg!(feature = "crdt-sync")
+    );
+    assert_eq!(
+        doc["service"]
+            .as_array()
+            .unwrap()
+            .iter()
             .any(|s| s["type"] == format!("{SSD}SparqlQueryService")
                 && s["serviceEndpoint"] == "https://pod.example/.lws/sparql"),
         cfg!(feature = "sparql-endpoint")
     );
-    assert!(!doc["service"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|s| s["type"] == format!("{SSD}CrdtSyncService")));
     let expanded = triples(
         RdfFormat::JsonLd,
         &serde_json::to_vec(&offline(doc)).unwrap(),
@@ -435,17 +478,14 @@ async fn solid_negotiation_graph_and_goldens() {
         canonical(&triples(
             RdfFormat::JsonLd,
             &serde_json::to_vec(&offline(
-                serde_json::from_slice(&fixture(&format!("solid{suffix}.jsonld"))).unwrap()
+                expected_description(&format!("solid{suffix}.jsonld"), true)
             ))
             .unwrap()
         ))
     );
     assert_eq!(
         canonical(&graph),
-        canonical(&triples(
-            RdfFormat::Turtle,
-            &fixture(&format!("solid{suffix}.ttl"))
-        ))
+        canonical(&expected_solid_turtle(&format!("solid{suffix}.ttl")))
     );
     assert_service(&graph, "storage-root", &format!("{LWS}StorageRoot"), ROOT);
     assert_service(

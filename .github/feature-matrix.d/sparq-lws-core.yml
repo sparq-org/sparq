@@ -110,6 +110,11 @@
   features: "authn-openid"
   test: true
 
+- name: "sparq-lws-core (crdt-sync)"
+  crate: "sparq-lws-core"
+  features: "crdt-sync"
+  test: true
+
 # Native filesystem adapter: run the real composite and reconciler paths.
 - name: "sparq-lws-core (blob-fs)"
   crate: "sparq-lws-core"

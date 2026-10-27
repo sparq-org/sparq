@@ -32,6 +32,39 @@ const LIST: &str = "HTTPS://App.Example:8443, http://Other.Example, https://[200
 const ALLOWED: &str = "https://aPP.eXAMPLE:8443";
 const UNLISTED: &str = "https://elsewhere.example";
 
+#[cfg(feature = "crdt-sync")]
+#[tokio::test]
+async fn collaboration_routes_inherit_the_origin_policy_in_both_modes() {
+    for lws in [false, true] {
+        let app = app(lws, CorsPolicy::from_origins(LIST).unwrap(), None, false).await;
+        let prefix = if lws { "/.lws/crdt" } else { "/.crdt" };
+        for (method, suffix) in [
+            ("POST", "tickets"),
+            ("GET", "socket"),
+            ("OPTIONS", "tickets"),
+            ("OPTIONS", "socket"),
+        ] {
+            for origin in [ALLOWED, UNLISTED] {
+                let response = app
+                    .clone()
+                    .oneshot(request(method, &format!("{prefix}/{suffix}"), Some(origin)))
+                    .await
+                    .unwrap();
+                if origin == ALLOWED {
+                    assert_allowed(&response, origin);
+                } else {
+                    assert_unlisted(&response);
+                }
+                if method == "OPTIONS" {
+                    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+                } else {
+                    assert!(response.status().is_client_error());
+                }
+            }
+        }
+    }
+}
+
 async fn app(
     lws: bool,
     policy: CorsPolicy,

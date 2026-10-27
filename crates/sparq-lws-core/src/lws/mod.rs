@@ -87,6 +87,8 @@ pub const META_SUFFIX: &str = ".meta";
 /// Boot configuration (see [`LwsConfig::from_env`]).
 #[derive(Debug, Clone)]
 pub struct LwsConfig {
+    #[cfg(feature = "crdt-sync")]
+    pub crdt_limits: sparq_lws_ysync::Limits,
     /// The public origin, without a trailing slash: `https://storage.example`.
     pub base_url: String,
     /// Browser origin policy shared with the outer overload response layer.
@@ -258,6 +260,8 @@ impl LwsConfig {
     /// suites built in that need no configuration ([`LwsConfig::suites`]).
     pub fn new(base_url: &str) -> Self {
         Self {
+            #[cfg(feature = "crdt-sync")]
+            crdt_limits: crate::crdt::limits_from_env().expect("valid CRDT limits"),
             base_url: base_url.trim_end_matches('/').to_string(),
             cors: crate::ldp::cors::CorsPolicy::default(),
             owner: None,
@@ -679,6 +683,8 @@ impl<S: Store> Clone for LwsState<S> {
 }
 
 pub struct Inner<S: Store> {
+    #[cfg(feature = "crdt-sync")]
+    pub(crate) crdt: std::sync::OnceLock<Arc<crate::crdt::CrdtState<S>>>,
     /// Every change to the store moves the listing snapshots it concerns (see [`tracked`]).
     pub store: tracked::Tracked<S>,
     pub cfg: LwsConfig,
@@ -816,9 +822,13 @@ impl<S: Store + 'static> LwsState<S> {
         let (owner, closed) = tokio::sync::watch::channel(());
         let mut catalog = resources::service_catalog(&cfg);
         catalog.extend(additional);
+        #[cfg(feature = "crdt-sync")]
+        crate::crdt::register(&mut catalog, &cfg.base_url, false);
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
+                #[cfg(feature = "crdt-sync")]
+                crdt: Default::default(),
                 store,
                 catalog,
                 cfg,
@@ -838,6 +848,8 @@ impl<S: Store + 'static> LwsState<S> {
                 sparql_parsing: Default::default(),
             }),
         };
+        #[cfg(feature = "crdt-sync")]
+        let _ = state.crdt.set(crate::crdt::CrdtState::lws(&state));
         // Changes a process stop cut short are put back before anything is served.
         // Nothing put back in the background starts until every step that can fail has
         // succeeded: a start that fails leaves nothing running to put an old state back over a
@@ -2536,6 +2548,10 @@ pub async fn router_with_catalog<S: Store + 'static>(
 /// (access requests, subscriptions, type search) are held to their own limits while the body is
 /// read, so no more than that is ever buffered for them; everything else to `max_body`.
 fn body_limit(path: &str, max_body: usize) -> usize {
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_ticket(path) {
+        return 8192.min(max_body);
+    }
     let limit = if path.starts_with(REQUESTS_PATH) {
         access::MAX_REQUEST_BYTES
     } else if path.starts_with(SUBSCRIPTIONS_PATH) {
@@ -2551,6 +2567,10 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_socket(req.uri().path()) {
+        return crate::crdt::lws_socket(&state, req).await;
+    }
     if notify::stream_path(req.uri().path()) {
         if let Err(refused) = check_headers(req.headers()) {
             return refused;
@@ -2654,6 +2674,10 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_ticket(path) {
+        return crate::crdt::lws_ticket(state, &req, &agent).await;
+    }
     #[cfg(feature = "sparql-endpoint")]
     if path == sparql::PATH {
         return sparql::handle(state, &req, &agent).await;

@@ -449,6 +449,23 @@ the catalog (currently webhooks). Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
 
+## Collaborate with Yjs
+
+The default-off native `crdt-sync` feature mounts ticket and Yjs socket services
+in Solid and LWS modes, and registers `CrdtSyncService` in the service catalog.
+These routes use the configured browser origin policy.
+See [collaboration](references/collaboration.md) for ticket JSON, room templates,
+read/write access, awareness, persistent room logs and configurable bounds.
+Live updates broadcast before persistence: clients retain their local Yjs state
+and append log resources on socket loss before reconnecting and synchronizing.
+Room loading and unload compaction are isolated per room. Closed connections release
+their presence IDs so a continuously occupied room supports new connections.
+Awareness forwarding follows protocol clocks; close cleanup follows the connection
+that first announced each state.
+Binary messages have limits on protocol record count and aggregate reply bytes.
+The native dependency's owned string interface uses the local standard-library adapter
+under `vendor/smallstr-shim`; document encoding remains supplied by `yrs`.
+
 ## Query readable resources
 
 The default `sparql-endpoint` feature exposes SPARQL Protocol `GET` and `POST`

@@ -1,0 +1,12 @@
+{
+  "name": "crdt-relay-interop-tests",
+  "private": true,
+  "scripts": {
+    "test": "cargo test -p sparq-lws-core --features crdt-sync --test crdt_sync real_javascript_peers -- --ignored --nocapture"
+  },
+  "devDependencies": {
+    "ws": "8.22.0",
+    "y-websocket": "3.1.0",
+    "yjs": "13.6.33"
+  }
+}
