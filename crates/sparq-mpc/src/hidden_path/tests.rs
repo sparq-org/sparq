@@ -326,9 +326,15 @@ fn huge_hop_count_is_refused_before_any_draw() {
         for k in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
             let mut dealer = backend.dealer();
             let mut counted = DrawCountingSource::new(&mut dealer);
-            let err =
-                eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, edge_set, k, 8)
-                    .expect_err("a hop count past the cap must be refused");
+            let err = eval_exact_k_chain_hidden_slots_through(
+                &mut counted,
+                &backend,
+                edge_set,
+                k,
+                PayloadWidths::derived(2),
+                8,
+            )
+            .expect_err("a hop count past the cap must be refused");
             assert!(
                 matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
                 "k={}: expected the hop-count refusal, got {:?}",
@@ -408,7 +414,14 @@ fn exact_k_through_refuses_a_source_that_does_not_match_the_backend() {
     // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
     // whether anything was drawn before the refusal.
     let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer());
-    match eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 4) {
+    match eval_exact_k_chain_hidden_slots_through(
+        &mut rec,
+        &backend,
+        &edges,
+        2,
+        PayloadWidths::derived(2),
+        4,
+    ) {
         Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
         other => panic!("a wrong-n source must be refused, got {other:?}"),
     }
@@ -428,7 +441,14 @@ fn exact_k_through_refuses_a_source_that_does_not_match_the_backend() {
             t,
         };
         let mut counted = DrawCountingSource::new(&mut lying);
-        match eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 4) {
+        match eval_exact_k_chain_hidden_slots_through(
+            &mut counted,
+            &backend,
+            &edges,
+            2,
+            PayloadWidths::derived(2),
+            4,
+        ) {
             Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
             other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
@@ -458,7 +478,14 @@ fn malformed_draws_in_the_chain_are_refused() {
         for how in ALL_MALFORMATIONS {
             let mut src =
                 MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, skip, how);
-            match eval_exact_k_chain_hidden_slots_through(&mut src, &backend, &edges, 2, 4) {
+            match eval_exact_k_chain_hidden_slots_through(
+                &mut src,
+                &backend,
+                &edges,
+                2,
+                PayloadWidths::derived(2),
+                4,
+            ) {
                 Err(MpcError::Protocol(m)) => assert!(m.contains(expected), "{skip}, {how:?}: {m}"),
                 other => panic!("{skip}, {how:?}: must fail closed, got {other:?}"),
             }
@@ -490,9 +517,15 @@ fn prss_fails_closed_on_every_exact_k_shape() {
     ]);
     // The formerly-draw-free shape still evaluates CORRECTLY through the seam on a
     // dealer source — it is the SOURCE that refuses below, not the shape.
-    let (slots, _) =
-        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), &backend, &edges, 1, 3)
-            .unwrap();
+    let (slots, _) = eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        &backend,
+        &edges,
+        1,
+        PayloadWidths::derived(2),
+        3,
+    )
+    .unwrap();
     assert_eq!(slots.len(), 3);
     assert_eq!(
         slot_pairs(&slots),
@@ -506,7 +539,14 @@ fn prss_fails_closed_on_every_exact_k_shape() {
     );
 
     for (edges, k) in [(&edges, 1), (&edges, 2), (&parallel, 1)] {
-        let outcome = eval_exact_k_chain_hidden_slots_through(&mut prss, &backend, edges, k, 4);
+        let outcome = eval_exact_k_chain_hidden_slots_through(
+            &mut prss,
+            &backend,
+            edges,
+            k,
+            PayloadWidths::derived(2),
+            4,
+        );
         assert!(
             matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
             "k = {k}: PRSS must fail closed, got {outcome:?}"
@@ -709,7 +749,15 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     let backend = ShamirBackend::new_seeded(3, 0x9A7B).unwrap();
     let (edges, _) = hidden_edges(&PIN_EDGES);
     let mut rec = RecordingSource::new(backend.dealer());
-    eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
+    eval_exact_k_chain_hidden_slots_through(
+        &mut rec,
+        &backend,
+        &edges,
+        2,
+        PayloadWidths::derived(2),
+        5,
+    )
+    .unwrap();
     assert_eq!(rec.log.len(), 2062);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
@@ -766,8 +814,15 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
     for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, bound)
-            .expect_err("an over-cap bound must be refused");
+        let err = eval_exact_k_chain_hidden_slots_through(
+            &mut counted,
+            &backend,
+            &edges,
+            2,
+            PayloadWidths::derived(2),
+            bound,
+        )
+        .expect_err("an over-cap bound must be refused");
         match &err {
             MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
             other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
@@ -821,8 +876,15 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
     for k in [2usize, 18] {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, k, 1)
-            .expect_err("a bound below the candidate count must be refused");
+        let err = eval_exact_k_chain_hidden_slots_through(
+            &mut counted,
+            &backend,
+            &edges,
+            k,
+            PayloadWidths::derived(2),
+            1,
+        )
+        .expect_err("a bound below the candidate count must be refused");
         match &err {
             MpcError::Protocol(m) => {
                 assert!(
@@ -851,7 +913,15 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     assert!(
-        eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 1, 1).is_err(),
+        eval_exact_k_chain_hidden_slots_through(
+            &mut counted,
+            &backend,
+            &edges,
+            1,
+            PayloadWidths::derived(2),
+            1
+        )
+        .is_err(),
         "B=1 below the k=1 count must be refused"
     );
     assert_eq!(counted.draws(), 0);
@@ -959,8 +1029,15 @@ fn both_branches_of_the_exact_k_bound_contract() {
     // draw, with a message carrying only B and the public bound.
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
-    let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 3)
-        .expect_err("B below both the public bound and the count must be refused");
+    let err = eval_exact_k_chain_hidden_slots_through(
+        &mut counted,
+        &backend,
+        &edges,
+        2,
+        PayloadWidths::derived(2),
+        3,
+    )
+    .expect_err("B below both the public bound and the count must be refused");
     assert_eq!(counted.draws(), 0, "refused before any draw");
     match &err {
         MpcError::Protocol(m) => {
@@ -1040,11 +1117,12 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
         MAX_OUTPUT_BOUND
     );
 
-    // `{0,1}` over 87_382 edges: the |V| = 2|E| diagonal plus length 1 is already
-    // `3·|E|` on this fixture.
+    // `{0,1}`: the |V| = 2|E| diagonal plus length 1 is already `3·|E|` on this
+    // fixture, so the public bound leaves `B`'s range at `|E| = ceil((B+1)/3)`.
     let one = HiddenBoundedPath::range("http://ex/p", 0, 1);
-    let wide = predicated_chain(87_382, "http://ex/p");
-    check_bounded_params(&backend, &wide, &one).expect("{0,1} over 87_382 edges is accepted");
+    let over = MAX_OUTPUT_BOUND / 3 + 1;
+    let wide = predicated_chain(over, "http://ex/p");
+    check_bounded_params(&backend, &wide, &one).expect("{0,1} over the fixture is accepted");
     let public_one =
         public_bounded_candidate_pair_bound(wide.len(), wide.declared_domain_len(), &one).unwrap();
     assert_eq!(public_one, 3 * 87_382);
@@ -1054,10 +1132,11 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
         public_one,
         MAX_OUTPUT_BOUND
     );
-    // One edge fewer still fits, so on this `|V| = 2|E|` fixture 87_382 is where the
+    // One edge fewer still fits, so on this `|V| = 2|E|` fixture `over` is where the
     // reach is actually lost.
     assert!(
-        public_bounded_candidate_pair_bound(87_381, 2 * 87_381, &one).unwrap() <= MAX_OUTPUT_BOUND
+        public_bounded_candidate_pair_bound(over - 1, 2 * (over - 1), &one).unwrap()
+            <= MAX_OUTPUT_BOUND
     );
 }
 
@@ -1100,9 +1179,15 @@ fn the_draw_method_count_projection_tracks_the_fold_count() {
         let mut recorder = RecordingSource::new(backend.dealer());
         // |E| = 3, k = 2: T = 9 tuples, and B = 9 is the public bound, so the bound
         // decision takes the public branch and no exact count is computed.
-        let (slots, _cost) =
-            eval_exact_k_chain_hidden_slots_through(&mut recorder, &backend, &edges, 2, 9)
-                .expect("the fixtures are legal");
+        let (slots, _cost) = eval_exact_k_chain_hidden_slots_through(
+            &mut recorder,
+            &backend,
+            &edges,
+            2,
+            PayloadWidths::derived(2),
+            9,
+        )
+        .expect("the fixtures are legal");
         // Every fixture below has an empty result, so the transcripts being compared
         // belong to calls that disclose the same answer.
         assert!(
@@ -1171,4 +1256,64 @@ fn the_draw_method_count_projection_tracks_the_fold_count() {
         fewer.len(),
         early.len()
     );
+}
+
+/// `check_output_entry_caps` precedes the chain's first equality draw. The
+/// output stage repeats the cap, so an empty recording distinguishes the entry.
+#[test]
+fn the_exact_k_entry_refuses_public_caps_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::RecordingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C01).unwrap();
+    let (edges, _int) = hidden_edges(&[("http://ex/a", "http://ex/b")]);
+    let mut source = RecordingSource::new(backend.dealer());
+    let err = eval_exact_k_chain_hidden_slots_through(
+        &mut source,
+        &backend,
+        &edges,
+        2,
+        PayloadWidths::declare(2, 2800).unwrap(),
+        MAX_OUTPUT_BOUND,
+    )
+    .expect_err("excessive declared slot work must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+        "{err:?}"
+    );
+    assert!(source.log.is_empty(), "the entry drew before refusing");
+}
+
+/// The DECLARED-width entries of this module are reachable, and a declaration
+/// enforces term fit at the output stage: a term that does not fit is refused, and one
+/// that fits runs and returns the same answer the derived default returns.
+#[test]
+fn the_declared_width_entries_refuse_an_over_width_term_and_otherwise_agree() {
+    let backend = ShamirBackend::new_seeded(5, 0x7C02).unwrap();
+    let (edges, _int) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+
+    // Wide enough for every endpoint IRI in the fixture: same answer as derived.
+    let declared = eval_exact_k_chain_hidden_with_widths(&backend, &edges, 2, 512, 8)
+        .expect("a declaration that fits every term runs");
+    let derived = eval_exact_k_chain_hidden(&backend, &edges, 2, 8).expect("the default runs");
+    assert_eq!(declared.vars, derived.vars);
+    assert_eq!(sorted_rows(&declared), sorted_rows(&derived));
+
+    // Too narrow for the fixture's IRIs: refused, naming the declaration only.
+    let err = eval_exact_k_chain_hidden_with_widths(&backend, &edges, 2, 4, 8)
+        .expect_err("a term wider than the declaration must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("declared per-term width")),
+        "{:?}",
+        err
+    );
+}
+
+fn sorted_rows(p: &PartialResult) -> Vec<String> {
+    let mut rows: Vec<String> = p.rows.iter().map(|r| format!("{r:?}")).collect();
+    rows.sort();
+    rows
 }

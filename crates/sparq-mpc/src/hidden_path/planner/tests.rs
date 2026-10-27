@@ -183,11 +183,11 @@ fn comm_counter_counts_equalities_reductions_and_output() {
         "mults must include equalities + reductions + B select mults"
     );
     assert!(
-        c.bytes_per_party() > 0,
+        c.bytes_per_party().unwrap() > 0,
         "a wired operator pays non-zero modelled bytes"
     );
     assert!(
-        c.total_rounds() > 0,
+        c.total_rounds().unwrap() > 0,
         "a wired operator has communication rounds"
     );
 }
@@ -199,7 +199,7 @@ fn comm_counter_is_deterministic() {
     let a = plan.comm_counter(5, 4).unwrap();
     let b = plan.comm_counter(5, 4).unwrap();
     assert_eq!(a.multiplications, b.multiplications);
-    assert_eq!(a.total_bytes(), b.total_bytes());
+    assert_eq!(a.total_bytes().unwrap(), b.total_bytes().unwrap());
 }
 
 #[test]
@@ -249,8 +249,8 @@ fn bounded_path_correctness_gate_passes() {
     assert_eq!(pairs, expected);
 }
 
-/// The cost model's own output bound is capped. `comm_counter` iterates `B` times
-/// and builds a real Waksman network over `B` slots, so an unchecked `B` would do
+/// The cost model's own output bound is capped. `comm_counter` builds a real
+/// Waksman network over `B` slots, so an unchecked `B` would do
 /// work and allocate in proportion to a caller-chosen number — and it would be
 /// modelling a run the output stage itself refuses.
 #[test]
@@ -275,4 +275,53 @@ fn comm_counter_refuses_an_over_cap_bound() {
     }
     // A bound inside the cap is still modelled.
     assert!(plan.comm_counter(5, 4).is_ok());
+}
+
+/// The cost model applies the output stage's PARTY cap, so it does not cost a
+/// plan the stage would refuse.
+///
+/// A cost model for a run that cannot happen is not a cost model: the bound cap
+/// alone let `comm_counter` report a figure for a party count the stage refuses
+/// outright. Aggregate slot work requires a threshold and payload width that
+/// this API does not receive; it is checked at the output stage.
+#[test]
+fn comm_counter_applies_the_output_party_cap() {
+    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+    let req = HiddenPathRequest::range("p", 1, 3);
+    let plan = plan_hidden_bounded_path(&req, 3).unwrap();
+
+    let err = plan
+        .comm_counter(MAX_OUTPUT_PARTIES + 1, 4)
+        .expect_err("a party count past the cap must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        "{:?}",
+        err
+    );
+    assert!(
+        plan.comm_counter(MAX_OUTPUT_PARTIES, 4).is_ok(),
+        "the cap itself is still modelled"
+    );
+    let err = plan.comm_counter(MAX_OUTPUT_PARTIES + 1, 0).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+    let empty = plan_hidden_bounded_path(&req, 0).unwrap();
+    assert_eq!(empty.secure_equalities, 0);
+    let err = empty.comm_counter(MAX_OUTPUT_PARTIES + 1, 1).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+    assert!(empty.comm_counter(MAX_OUTPUT_PARTIES, 1).is_ok());
+}
+
+#[test]
+fn comm_counter_does_not_assume_an_unstated_threshold() {
+    use crate::oblivious_join::{check_slot_work_budget, MAX_OUTPUT_PARTIES};
+    let bound = 8192;
+    let parties = MAX_OUTPUT_PARTIES;
+    assert!(check_slot_work_budget(bound, 0, parties, (parties - 1) / 2).is_err());
+    assert!(check_slot_work_budget(bound, 0, parties, 0).is_ok());
+    let plan = plan_hidden_bounded_path(&HiddenPathRequest::range("p", 1, 3), 3).unwrap();
+    let counter = plan
+        .comm_counter(parties, bound)
+        .expect("a threshold-free cost must admit a plan that fits at threshold zero");
+    assert_eq!(counter.parties, parties);
+    assert!(counter.multiplications >= bound as u64);
 }

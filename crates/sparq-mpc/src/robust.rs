@@ -100,9 +100,11 @@ use crate::shamir::Share;
 
 /// Maximum number of shares accepted by robust reconstruction.
 ///
-/// This cap follows #7167's planned `crate::oblivious_join::MAX_OUTPUT_PARTIES`.
-/// It is `1 << 10` for now and will be defined as that shared constant when
-/// #7167 merges, adopting whatever value it has then.
+/// Reconstruction accepts at most 1024 shares, before distinct-point validation,
+/// interpolation or decoding. The decoder's cubic work is not modelled by the
+/// output stage's slot-work budget. [`crate::oblivious_join::MAX_OUTPUT_PARTIES`]
+/// derives its ceiling from this constant for output slots or secure equalities
+/// and comparisons; sharing input keys alone does not require the output cap.
 pub const MAX_ROBUST_SHARES: usize = 1 << 10;
 
 /// Maximum number of reference-subset fits attempted for abort-path attribution.
@@ -708,10 +710,11 @@ mod tests {
     }
 
     #[test]
-    fn work_bound_accepts_1024_shares_on_consistency_check() {
+    fn work_bound_accepts_the_output_party_cap_on_consistency_check() {
         assert_eq!(MAX_ROBUST_SHARES, 1024);
+        assert_eq!(MAX_ROBUST_SHARES, crate::oblivious_join::MAX_OUTPUT_PARTIES);
         // Degree zero exercises the e=0 consistency path with redundancy.
-        let shares = work_bound_shares(1024, 0);
+        let shares = work_bound_shares(MAX_ROBUST_SHARES, 0);
         let clean = reconstruct_robust_attributed(&shares, 0).unwrap();
         assert_eq!(clean.secret, fp(42));
         assert!(clean.cheaters.is_empty());
@@ -719,24 +722,39 @@ mod tests {
     }
 
     #[test]
-    fn work_bound_refuses_1025_shares_before_distinct_point_validation() {
-        let mut shares = work_bound_shares(1025, 0);
-        let expected = "robust reconstruction: share count 1025 exceeds MAX_ROBUST_SHARES=1024";
-        for degree in [0, 1024] {
+    fn reconstruction_refuses_1025_shares() {
+        let shares = work_bound_shares(1025, 0);
+        for result in [
+            reconstruct_robust(&shares, 0),
+            reconstruct_robust_attributed(&shares, 0).map(|value| value.secret),
+        ] {
+            assert!(matches!(result, Err(MpcError::Protocol(m))
+                if m == "robust reconstruction: share count 1025 exceeds MAX_ROBUST_SHARES=1024"));
+        }
+    }
+
+    #[test]
+    fn work_bound_refuses_one_past_the_cap_before_distinct_point_validation() {
+        let mut shares = work_bound_shares(MAX_ROBUST_SHARES + 1, 0);
+        let expected = format!(
+            "robust reconstruction: share count {} exceeds MAX_ROBUST_SHARES={MAX_ROBUST_SHARES}",
+            MAX_ROBUST_SHARES + 1
+        );
+        for degree in [0, MAX_ROBUST_SHARES] {
             let err = reconstruct_robust_attributed(&shares, degree).unwrap_err();
             assert!(matches!(err, MpcError::Protocol(m) if m == expected));
             let err = reconstruct_robust(&shares, degree).unwrap_err();
             assert!(matches!(err, MpcError::Protocol(m) if m == expected));
         }
-        shares[1024].x = shares[0].x;
+        shares[MAX_ROBUST_SHARES].x = shares[0].x;
         let err = reconstruct_robust_attributed(&shares, 0).unwrap_err();
         assert!(matches!(err, MpcError::Protocol(m) if m == expected));
     }
 
     #[test]
     fn work_bound_preserves_existing_precondition_messages() {
-        let shares = work_bound_shares(1025, 0);
-        for n in [2, 1025] {
+        let shares = work_bound_shares(MAX_ROBUST_SHARES + 1, 0);
+        for n in [2, MAX_ROBUST_SHARES + 1] {
             let err = reconstruct_robust_attributed(&shares[..n], usize::MAX).unwrap_err();
             let expected = format!(
                 "robust reconstruction: degree {} + 1 overflows usize; no share count \

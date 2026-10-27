@@ -133,6 +133,43 @@ impl DisclosedKeyJoin {
     }
 }
 
+impl DisclosedKeyJoin {
+    /// [`GlobalJoin::join`] over exactly TWO relations, taking both by reference.
+    ///
+    /// The slice form has to clone its first input to seed the fold; a two-input
+    /// equi-join does not, and every join in `bounded_path` is a two-input join
+    /// whose left side is an accumulator the caller still owns and whose right side
+    /// is a BORROWED edge relation. Same preconditions, same result.
+    pub(crate) fn join_pair(
+        &self,
+        left: &PartialResult,
+        right: &PartialResult,
+        plan: &JoinPlan,
+    ) -> Result<PartialResult, MpcError> {
+        if !plan.key_disclosed {
+            return Err(MpcError::not_yet(
+                "hidden-value (private-key) cross-holder join — circuit-PSI / oblivious join",
+                "M3 MpcBackend + Q2 (trust model) + Q3 (BGP-join obliviousness cost, RQ2b)",
+            ));
+        }
+        for p in [left, right] {
+            if !p.vars.contains(&plan.join_var) {
+                return Err(MpcError::Protocol(format!(
+                    "holder {} did not disclose the join key ?{} (vars: {})",
+                    p.holder,
+                    plan.join_var.as_str(),
+                    p.vars
+                        .iter()
+                        .map(|v| format!("?{}", v.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )));
+            }
+        }
+        join_two(left, right)
+    }
+}
+
 impl GlobalJoin for DisclosedKeyJoin {
     fn join(&self, partials: &[PartialResult], plan: &JoinPlan) -> Result<PartialResult, MpcError> {
         // The hidden-value path is the deferred, fork-gated one: PRIVATE join
@@ -731,6 +768,24 @@ impl BatchedHiddenInput {
 pub type BatchedJoinOutput = (PartialResult, ObliviousOutputCost);
 
 impl HiddenValueJoin {
+    /// The output stage's PUBLIC-ONLY caps, run at THIS operator's entry — before a
+    /// key is dealt, an equality bit drawn or a candidate built.
+    ///
+    /// What it checks is the padded bound, the output arity and the compute-party
+    /// count, all of them the caller's own numbers. The DEFAULT width is a function
+    /// of the candidates' own rows, so the width's caps and the aggregate slot work
+    /// are decided at the stage, over the rows it packs — which is this crate's
+    /// long-standing draw schedule. An entry check that guessed a width from the
+    /// batches' widest term refused runs the stage itself accepts.
+    fn preflight_output_shape(&self, arity: usize, bound: usize) -> Result<(), MpcError> {
+        oblivious_join::check_output_entry_caps(
+            &oblivious_join::PayloadWidths::derived(arity),
+            bound,
+            self.backend.parties(),
+            self.backend.threshold(),
+        )
+    }
+
     /// The bound contract every candidate-materialising entry runs FIRST: refuse an
     /// over-cap `B`, then check both inputs' payload arity and keyed binding
     /// counts, count the candidates without enumerating them, and require `B` to
@@ -842,6 +897,12 @@ impl HiddenValueJoin {
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Preflight before a dealer exists: minting one is cheap, but it is still
         // keystream state created for a run that is about to be refused.
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         // Mint ONE fresh dealer for this protocol run (production: a fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across joins
@@ -870,6 +931,12 @@ impl HiddenValueJoin {
         // shuffle network from `bound`. So the candidate CARDINALITY is counted
         // without materialising the pairs, and `B` must be within the cap and cover
         // it (see `candidate_pair_count`).
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
         let n = self.backend.parties();
@@ -998,6 +1065,12 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Preflight before a dealer exists, as in `batched_join`.
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         // ONE fresh dealer for this protocol run (production: fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across
@@ -1021,6 +1094,12 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Validated before any draw or allocation, as in `batched_join_through`.
+        self.preflight_output_shape(
+            left.payload_vars
+                .len()
+                .saturating_add(right.payload_vars.len()),
+            bound,
+        )?;
         self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
 
@@ -3409,6 +3488,120 @@ mod randomness_seam_tests {
                     "{method:?} #{skip}: the targeted draw never happened"
                 );
             }
+        }
+    }
+
+    /// BOTH batched entries run the output stage's public-shape checks at their
+    /// OWN entry, before a key is dealt or an equality bit drawn. Derived widths
+    /// are resolved at the output stage, after these operators' own draws.
+    ///
+    /// The shape that refuses is a party count past
+    /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`], a public number, so neither
+    /// entry needs a candidate to decide it. Without the entry check, both paths
+    /// deal every key and draw every equality bit and only then let the output
+    /// stage refuse; `RecordingSource`'s empty log is what distinguishes the two.
+    #[test]
+    fn both_batched_entries_refuse_the_output_party_cap_before_any_draw() {
+        use crate::randomness::test_sources::RecordingSource;
+        let parties = crate::oblivious_join::MAX_OUTPUT_PARTIES + 2;
+        let b = ShamirBackend::new_seeded(parties, 0xBA7D1).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+
+        let mut rec = RecordingSource::new(b.dealer());
+        let err = join
+            .batched_join_through(&mut rec, &l, &r, 3)
+            .expect_err("a party count past the output cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+        assert!(rec.log.is_empty(), "batched_join drew before refusing");
+
+        let mut rec = RecordingSource::new(b.dealer());
+        let err = join
+            .fully_oblivious_batched_join_through(&mut rec, &l, &r, 3)
+            .expect_err("a party count past the output cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+        assert!(
+            rec.log.is_empty(),
+            "fully_oblivious_batched_join drew before refusing"
+        );
+    }
+
+    #[test]
+    fn batched_join_accepts_key_sharing_above_the_party_cap_without_output_slots() {
+        use crate::randomness::test_sources::RecordingSource;
+        let backend = ShamirBackend::new_seeded(1025, 0xBA7D3).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let left = input("L", "l", &[(5, "x")], RowBinding::Keyed(vec!["a".into()]));
+        let right = input("R", "r", &[(7, "y")], RowBinding::Keyed(vec!["b".into()]));
+        let empty = input("E", "e", &[], RowBinding::Keyed(vec![]));
+        for (left, right) in [(&left, &right), (&left, &empty), (&empty, &right)] {
+            let mut source = RecordingSource::new(backend.dealer());
+            let output = join.batched_join_through(&mut source, left, right, 0);
+            assert!(output.is_ok());
+            let (result, cost) = output.unwrap();
+            assert!(result.rows.is_empty());
+            assert_eq!(cost.bound, 0);
+            assert_eq!(cost.opens, 0);
+            let output = join.batched_join(left, right, 0);
+            assert!(output.is_ok());
+            let (result, cost) = output.unwrap();
+            assert!(result.rows.is_empty());
+            assert_eq!(cost.bound, 0);
+            assert_eq!(cost.opens, 0);
+            // The fully oblivious path shares only candidate keys; these groups
+            // do not overlap, so it has no party-dependent work at all.
+            let (result, _) = join.fully_oblivious_batched_join(left, right, 0).unwrap();
+            assert!(result.rows.is_empty());
+        }
+    }
+
+    #[test]
+    fn batched_join_refuses_output_slots_above_the_party_cap() {
+        use crate::randomness::test_sources::RecordingSource;
+        let backend = ShamirBackend::new_seeded(1025, 0xBA7D4).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let left = input("L", "l", &[(5, "x")], RowBinding::Keyed(vec!["a".into()]));
+        let right = input("R", "r", &[(7, "y")], RowBinding::Keyed(vec!["b".into()]));
+        let mut source = RecordingSource::new(backend.dealer());
+        for result in [
+            join.batched_join_through(&mut source, &left, &right, 1),
+            join.batched_join(&left, &right, 1),
+        ] {
+            let err = result.expect_err("output slots must refuse 1025 parties at B = 1");
+            assert!(matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+        }
+        assert!(
+            source.log.is_empty(),
+            "the output cap must precede key sharing"
+        );
+    }
+
+    #[test]
+    fn public_batched_entries_check_party_caps_before_input_shape() {
+        let parties = crate::oblivious_join::MAX_OUTPUT_PARTIES + 2;
+        let join = HiddenValueJoin::new(ShamirBackend::new_seeded(parties, 0xBA7D2).unwrap());
+        let (mut left, right) = positional_pair();
+        // Public fields may be changed after construction. The party cap must
+        // precede even this malformed input's shape and candidate checks.
+        left.rows[0].1.clear();
+        for result in [
+            join.batched_join(&left, &right, 3),
+            join.fully_oblivious_batched_join(&left, &right, 3),
+        ] {
+            let err = result.expect_err("the public party cap must run first");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+                "{:?}",
+                err
+            );
         }
     }
 

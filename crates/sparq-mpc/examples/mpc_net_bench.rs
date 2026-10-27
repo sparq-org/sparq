@@ -229,7 +229,9 @@ fn run(
         }
     };
     let wall_clock = start.elapsed();
-    let (bytes_sent, bytes_recv) = coord.byte_totals();
+    let (bytes_sent, bytes_recv) = coord
+        .byte_totals()
+        .expect("the measured byte totals fit u64");
 
     // Reap the party processes (they exit on Done).
     for mut c in children {
@@ -308,7 +310,8 @@ fn cell_json(cell: &NetworkCell, reference: u64) -> String {
         cell.wall_clock.as_micros(),
         cell.bytes_sent,
         cell.bytes_recv,
-        cell.total_bytes(),
+        cell.total_bytes()
+            .expect("the measured byte total fits u64"),
         cell.rounds,
     )
 }
@@ -338,7 +341,8 @@ fn print_human(cell: &NetworkCell, reference: u64) {
         cell.wall_clock.as_micros(),
         cell.bytes_sent,
         cell.bytes_recv,
-        cell.total_bytes(),
+        cell.total_bytes()
+            .expect("the measured byte total fits u64"),
         cell.rounds,
     );
 }

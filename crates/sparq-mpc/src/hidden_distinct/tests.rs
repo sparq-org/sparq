@@ -295,7 +295,13 @@ fn malformed_key_sharings_are_refused() {
         for how in ALL_MALFORMATIONS {
             let mut src =
                 MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, skip, how);
-            match distinct_hidden_pairs_slots_through(&mut src, &backend, &pairs, 4) {
+            match distinct_hidden_pairs_slots_through(
+                &mut src,
+                &backend,
+                &pairs,
+                PayloadWidths::derived(2),
+                4,
+            ) {
                 Err(MpcError::Protocol(m)) => {
                     assert!(
                         m.contains(SHAPE_REFUSAL),
@@ -334,7 +340,13 @@ fn distinct_through_refuses_a_source_that_does_not_match_the_backend() {
     // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
     // whether anything was drawn before the refusal.
     let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0xD15C9).unwrap().dealer());
-    match distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4) {
+    match distinct_hidden_pairs_slots_through(
+        &mut rec,
+        &backend,
+        &pairs,
+        PayloadWidths::derived(2),
+        4,
+    ) {
         Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
         other => panic!("a wrong-n source must be refused, got {other:?}"),
     }
@@ -353,7 +365,13 @@ fn distinct_through_refuses_a_source_that_does_not_match_the_backend() {
             t,
         };
         let mut counted = DrawCountingSource::new(&mut lying);
-        match distinct_hidden_pairs_slots_through(&mut counted, &backend, &pairs, 4) {
+        match distinct_hidden_pairs_slots_through(
+            &mut counted,
+            &backend,
+            &pairs,
+            PayloadWidths::derived(2),
+            4,
+        ) {
             Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
             other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
@@ -375,8 +393,14 @@ fn distinct_through_refuses_a_source_that_does_not_match_the_backend() {
 fn prss_fails_closed_on_every_distinct_shape() {
     use crate::prss::PrssRandomness;
     let backend = ShamirBackend::new_seeded(3, 0xD15CA).unwrap();
-    let (slots, cost) =
-        distinct_hidden_pairs_slots_through(&mut backend.dealer(), &backend, &[], 2).unwrap();
+    let (slots, cost) = distinct_hidden_pairs_slots_through(
+        &mut backend.dealer(),
+        &backend,
+        &[],
+        PayloadWidths::derived(2),
+        2,
+    )
+    .unwrap();
     assert_eq!(slots, vec![OutputSlot::Dummy, OutputSlot::Dummy]);
     assert_eq!(cost.rows, 0);
     let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
@@ -385,7 +409,13 @@ fn prss_fails_closed_on_every_distinct_shape() {
         vec![pair(1, 2, "a", "b")],
         vec![pair(1, 2, "a", "b"), pair(1, 2, "a", "b")],
     ] {
-        let outcome = distinct_hidden_pairs_slots_through(&mut prss, &backend, &pairs, 2);
+        let outcome = distinct_hidden_pairs_slots_through(
+            &mut prss,
+            &backend,
+            &pairs,
+            PayloadWidths::derived(2),
+            2,
+        );
         assert!(
             matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
             "PRSS must fail closed over {} rows, got {outcome:?}",
@@ -545,7 +575,8 @@ fn seeded_distinct_stage_transcript_is_pinned() {
         pair(5, 6, "e", "f"),
     ];
     let mut rec = RecordingSource::new(backend.dealer());
-    distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4).unwrap();
+    distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, PayloadWidths::derived(2), 4)
+        .unwrap();
     assert_eq!(rec.log.len(), 8532);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
@@ -582,8 +613,14 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
     for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = distinct_hidden_pairs_slots_through(&mut counted, &backend, &pairs, bound)
-            .expect_err("an over-cap bound must be refused");
+        let err = distinct_hidden_pairs_slots_through(
+            &mut counted,
+            &backend,
+            &pairs,
+            PayloadWidths::derived(2),
+            bound,
+        )
+        .expect_err("an over-cap bound must be refused");
         match &err {
             MpcError::Protocol(m) => {
                 assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m)
@@ -599,4 +636,112 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
     }
     // A legal bound over the same input still runs.
     assert!(distinct_hidden_pairs(&backend, &pairs, 4).is_ok());
+}
+
+/// Each DISTINCT entry must apply `check_output_entry_caps` before its own draws.
+/// One pair still draws its two key sharings, so omitting either preflight is
+/// observable even though the output stage repeats the public-cap check.
+#[test]
+fn both_distinct_entries_refuse_the_output_party_cap_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+    use crate::randomness::test_sources::RecordingSource;
+
+    let wide = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x9D11).unwrap();
+    let pairs = vec![pair(1, 2, "a", "b")];
+    for oblivious in [false, true] {
+        let mut source = RecordingSource::new(wide.dealer());
+        let result = if oblivious {
+            distinct_hidden_pairs_oblivious_through(
+                &mut source,
+                &wide,
+                &pairs,
+                PayloadWidths::derived(2),
+                1,
+            )
+            .map(|_| ())
+        } else {
+            distinct_hidden_pairs_slots_through(
+                &mut source,
+                &wide,
+                &pairs,
+                PayloadWidths::derived(2),
+                1,
+            )
+            .map(|_| ())
+        };
+        let err = result.expect_err("a party count past the output cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{err:?}"
+        );
+        assert!(
+            source.log.is_empty(),
+            "entry oblivious={oblivious} drew before refusing"
+        );
+    }
+}
+
+/// Public caps precede the input key-range check as well as the output stage.
+#[test]
+fn distinct_public_caps_precede_data_checks() {
+    use crate::oblivious_join::MAX_PAYLOAD_ARITY;
+    use crate::randomness::test_sources::RecordingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x9D13).unwrap();
+    let pairs = vec![pair(COMPARE_MAX_EXCLUSIVE, 2, "a", "b")];
+    for oblivious in [false, true] {
+        let mut source = RecordingSource::new(backend.dealer());
+        let widths = PayloadWidths::derived(MAX_PAYLOAD_ARITY + 1);
+        let result = if oblivious {
+            distinct_hidden_pairs_oblivious_through(&mut source, &backend, &pairs, widths, 1)
+                .map(|_| ())
+        } else {
+            distinct_hidden_pairs_slots_through(&mut source, &backend, &pairs, widths, 1)
+                .map(|_| ())
+        };
+        assert!(matches!(result, Err(MpcError::Protocol(m)) if m.contains("MAX_PAYLOAD_ARITY")));
+        assert!(source.log.is_empty());
+    }
+}
+
+/// The DECLARED-width entry is reachable and really declares: the padded per-slot
+/// width it pays is a closed form of the declaration, so two runs whose endpoint
+/// terms differ by orders of magnitude cost the same, which the derived default
+/// does not.
+#[test]
+fn the_declared_width_entry_pays_a_width_that_does_not_follow_the_data() {
+    let backend = ShamirBackend::new_seeded(5, 0x9D12).unwrap();
+    let short = vec![pair(1, 2, "a", "b")];
+    let long = vec![pair(1, 2, &"a".repeat(300), "b")];
+
+    let per_slot = |pairs: &[SecretEndpointPair], declared: Option<usize>| {
+        let (_slots, cost) = match declared {
+            Some(w) => distinct_hidden_pairs_oblivious_with_widths(&backend, pairs, w, 4),
+            None => distinct_hidden_pairs_oblivious(&backend, pairs, 4),
+        }
+        .expect("a legal run");
+        assert_eq!(cost.payload_select_mults % 4, 0);
+        cost.payload_select_mults / 4
+    };
+
+    // Declared: one width, whatever the data.
+    assert_eq!(
+        per_slot(&short, Some(512)),
+        per_slot(&long, Some(512)),
+        "a declared width must not follow the data"
+    );
+    // Derived: the wider data costs more, which is the residual the declaration
+    // removes.
+    assert!(
+        per_slot(&long, None) > per_slot(&short, None),
+        "the derived width must follow the data"
+    );
+    // And a term that does not fit the declaration is refused.
+    let err = distinct_hidden_pairs_oblivious_with_widths(&backend, &long, 64, 4)
+        .expect_err("a term wider than the declaration must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("declared per-term width")),
+        "{:?}",
+        err
+    );
 }
