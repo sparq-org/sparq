@@ -147,6 +147,37 @@ test.describe("compiler-compatible demo state", () => {
       finishLoading();
     }
   });
+
+  test("a malformed credential sample is dropped while the other sample remains queryable", async ({ page }) => {
+    await page.route("**/wasm/sparq_wasm*.js", async (route) => {
+      const response = await route.fetch();
+      const source = await response.text();
+      // Feed malformed JSON-LD to the real parser for just that sample.
+      await route.fulfill({
+        response,
+        body: `${source}\nconst originalLoadDataset = Store.loadDataset;
+Store.loadDataset = function(text, format) {
+  return originalLoadDataset.call(this, format === "jsonld" ? "{invalid sample}" : text, format);
+};`,
+      });
+    });
+    await gotoAppReady(page, "showcase/verifiable-credentials/");
+    await expect(page.locator("[data-vc-cred]")).toHaveCount(1);
+    await expect(page.locator("[data-vc-cred]")).toContainText("Driving licence (Turtle VC)");
+    await expect(page.locator("[data-vc-count]")).toHaveText(/1 · [1-9]\d* triples/);
+    await page.getByRole("button", { name: "Run query", exact: true }).click();
+    const table = page.getByRole("table");
+    await expect(table.locator("tbody tr")).toHaveCount(1);
+    await expect(table.getByRole("cell", { name: "<https://example.org/credentials/dl-9981>", exact: true })).toBeVisible();
+    await expect(table.getByRole("cell", { name: "<https://dvla.example/issuers/1>", exact: true })).toBeVisible();
+  });
+
+  test("an engine load failure removes every sample placeholder", async ({ page }) => {
+    await page.route("**/wasm/sparq_wasm*.js", (route) => route.abort("failed"));
+    await gotoAppReady(page, "showcase/verifiable-credentials/");
+    await expect(page.locator("[data-vc-count]")).toHaveText("0 · 0 triples");
+    await expect(page.locator("[data-vc-cred]")).toHaveCount(0);
+  });
 });
 
 test.describe("hydrated site navigation", () => {
