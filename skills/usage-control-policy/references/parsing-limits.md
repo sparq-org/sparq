@@ -12,8 +12,10 @@ RDF lists, predicate scans and extraction queries.
 - **Depth:** the existing compound descent cap is retained. The shared meter's
   independent triple-term nesting guard reports the same `Depth` refusal kind.
 - **Nodes:** defaults cover the former per-compound operand allowance times the
-  larger of distinct rule count and constraint-edge count, plus first-walk list
-  cells, capped by the policy-wide operand ceiling. Each compound independently
+  larger of distinct rule count and constraint-edge count, plus authored combinator
+  references and first-walk list cells, capped by the policy-wide operand ceiling.
+  The input-reference allowance also covers valid unattached combinator definitions.
+  Each compound independently
   retains the former operand cap, even with padding rules or raised caller limits.
   Combined expansion counts are checked before assembling compound operands.
   Operand references consume nodes; this ceiling bounds operand count, rather
@@ -39,6 +41,12 @@ values use `Arc` to preserve thread transfer. A memoized list or folded value co
 one reference node per reuse. Unattached atomic fields incur scans without building
 atoms or folding their right operands. Raw fields, folded values and compound
 shapes are cached for the duration of one parse.
+
+Combinator collections also retain shared member-key sequences. Their members are
+validated and deduplicated once per head; compound definitions keep the authored
+operand references. Expansion traverses these sequences with ordered deduplication,
+preserving the position of an explicitly authored direct operand. The compound
+operand count is checked before its result vector is reserved.
 
 ```rust
 use sparq_core::{Graph, meter::Ledger};

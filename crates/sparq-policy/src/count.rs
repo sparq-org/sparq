@@ -405,7 +405,7 @@ fn count_limit(op: Operator, right: &Value) -> Option<u64> {
     let n = match right {
         Value::Num(x) => *x,
         // a numeric-looking string bound
-        Value::Str(s) => s.trim().parse::<f64>().ok()?,
+        Value::Str(_) | Value::SharedStr(_) => right.as_str().trim().parse::<f64>().ok()?,
         _ => return None,
     };
     if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {

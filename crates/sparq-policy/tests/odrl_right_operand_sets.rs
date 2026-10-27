@@ -616,3 +616,63 @@ fn repeated_identical_left_operand_rows_still_fold() {
     assert!(!evaluate(&p, &purpose("urn:purpose/b")).allow);
     assert!(evaluate(&p, &purpose("urn:purpose/c")).allow);
 }
+#[test]
+fn owned_and_shared_temporal_values_keep_instant_comparisons() {
+    for (operator, expected) in [
+        ("eq", [true, false]),
+        ("neq", [false, true]),
+        ("lt", [false, true]),
+        ("lteq", [true, true]),
+        ("gt", [false, false]),
+        ("gteq", [true, false]),
+        ("isA", [true, false]),
+    ] {
+        for list in [false, true] {
+            let right = r#""2000-01-02T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>"#;
+            let right = if list {
+                format!("({right})")
+            } else {
+                right.to_owned()
+            };
+            for kind in ["permission", "prohibition"] {
+                let base = if kind == "prohibition" {
+                    "<urn:p> o:permission [ o:action o:read ] ."
+                } else {
+                    ""
+                };
+                let rdf = format!("@prefix o: <http://www.w3.org/ns/odrl/2/> . {base} <urn:p> o:{kind} [ o:action o:read; o:constraint [ o:leftOperand o:dateTime; o:operator o:{operator}; o:rightOperand {right} ] ] .");
+                let policy = parse_policy_str(&rdf, "turtle").unwrap();
+                for (i, actual) in [
+                    "2000-01-02T02:00:00+02:00",
+                    "2000-01-01T00:00:00Z",
+                    "invalid",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    for shared in [false, true] {
+                        let value = if shared {
+                            Value::SharedDateTime(actual.into())
+                        } else {
+                            Value::DateTime(actual.into())
+                        };
+                        let request = Request::new("http://www.w3.org/ns/odrl/2/read")
+                            .with("http://www.w3.org/ns/odrl/2/dateTime", value);
+                        let allowed = if i == 2 {
+                            false
+                        } else if kind == "permission" {
+                            expected[i]
+                        } else {
+                            !expected[i]
+                        };
+                        assert_eq!(
+                            evaluate(&policy, &request).allow,
+                            allowed,
+                            "{operator}, {kind}, list={list}, shared={shared}, actual={actual}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

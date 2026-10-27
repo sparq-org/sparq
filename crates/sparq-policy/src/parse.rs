@@ -81,7 +81,8 @@ pub fn default_policy_limits() -> Limits {
 /// Input-sized limits used by the ordinary parsing wrappers.
 /// `source_bytes` is the original source length when known. Otherwise bytes are
 /// four times the summed term bytes of all graph triples. Nodes cover rule and
-/// constraint references plus first-walk list cells, up to an operand ceiling.
+/// constraint references, authored combinator references and first-walk list cells,
+/// up to an operand ceiling.
 /// Each individual compound also retains its independent operand cap.
 pub fn default_policy_limits_for(graph: &Graph, source_bytes: Option<usize>) -> Limits {
     policy_limits(graph, source_bytes).0
@@ -104,11 +105,13 @@ fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) 
     let permission = id("permission");
     let prohibition = id("prohibition");
     let constraint = id("constraint");
+    let combinator = [id("and"), id("or"), id("xone")];
     let first = graph
         .dict()
         .lookup(&oxrdf::NamedNode::new_unchecked(format!("{RDF_NS}first")).into());
     let mut rules = BTreeSet::new();
     let mut constraints = 0usize;
+    let mut combinators = 0usize;
     let mut cells = 0usize;
     let scan = graph.store().scan(&pattern);
     for row in scan.rows.iter() {
@@ -117,6 +120,7 @@ fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) 
             rules.insert(triple[2]);
         }
         constraints += usize::from(triple[1] == constraint);
+        combinators += usize::from(combinator.contains(&triple[1]));
         cells += usize::from(triple[1] == first);
         if source_bytes.is_none() {
             for term in triple {
@@ -126,6 +130,7 @@ fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) 
     }
     limits.nodes = MAX_CONSTRAINT_NODES
         .saturating_mul(rules.len().max(constraints))
+        .saturating_add(combinators)
         .saturating_add(cells)
         .min(POLICY_NODE_CEILING);
     limits.bytes = source_bytes
@@ -1335,10 +1340,39 @@ fn absorb_properties(
 /// recursive assembly into a [`LogicalConstraint`]. sq-a0zef.
 struct LcDef {
     operator: LogicalOperator,
-    /// Operand node-keys in graph order (de-duplicated).
+    /// Authored operand node-keys in graph order (de-duplicated).
     operands: Vec<String>,
-    /// De-dup set for the operand node-keys.
+    /// Authored keys also preserve direct-operand positions during list traversal.
     seen: BTreeMap<String, ()>,
+    /// Collection operands retain one shared key sequence per list head.
+    list_operands: BTreeMap<String, Rc<[String]>>,
+}
+
+impl LcDef {
+    fn operand_keys(&self) -> impl Iterator<Item = &String> {
+        let mut seen = BTreeSet::new();
+        let has_lists = !self.list_operands.is_empty();
+        self.operands
+            .iter()
+            .flat_map(move |key| {
+                let list = self.list_operands.get(key);
+                let keys = list.map_or_else(|| std::slice::from_ref(key), |keys| keys.as_ref());
+                keys.iter().filter(move |member| {
+                    // Authored direct operands keep their original positions, including
+                    // when an earlier list also contains them.
+                    list.is_none() || !self.seen.contains_key(member.as_str())
+                })
+            })
+            .filter(move |key| !has_lists || seen.insert(key.as_str()))
+    }
+
+    fn operand_count(&self, cap: usize) -> usize {
+        if self.list_operands.is_empty() {
+            self.operands.len()
+        } else {
+            self.operand_keys().take(cap.saturating_add(1)).count()
+        }
+    }
 }
 
 /// A `LogicalConstraint` node carries one combinator property
@@ -1386,6 +1420,7 @@ fn logical_constraints_for(
                 operator,
                 operands: Vec::new(),
                 seen: BTreeMap::new(),
+                list_operands: BTreeMap::new(),
             });
             if def.seen.insert(okey.clone(), ()).is_none() {
                 def.operands.push(okey);
@@ -1445,11 +1480,11 @@ fn preflight_expansions(
         }
         active.insert(key.to_owned());
         let def = &defs[key];
-        let mut n = def.operands.len();
+        let mut n = def.operand_count(MAX_CONSTRAINT_NODES);
         if n > MAX_CONSTRAINT_NODES {
             return Some(MAX_CONSTRAINT_NODES + 1);
         }
-        for operand in &def.operands {
+        for operand in def.operand_keys() {
             if defs.contains_key(operand) {
                 n = n.saturating_add(size(operand, defs, memo, active)?);
             }
@@ -1490,8 +1525,8 @@ fn preflight_expansions(
 /// guard. That was fail-closed for a *permission*'s compound (never permits), but on a
 /// **prohibition** it silently DISABLED the compound (a never-satisfied carve-out never
 /// fires → deny-overrides is bypassed — the widening direction). This pass expands the
-/// head into its member node keys via the pre-loaded [`ListCell`] table, in place and
-/// in list order, deduplicated against the combinator's already-seen operands.
+/// head's member node keys via the pre-loaded [`ListCell`] table. Definitions retain
+/// shared sequences, traversed in list order and deduplicated against authored operands.
 ///
 /// **Strictly narrow:** a key is expanded ONLY when it would otherwise degrade — it is
 /// a list head (has a cons cell) AND is neither a known compound nor a known atomic
@@ -1519,8 +1554,7 @@ fn fold_list_operands(
     ledger: &mut Ledger,
 ) -> Result<(), String> {
     let nil = format!("<{RDF_NS}nil>");
-    // Snapshot the compound-node keys: the mutation below never adds/removes defs,
-    // only rewrites operand lists, so membership checks stay sound.
+    // Compound identity stays fixed while definitions acquire shared list references.
     let lc_keys: BTreeMap<String, ()> = lc_defs.keys().map(|k| (k.clone(), ())).collect();
     // A node with NO constraint reading (neither compound nor atomic) — only such
     // nodes are folded/refused; a real constraint keeps its reading.
@@ -1529,6 +1563,7 @@ fn fold_list_operands(
     let expandable = |k: &str| lists.cells.contains_key(k) && no_reading(k);
     let empty_op = |k: &str| *k == nil && no_reading(k);
     let rest_only_op = |k: &str| lists.rest_only.contains_key(k) && no_reading(k);
+    let mut resolved_keys: BTreeMap<String, Rc<[String]>> = BTreeMap::new();
     for def in lc_defs.values_mut() {
         if !def
             .operands
@@ -1537,9 +1572,8 @@ fn fold_list_operands(
         {
             continue;
         }
-        let old = std::mem::take(&mut def.operands);
-        for okey in old {
-            if empty_op(&okey) {
+        for okey in &def.operands {
+            if empty_op(okey) {
                 return Err(
                     "a LogicalConstraint combinator has an EMPTY collection operand (`( )`); \
                      a degenerate compound cannot be honoured deterministically on both rule \
@@ -1547,7 +1581,7 @@ fn fold_list_operands(
                         .to_owned(),
                 );
             }
-            if rest_only_op(&okey) {
+            if rest_only_op(okey) {
                 return Err(format!(
                     "a LogicalConstraint combinator has a MALFORMED collection operand \
                      ({okey}: a cons cell asserting `rdf:rest` but no `rdf:first`); a \
@@ -1555,8 +1589,8 @@ fn fold_list_operands(
                      widen decisions on a prohibition, so the policy is refused (fail-closed)"
                 ));
             }
-            if expandable(&okey) {
-                let Some(members) = well_formed_list(&okey, lists, ledger)? else {
+            if expandable(okey) {
+                let Some(members) = well_formed_list(okey, lists, ledger)? else {
                     return Err(format!(
                         "a LogicalConstraint combinator has a MALFORMED collection operand \
                          ({okey}: broken/dangling tail, cycle, or forked cell); honouring a \
@@ -1564,22 +1598,31 @@ fn fold_list_operands(
                          refused (fail-closed)"
                     ));
                 };
-                for member in members.iter() {
-                    let mkey = node_key(member);
-                    if (mkey == nil || lists.is_collection_shaped(&mkey)) && no_reading(&mkey) {
-                        return Err(format!(
-                            "a LogicalConstraint combinator collection operand ({okey}) has a \
-                             NESTED-list member ({mkey}); nested collections are not a \
-                             supported operand shape and are refused (fail-closed)"
-                        ));
+                let keys = if let Some(keys) = resolved_keys.get(okey) {
+                    Rc::clone(keys)
+                } else {
+                    let mut keys = Vec::new();
+                    let mut seen = BTreeSet::new();
+                    keys.try_reserve(members.len())
+                        .map_err(|_| budget_error(ConstraintBudget::Nodes))?;
+                    for member in members.iter() {
+                        let mkey = node_key(member);
+                        if (mkey == nil || lists.is_collection_shaped(&mkey)) && no_reading(&mkey) {
+                            return Err(format!(
+                                "a LogicalConstraint combinator collection operand ({okey}) has a \
+                                 NESTED-list member ({mkey}); nested collections are not a \
+                                 supported operand shape and are refused (fail-closed)"
+                            ));
+                        }
+                        if seen.insert(mkey.clone()) {
+                            keys.push(mkey);
+                        }
                     }
-                    if def.seen.insert(mkey.clone(), ()).is_none() {
-                        def.operands.push(mkey);
-                    }
-                }
-            } else {
-                // Already deduplicated at absorb time — keep its position.
-                def.operands.push(okey);
+                    let keys: Rc<[String]> = keys.into();
+                    resolved_keys.insert(okey.clone(), Rc::clone(&keys));
+                    keys
+                };
+                def.list_operands.insert(okey.clone(), keys);
             }
         }
     }
@@ -1620,16 +1663,17 @@ fn assemble_logical_inner(
     let def = lc_defs
         .get(lc_key)
         .expect("assemble_logical called on a non-LC node");
-    if def.operands.len() > *remaining {
+    let width = def.operand_count(*remaining);
+    if width > *remaining {
         return Err(budget_error(ConstraintBudget::Expansion));
     }
-    *remaining -= def.operands.len();
+    *remaining -= width;
     active.insert(lc_key.to_owned(), ());
     let mut operands = Vec::new();
     ledger
-        .reserve(&mut operands, def.operands.len(), Dim::Nodes)
+        .reserve(&mut operands, width, Dim::Nodes)
         .map_err(expansion_error)?;
-    for okey in &def.operands {
+    for okey in def.operand_keys() {
         let node = if lc_defs.contains_key(okey) {
             if active.contains_key(okey) {
                 // A cycle in the LogicalConstraint graph — fail closed rather than loop.
@@ -2257,6 +2301,83 @@ mod metered_tests {
     }
 
     #[test]
+    fn combinator_lists_keep_direct_operand_positions() {
+        let def = LcDef {
+            operator: LogicalOperator::And,
+            operands: vec!["list0".into(), "list1".into(), "b".into()],
+            seen: BTreeMap::from([("list0".into(), ()), ("list1".into(), ()), ("b".into(), ())]),
+            list_operands: BTreeMap::from([
+                (
+                    "list0".into(),
+                    Rc::from(["a".into(), "b".into(), "a".into(), "c".into()]),
+                ),
+                (
+                    "list1".into(),
+                    Rc::from(["b".into(), "d".into(), "c".into()]),
+                ),
+            ]),
+        };
+        assert_eq!(
+            def.operand_keys().map(String::as_str).collect::<Vec<_>>(),
+            ["a", "c", "d", "b"]
+        );
+        assert_eq!(def.operand_count(2), 3);
+        assert_eq!(def.operand_count(4), 4);
+    }
+
+    #[test]
+    fn combinator_lists_share_member_keys_before_expansion() {
+        for distinct in [true, false] {
+            let mut rdf = format!("<urn:list> <{RDF_NS}first> <urn:v0>; <{RDF_NS}rest> (");
+            for i in 1..4000 {
+                let member = if distinct { i } else { i % 2 };
+                rdf.push_str(&format!(" <urn:v{member}>"));
+            }
+            rdf.push_str(") .");
+            let graph = Graph::load_str(&rdf, "turtle").unwrap();
+            let mut ledger = Ledger::new(Limits::default());
+            let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+            let head = "<urn:list>".to_owned();
+            let mut defs: BTreeMap<_, _> = (0..4000)
+                .map(|i| {
+                    (
+                        format!("root{i}"),
+                        LcDef {
+                            operator: LogicalOperator::And,
+                            operands: vec![head.clone()],
+                            seen: BTreeMap::from([(head.clone(), ())]),
+                            list_operands: BTreeMap::new(),
+                        },
+                    )
+                })
+                .collect();
+            fold_list_operands(&mut defs, &BTreeMap::new(), &lists, &mut ledger).unwrap();
+            let first = &defs.values().next().unwrap().list_operands[&head];
+            for def in defs.values() {
+                assert!(Rc::ptr_eq(first, &def.list_operands[&head]));
+                assert_eq!(def.operands.as_slice(), std::slice::from_ref(&head));
+                assert_eq!(def.seen.len(), 1, "keep the authored key index compact");
+            }
+            assert_eq!(first.len(), if distinct { 4000 } else { 2 });
+            assert_eq!(ledger.spent(Dim::Nodes), 4000 + 3999);
+            assert_eq!(lists.walks.get(), 1);
+            let mut expansion = Ledger::new(Limits::default());
+            let result =
+                assemble_logical("root0", &defs, &lists, &mut BTreeMap::new(), &mut expansion);
+            if distinct {
+                assert_eq!(
+                    constraint_budget_refusal(&result.unwrap_err()),
+                    Some(ConstraintBudget::Expansion)
+                );
+                assert_eq!(expansion.spent(Dim::Nodes), 0);
+            } else {
+                assert_eq!(result.unwrap().operands.len(), 2);
+                assert_eq!(expansion.spent(Dim::Nodes), 2);
+            }
+        }
+    }
+
+    #[test]
     fn wide_compound_refuses_before_allocating_operands() {
         let mut defs = BTreeMap::new();
         defs.insert(
@@ -2265,6 +2386,7 @@ mod metered_tests {
                 operator: LogicalOperator::And,
                 operands: (0..1_000_000).map(|i| format!("atom{i}")).collect(),
                 seen: BTreeMap::new(),
+                list_operands: BTreeMap::new(),
             },
         );
         let mut limits = Limits::default();
@@ -2294,6 +2416,7 @@ mod metered_tests {
                     operator: LogicalOperator::And,
                     operands: vec!["sub".into()],
                     seen: BTreeMap::new(),
+                    list_operands: BTreeMap::new(),
                 },
             ),
             (
@@ -2302,6 +2425,7 @@ mod metered_tests {
                     operator: LogicalOperator::And,
                     operands: vec!["atom".into()],
                     seen: BTreeMap::new(),
+                    list_operands: BTreeMap::new(),
                 },
             ),
         ]);

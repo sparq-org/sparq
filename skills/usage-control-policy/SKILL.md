@@ -64,6 +64,12 @@ assert_eq!(d.matched_rules.len(), 1);  // the granting permission, for audit
 - **`LogicalConstraint`** — a compound `odrl:LogicalConstraint`: a `LogicalOperator` (`And`/`Or`/`Xone`) over a set of operand `ConstraintNode`s (each atomic **or** nested compound). sq-a0zef. Parsed leaves use `ConstraintNode::SharedAtomic(Arc<Constraint>)`; hand-built leaves may use `Atomic(Constraint)`. Both compare and evaluate by their constraint contents.
 - **`Duty`** — an obligation (`action`) that must be in the request's `discharged_duties` set, or the permission is denied.
 
+The shared variants are a source compatibility change for exhaustive matches on
+`Value` and `ConstraintNode`: handle `SharedIri`, `SharedStr`, `SharedDateTime` and
+`SharedAtomic` alongside their owned counterparts. Read text with `Value::as_str()`
+and borrow a shared leaf with `Arc::as_ref()`. Existing owned constructors and
+`Constraint` fields retain their types. Policies retain `Send` and `Sync`.
+
 ## Evaluation semantics (fail-closed)
 
 1. A `Rule` **matches** when its action permits the request action (per the ODRL action hierarchy — `use` subsumes its sub-actions but not the `transfer` subtree), its `target`/`assignee` (if set) agree (by IRI equality **or collection membership** — see below), and **every** atomic `Constraint` **and** compound `LogicalConstraint` is satisfied (all ANDed).
@@ -98,7 +104,7 @@ assert!(evaluate(&policy, &req).allow); // a sub-region of the named region gran
 
 ## Building the request
 
-`Request::new(action_iri)` then chain `.on(target)`, `.by(party)`, `.with(left_operand_iri, Value)` for each context dimension (`dateTime`, `purpose`, `recipient`, `count`, `spatial`, …), `.with_purpose_subsumption(narrower, broader)` / `.with_purpose_taxonomy([(n, b), …])` per asserted subsumption edge (the DPV-purpose taxonomy / spatial region trees, above — one closure for both taxonomic dimensions), `.with_party_membership(party, collection)` / `.with_asset_membership(asset, collection)` (and bulk `…_memberships([…])`) per ODRL collection-membership edge (above), and `.discharge(duty_action_iri)` per discharged duty. `Value` is `Iri` | `Str` | `Num(f64)` | `DateTime(String)`. For purpose specifically, prefer the first-class `.for_purpose(Value)` (sugar over `.with(ODRL_PURPOSE, ..)`; read it back via `req.purpose()`); for the evaluation time prefer `.at(instant)` (sugar over `.with(ODRL_DATETIME, Value::DateTime(..))`; read it back via `req.request_time()`).
+`Request::new(action_iri)` then chain `.on(target)`, `.by(party)`, `.with(left_operand_iri, Value)` for each context dimension (`dateTime`, `purpose`, `recipient`, `count`, `spatial`, …), `.with_purpose_subsumption(narrower, broader)` / `.with_purpose_taxonomy([(n, b), …])` per asserted subsumption edge (the DPV-purpose taxonomy / spatial region trees, above — one closure for both taxonomic dimensions), `.with_party_membership(party, collection)` / `.with_asset_membership(asset, collection)` (and bulk `…_memberships([…])`) per ODRL collection-membership edge (above), and `.discharge(duty_action_iri)` per discharged duty. Construct owned values with `Iri(String)`, `Str(String)`, `Num(f64)` or `DateTime(String)`; parsed values may also use the shared text variants described above. For purpose specifically, prefer the first-class `.for_purpose(Value)` (sugar over `.with(ODRL_PURPOSE, ..)`; read it back via `req.purpose()`); for the evaluation time prefer `.at(instant)` (sugar over `.with(ODRL_DATETIME, Value::DateTime(..))`; read it back via `req.request_time()`).
 
 For the internal `sparq-acbench` corpus, `PersonalDataset`, `ProjectMgmtDataset`, and
 `ConsortiumDataset` export `group_memberships: BTreeMap<String, BTreeSet<String>>`
@@ -182,6 +188,10 @@ A `dateTime` constraint gates a permission/prohibition to a **time window** — 
 ## `odrl:count` enforcement (stateful, opt-in `count-enforcement`) — sq-zi5w
 
 `odrl:count` limits the **number of times** a permission may be exercised ("read at most 5 times"). Unlike `purpose`/`dateTime`/`recipient` (stateless — a single test against evidence the request carries), a count limit is **stateful**: it lives in a usage counter that persists *across* requests. Behind the off-by-default `count-enforcement` feature on `sparq-policy` (the default build is unchanged — it treats `odrl:count` as the stateless numeric comparison), `evaluate_and_exercise` runs the **real** `evaluate` decision and, on a grant, **atomically consumes** one unit of budget.
+
+Numeric-looking string bounds have the same allowance whether authored as a scalar
+or a singleton collection. Owned and shared string values participate in the same
+minimum when a rule declares several count bounds.
 
 ```rust,ignore
 // cargo: sparq-policy with --features count-enforcement

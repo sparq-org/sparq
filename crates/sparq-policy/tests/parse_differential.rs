@@ -623,3 +623,30 @@ fn repeated_atomic_rights_retain_main_operand_allowance() {
         parse_policy_str(&rdf, "turtle").unwrap();
     }
 }
+
+#[test]
+fn shared_combinator_lists_keep_direct_positions_and_deduplicate_members() {
+    let rdf = r#"@prefix o: <http://www.w3.org/ns/odrl/2/> .
+        <urn:p> o:permission <urn:r0>, <urn:r1> .
+        <urn:r0> o:constraint <urn:lc> . <urn:r1> o:constraint <urn:lc> .
+        <urn:lc> o:and ( <urn:a> <urn:b> <urn:a> ), ( <urn:b> <urn:c> ), <urn:b> .
+        <urn:a> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand <urn:va> .
+        <urn:b> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand <urn:vb> .
+        <urn:c> o:leftOperand o:purpose; o:operator o:eq; o:rightOperand <urn:vc> ."#;
+    let policy = parse_policy_str(rdf, "turtle").unwrap();
+    assert_eq!(policy.permissions.len(), 2);
+    for rule in &policy.permissions {
+        assert_eq!(rule.logical_constraints[0].operands.len(), 3);
+    }
+}
+
+#[test]
+fn unattached_shared_combinators_keep_main_empty_policy_result() {
+    let rdf = r#"@prefix o: <http://www.w3.org/ns/odrl/2/> .
+        @prefix r: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+        <urn:list> r:first <urn:atom>; r:rest r:nil .
+        <urn:lc0> o:and <urn:list> . <urn:lc1> o:and <urn:list> ."#;
+    let policy = parse_policy_str(rdf, "turtle").unwrap();
+    assert!(policy.permissions.is_empty());
+    assert!(policy.prohibitions.is_empty());
+}

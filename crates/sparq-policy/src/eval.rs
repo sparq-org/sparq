@@ -1263,6 +1263,20 @@ fn constraint_status(c: &Constraint, request: &Request) -> ConstraintStatus {
     }
     match resolve_actual(c, request) {
         None => ConstraintStatus::Unprovable,
+        Some(actual)
+            if matches!(
+                c.operator,
+                Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq
+            ) =>
+        {
+            // Ordering has the same meaning with or without membership evidence.
+            // Retain its result for both comparability and the constraint's truth.
+            match ordered_comparison(actual, c.operator, &c.right) {
+                Some(true) => ConstraintStatus::Satisfied,
+                Some(false) => ConstraintStatus::DefinitelyUnsatisfied,
+                None => ConstraintStatus::Unprovable,
+            }
+        }
         // An incomparable pair (mismatched types, an unparseable dateTime, a typed set
         // member) is Unknown too, so it can neither satisfy nor refute a constraint.
         Some(actual) if !comparable(actual, c.operator, &c.right) => ConstraintStatus::Unprovable,
@@ -1373,8 +1387,9 @@ fn is_subsumable_dimension(left: &str) -> bool {
 /// matched against the constraint value *and every broader value* the request's
 /// supplied subsumption closure proves it falls under (see
 /// [`Request::with_purpose_subsumption`]); every other dimension is the plain
-/// [`compare`]. One source of truth for both [`constraint_status`] and
-/// [`constraint_satisfied`]. sq-z3ve / sq-wukl.
+/// [`compare`]. Order operators share [`ordered_comparison`], which
+/// [`constraint_status`] uses directly to retain the comparability result;
+/// other operators route through this helper. sq-z3ve / sq-wukl.
 ///
 /// The `odrl:recipient` dimension is additionally **party-collection resolvable**
 /// (sq-c2aze): when the request supplies party-membership evidence
@@ -1624,18 +1639,20 @@ fn compare(actual: &Value, op: Operator, bound: &Value) -> bool {
         Operator::IsPartOf | Operator::IsAnyOf => is_part_of(actual, bound),
         Operator::IsNoneOf => is_none_of(actual, bound),
         Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq => {
-            let Some(ord) = order(actual, bound) else {
-                return false;
-            };
-            match op {
-                Operator::Lt => ord == std::cmp::Ordering::Less,
-                Operator::Lteq => ord != std::cmp::Ordering::Greater,
-                Operator::Gt => ord == std::cmp::Ordering::Greater,
-                Operator::Gteq => ord != std::cmp::Ordering::Less,
-                _ => unreachable!(),
-            }
+            ordered_comparison(actual, op, bound).unwrap_or(false)
         }
     }
+}
+
+fn ordered_comparison(actual: &Value, op: Operator, bound: &Value) -> Option<bool> {
+    let ord = order(actual, bound)?;
+    Some(match op {
+        Operator::Lt => ord == std::cmp::Ordering::Less,
+        Operator::Lteq => ord != std::cmp::Ordering::Greater,
+        Operator::Gt => ord == std::cmp::Ordering::Greater,
+        Operator::Gteq => ord != std::cmp::Ordering::Less,
+        _ => unreachable!("ordered comparison requires an order operator"),
+    })
 }
 
 /// Insert one `narrower ⊑ broader` purpose edge into `set`, maintaining the
@@ -1764,11 +1781,18 @@ pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static ORDER_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A total-ish order for orderable values: numeric by magnitude, dateTime by
 /// the **instant** the lexical form denotes (mixed timezone offsets are
 /// normalized to UTC before comparing — sq-qj2q). Returns `None` for
 /// incomparable pairs (e.g. an unparseable dateTime under an order operator).
 pub(crate) fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+    #[cfg(test)]
+    ORDER_COMPARISONS.with(|count| count.set(count.get() + 1));
     match (a, b) {
         (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
         _ if a.is_datetime() && b.is_datetime() => cmp_datetime(a.as_str(), b.as_str()),
@@ -2174,5 +2198,27 @@ mod subsumption_tests {
         // both directions without diverging.
         let s = closure(&[("a", "b"), ("b", "a")]);
         assert!(has(&s, "a", "b") && has(&s, "b", "a"));
+    }
+}
+
+#[cfg(test)]
+mod ordered_work_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_constraint_uses_one_comparison() {
+        let policy = crate::parse_policy_str(
+            r#"@prefix o: <http://www.w3.org/ns/odrl/2/> .
+            @prefix x: <http://www.w3.org/2001/XMLSchema#> .
+            <urn:p> o:permission [ o:action o:read; o:constraint [
+                o:leftOperand o:dateTime; o:operator o:lteq;
+                o:rightOperand "2030-01-01T00:00:00Z"^^x:dateTime ] ] ."#,
+            "turtle",
+        )
+        .unwrap();
+        let request = Request::new("http://www.w3.org/ns/odrl/2/read").at("2026-01-01T00:00:00Z");
+        let before = ORDER_COMPARISONS.with(std::cell::Cell::get);
+        assert!(evaluate(&policy, &request).allow);
+        assert_eq!(ORDER_COMPARISONS.with(std::cell::Cell::get) - before, 1);
     }
 }
