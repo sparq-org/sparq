@@ -6339,8 +6339,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
             "compaction complete\n".to_string(),
             false,
         ),
-        // A compaction failure (e.g. durable-write I/O error) is retryable: the writer thread
-        // stays alive and reads keep flowing from the last published snapshot.
+        // Compaction errors preserve the published read snapshot. Recovery status is logged.
         // (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
         // the server's `--persist` filesystem path (an I/O error embeds the absolute path).
         // Although this route is write/admin-gated, withhold the path from the response body —
@@ -6348,7 +6347,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
         Ok(Err(e)) => sanitized_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "compaction",
-            "compaction failed (retryable)",
+            "compaction failed; see server logs for recovery status",
             &e,
         ),
         Err(_) => json_error(

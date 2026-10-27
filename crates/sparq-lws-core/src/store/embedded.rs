@@ -296,6 +296,30 @@ impl EmbeddedSparqClient {
         Self::over(graph)
     }
 
+    /// Open a directory-backed graph, atomically seeding an empty graph when absent.
+    ///
+    /// The core owns locking, interrupted-swap recovery and snapshot publication. The lock lives
+    /// until the last client clone drops and joins the actor. An already-held directory returns
+    /// [`std::io::ErrorKind::WouldBlock`], preserving the error kind for boot-time retry policies.
+    pub fn open_or_create(dir: &Path) -> std::io::Result<Self> {
+        let graph = Graph::open_or_create(dir, &Graph::new())?;
+        Self::over(graph).map_err(std::io::Error::other)
+    }
+
+    /// Compact the backing directory on the graph actor, after previously queued writes.
+    ///
+    /// Returns a backend error on compaction failure or a stopped actor. The core retains the
+    /// transaction journal on a refused compaction; dropping this client never removes that data.
+    /// This maintenance job does not increment [`Self::engine_round_trips`].
+    pub async fn compact(&self) -> Result<(), SparqError> {
+        self.actor
+            .call(|graph| {
+                refuse_frozen(graph)?;
+                graph.compact().map_err(|e| engine_err("compact", e))
+            })
+            .await
+    }
+
     /// Hand `graph` to a freshly-spawned [`GraphActor`] and wrap it as a client. The single place a
     /// `Graph` is moved onto its owning thread, shared by both constructors.
     fn over(graph: Graph) -> Result<Self, SparqError> {
@@ -530,6 +554,60 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
     })
 }
 
+impl EmbeddedSparqClient {
+    async fn commit_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+        return_previous: bool,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        // IN-PROCESS atomicity simplification: inside ONE actor job, verify the container exists, then
+        // commit the child record + the containment edge atomically. No create-marker/follow-up-ASK
+        // is needed (the HTTP path needs them only because an UPDATE over HTTP cannot report whether
+        // its container-EXISTS guard matched). The builder's guarded `DELETE/INSERT … WHERE` is still
+        // used VERBATIM, so the committed triples are identical to the HTTP path.
+        let exists_q = sparql::ask_exists(container)?;
+        let previous_q = return_previous
+            .then(|| sparql::select_meta(child))
+            .transpose()?;
+        let nonce = next_nonce();
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let create_u = sparql::update_create_child(
+            container,
+            child,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+            &nonce,
+        )?;
+        self.dispatch(move |graph| {
+            // Container must exist (else 404). Checked inside the same job as the insert, so no
+            // concurrent delete can race between this check and the insert.
+            if !sparq_engine::ask(graph, &exists_q)
+                .map_err(|e| engine_err("create_child/exists", e))?
+            {
+                return Err(SparqError::NotFound);
+            }
+            let previous = if let Some(q) = previous_q {
+                let result = sparq_engine::query(graph, &q)
+                    .map_err(|e| engine_err("create_child/previous", e))?;
+                match meta_from_result(&result) {
+                    Ok(meta) => Some(meta),
+                    Err(SparqError::NotFound) => None,
+                    Err(e) => return Err(e),
+                }
+            } else {
+                None
+            };
+            commit(graph, &create_u, "create_child/insert")?;
+            Ok(previous)
+        })
+        .await
+    }
+}
+
 #[async_trait]
 impl SparqClient for EmbeddedSparqClient {
     /// The graph is this process's: held in its memory, or opened from a directory it holds
@@ -757,34 +835,18 @@ impl SparqClient for EmbeddedSparqClient {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
-        // IN-PROCESS atomicity simplification: inside ONE actor job, verify the container exists, then
-        // commit the child record + the containment edge atomically. No create-marker/follow-up-ASK
-        // is needed (the HTTP path needs them only because an UPDATE over HTTP cannot report whether
-        // its container-EXISTS guard matched). The builder's guarded `DELETE/INSERT … WHERE` is still
-        // used VERBATIM, so the committed triples are identical to the HTTP path.
-        let exists_q = sparql::ask_exists(container)?;
-        let nonce = next_nonce();
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let create_u = sparql::update_create_child(
-            container,
-            child,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-            &nonce,
-        )?;
-        self.dispatch(move |graph| {
-            // Container must exist (else 404). Checked inside the same job as the insert, so no
-            // concurrent delete can race between this check and the insert.
-            if !sparq_engine::ask(graph, &exists_q)
-                .map_err(|e| engine_err("create_child/exists", e))?
-            {
-                return Err(SparqError::NotFound);
-            }
-            commit(graph, &create_u, "create_child/insert")
-        })
-        .await
+        self.commit_child(container, child, meta, false)
+            .await
+            .map(|_| ())
+    }
+
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        self.commit_child(container, child, meta, true).await
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
