@@ -24,6 +24,9 @@ pub enum BlobError {
     /// The configured in-memory byte or entry ceiling would be exceeded.
     #[error("in-memory blob-store quota exceeded")]
     QuotaExceeded,
+    /// The service pool's own byte or entry ceiling would be exceeded.
+    #[error("service pool is full")]
+    ServicePoolFull,
     #[error("blob backend error: {0}")]
     Backend(String),
 }
@@ -330,6 +333,13 @@ impl InMemoryBlobStore {
         // A service-pool record is admitted against the pool's own ceilings and counts towards
         // nothing else, so no number of them makes a write of content fail.
         let pooled = super::is_pooled_blob_key(key);
+        let full = || {
+            if pooled {
+                BlobError::ServicePoolFull
+            } else {
+                BlobError::QuotaExceeded
+            }
+        };
         let (pool_entries, pool_bytes) = guard.entries.pooled();
         let held = if pooled {
             pool_entries
@@ -342,30 +352,29 @@ impl InMemoryBlobStore {
             self.limits.max_resource_count
         };
         if is_new && held >= ceiling {
-            return Err(BlobError::QuotaExceeded);
+            return Err(full());
         }
         let retained_bytes = guard
             .total_bytes
             .checked_sub(previous_bytes)
             .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?;
-        let next_total = retained_bytes
-            .checked_add(body.len())
-            .ok_or(BlobError::QuotaExceeded)?;
+        let next_total = retained_bytes.checked_add(body.len()).ok_or_else(full)?;
         let next_pool_bytes = if pooled {
             pool_bytes
                 .checked_sub(previous_bytes)
                 .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?
                 .checked_add(body.len())
-                .ok_or(BlobError::QuotaExceeded)?
+                .ok_or_else(full)?
         } else {
             pool_bytes
         };
         let next_content_bytes = next_total
             .checked_sub(next_pool_bytes)
             .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?;
-        if next_pool_bytes > self.limits.max_pool_bytes
-            || next_content_bytes > self.limits.max_total_bytes
-        {
+        if next_pool_bytes > self.limits.max_pool_bytes {
+            return Err(BlobError::ServicePoolFull);
+        }
+        if next_content_bytes > self.limits.max_total_bytes {
             return Err(BlobError::QuotaExceeded);
         }
 

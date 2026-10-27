@@ -58,6 +58,11 @@ which is drained completely before live frames. Registration and the replay snap
 share the publication gate; replay authorization and queue sends happen after releasing it.
 An unread replay therefore permits live publication and webhook dispatch to proceed.
 Webhooks for each change enter their delivery queue before stream publication is awaited.
+Selection retains the write's admission slot, or a delayed announcement's shared or maintenance
+place, through webhook queueing. It releases that place before waiting on stream publication.
+Pending stream events retain their own storage-wide delivery places through publication and
+access checks. `SOLID_SERVER_LWS_DELIVERY_QUEUE` bounds this queue separately from the webhook
+queue (default 1024 each); overflow is dropped and logged without delaying write responses.
 There are at most 1024 open connections across both bindings per storage instance,
 and a subscriber cannot exceed its subscription quota in open connections.
 Excess connections return 429. Open bodies do not retain request admission permits
@@ -67,9 +72,16 @@ WebSocket sends one Notification envelope per text frame, pings every 30 seconds
 and ignores client application frames. It has no replay; after close, subscribe
 again for a new connection URL.
 
-Both bindings prepare authorization while the change's locks are held and check
-it again before retaining or sending. Delete checks use the pre-delete access
-snapshot. Open connections recheck topic access every 10 seconds; losing some
+Both bindings capture resource state, grant policies and registration eligibility while
+the change's locks are held. Selection and initial authorization run on a background task
+the response never awaits; subscriptions registered after capture are excluded. A content-only
+owner PATCH with no early metadata snapshot captures registration eligibility and rechecks
+live/pending subscriptions before releasing its locks, reading metadata only if needed. Parent
+and ancestor subscriptions registered during the write therefore use the same commit snapshot.
+Access is
+checked again before retaining or sending. Separate commits have no delivery-order guarantee;
+stream sequences follow publication order. Delete checks use the pre-delete access snapshot.
+Open connections recheck topic access every 10 seconds; losing some
 topics filters their events. Losing all topic access sends terminal `event: revoked`
 (SSE) or close code 4403 (WebSocket), closes the connection and deactivates the
 subscription. These timer checks have a bounded deadline so revocation closes

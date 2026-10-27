@@ -178,6 +178,11 @@ impl Streams {
             .clone()
     }
 
+    #[cfg(test)]
+    pub(super) async fn hold_publication(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        self.slot(id).gate.clone().lock_owned().await
+    }
+
     pub(super) fn register(&self, id: &str) {
         self.slot(id);
     }
@@ -191,8 +196,8 @@ impl Streams {
     }
 }
 
-/// Recheck the original Watch immediately before retaining/pushing an event. Preparing it earlier
-/// under the change's locks is what prevents a later grant from exposing an earlier change.
+/// Recheck the original Watch immediately before retaining/pushing an event. Initial selection
+/// uses the captured policies, so a later grant cannot expose an earlier change.
 pub(super) async fn publish<S: Store + 'static>(state: &LwsState<S>, pending: Pending) {
     let id = &pending.watch.subscription;
     let Some(slot) = state
@@ -535,12 +540,7 @@ async fn readable<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription) -
 async fn deactivate<S: Store + 'static>(state: &LwsState<S>, id: &str) {
     // Close first: a slow durable removal may not extend the revocation deadline. Withdrawing also
     // revokes the capability when removal has to be retried on a later request/restart.
-    state
-        .notify
-        .withdrawn
-        .write()
-        .expect("lock")
-        .insert(id.into());
+    Arc::make_mut(&mut state.notify.withdrawn.write().expect("lock")).insert(id.into());
     state.notify.streams.remove(id);
     let _ = state
         .notify

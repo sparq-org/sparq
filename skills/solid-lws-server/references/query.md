@@ -84,8 +84,9 @@ lease. The request deadline also releases a queued or held barrier when the
 request expires.
 
 Record publication holds a mutation lease for its bounded store and memory
-steps. Record settlement fence waits and retry loops run outside that lease;
-publication after settlement acquires a fresh lease. A service-record fence
+steps. Record settlement fence waits, principal-permit waits and retry loops run outside that lease.
+Any released listing locks are reacquired before publication takes a fresh lease, so a listing
+wait does not retain query admission. A service-record fence
 resolves its private record before publication and contributes no data graph.
 
 With `sparql-endpoint`, `LwsConfig::sparql_max_resources` defaults to 10000 and

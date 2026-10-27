@@ -72,19 +72,20 @@ const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Consecutive failed deliveries before a subscription is deactivated.
 const MAX_DELIVERY_FAILURES: u32 = 5;
 
-/// Bounds on outgoing webhook deliveries, so many subscriptions times many changes cannot exhaust
-/// sockets or memory.
+/// Bounds on webhook deliveries and pending stream publications.
 ///
 /// A delivery is admitted while fewer than `queue` are waiting or in flight; past that it is
 /// dropped (and logged), which counts toward no subscription's failures. At most `workers` are in
 /// flight at once, and at most `per_inbox` to any one inbox origin (scheme, host and port, so
 /// many paths on one host share a limit). A delivery waits for its inbox's turn before it takes a
 /// worker, so a slow inbox holds back only its own deliveries.
+/// Stream publications have a separate storage-wide queue of at most `queue` events,
+/// including events waiting on a publication gate or a delivery-time access check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeliveryLimits {
-    /// Deliveries waiting or in flight (`SOLID_SERVER_LWS_DELIVERY_QUEUE`, default 1024).
+    /// Capacity of each delivery queue (`SOLID_SERVER_LWS_DELIVERY_QUEUE`, default 1024).
     pub queue: usize,
-    /// Deliveries in flight (`SOLID_SERVER_LWS_DELIVERY_WORKERS`, default 16).
+    /// Webhook deliveries in flight (`SOLID_SERVER_LWS_DELIVERY_WORKERS`, default 16).
     pub workers: usize,
     /// Deliveries in flight to one inbox origin (`SOLID_SERVER_LWS_DELIVERY_PER_INBOX`, default 2).
     pub per_inbox: usize,
@@ -123,7 +124,7 @@ const SIGNATURE_COMPONENTS: [&str; 7] = [
     "content-digest",
 ];
 
-/// A notification addressed to one subscriber, not yet sent (see [`Notifier::prepare`]).
+/// A notification addressed to one subscriber, not yet sent (see [`Notifier::send`]).
 #[derive(Debug, Clone)]
 pub struct Pending {
     inbox: String,
@@ -132,12 +133,11 @@ pub struct Pending {
     watch: Watch,
 }
 
-/// The notifications one change makes, addressed but not yet sent ([`Notifier::prepare`]), and
-/// what preparing them left out. What was left out is counted ([`Notifier::dropped`],
-/// [`Notifier::unprepared`]) only when they are [`Notifier::send`]t: a change that does not
-/// happen (a delete that fails) sends nothing and counts nothing.
+/// The result of selection for one committed change: addressed notifications and what the
+/// delivery bound left out. The task spawned by [`Notifier::send`] counts and queues it.
+/// A change that does not happen (a delete that fails) schedules no selection or accounting.
 #[derive(Debug, Default)]
-#[must_use = "prepared notifications go out, and are counted, only through Notifier::send"]
+#[must_use = "selected notifications must be counted and queued by the notification task"]
 pub struct Prepared {
     pending: Vec<Pending>,
     /// The resource the change is to.
@@ -165,6 +165,17 @@ impl Prepared {
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
+}
+
+/// Fixed work captured by a writer under its locks. Selection runs on the send task.
+#[derive(Debug, Default)]
+pub struct Committed {
+    event: Option<Event>,
+    seq: u64,
+    policies: Arc<[access::Policy]>,
+    snapshot: Arc<access::Snapshot>,
+    service: Option<Option<String>>,
+    withdrawn: Arc<std::collections::BTreeSet<String>>,
 }
 
 /// What a delivery for a subscription is checked against before every attempt: the subscription
@@ -331,6 +342,9 @@ impl SubscriptionKind {
 pub struct Subscription {
     #[serde(skip)]
     pub id: String,
+    /// Registration sequence, in memory only.
+    #[serde(skip)]
+    pub in_force_from: u64,
     /// The subscribing agent (none in open mode without a token).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscriber: Option<String>,
@@ -466,14 +480,37 @@ pub fn covers(topic: &str, uri: &str) -> bool {
 struct Subs {
     by_id: BTreeMap<String, Subscription>,
     by_subscriber: BTreeMap<Option<String>, std::collections::BTreeSet<String>>,
+    owner: Option<String>,
+    non_owners: usize,
+}
+
+struct NonOwnerRegistration(Arc<AtomicUsize>);
+
+impl Drop for NonOwnerRegistration {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Subs {
+    fn new(owner: Option<String>) -> Self {
+        Self {
+            owner,
+            ..Self::default()
+        }
+    }
+
+    fn non_owner(&self, subscriber: &Option<String>) -> bool {
+        self.owner.is_none() || *subscriber != self.owner
+    }
+
     /// Hold `sub` under `id`, giving back what `id` held before.
     fn insert(&mut self, id: String, sub: Subscription) -> Option<Subscription> {
         let subscriber = sub.subscriber.clone();
+        self.non_owners += usize::from(self.non_owner(&subscriber));
         let replaced = self.by_id.insert(id.clone(), sub);
         if let Some(old) = &replaced {
+            self.non_owners -= usize::from(self.non_owner(&old.subscriber));
             self.unindex(&id, &old.subscriber);
         }
         self.by_subscriber.entry(subscriber).or_default().insert(id);
@@ -482,6 +519,7 @@ impl Subs {
 
     fn remove(&mut self, id: &str) -> Option<Subscription> {
         let gone = self.by_id.remove(id)?;
+        self.non_owners -= usize::from(self.non_owner(&gone.subscriber));
         self.unindex(id, &gone.subscriber);
         Some(gone)
     }
@@ -600,12 +638,23 @@ pub struct Notifier {
     limits: DeliveryLimits,
     /// Deliveries admitted and not yet finished.
     admitted: Arc<AtomicUsize>,
+    /// Stream publications admitted and not yet finished, independent of webhook capacity.
+    stream_admitted: Arc<AtomicUsize>,
     /// Notifications dropped for want of queue room, each one known to be owed: authorized for
     /// its subscriber, or belonging to no subscription.
     dropped: AtomicU64,
     /// Subscriptions that heard of a change once its deliveries were already at their bound:
     /// neither authorized nor notified, so whether each was owed a notification is not known.
     unprepared: AtomicU64,
+    seq: AtomicU64,
+    registering_non_owners: Arc<AtomicUsize>,
+    #[cfg(test)]
+    selection_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    #[cfg(test)]
+    selected: AtomicUsize,
+    #[cfg(test)]
+    /// A deterministic transport result; selection and completion remain live in tests.
+    delivery_status: Mutex<Option<StatusCode>>,
     /// Preparations that had a subscription to weigh, for tests to see whether one ran.
     #[cfg(test)]
     pub(crate) prepared_for: AtomicUsize,
@@ -630,17 +679,17 @@ pub struct Notifier {
     #[cfg(test)]
     sweeper_off: Arc<AtomicBool>,
     /// Stored subscriptions the start did not load because a change to them was still being
-    /// settled, or their removal failed. Each is counted against both shares until the next
+    /// settled, or their removal failed. Each is counted against the owner's share until the next
     /// start, as it may still be stored.
     held_back: AtomicUsize,
     /// Stored subscriptions whose stored body is not a subscription, by id: quarantined at every
     /// start (what makes them so is what is stored). Each is listed to the owner, counted
-    /// against both shares, answers `500` to a read, and goes when the owner deletes it.
+    /// against the owner's share, answers `500` to a read, and goes when the owner deletes it.
     quarantined: RwLock<std::collections::BTreeSet<String>>,
     /// Live subscriptions out of force while their removal runs ([`Notifier::remove`]): no
     /// delivery is prepared or made for one, and it is put back in force should its removal
     /// leave it stored.
-    withdrawn: RwLock<std::collections::BTreeSet<String>>,
+    withdrawn: RwLock<Arc<std::collections::BTreeSet<String>>>,
     /// The time by which subscriptions are expired, as stored.
     high_water: HighWater,
     /// Added to the clock expiry is decided by ([`Notifier::clock`]).
@@ -806,6 +855,7 @@ impl Notifier {
     #[cfg(test)]
     pub fn subscribe_root_for_test(&self, storage: &str, inbox: &str) {
         let sub = Subscription {
+            in_force_from: 0,
             id: "test".into(),
             subscriber: None,
             client: None,
@@ -847,14 +897,23 @@ impl Notifier {
             .build()
             .map_err(|e| format!("notification client: {e}"))?;
         Ok(Self {
-            subs: RwLock::new(Subs::default()),
+            subs: RwLock::new(Subs::new(cfg.owner.clone())),
             streams: streams::Streams::new(),
             etag: RwLock::new(new_etag()),
             client,
             limits: cfg.delivery,
             admitted: Arc::new(AtomicUsize::new(0)),
+            stream_admitted: Arc::new(AtomicUsize::new(0)),
             dropped: AtomicU64::new(0),
             unprepared: AtomicU64::new(0),
+            seq: AtomicU64::new(0),
+            registering_non_owners: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            selection_gate: Default::default(),
+            #[cfg(test)]
+            selected: AtomicUsize::new(0),
+            #[cfg(test)]
+            delivery_status: Default::default(),
             #[cfg(test)]
             prepared_for: AtomicUsize::new(0),
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
@@ -1023,7 +1082,7 @@ impl Notifier {
         }
         // An expired subscription is purged; one that cannot be removed stays loaded and counted
         // (no delivery goes to it: every attempt checks expiry) until it can be.
-        let mut subs = Subs::default();
+        let mut subs = Subs::new(cfg.owner.clone());
         for (child, sub) in loaded {
             if !halted
                 && sub.expired(high_water)
@@ -1080,8 +1139,8 @@ impl Notifier {
     }
 
     /// What of the subscriptions in force is past the bounds they are held to, counted as a new
-    /// subscription is admitted: each total holds its own subscriptions and those held back or
-    /// quarantined at the start (which may be anyone's), and each subscriber's capacity its own
+    /// subscription is admitted: each total holds its own subscriptions; only the owner also holds those held back or
+    /// quarantined at the start, and each subscriber's capacity its own
     /// unexpired ones. `None` when nothing is past one.
     pub(crate) fn past_quota(&self, owner: Option<&str>) -> Option<String> {
         let high_water = self.high_water();
@@ -1091,7 +1150,7 @@ impl Notifier {
         let is_owner = |s: &&Subscription| owner.is_some() && s.subscriber.as_deref() == owner;
         let share = |owners: bool| {
             let mine = || subs.values().filter(move |s| is_owner(s) == owners);
-            let held = mine().count() + unloaded;
+            let held = mine().count() + if owners { unloaded } else { 0 };
             let authors = mine()
                 .filter(|s| !s.expired(high_water))
                 .map(|s| s.subscriber.as_deref());
@@ -1414,7 +1473,7 @@ impl Notifier {
                 // to it from here on, and it is put back should its removal leave it stored.
                 // (An expired one is out of force already.)
                 if !unlisted {
-                    me.withdrawn.write().expect("lock").insert(id.clone());
+                    Arc::make_mut(&mut me.withdrawn.write().expect("lock")).insert(id.clone());
                 }
                 Some(!unlisted)
             }
@@ -1438,7 +1497,7 @@ impl Notifier {
                     author
                 });
                 if withdrawn {
-                    me.withdrawn.write().expect("lock").remove(&id);
+                    Arc::make_mut(&mut me.withdrawn.write().expect("lock")).remove(&id);
                 }
                 author.flatten()
             }
@@ -1461,20 +1520,91 @@ impl Notifier {
         removed
     }
 
-    /// Tell every subscriber whose topic covers `event.uri`, and who may read it now, that it
-    /// changed. Delivery itself happens in the background.
-    pub async fn announce<S: Store + 'static>(&self, state: &LwsState<S>, event: Event) {
-        let pending = self.prepare(state, &event).await;
-        self.send(state, pending);
+    /// Whether a non-owner subscription is held or can still register after checking a topic.
+    /// Both counts take fixed work; registration keeps its place until its outcome is known.
+    pub(crate) fn has_non_owner_subscriptions(&self) -> bool {
+        let subs = self.subs.read().expect("lock");
+        subs.non_owners != 0 || self.registering_non_owners.load(Ordering::SeqCst) != 0
     }
 
-    /// The notifications `event` makes, addressed but not yet sent: one per subscriber whose topic
-    /// covers `event.uri` and who may read it now. A delete prepares its notifications before the
-    /// resource goes, while who may read it can still be decided, and [`Notifier::send`]s them only
-    /// once the removal is confirmed.
-    ///
-    /// At most as many as the delivery queue holds are prepared ([`Notifier::prepare_at_most`]):
-    /// past that they would be dropped when sent.
+    /// Capture the resource state and policies already held at commit, without store calls
+    /// or work per subscription or grant. A halted service commits no notification.
+    pub fn commit<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: Event,
+        snapshot: access::Snapshot,
+    ) -> Committed {
+        if self.halted() {
+            return Committed::default();
+        }
+        Committed {
+            event: Some(event),
+            seq: self.seq.load(Ordering::SeqCst),
+            policies: state.access.grant_policies(),
+            snapshot: Arc::new(snapshot),
+            service: None,
+            withdrawn: self.withdrawn.read().expect("lock").clone(),
+        }
+    }
+
+    /// Owner PATCH can start without a snapshot. Capture registration eligibility first,
+    /// then recheck pending/live readers while the writer still holds its resource locks.
+    pub(crate) async fn commit_patch<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: Event,
+        format: Option<String>,
+    ) -> Committed {
+        let mut committed = self.commit(state, event, access::Snapshot::unreadable());
+        if let Some(event) = committed
+            .event
+            .as_ref()
+            .filter(|_| !state.cfg.open && self.has_non_owner_subscriptions())
+        {
+            let snapshot = match state.resource_meta(&event.uri).await {
+                Ok(meta) => access::Snapshot::from_parts(meta, format),
+                Err(_) => access::Snapshot::unreadable(),
+            };
+            committed.snapshot = Arc::new(snapshot);
+        }
+        committed
+    }
+
+    /// Capture a service-record change at registration/removal, before scheduling selection.
+    pub fn announce_service<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: Event,
+        author: Option<String>,
+        admission: Option<crate::overload::AdmissionSlot>,
+    ) {
+        self.announce_service_held(state, event, author, admission, None);
+    }
+
+    /// Retain a delayed or maintenance announcement's existing shared work place.
+    pub(crate) fn announce_service_held<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: Event,
+        author: Option<String>,
+        admission: Option<crate::overload::AdmissionSlot>,
+        settlement: Option<super::records::SettlementPlace>,
+    ) {
+        let mut committed = self.commit(state, event, access::Snapshot::default());
+        committed.service = Some(author);
+        self.send_all_held(state, vec![committed], admission, settlement);
+    }
+
+    #[cfg(test)]
+    pub async fn announce<S: Store + 'static>(&self, state: &LwsState<S>, event: Event) {
+        let snapshot = access::Snapshot::take(state, &event.uri)
+            .await
+            .unwrap_or_else(|_| access::Snapshot::unreadable());
+        self.send(state, self.commit(state, event, snapshot), None);
+    }
+
+    #[cfg(test)]
     pub async fn prepare<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
@@ -1483,41 +1613,37 @@ impl Notifier {
         self.prepare_at_most(state, event, self.limits.queue).await
     }
 
-    /// [`Notifier::prepare`], for at most `limit` subscriptions: a change that prepares many
-    /// (a recursive delete prepares one per resource it removes) shares one bound between them.
+    #[cfg(test)]
     pub async fn prepare_at_most<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
         event: &Event,
         limit: usize,
     ) -> Prepared {
-        self.prepare_for(state, event, limit, None).await
+        let snapshot = access::Snapshot::take(state, &event.uri)
+            .await
+            .unwrap_or_else(|_| access::Snapshot::unreadable());
+        self.prepare_committed(state, self.commit(state, event.clone(), snapshot), limit)
+            .await
     }
 
-    /// Tell every subscriber whose topic covers the service record `event.uri` (an access grant
-    /// or request, a subscription), and who may read it, that it was created or removed:
-    /// `author` is the record's author, who may read it, as the storage owner may. Called once
-    /// the change is made and its locks released.
-    pub async fn announce_service<S: Store + 'static>(
+    async fn prepare_committed<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
-        event: Event,
-        author: Option<String>,
-    ) {
-        let pending = self
-            .prepare_for(state, &event, self.limits.queue, Some(author))
-            .await;
-        self.send(state, pending);
-    }
-
-    /// [`Notifier::prepare_at_most`], for a service record when `service` holds its author.
-    async fn prepare_for<S: Store + 'static>(
-        &self,
-        state: &LwsState<S>,
-        event: &Event,
+        committed: Committed,
         limit: usize,
-        service: Option<Option<String>>,
     ) -> Prepared {
+        #[cfg(test)]
+        {
+            let gate = self.selection_gate.lock().unwrap().clone();
+            if let Some(gate) = gate {
+                let _ = gate.acquire().await;
+            }
+        }
+        let Some(event) = committed.event.as_ref() else {
+            return Prepared::default();
+        };
+        let service = committed.service;
         // A resource's linkset changes with it, and is read under its authorization: a
         // subscription to the linkset itself hears of it as of the resource.
         let linkset = format!("{}{META_SUFFIX}", event.uri);
@@ -1532,34 +1658,22 @@ impl Notifier {
                 .any(|t| *t == event.uri || Some(t.as_str()) == service_container),
             None => s.covers(&event.uri) || names_linkset(s),
         };
-        // Every matching subscription is a candidate: the bound is on the deliveries prepared,
-        // which only an authorized one makes, so one that may not read the resource never takes
-        // the place of one that may. For the same reason the authorization done here has no
-        // budget of its own: a budget spent on the candidates in turn could be used up by one
-        // party's subscriptions that may not read the resource before an authorized one is
-        // reached. The work is bounded instead by the subscriptions in force, which the totals
-        // bound: at most MAX_SUBSCRIPTIONS held by subscribers other than the owner and
-        // MAX_OWNER_SUBSCRIPTIONS by the owner, so one authorization each for at most
-        // MAX_SUBSCRIPTIONS + MAX_OWNER_SUBSCRIPTIONS candidates, and none past the `limit`-th
-        // delivery prepared. That is a ceiling on the number of checks, not on their work: each
-        // takes the resource's access from one snapshot taken for the change
-        // ([`access::ResourceAccess`]), so the resource's metadata is read and the grants (which
-        // have no quota) are scanned once per change, not once per check. What the checks admit
-        // is bounded by `limit`, and the deliveries they make leave the request's task before
-        // any of them is queued ([`Notifier::send`]). Stored subscriptions loaded past a bound are reported at the
-        // start, and admit no new one to it until it is under it.
-        // Preparing runs under the change's locks, so it writes nothing and reads no clock: only
-        // what the stored high water has expired is left out. One expired by the clock alone is
-        // passed on, and its delivery decides it ([`Watch::stands`], which stores the time
-        // before it stops one). While the service is halted nothing is prepared.
+        // Selection and authorization run only on the notification task. Unauthorized
+        // candidates take no room from authorized ones. The commit snapshot and shared
+        // policies decide initial access; delivery still rechecks access before each attempt.
+        // Selection reads only the stored high water: clock expiry is settled by delivery.
         let candidates: Vec<Subscription> = if self.halted() {
             Vec::new()
         } else {
             let high_water = self.high_water();
             let subs = self.subs.read().expect("lock");
-            let withdrawn = self.withdrawn.read().expect("lock");
             subs.values()
-                .filter(|s| hears(s) && !s.expired(high_water) && !withdrawn.contains(&s.id))
+                .filter(|s| {
+                    s.in_force_from <= committed.seq
+                        && hears(s)
+                        && !s.expired(high_water)
+                        && !committed.withdrawn.contains(&s.id)
+                })
                 .cloned()
                 .collect()
         };
@@ -1572,24 +1686,15 @@ impl Notifier {
             limit,
             ..Prepared::default()
         };
-        // A Delete is prepared while the resource is still there; its deliveries, made once it
-        // is gone, are authorized against what it was. When that cannot be read, only the owner
-        // (and everyone in open mode) hears of it: no one else's access can be decided.
-        let mut unreadable = false;
-        let snapshot = if event.kind == "Delete" && !candidates.is_empty() && service.is_none() {
-            match access::Snapshot::take(state, &event.uri).await {
-                Ok(s) => Some(Arc::new(s)),
-                Err(_) => {
-                    unreadable = true;
-                    Some(Arc::new(access::Snapshot::unreadable()))
-                }
-            }
-        } else {
-            None
-        };
+        let snapshot =
+            (event.kind == "Delete" && service.is_none()).then(|| committed.snapshot.clone());
         let total = candidates.len();
-        // The resource's access, taken at the first check that needs it.
-        let mut resource: Option<access::ResourceAccess> = None;
+        let resource = access::ResourceAccess::from_snapshot(
+            Action::Read,
+            &event.uri,
+            &committed.snapshot,
+            &committed.policies,
+        );
         for (i, sub) in candidates.into_iter().enumerate() {
             // Once the bound is reached the rest are not authorized (that work is what the bound
             // saves), so whether each was owed a notification is not known: they are counted
@@ -1604,15 +1709,7 @@ impl Notifier {
             let allowed = match &service {
                 Some(author) => reads_service_record(state, &agent, author),
                 None if state.cfg.open || access::is_owner(state, &agent) => true,
-                None if unreadable => false,
-                None => {
-                    if resource.is_none() {
-                        resource = Some(
-                            access::ResourceAccess::take(state, Action::Read, &event.uri).await,
-                        );
-                    }
-                    resource.as_ref().is_some_and(|r| r.allows(state, &agent))
-                }
+                None => resource.allows(state, &agent),
             };
             if !allowed {
                 continue;
@@ -1660,44 +1757,117 @@ impl Notifier {
         out
     }
 
-    /// Deliver notifications [`Notifier::prepare`]d earlier, and count what preparing them left
-    /// out.
-    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, prepared: Prepared) {
+    /// Schedule selection, authorization, accounting and queueing off the writer's task.
+    pub fn send<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        committed: Committed,
+        admission: Option<crate::overload::AdmissionSlot>,
+    ) {
+        self.send_all(state, vec![committed], admission);
+    }
+
+    /// A recursive delete uses one task and one shared room bound.
+    pub fn send_all<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        committed: Vec<Committed>,
+        admission: Option<crate::overload::AdmissionSlot>,
+    ) {
+        self.send_all_held(state, committed, admission, None);
+    }
+
+    fn send_all_held<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        committed: Vec<Committed>,
+        admission: Option<crate::overload::AdmissionSlot>,
+        settlement: Option<super::records::SettlementPlace>,
+    ) {
+        if committed.iter().all(|change| change.event.is_none()) {
+            return;
+        }
+        let state = state.detached();
+        tokio::spawn(async move {
+            let _admission = admission;
+            let _settlement = settlement;
+            let mut room = state.notify.limits.queue;
+            let mut pending = Vec::new();
+            for change in committed {
+                let prepared = state.notify.prepare_committed(&state, change, room).await;
+                room = room.saturating_sub(prepared.len());
+                state.notify.count_prepared(&prepared);
+                pending.extend(prepared.pending);
+            }
+            let streams = state.notify.queue_webhooks(&state, pending);
+            // Only selection and webhook admission retain these places. A stream's own
+            // publication gate must not retain a writer's or delayed announcement's place.
+            drop((_admission, _settlement));
+            #[cfg(test)]
+            state.notify.selected.fetch_add(1, Ordering::SeqCst);
+            state.notify.publish_streams(&state, streams).await;
+        });
+    }
+
+    fn count_prepared(&self, prepared: &Prepared) {
         if prepared.dropped > 0 {
             self.note_dropped(prepared.dropped, &prepared.uri);
         }
         if prepared.unprepared > 0 {
             self.note_unprepared(prepared.unprepared, prepared.limit, &prepared.uri);
         }
-        if prepared.pending.is_empty() {
-            return;
-        }
-        // The deliveries themselves leave this task: taking a place in the delivery queue,
-        // parsing each inbox, building and signing each body and running each delivery is work
-        // per subscription, and how many subscriptions one change has is no business of the
-        // request that made it. One task admits webhooks first, then publishes stream pendings
-        // in preparation order. Each subscription uses one transport, so its pending order is
-        // preserved. When the
-        // runtime runs that task is the runtime's business: this says the request does not do
-        // the work, not that the work happens after the response reaches the client.
+    }
+
+    #[cfg(test)]
+    pub fn send_prepared<S: Store + 'static>(&self, state: &LwsState<S>, prepared: Prepared) {
+        self.count_prepared(&prepared);
         let state = state.detached();
         tokio::spawn(async move {
-            let mut streams = Vec::new();
-            for p in prepared.pending {
-                if p.kind == SubscriptionKind::Webhook {
-                    state
-                        .notify
-                        .deliver(&state, &p.inbox, p.activity, Some(p.watch));
-                } else {
-                    streams.push(p);
-                }
-            }
-            // Admit every webhook before any stream's asynchronous access recheck or gate.
-            // The stream pendings retain their preparation order.
-            for p in streams {
-                streams::publish(&state, p).await;
-            }
+            state.notify.queue_prepared(&state, prepared.pending).await;
         });
+    }
+
+    #[cfg(test)]
+    async fn queue_prepared<S: Store + 'static>(&self, state: &LwsState<S>, pending: Vec<Pending>) {
+        let streams = self.queue_webhooks(state, pending);
+        self.publish_streams(state, streams).await;
+    }
+
+    fn queue_webhooks<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        pending: Vec<Pending>,
+    ) -> Vec<(Pending, Admitted)> {
+        let mut streams = Vec::new();
+        for p in pending {
+            if p.kind == SubscriptionKind::Webhook {
+                self.deliver(state, &p.inbox, p.activity, Some(p.watch));
+            } else {
+                streams.push(p);
+            }
+        }
+        // Bound pending stream work across commits before releasing request/record places.
+        // Webhooks have already queued, and keep their independent delivery capacity.
+        streams
+            .into_iter()
+            .filter_map(|pending| match self.admit_to(&self.stream_admitted) {
+                Some(place) => Some((pending, place)),
+                None => {
+                    self.note_dropped(1, &pending.watch.uri);
+                    None
+                }
+            })
+            .collect()
+    }
+
+    async fn publish_streams<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        streams: Vec<(Pending, Admitted)>,
+    ) {
+        for (p, _publication) in streams {
+            streams::publish(state, p).await;
+        }
     }
 
     /// Deliver one notification wrapping `activity` to `inbox` in the background. `watch` names
@@ -1758,7 +1928,7 @@ impl Notifier {
         let after = before + n as u64;
         if before == 0 || before.ilog2() != after.ilog2() {
             eprintln!(
-                "lws: webhook delivery queue full ({} waiting or in flight); dropped {n} \
+                "lws: notification delivery queue full ({} waiting or in flight); dropped {n} \
                  notification(s) for {target} ({after} dropped so far)",
                 self.limits.queue
             );
@@ -1806,9 +1976,15 @@ impl Notifier {
             // Waiting for the permits (and between retries) can take a while; the subscription and
             // the subscriber's access are checked again before every attempt, and work that no
             // longer stands is discarded.
-            let Some(status) =
-                attempt_delivery(&state, &target, &body, &keyid, watch.as_ref()).await
-            else {
+            #[cfg(test)]
+            let injected = *state.notify.delivery_status.lock().unwrap();
+            #[cfg(not(test))]
+            let injected: Option<StatusCode> = None;
+            let outcome = match injected {
+                Some(status) => Some(Some(status)),
+                None => attempt_delivery(&state, &target, &body, &keyid, watch.as_ref()).await,
+            };
+            let Some(status) = outcome else {
                 return;
             };
             let Some(Watch {
@@ -1820,7 +1996,7 @@ impl Notifier {
             let notifier = &state.notify;
             // The count lives in the subscription: one cancelled while this delivery was out is
             // gone, and nothing is counted for it.
-            let failures = {
+            let (failures, principal) = {
                 let mut subs = notifier.subs.write().expect("lock");
                 let Some(sub) = subs.get_mut(&id) else {
                     return;
@@ -1830,7 +2006,7 @@ impl Notifier {
                 } else {
                     sub.failures + 1
                 };
-                sub.failures
+                (sub.failures, sub.subscriber.clone())
             };
             if failures == 0 {
                 return;
@@ -1838,7 +2014,7 @@ impl Notifier {
             if status == Some(StatusCode::GONE) || failures >= MAX_DELIVERY_FAILURES {
                 // A store failure keeps the subscription (and its failure count), so the next
                 // failed delivery tries to deactivate it again.
-                let by = super::records::Remover::Request;
+                let by = super::records::Remover::Request(principal);
                 let _ = notifier.remove(&state, &id, None, by, false).await;
             }
         });
@@ -1848,13 +2024,17 @@ impl Notifier {
 impl Notifier {
     /// A place in the delivery queue, or `None` when it is full.
     fn admit(&self) -> Option<Admitted> {
+        self.admit_to(&self.admitted)
+    }
+
+    fn admit_to(&self, count: &Arc<AtomicUsize>) -> Option<Admitted> {
         let limit = self.limits.queue;
-        self.admitted
+        count
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < limit).then_some(n + 1)
             })
             .ok()
-            .map(|_| Admitted(self.admitted.clone()))
+            .map(|_| Admitted(count.clone()))
     }
 
     /// The limit shared by every delivery to `target`'s origin.
@@ -2150,7 +2330,7 @@ pub async fn handle<S: Store + 'static>(
         };
     }
     if owner && state.notify.quarantined.read().expect("lock").contains(id) {
-        return quarantined(state, req, id).await;
+        return quarantined(state, req, agent, id).await;
     }
     // Who may see it is asked of what is stored; whether it expired is decided below.
     let sub = state.notify.get(id, state.notify.high_water());
@@ -2212,7 +2392,7 @@ pub async fn handle<S: Store + 'static>(
             if let Some(refused) = super::resources::unless_preconditions(req, Some(&etag), None) {
                 return refused;
             }
-            let by = super::records::Remover::Request;
+            let by = super::records::Remover::Request(agent.subject.clone());
             match state
                 .notify
                 .remove(state, id, req.admission.clone(), by, false)
@@ -2234,6 +2414,7 @@ pub async fn handle<S: Store + 'static>(
 async fn quarantined<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
+    agent: &Agent,
     id: &str,
 ) -> Response {
     match req.method {
@@ -2270,7 +2451,7 @@ async fn quarantined<S: Store + 'static>(
                 "subscription",
                 // Listed to the owner alone, in the container's listing.
                 super::records::Listed::InContainer,
-                super::records::Remover::Request,
+                super::records::Remover::Request(agent.subject.clone()),
                 req.admission.clone(),
                 super::records::at_once(set_aside),
                 settle,
@@ -2417,7 +2598,7 @@ async fn purge_own_expired<S: Store + 'static>(
                 state,
                 &id,
                 admission.clone(),
-                super::records::Remover::Request,
+                super::records::Remover::Request(subscriber.map(str::to_string)),
                 true,
             )
             .await;
@@ -2427,10 +2608,11 @@ async fn purge_own_expired<S: Store + 'static>(
 
 /// The gate a subscription create passes once its listing locks are held, before anything is
 /// stored ([`super::records::create_record`]): the high water's raise lock
-/// ([`HighWater::writing`], so the lock order is listing, then raise), held until the create is
-/// settled. Under it the create is refused, `503`, while the service is halted, and `400` when
-/// its expiry (`expires_at`) is no longer after the clock and the stored high water: no raise
-/// can fail, nor the high water pass the expiry, between that check and the registration.
+/// ([`HighWater::writing`], so the lock order is listing, then raise), held through the initial
+/// store answer and confirmation. A principal permit wait or background settlement releases it.
+/// Under it the create is refused, `503`, while the service is halted, and `400` when
+/// its expiry (`expires_at`) is no longer after the clock and the stored high water. Delivery
+/// rechecks expiry, including for a create confirmed after releasing the gate.
 async fn commit_gate<S: Store + 'static>(
     state: &LwsState<S>,
     expires_at: Option<i64>,
@@ -2869,6 +3051,14 @@ async fn subscribe<S: Store + 'static>(
                 && state.store.exists(&resource).await.unwrap_or(false)
         }
     };
+    // Count registrations through confirmation, including ancestor/container topics whose
+    // locks do not exclude a descendant PATCH. PATCH rechecks this count after capturing
+    // its registration sequence at commit, while its resource locks are still held.
+    let registering = (!access::is_owner(state, agent)).then(|| {
+        let count = state.notify.registering_non_owners.clone();
+        count.fetch_add(1, Ordering::SeqCst);
+        NonOwnerRegistration(count)
+    });
     for topic in &topics {
         let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
         // A linkset's record is no resource, and has no linkset: whatever is stored, it is not
@@ -2961,15 +3151,8 @@ async fn subscribe<S: Store + 'static>(
         Err(refused) => return refused,
     };
     // The place is reserved before anything is stored and held until the subscription is
-    // registered. Two bounds are counted, and they say different things. The requester's own
-    // capacity ([`MAX_SUBSCRIPTIONS_PER_SUBSCRIBER`]) is counted from its own records alone, so
-    // `429` rests on nothing but what it holds itself. The total
-    // ([`MAX_SUBSCRIPTIONS`], or [`MAX_OWNER_SUBSCRIPTIONS`] for the storage owner, whose
-    // subscriptions are counted apart) is a bound on what the store holds: `507` says the
-    // storage is full of subscriptions, whoever filled it, as it does for access requests, and
-    // one subscriber cannot reach it alone. Expired subscriptions take room in the store until
-    // they are removed, and so count against the total, but take none of their subscriber's
-    // capacity: it can neither see nor cancel them.
+    // registered. Both the principal and shared bound give the same refusal. Expired
+    // subscriptions count against the total until removed, but not the subscriber's live share.
     let high_water = state.notify.high_water();
     let owner = access::is_owner(state, agent);
     let (quota, what) = if owner {
@@ -2992,14 +3175,13 @@ async fn subscribe<S: Store + 'static>(
             .as_deref()
             .map_or(0, |o| subs.count_of(Some(o)));
         let in_share = if owner { owners } else { subs.len() - owners };
-        // Those held back or quarantined at the start may be anyone's: they count against
-        // either total.
-        (
-            in_share
-                + state.notify.held_back.load(Ordering::SeqCst)
-                + state.notify.quarantined.read().expect("lock").len(),
-            mine,
-        )
+        let unloaded = if owner {
+            state.notify.held_back.load(Ordering::SeqCst)
+                + state.notify.quarantined.read().expect("lock").len()
+        } else {
+            0
+        };
+        (in_share + unloaded, mine)
     });
     let slot = match reserved {
         Ok(slot) => slot,
@@ -3010,6 +3192,7 @@ async fn subscribe<S: Store + 'static>(
     let iri = format!("{container}{id}");
     let capability = (kind != SubscriptionKind::Webhook).then(streams::capability);
     let sub = Subscription {
+        in_force_from: 0,
         id: id.clone(),
         subscriber: agent.subject.clone(),
         client: agent.client.clone(),
@@ -3033,10 +3216,15 @@ async fn subscribe<S: Store + 'static>(
             if sub.kind != SubscriptionKind::Webhook {
                 state.notify.streams.register(&id);
             }
-            state.notify.subs.write().expect("lock").insert(id, sub);
+            let mut subs = state.notify.subs.write().expect("lock");
+            let mut sub = sub;
+            sub.in_force_from = state.notify.seq.fetch_add(1, Ordering::SeqCst) + 1;
+            subs.insert(id, sub);
+            drop(subs);
             *state.notify.etag.write().expect("lock") = new_etag();
             // Counted as registered from here on.
             drop(slot);
+            drop(registering);
         }
     };
     // Nothing is created while the service is halted, whatever halted it since the request
@@ -3057,6 +3245,13 @@ async fn subscribe<S: Store + 'static>(
         commit_gate(state, expires_at),
     );
     if let Err(refused) = created.await {
+        if refused
+            .extensions()
+            .get::<super::records::PoolFull>()
+            .is_some()
+        {
+            return super::QuotaFull::Total.response(what);
+        }
         return refused;
     }
     // The listing and the new record's locks are gone with the create, so the sweep of
@@ -3076,6 +3271,9 @@ async fn subscribe<S: Store + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod capacity {
+        include!("notify/capacity_tests.rs");
+    }
     use p256::ecdsa::signature::Verifier;
     use p256::ecdsa::{Signature, VerifyingKey};
 
@@ -3083,6 +3281,7 @@ mod tests {
 
     fn sub_until(expires_at: i64) -> Subscription {
         Subscription {
+            in_force_from: 0,
             id: String::new(),
             subscriber: None,
             client: None,
@@ -3406,7 +3605,7 @@ mod tests {
                 &state,
                 "u",
                 None,
-                super::super::records::Remover::Request,
+                super::super::records::Remover::Request(None),
                 true,
             )
             .await;
@@ -4469,6 +4668,7 @@ mod tests {
         let container = cfg.absolute(SUBSCRIPTIONS_PATH);
         Notifier::load(&store, &cfg).await.unwrap();
         let sub = Subscription {
+            in_force_from: 0,
             id: String::new(),
             subscriber: None,
             client: None,
@@ -4802,6 +5002,7 @@ mod tests {
                 subs.insert(
                     id.clone(),
                     Subscription {
+                        in_force_from: 0,
                         id,
                         subscriber: Some(owner.into()),
                         client: None,
@@ -4879,6 +5080,7 @@ mod tests {
         let (state, _store) = test_store::state(100).await;
         for i in 0..10 {
             let sub = Subscription {
+                in_force_from: 0,
                 id: format!("s{i}"),
                 subscriber: None,
                 client: None,
@@ -4992,6 +5194,7 @@ mod tests {
         let container = cfg.absolute(SUBSCRIPTIONS_PATH);
         let iri = format!("{container}s1");
         let sub = Subscription {
+            in_force_from: 0,
             id: "s1".into(),
             subscriber: None,
             client: None,
@@ -5069,6 +5272,7 @@ mod tests {
             ("root", root.clone()),
         ] {
             let sub = Subscription {
+                in_force_from: 0,
                 id: id.into(),
                 subscriber: None,
                 client: None,
@@ -5137,6 +5341,7 @@ mod tests {
             .unwrap();
         let file = format!("{}file", state.cfg.storage());
         let sub = Subscription {
+            in_force_from: 0,
             id: "both".into(),
             subscriber: None,
             client: None,
@@ -5195,6 +5400,7 @@ mod tests {
     async fn subscribe_root(state: &LwsState<test_store::FlakyStore>, id: &str) -> String {
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         let sub = Subscription {
+            in_force_from: 0,
             id: id.into(),
             subscriber: None,
             client: None,
@@ -5641,6 +5847,7 @@ mod tests {
         let bob = "https://bob.example/#me";
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         let sub = Subscription {
+            in_force_from: 0,
             id: "s".into(),
             subscriber: Some(bob.into()),
             client: None,
@@ -5691,7 +5898,7 @@ mod tests {
         for _ in 0..2 {
             let pending = state.notify.prepare(&state, &update).await;
             assert_eq!(pending.len(), 1);
-            state.notify.send(&state, pending);
+            state.notify.send_prepared(&state, pending);
         }
         for _ in 0..100 {
             if total.load(Ordering::SeqCst) == 1 {
@@ -5738,7 +5945,7 @@ mod tests {
             .delete(&super::super::meta_key(&d), None)
             .await
             .unwrap();
-        state.notify.send(&state, pending);
+        state.notify.send_prepared(&state, pending);
         for _ in 0..200 {
             if total.load(Ordering::SeqCst) == 1 {
                 break;
@@ -5810,6 +6017,7 @@ mod tests {
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         // A subscription to the subscriptions container hears of each one created.
         let watcher = Subscription {
+            in_force_from: 0,
             id: "w".into(),
             subscriber: None,
             client: None,
@@ -5874,6 +6082,7 @@ mod tests {
             ("b", "https://owner.example/#me"),
         ] {
             let sub = Subscription {
+                in_force_from: 0,
                 id: id.into(),
                 subscriber: Some(who.into()),
                 client: None,
@@ -5924,6 +6133,7 @@ mod tests {
             ),
         ] {
             let sub = Subscription {
+                in_force_from: 0,
                 id: id.into(),
                 subscriber: Some(who.into()),
                 client: None,
@@ -5947,7 +6157,7 @@ mod tests {
         // What preparing left out is counted once the notifications are sent (here, none).
         let send = |mut prepared: Prepared| {
             prepared.pending.clear();
-            state.notify.send(&state, prepared);
+            state.notify.send_prepared(&state, prepared);
         };
         // Bob may not read the root, the owner may: `a` is passed over, `b` fills the bound, and
         // `c`, `d` and `e` are neither checked nor notified, whoever they belong to.
@@ -6034,6 +6244,7 @@ mod tests {
         ];
         for (id, subject, client) in agents {
             let sub = Subscription {
+                in_force_from: 0,
                 id: id.into(),
                 subscriber: subject.map(str::to_string),
                 client: client.map(str::to_string),
@@ -6127,6 +6338,7 @@ mod tests {
         ];
         for (id, subject, client) in agents {
             let sub = Subscription {
+                in_force_from: 0,
                 id: id.into(),
                 subscriber: subject.map(str::to_string),
                 client: client.map(str::to_string),
@@ -6325,9 +6537,8 @@ mod tests {
         }
     }
 
-    /// Codex review of #6841: a delete prepares its notifications before the removal is tried,
-    /// and preparing counted what it left out at once, so a delete that failed (nothing removed,
-    /// nothing announced) still moved both counters. They move only for a delete that happened.
+    /// Failed deletes schedule no selection or accounting. Only a successful delete counts
+    /// the deliveries beyond its room and the candidates left unprepared.
     #[tokio::test]
     async fn a_failed_delete_counts_nothing() {
         use std::sync::atomic::Ordering;
@@ -6353,6 +6564,7 @@ mod tests {
         )
         .await;
         assert_eq!(created.status(), StatusCode::CREATED);
+        run_ready().await;
         let f = format!("{root}f");
         // `a` hears of `f` and of its linkset, `b` of everything: with room for one delivery,
         // a Delete of `f` prepares `a`'s first, drops `a`'s second (owed) and leaves `b` out.
@@ -6361,6 +6573,7 @@ mod tests {
             ("b", vec![root.clone()]),
         ] {
             let sub = Subscription {
+                in_force_from: 0,
                 id: id.into(),
                 subscriber: None,
                 client: None,
@@ -6388,15 +6601,18 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(state.store.exists(&f).await.unwrap());
+        run_ready().await;
         assert_eq!(
             state.notify.prepared_for.load(Ordering::SeqCst),
-            1,
-            "prepared"
+            0,
+            "a failed delete does no selection"
         );
         assert_eq!(state.notify.dropped(), 0);
         assert_eq!(state.notify.unprepared(), 0);
         let r = delete().await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        run_ready().await;
+        assert_eq!(state.notify.prepared_for.load(Ordering::SeqCst), 1);
         assert_eq!(state.notify.dropped(), 1);
         assert_eq!(state.notify.unprepared(), 1);
     }
@@ -6404,10 +6620,8 @@ mod tests {
     /// Review finding (#6810): stored subscriptions can exceed the bounds they are held to
     /// (stored before one was lowered, or written to the store directly). The start loads them
     /// all, removes none, reports what is past which bound, and admits no new subscription to a
-    /// bound until it is under it again. The two bounds answer differently and say different
-    /// things: a subscriber at its own capacity is told `429`, it asked for too many; a
-    /// subscriber at the store's total is told `507`, the storage is full of subscriptions —
-    /// which it is whoever filled it, so a newcomer holding none is refused too.
+    /// bound until it is under it again. Both bounds give the same `429`, including when a
+    /// newcomer holding none reaches the shared bound.
     #[tokio::test]
     async fn subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more() {
         let (state, store) = test_store::state(100).await;
@@ -6421,6 +6635,7 @@ mod tests {
             .chain((0..others).map(|i| format!("https://p{i}.example/#me")));
         for (i, who) in subscribers.enumerate() {
             let sub = Subscription {
+                in_force_from: 0,
                 id: String::new(),
                 subscriber: Some(who),
                 client: None,
@@ -6473,7 +6688,7 @@ mod tests {
         let r = handle(&state, &post, &agent(reader)).await;
         assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
         let r = handle(&state, &post, &newcomer).await;
-        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
         // The reader cancels two of its own: it is under its own capacity, and everyone
         // together is under the total.
         for i in 0..2 {
@@ -6490,7 +6705,7 @@ mod tests {
                 let r = handle(&state, &post, &agent(reader)).await;
                 assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
                 let r = handle(&state, &post, &newcomer).await;
-                assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+                assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
             }
         }
         assert!(state
@@ -6499,11 +6714,10 @@ mod tests {
             .is_none());
         let r = handle(&state, &post, &newcomer).await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        // The newcomer's create filled the total again, so the reader -- under its own
-        // capacity, and holding none of the blame -- is told the storage is full, not that it
-        // asked for too many.
+        // The newcomer's create filled the total again: the reader, under its own capacity,
+        // receives the same capacity refusal.
         let r = handle(&state, &post, &agent(reader)).await;
-        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     /// A closed state holding `mine` subscriptions of `alice` to one data resource, and one
@@ -6526,6 +6740,7 @@ mod tests {
             .chain((0..others).map(|i| format!("https://p{}.example/#me", i)));
         for (i, subscriber) in subscribers.enumerate() {
             let sub = Subscription {
+                in_force_from: 0,
                 id: String::new(),
                 subscriber: Some(subscriber.clone()),
                 client: None,
@@ -6715,6 +6930,7 @@ mod tests {
             .unwrap();
         for i in 0..3 {
             let sub = Subscription {
+                in_force_from: 0,
                 id: format!("s{}", i),
                 subscriber: Some(format!("https://p{}.example/#me", i)),
                 client: None,
@@ -6754,7 +6970,7 @@ mod tests {
         };
         let prepared = state.notify.prepare_at_most(&state, &event, 3).await;
         assert_eq!(prepared.len(), 3);
-        state.notify.send(&state, prepared);
+        state.notify.send_prepared(&state, prepared);
         // Nothing was queued on the way out: this task has not yielded since `send` returned,
         // so no delivery can have taken a place or been refused one.
         assert_eq!(state.notify.admitted.load(Ordering::SeqCst), 0);
@@ -6765,7 +6981,7 @@ mod tests {
         // through all the same, and its deliveries leave its task too.
         let prepared = state.notify.prepare_at_most(&state, &event, 3).await;
         assert_eq!(prepared.len(), 3);
-        state.notify.send(&state, prepared);
+        state.notify.send_prepared(&state, prepared);
         assert_eq!(state.notify.dropped(), 2, "none queued on the way out");
         drained(5).await;
     }
@@ -6869,7 +7085,7 @@ mod tests {
     }
 
     /// The subscription pool is bounded in its own right: once it is full a subscription create
-    /// is refused `507`, and content writes are admitted all the same.
+    /// is refused `429`, and content writes are admitted all the same.
     #[tokio::test]
     async fn a_full_subscription_pool_refuses_only_subscriptions() {
         // Room for the service container and two subscription records.
@@ -6889,13 +7105,15 @@ mod tests {
         let post = |who: Agent| {
             let (state, body) = (state.clone(), body.clone());
             async move {
-                let req = test_store::request(
-                    Method::POST,
+                test_store::call(
+                    &state,
+                    "POST",
                     SUBSCRIPTIONS_PATH,
-                    &[("content-type", LWS_JSON)],
+                    who.subject.as_deref(),
                     &body,
-                );
-                handle(&state, &req, &who).await.status()
+                )
+                .await
+                .status()
             }
         };
         let me = test_store::agent("https://alice.example/#me");
@@ -6913,18 +7131,18 @@ mod tests {
         assert!(created > 0, "the pool held nothing at all");
         assert_eq!(
             full,
-            Some(StatusCode::INSUFFICIENT_STORAGE),
+            Some(StatusCode::TOO_MANY_REQUESTS),
             "a full pool refuses a subscription create"
         );
         // The pool is full and this subscriber is nowhere near its own capacity; content is
         // written all the same.
         assert!(created < MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
-        let iri = format!("{}doc", state.cfg.storage());
-        state
-            .store
-            .create_in_container(&state.cfg.storage(), &iri, Bytes::from("x"), "text/plain")
-            .await
-            .expect("content write refused while the subscription pool is full");
+        let response = test_store::call(&state, "POST", "/", me.subject.as_deref(), "x").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::CREATED,
+            "content write refused while the subscription pool is full"
+        );
     }
 
     /// A subscription create waits only on its own expired subscriptions: at most
@@ -7348,6 +7566,7 @@ mod tests {
                 subs.insert(
                     id.clone(),
                     Subscription {
+                        in_force_from: 0,
                         id: id.clone(),
                         subscriber: Some(format!("https://r{i}.example/#me")),
                         client: None,
@@ -7399,7 +7618,7 @@ mod tests {
                 .status()
         };
         // The totals are full of expired subscriptions, and a create is refused.
-        assert_eq!(post().await, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(post().await, StatusCode::TOO_MANY_REQUESTS);
         let sweep = || async {
             tokio::time::sleep(EXPIRY_SWEEP_EVERY).await;
             run_ready().await;
@@ -8273,6 +8492,7 @@ mod tests {
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         let old = format!("{container}old");
         let sub = Subscription {
+            in_force_from: 0,
             id: "old".into(),
             subscriber: Some(OWNER.into()),
             client: None,
