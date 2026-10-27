@@ -153,7 +153,7 @@ fn shared_atom_expansions_retain_one_allocation_and_linear_charges() {
         let rdf = shared_compound(rules);
         let graph = Graph::load_str(&rdf, "turtle").unwrap();
         let limits = default_policy_limits_for(&graph, Some(rdf.len()));
-        assert_eq!(limits.bytes, 4 * rdf.len());
+        assert_eq!(limits.bytes, default_policy_limits_for(&graph, None).bytes);
         let mut l = Ledger::new(limits);
         let result = parse_policy_metered(&graph, &mut l);
         if rules == 2000 {
@@ -172,7 +172,7 @@ fn shared_atom_expansions_retain_one_allocation_and_linear_charges() {
         let policy = result.unwrap();
         assert_eq!(policy.permissions.len(), rules);
         assert_eq!(l.spent(Dim::Nodes), rules * 1000 + 2000);
-        assert!(l.spent(Dim::Bytes) <= 4 * rdf.len());
+        assert!(l.spent(Dim::Bytes) <= l.limits().bytes);
         if let Some(expected) = bytes {
             assert_eq!(l.spent(Dim::Bytes), expected);
         } else {
@@ -223,7 +223,7 @@ fn shared_list_references_retain_one_folded_allocation() {
         "cells plus references: {}",
         l.spent(Dim::Nodes)
     );
-    assert!(l.spent(Dim::Bytes) <= 4 * rdf.len());
+    assert!(l.spent(Dim::Bytes) <= l.limits().bytes);
     let Value::SharedStr(first) = &p.permissions[0].constraints[0].right else {
         panic!("expected shared folded string")
     };
@@ -280,13 +280,12 @@ fn field_scans_charge_every_visited_triple() {
 }
 
 #[test]
-fn defaults_follow_source_graph_and_rule_counts() {
+fn defaults_follow_parsed_graph_and_rule_counts() {
     use sparq_policy::default_policy_limits_for;
     let rdf =
         format!("{PREFIX}<urn:p> o:permission <urn:r1>, <urn:r2> . <urn:r1> o:action o:read .");
     let graph = Graph::load_str(&rdf, "turtle").unwrap();
     let source = default_policy_limits_for(&graph, Some(rdf.len()));
-    assert_eq!(source.bytes, rdf.len() * 4);
     assert_eq!(source.nodes, 2 * 1024);
     let mut sizing = Ledger::new(Limits::default());
     let scan = graph.store().scan(&[None, None, None]);
@@ -297,6 +296,13 @@ fn defaults_follow_source_graph_and_rule_counts() {
     }
     let limits = default_policy_limits_for(&graph, None);
     assert_eq!(limits.bytes, sizing.spent(Dim::Bytes) * 4);
+    assert_eq!(limits.bytes, source.bytes);
+    for source_bytes in [0, 1, usize::MAX] {
+        assert_eq!(
+            default_policy_limits_for(&graph, Some(source_bytes)).bytes,
+            limits.bytes
+        );
+    }
     assert_eq!(limits.nodes, source.nodes);
     assert_eq!(limits.query_rows, source.query_rows);
     assert!(parse_policy_metered(&graph, &mut Ledger::new(limits)).is_ok());
@@ -359,7 +365,7 @@ fn singleton_lists_share_text_while_retaining_value_kinds() {
             }
         }
         assert_eq!(l.spent(Dim::Nodes), 129);
-        assert!(l.spent(Dim::Bytes) <= 4 * rdf.len());
+        assert!(l.spent(Dim::Bytes) <= l.limits().bytes);
     }
 }
 

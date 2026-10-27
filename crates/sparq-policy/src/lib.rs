@@ -51,7 +51,7 @@ pub use eval::{
 };
 pub use model::{
     Action, ConflictStrategy, Constraint, ConstraintNode, Duty, LogicalConstraint, LogicalOperator,
-    Operator, Policy, Rule, Value, ODRL_NS,
+    Operator, Policy, Rule, SharedSet, Value, ODRL_NS,
 };
 pub use parse::{
     constraint_budget_refusal, default_policy_limits, default_policy_limits_for, parse_policy,

@@ -44,7 +44,7 @@ const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 /// (which then denies everything — fail-closed).
 pub fn parse_policy_str(rdf: &str, format: &str) -> Result<ValidatedPolicy, String> {
     let graph = Graph::load_str(rdf, format)?;
-    let mut ledger = default_ledger(&graph, Some(rdf.len()));
+    let mut ledger = default_ledger(&graph);
     parse_policy_metered(&graph, &mut ledger)
 }
 
@@ -59,7 +59,7 @@ pub fn parse_policy_str_with_memberships(
     format: &str,
 ) -> Result<(ValidatedPolicy, BTreeSet<(String, String)>), String> {
     let graph = Graph::load_str(rdf, format)?;
-    let mut ledger = default_ledger(&graph, Some(rdf.len()));
+    let mut ledger = default_ledger(&graph);
     let policy = parse_policy_metered(&graph, &mut ledger)?;
     let members = target_memberships_metered(&policy, &graph, &mut ledger)?;
     Ok((policy, members))
@@ -79,17 +79,18 @@ pub fn default_policy_limits() -> Limits {
 }
 
 /// Input-sized limits used by the ordinary parsing wrappers.
-/// `source_bytes` is the original source length when known. Otherwise bytes are
-/// four times the summed term bytes of all graph triples. Nodes cover rule and
+/// Bytes are four times the summed term bytes of all parsed graph triples,
+/// including term-node overhead. `source_bytes` is retained for compatibility and
+/// does not affect sizing. Nodes cover rule and
 /// constraint references, authored combinator references and first-walk list cells,
 /// up to an operand ceiling.
 /// Each individual compound also retains its independent operand cap.
-pub fn default_policy_limits_for(graph: &Graph, source_bytes: Option<usize>) -> Limits {
-    policy_limits(graph, source_bytes).0
+pub fn default_policy_limits_for(graph: &Graph, _source_bytes: Option<usize>) -> Limits {
+    policy_limits(graph).0
 }
 
-// One charged sizing scan counts references and, for graph inputs, term bytes.
-fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) {
+// One charged sizing scan counts references and parsed term bytes for every input.
+fn policy_limits(graph: &Graph) -> (Limits, usize) {
     let mut limits = default_policy_limits();
     let mut sizing = Ledger::new(Limits::default());
     let pattern = [None, None, None];
@@ -122,10 +123,8 @@ fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) 
         constraints += usize::from(triple[1] == constraint);
         combinators += usize::from(combinator.contains(&triple[1]));
         cells += usize::from(triple[1] == first);
-        if source_bytes.is_none() {
-            for term in triple {
-                let _ = sizing.stored_term(graph.dict(), term);
-            }
+        for term in triple {
+            let _ = sizing.stored_term(graph.dict(), term);
         }
     }
     limits.nodes = MAX_CONSTRAINT_NODES
@@ -133,17 +132,15 @@ fn policy_limits(graph: &Graph, source_bytes: Option<usize>) -> (Limits, usize) 
         .saturating_add(combinators)
         .saturating_add(cells)
         .min(POLICY_NODE_CEILING);
-    limits.bytes = source_bytes
-        .unwrap_or_else(|| sizing.spent(Dim::Bytes))
-        .saturating_mul(4);
+    limits.bytes = sizing.spent(Dim::Bytes).saturating_mul(4);
     limits.query_rows = POLICY_QUERY_COUNT
         .saturating_mul(graph.len().max(1))
         .saturating_mul(2);
     (limits, rows)
 }
 
-fn default_ledger(graph: &Graph, source_bytes: Option<usize>) -> Ledger {
-    let (limits, rows) = policy_limits(graph, source_bytes);
+fn default_ledger(graph: &Graph) -> Ledger {
+    let (limits, rows) = policy_limits(graph);
     let mut ledger = Ledger::new(limits);
     ledger
         .charge(Dim::QueryRows, rows)
@@ -249,7 +246,7 @@ pub fn target_memberships(
     policy: &Policy,
     graph: &Graph,
 ) -> Result<BTreeSet<(String, String)>, String> {
-    let mut ledger = default_ledger(graph, None);
+    let mut ledger = default_ledger(graph);
     target_memberships_metered(policy, graph, &mut ledger)
 }
 
@@ -305,9 +302,11 @@ fn target_memberships_metered(
 /// encoding, likewise widening), or a rule's compound constraint is past the
 /// constraint-assembly budget (nesting depth or total operand expansion;
 /// [`constraint_budget_refusal`] tells that refusal from any other parse error).
+/// Constraint fields and compound collections are folded only when a rule reaches
+/// them; unreachable malformed or conflicting constraints do not refuse parsing.
 /// The result is validated ([`Policy::validate`]).
 pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
-    let mut ledger = default_ledger(graph, None);
+    let mut ledger = default_ledger(graph);
     parse_policy_metered(graph, &mut ledger)
 }
 
@@ -613,12 +612,19 @@ struct ListTable {
     raw: RefCell<Option<BTreeMap<String, RawConstraint>>>,
     atoms: RefCell<BTreeMap<String, Rc<Atom>>>,
     folded: RefCell<FoldedRights>,
+    right_members: RefCell<BTreeMap<String, Rc<RightMembers>>>,
+    member_keys: RefCell<BTreeMap<String, Rc<[String]>>>,
+    set_prefixes: RefCell<HashMap<Vec<Term>, bool>>,
     defs: RefCell<Option<BTreeMap<String, LcDef>>>,
     expansion_checked: std::cell::Cell<bool>,
     roots: RefCell<Option<ConstraintRoots>>,
     charged_cells: RefCell<BTreeSet<String>>,
     #[cfg(test)]
     walks: std::cell::Cell<usize>,
+    #[cfg(test)]
+    member_visits: std::cell::Cell<usize>,
+    #[cfg(test)]
+    validation_visits: std::cell::Cell<usize>,
 }
 
 impl ListTable {
@@ -689,6 +695,9 @@ fn rdf_list_table(graph: &Graph, ledger: &mut Ledger) -> Result<ListTable, Strin
         raw: RefCell::new(None),
         atoms: RefCell::new(BTreeMap::new()),
         folded: RefCell::new(HashMap::new()),
+        right_members: RefCell::new(BTreeMap::new()),
+        member_keys: RefCell::new(BTreeMap::new()),
+        set_prefixes: RefCell::new(HashMap::new()),
         defs: RefCell::new(None),
         expansion_checked: std::cell::Cell::new(false),
         roots: RefCell::new(None),
@@ -696,6 +705,10 @@ fn rdf_list_table(graph: &Graph, ledger: &mut Ledger) -> Result<ListTable, Strin
         charged_cells: RefCell::new(BTreeSet::new()),
         #[cfg(test)]
         walks: std::cell::Cell::new(0),
+        #[cfg(test)]
+        member_visits: std::cell::Cell::new(0),
+        #[cfg(test)]
+        validation_visits: std::cell::Cell::new(0),
     })
 }
 
@@ -898,6 +911,144 @@ fn fold_rights(
     Ok(value)
 }
 
+struct RightMembers {
+    first_key: Option<String>,
+    singleton: Option<Value>,
+    several: bool,
+    members: crate::model::SetMembers,
+    typed: BTreeSet<String>,
+    lexical_valid: bool,
+    joined: Option<std::sync::Arc<str>>,
+}
+
+fn right_members(
+    head: &Term,
+    lists: &ListTable,
+    reference_counted: bool,
+    ledger: &mut Ledger,
+) -> Result<Rc<RightMembers>, String> {
+    let key = node_key(head);
+    let collection = lists.is_collection_shaped(&key);
+    if collection {
+        if let Some(cached) = lists.right_members.borrow().get(&key) {
+            if !reference_counted {
+                ledger
+                    .charge(Dim::Nodes, 1)
+                    .map_err(|e| ledger_error(e, ConstraintBudget::Nodes))?;
+            }
+            return Ok(Rc::clone(cached));
+        }
+    }
+    let members = if collection {
+        resolve_list(&key, lists, ledger, reference_counted)?.ok_or_else(|| {
+            format!("a constraint has a MALFORMED collection rightOperand ({key}); the policy is refused")
+        })?
+    } else {
+        Rc::from([head.clone()])
+    };
+    let nil = format!("<{RDF_NS}nil>");
+    let mut seen = BTreeSet::new();
+    let mut first = None;
+    let mut encoded = Vec::new();
+    let mut lexical_valid = true;
+    let mut typed = BTreeSet::new();
+    for member in members.iter() {
+        #[cfg(test)]
+        lists.member_visits.set(lists.member_visits.get() + 1);
+        let mkey = node_key(member);
+        if collection && (mkey == nil || lists.is_collection_shaped(&mkey)) {
+            return Err(format!("a constraint's collection rightOperand ({key}) has a NESTED-list member ({mkey}); the policy is refused"));
+        }
+        if let Some(err) = ill_typed_operand(member) {
+            return Err(err);
+        }
+        if seen.insert(mkey.clone()) {
+            if first.is_none() {
+                first = Some((mkey.clone(), member.clone()));
+            }
+            let text = term_str(member);
+            if typed_member(member) {
+                typed.insert(mkey.clone());
+            }
+            lexical_valid &= !text.is_empty()
+                && !text.contains(['|', ','])
+                && !text.chars().any(char::is_whitespace);
+            encoded.push((mkey, text));
+        }
+    }
+    let singleton = first.as_ref().map(|(_, term)| {
+        let value = value_of(term);
+        if collection {
+            match value {
+                Value::Iri(s) => Value::SharedIri(s.into()),
+                Value::Str(s) => Value::SharedStr(s.into()),
+                Value::DateTime(s) => Value::SharedDateTime(s.into()),
+                other => other,
+            }
+        } else {
+            value
+        }
+    });
+    let joined = (lexical_valid && typed.is_empty()).then(|| {
+        encoded
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>()
+            .join("|")
+            .into()
+    });
+    let result = Rc::new(RightMembers {
+        first_key: first.map(|(key, _)| key),
+        singleton,
+        several: seen.len() > 1,
+        members: encoded.into(),
+        typed,
+        lexical_valid,
+        joined,
+    });
+    if collection {
+        lists
+            .right_members
+            .borrow_mut()
+            .insert(key, Rc::clone(&result));
+    }
+    Ok(result)
+}
+
+// Only a first occurrence determines the retained member's kind. Cache the
+// ordered prefix through the last typed group; later distinct scalar operands
+// do not change whether those earlier members can be represented textually.
+fn set_groups_encodable(rights: &[Term], groups: &[Rc<RightMembers>], lists: &ListTable) -> bool {
+    if groups.iter().any(|group| !group.lexical_valid) {
+        return false;
+    }
+    let Some(last_typed) = groups.iter().rposition(|group| !group.typed.is_empty()) else {
+        return true;
+    };
+    if !groups[0].typed.is_empty() {
+        return false;
+    }
+    let prefix = &rights[..=last_typed];
+    if let Some(result) = lists.set_prefixes.borrow().get(prefix) {
+        return *result;
+    }
+    let mut seen = BTreeSet::new();
+    let encodable = groups[..=last_typed].iter().all(|group| {
+        group.members.iter().all(|(key, _)| {
+            #[cfg(test)]
+            lists
+                .validation_visits
+                .set(lists.validation_visits.get() + 1);
+            !seen.insert(key.as_str()) || !group.typed.contains(key)
+        })
+    });
+    lists
+        .set_prefixes
+        .borrow_mut()
+        .insert(prefix.to_vec(), encodable);
+    encodable
+}
+
 fn fold_rights_uncached(
     op: Option<&Term>,
     rights: &[Term],
@@ -905,75 +1056,53 @@ fn fold_rights_uncached(
     reference_counted: bool,
     ledger: &mut Ledger,
 ) -> Result<Option<Value>, String> {
-    let mut members: Vec<Term> = Vec::new();
-    let mut seen: BTreeMap<String, ()> = BTreeMap::new();
-    for r in rights {
-        let key = node_key(r);
-        // Collection-SHAPED (a cons cell OR a member-less rest-only node) → it must
-        // validate as a collection; a rest-only head is invisible to the cell table,
-        // so testing only `cells` would read it as an ordinary value. sq-srjuc.
-        let expanded = if lists.is_collection_shaped(&key) {
-            resolve_list(&key, lists, ledger, reference_counted)?.ok_or_else(|| {
-                format!(
-                    "a constraint has a MALFORMED collection rightOperand ({key}: \
-                     broken/dangling tail, cycle, forked cell, or a member-less cell \
-                     asserting `rdf:rest` with no `rdf:first`); honouring the valid \
-                     PREFIX would drop authored members and widen decisions (an \
-                     `isNoneOf` permission excludes fewer values than authored; a \
-                     set-op prohibition's carve-out narrows), so the policy is refused \
-                     (fail-closed)"
-                )
-            })?
-        } else {
-            Rc::from([r.clone()])
-        };
-        if lists.is_collection_shaped(&key) {
-            let nil = format!("<{RDF_NS}nil>");
-            if let Some(m) = expanded.iter().find(|m| {
-                let mkey = node_key(m);
-                mkey == nil || lists.is_collection_shaped(&mkey)
-            }) {
-                return Err(format!(
-                    "a constraint's collection rightOperand ({key}) has a NESTED-list \
-                     member ({}); nested collections are not a supported operand shape \
-                     (an unmatchable member would silently drop an `isNoneOf` exclusion), \
-                     so the policy is refused (fail-closed)",
-                    node_key(m)
-                ));
-            }
-        }
-        for m in expanded.iter() {
-            // Every collection member is checked before the node-key deduplication. #3902.
-            if let Some(err) = ill_typed_operand(m) {
+    if let [right] = rights {
+        if !lists.is_collection_shaped(&node_key(right)) {
+            if let Some(err) = ill_typed_operand(right) {
                 return Err(err);
             }
-            if seen.insert(node_key(m), ()).is_none() {
-                members.push(m.clone());
-            }
+            return Ok(Some(value_of(right)));
         }
     }
-    Ok(match members.len() {
-        0 => None, // no rightOperand object at all → missing-right (unsatisfiable)
-        1 => Some(value_of(&members[0])), // single value stays TYPED (pre-fold path)
-        _ => {
-            if !is_set_operator(op) {
-                return Ok(None); // ambiguous multi-value under a non-set operator
-            }
-            // The set encoding is textual: a typed member (a number, a dateTime) would
-            // lose its type and match a same-lexical string, so the set degrades to the
-            // guard (Unknown) instead.
-            if members.iter().any(typed_member) {
-                return Ok(None);
-            }
-            let strs: Vec<String> = members.iter().map(term_str).collect();
-            if strs.iter().any(|s| {
-                s.is_empty() || s.contains(['|', ',']) || s.chars().any(char::is_whitespace)
-            }) {
-                return Ok(None); // un-encodable member would corrupt the set encoding
-            }
-            Some(Value::SharedStr(strs.join("|").into()))
-        }
-    })
+    let groups = rights
+        .iter()
+        .map(|right| right_members(right, lists, reference_counted, ledger))
+        .collect::<Result<Vec<_>, _>>()?;
+    let Some(first) = groups.iter().find(|group| group.first_key.is_some()) else {
+        return Ok(None);
+    };
+    let several = groups.iter().any(|group| {
+        group.several || (group.first_key.is_some() && group.first_key != first.first_key)
+    });
+    if !several {
+        return Ok(first.singleton.clone());
+    }
+    if !is_set_operator(op) || !set_groups_encodable(rights, &groups, lists) {
+        return Ok(None);
+    }
+    if groups.len() == 1 {
+        return Ok(Some(Value::SharedStr(
+            groups[0].joined.as_ref().unwrap().clone(),
+        )));
+    }
+    if !rights
+        .iter()
+        .any(|right| lists.is_collection_shaped(&node_key(right)))
+    {
+        let mut seen = BTreeSet::new();
+        let text = groups
+            .iter()
+            .flat_map(|group| group.members.iter())
+            .filter(|(key, _)| seen.insert(key.as_str()))
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>()
+            .join("|");
+        return Ok(Some(Value::SharedStr(text.into())));
+    }
+    let parts = groups.iter().map(|group| group.members.clone()).collect();
+    Ok(Some(Value::SharedSet(std::sync::Arc::new(
+        crate::model::SharedSet::new(parts),
+    ))))
 }
 
 /// Accumulator grouping one constraint node's result rows: a multi-valued
@@ -1369,6 +1498,8 @@ impl LcDef {
     fn operand_count(&self, cap: usize) -> usize {
         if self.list_operands.is_empty() {
             self.operands.len()
+        } else if self.operands.len() == 1 {
+            self.list_operands[&self.operands[0]].len()
         } else {
             self.operand_keys().take(cap.saturating_add(1)).count()
         }
@@ -1428,12 +1559,15 @@ fn logical_constraints_for(
         }
 
         ensure_raw_constraints(graph, lists, ledger)?;
+        ensure_constraint_roots(graph, lists, ledger)?;
         let raw = lists.raw.borrow();
+        let roots = lists.roots.borrow();
         fold_list_operands(
             &mut lc_defs,
             raw.as_ref().expect("loaded above"),
             lists,
             ledger,
+            roots.as_ref(),
         )?;
         *lists.defs.borrow_mut() = Some(lc_defs);
     }
@@ -1552,6 +1686,7 @@ fn fold_list_operands(
     atoms: &BTreeMap<String, RawConstraint>,
     lists: &ListTable,
     ledger: &mut Ledger,
+    roots: Option<&ConstraintRoots>,
 ) -> Result<(), String> {
     let nil = format!("<{RDF_NS}nil>");
     // Compound identity stays fixed while definitions acquire shared list references.
@@ -1563,13 +1698,36 @@ fn fold_list_operands(
     let expandable = |k: &str| lists.cells.contains_key(k) && no_reading(k);
     let empty_op = |k: &str| *k == nil && no_reading(k);
     let rest_only_op = |k: &str| lists.rest_only.contains_key(k) && no_reading(k);
-    let mut resolved_keys: BTreeMap<String, Rc<[String]>> = BTreeMap::new();
-    for def in lc_defs.values_mut() {
+    let mut resolved_keys = lists.member_keys.borrow_mut();
+    let mut pending: Vec<String> = match roots {
+        Some(roots) => roots
+            .permission
+            .iter()
+            .chain(&roots.prohibition)
+            .map(|(_, key)| key.clone())
+            .collect(),
+        None => lc_defs.keys().cloned().collect(),
+    };
+    let mut visited = BTreeSet::new();
+    let mut reached_lists = BTreeSet::new();
+    while let Some(key) = pending.pop() {
+        if !visited.insert(key.clone()) {
+            continue;
+        }
+        let Some(def) = lc_defs.get_mut(&key) else {
+            continue;
+        };
         if !def
             .operands
             .iter()
             .any(|k| expandable(k) || empty_op(k) || rest_only_op(k))
         {
+            pending.extend(
+                def.operands
+                    .iter()
+                    .filter(|key| lc_keys.contains_key(*key))
+                    .cloned(),
+            );
             continue;
         }
         for okey in &def.operands {
@@ -1606,6 +1764,8 @@ fn fold_list_operands(
                     keys.try_reserve(members.len())
                         .map_err(|_| budget_error(ConstraintBudget::Nodes))?;
                     for member in members.iter() {
+                        #[cfg(test)]
+                        lists.member_visits.set(lists.member_visits.get() + 1);
                         let mkey = node_key(member);
                         if (mkey == nil || lists.is_collection_shaped(&mkey)) && no_reading(&mkey) {
                             return Err(format!(
@@ -1623,6 +1783,22 @@ fn fold_list_operands(
                     keys
                 };
                 def.list_operands.insert(okey.clone(), keys);
+            }
+        }
+        if roots.is_some() {
+            for key in &def.operands {
+                if let Some(members) = def.list_operands.get(key) {
+                    if reached_lists.insert(key.clone()) {
+                        pending.extend(
+                            members
+                                .iter()
+                                .filter(|key| lc_keys.contains_key(*key))
+                                .cloned(),
+                        );
+                    }
+                } else if lc_keys.contains_key(key) {
+                    pending.push(key.clone());
+                }
             }
         }
     }
@@ -2351,7 +2527,7 @@ mod metered_tests {
                     )
                 })
                 .collect();
-            fold_list_operands(&mut defs, &BTreeMap::new(), &lists, &mut ledger).unwrap();
+            fold_list_operands(&mut defs, &BTreeMap::new(), &lists, &mut ledger, None).unwrap();
             let first = &defs.values().next().unwrap().list_operands[&head];
             for def in defs.values() {
                 assert!(Rc::ptr_eq(first, &def.list_operands[&head]));
@@ -2375,6 +2551,112 @@ mod metered_tests {
                 assert_eq!(expansion.spent(Dim::Nodes), 2);
             }
         }
+    }
+
+    #[test]
+    fn mixed_right_operands_visit_each_collection_member_once() {
+        for operator in ["eq", "isAnyOf"] {
+            let mut rdf = format!(
+                "@prefix o: <{ODRL_NS}> . <urn:list> <{RDF_NS}first> <urn:v0>; <{RDF_NS}rest> ("
+            );
+            for i in 1..4000 {
+                rdf.push_str(&format!(" <urn:v{i}>"));
+            }
+            rdf.push_str(") . <urn:p> o:permission <urn:r> .\n");
+            for i in 0..4000 {
+                rdf.push_str(&format!("<urn:r> o:constraint <urn:c{i}> . <urn:c{i}> o:leftOperand o:purpose; o:operator o:{operator}; o:rightOperand <urn:list>, <urn:x{i}> .\n"));
+            }
+            let graph = Graph::load_str(&rdf, "turtle").unwrap();
+            let limits = default_policy_limits_for(&graph, None);
+            let mut ledger = Ledger::new(limits);
+            let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+            ensure_raw_constraints(&graph, &lists, &mut ledger).unwrap();
+            for i in 0..4000 {
+                ledger.charge(Dim::Nodes, 1).unwrap();
+                let atom = atom_for(&format!("<urn:c{i}>"), &lists, &mut ledger).unwrap();
+                assert_eq!(lists.walks.get(), 1);
+                assert_eq!(lists.member_visits.get(), 4000 + i + 1);
+                assert_eq!(ledger.spent(Dim::Nodes), 4000 + i + 1);
+                if operator == "isAnyOf" {
+                    assert!(matches!(atom.value.right, Value::SharedSet(_)));
+                }
+            }
+            assert!(ledger.spent(Dim::Bytes) <= limits.bytes);
+            if operator == "isAnyOf" {
+                let cache = lists.right_members.borrow();
+                let shared = &cache["<urn:list>"].members;
+                assert_eq!(std::sync::Arc::strong_count(shared), 4001);
+                let atom = atom_for("<urn:c0>", &lists, &mut ledger).unwrap();
+                let members: BTreeSet<_> = atom.value.right.as_str().split('|').collect();
+                assert_eq!(members.len(), 4001);
+                assert!(members.contains("urn:x0"));
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_literal_prefix_validation_is_shared() {
+        let mut rdf = format!("@prefix r: <{RDF_NS}> . <urn:plain> r:first \"0\"; r:rest (");
+        for i in 1..128 {
+            rdf.push_str(&format!(" \"{i}\""));
+        }
+        rdf.push_str(") . <urn:typed> r:first 0; r:rest (");
+        for i in 1..128 {
+            rdf.push_str(&format!(" {i}"));
+        }
+        rdf.push_str(") .");
+        let graph = Graph::load_str(&rdf, "turtle").unwrap();
+        let mut ledger = Ledger::new(Limits::default());
+        let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+        let op = oxrdf::NamedNode::new_unchecked(format!("{ODRL_NS}isAnyOf")).into();
+        for i in 0..128 {
+            let rights = [
+                oxrdf::NamedNode::new_unchecked("urn:plain").into(),
+                oxrdf::NamedNode::new_unchecked("urn:typed").into(),
+                oxrdf::NamedNode::new_unchecked(format!("urn:x{i}")).into(),
+            ];
+            let value = fold_rights(Some(&op), &rights, &lists, false, &mut ledger)
+                .unwrap()
+                .unwrap();
+            assert!(matches!(value, Value::SharedSet(_)));
+            assert_eq!(lists.walks.get(), 2);
+            assert_eq!(lists.member_visits.get(), 256 + i + 1);
+            assert_eq!(lists.validation_visits.get(), 256);
+            assert_eq!(ledger.spent(Dim::Nodes), 256 + 2 * i);
+        }
+        assert_eq!(lists.set_prefixes.borrow().len(), 1);
+    }
+
+    #[test]
+    fn unattached_combinators_only_consume_scans() {
+        let mut rdf = format!("@prefix o: <{ODRL_NS}> . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read . <urn:list> <{RDF_NS}first> <urn:v0>; <{RDF_NS}rest> (");
+        for i in 1..4000 {
+            rdf.push_str(&format!(" <urn:v{i}>"));
+        }
+        rdf.push_str(") .\n");
+        for i in 0..4000 {
+            rdf.push_str(&format!("<urn:lc{i}> o:and <urn:list> .\n"));
+        }
+        let graph = Graph::load_str(&rdf, "turtle").unwrap();
+        let mut ledger = Ledger::new(default_policy_limits_for(&graph, None));
+        let lists = rdf_list_table(&graph, &mut ledger).unwrap();
+        assert!(
+            logical_constraints_for(&graph, "permission", &lists, &mut ledger)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(lists.walks.get(), 0);
+        assert_eq!(lists.member_visits.get(), 0);
+        assert_eq!(ledger.spent(Dim::Nodes), 0);
+        assert_eq!(ledger.spent(Dim::Bytes), 0);
+        assert!(ledger.spent(Dim::QueryRows) >= graph.len());
+        assert!(lists
+            .defs
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .values()
+            .all(|def| def.list_operands.is_empty()));
     }
 
     #[test]

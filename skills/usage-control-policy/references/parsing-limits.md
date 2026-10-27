@@ -1,9 +1,10 @@
 # Policy parsing limits
 
 `default_policy_limits_for(&graph, source_bytes) -> sparq_core::meter::Limits`
-returns the input-sized limits used by the ordinary wrappers. Pass `Some(rdf.len())`
-when source text is available, or `None` for an already-loaded graph. Explicit
-metered calls use the caller's limits. The older `default_policy_limits()` remains
+returns the input-sized limits used by the ordinary wrappers. Sizing uses the
+parsed graph for every input; the optional source length is retained for call
+compatibility and has no effect. Pass `None` for new calls. Explicit metered calls
+use the caller's limits. The older `default_policy_limits()` remains
 an input-independent template for callers choosing their own limits.
 
 One ledger covers permission and prohibition rules, compounds, atomic constraints,
@@ -14,16 +15,17 @@ RDF lists, predicate scans and extraction queries.
 - **Nodes:** defaults cover the former per-compound operand allowance times the
   larger of distinct rule count and constraint-edge count, plus authored combinator
   references and first-walk list cells, capped by the policy-wide operand ceiling.
-  The input-reference allowance also covers valid unattached combinator definitions.
-  Each compound independently
-  retains the former operand cap, even with padding rules or raised caller limits.
+  Sizing counts all authored combinator references; folding visits only reached
+  definitions. Each compound independently retains the former operand cap, even with padding rules or raised caller limits.
   Combined expansion counts are checked before assembling compound operands.
   Operand references consume nodes; this ceiling bounds operand count, rather
-  than elapsed work. List reuse consumes its reference node once, including when
-  an enclosing operand reservation or direct constraint has already counted it.
-- **Bytes:** four times source length when known. For a graph, the base is the
-  summed term bytes of its triples, including term-node overhead, counted in one
-  charged sizing scan. Each distinct atom and resolved list is charged when built.
+  than elapsed work. List reuse consumes one reference node; a direct constraint
+  or atom reservation can supply that charge. Combinator list references have
+  their own input allowance.
+- **Bytes:** four times the summed term bytes of the parsed graph's triples,
+  including term-node overhead, counted in one charged sizing scan. String and
+  Graph inputs use the same allowance, including expanded prefix IRIs. Each
+  distinct atom and resolved list is charged when built.
   Fixed list slots count towards Nodes; their lexical storage counts towards Bytes,
   and per-term checks still include term-node overhead. Compound reuse shares the
   retained atom without charging or copying its terms again. Generated constraint
@@ -35,18 +37,28 @@ RDF lists, predicate scans and extraction queries.
   pass. SPARQL queries use the remaining row cap for intermediate results as well
   as charging their returned rows.
 
-Atoms are built only when reachable from rule constraints. Parser-local atoms and
-resolved list members use `Rc` and `Rc<[Term]>`; public shared leaves and collection text
+Atoms and compound collections are built only when reachable from rule constraints.
+Parser-local atoms and resolved list members use `Rc` and `Rc<[Term]>`; public shared leaves and collection text
 values use `Arc` to preserve thread transfer. A memoized list or folded value costs
 one reference node per reuse. Unattached atomic fields incur scans without building
-atoms or folding their right operands. Raw fields, folded values and compound
-shapes are cached for the duration of one parse.
+atoms or folding their right operands. Unlike the earlier parser, malformed or
+conflicting constraints that no rule reaches do not refuse the policy. Raw fields,
+folded values and compound shapes are cached for the duration of one parse.
 
 Combinator collections also retain shared member-key sequences. Their members are
 validated and deduplicated once per head; compound definitions keep the authored
 operand references. Expansion traverses these sequences with ordered deduplication,
 preserving the position of an explicitly authored direct operand. The compound
-operand count is checked before its result vector is reserved.
+operand count is checked before its result vector is reserved. Unreached compounds
+incur field scans without folding their collections.
+
+Right-operand collections cache member identity, validation, encodability and
+joined text once per head. Mixed collection sets retain shared member groups in
+`Value::SharedSet`; parsing stores references to those groups. `Value::as_str()`
+traverses and deduplicates the groups on first access and memoizes the resulting
+text. Overlapping groups keep the first member reading for coinciding parser
+keys; validation prefixes through typed groups are cached independently of later
+scalar operands. This text conversion is separate from the parsing ledger.
 
 ```rust
 use sparq_core::{Graph, meter::Ledger};

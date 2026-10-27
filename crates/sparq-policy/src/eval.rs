@@ -1746,10 +1746,18 @@ fn is_none_of(actual: &Value, bound: &Value) -> bool {
 fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
     matches!(
         actual,
-        Value::Iri(_) | Value::SharedIri(_) | Value::Str(_) | Value::SharedStr(_)
+        Value::Iri(_)
+            | Value::SharedIri(_)
+            | Value::Str(_)
+            | Value::SharedStr(_)
+            | Value::SharedSet(_)
     ) && matches!(
         bound,
-        Value::Iri(_) | Value::SharedIri(_) | Value::Str(_) | Value::SharedStr(_)
+        Value::Iri(_)
+            | Value::SharedIri(_)
+            | Value::Str(_)
+            | Value::SharedStr(_)
+            | Value::SharedSet(_)
     )
 }
 
@@ -1761,7 +1769,11 @@ pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
     let textual = |v: &Value| {
         matches!(
             v,
-            Value::Iri(_) | Value::SharedIri(_) | Value::Str(_) | Value::SharedStr(_)
+            Value::Iri(_)
+                | Value::SharedIri(_)
+                | Value::Str(_)
+                | Value::SharedStr(_)
+                | Value::SharedSet(_)
         )
     };
     match op {
