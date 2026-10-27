@@ -254,3 +254,11 @@ pub struct StoreUsage {
     /// same bounded capacity as live resources.
     pub resource_count: usize,
 }
+
+/// The internal wrapped-data-key namespace. It is outside every HTTP storage.
+pub const DATA_KEY_CONTAINER: &str = "urn:x-sparq-lws:data-keys/";
+
+/// Whether an index IRI belongs to the reserved wrapped-data-key namespace.
+pub fn is_data_key_record(iri: &str) -> bool {
+    iri.starts_with(DATA_KEY_CONTAINER)
+}

@@ -894,3 +894,49 @@ mod embedded {
         );
     }
 }
+
+#[cfg(feature = "crypt")]
+#[path = "storage_crypt_tests.rs"]
+mod crypt;
+
+#[test]
+fn crypt_provider_selection_refuses_unknown_and_unbuilt_providers() {
+    for provider in ["aws-kms", "azure-kv"] {
+        let error = config(&[(ENV_CRYPT_PROVIDER, provider)]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error.to_string().contains(provider));
+        assert!(error.to_string().contains("not built"));
+    }
+    for provider in ["", "unknown"] {
+        assert_eq!(
+            config(&[(ENV_CRYPT_PROVIDER, provider)])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+    assert!(config(&[(ENV_CRYPT_PROVIDER, "none")]).is_ok());
+    #[cfg(not(feature = "crypt"))]
+    {
+        let error = config(&[(ENV_CRYPT_PROVIDER, "local")]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("not built"));
+        assert!(error.to_string().contains("crypt"));
+    }
+}
+
+#[test]
+fn invalid_unicode_provider_never_selects_the_plaintext_default() {
+    let error = StorageConfig::read_environment(|key| {
+        if key == ENV_CRYPT_PROVIDER {
+            Err(std::env::VarError::NotUnicode(std::ffi::OsString::from(
+                "invalid provider bytes",
+            )))
+        } else {
+            Err(std::env::VarError::NotPresent)
+        }
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains(ENV_CRYPT_PROVIDER));
+    assert!(error.to_string().contains("Unicode"));
+}

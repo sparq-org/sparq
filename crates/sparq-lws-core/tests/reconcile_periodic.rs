@@ -299,3 +299,55 @@ async fn runtime_flag_controls_periodic_sweep_without_weakening_delete_safety() 
         "with no task, an old orphan must remain untouched beyond an enabled tick interval"
     );
 }
+
+#[cfg(feature = "crypt")]
+#[tokio::test]
+async fn shared_blob_adapter_preserves_scoped_encryption_writes() {
+    use sparq_lws_core::store::{
+        blob_crypt::{CryptOptions, CryptScheme, EncryptingBlobStore},
+        CompositeStore, Store,
+    };
+    use sparq_lws_crypt::LocalKeyProvider;
+    use std::{fs::OpenOptions, io::Write, sync::Arc};
+
+    let mut id = [0; 16];
+    getrandom::getrandom(&mut id).unwrap();
+    let id: String = id.iter().map(|b| format!("{b:02x}")).collect();
+    let path = std::env::temp_dir().join(format!("lane-3-shared-kek-{id}"));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(&path).unwrap().write_all(&[0x51; 32]).unwrap();
+    let provider = LocalKeyProvider::from_file(&path).unwrap();
+    std::fs::remove_file(path).unwrap();
+    let index = SharedStore::new(InMemorySparqClient::new());
+    let raw = SharedStore::new(TestBlobStore::default());
+    let encrypted = EncryptingBlobStore::new(
+        raw.clone(),
+        provider,
+        Arc::new(index.clone()),
+        CryptScheme::Solid,
+        CryptOptions::default(),
+    )
+    .await
+    .unwrap();
+    let store = CompositeStore::with_body_cache(
+        index.clone(),
+        SharedStore::new(encrypted),
+        sparq_lws_core::store::BodyCache::disabled(),
+    );
+    let iri = "https://pod.example/alice/shared";
+    let body = Bytes::from_static(b"a scoped shared resource");
+    let meta = store.write(iri, body.clone(), "text/plain").await.unwrap();
+    assert!(raw.get(&meta.blob_key).await.unwrap().starts_with(b"SQLB"));
+    assert_eq!(store.read(iri).await.unwrap().body, body);
+    let other = "https://pod.example/bob/shared";
+    index.replace_meta(other, meta).await.unwrap();
+    assert!(
+        matches!(store.read(other).await, Err(sparq_lws_core::error::ServerError::Storage(e)) if e.contains("data-key pod"))
+    );
+}

@@ -505,10 +505,27 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
         self.inner.get(key).await
     }
 
+    async fn get_scoped(&self, scope: &super::BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        let _g = self.counters.op_guard();
+        self.counters.blob_gets.fetch_add(1, Ordering::Relaxed);
+        self.inner.get_scoped(scope, key).await
+    }
+
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
         let _g = self.counters.op_guard();
         self.counters.blob_puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put(key, body).await
+    }
+
+    async fn put_scoped(
+        &self,
+        scope: &super::BlobScope,
+        key: &str,
+        body: Bytes,
+    ) -> Result<(), BlobError> {
+        let _g = self.counters.op_guard();
+        self.counters.blob_puts.fetch_add(1, Ordering::Relaxed);
+        self.inner.put_scoped(scope, key, body).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {

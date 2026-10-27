@@ -115,3 +115,15 @@
   crate: "sparq-lws-core"
   features: "blob-fs"
   test: true
+
+# Native byte-plane envelope encryption and reservation/cache lifecycle tests.
+- name: "sparq-lws-core (crypt)"
+  crate: "sparq-lws-core"
+  features: "crypt"
+  test: true
+
+# Exercise encrypted bodies over the native filesystem adapter, including reopen.
+- name: "sparq-lws-core (crypt,blob-fs)"
+  crate: "sparq-lws-core"
+  features: "crypt,blob-fs"
+  test: true

@@ -13,17 +13,21 @@ The default native build opens `FsBlobStore` at `<data>/blobs`. Both
 data-directory boot with a message naming the missing feature. Without a data
 directory, the native binary uses in-memory blobs.
 
-The boot contract checks `<data>/format.json` before opening either plane:
+The default provider `none` checks `<data>/format.json` before opening either plane:
 
 ```json
 {"schema":1,"index":{"major":1},"blobs":{"major":1}}
 ```
 
-An absent marker is published atomically (temporary file, file sync, rename,
-data-directory sync) only if both plane directories are absent or empty. Existing
+An absent marker is published atomically (temporary file, file sync, non-replacing
+hard link, data-directory sync) only if both plane directories are absent or empty. Existing
 plane content without the marker is refused as a foreign directory. An unknown
 schema, incompatible index/blob major, or malformed marker refuses boot. A marker
 without an index resumes first boot. Do not remove the marker from an existing store.
+With `SOLID_SERVER_CRYPT_PROVIDER=local`, a build with `crypt` upgrades blobs to
+`{"major":2,"encryption":"envelope-v1"}` under the index lock after validating
+existing keys. This is one-way; `none` and older binaries refuse the upgraded
+directory. See [blob encryption](blob-encryption.md) for KEK backup and format details.
 
 `EmbeddedSparqClient::open_or_create(dir)` delegates empty-store creation,
 interrupted-swap recovery and exclusive locking to the core. Its I/O result preserves

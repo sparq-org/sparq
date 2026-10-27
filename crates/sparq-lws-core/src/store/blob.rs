@@ -17,16 +17,23 @@ use bytes::Bytes;
 use super::{InMemoryStoreLimits, StoreUsage};
 
 /// A blob-store error (kept opaque so it never leaks backend detail to a client).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum BlobError {
     #[error("blob not found")]
     NotFound,
     /// The configured in-memory byte or entry ceiling would be exceeded.
     #[error("in-memory blob-store quota exceeded")]
     QuotaExceeded,
+    /// An envelope names no durable wrapped-key record.
+    #[error("UnknownDataKey")]
+    UnknownDataKey,
     #[error("blob backend error: {0}")]
     Backend(String),
 }
+
+/// The stable pod identity supplied by the resource read and write paths.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlobScope(pub String);
 
 /// One stored blob, as surfaced by [`BlobStore::list`] for the reconciler's orphan sweep.
 ///
@@ -80,8 +87,19 @@ pub trait BlobStore: Send + Sync {
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
 
+    /// Read resource bytes for a pod. Ordinary backends ignore the scope;
+    /// decorators must forward it to their inner store.
+    async fn get_scoped(&self, _scope: &BlobScope, key: &str) -> Result<Bytes, BlobError> {
+        self.get(key).await
+    }
+
     /// Write bytes under a fresh key. Rewriting or reusing a key violates the caller contract.
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError>;
+
+    /// Write resource bytes for a pod. Ordinary backends ignore the scope.
+    async fn put_scoped(&self, _scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
+        self.put(key, body).await
+    }
 
     /// Whether a key exists.
     async fn exists(&self, key: &str) -> Result<bool, BlobError>;

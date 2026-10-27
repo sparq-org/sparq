@@ -6,6 +6,13 @@ use std::process::Command;
 
 #[test]
 fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
+    assert_boundary("wasm");
+    assert_boundary("wasm,crypt");
+    assert_boundary("wasm,blob-fs");
+    assert_boundary("wasm,crypt,blob-fs");
+}
+
+fn assert_boundary(features: &str) {
     let output = Command::new(env!("CARGO"))
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args([
@@ -14,7 +21,7 @@ fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
             "sparq-lws-core",
             "--no-default-features",
             "--features",
-            "wasm,blob-fs",
+            features,
             "--target",
             "wasm32-unknown-unknown",
             "--edges",
@@ -46,6 +53,7 @@ fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
         "rustls v",
         "solid-oidc-verifier",
         "spargebra",
+        "sparq-lws-crypt",
         "sparq-core",
         "sparq-engine",
         "sparq-lws-blob-fs",

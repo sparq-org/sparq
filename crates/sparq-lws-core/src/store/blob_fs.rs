@@ -41,6 +41,8 @@ fn entry(blob: sparq_lws_blob_fs::BlobEntry) -> BlobEntry {
     }
 }
 
+// This is the terminal byte backend: the default scoped methods call the async
+// get/put below. An outer encryption decorator supplies the envelope bytes.
 #[async_trait]
 impl BlobStore for FsBlobStore {
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
@@ -220,7 +222,9 @@ mod tests {
         let CompositeStore { sparq, blob, .. } = store;
         drop(blob);
         let reopened = CompositeStore::with_body_cache(
-            sparq,
+            std::sync::Arc::try_unwrap(sparq)
+                .ok()
+                .expect("sole index owner"),
             FsBlobStore::open(&directory.0).unwrap(),
             BodyCache::disabled(),
         );
@@ -273,7 +277,7 @@ mod tests {
             grace: Duration::from_secs(60),
             dry_run: false,
         };
-        let report = reconcile_orphans(&store.sparq, &store.blob, &options)
+        let report = reconcile_orphans(store.sparq.as_ref(), &store.blob, &options)
             .await
             .unwrap();
         assert_eq!(report.scanned, 2);
@@ -290,11 +294,28 @@ mod tests {
         assert_eq!(fs::read(stray_file).unwrap(), b"foreign");
         assert!(stray_dir.is_dir());
         assert_eq!(
-            reconcile_orphans(&store.sparq, &store.blob, &options)
+            reconcile_orphans(store.sparq.as_ref(), &store.blob, &options)
                 .await
                 .unwrap()
                 .deleted,
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_defaults_preserve_the_supplied_bytes() {
+        let directory = Directory::new();
+        let blob = FsBlobStore::open(&directory.0).unwrap();
+        let key = "b1-0123456789abcdef0123456789abcdef";
+        let scope = crate::store::BlobScope("https://pod.example/alice/".into());
+        let body = Bytes::from_static(b"SQLB opaque bytes supplied by a decorator");
+        BlobStore::put_scoped(&blob, &scope, key, body.clone())
+            .await
+            .unwrap();
+        assert_eq!(blob.get(key).unwrap(), body);
+        assert_eq!(
+            BlobStore::get_scoped(&blob, &scope, key).await.unwrap(),
+            body
         );
     }
 

@@ -160,7 +160,7 @@ pub const MAX_GROUP_DOCUMENTS: usize = 16;
 ///
 /// Optionally fronted by a per-instance [`AclCache`] (read-path optimisation #3): when present, the
 /// effective-ACL resolution reuses the PARSED triples of an UNCHANGED ACL across requests (keyed by
-/// `(acl-iri, etag)`), skipping the byte-fetch + `oxttl` re-parse — without ever changing the decision
+/// `(acl-iri, etag, blob_key)`), skipping the byte-fetch + `oxttl` re-parse without changing the decision
 /// (the cache is never authoritative; see [`crate::acl_cache`]). When absent (`None`) the resolver
 /// reads + parses every ACL every time — the pre-cache behaviour, also exactly what the `=0` disabled
 /// cache yields.
@@ -183,7 +183,7 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
     }
 
     /// Build an authorizer fronted by the per-instance [`AclCache`]. The cache reuses the PARSED
-    /// triples of an unchanged ACL across requests (keyed by `(acl-iri, etag)`), never changing a
+    /// triples of an unchanged ACL across requests (keyed by `(acl-iri, etag, blob_key)`), preserving a
     /// decision (see [`crate::acl_cache`]).
     pub fn with_cache(store: &'a S, base_url: impl Into<String>, acl_cache: &'a AclCache) -> Self {
         Self {
@@ -500,8 +500,8 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
     ///  - LIVE `store.meta(acl)` first: `None` ⇒ the ACL is GONE NOW (deleted since the plan) ⇒
     ///    `Ok(None)`, keep walking (fail-closed). This is the security core — the plan's plan-time
     ///    etag is NEVER used as the cache gate, so a delete-after-plan can never serve a stale grant;
-    ///  - present ⇒ gate the cache on the ACL's CURRENT etag: a HIT reuses the cached parse (bytes
-    ///    provably unchanged — a rotation changes the etag and misses), a MISS fetches the bytes
+    ///  - present ⇒ gate the cache on the ACL's CURRENT etag and blob pointer: a HIT reuses the parse,
+    ///    a MISS fetches the bytes
     ///    through the JUST-PROBED metadata (`read_at` — no duplicate `get_meta`, the §3.3 F2 fix) and
     ///    parses, refreshing the cache under that same current etag;
     ///  - the ACL vanished between the probe and the byte fetch (a concurrent DELETE) ⇒ `read_at`
@@ -531,8 +531,8 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
             None => return Ok(None),
         };
         let now = Self::now_secs();
-        // Gate the cache on the ACL's CURRENT etag (not the plan's): a rotation misses + re-parses.
-        if let Some(triples) = cache.get(acl, &meta.etag, now) {
+        // Reuse only the current ETag and blob pointer, both obtained from the live probe.
+        if let Some(triples) = cache.get_for_blob(acl, &meta.etag, &meta.blob_key, now) {
             return Ok(Some(triples));
         }
         // Miss: fetch the bytes through the just-probed metadata (read_at — no duplicate get_meta).
@@ -554,7 +554,13 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
             Err(e) => return Err(e),
         };
         let triples = Self::parse_acl_body(&resource, acl);
-        cache.insert(acl, &resource.meta.etag, triples.clone(), now);
+        cache.insert_for_blob(
+            acl,
+            &resource.meta.etag,
+            &resource.meta.blob_key,
+            triples.clone(),
+            now,
+        );
         Ok(Some(triples))
     }
 
@@ -757,7 +763,7 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
     ///  1. cheaply probes the ACL's CURRENT etag via [`Store::meta`] (an index lookup — NO blob
     ///     byte-fetch, NO parse). An ABSENT ACL (`None`) is the `Ok(None)` "no own ACL, keep walking"
     ///     case (unchanged), and the cache holds nothing for it (it can never fabricate a removed ACL);
-    ///  2. on a cache HIT for `(acl, etag)` returns the cached parse — the byte-fetch + `oxttl` parse
+    ///  2. on a cache HIT for `(acl, etag, blob_key)` returns the parse — the byte-fetch + `oxttl` parse
     ///     are SKIPPED (the win);
     ///  3. on a MISS reads the bytes + parses, then REFRESHES the entry under the etag of the bytes it
     ///     ACTUALLY read (so the cached parse always corresponds to the cached etag — no TOCTOU stale).
@@ -783,8 +789,8 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
             None => return Ok(None),
         };
         let now = Self::now_secs();
-        // HIT on `(acl, current-etag)`: reuse the cached parse — skip the byte-fetch + `oxttl` parse.
-        if let Some(triples) = cache.get(acl, &meta.etag, now) {
+        // Reuse only the current ETag and blob pointer, both obtained from the live probe.
+        if let Some(triples) = cache.get_for_blob(acl, &meta.etag, &meta.blob_key, now) {
             return Ok(Some(triples));
         }
         // MISS (no entry / rotated etag / TTL-stale): read the bytes + parse, then refresh the cache
@@ -799,7 +805,13 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
             Err(e) => return Err(e),
         };
         let triples = Self::parse_acl_body(&resource, acl);
-        cache.insert(acl, &resource.meta.etag, triples.clone(), now);
+        cache.insert_for_blob(
+            acl,
+            &resource.meta.etag,
+            &resource.meta.blob_key,
+            triples.clone(),
+            now,
+        );
         Ok(Some(triples))
     }
 
