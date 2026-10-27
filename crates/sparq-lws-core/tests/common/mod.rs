@@ -213,3 +213,6 @@ pub fn mint_dpop_proof(client_key: &KeyKit, method: &str, url: &str, access_toke
 pub fn jwks_provider(issuer_key: &KeyKit) -> StaticJwksProvider {
     StaticJwksProvider::new().with_issuer(ISSUER.to_string(), vec![issuer_key.jwk()])
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod process;

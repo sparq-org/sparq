@@ -2330,7 +2330,7 @@ async fn ensure_ancestor_containers<S: Store>(
 
     // Interior path segments, excluding the resource's own final segment. e.g. for
     // `/a/b/c.txt` the ancestor containers are `/`, `/a/`, `/a/b/`.
-    let path = rest.trim_start_matches('/');
+    let path = rest.trim_matches('/');
     let segments: Vec<&str> = path.split('/').collect();
     if segments.len() <= 1 {
         // Resource is a direct child of the base root — only the root container is its ancestor, and it
