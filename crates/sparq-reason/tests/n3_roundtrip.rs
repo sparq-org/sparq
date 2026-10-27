@@ -3,9 +3,10 @@
 //! example per review round.
 //!
 //! The contract (`n3::serialize`, the `Unit` docs): every RE-REASONABLE writer is exact or
-//! refuses. `parse(write(x))` is `x` exactly — a backward-chaining copy
-//! `__bw<n>.__ua.<iri>` reading back as the universal it copies is the one normalisation —
-//! or the write returns `NotRepresentable`, which it does exactly for the shapes with no
+//! refuses. `parse(write(x))` is `x` under one document-wide variable bijection, with
+//! universals retaining their exact names. A backward copy `__bw<n>.__ua.<iri>` cannot
+//! read back as the original universal; it is refused. The writer returns
+//! `NotRepresentable` for the shapes with no
 //! lossless N3 form (checked against an independent oracle). A document-level `@forAll`
 //! is ONE variable, `__ua.<iri>`, so the writer declares it once, at document level; a
 //! formula-level one binds only in its formula (GH #6754) and is declared in that formula
@@ -17,8 +18,11 @@
 //! Semantics, not just syntax: for every document in a corpus (Codex's examples among it),
 //! `reason_n3_pass_all` either refuses or writes a document whose closure — read directly,
 //! through `log:conclusion` of each formula-valued fact, and through `log:semantics` +
-//! `log:conclusion` of the whole document — equals the source's. On top of that: a
-//! statement renders the same whatever surrounds it, distinct variables (a universal and
+//! `log:conclusion` of the whole document — equals the source's. Fixpoint checks exclude
+//! fresh conclusion existentials and output retaining unbound backward variables: a
+//! written generated name becomes an ordinary source variable when read back, and a
+//! later pass can add a distinct formula. Ordinary-variable spellings share one document
+//! plan, so another statement can reserve a spelling. Distinct variables (a universal and
 //! its backward-chaining copy) are never merged, and identity keys (`statement_keys`,
 //! which provenance addresses facts by) are injective over every `Term` field.
 

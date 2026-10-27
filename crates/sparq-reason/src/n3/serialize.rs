@@ -102,20 +102,26 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
 /// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>.`, one chunk per rule
 /// application the variable was standardized apart by, `<n>` the FINGERPRINT of the proof-tree
 /// node that application sits at — `BwPath`) stripped, when what remains is an `@forAll`
-/// universal. Each chunk's digits are read by maximal munch, so a name decomposes only one
-/// way.
+/// universal. Escaped `__bx<n>.` copies retain the same universal-copy refusal at output.
+/// Each chunk's digits are read by maximal munch, so a name decomposes only one way.
 fn universal_base(v: &str) -> Option<&str> {
+    // A copied universal starts with its own marker, or has another internal prefix
+    // after the first application separator. Ordinary original names need no decoding.
+    if !v.starts_with(UNIVERSAL_VAR)
+        && !v
+            .split_once(super::MINTED_VAR_SEPARATOR)
+            .is_some_and(|(_, original)| original.starts_with("__"))
+    {
+        return None;
+    }
     let mut rest = v;
     loop {
         if rest.starts_with(UNIVERSAL_VAR) {
             return Some(rest);
         }
-        let r = rest.strip_prefix(super::MINTED_VAR)?;
-        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
-        if digits == 0 {
-            return None;
-        }
-        rest = r[digits..].strip_prefix(super::MINTED_VAR_SEPARATOR)?;
+        rest = super::minted_parts(rest)
+            .or_else(|| super::escaped_parts(rest))?
+            .1;
     }
 }
 
@@ -159,6 +165,28 @@ fn local_name(iri: &str) -> String {
 /// Can `?name` be written as is — does the parser's `read_name` read exactly `name` back?
 fn spellable_var(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || !c.is_ascii())
+}
+
+/// The common generated spelling needs only its one internal separator changed to `_`.
+/// Complex original names retain an explicit spelling in the unit's plan.
+fn default_generated(v: &str) -> Option<(&str, &str)> {
+    let (_, original) = super::minted_parts(v).or_else(|| super::escaped_parts(v))?;
+    spellable_var(original).then(|| {
+        let end = v.len() - original.len() - super::MINTED_VAR_SEPARATOR.len_utf8();
+        (&v[..end], original)
+    })
+}
+
+/// Simple generated spellings are injective: tag, digits and original name each retain
+/// their own boundary. Only a source spelling with a generated tag, or a complex name,
+/// can require an exception. Display plans still reserve their universal fallback names.
+fn needs_generated_plan(v: &str) -> bool {
+    // This is a collision hint, not validation: Unit::exact still rejects unsupported
+    // prefixes. A simple suffix needs no repeated fingerprint decoding here.
+    match v.split_once(super::MINTED_VAR_SEPARATOR) {
+        Some((_, original)) => !spellable_var(original),
+        None => v.starts_with(super::MINTED_VAR) || v.starts_with(super::ESCAPED_VAR),
+    }
 }
 
 /// Write `iri` as an N3 `IRIREF`, `<…>`. A backslash is the one character the parser can
@@ -272,9 +300,10 @@ enum Unplaced {
 }
 
 /// Every naming decision for ONE top-level unit of output — a statement (fact), a rule, or
-/// a lone term — made before anything is written. A unit is planned from its own terms
-/// (plus, for a rule in a document's trailer, the document-level declarations it sits
-/// under), so it renders the same whatever else is in the document.
+/// a lone term — made before anything is written. A standalone unit plans its own names;
+/// a document unit borrows the document-wide ordinary-variable spelling plan, alongside
+/// the document-level declarations it sits under. Other units can therefore reserve a
+/// spelling that this unit would otherwise use.
 ///
 /// # Two writers, split by construction
 ///
@@ -328,17 +357,17 @@ enum Unplaced {
 /// until it differs from every variable name in the unit (unspellable variables are
 /// renamed the same way). Two different facts can therefore display alike, so identity —
 /// provenance addressing — comes from [`statement_keys`], never from display strings.
-struct Unit {
+struct Unit<'a> {
     /// Document-level universals (base names) declared OUTSIDE the unit, before it.
     outer: BTreeSet<String>,
     /// Universals (base names) written as a plain variable (display only) → that name.
     names: BTreeMap<String, String>,
-    /// Non-universal variables whose internal name is not a legal variable name → their
-    /// written name (ordinary backward names for exact output; any name for display).
-    renamed: BTreeMap<String, String>,
+    /// Spelling exceptions: collisions with a default generated spelling, and complex
+    /// unspellable names. Ordinary generated names use their separator-replaced default.
+    renamed: std::borrow::Cow<'a, BTreeMap<String, String>>,
 }
 
-impl Unit {
+impl<'a> Unit<'a> {
     /// The universals of the unit made of `terms` that cannot be written under `outer` (the
     /// universals, by base name, whose document-level `@forAll` is already declared before
     /// the unit), by base name with IRI and why.
@@ -358,14 +387,17 @@ impl Unit {
 
     /// Plan the unit made of `terms` for an EXACT writer, under the document-level
     /// declarations `outer`: the plan, or why no exact N3 form exists.
-    fn exact(terms: &[&Term], outer: &BTreeSet<String>) -> Result<Unit, NotRepresentable> {
+    fn exact(
+        terms: &[&Term],
+        outer: &BTreeSet<String>,
+        renamed: Option<&'a BTreeMap<String, String>>,
+    ) -> Result<Unit<'a>, NotRepresentable> {
         let mut vars = BTreeSet::new();
         terms.iter().for_each(|t| all_vars(t, &mut vars));
         check_no_merge(vars.iter().copied())?;
-        if let Some(v) = vars
-            .iter()
-            .find(|v| !binder_named(v) && !spellable_var(v) && !super::minted_var(v))
-        {
+        if let Some(v) = vars.iter().find(|v| {
+            !binder_named(v) && !spellable_var(v) && !super::minted_var(v) && !super::escaped_var(v)
+        }) {
             return Err(NotRepresentable::Unspellable(format!(
                 "the variable `{v}` has no N3 spelling"
             )));
@@ -395,7 +427,10 @@ impl Unit {
         }
         // Ordinary backward names can be written under a bijective plain-variable
         // renaming. Universal copies still require the exact-name refusal above.
-        let renamed = Unit::generated_names(terms);
+        let renamed = match renamed {
+            Some(plan) => std::borrow::Cow::Borrowed(plan),
+            None => std::borrow::Cow::Owned(Unit::generated_names(terms)),
+        };
         Ok(Unit {
             outer: outer.clone(),
             names: BTreeMap::new(),
@@ -403,14 +438,25 @@ impl Unit {
         })
     }
 
+    /// Reserve a legal spelling, adding a suffix only when another variable owns it.
+    fn fresh_name(base: String, taken: &mut BTreeMap<String, ()>) -> String {
+        let mut name = base.clone();
+        let mut n = 2;
+        while taken.insert(name.clone(), ()).is_some() {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        name
+    }
+
     /// Legal names for ordinary backward variables, reserved against all source names
     /// in `terms`. Document writers share this plan across their statement/rule units.
     fn generated_names(terms: &[&Term]) -> BTreeMap<String, String> {
         if terms
             .iter()
-            .any(|t| super::mentions_var(t, &super::minted_var))
+            .any(|t| super::mentions_var(t, &needs_generated_plan))
         {
-            Unit::lossy(terms).renamed
+            Unit::name_plan(terms, false).renamed.into_owned()
         } else {
             BTreeMap::new()
         }
@@ -418,31 +464,67 @@ impl Unit {
 
     /// Plan the unit made of `terms` for DISPLAY: always succeeds; what [`Unit::exact`]
     /// refuses gets a collision-free plain-variable spelling unit-wide.
-    fn lossy(terms: &[&Term]) -> Unit {
-        let unplaced = Unit::unplaced(terms, &BTreeSet::new());
+    fn lossy(terms: &[&Term]) -> Unit<'a> {
+        Unit::name_plan(terms, true)
+    }
+
+    /// The shared spelling plan. Exact generated-name planning needs no display-only
+    /// universal placement or fallback names.
+    fn name_plan(terms: &[&Term], display: bool) -> Unit<'a> {
+        let unplaced = if display {
+            Unit::unplaced(terms, &BTreeSet::new())
+        } else {
+            Vec::new()
+        };
         let mut vars = BTreeSet::new();
         terms.iter().for_each(|t| all_vars(t, &mut vars));
-        let mut taken: BTreeSet<String> = vars
+        let mut taken: BTreeMap<String, ()> = vars
             .iter()
             .filter(|v| !binder_named(v) && spellable_var(v))
-            .map(|v| v.to_string())
+            .map(|v| (v.to_string(), ()))
             .collect();
-        let mut fresh = |base: String| {
-            let mut name = base.clone();
-            let mut n = 2;
-            while !taken.insert(name.clone()) {
-                name = format!("{base}_{n}");
-                n += 1;
-            }
-            name
-        };
-        let names = unplaced.into_iter().map(|(base, iri, _)| (base, fresh(local_name(&iri)))).collect();
+        let names = unplaced
+            .into_iter()
+            .map(|(base, iri, _)| (base, Unit::fresh_name(local_name(&iri), &mut taken)))
+            .collect();
         let renamed = vars
             .iter()
             .filter(|v| !binder_named(v) && !spellable_var(v))
-            .map(|v| (v.to_string(), fresh(sanitize_name(v))))
+            .filter_map(|v| {
+                let default = default_generated(v);
+                let base = match default {
+                    Some((prefix, original)) => {
+                        let mut name = String::with_capacity(v.len());
+                        name.push_str(prefix);
+                        name.push('_');
+                        name.push_str(original);
+                        name
+                    }
+                    None => sanitize_name(v),
+                };
+                match taken.entry(base) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        if default.is_some() {
+                            entry.insert(());
+                            None
+                        } else {
+                            let name = entry.key().clone();
+                            entry.insert(());
+                            Some((v.to_string(), name))
+                        }
+                    }
+                    std::collections::btree_map::Entry::Occupied(entry) => {
+                        let base = entry.key().clone();
+                        Some((v.to_string(), Unit::fresh_name(base, &mut taken)))
+                    }
+                }
+            })
             .collect();
-        Unit { outer: BTreeSet::new(), names, renamed }
+        Unit {
+            outer: BTreeSet::new(),
+            names,
+            renamed: std::borrow::Cow::Owned(renamed),
+        }
     }
 
     /// Write `t`, a term at the unit's top level.
@@ -495,7 +577,18 @@ impl Unit {
                 },
                 None => {
                     out.push('?');
-                    out.push_str(self.renamed.get(v.as_str()).map_or(v.as_str(), String::as_str));
+                    if let Some(name) = self.renamed.get(v.as_str()) {
+                        out.push_str(name);
+                    } else if let Some((prefix, original)) =
+                        v.split_once(super::MINTED_VAR_SEPARATOR)
+                    {
+                        debug_assert!(default_generated(v).is_some());
+                        out.push_str(prefix);
+                        out.push('.');
+                        out.push_str(original);
+                    } else {
+                        out.push_str(v);
+                    }
                 }
             },
             Term::List(ms) => {
@@ -1175,7 +1268,7 @@ const CHECK_IRI: &str = "urn:sparq:serialize:check";
 /// `Unit`). The check costs one parse of the written text.
 pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
     let mut s = String::new();
-    Unit::exact(&[t], &BTreeSet::new())?.term(t, &mut s);
+    Unit::exact(&[t], &BTreeSet::new(), None)?.term(t, &mut s);
     let k = Term::Iri(CHECK_IRI.into());
     verify_document(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[&[k.clone(), k, t.clone()]], &[], &super::bounded::Truncation::top_level())?;
     out.push_str(&s);
@@ -1222,8 +1315,8 @@ fn statement_text(
     renamed: &BTreeMap<String, String>,
 ) -> Result<String, NotRepresentable> {
     let mut s = String::new();
-    let mut unit = Unit::exact(&[&f[0], &f[1], &f[2]], outer).map_err(|e| in_statement(f, e))?;
-    unit.renamed.clone_from(renamed);
+    let unit = Unit::exact(&[&f[0], &f[1], &f[2]], outer, Some(renamed))
+        .map_err(|e| in_statement(f, e))?;
     unit.statement(f, &mut s);
     Ok(s)
 }
@@ -1417,9 +1510,8 @@ pub(super) fn write_document(
                 let outer = binders
                     .before(s.iter(), &mut doc)
                     .map_err(|e| in_rule(s, *kind, e))?;
-                let mut unit =
-                    Unit::exact(&[&s[0], &s[1]], &outer).map_err(|e| in_rule(s, *kind, e))?;
-                unit.renamed.clone_from(&renamed);
+                let unit = Unit::exact(&[&s[0], &s[1]], &outer, Some(&renamed))
+                    .map_err(|e| in_rule(s, *kind, e))?;
                 write_rule_sides(&unit, s, *kind, &mut doc);
                 rule_order.push((s.clone(), *kind));
             }
@@ -1475,7 +1567,8 @@ pub enum RuleKind {
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) -> Result<(), NotRepresentable> {
     let sides = rule_sides(r, kind, vars);
     check_no_merge(vars_of(sides.iter()).into_iter()).map_err(|e| in_rule(&sides, kind, e))?;
-    let unit = Unit::exact(&[&sides[0], &sides[1]], &BTreeSet::new()).map_err(|e| in_rule(&sides, kind, e))?;
+    let unit = Unit::exact(&[&sides[0], &sides[1]], &BTreeSet::new(), None)
+        .map_err(|e| in_rule(&sides, kind, e))?;
     let mut s = String::new();
     write_rule_sides(&unit, &sides, kind, &mut s);
     verify_document(&s, &[], &[(sides.clone(), kind)], &super::bounded::Truncation::top_level()).map_err(|e| in_rule(&sides, kind, e))?;
@@ -1518,7 +1611,7 @@ fn rule_sides(r: &Rule, kind: RuleKind, vars: RuleVars) -> [Term; 2] {
     [side(left), side(right)]
 }
 
-fn write_rule_sides(unit: &Unit, sides: &[Term; 2], kind: RuleKind, out: &mut String) {
+fn write_rule_sides(unit: &Unit<'_>, sides: &[Term; 2], kind: RuleKind, out: &mut String) {
     unit.term(&sides[0], out);
     out.push_str(match kind {
         RuleKind::Forward => " => ",
@@ -1640,6 +1733,46 @@ mod tests {
     }
 
     const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+    #[test]
+    fn complex_generated_names_keep_defaults_distinct() {
+        let iri = |name: &str| Term::Iri(format!("http://ex/{name}"));
+        let fact = |subject: &str, name: &str| {
+            let v = Term::Var(name.into());
+            [
+                iri(subject),
+                iri("p"),
+                Term::Formula(vec![[v.clone(), iri("same"), v]]),
+            ]
+        };
+        // Both sanitize to the same base. No legal source name can force the slow path:
+        // the complex original name itself must keep the shared exception plan active.
+        let complex = fact("complex", "__bx7.__bw8.y");
+        let simple = fact("simple", "__bx7.__bw8_y");
+        let text = serialize_facts([&complex, &simple].into_iter())
+            .expect("complex names and defaults stay distinct");
+        let parsed = super::super::parser::parse(&text).expect("the complete document parses");
+        assert_eq!(parsed.facts.len(), 2);
+        let variable = |subject: &str| {
+            let row = parsed.facts.iter().find(|r| r[0] == iri(subject)).unwrap();
+            assert_eq!(row[1], iri("p"));
+            let Term::Formula(ts) = &row[2] else {
+                panic!("{row:?}")
+            };
+            assert_eq!(ts.len(), 1);
+            assert_eq!(ts[0][1], iri("same"));
+            assert_eq!(ts[0][0], ts[0][2], "repeated occurrences keep sharing");
+            let Term::Var(v) = &ts[0][0] else {
+                panic!("{row:?}")
+            };
+            v.clone()
+        };
+        assert_ne!(
+            variable("complex"),
+            variable("simple"),
+            "distinct variables never merge"
+        );
+    }
 
     #[test]
     fn ordinary_backward_names_round_trip_in_every_exact_writer() {

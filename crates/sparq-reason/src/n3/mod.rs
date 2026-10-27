@@ -1117,9 +1117,14 @@ pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, Str
 /// itself is an unordered set), then rules in document order.
 ///
 /// Re-running this over its own output is a FIXPOINT for a monotone rule set whose
-/// conclusions mint no fresh existentials: the closure is already saturated and the rules
-/// round-trip. A rule with a blank node in its CONCLUSION mints a fresh `_:__sk…` label per
-/// firing, so such a document grows on each re-run — the same caveat EYE carries.
+/// conclusions mint no fresh existentials and whose output retains no unbound backward
+/// variables: the closure is already saturated and the rules round-trip. There are two
+/// exceptions. A blank node in a rule's CONCLUSION mints a fresh `_:__sk…` label per firing,
+/// so the document grows on each re-run — the same existential caveat EYE carries. An unbound
+/// backward variable is written under a legal, bijective spelling; reading it back makes it
+/// an ordinary source variable. Re-deriving its formula adds another distinct variable and
+/// fact on each pass, so this output can grow too. The bijection preserves one document's
+/// variable sharing; it does not preserve a generated name across separate reasoning runs.
 ///
 /// HONESTY: the mapping onto the two EYE flags is BY CONSTRUCTION — closure + echoed rules,
 /// and "ground" read as "no syntactic variable survives IN A RULE" — not a differential
@@ -1131,8 +1136,8 @@ pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, Str
 ///
 /// # Errors
 ///
-/// A parse error, or — the output must re-reason exactly as the input did — a closure fact
-/// or rule that has no lossless N3 form ([`serialize::NotRepresentable`]): a unit mixing a
+/// A parse error, or a closure fact or rule that has no lossless N3 form under the
+/// document-wide variable bijection ([`serialize::NotRepresentable`]): a unit mixing a
 /// plain mention of an `@forAll` IRI with its universal (the one document-level declaration
 /// would capture it), units whose plain mentions and universals need each other first (a
 /// cycle), or a backward-chaining copy of a universal. No fallback spelling is written.
@@ -1288,7 +1293,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple(&c, b, &bw.truncated) {
+                if let Some(g) = ground_triple::<true>(&c, b, &bw.truncated) {
                     // A conclusion past the term-depth limit is dropped, as a cut.
                     if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
                     {
@@ -2429,7 +2434,7 @@ fn run_closure_in(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple(&c, b, &bw.truncated) {
+                        if let Some(g) = ground_triple::<true>(&c, b, &bw.truncated) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
                             if !facts.contains(&g)
                                 && bw.settle(bounded::generated(&bw.truncated, &g))
@@ -2440,7 +2445,7 @@ fn run_closure_in(
                                     rule.premise
                                         .iter()
                                         .filter_map(|p| match universals {
-                                            None => ground_triple(p, b, &bw.truncated),
+                                            None => ground_triple::<false>(p, b, &bw.truncated),
                                             // The stored facts a premise universal was
                                             // proved from mention a store universal.
                                             Some(_) => premise_instance(p, b, &bw.truncated),
@@ -3987,9 +3992,9 @@ impl bounded::Subst for Produced<'_> {
 /// node's identity to 64 bits and refuses to hand the same fold to two different identities,
 /// so a fold names a derivation and nothing else.
 ///
-/// A renamed variable is not confined to the proof. A rule conclusion can bind a goal
-/// variable to a quoted formula that still holds one, and that value reaches a derived fact,
-/// where it becomes part of the fact's term identity — its `term_key`, its `why()` string and
+/// A rule conclusion can bind a goal variable to a quoted formula that still holds a
+/// renamed variable. Its escaped spelling reaches a derived fact, where it becomes part
+/// of the fact's term identity — its `term_key`, its `why()` string and
 /// its `sparq-prov` IRI. So the name has to be a function of the derivation, not of how much
 /// proving happened first: a counter bumped once per rule application made every such name
 /// depend on the order bindings arrived out of a fact set, and so on insertion history and on
@@ -4022,12 +4027,12 @@ impl bounded::Subst for Produced<'_> {
 ///   closures at one nesting depth apart ([`BwCtx::scope_salt`]): both go into the root
 ///   identity ([`BwCtx::root_path`]).
 ///
-/// Keying the name to the goal is also what makes it safe ACROSS ROUNDS. The same goal
-/// re-proved at the same node in a later round takes the same name and derives the same fact
-/// — which is why a program whose only growth was the old counter now saturates. A goal that
-/// a later round reaches carrying a renamed variable leaked out of an earlier one (through a
-/// stored quoted formula and a forward `log:includes`, say) is a DIFFERENT goal, so it takes
-/// a different name and cannot capture the node that minted that variable.
+/// The same goal re-proved at the same node in a later round takes the same name and
+/// derives the same fact, so in-run deduplication is stable. Before a result enters a fact
+/// or query output, [`finish_conclusion_names`] moves any surviving application names into
+/// the deterministic `__bx<fold>.` namespace. Such a name is an ordinary free variable:
+/// [`minted_parts`] and [`live_var`] never recognize it as a live application name, even
+/// when a later round proves the same goal at the same node.
 ///
 /// A path is ONE `u64`, not a chain: each step's fingerprint is folded from the step and the
 /// fingerprint it is taken from ([`NodeKey::Step`]), and registered like any other, so the
@@ -4425,6 +4430,21 @@ fn minted_parts(v: &str) -> Option<(&str, &str)> {
 
 fn minted_var(v: &str) -> bool {
     minted_parts(v).is_some()
+}
+
+/// Escaped application names are ordinary free variables outside their producing proof.
+const ESCAPED_VAR: &str = "__bx";
+
+/// Recognize the deterministic escaped spelling for exact output and universal-copy checks.
+fn escaped_parts(v: &str) -> Option<(&str, &str)> {
+    let (digits, original) = v
+        .strip_prefix(ESCAPED_VAR)?
+        .split_once(MINTED_VAR_SEPARATOR)?;
+    (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())).then_some((digits, original))
+}
+
+fn escaped_var(v: &str) -> bool {
+    escaped_parts(v).is_some()
 }
 
 /// Keep a rule-built variable only while its application is on the live proof path.
@@ -5085,7 +5105,11 @@ fn formula_search(
 /// statements include rules — cwm keeps those rule variables quoted in the
 /// emitted formula). Only a variable at the triple level (or inside a list)
 /// leaves the conclusion genuinely uninstantiated.
-fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 3]> {
+fn ground_triple<const ESCAPE: bool>(
+    t: &[Term; 3],
+    b: &Binding,
+    run: &Truncation,
+) -> Option<[Term; 3]> {
     fn instantiated(t: &Term) -> bool {
         match t {
             Term::Var(_) => false,
@@ -5104,7 +5128,7 @@ fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 
     ];
     // The conclusion's own `@forAll` universals, now asserted, are document-level ones
     // (GH #6754). After substitution, so no binding can reach them.
-    g.iter_mut().for_each(assert_conclusion_universals);
+    g.iter_mut().for_each(finish_conclusion_names::<ESCAPE>);
     if g.iter().all(instantiated) {
         Some(g)
     } else {
@@ -5146,18 +5170,27 @@ fn rename_var_prefix(stmts: &mut [[Term; 3]], from: &str, to: &str) {
 /// that run's document level, `__ul.<k>.<iri>`, so the result formula gets them back as its
 /// own: asserting `∀x. S(x)` beside a document under `∀x` is the
 /// same as conjoining `S(x)` under it, since `x` does not occur in what is already there.
-fn assert_conclusion_universals(t: &mut Term) {
+///
+/// Fact and query emission also escape still-unbound application names to `__bx<fold>.`
+/// in this same walk, preserving the fold and original name for deterministic deduplication.
+/// Premise instantiation keeps its live names (`ESCAPE = false`).
+fn finish_conclusion_names<const ESCAPE: bool>(t: &mut Term) {
     match t {
         Term::Var(v) => {
             if let Some(iri) = v.strip_prefix(serialize::CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{}{iri}", serialize::UNIVERSAL_VAR));
             } else if let Some(rest) = v.strip_prefix(CLOSURE_CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{LIFTED_UNIVERSAL}{rest}"));
+            } else if ESCAPE && minted_var(v) {
+                v.replace_range(..MINTED_VAR.len(), ESCAPED_VAR);
             }
         }
-        Term::Formula(ts) => ts.iter_mut().flatten().for_each(assert_conclusion_universals),
-        Term::List(ms) => ms.iter_mut().for_each(assert_conclusion_universals),
-        Term::Triple(tr) => tr.iter_mut().for_each(assert_conclusion_universals),
+        Term::Formula(ts) => ts
+            .iter_mut()
+            .flatten()
+            .for_each(finish_conclusion_names::<ESCAPE>),
+        Term::List(ms) => ms.iter_mut().for_each(finish_conclusion_names::<ESCAPE>),
+        Term::Triple(tr) => tr.iter_mut().for_each(finish_conclusion_names::<ESCAPE>),
         _ => {}
     }
 }
@@ -8611,6 +8644,87 @@ mod runtime_doc_key_golden {
 
 #[cfg(test)]
 mod tests {
+    // The text parser excludes dots from variable names. Build the two ownership cases
+    // through Term so they exercise minted-shaped data, rather than a lexer rejection.
+    #[test]
+    fn a_live_application_id_does_not_own_unminted_source_names() {
+        use super::*;
+        let closure = |variable: &str, backward: bool| {
+            let data = ":seed :value :g . :cfg :pat { :v0 :inner ?source } .\n\
+                        :k :s1 { :v0 :inner :A } . :k :s2 { :v0 :inner :B } .";
+            let head = "?q :odd { :tag :v ?z }";
+            let body = ":seed :value ?q . :cfg :pat ?f . :k :s1 ?s1 . :k :s2 ?s2 . ?s1 log:includes ?f . ?s2 log:includes ?f";
+            let rule = if backward {
+                format!("{{ {head} }} <= {{ {body} }} .")
+            } else {
+                format!("{{ {body} }} => {{ {head} }} .")
+            };
+            let src = format!("@prefix : <http://ex/> . @prefix log: <{LOG}> .\n\
+                               {data} {rule} {{ :g :odd ?r }} => {{ :trace :got ?r . :out :fired :yes }} .");
+            let mut parsed = parser::parse(&src).unwrap();
+            let pattern = parsed
+                .facts
+                .iter_mut()
+                .find(|t| t[0] == Term::Iri("http://ex/cfg".into()))
+                .unwrap();
+            let Term::Formula(ts) = &mut pattern[2] else {
+                panic!("{pattern:?}")
+            };
+            ts[0][2] = Term::Var(variable.into());
+            let run = Truncation::top_level();
+            run_closure(
+                parsed,
+                None,
+                None,
+                &run,
+                StepMode::None,
+                NegationCycles::Reject,
+                None,
+            )
+            .unwrap()
+            .top_level()
+            .0
+        };
+        let baseline = closure("source", true);
+        let formula = &baseline
+            .all
+            .iter()
+            .find(|t| t[0] == Term::Iri("http://ex/trace".into()))
+            .unwrap()[2];
+        let Term::Formula(ts) = formula else {
+            panic!("{formula:?}")
+        };
+        let Term::Var(name) = &ts[0][2] else {
+            panic!("{formula:?}")
+        };
+        let (application, _) = name.strip_prefix("__bx").unwrap().split_once('.').unwrap();
+        let fired = [
+            Term::Iri("http://ex/out".into()),
+            Term::Iri("http://ex/fired".into()),
+            Term::Iri("http://ex/yes".into()),
+        ];
+        assert!(
+            baseline.contains(&fired),
+            "the ordinary pattern is matched afresh"
+        );
+        for name in [
+            format!("__bw0{application}.z"),
+            format!("__bw{application}.not_written"),
+        ] {
+            assert!(
+                minted_var(&name),
+                "the ownership guard must see a minted-shaped name"
+            );
+            let forward = closure(&name, false);
+            let backward = closure(&name, true);
+            assert!(forward.contains(&fired), "forward case {name}");
+            assert!(
+                backward.contains(&fired),
+                "unowned source name {name} matches each scope afresh"
+            );
+        }
+    }
+
     #[test]
     fn arriving_patterns_keep_only_live_application_names() {
         use super::{
@@ -11726,13 +11840,13 @@ mod tests {
         assert!(reached_false > 100, "the refusing arms are reached: {reached_false}");
     }
 
-    /// Every fact a backward proof derives is BYTE IDENTICAL to what the
-    /// `HashMap<String, Term>`-keyed substitution derived, and so is every proof step.
+    /// Backward proofs preserve the captured substitution results and derivation folds.
+    /// Ground answers and proof steps match the `HashMap<String, Term>`-keyed substitution;
+    /// surviving unbound names use the current escaped prefix around the captured folds.
     ///
-    /// The expectations are not computed: they are the literal output of the engine as it
-    /// stood BEFORE this change, captured from the parent commit and pasted in. That is
-    /// what makes this a differential and not a tautology — the new representation cannot
-    /// talk its way into agreeing with itself.
+    /// The expected bindings and folds were captured before the substitution representation
+    /// changed, not computed from the implementation being tested. The returned-formula
+    /// expectations also apply the projection and escaped-name corrections (GH #6943).
     ///
     /// What they pin is exactly the part a representation change could move. A backward
     /// renaming's `__bw<fold>.` name is a function of the goal with its variables resolved
@@ -11772,16 +11886,16 @@ mod tests {
                 // proof's substitution — and that name, not `:v0`, was what the derived
                 // fact's identity, its `why()` and its `sparq-prov` IRI were built from.
                 // The renaming property this case is in the list for is untouched: one
-                // distinct `__bw<n>.` chunk per goal, in `?z`, which is still the
+                // distinct escaped `__bx<n>.` chunk per goal, in `?z`, which is still the
                 // fingerprint of the derivation and nothing else.
                 "a renamed variable the proof bound, instantiated; one it did not, kept",
                 "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n:s2 :p :v2 .\n\
                  { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n",
                 "@prefix : <http://ex/> .\n{ ?x :p ?any . ?x :has ?f } => { ?x :vals ?f } .\n",
                 &[
-                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Iri("http://ex/v0"), Iri("http://ex/inner"), Var("__bw13293826320743913544.z")]])"#,
-                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Iri("http://ex/v1"), Iri("http://ex/inner"), Var("__bw14225706374877674727.z")]])"#,
-                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Iri("http://ex/v2"), Iri("http://ex/inner"), Var("__bw8776505594191193573.z")]])"#,
+                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Iri("http://ex/v0"), Iri("http://ex/inner"), Var("__bx13293826320743913544.z")]])"#,
+                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Iri("http://ex/v1"), Iri("http://ex/inner"), Var("__bx14225706374877674727.z")]])"#,
+                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Iri("http://ex/v2"), Iri("http://ex/inner"), Var("__bx8776505594191193573.z")]])"#,
                 ],
             ),
             (
@@ -11810,8 +11924,8 @@ mod tests {
                     // (`:v` / `:w`), its `?z` still the site's own fingerprint: the two
                     // rows this case is about stay two rows, and now differ in what was
                     // proved as well as in the name (GH #6943 case 1, `Produced`).
-                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/v"), Iri("http://ex/inner"), Var("__bw17784778144888223834.z")]])"#,
-                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/w"), Iri("http://ex/inner"), Var("__bw17784779244399852045.z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/v"), Iri("http://ex/inner"), Var("__bx17784778144888223834.z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/w"), Iri("http://ex/inner"), Var("__bx17784779244399852045.z")]])"#,
                 ],
             ),
             (
@@ -12276,11 +12390,11 @@ mod tests {
     fn backward_renaming_does_not_depend_on_traversal_order() {
         // GH #6844 item 2: a backward rule's conclusion can bind a goal variable to a
         // QUOTED FORMULA that still holds the rule's freshened variables, and that value
-        // reaches a derived fact — where the `__bw<n>.` name is part of the fact's term
+        // reaches a derived fact — where the `__bx<n>.` name is part of the fact's term
         // identity (its `term_key`, its `why()` string, its `sparq-prov` IRI). The name came
         // from a counter bumped once per rule application, and the applications here run one
         // per binding of the preceding conjunct, in the order the fact set yields them: so
-        // which subject got `__bw0_z` moved with insertion history and hasher width.
+        // which subject got the old `__bw0_z` moved with insertion history and hasher width.
         //
         // The variable this reads is `?z`, which NO premise binds. Its sibling `?y` is bound
         // by the premise, so the projection instantiates it (GH #6943 case 1, `Produced`)
@@ -12298,18 +12412,24 @@ mod tests {
         for (i, r) in runs.iter().enumerate().skip(1) {
             assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
         }
-        // The name is the derivation's own fingerprint and nothing else: one `__bw<n>.`
+        // The name is the derivation's own fingerprint and nothing else: one `__bx<n>.`
         // chunk, so its length does not grow with the depth of the proof that minted it.
         let names: Vec<&str> = runs[0]
             .iter()
             .map(|r| {
-                let at = r.find("Var(\"__bw").expect("the value carries a renamed variable");
+                let at = r
+                    .find("Var(\"__bx")
+                    .expect("the value carries a renamed variable");
                 &r[at..]
             })
             .collect();
         for (r, v) in runs[0].iter().zip(&names) {
-            assert_eq!(r.matches("Var(\"__bw").count(), 1, "one surviving name per row: {r}");
-            let rest = v.strip_prefix("Var(\"__bw").expect("a renamed variable");
+            assert_eq!(
+                r.matches("Var(\"__bx").count(),
+                1,
+                "one surviving name per row: {r}"
+            );
+            let rest = v.strip_prefix("Var(\"__bx").expect("a renamed variable");
             let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
             assert!(digits > 0, "{v}");
             assert!(

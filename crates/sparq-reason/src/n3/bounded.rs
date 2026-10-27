@@ -1000,7 +1000,8 @@ fn resolved_bytes_deep<B: Subst + ?Sized>(
                 if open.contains(&at) {
                     return Some(term_bytes(t));
                 }
-                let fuel = fuel.checked_sub(1)?;
+                debug_assert!(fuel > 0, "a binding path cannot exceed the binding length");
+                let fuel = fuel.saturating_sub(1);
                 let key = (at, fuel, room);
                 if let Some(n) = memo.get(&key) {
                     return Some(*n);
@@ -1038,7 +1039,10 @@ pub(crate) fn substitute_resolved<B: Subst + ?Sized>(
         &mut HashSet::new(),
         &mut HashMap::new(),
     ) else {
-        run.refuse(CutKind::Other, || TERM_DEPTH_CUT.to_string());
+        run.refuse(CutKind::Other, || format!(
+            "n3: backward projection exceeded the term-depth limit (allowance: {} nested containers)",
+            run.term_depth.get(),
+        ));
         return None;
     };
     if substituted_refused(run, bytes) {
@@ -1979,9 +1983,13 @@ mod tests {
         let mut open = HashSet::new();
         let mut memo = HashMap::new();
         assert!(resolved_bytes_deep(&t, &b, 3, 2, &mut open, &mut memo).is_some());
-        assert_eq!(
-            resolved_bytes_deep(&t, &b, 1, 2, &mut open, &mut memo),
-            None
+        #[cfg(debug_assertions)]
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                resolved_bytes_deep(&t, &b, 1, 2, &mut HashSet::new(), &mut HashMap::new())
+            }))
+            .is_err(),
+            "an impossible hop bound must trip the debug invariant"
         );
         assert_eq!(
             resolved_bytes_deep(&t, &b, 3, 0, &mut open, &mut memo),
