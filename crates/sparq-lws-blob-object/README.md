@@ -1,7 +1,7 @@
 # sparq-lws-blob-object
 
 Experimental native object-store blob plane, `publish = false`. The crate is
-available; native server configuration and boot wiring are pending.
+available and wired into the native server behind its default-off `blob-object` feature.
 
 ## 🚀 Quickstart
 
@@ -29,8 +29,16 @@ and `gcp` enable `s3://`, `az://`, and `gs://` respectively; all are off by defa
 does not fsync file data or directories and is not crash-durable. For durable
 local storage in library integrations, use `store::blob_fs::FsBlobStore` with the
 native `blob-fs` feature and hold the exclusive data-directory lock. Native server
-boot uses filesystem blobs with `SOLID_SERVER_DATA_DIR` and in-memory blobs
-otherwise.
+boot selects this backend with `SOLID_SERVER_BLOB_URL` plus
+`SOLID_SERVER_DATA_DIR` (the index remains local). Unset URL retains filesystem
+blobs with a data directory and in-memory blobs otherwise. A set URL without
+`blob-object` fails startup. `SOLID_SERVER_BLOB_OPTIONS` is an optional JSON map
+of provider keys to string values (default empty); unknown keys fail startup.
+The URL must have no user information, query or fragment. Credentials belong in
+options or provider-default discovery. Configuration values are never logged.
+`format.json` records the backend and exact URL, excluding options; reopening
+with a different backend or URL requires migration. Legacy markers denote
+filesystem blobs. Cloud provider features must also be enabled.
 `ObjectBlobStore::new(Arc<dyn ObjectStore>, prefix)` wraps an existing backend.
 `from_url(url, options)` uses the pinned provider's configuration options and
 rejects unknown options. Provider credential discovery can consult local files,
