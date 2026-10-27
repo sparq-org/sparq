@@ -1401,8 +1401,8 @@ impl BoundRuleSet<'_> {
     /// charge is debited here. This compiled subset currently has no nested closure builtin.
     ///
     /// # Errors
-    /// A strictly narrower ledger cap returns [`MeteredError::Ledger`]. Other failures
-    /// return [`MeteredError::Closure`] with the exact existing error string.
+    /// A strictly narrower ledger cap or an elapsed deadline returns [`MeteredError::Ledger`].
+    /// Other failures return [`MeteredError::Closure`] with the exact existing error string.
     /// The ledger refusal's `reached` is the first total past the cap (a lower bound
     /// when a batch of firings crosses it). Dictionary interning is not rolled back.
     pub fn eval_metered(
@@ -1416,33 +1416,37 @@ impl BoundRuleSet<'_> {
         let facts_left = ledger.remaining(Dim::ClosureFacts);
         let effective = bounded::metered_limits(limits, joins, facts_left);
         let run = Truncation::top_level_with(effective);
-        let (closure, charge) =
-            self.eval_closure(dict, facts, &run)
-                .map_err(|ClosureRefusal { message: e, kind }| {
-                    let dim = match kind {
-                        Some(bounded::CutKind::TotalJoinRows) if joins < limits.max_total_join_rows => {
-                            Dim::JoinRows
-                        }
-                        Some(bounded::CutKind::Facts) if facts_left < limits.max_facts => {
-                            Dim::ClosureFacts
-                        }
-                        Some(bounded::CutKind::Rounds) => {
-                            return MeteredError::Closure(bounded::rounds_error(limits));
-                        }
-                        _ => return MeteredError::Closure(e),
-                    };
-                    MeteredError::Ledger(Exceeded::new(
-                        dim,
-                        match dim {
-                            Dim::JoinRows => ledger.limits().join_rows,
-                            _ => ledger.limits().closure_facts,
-                        },
-                        ledger
-                            .spent(dim)
-                            .saturating_add(ledger.remaining(dim))
-                            .saturating_add(1),
-                    ))
-                })?;
+        let (closure, charge) = self.eval_closure(dict, facts, &run).map_err(
+            |ClosureRefusal { message: e, kind }| {
+                let dim = match kind {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    Some(bounded::CutKind::Deadline) => {
+                        return MeteredError::Ledger(Exceeded::new(Dim::Deadline, usize::MAX, 0));
+                    }
+                    Some(bounded::CutKind::TotalJoinRows) if joins < limits.max_total_join_rows => {
+                        Dim::JoinRows
+                    }
+                    Some(bounded::CutKind::Facts) if facts_left < limits.max_facts => {
+                        Dim::ClosureFacts
+                    }
+                    Some(bounded::CutKind::Rounds) => {
+                        return MeteredError::Closure(bounded::rounds_error(limits));
+                    }
+                    _ => return MeteredError::Closure(e),
+                };
+                MeteredError::Ledger(Exceeded::new(
+                    dim,
+                    match dim {
+                        Dim::JoinRows => ledger.limits().join_rows,
+                        _ => ledger.limits().closure_facts,
+                    },
+                    ledger
+                        .spent(dim)
+                        .saturating_add(ledger.remaining(dim))
+                        .saturating_add(1),
+                ))
+            },
+        )?;
         // Both charges have already been checked by the effective caps. The clone
         // also keeps compound publication atomic if a future dimension is added.
         let mut charged = ledger.clone();

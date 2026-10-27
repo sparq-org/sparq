@@ -141,7 +141,9 @@ pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> 
 #[non_exhaustive] // build from Default, then set fields: `let mut l = ClosureLimits::default(); l.max_term_bytes = …;`
 pub struct ClosureLimits { pub max_rounds: usize /* 1_000_000 */, pub max_facts: usize /* 50_000_000 */,
                            pub max_term_bytes: usize /* 16 MiB per derived term */,
-                           pub max_join_rows: usize /* usize::MAX (unbounded, opt-in): binding rows + firings per round (GH #6938) */ }
+                           pub max_join_rows: usize /* usize::MAX (unbounded, opt-in): binding rows + firings per round (GH #6938) */,
+                           pub max_total_join_rows: usize /* usize::MAX; across rounds */,
+                           pub deadline: Option<std::time::Instant> /* None; ignored on wasm32 */ }
 pub fn reason_n3_terms_with_limits(src, base, resolver, cycles: NegationCycles, limits: ClosureLimits)
     -> Result<N3Closure, String>;
 pub fn reason_n3_with_limits(dict: &mut Dict, src: &str, cycles: NegationCycles, limits: ClosureLimits)
@@ -333,15 +335,38 @@ per-closure evaluation followed by checking its charge against the ledger, with
 refusal at the effective cap. Nested closures retain fresh allowances and only
 the top-level charge is debited; the compiled subset currently has no nested
 closure builtin. Dictionary interning is not rolled back on refusal. Existing
-closure entry points retain their behaviour. No production caller uses this
-ledger yet. The term-size cap `Limits::term_bytes` applies per term and term sizing
-never debits it. `spent(Dim::DocumentBytes)` and `spent(Dim::Depth)` report current
-values, not totals. Triple-term nesting has a separate fixed guard:
-`Dim::TermDepth` (`"term_depth"`) reports `MAX_TRIPLE_DEPTH`, independently of
+closure entry points retain their behaviour when no deadline is supplied. The WAC and ACP
+authorization materializers share one ledger across input and closures. The term-size
+cap `Limits::term_bytes` applies per term and term sizing never debits it.
+`spent(Dim::DocumentBytes)` and `spent(Dim::Depth)` report current
+values, not totals. A new ledger accounts document bytes immediately;
+`close_document()` suspends that document counter while aggregate byte charges
+continue, and `open_document()` reopens and resets it. Use the closed state for
+generated input or resource names outside source documents. Triple-term nesting
+has a separate fixed guard:
+`Dim::TermDepth` (`"term_depth"`) is a refusal tag without a configurable limit
+field; it reports `MAX_TRIPLE_DEPTH`, independently of
 `Limits::depth`. Stored directional language tags are sized using the language
 component, matching oxrdf terms. `Ledger::mint` reserves capacity fallibly; a
 reservation failure refunds both byte counters and returns `Dim::Alloc`, whose
 display describes the requested element count without an unbounded-limit sentinel.
+
+Generated lexical strings can use `Limits::generated_bytes` independently of source
+and document bytes. This dimension defaults to `usize::MAX`. `mint_generated(parts)`
+charges `Dim::GeneratedBytes` before fallible allocation and refunds that counter on
+allocation failure; `mint(parts)` retains its source/document byte accounting. The
+Solid input ledger maps its separate `AuthBudget::max_generated_bytes` onto this
+counter, preserving the original source-byte cap.
+
+**Closure deadline.** `ClosureLimits::deadline: Option<std::time::Instant>` defaults
+to `None`. On native targets, every forward closure samples the absolute deadline
+once at the start of each round, including nested closures, which inherit the same
+instant. A round already in progress completes before the next sample. On wasm32,
+the field is ignored and no clock is read. A metered deadline cut returns
+`MeteredError::Ledger(Exceeded { dim: Dim::Deadline, .. })` without debiting the
+ledger. `Dim::Deadline` is a refusal tag with no `Limits` field; consumers supply
+the deadline through `ClosureLimits`. Unmetered entry points return a closure
+error on expiry. Caller count and size caps still apply.
 
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.
 

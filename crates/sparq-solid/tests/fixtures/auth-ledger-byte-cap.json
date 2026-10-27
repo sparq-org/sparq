@@ -1,0 +1,20 @@
+{
+  "above": {
+    "refusal_kind": "InputBytes",
+    "views": {}
+  },
+  "at": {
+    "views": {
+      "urn:sparq:auth": {
+        "triples": []
+      }
+    }
+  },
+  "below": {
+    "views": {
+      "urn:sparq:auth": {
+        "triples": []
+      }
+    }
+  }
+}

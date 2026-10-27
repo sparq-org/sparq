@@ -106,6 +106,7 @@ fn a_deep_resource_iri_is_refused_without_building_its_chain() {
         .materialize_wac()
         .expect_err("a resource IRI past the caps must be refused");
     let held = PEAK.load(Ordering::Relaxed).saturating_sub(before);
+    eprintln!("resource enumeration allocation peak: {held}");
 
     assert!(
         is_auth_allowance_refusal(&err),
@@ -148,6 +149,7 @@ fn a_deep_added_name_is_refused_without_replaying_its_chain() {
         .rematerialize_after_edit(&before, None, &[name.as_str()], false)
         .expect_err("a name past the caps must refuse the rebuild");
     let held = PEAK.load(Ordering::Relaxed).saturating_sub(start);
+    eprintln!("resource replay allocation peak: {held}");
 
     assert!(
         is_auth_allowance_refusal(&err),
@@ -163,4 +165,145 @@ fn a_deep_added_name_is_refused_without_replaying_its_chain() {
     );
     // The name is still alive, so the measurement really did span the rebuild.
     assert!(!name.is_empty());
+}
+
+fn measured_refusal(mut store: PodStore, kind: sparq_solid::AuthAllowance, ceiling: usize) {
+    let before = LIVE.load(Ordering::Relaxed);
+    PEAK.store(before, Ordering::Relaxed);
+    let error = store.materialize_wac().expect_err("input must be refused");
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(before);
+    eprintln!("{kind:?} allocation peak: {peak}");
+    assert_eq!(
+        sparq_solid::auth_allowance_refusal(&error),
+        Some(kind),
+        "{error}"
+    );
+    assert!(
+        peak < ceiling,
+        "refusal allocated {peak} bytes, ceiling {ceiling}"
+    );
+}
+
+fn document_store(document: Graph, group: bool) -> PodStore {
+    use oxrdf::{NamedNode, Term};
+    let name = if group {
+        "https://pod.ex/group"
+    } else {
+        "https://pod.ex/doc.acl"
+    };
+    let mut graph = Graph::new();
+    graph
+        .add_named(Term::NamedNode(NamedNode::new(name).unwrap()), document)
+        .unwrap();
+    if group {
+        let acl = Graph::load_str(
+            "@prefix acl: <http://www.w3.org/ns/auth/acl#> . <https://pod.ex/doc.acl#a> acl:accessTo <https://pod.ex/doc>; acl:mode acl:Read; acl:agentGroup <https://pod.ex/group#team> .",
+            "turtle",
+        ).unwrap();
+        graph
+            .add_named(
+                NamedNode::new("https://pod.ex/doc.acl").unwrap().into(),
+                acl,
+            )
+            .unwrap();
+    }
+    PodStore::new(graph)
+}
+
+fn stored_literal_case(group: bool) {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use oxrdf::{Literal, NamedNode};
+    {
+        let mut dict = sparq_core::dict::Dict::new();
+        let subject = if group {
+            "https://pod.ex/group#team"
+        } else {
+            "https://pod.ex/doc.acl#a"
+        };
+        let s = dict.intern(&NamedNode::new(subject).unwrap().into());
+        let p = dict.intern(&NamedNode::new("https://ex.dev/p").unwrap().into());
+        let o = dict.intern(&Literal::new_simple_literal("x".repeat(64 << 20)).into());
+        let document = Graph::from_parts(dict, vec![[s, p, o]]);
+        measured_refusal(
+            document_store(document, group),
+            sparq_solid::AuthAllowance::InputTermBytes,
+            2 << 20,
+        );
+    }
+}
+
+fn document_row_case(group: bool) {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use oxrdf::NamedNode;
+    use sparq_core::dict::{inline_id_of_int, Dict};
+    {
+        let mut dict = Dict::new();
+        let subject = if group {
+            "https://pod.ex/group#team"
+        } else {
+            "https://pod.ex/doc.acl#a"
+        };
+        let s = dict.intern(&NamedNode::new(subject).unwrap().into());
+        let p = dict.intern(&NamedNode::new("https://ex.dev/p").unwrap().into());
+        let rows = (0..5_000_000)
+            .map(|n| [s, p, inline_id_of_int(n).unwrap()])
+            .collect();
+        let document = Graph::from_parts(dict, rows);
+        measured_refusal(
+            document_store(document, group),
+            sparq_solid::AuthAllowance::InputBytes,
+            8 << 20,
+        );
+    }
+}
+
+#[test]
+fn skolem_expansion_is_charged_before_its_strings_are_allocated() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use oxrdf::{BlankNode, Literal, NamedNode};
+    let doc = format!("https://pod.ex/{}.acl", "a".repeat(2 << 10));
+    let mut dict = sparq_core::dict::Dict::new();
+    let p = dict.intern(&NamedNode::new("https://ex.dev/p").unwrap().into());
+    let o = dict.intern(&Literal::new_simple_literal("x").into());
+    let rows = (0..10_000)
+        .map(|n| {
+            [
+                dict.intern(&BlankNode::new(format!("b{n}")).unwrap().into()),
+                p,
+                o,
+            ]
+        })
+        .collect();
+    let mut graph = Graph::new();
+    graph
+        .add_named(
+            NamedNode::new(doc).unwrap().into(),
+            Graph::from_parts(dict, rows),
+        )
+        .unwrap();
+    let mut store = PodStore::new(graph);
+    let mut budget = default_auth_budget();
+    // Admit all stored terms; the refusal must account for the generated strings.
+    budget.max_document_bytes = usize::MAX;
+    budget.max_input_bytes = 4 << 20;
+    budget.max_generated_bytes = 4 << 20;
+    store.set_auth_budget(budget);
+    measured_refusal(store, sparq_solid::AuthAllowance::GeneratedBytes, 8 << 20);
+}
+
+#[test]
+fn stored_literal_is_refused_before_control_document_reconstruction() {
+    stored_literal_case(false);
+}
+#[test]
+fn stored_literal_is_refused_before_group_document_reconstruction() {
+    stored_literal_case(true);
+}
+#[test]
+fn row_cap_precedes_control_document_reservation() {
+    document_row_case(false);
+}
+#[test]
+fn row_cap_precedes_group_document_reservation() {
+    document_row_case(true);
 }

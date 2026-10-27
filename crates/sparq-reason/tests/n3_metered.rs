@@ -194,3 +194,35 @@ fn metered_other_cuts_are_closure_errors() {
     let e = eval_metered(&mut d, &f, &r, limits, &mut Ledger::new(Limits::default())).unwrap_err();
     assert!(matches!(e, MeteredError::Closure(e) if e == exact));
 }
+
+#[test]
+fn metered_refuses_rule_document_facts_without_debit() {
+    let mut dict = Dict::new();
+    let facts = intern_facts(&mut dict, "<urn:a> <urn:p> <urn:b> .").unwrap();
+    let rules = compile("<urn:c> <urn:p> <urn:d> .").unwrap();
+    let mut ledger = ledger(Dim::ClosureFacts, 1);
+    let error = eval_metered(
+        &mut dict,
+        &facts,
+        &rules,
+        ClosureLimits::default(),
+        &mut ledger,
+    )
+    .unwrap_err();
+    assert!(matches!(error, MeteredError::Ledger(e) if e.dim == Dim::ClosureFacts));
+    assert_eq!(ledger.spent(Dim::ClosureFacts), 0);
+    assert_eq!(ledger.spent(Dim::JoinRows), 0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn metered_deadline_is_a_tag_and_never_debits_a_failed_closure() {
+    let (mut dict, facts, rules) = fixture();
+    let mut limits = ClosureLimits::default();
+    limits.deadline = Some(std::time::Instant::now());
+    let mut ledger = Ledger::new(Limits::default());
+    let error = eval_metered(&mut dict, &facts, &rules, limits, &mut ledger).unwrap_err();
+    assert!(matches!(error, MeteredError::Ledger(e) if e.dim == Dim::Deadline));
+    assert_eq!(ledger.spent(Dim::JoinRows), 0);
+    assert_eq!(ledger.spent(Dim::ClosureFacts), 0);
+}
