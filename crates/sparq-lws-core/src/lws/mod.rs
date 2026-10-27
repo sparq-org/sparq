@@ -3154,6 +3154,8 @@ pub(crate) mod test_store {
         /// backend. The create is already sent: dropping the call does not stop it, and it
         /// commits once the gate opens.
         pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// The next create of this IRI commits, then waits before returning its reply.
+        pub hold_next_create_reply_of: GateOf,
         /// As `hold_next_create`, for the next `write` of the IRI named.
         pub hold_next_write_of: GateOf,
         /// The next `read` of the IRI named reads it, then waits on the gate before it answers.
@@ -3284,6 +3286,7 @@ pub(crate) mod test_store {
                 write_cycles: Default::default(),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
+                hold_next_create_reply_of: Default::default(),
                 hold_next_write_of: Default::default(),
                 hold_next_read_reply_of: Default::default(),
                 hold_next_delete_of: Default::default(),
@@ -3610,6 +3613,9 @@ pub(crate) mod test_store {
                 .inner
                 .create_in_container(container, child, body, ct)
                 .await;
+            if let Some(gate) = held(&self.hold_next_create_reply_of, child) {
+                gate.acquire().await.expect("create reply").forget();
+            }
             if self.fail_after_create.load(Ordering::SeqCst)
                 && !container.starts_with(super::intents::PREFIX)
             {
@@ -4163,6 +4169,256 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    #[cfg(feature = "sparql-endpoint")]
+    #[tokio::test]
+    async fn query_views_follow_settlement_visibility() {
+        use std::collections::BTreeSet;
+        use std::time::Duration;
+
+        let (state, _) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        let uri = state.cfg.absolute("/note.ttl");
+        state
+            .store
+            .create_in_container(
+                &root,
+                &uri,
+                Bytes::from_static(b"<urn:s> <urn:p> <urn:o> ."),
+                "text/turtle",
+            )
+            .await
+            .unwrap();
+        let req = request(
+            Method::POST,
+            "/sparql",
+            &[("content-type", "application/sparql-query")],
+            "SELECT ?g WHERE { GRAPH ?g {} }",
+        );
+        let hidden = state.hide_all(vec![Unsettled::new(vec![Undo::Locked {
+            iri: uri.clone(),
+        }])]);
+        let during = sparql::handle(&state, &req, &Agent::anonymous()).await;
+        let during_status = during.status();
+        let during = body_json(during).await;
+        state.settle_hidden(hidden);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !state.visible(&uri) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("settlement completed");
+        let after = sparql::handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(during_status, StatusCode::OK);
+        assert_eq!(after.status(), StatusCode::OK);
+        let after = body_json(after).await;
+        let names = |result: &Value| -> BTreeSet<String> {
+            result["results"]["bindings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["g"]["value"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(names(&during), BTreeSet::new());
+        assert_eq!(names(&after), [root, uri].into_iter().collect());
+    }
+
+    #[tokio::test]
+    async fn container_views_follow_create_settlement() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use test_store::{agent, closed_state, OWNER};
+
+        let (state, store) = closed_state(100).await;
+        let container_type = format!("<{LWS_NS}Container>; rel=\"type\"");
+        assert_eq!(
+            resources::handle(
+                &state,
+                &request(
+                    Method::POST,
+                    "/",
+                    &[("slug", "notes"), ("link", &container_type)],
+                    ""
+                ),
+                &agent(OWNER),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        let uri = state.cfg.absolute("/notes/note.txt");
+        store.fail_after_create.store(true, Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let response = resources::handle(
+            &state,
+            &request(
+                Method::POST,
+                "/notes/",
+                &[("slug", "note.txt"), ("content-type", "text/plain")],
+                "note",
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        let pending = resources::handle(
+            &state,
+            &request(Method::GET, "/", &[("accept", "application/lws+cid")], ""),
+            &agent(OWNER),
+        )
+        .await
+        .status();
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = None;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !state.visible(&uri) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("create settled");
+        assert!(response.status().is_server_error());
+        assert_eq!(pending, StatusCode::SERVICE_UNAVAILABLE);
+        for (path, expected) in [
+            ("/", StatusCode::OK),
+            ("/notes/", StatusCode::OK),
+            ("/notes/note.txt", StatusCode::NOT_FOUND),
+        ] {
+            assert_eq!(
+                resources::handle(&state, &request(Method::GET, path, &[], ""), &agent(OWNER),)
+                    .await
+                    .status(),
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn create_reply_errors_preserve_the_initial_store_view() {
+        use std::sync::atomic::Ordering;
+        use test_store::{agent, closed_state, OWNER};
+
+        let (state, store) = closed_state(100).await;
+        let uri = state.cfg.absolute("/note.txt");
+        let metadata = format!("{uri}{META_SUFFIX}");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.fail_after_write_of.lock().unwrap() = Some(metadata.clone());
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((uri.clone(), gate.clone()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let response = resources::handle(
+            &state,
+            &request(
+                Method::POST,
+                "/",
+                &[("slug", "note.txt"), ("content-type", "text/plain")],
+                "note",
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        let present = store.exists(&metadata).await.unwrap();
+        store.fail_fence.store(false, Ordering::SeqCst);
+        gate.add_permits(1);
+        assert!(response.status().is_server_error());
+        assert!(!present);
+        assert!(!store.exists(&uri).await.unwrap());
+        assert_eq!(
+            resources::handle(
+                &state,
+                &request(Method::GET, "/note.txt", &[], ""),
+                &agent(OWNER),
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn create_views_follow_store_reply_completion() {
+        use std::time::Duration;
+        use test_store::{agent, closed_state, OWNER};
+
+        let (state, store) = closed_state(100).await;
+        let root = state.cfg.storage();
+        let reader = "https://reader.example/#me";
+        let kind = "https://example.org/Note";
+        let policies = access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"],
+                "assignee": reader, "constraint": [{"leftOperand": "type",
+                "operator": "eq", "rightOperand": kind}]}]),
+            &root,
+        )
+        .unwrap();
+        state.access.put_grant_for_test("reader", policies);
+        let uri = state.cfg.absolute("/note.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create_reply_of.lock().unwrap() = Some((uri.clone(), gate.clone()));
+        let creating = tokio::spawn({
+            let state = state.clone();
+            async move {
+                let link = format!("<{kind}>; rel=\"type\"");
+                let req = request(
+                    Method::POST,
+                    "/",
+                    &[
+                        ("slug", "note.txt"),
+                        ("content-type", "text/plain"),
+                        ("link", &link),
+                    ],
+                    "note",
+                );
+                resources::handle(&state, &req, &agent(OWNER))
+                    .await
+                    .status()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !store.exists(&uri).await.unwrap() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("create stored");
+        assert!(!creating.is_finished());
+        let req = request(
+            Method::PATCH,
+            "/note.txt",
+            &[("content-type", "application/json-patch+json")],
+            "[]",
+        );
+        let pending = tokio::time::timeout(
+            Duration::from_secs(3),
+            resources::handle(&state, &req, &agent(reader)),
+        )
+        .await;
+        gate.add_permits(1);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), creating)
+                .await
+                .expect("create completed")
+                .unwrap(),
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            pending.expect("pending view").status(),
+            StatusCode::FORBIDDEN
+        );
+        let response = resources::handle(
+            &state,
+            &request(Method::GET, "/note.txt", &[], ""),
+            &agent(reader),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+            Bytes::from_static(b"note")
+        );
+    }
 
     /// Review finding: the default OpenID Connect suite could not be swapped for one with
     /// trusted providers, as a second suite for ID Tokens is refused. An embedder offers the one
