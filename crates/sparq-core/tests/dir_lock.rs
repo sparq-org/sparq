@@ -1447,3 +1447,173 @@ fn durable_named_slots_refuse_in_memory_views() {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn store_paths_report_the_outermost_store() {
+    use sparq_core::dir_lock::{is_inside_store, store_root};
+    let root = scratch("outermost-path");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let expected = dir.canonicalize().unwrap();
+    for path in [
+        dir.clone(),
+        dir.join("named/0"),
+        dir.join("named/0/new/output.nt"),
+    ] {
+        assert_eq!(store_root(&path).unwrap(), Some(expected.clone()));
+        assert!(is_inside_store(&path).unwrap());
+    }
+    for path in [root.clone(), root.join("new/output.nt")] {
+        assert_eq!(store_root(&path).unwrap(), None);
+        assert!(!is_inside_store(&path).unwrap());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn store_paths_preserve_resolution_errors() {
+    use sparq_core::dir_lock::is_reserved_store_path;
+    use sparq_core::dir_lock::{is_inside_store, store_root};
+    let root = scratch("path-components");
+    let file = root.join("file");
+    std::fs::write(&file, b"content").unwrap();
+    for path in [file.join("child"), file.join("child/grandchild")] {
+        assert_eq!(
+            store_root(&path).unwrap_err().kind(),
+            ErrorKind::NotADirectory
+        );
+        assert_eq!(
+            is_inside_store(&path).unwrap_err().kind(),
+            ErrorKind::NotADirectory
+        );
+    }
+    let invalid = root.join("invalid\0name");
+    assert_eq!(
+        is_reserved_store_path(&invalid).unwrap_err().kind(),
+        ErrorKind::InvalidInput
+    );
+    assert_eq!(std::fs::read(file).unwrap(), b"content");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reserved_paths_classify_entries_and_targets() {
+    use sparq_core::dir_lock::is_reserved_store_path;
+    assert!(is_reserved_store_path(Path::new("sparq-store")).unwrap());
+    let output = format!("sparq-dirlock-output-{}.nt", std::process::id());
+    assert!(!is_reserved_store_path(Path::new(&output)).unwrap());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let root = scratch("entry-targets");
+        let dir = root.join("g");
+        save_dataset(&dir);
+        let plain = root.join("plain.nt");
+        std::fs::write(&plain, b"plain").unwrap();
+        for (link, target, expected) in [
+            (root.join("stored-alias"), dir.join("dict-meta.bin"), true),
+            (root.join("plain-alias"), plain.clone(), false),
+            (dir.join("external-alias"), plain.clone(), true),
+        ] {
+            symlink(target, &link).unwrap();
+            assert_eq!(is_reserved_store_path(&link).unwrap(), expected);
+        }
+        let dangling = root.join("missing-alias");
+        symlink(root.join("missing"), &dangling).unwrap();
+        assert_eq!(
+            is_reserved_store_path(&dangling).unwrap_err().kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(std::fs::read(plain).unwrap(), b"plain");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn named_manifest_read_errors_are_reported() {
+    let root = scratch("manifest-read-error");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let manifest = dir.join("named.bin");
+    let bytes = std::fs::read(&manifest).unwrap();
+    std::fs::remove_file(&manifest).unwrap();
+    std::fs::create_dir(&manifest).unwrap();
+    for writable in [true, false] {
+        let opened = if writable {
+            Graph::open(&dir)
+        } else {
+            Graph::open_read_only(&dir)
+        };
+        assert!(opened.is_err());
+        for slot in ["0", "1"] {
+            assert!(dir.join("named").join(slot).is_dir());
+        }
+    }
+    std::fs::remove_dir(&manifest).unwrap();
+    for truncated in [&bytes[..0], &bytes[..11]] {
+        std::fs::write(&manifest, truncated).unwrap();
+        let opened = std::panic::catch_unwind(|| Graph::open(&dir));
+        assert!(matches!(opened, Ok(Err(_))));
+        for slot in ["0", "1"] {
+            assert!(dir.join("named").join(slot).is_dir());
+        }
+    }
+    std::fs::write(&manifest, bytes).unwrap();
+    let graph = Graph::open(&dir).unwrap();
+    assert_eq!(graph.iter_ids().count(), 1);
+    assert!(has(&graph, "a"));
+    assert_eq!(graph.named().len(), 2);
+    for (name, subject) in [("g0", "b"), ("g1", "c")] {
+        let child = sub_graph(&graph, name);
+        assert_eq!(child.iter_ids().count(), 1);
+        assert!(has(child, subject));
+    }
+    drop(graph);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn named_slot_cursor_is_restored_on_reopen() {
+    for low_cursor in [false, true] {
+        let root = scratch(if low_cursor {
+            "cursor-low"
+        } else {
+            "cursor-high"
+        });
+        let dir = root.join("g");
+        save_dataset(&dir);
+        let removed = if low_cursor { "g0" } else { "g1" };
+        let retained = if low_cursor { ("g1", "c") } else { ("g0", "b") };
+        let removed_slot = if low_cursor { "0" } else { "1" };
+        let mut graph = Graph::open(&dir).unwrap();
+        assert!(graph.drop_named_durable(&iri(removed)).unwrap());
+        drop(graph);
+        if low_cursor {
+            let manifest = dir.join("named.bin");
+            let mut bytes = std::fs::read(&manifest).unwrap();
+            assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 2);
+            bytes[12..16].copy_from_slice(&0u32.to_le_bytes());
+            std::fs::write(manifest, bytes).unwrap();
+        }
+        let mut graph = Graph::open(&dir).unwrap();
+        let slot = graph.ensure_named(&iri("fresh")).unwrap();
+        graph
+            .apply_delta_to_named(slot, &[triple("fresh")], &[])
+            .unwrap();
+        assert!(dir.join("named/2").is_dir());
+        assert!(!dir.join("named").join(removed_slot).exists());
+        drop(graph);
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(reopened.iter_ids().count(), 1);
+        assert!(has(&reopened, "a"));
+        assert_eq!(reopened.named().len(), 2);
+        for (name, subject) in [retained, ("fresh", "fresh")] {
+            let child = sub_graph(&reopened, name);
+            assert_eq!(child.iter_ids().count(), 1);
+            assert!(has(child, subject));
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

@@ -814,6 +814,7 @@ mod tests {
         let old = root.join("old");
         std::fs::rename(&dir, &old).unwrap();
         std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join(INSIDE_LOCK), b"").unwrap();
         lock.ensure_inside().unwrap();
         lock.ensure_inside()
             .expect("already holding the replacement lock");

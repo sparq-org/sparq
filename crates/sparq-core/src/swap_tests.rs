@@ -307,6 +307,16 @@ fn a_swap_failing_after_its_first_rename_is_completed_at_once() {
     fault::fail_when(move |step, p| step == "mark" && old(p));
     g.compact().expect("the recovered swap counts as done");
     assert_eq!(fault::disarm(), 1);
+    let inside = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join(dir_lock::INSIDE_LOCK))
+        .unwrap();
+    assert!(matches!(
+        fs4::FileExt::try_lock(&inside),
+        Err(fs4::TryLockError::WouldBlock)
+    ));
+    drop(inside);
     assert!(!g.is_frozen());
     assert!(has(&g, "a2") && has(sub(&g, "g0"), "b2"));
     g.apply_delta(&[triple("z")], &[]).unwrap();

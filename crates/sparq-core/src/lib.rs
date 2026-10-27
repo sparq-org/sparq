@@ -14536,6 +14536,27 @@ mod tests {
         let g2 = Graph::open(&dir).unwrap();
         assert_eq!(dump_terms(&g2).len(), 1, "checksum-failing batch must not apply");
         assert_eq!(std::fs::read(&wal_path).unwrap().len(), 0, "corrupt leading batch truncates the whole log");
+        drop(g2);
+        let expected: Vec<_> = (0..=1)
+            .map(|i| {
+                (
+                    term_iri(i, "s").to_string(),
+                    term_iri(i, "p").to_string(),
+                    term_iri(i, "o").to_string(),
+                )
+            })
+            .collect();
+        for header_bytes in 0..12 {
+            std::fs::write(&wal_path, &full[..first_batch_len + header_bytes]).unwrap();
+            let reopened = std::panic::catch_unwind(|| Graph::open(&dir))
+                .expect("a header prefix returns an I/O result")
+                .unwrap();
+            assert_eq!(dump_terms(&reopened), expected);
+            assert_eq!(
+                std::fs::read(&wal_path).unwrap().as_slice(),
+                &full[..first_batch_len]
+            );
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -15671,20 +15692,22 @@ mod tests {
             &txn_record(0, Some("<http://ex/s1> <http://ex/p> <http://ex/o1> .\n")),
         );
         let journal = TxnJournal::path(&dir);
-        std::fs::write(&journal, &frame).unwrap();
-        match Graph::open(&dir) {
-            Ok(_) => panic!("a future journal format must not open"),
-            Err(e) => assert!(
-                e.to_string().contains("newer build"),
-                "unexpected error: {}",
-                e
-            ),
+        for bytes in [&frame[..], &frame[..12]] {
+            std::fs::write(&journal, bytes).unwrap();
+            match Graph::open(&dir) {
+                Ok(_) => panic!("a future journal format must not open"),
+                Err(e) => assert!(
+                    e.to_string().contains("newer build"),
+                    "unexpected error: {}",
+                    e
+                ),
+            }
+            assert_eq!(
+                std::fs::read(&journal).unwrap().as_slice(),
+                bytes,
+                "the frame must still be on disk, byte for byte"
+            );
         }
-        assert_eq!(
-            std::fs::read(&journal).unwrap(),
-            frame,
-            "the frame must still be on disk, byte for byte"
-        );
         std::fs::write(
             &journal,
             txn_frame(
@@ -19072,6 +19095,289 @@ mod tests {
         a.sort();
         b.sort();
         assert_eq!(a, b, "insert_triple build must match the text-loaded graph");
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn named_manifest_pending_roundtrip() {
+        for promoted in [false, true] {
+            let dir = txn_tmp_dir("pending-named-roundtrip");
+            save_named_store(&dir, &["g0", "g1"]);
+            let (default, survivor) = {
+                let graph = Graph::open(&dir).unwrap();
+                (
+                    dump_terms(&graph),
+                    dump_terms(graph.named_graph(&named("g1")).unwrap()),
+                )
+            };
+            let manifest = dir.join(NAMED_MANIFEST);
+            let original = std::fs::read(&manifest).unwrap();
+            write_named_manifest(&dir, &[(1, named("g1"))], 2).unwrap();
+            let pending_bytes = std::fs::read(&manifest).unwrap();
+            std::fs::write(&manifest, original).unwrap();
+
+            let container = dir.join(NAMED_SUBDIR);
+            let fresh = staging_path(&container, "drop-new");
+            let old = staging_path(&container, "drop-old");
+            copy_tree(&container.join("1"), &fresh.join("1")).unwrap();
+            std::fs::write(fresh.join(PENDING_NAMED_MANIFEST), &pending_bytes).unwrap();
+            let owner = read_marker(&dir).unwrap().unwrap().id.unwrap();
+            mark_staging(&fresh, "drop-new", &owner).unwrap();
+            std::fs::rename(&container, &old).unwrap();
+            mark_staging(&old, "drop-old", &owner).unwrap();
+            if promoted {
+                std::fs::rename(&fresh, &container).unwrap();
+            }
+
+            for _ in 0..2 {
+                let graph = Graph::open(&dir).unwrap();
+                assert_eq!(dump_terms(&graph), default);
+                assert_eq!(graph.named.len(), 1);
+                assert_eq!(graph.named[0].0, named("g1"));
+                assert_eq!(dump_terms(&graph.named[0].1), survivor);
+                assert_eq!(std::fs::read(&manifest).unwrap(), pending_bytes);
+            }
+            assert!(!fresh.exists());
+            assert!(!old.exists());
+            let pending = container.join(PENDING_NAMED_MANIFEST);
+            assert!(!pending.exists());
+            complete_named_manifest(&dir).unwrap();
+            std::fs::create_dir(&pending).unwrap();
+            assert!(complete_named_manifest(&dir).is_err());
+            assert_eq!(std::fs::read(&manifest).unwrap(), pending_bytes);
+            assert!(pending.is_dir());
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn replay_readers_report_io_results() {
+        type Reader = fn(&std::path::Path, bool) -> std::io::Result<usize>;
+        let readers: [(&str, Reader); 2] = [
+            ("wal.log", |dir, truncate| {
+                Wal::read(dir, truncate).map(|records| records.len())
+            }),
+            ("txn.log", |dir, truncate| {
+                TxnJournal::read(dir, truncate).map(|records| records.len())
+            }),
+        ];
+        for (filename, read) in readers {
+            let dir = txn_tmp_dir("replay-reader-results");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(filename);
+            for truncate in [false, true] {
+                assert_eq!(read(&dir, truncate).unwrap(), 0);
+                assert!(!path.exists());
+            }
+            std::fs::create_dir(&path).unwrap();
+            let expected = std::fs::read(&path).unwrap_err().kind();
+            assert_ne!(expected, std::io::ErrorKind::NotFound);
+            for truncate in [false, true] {
+                assert_eq!(read(&dir, truncate).unwrap_err().kind(), expected);
+                assert!(path.is_dir());
+            }
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn committed_record_boundaries_report_errors() {
+        let triple = one_triple();
+        let mut wal_record = Vec::new();
+        Wal::push_record(&mut wal_record, Wal::INSERT, &triple).unwrap();
+        let line = format!("{} {} {} .\n", triple[0], triple[1], triple[2]);
+        let cases = [
+            (
+                "wal.log",
+                Wal::BATCH_MAGIC,
+                wal_record,
+                vec![Wal::INSERT, 0, 0, 0, 0],
+            ),
+            (
+                "txn.log",
+                TxnJournal::TXN_MAGIC,
+                txn_record(TxnJournal::INSERT, Some(&line)),
+                vec![TxnJournal::INSERT, 2, 0, 0, 0, 0],
+            ),
+        ];
+        for (filename, magic, first, header) in cases {
+            let dir = txn_tmp_dir("record-boundaries");
+            save_named_store(&dir, &[]);
+            let original = dump_terms(&Graph::open(&dir).unwrap());
+            let path = dir.join(filename);
+            for len in 0..=header.len() {
+                let mut body = first.clone();
+                body.extend_from_slice(&header[..len]);
+                let frame = txn_frame(magic, 2, &body);
+                std::fs::write(&path, &frame).unwrap();
+                let result = std::panic::catch_unwind(|| Graph::open(&dir));
+                assert!(matches!(result, Ok(Err(_))), "{filename}: prefix {len}");
+                assert_eq!(std::fs::read(&path).unwrap(), frame);
+            }
+            std::fs::write(&path, []).unwrap();
+            assert_eq!(dump_terms(&Graph::open(&dir).unwrap()), original);
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn read_only_journal_operations_roundtrip() {
+        let dir = txn_tmp_dir("read-only-journal-operations");
+        save_named_store(&dir, &["g0", "g1"]);
+        let default = dump_terms(&Graph::open(&dir).unwrap());
+        let updated = [named("updated"), named("p"), named("o")];
+        let inserted = one_triple();
+        {
+            let mut journal = TxnJournal::open(&dir).unwrap();
+            journal
+                .append(&[
+                    TxnOp::Drop(named("g0")),
+                    TxnOp::Delete {
+                        slot: Some(named("absent")),
+                        triple: one_triple(),
+                    },
+                    TxnOp::Create(named("empty")),
+                    TxnOp::Insert {
+                        slot: Some(named("new")),
+                        triple: inserted.clone(),
+                    },
+                    TxnOp::Delete {
+                        slot: Some(named("g1")),
+                        triple: [named("s-g1"), named("p"), named("o")],
+                    },
+                    TxnOp::Insert {
+                        slot: Some(named("g1")),
+                        triple: updated.clone(),
+                    },
+                ])
+                .unwrap();
+        }
+        let paths = [
+            dir.join(NAMED_MANIFEST),
+            dir.join("wal.log"),
+            TxnJournal::path(&dir),
+            dir.join("named/0/wal.log"),
+            dir.join("named/1/wal.log"),
+        ];
+        let before = paths.each_ref().map(|path| std::fs::read(path).unwrap());
+        let tuple = |t: &[Term; 3]| (t[0].to_string(), t[1].to_string(), t[2].to_string());
+        let mut expected = vec![
+            (named("empty").to_string(), vec![]),
+            (named("g1").to_string(), vec![tuple(&updated)]),
+            (named("new").to_string(), vec![tuple(&inserted)]),
+        ];
+        expected.sort();
+        for _ in 0..2 {
+            let graph = Graph::open_read_only(&dir).unwrap();
+            assert_eq!(dump_terms(&graph), default);
+            let mut actual: Vec<_> = graph
+                .named
+                .iter()
+                .map(|(name, sub)| (name.to_string(), dump_terms(sub)))
+                .collect();
+            actual.sort();
+            assert_eq!(actual, expected);
+            for (path, bytes) in paths.iter().zip(&before) {
+                assert_eq!(&std::fs::read(path).unwrap(), bytes);
+            }
+        }
+        for _ in 0..2 {
+            let graph = Graph::open(&dir).unwrap();
+            assert_eq!(dump_terms(&graph), default);
+            let mut actual: Vec<_> = graph
+                .named
+                .iter()
+                .map(|(name, sub)| (name.to_string(), dump_terms(sub)))
+                .collect();
+            actual.sort();
+            assert_eq!(actual, expected);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(all(feature = "mmap", unix))]
+    #[test]
+    fn journal_inspection_reports_io_results() {
+        let dir = txn_tmp_dir("journal-inspection-results");
+        std::fs::create_dir_all(&dir).unwrap();
+        let journal = TxnJournal::path(&dir);
+        assert_eq!(retained_journal_under(&dir).unwrap(), None);
+        std::fs::write(&journal, []).unwrap();
+        assert_eq!(retained_journal_under(&dir).unwrap(), None);
+        std::fs::write(&journal, b"journal fixture").unwrap();
+        assert_eq!(retained_journal_under(&dir).unwrap(), Some(journal.clone()));
+        std::fs::remove_file(&journal).unwrap();
+
+        std::os::unix::fs::symlink("txn.log", &journal).unwrap();
+        let expected = std::fs::metadata(&journal).unwrap_err().kind();
+        assert_ne!(expected, std::io::ErrorKind::NotFound);
+        assert_eq!(retained_journal_under(&dir).unwrap_err().kind(), expected);
+        assert!(
+            std::fs::symlink_metadata(&journal)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        std::fs::remove_file(&journal).unwrap();
+
+        let named = dir.join(NAMED_SUBDIR);
+        std::fs::write(&named, b"directory fixture").unwrap();
+        let expected = std::fs::read_dir(&named).unwrap_err().kind();
+        assert_ne!(expected, std::io::ErrorKind::NotFound);
+        assert_eq!(retained_journal_under(&dir).unwrap_err().kind(), expected);
+        assert_eq!(std::fs::read(&named).unwrap(), b"directory fixture");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn journal_format_metadata_reports_results() {
+        let dir = txn_tmp_dir("journal-format-metadata");
+        std::fs::create_dir_all(&dir).unwrap();
+        let meta = dir.join("dict-meta.bin");
+        let mut current = Vec::new();
+        current.extend_from_slice(&dict::DICT_META_MAGIC.to_le_bytes());
+        current.extend_from_slice(&dict::DICT_META_VERSION.to_le_bytes());
+        let mut invalid: Vec<Vec<u8>> = (0..8).map(|len| current[..len].to_vec()).collect();
+        let mut other_magic = current.clone();
+        other_magic[0] ^= 1;
+        invalid.push(other_magic);
+        for bytes in invalid {
+            std::fs::write(&meta, &bytes).unwrap();
+            let mut journal = TxnJournal::open(&dir).unwrap();
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| journal.mark_store_format()));
+            assert!(
+                matches!(result, Ok(Err(_))),
+                "header length {}",
+                bytes.len()
+            );
+            assert_eq!(std::fs::read(&meta).unwrap(), bytes);
+            assert!(std::fs::read(TxnJournal::path(&dir)).unwrap().is_empty());
+        }
+        for version in [1u32, dict::DICT_META_VERSION] {
+            let mut bytes = current.clone();
+            bytes[4..8].copy_from_slice(&version.to_le_bytes());
+            std::fs::write(&meta, bytes).unwrap();
+            let mut journal = TxnJournal::open(&dir).unwrap();
+            journal.mark_store_format().unwrap();
+            journal.mark_store_format().unwrap();
+            assert_eq!(std::fs::read(&meta).unwrap(), current);
+            assert!(std::fs::read(TxnJournal::path(&dir)).unwrap().is_empty());
+        }
+        std::fs::remove_file(&meta).unwrap();
+        std::fs::create_dir(&meta).unwrap();
+        let expected = std::fs::read(&meta).unwrap_err().kind();
+        assert_ne!(expected, std::io::ErrorKind::NotFound);
+        let mut journal = TxnJournal::open(&dir).unwrap();
+        assert_eq!(journal.mark_store_format().unwrap_err().kind(), expected);
+        assert!(meta.is_dir());
+        assert!(std::fs::read(TxnJournal::path(&dir)).unwrap().is_empty());
+        drop(journal);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

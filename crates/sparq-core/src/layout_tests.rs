@@ -879,6 +879,15 @@ fn undeclared_slot_with_a_held_lock_is_preserved_until_released() {
 #[cfg(unix)]
 #[test]
 fn unsupported_directory_sync_is_an_error() {
+    let tmp = tempdir().unwrap();
+    fsync_dir(tmp.path()).unwrap();
+    fsync_dir(&tmp.path().join("absent")).unwrap();
+    let file = tmp.path().join("file");
+    std::fs::write(&file, b"sync fixture").unwrap();
+    let blocked = file.join("child");
+    let expected = std::fs::File::open(&blocked).unwrap_err().kind();
+    assert_ne!(expected, std::io::ErrorKind::NotFound);
+    assert_eq!(fsync_dir(&blocked).unwrap_err().kind(), expected);
     assert_eq!(
         fsync_dir(Path::new("/dev/null")).unwrap_err().kind(),
         std::io::ErrorKind::InvalidInput
