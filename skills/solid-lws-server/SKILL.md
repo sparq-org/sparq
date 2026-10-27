@@ -175,6 +175,21 @@ for tests and development only; see the reference for local durability limits.
 The native backend wrapper and periodic reconciler's shared handle forward
 `list_stream`, preserving backend
 streaming when the compatibility snapshot is unavailable or exceeds its limit.
+A listing error aborts its current batch immediately; earlier batches may have completed.
+
+### Child record replacement
+
+`SparqClient::replace_child(container, child, meta)` commits the child record and
+containment together, reporting the previous metadata when supported. The in-memory
+and embedded clients return it in the same index operation. The default calls
+`create_child` without reading the previous record and returns `None`; clients without
+an override, such as the remote HTTP client, leave any superseded blob key to the
+reconciler.
+`CompositeStore` uses this for contained creates, restores and reinstatements,
+reclaiming replaced bytes through the existing hold-aware path. A settled failed
+write also attempts to reclaim its unreferenced candidate; a committed reference
+or hold preserves it. Unsettled writes retain their bytes until their outcome is
+settled. Reclamation remains best effort when a backend fails.
 
 ### Filesystem blobs in library integrations
 

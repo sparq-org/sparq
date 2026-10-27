@@ -85,7 +85,7 @@ The reconciler consumes bounded batches, rechecks references and age, then calls
 backend is a caller bug. The compatibility `list` snapshot refuses more
 than 4096 entries; use the stream for an unbounded namespace. Foreign object names
 and nested directories are excluded from listings. If a later page fails, a sweep
-returns an error and earlier batches may already have completed.
+returns an error immediately and earlier batches may already have completed.
 
 For backend authors, enable `sparq-lws-core/test-support` and call
 `store::blob_contract::run(&backend)` on an empty isolated backend. Every backend
