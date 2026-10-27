@@ -312,8 +312,8 @@ impl BoundedPathPlan {
     /// [`crate::oblivious::MAX_NETWORK_WIDTH`] IS `MAX_OUTPUT_BOUND`, so a `B`
     /// inside the bound cap is inside the width cap by definition.) The party cap
     /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`] is applied here too, for the
-    /// same reason. Counting the cost of a run the stage itself would refuse is not
-    /// a cost model either way.
+    /// same reason, when `B > 0` or the plan performs secure equalities. A plan
+    /// with neither kind of work accepts larger party counts.
     ///
     /// The counting itself is CLOSED FORM: every counter the per-equality and
     /// per-slot records touch is linear in its multiplicity, so the batches fold in
@@ -332,7 +332,9 @@ impl BoundedPathPlan {
         // stage would refuse is not costed here either — a cost model for a run
         // that cannot happen is not a cost model.
         //
-        crate::oblivious_join::check_output_parties_cap(parties)?;
+        if bound > 0 || self.secure_equalities > 0 {
+            crate::oblivious_join::check_output_parties_cap(parties)?;
+        }
         // The aggregate slot-work budget also needs the actual threshold and
         // payload width, neither of which this API receives. It is checked at
         // the output stage. Assuming the largest threshold here would refuse

@@ -392,10 +392,11 @@ pub const MAX_PATH_FORM_JOIN_WORK: u64 = 1 << 31; // 2_147_483_648 row-steps
 /// worklist: a recursive depth check would overflow on exactly the forms the cap
 /// exists to refuse. This is a stack bound, not a work bound. The ceiling is
 /// above the reference release evaluator's first failing right-nested sequence
-/// depth on both standard thread and main stacks. Evaluation uses a scoped
-/// worker with an explicit stack sized to complete the accepted depth with
-/// margin, independently of the caller's stack. Worker creation failure returns
-/// [`MpcError::Protocol`]. Stack use depends on the build and platform.
+/// depth on both standard thread and main stacks. Evaluation runs inline through
+/// depth 256, assuming a standard caller stack. Deeper forms use a scoped worker
+/// with a 128 MiB stack sized for the full cap with margin. Worker creation
+/// failure returns [`MpcError::Protocol`]; a worker panic resumes on the caller.
+/// Stack use depends on the build and platform.
 ///
 /// What this cap does NOT cover: a [`PathForm`] is a recursive type with DERIVED
 /// `Clone`, `Debug` and `Drop`, and those walk it recursively whatever this cap
@@ -408,9 +409,16 @@ pub const MAX_PATH_FORM_JOIN_WORK: u64 = 1 << 31; // 2_147_483_648 row-steps
 /// have to live in the type's own constructors.
 pub const MAX_PATH_FORM_DEPTH: usize = 1 << 14;
 
+// Conservative for a standard 2 MiB caller stack, including debug builds.
+const INLINE_PATH_FORM_DEPTH: usize = 256;
 // Includes margin for debug builds at the full accepted nesting depth. Only the
 // pages touched by evaluation need to be resident.
-const PATH_FORM_STACK_BYTES: usize = 256 * 1024 * 1024;
+const PATH_FORM_STACK_BYTES: usize = 128 * 1024 * 1024;
+
+#[cfg(test)]
+thread_local! {
+    static PATH_WORKER_SPAWNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Largest STATIC unroll work the whole [`PathForm`] may project to before
 /// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
@@ -484,6 +492,7 @@ pub(crate) fn worklist_peak() -> usize {
 /// Both halves read PUBLIC plan parameters only — alternation width, `min`, `max`,
 /// part counts — so no edge is touched and the refusals name those numbers and the
 /// caps, nothing else.
+#[cfg(test)]
 pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
     check_form_shape_from(form, 0)
 }
@@ -493,8 +502,14 @@ pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
 /// of a billion parts. It uses the same walk and the same per-repetition
 /// caps and the same `work > MAX_PATH_FORM_WORK` decision against the same
 /// constant.
+#[cfg(test)]
 pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64, MpcError> {
+    inspect_form_shape(form, already).map(|(work, _)| work)
+}
+
+fn inspect_form_shape(form: &PathForm, already: u64) -> Result<(u64, usize), MpcError> {
     let mut work: u64 = already;
+    let mut max_depth = 0;
     // (form, depth-of-that-form, whether its own `+ 1` is already charged). The
     // root is depth 1 and charges its own; a Sequence's parts are pushed PREPAID,
     // because the Sequence charged its declared part count before pushing them.
@@ -502,6 +517,7 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
     #[cfg(test)]
     WORKLIST_PEAK.with(|c| c.set(c.get().max(stack.len())));
     while let Some((f, depth, prepaid)) = stack.pop() {
+        max_depth = max_depth.max(depth);
         if depth > MAX_PATH_FORM_DEPTH {
             return Err(MpcError::Protocol(format!(
                 "bounded path form: nesting depth {} exceeds the MAX_PATH_FORM_DEPTH cap of \
@@ -561,7 +577,7 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
             return Err(form_work_over_budget(work));
         }
     }
-    Ok(work)
+    Ok((work, max_depth))
 }
 
 /// The one refusal for a form whose static unroll work passes the budget. Names
@@ -1162,37 +1178,52 @@ impl DisclosedEdges {
 /// zero-length arm over the declared node domain. The HIDDEN-intermediate regime
 /// is sq-py8h.2 and is NOT handled here.
 ///
-/// The recursive walk runs on a scoped worker with its own explicit stack,
-/// independent of the caller's stack. Failure to create the worker is reported
-/// as [`MpcError::Protocol`]. The form remains borrowed; its recursive `Drop`,
-/// `Clone` and `Debug` operations remain the caller's responsibility.
+/// The recursive walk runs inline through depth 256 on a standard caller stack.
+/// Deeper accepted forms use a scoped worker with a 128 MiB stack. Failure to
+/// create the worker is reported as [`MpcError::Protocol`]; worker panics resume
+/// on the caller with their original payload. The form remains borrowed; its
+/// recursive `Drop`, `Clone` and `Debug` remain the caller's responsibility.
 pub fn eval_bounded_path_disclosed(
     edges: &DisclosedEdges,
     form: &PathForm,
 ) -> Result<PartialResult, MpcError> {
-    // ONE budget for the whole form, so what its parts materialise between them is
-    // bounded and not only what each part's own shape caps allow.
+    let (_, depth) = inspect_form_shape(form, 0)?;
+    with_path_stack(depth, || {
+        // ONE budget for the whole form, so its parts share the same limits.
+        eval_checked_form(edges, form, &mut PathFormBudget::new())
+    })
+}
+
+fn with_path_stack<T: Send>(
+    depth: usize,
+    walk: impl FnOnce() -> Result<T, MpcError> + Send,
+) -> Result<T, MpcError> {
+    if depth <= INLINE_PATH_FORM_DEPTH {
+        return walk();
+    }
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .stack_size(PATH_FORM_STACK_BYTES)
-            .spawn_scoped(scope, || {
-                eval_with_budget(edges, form, &mut PathFormBudget::new())
-            })
+            .spawn_scoped(scope, walk)
             .map_err(|error| {
                 MpcError::Protocol(format!(
                     "bounded path evaluation worker creation failed: {error}"
                 ))
             })?;
-        worker
-            .join()
-            .map_err(|_| MpcError::Protocol("bounded path evaluation worker panicked".into()))?
+        #[cfg(test)]
+        PATH_WORKER_SPAWNS.with(|count| count.set(count.get() + 1));
+        match worker.join() {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     })
 }
 
 /// [`eval_bounded_path_disclosed`] with the whole-form row budget supplied by the
-/// caller — the single code path the public entry delegates to, so the tests can
-/// reach the [`MAX_PATH_FORM_ROWS`] cap by handing in a budget that is already
+/// caller, using the same shape check and evaluation body as the public entry.
+/// Tests reach the [`MAX_PATH_FORM_ROWS`] cap by handing in a budget that is already
 /// nearly spent instead of materialising a quarter of a billion rows.
+#[cfg(test)]
 fn eval_with_budget(
     edges: &DisclosedEdges,
     form: &PathForm,
@@ -1203,6 +1234,14 @@ fn eval_with_budget(
     // over-budget form refuses before a single sub-form is evaluated — and before
     // `eval_sequence` recurses into anything.
     check_form_shape(form)?;
+    eval_checked_form(edges, form, budget)
+}
+
+fn eval_checked_form(
+    edges: &DisclosedEdges,
+    form: &PathForm,
+    budget: &mut PathFormBudget,
+) -> Result<PartialResult, MpcError> {
     let subject = Variable::new_unchecked(SUBJECT_VAR);
     let object = Variable::new_unchecked(OBJECT_VAR);
     // The pair RELATION over the canonical endpoint vars (?__pp_a, ?__pp_b),

@@ -100,9 +100,11 @@ use crate::shamir::Share;
 
 /// Maximum number of shares accepted by robust reconstruction.
 ///
-/// Shares the output stage's public party ceiling so an accepted output-stage
-/// federation is also accepted by reconstruction.
-pub const MAX_ROBUST_SHARES: usize = crate::oblivious_join::MAX_OUTPUT_PARTIES;
+/// Reconstruction accepts at most 1024 shares, before distinct-point validation,
+/// interpolation or decoding. The decoder's cubic work is not modelled by the
+/// output stage's slot-work budget. [`crate::oblivious_join::MAX_OUTPUT_PARTIES`]
+/// derives its ceiling from this constant when sharing or opening will run.
+pub const MAX_ROBUST_SHARES: usize = 1 << 10;
 
 /// Maximum number of reference-subset fits attempted for abort-path attribution.
 ///
@@ -708,6 +710,7 @@ mod tests {
 
     #[test]
     fn work_bound_accepts_the_output_party_cap_on_consistency_check() {
+        assert_eq!(MAX_ROBUST_SHARES, 1024);
         assert_eq!(MAX_ROBUST_SHARES, crate::oblivious_join::MAX_OUTPUT_PARTIES);
         // Degree zero exercises the e=0 consistency path with redundancy.
         let shares = work_bound_shares(MAX_ROBUST_SHARES, 0);
@@ -718,9 +721,15 @@ mod tests {
     }
 
     #[test]
-    fn reconstruction_accepts_more_than_the_former_party_limit() {
+    fn reconstruction_refuses_1025_shares() {
         let shares = work_bound_shares(1025, 0);
-        assert_eq!(reconstruct_robust(&shares, 0).unwrap(), fp(42));
+        for result in [
+            reconstruct_robust(&shares, 0),
+            reconstruct_robust_attributed(&shares, 0).map(|value| value.secret),
+        ] {
+            assert!(matches!(result, Err(MpcError::Protocol(m))
+                if m == "robust reconstruction: share count 1025 exceeds MAX_ROBUST_SHARES=1024"));
+        }
     }
 
     #[test]

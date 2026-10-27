@@ -399,9 +399,12 @@ pub const MAX_SLOT_LIMBS: usize = 1 << 29; // 536_870_912
 /// Every sharing the stage draws is `parties` field elements, and the degree
 /// reduction behind each select re-shares `2t + 1 <= parties` times, so the party
 /// count multiplies the work twice over. It is a public plan parameter of the
-/// backend, checked in closed form. This bounds THIS stage's budget; it is not a
+/// backend, checked in closed form when `B > 0` requires sharing and opening.
+/// The source is [`crate::robust::MAX_ROBUST_SHARES`] (1024), whose reconstruction
+/// cost is not modelled by [`MAX_SLOT_WORK`]. An empty `B = 0` stage does no
+/// party-dependent work and is accepted above this ceiling. This is not a
 /// crate-wide limit on how many parties a `ShamirBackend` may have.
-pub const MAX_OUTPUT_PARTIES: usize = 1 << 12; // 4_096
+pub const MAX_OUTPUT_PARTIES: usize = crate::robust::MAX_ROBUST_SHARES;
 
 /// Maximum aggregate slot work the oblivious output stage accepts before refusing
 /// with an [`MpcError::Protocol`] error, counted in MODELLED FIELD ELEMENTS.
@@ -781,8 +784,10 @@ pub(crate) fn check_slot_work_budget(
 /// the uniform limb count it implies and the aggregate slot work.
 ///
 /// In the DEFAULT (derived) mode only the bound, arity and party caps are checked
-/// here. The width is a function of the rows the stage
-/// packs, so the width's caps and the aggregate work are decided at the stage,
+/// here. The party cap applies when `B > 0`; an upstream entry that shares inputs
+/// without output slots must also check it before those sharings. The width is a
+/// function of the rows the stage packs, so the width's caps and the aggregate work
+/// are decided at the stage,
 /// exactly where this crate has always decided them. An entry check that guessed
 /// an upper bound from the inputs' widest term refused runs that both the stage and
 /// the pre-cap behaviour accept — a 900k-character literal at `B = 1`, or ten
@@ -800,7 +805,9 @@ pub(crate) fn check_output_entry_caps(
 ) -> Result<(), MpcError> {
     check_output_bound_cap(bound)?;
     check_payload_arity_cap(widths.arity())?;
-    check_output_parties_cap(parties)?;
+    if bound > 0 {
+        check_output_parties_cap(parties)?;
+    }
     if widths.declared_term_bytes().is_some() {
         // A declared width ignores the rows, so resolving over none of them gives
         // the run's real width and `resolve_rows` applies its caps.
@@ -1899,7 +1906,9 @@ pub(crate) fn check_output_public_shape(
     // functions of the run's rows.
     check_output_bound_cap(bound)?;
     check_payload_arity_cap(widths.arity())?;
-    check_output_parties_cap(parties)?;
+    if bound > 0 {
+        check_output_parties_cap(parties)?;
+    }
     widths.check_shape()?;
     // With no slot at all nothing is packed and the width is 0.
     let limb_capacity = if bound == 0 {
@@ -4378,7 +4387,8 @@ mod tests {
         assert_eq!(MAX_PAYLOAD_ARITY, 1 << 30);
         assert_eq!(MAX_PAYLOAD_TERM_BYTES, 1 << 24);
         assert_eq!(MAX_SLOT_LIMBS, 1 << 29);
-        assert_eq!(MAX_OUTPUT_PARTIES, 1 << 12);
+        assert_eq!(MAX_OUTPUT_PARTIES, 1 << 10);
+        assert_eq!(MAX_OUTPUT_PARTIES, crate::robust::MAX_ROBUST_SHARES);
         assert_eq!(MAX_SLOT_WORK, 1 << 32);
     }
 
@@ -4967,7 +4977,7 @@ mod tests {
 
     /// The party count is a factor of the work and is capped in its own right: a
     /// backend with more compute parties than [`MAX_OUTPUT_PARTIES`] is refused
-    /// before any candidate is read.
+    /// before any candidate is read when `B > 0` requires sharing and opening.
     #[test]
     fn the_output_parties_cap_refuses_a_wider_federation() {
         use crate::randomness::test_sources::DrawCountingSource;

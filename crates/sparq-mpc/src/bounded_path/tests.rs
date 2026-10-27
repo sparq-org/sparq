@@ -1596,7 +1596,9 @@ fn differential_zero_length_over_an_empty_graph_is_empty() {
     // The distinction that matters: an EMPTY declared domain runs, an UNDECLARED
     // one is refused. Both would print as "no identity pairs" otherwise.
     let undeclared = disclosed_edges_only(&[("", &["http://ex/p"])]);
-    assert!(eval_bounded_path_disclosed(&undeclared, &form).is_err());
+    let err = eval_bounded_path_disclosed(&undeclared, &form).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m)
+        if m.contains("needs the federation's PUBLIC node domain")));
     assert!(eval_bounded_path_disclosed(&edges, &form).is_ok());
 }
 
@@ -2165,6 +2167,85 @@ fn nested_form(depth: usize) -> PathForm {
     form
 }
 
+fn dispose_form(form: PathForm) {
+    let mut pending = vec![form];
+    while let Some(form) = pending.pop() {
+        if let PathForm::Sequence(parts) = form {
+            pending.extend(parts);
+        }
+    }
+}
+
+#[test]
+fn shallow_forms_run_inline_and_deeper_forms_spawn_once() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            assert_eq!(INLINE_PATH_FORM_DEPTH, 256);
+            assert_eq!(PATH_FORM_STACK_BYTES, 128 * 1024 * 1024);
+            let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
+            PATH_WORKER_SPAWNS.with(|count| count.set(0));
+            for depth in [1, INLINE_PATH_FORM_DEPTH, INLINE_PATH_FORM_DEPTH + 1] {
+                for two_parts in [false, true] {
+                    let mut form = nested_form(1);
+                    for _ in 1..depth {
+                        form = if two_parts {
+                            PathForm::Sequence(vec![nested_form(1), form])
+                        } else {
+                            PathForm::Sequence(vec![form])
+                        };
+                    }
+                    let result = eval_bounded_path_disclosed(&edges, &form);
+                    dispose_form(form);
+                    assert_eq!(result.unwrap().rows.len(), 1);
+                    PATH_WORKER_SPAWNS.with(|count| {
+                        let expected = if depth > INLINE_PATH_FORM_DEPTH {
+                            1 + usize::from(two_parts)
+                        } else {
+                            0
+                        };
+                        assert_eq!(count.get(), expected);
+                    });
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn the_stack_choice_uses_the_deepest_branch() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
+    // The worklist is LIFO; both branch orders must select the larger stack.
+    for deep_first in [false, true] {
+        let deep = nested_form(INLINE_PATH_FORM_DEPTH);
+        let shallow = nested_form(1);
+        let parts = if deep_first {
+            vec![deep, shallow]
+        } else {
+            vec![shallow, deep]
+        };
+        let form = PathForm::Sequence(parts);
+        PATH_WORKER_SPAWNS.with(|count| count.set(0));
+        let result = eval_bounded_path_disclosed(&edges, &form);
+        dispose_form(form);
+        assert_eq!(result.unwrap().rows.len(), 1);
+        PATH_WORKER_SPAWNS.with(|count| assert_eq!(count.get(), 1));
+    }
+}
+
+#[test]
+fn path_worker_panics_resume_with_the_original_payload() {
+    let panic = std::panic::catch_unwind(|| {
+        with_path_stack::<()>(INLINE_PATH_FORM_DEPTH + 1, || {
+            std::panic::panic_any(731_u64);
+        })
+    })
+    .expect_err("a worker panic must reach the caller");
+    assert_eq!(*panic.downcast::<u64>().unwrap(), 731);
+}
+
 /// A form nested one level past [`MAX_PATH_FORM_DEPTH`] is refused; a form exactly
 /// AT the cap evaluates. The refusal comes from the ITERATIVE shape check, before
 /// `eval_sequence` recurses into anything — which is the whole point, since nesting
@@ -2180,32 +2261,25 @@ fn the_form_depth_cap_refuses_just_over_and_runs_at_the_cap() {
             let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
             // Dismantle the fixture iteratively: recursive destruction belongs
             // to the caller and is independent of the evaluation stack.
-            let dispose = |form| {
-                let mut pending = vec![form];
-                while let Some(form) = pending.pop() {
-                    if let PathForm::Sequence(parts) = form {
-                        pending.extend(parts);
-                    }
-                }
-            };
             for depth in [MAX_PATH_FORM_DEPTH + 1, MAX_PATH_FORM_DEPTH + 16] {
                 let form = nested_form(depth);
                 let err = eval_bounded_path_disclosed(&edges, &form)
                     .expect_err("one level past the depth cap must be refused");
-                dispose(form);
+                dispose_form(form);
                 assert!(
                     matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_DEPTH")),
                     "{:?}",
                     err
                 );
             }
+            PATH_WORKER_SPAWNS.with(|count| assert_eq!(count.get(), 0));
 
             let flat = eval_bounded_path_disclosed(&edges, &nested_form(1)).unwrap();
             // Exercise both single-part sequences and the right-nested p/(...)
             // shape from a caller with the standard small thread stack.
             for two_parts in [false, true] {
                 let mut form = PathForm::exact(nn("http://ex/p"), 1);
-                for _ in 1..(1 << 14) {
+                for _ in 1..MAX_PATH_FORM_DEPTH {
                     form = if two_parts {
                         PathForm::Sequence(vec![PathForm::exact(nn("http://ex/p"), 1), form])
                     } else {
@@ -2213,10 +2287,13 @@ fn the_form_depth_cap_refuses_just_over_and_runs_at_the_cap() {
                     };
                 }
                 let got = eval_bounded_path_disclosed(&edges, &form);
-                dispose(form);
+                dispose_form(form);
                 let got = got.expect("the deepest legal form evaluates");
                 assert_eq!(got.rows, flat.rows);
                 assert_eq!(got.rows.len(), 1);
+                PATH_WORKER_SPAWNS.with(|count| {
+                    assert_eq!(count.get(), 1 + usize::from(two_parts));
+                });
             }
         })
         .unwrap()
@@ -2715,7 +2792,8 @@ fn the_cumulative_work_budget_binds_on_a_real_form() {
     assert_eq!(got.rows, baseline.rows);
     // And an overflowing total refuses rather than wrapping under the budget.
     let mut huge = PathFormBudget::with_work(u64::MAX);
-    assert!(eval_with_budget(&edges, &form, &mut huge).is_err());
+    let err = eval_with_budget(&edges, &form, &mut huge).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_JOIN_WORK")));
 }
 
 /// The shape walk's charge is MONOTONIC: a `Sequence` charges its declared part

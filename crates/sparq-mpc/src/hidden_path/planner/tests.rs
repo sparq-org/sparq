@@ -302,12 +302,19 @@ fn comm_counter_applies_the_output_party_cap() {
         plan.comm_counter(MAX_OUTPUT_PARTIES, 4).is_ok(),
         "the cap itself is still modelled"
     );
+    let err = plan.comm_counter(MAX_OUTPUT_PARTIES + 1, 0).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+    let empty = plan_hidden_bounded_path(&req, 0).unwrap();
+    assert_eq!(empty.secure_equalities, 0);
+    let err = empty.comm_counter(MAX_OUTPUT_PARTIES + 1, 1).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+    assert!(empty.comm_counter(MAX_OUTPUT_PARTIES, 1).is_ok());
 }
 
 #[test]
 fn comm_counter_does_not_assume_an_unstated_threshold() {
     use crate::oblivious_join::{check_slot_work_budget, MAX_OUTPUT_PARTIES};
-    let bound = 4096;
+    let bound = 8192;
     let parties = MAX_OUTPUT_PARTIES;
     assert!(check_slot_work_budget(bound, 0, parties, (parties - 1) / 2).is_err());
     assert!(check_slot_work_budget(bound, 0, parties, 0).is_ok());
