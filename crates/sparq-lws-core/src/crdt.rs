@@ -35,6 +35,7 @@ pub fn limits_from_env() -> Result<Limits, String> {
         ("MAX_ROOMS", &mut limits.max_rooms),
         ("PEERS_PER_ROOM", &mut limits.peers_per_room),
         ("MESSAGE_BYTES", &mut limits.message_bytes),
+        ("FRAME_MESSAGES", &mut limits.frame_messages),
         ("DOCUMENT_BYTES", &mut limits.document_bytes),
         ("TICKETS_PER_AGENT", &mut limits.tickets_per_agent),
         ("MAX_TICKETS", &mut limits.max_tickets),
@@ -606,32 +607,37 @@ async fn serve<S: Store + 'static>(state: Arc<CrdtState<S>>, query: Join, mut so
     let fault = loop {
         tokio::select! {
             biased;
-            _ = session.ended.changed() => break session.ended.borrow().unwrap_or(Fault::Store),
+            _ = session.ended.changed() => break Some(session.ended.borrow().unwrap_or(Fault::Store)),
             _ = recheck.tick() => {
                 match tokio::time::timeout(Duration::from_secs(2), state.relay.recheck(&session)).await {
-                    Ok(Ok(())) => {}, Ok(Err(error)) => break error, Err(_) => break Fault::Store,
+                    Ok(Ok(())) => {}, Ok(Err(error)) => break Some(error), Err(_) => break Some(Fault::Store),
                 }
             }
-            _ = ping.tick() => { if let Err(error) = send(&mut socket, Message::Ping(Bytes::new())).await { break error; } }
+            _ = ping.tick() => { if let Err(error) = send(&mut socket, Message::Ping(Bytes::new())).await { break Some(error); } }
             Some(frame) = session.incoming.recv() => {
                 match frame {
-                    Ok(frame) => if let Err(error) = send(&mut socket, Message::Binary(Bytes::copy_from_slice(&frame))).await { break error; },
-                    Err(error) => break error,
+                    Ok(frame) => if let Err(error) = send(&mut socket, Message::Binary(Bytes::copy_from_slice(&frame))).await { break Some(error); },
+                    Err(error) => break Some(error),
                 }
             }
             frame = socket.recv() => {
                 match frame {
-                    Some(Ok(Message::Binary(bytes))) => if let Err(error) = state.relay.handle(&session, &bytes).await { break error; },
-                    Some(Ok(Message::Ping(bytes))) => { if let Err(error) = send(&mut socket, Message::Pong(bytes)).await { break error; } },
+                    Some(Ok(Message::Binary(bytes))) => if let Err(error) = state.relay.handle(&session, &bytes).await { break Some(error); },
+                    Some(Ok(Message::Ping(bytes))) => { if let Err(error) = send(&mut socket, Message::Pong(bytes)).await { break Some(error); } },
                     Some(Ok(Message::Pong(_))) => {},
-                    Some(Ok(Message::Close(_))) | None => break Fault::Malformed,
-                    Some(Err(_)) => break Fault::TooLarge,
-                    _ => break Fault::Malformed,
+                    Some(Ok(Message::Close(_))) | None => break None,
+                    Some(Err(_)) => break Some(Fault::TooLarge),
+                    _ => break Some(Fault::Malformed),
                 }
             }
         }
     };
     // Remove presence before attempting the terminal network write.
     state.relay.leave(&session).await;
-    close(&mut socket, fault).await;
+    if let Some(fault) = fault {
+        close(&mut socket, fault).await;
+    } else {
+        // Drive the queued close reply to completion before releasing the transport.
+        let _ = tokio::time::timeout(Duration::from_secs(2), socket.recv()).await;
+    }
 }

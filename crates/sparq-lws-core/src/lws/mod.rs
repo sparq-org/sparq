@@ -2476,6 +2476,10 @@ pub async fn router_with_catalog<S: Store + 'static>(
 /// (access requests, subscriptions, type search) are held to their own limits while the body is
 /// read, so no more than that is ever buffered for them; everything else to `max_body`.
 fn body_limit(path: &str, max_body: usize) -> usize {
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_ticket(path) {
+        return 8192.min(max_body);
+    }
     let limit = if path.starts_with(REQUESTS_PATH) {
         access::MAX_REQUEST_BYTES
     } else if path.starts_with(SUBSCRIPTIONS_PATH) {

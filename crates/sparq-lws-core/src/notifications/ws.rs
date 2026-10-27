@@ -2324,30 +2324,29 @@ mod tests {
         let topic = format!("{BASE}/doc");
         let ws = open_for_bob(&s, &topic).await;
         let (mut tx, mut rx) = ws.split();
-        let flood = tokio::spawn(async move {
-            loop {
-                for _ in 0..1024 {
-                    if tx.feed(M::Text("frame".into())).await.is_err() {
-                        return;
-                    }
-                }
-                if tx.flush().await.is_err() {
-                    return;
-                }
-            }
-        });
+        tx.send(M::Text("frame".into())).await.unwrap();
         revoke_bob(&s).await;
         let close = tokio::time::timeout(every * 2, async {
-            while let Some(frame) = rx.next().await {
-                if let M::Close(Some(frame)) = frame.unwrap() {
-                    return frame;
+            // Poll the reader before each write. A separate task feeding large batches can
+            // monopolize the client's split transport and delay observing an already-sent close.
+            let mut writing = true;
+            loop {
+                tokio::select! {
+                    biased;
+                    frame = rx.next() => {
+                        match frame.expect("socket ended without a close").unwrap() {
+                            M::Close(Some(frame)) => return frame,
+                            _ => continue,
+                        }
+                    }
+                    sent = tx.send(M::Text("frame".into())), if writing => {
+                        writing = sent.is_ok();
+                    }
                 }
             }
-            panic!("socket ended without a close");
         })
         .await
         .expect("frame flood delayed the revocation close");
-        flood.abort();
         assert_eq!(u16::from(close.code), 1008);
         assert_eq!(close.reason, REVOKED);
     }

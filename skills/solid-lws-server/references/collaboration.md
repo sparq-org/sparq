@@ -30,7 +30,11 @@ document changes is disconnected. Access is checked again at connection and
 every ten seconds. Losing read ends the connection; losing write changes it to
 an observer for the rest of that connection. Reconnect with a fresh ticket after
 an access change. Ping frames are sent every thirty seconds. Closing a connection
-removes the awareness states it announced and broadcasts the removal immediately.
+removes the awareness states it first announced and broadcasts the removal immediately.
+The connection also releases those presence IDs, including previously cleared states.
+Awareness byte accounting follows the protocol clocks and counts the retained states.
+Peers may forward awareness updates. Replays follow the normal clock rules, and
+forwarding does not transfer responsibility for close cleanup to the forwarding peer.
 
 | Close code | Meaning |
 | --- | --- |
@@ -55,28 +59,35 @@ beside the binary resource. A failed flush remains queued, with exponential
 retry delays capped at thirty seconds while the room remains live. A persistence
 retry must still pass the ordinary access check. Internal create notifications
 bring log-mode appends into live rooms; no periodic container scan is used.
+Queued updates are timestamped at least as late as the newest observed log header
+when flushed, including after a snapshot arrives during a retry.
 
 Every log resource has a 16-byte envelope before its Yjs v1 payload. The first
 four bytes identify an update (`JYU1`) or snapshot (`JYS1`); the next eight hold
 an unsigned epoch-millisecond timestamp in big-endian order; the final four hold
 a random unsigned suffix in big-endian order. Loaders order these headers,
-regardless of filenames. Apply the newest snapshot first, then update resources
+regardless of filenames. Resource URIs follow each mode’s ordinary creation path.
+Apply the newest snapshot first, then update resources
 whose timestamp is at least the snapshot's. Orphaned older updates are harmless.
-After the last peer leaves, the room remains loaded for sixty seconds. At the
+After the last peer leaves, the room remains loaded for sixty seconds. Unloading
+waits for queued writes to complete. At the
 compaction threshold, an admitted writer is used to create a snapshot during
 unloading. Only confirmed creation permits ordinary authorized deletion of the
 folded files. Without confirmation the original resources remain. Restart reconstructs
 a room from those same files.
+Loading and compaction do not hold the service-wide room admission lock during
+storage operations. A room being unloaded refuses new joins until retirement ends.
 
 Limits can be set before router assembly. Library embedders may set
 `LdpState::crdt_limits` or `LwsConfig::crdt_limits` using
-`sparq_lws_ysync::Limits`. Native environment variables are positive integers:
+`sparq_lws_ysync::Limits`. Native environment variables are positive integers no larger than 1073741824:
 
 | Variable prefix `SOLID_SERVER_CRDT_` | Default | Effect |
 | --- | --- | --- |
 | `MAX_ROOMS` | 128 | Loaded rooms per service |
 | `PEERS_PER_ROOM` | 32 | Connections per room; pending authors per room |
 | `MESSAGE_BYTES` | 1048576 | Incoming binary messages; retained awareness bytes |
+| `FRAME_MESSAGES` | 32 | Protocol records in one incoming binary WebSocket message |
 | `DOCUMENT_BYTES` | 16777216 | Merged encoded room state and pending updates |
 | `TICKETS_PER_AGENT` | 8 | Outstanding tickets for one subject |
 | `MAX_TICKETS` | 1024 | Outstanding tickets for the service |
@@ -86,6 +97,11 @@ Limits can be set before router assembly. Library embedders may set
 
 Loading also bounds aggregate log bytes to four times `DOCUMENT_BYTES` and
 container-listing bytes to 8192 times `MAX_LOG_FILES`.
+Replies to one binary message share a byte budget equal to `DOCUMENT_BYTES` plus
+`MESSAGE_BYTES`; exceeding it ends the connection with the capacity code.
+Ticket request bodies are limited to 8192 bytes as they are read. Pending authors
+reserve log entries before their updates are admitted, including an additional
+entry when an update overlaps that author's in-progress flush.
 
 The crate `sparq-lws-ysync` is internal and has no HTTP framework dependency.
 Its store/authorizer traits are supplied by the native server adapter; standalone

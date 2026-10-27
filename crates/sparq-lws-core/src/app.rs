@@ -380,6 +380,7 @@ where
                 .layer(axum::middleware::from_fn_with_state(auth.clone(), auth_middleware::<J, R>)))
             .route(crate::crdt::SOLID_SOCKET, get(crate::crdt::solid_socket::<S>))
             .with_state(crdt)
+            .layer(axum::extract::DefaultBodyLimit::max(8192))
             .layer(axum::middleware::from_fn(cors_middleware)));
     }
 

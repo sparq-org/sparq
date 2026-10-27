@@ -47,6 +47,7 @@ pub struct Limits {
     pub max_rooms: usize,
     pub peers_per_room: usize,
     pub message_bytes: usize,
+    pub frame_messages: usize,
     pub document_bytes: usize,
     pub tickets_per_agent: usize,
     pub max_tickets: usize,
@@ -61,6 +62,7 @@ impl Default for Limits {
             max_rooms: 128,
             peers_per_room: 32,
             message_bytes: 1024 * 1024,
+            frame_messages: 32,
             document_bytes: 16 * 1024 * 1024,
             tickets_per_agent: 8,
             max_tickets: 1024,
@@ -118,6 +120,7 @@ struct Room {
     doc: Document,
     peers: HashMap<u64, Peer>,
     pending: HashMap<Agent, Pending>,
+    flushing: Option<(Agent, u64)>,
     files: Vec<String>,
     update_files: usize,
     last_writer: Option<Agent>,
@@ -125,6 +128,7 @@ struct Room {
     sequence: u64,
     newest_ms: u64,
     needs_reload: bool,
+    unloading: bool,
 }
 
 impl Room {
@@ -143,8 +147,10 @@ struct Inner<B> {
     limits: Limits,
     changes: Changes,
     tickets: Mutex<HashMap<[u8; 32], Ticket>>,
-    rooms: Mutex<HashMap<String, Arc<Mutex<Room>>>>,
+    rooms: Mutex<HashMap<String, RoomReady>>,
 }
+
+type RoomReady = tokio::sync::watch::Receiver<Option<Result<Arc<Mutex<Room>>, Fault>>>;
 
 /// One service instance. Each mode must have its own instance and ticket table.
 pub struct Relay<B>(Arc<Inner<B>>);
@@ -160,8 +166,8 @@ pub struct Session {
     pub incoming: mpsc::Receiver<Result<Arc<[u8]>, Fault>>,
     pub ended: tokio::sync::watch::Receiver<Option<Fault>>,
     room: Arc<Mutex<Room>>,
-    pub room_url: String,
-    pub agent: Agent,
+    room_url: String,
+    agent: Agent,
     id: u64,
 }
 
@@ -225,33 +231,44 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         if !access.read {
             return Err(Fault::Forbidden);
         }
-        let mut rooms = self.0.rooms.lock().await;
-        let room = if let Some(room) = rooms.get(room_url) {
-            room.clone()
-        } else {
-            if rooms.len() >= self.0.limits.max_rooms {
-                return Err(Fault::Capacity);
+        let mut ready = {
+            let mut rooms = self.0.rooms.lock().await;
+            if let Some(ready) = rooms.get(room_url) {
+                ready.clone()
+            } else {
+                if rooms.len() >= self.0.limits.max_rooms {
+                    return Err(Fault::Capacity);
+                }
+                let (tx, ready) = tokio::sync::watch::channel(None);
+                rooms.insert(room_url.into(), ready.clone());
+                let relay = self.clone();
+                let name = room_url.to_string();
+                // Loading owns its reservation independently of any joining socket's deadline.
+                tokio::spawn(async move {
+                    let result =
+                        tokio::time::timeout(Duration::from_secs(10), relay.open_room(&name))
+                            .await
+                            .unwrap_or(Err(Fault::Store));
+                    let failed = result.is_err();
+                    let _ = tx.send(Some(result));
+                    if failed {
+                        relay.0.rooms.lock().await.remove(&name);
+                    }
+                });
+                ready
             }
-            // Subscribe before listing so an overlapping committed append cannot be missed.
-            let changes = self.0.changes.subscribe(room_url);
-            let (files, state, newest_ms, update_files) = self.read_room(room_url).await?;
-            let room = Arc::new(Mutex::new(Room {
-                doc: Document::new(state)?,
-                peers: HashMap::new(),
-                pending: HashMap::new(),
-                files,
-                update_files,
-                last_writer: None,
-                last_left: Instant::now(),
-                sequence: 0,
-                newest_ms,
-                needs_reload: false,
-            }));
-            rooms.insert(room_url.into(), room.clone());
-            self.spawn(room_url.to_string(), room.clone(), changes);
-            room
         };
+        let room = ready
+            .wait_for(|r| r.is_some())
+            .await
+            .map_err(|_| Fault::Store)?
+            .as_ref()
+            .unwrap()
+            .clone()?;
         let mut guard = room.lock().await;
+        if guard.unloading {
+            return Err(Fault::Capacity);
+        }
         if guard.needs_reload {
             return Err(Fault::Store);
         }
@@ -277,7 +294,6 @@ impl<B: RoomStore + Authorizer> Relay<B> {
             },
         );
         drop(guard);
-        drop(rooms);
         Ok(Session {
             room,
             room_url: room_url.into(),
@@ -286,6 +302,28 @@ impl<B: RoomStore + Authorizer> Relay<B> {
             incoming,
             ended,
         })
+    }
+
+    async fn open_room(&self, name: &str) -> Result<Arc<Mutex<Room>>, Fault> {
+        // Subscribe before listing so an overlapping committed append cannot be missed.
+        let changes = self.0.changes.subscribe(name);
+        let (files, state, newest_ms, update_files) = self.read_room(name).await?;
+        let room = Arc::new(Mutex::new(Room {
+            doc: Document::new(state)?,
+            peers: HashMap::new(),
+            pending: HashMap::new(),
+            flushing: None,
+            files,
+            update_files,
+            last_writer: None,
+            last_left: Instant::now(),
+            sequence: 0,
+            newest_ms,
+            needs_reload: false,
+            unloading: false,
+        }));
+        self.spawn(name.to_string(), room.clone(), changes);
+        Ok(room)
     }
 
     async fn read_room(&self, room: &str) -> Result<(Vec<String>, Vec<u8>, u64, usize), Fault> {
@@ -304,7 +342,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 continue;
             }
             bytes = bytes.saturating_add(body.len());
-            if body.len() > self.0.limits.document_bytes + 16
+            if body.len() > self.0.limits.document_bytes.saturating_add(16)
                 || bytes > self.0.limits.document_bytes.saturating_mul(4)
             {
                 return Err(Fault::TooLarge);
@@ -328,8 +366,9 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         if bytes.len() > self.0.limits.message_bytes {
             return Err(Fault::TooLarge);
         }
-        let messages = messages(bytes)?;
+        let messages = messages(bytes, self.0.limits.frame_messages)?;
         let mut room = session.room.lock().await;
+        let mut response_bytes = 0usize;
         for message in messages {
             let peer = room.peers.get(&session.id).ok_or(Fault::Forbidden)?;
             let writable = peer.write;
@@ -342,7 +381,22 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                         continue;
                     };
                     let existing = room.pending.get(&session.agent);
-                    if room.files.len() >= self.0.limits.max_log_files {
+                    let split = room.flushing.as_ref().is_some_and(|(agent, revision)| {
+                        agent == &session.agent && existing.is_some_and(|p| p.revision == *revision)
+                    });
+                    let reserved = room.flushing.as_ref().is_some_and(|(agent, revision)| {
+                        room.pending
+                            .get(agent)
+                            .is_some_and(|p| p.revision != *revision)
+                    });
+                    if (existing.is_none() || split)
+                        && room
+                            .files
+                            .len()
+                            .saturating_add(room.pending.len())
+                            .saturating_add(usize::from(reserved))
+                            >= self.0.limits.max_log_files
+                    {
                         return Err(Fault::Capacity);
                     }
                     if existing.is_none() && room.pending.len() >= self.0.limits.peers_per_room {
@@ -404,6 +458,16 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 }
                 other => {
                     let reply = room.doc.reply(other)?;
+                    response_bytes = response_bytes.saturating_add(reply.len());
+                    if response_bytes
+                        > self
+                            .0
+                            .limits
+                            .document_bytes
+                            .saturating_add(self.0.limits.message_bytes)
+                    {
+                        return Err(Fault::Capacity);
+                    }
                     if !reply.is_empty()
                         && room.peers[&session.id]
                             .tx
@@ -467,10 +531,10 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                             Err(broadcast::error::RecvError::Lagged(_)) => relay.reload(&name, &room).await,
                             Err(broadcast::error::RecvError::Closed) => break,
                         };
-                        if result.is_err() {
+                        if let Err(error) = result {
                             let mut guard = room.lock().await;
                             guard.needs_reload = true;
-                            for peer in guard.peers.values() { let _ = peer.end.send(Some(Fault::Store)); }
+                            for peer in guard.peers.values() { let _ = peer.end.send(Some(error)); }
                         }
                         continue;
                     }
@@ -509,14 +573,14 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 if compact && relay.reload(&name, &room).await.is_err() {
                     continue;
                 }
-                // Match join's map -> room lock order; pending failures keep the room live.
-                let mut rooms = relay.0.rooms.lock().await;
-                let guard = room.lock().await;
+                // Retire this room without holding the service-wide admission lock over I/O.
+                let mut guard = room.lock().await;
                 if guard.peers.is_empty()
                     && guard.pending.is_empty()
                     && !guard.needs_reload
                     && guard.last_left.elapsed() >= Duration::from_secs(60)
                 {
+                    guard.unloading = true;
                     let snapshot = if guard.update_files >= relay.0.limits.compact_after {
                         guard
                             .last_writer
@@ -552,7 +616,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                             }
                         }
                     }
-                    rooms.remove(&name);
+                    relay.0.rooms.lock().await.remove(&name);
                     break;
                 }
             }
@@ -560,22 +624,35 @@ impl<B: RoomStore + Authorizer> Relay<B> {
     }
 
     async fn flush(&self, name: &str, room: &Arc<Mutex<Room>>) {
-        let pending = room.lock().await.pending.clone();
-        for (agent, batch) in pending {
-            if batch.retry > Instant::now() {
-                continue;
-            }
-            let file = match self.0.backend.create(name, &agent, &batch.file).await {
+        let authors: Vec<_> = room.lock().await.pending.keys().cloned().collect();
+        for agent in authors {
+            let batch = {
+                let mut guard = room.lock().await;
+                let Some(batch) = guard.pending.get(&agent) else {
+                    continue;
+                };
+                if batch.retry > Instant::now() {
+                    continue;
+                }
+                let mut batch = batch.clone();
+                // Preserve replay ordering after a snapshot arrives while an update is queued.
+                batch.file.millis = millis().max(batch.file.millis).max(guard.newest_ms);
+                guard.flushing = Some((agent.clone(), batch.revision));
+                batch
+            };
+            let created = self.0.backend.create(name, &agent, &batch.file).await;
+            let mut guard = room.lock().await;
+            guard.flushing = None;
+            let file = match created {
                 Ok(file) => file,
                 Err(_) => {
-                    if let Some(held) = room.lock().await.pending.get_mut(&agent) {
+                    if let Some(held) = guard.pending.get_mut(&agent) {
                         held.retry = Instant::now() + held.delay;
                         held.delay = (held.delay * 2).min(Duration::from_secs(30));
                     }
                     continue;
                 }
             };
-            let mut guard = room.lock().await;
             guard.newest_ms = guard.newest_ms.max(batch.file.millis);
             if !guard.files.contains(&file) {
                 guard.files.push(file);
@@ -599,7 +676,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         if !bytes.starts_with(b"JYU1") && !bytes.starts_with(b"JYS1") {
             return Ok(());
         }
-        if bytes.len() > self.0.limits.document_bytes + 16 {
+        if bytes.len() > self.0.limits.document_bytes.saturating_add(16) {
             return Err(Fault::TooLarge);
         }
         let log = LogFile::decode(&bytes)?;

@@ -41,7 +41,7 @@ impl Fault {
 }
 
 pub(crate) struct Presence {
-    owner: Option<u64>,
+    owner: u64,
     entry: AwarenessUpdateEntry,
 }
 
@@ -140,62 +140,70 @@ impl Document {
         max_ids: usize,
         max_bytes: usize,
     ) -> Result<Vec<u8>, Fault> {
-        let new_ids = update
-            .clients
+        let mut size: usize = self.presence.values().map(|p| p.entry.json.len()).sum();
+        let mut clients = HashMap::new();
+        for (id, entry) in update.clients {
+            if serde_json::from_str::<serde_json::Value>(&entry.json).is_err() {
+                return Err(Fault::Malformed);
+            }
+            if let Some(p) = self.presence.get(&id) {
+                if entry.clock < p.entry.clock
+                    || (entry.clock == p.entry.clock && entry.json.as_ref() != "null")
+                {
+                    continue;
+                }
+                size = size.saturating_sub(p.entry.json.len());
+            } else if entry.json.as_ref() == "null" {
+                continue;
+            }
+            size = size.saturating_add(entry.json.len());
+            clients.insert(id, entry);
+        }
+        let new_ids = clients
             .keys()
             .filter(|id| !self.presence.contains_key(id))
             .count();
         if self.presence.len() + new_ids > max_ids {
             return Err(Fault::Capacity);
         }
-        let mut size: usize = self.presence.values().map(|p| p.entry.json.len()).sum();
-        for (id, entry) in &update.clients {
-            if serde_json::from_str::<serde_json::Value>(&entry.json).is_err() {
-                return Err(Fault::Malformed);
-            }
-            if let Some(p) = self.presence.get(id) {
-                if p.owner.is_some_and(|owner| owner != peer) {
-                    return Err(Fault::Forbidden);
-                }
-                size = size.saturating_sub(p.entry.json.len());
-            }
-            size = size.saturating_add(entry.json.len());
-        }
         if size > max_bytes {
             return Err(Fault::TooLarge);
         }
-        let mut clients = HashMap::new();
-        for (id, entry) in update.clients {
-            let accept = self.presence.get(&id).is_none_or(|p| {
-                entry.clock > p.entry.clock
-                    || (entry.clock == p.entry.clock && entry.json.as_ref() == "null")
-            });
-            if accept {
-                clients.insert(id, entry.clone());
-                let owner = (entry.json.as_ref() != "null").then_some(peer);
-                self.presence.insert(id, Presence { owner, entry });
-            }
+        for (id, entry) in &clients {
+            self.presence
+                .entry(*id)
+                .and_modify(|p| p.entry = entry.clone())
+                .or_insert_with(|| Presence {
+                    owner: peer,
+                    entry: entry.clone(),
+                });
         }
         Ok(Message::Awareness(AwarenessUpdate { clients }).encode_v1())
     }
 
     pub fn leave(&mut self, peer: u64) -> Vec<u8> {
         let mut clients = HashMap::new();
-        for (id, p) in &mut self.presence {
-            if p.owner == Some(peer) {
-                p.owner = None;
-                p.entry.json = Arc::from("null");
-                clients.insert(*id, p.entry.clone());
+        self.presence.retain(|id, p| {
+            if p.owner == peer {
+                let mut entry = p.entry.clone();
+                entry.json = Arc::from("null");
+                clients.insert(*id, entry);
+                false
+            } else {
+                true
             }
-        }
+        });
         Message::Awareness(AwarenessUpdate { clients }).encode_v1()
     }
 }
 
-pub(crate) fn messages(bytes: &[u8]) -> Result<Vec<Message>, Fault> {
+pub(crate) fn messages(bytes: &[u8], max: usize) -> Result<Vec<Message>, Fault> {
     let mut remaining = bytes;
     let mut result = Vec::new();
     while !remaining.is_empty() {
+        if result.len() >= max {
+            return Err(Fault::Capacity);
+        }
         let mut decoder = DecoderV1::new(Cursor::new(remaining));
         result.push(Message::decode(&mut decoder).map_err(|_| Fault::Malformed)?);
         let left = decoder.read_to_end().map_err(|_| Fault::Malformed)?.len();
