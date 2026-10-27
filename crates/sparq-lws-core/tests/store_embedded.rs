@@ -37,6 +37,74 @@ fn store() -> impl Store {
 }
 
 #[tokio::test]
+async fn durable_middle_delete_and_post_compaction_rewrites_preserve_other_resources() {
+    struct TestDir(std::path::PathBuf);
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = TestDir(std::env::temp_dir().join(format!(
+        "sparq-lws-durability-{}-{nonce}", std::process::id()
+    )));
+    std::fs::create_dir(&dir.0).unwrap();
+    let path = dir.0.join("store");
+    let meta = |key: &str| ResourceMeta {
+        content_type: "text/turtle".into(),
+        blob_key: key.into(),
+        etag: format!("\"{key}\""),
+        last_modified: None,
+    };
+    let mut client = EmbeddedSparqClient::open_or_create(&path).unwrap();
+    let parent = "https://pod.example/alice/";
+    let first = "https://pod.example/alice/first";
+    let removed = "https://pod.example/alice/removed";
+    let last = "https://pod.example/alice/last";
+    let added = "https://pod.example/alice/added";
+    client.put_meta(parent, meta("parent")).await.unwrap();
+    for (child, key) in [(first, "first"), (removed, "removed"), (last, "last")] {
+        client.create_child(parent, child, meta(key)).await.unwrap();
+    }
+    client.delete_meta(removed).await.unwrap();
+    client.remove_child(parent, removed).await.unwrap();
+    drop(client);
+    client = EmbeddedSparqClient::open(&path).unwrap();
+    assert!(!client.exists(removed).await.unwrap());
+    assert_eq!(client.get_meta(first).await.unwrap(), meta("first"));
+    assert_eq!(client.get_meta(last).await.unwrap(), meta("last"));
+    client
+        .create_child(parent, added, meta("added"))
+        .await
+        .unwrap();
+    client.compact().await.unwrap();
+    client.put_meta(last, meta("after-compact")).await.unwrap();
+    client
+        .put_meta(parent, meta("parent-after-compact"))
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        // Reopen without saving: these records must survive in the replacement logs.
+        drop(client);
+        client = EmbeddedSparqClient::open(&path).unwrap();
+        assert_eq!(
+            client.get_meta(parent).await.unwrap(),
+            meta("parent-after-compact")
+        );
+        assert_eq!(client.get_meta(first).await.unwrap(), meta("first"));
+        assert_eq!(client.get_meta(last).await.unwrap(), meta("after-compact"));
+        assert_eq!(client.get_meta(added).await.unwrap(), meta("added"));
+        assert!(!client.exists(removed).await.unwrap());
+        let mut children = client.list_children(parent).await.unwrap();
+        children.sort();
+        assert_eq!(children, vec![added, first, last]);
+    }
+}
+
+#[tokio::test]
 async fn read_of_a_missing_resource_is_not_found() {
     let s = store();
     assert!(matches!(

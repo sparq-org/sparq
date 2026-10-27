@@ -31,8 +31,6 @@ enum Mode {
     Crash,
     FailThenCrash(usize),
     Panic,
-    // Only the Unix-only swap tests observe.
-    #[cfg_attr(windows, allow(dead_code))]
     Observe,
 }
 
@@ -86,7 +84,6 @@ pub(crate) fn panic_at(pred: impl FnMut(&str, &Path) -> bool + 'static) {
 }
 
 /// `f` sees every step before it runs; nothing fails.
-#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn observe(mut f: impl FnMut(&str, &Path) + 'static) {
     arm(Mode::Observe, move |step, path| {
         f(step, path);
