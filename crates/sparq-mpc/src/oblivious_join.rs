@@ -784,10 +784,9 @@ pub(crate) fn check_slot_work_budget(
 /// the uniform limb count it implies and the aggregate slot work.
 ///
 /// In the DEFAULT (derived) mode only the bound, arity and party caps are checked
-/// here. The party cap applies when `B > 0`; an upstream entry that shares inputs
-/// without output slots must also check it before those sharings. The width is a
-/// function of the rows the stage packs, so the width's caps and the aggregate work
-/// are decided at the stage,
+/// here. The party cap applies when `B > 0`; sharing input keys alone without
+/// output slots does not require this cap. The width is a function of the rows the
+/// stage packs, so the width's caps and the aggregate work are decided at the stage,
 /// exactly where this crate has always decided them. An entry check that guessed
 /// an upper bound from the inputs' widest term refused runs that both the stage and
 /// the pre-cap behaviour accept — a 900k-character literal at `B = 1`, or ten
@@ -827,9 +826,8 @@ pub(crate) fn check_output_parties_cap(parties: usize) -> Result<(), MpcError> {
     if parties > MAX_OUTPUT_PARTIES {
         return Err(MpcError::Protocol(format!(
             "oblivious output stage: {} compute parties exceeds the MAX_OUTPUT_PARTIES cap \
-             of {} — refusing before any candidate is read (every sharing spans one field \
-             element per party and every select's degree reduction re-shares up to that \
-             many times, so the party count multiplies the per-limb work twice over)",
+             of {} — output slots and secure equalities/comparisons require a party \
+             count within the robust reconstruction share limit",
             parties, MAX_OUTPUT_PARTIES
         )));
     }

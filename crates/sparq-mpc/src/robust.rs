@@ -103,7 +103,8 @@ use crate::shamir::Share;
 /// Reconstruction accepts at most 1024 shares, before distinct-point validation,
 /// interpolation or decoding. The decoder's cubic work is not modelled by the
 /// output stage's slot-work budget. [`crate::oblivious_join::MAX_OUTPUT_PARTIES`]
-/// derives its ceiling from this constant when sharing or opening will run.
+/// derives its ceiling from this constant for output slots or secure equalities
+/// and comparisons; sharing input keys alone does not require the output cap.
 pub const MAX_ROBUST_SHARES: usize = 1 << 10;
 
 /// Maximum number of reference-subset fits attempted for abort-path attribution.

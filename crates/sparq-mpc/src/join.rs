@@ -903,10 +903,6 @@ impl HiddenValueJoin {
                 .saturating_add(right.payload_vars.len()),
             bound,
         )?;
-        if !left.is_empty() || !right.is_empty() {
-            // This path shares every input key, even with no candidate or slot.
-            oblivious_join::check_output_parties_cap(self.backend.parties())?;
-        }
         self.preflight_candidate_bound(left, right, bound)?;
         // Mint ONE fresh dealer for this protocol run (production: a fresh OS-seeded
         // CSPRNG, sq-1vt) — independent masks, never a reused keystream across joins
@@ -941,9 +937,6 @@ impl HiddenValueJoin {
                 .saturating_add(right.payload_vars.len()),
             bound,
         )?;
-        if !left.is_empty() || !right.is_empty() {
-            oblivious_join::check_output_parties_cap(self.backend.parties())?;
-        }
         self.preflight_candidate_bound(left, right, bound)?;
         require_source_matches(source, &self.backend)?;
         let n = self.backend.parties();
@@ -3542,33 +3535,53 @@ mod randomness_seam_tests {
     }
 
     #[test]
-    fn batched_join_caps_key_sharing_without_output_slots() {
+    fn batched_join_accepts_key_sharing_above_the_party_cap_without_output_slots() {
         use crate::randomness::test_sources::RecordingSource;
         let backend = ShamirBackend::new_seeded(1025, 0xBA7D3).unwrap();
         let join = HiddenValueJoin::new(backend.clone());
-        let left = input(
-            "L", "l", &[(5, "l0")], RowBinding::Keyed(vec!["a".into()]),
-        );
-        let right = input(
-            "R", "r", &[(7, "r0")], RowBinding::Keyed(vec!["b".into()]),
-        );
+        let left = input("L", "l", &[(5, "x")], RowBinding::Keyed(vec!["a".into()]));
+        let right = input("R", "r", &[(7, "y")], RowBinding::Keyed(vec!["b".into()]));
         let empty = input("E", "e", &[], RowBinding::Keyed(vec![]));
         for (left, right) in [(&left, &right), (&left, &empty), (&empty, &right)] {
             let mut source = RecordingSource::new(backend.dealer());
-            let err = join
-                .batched_join_through(&mut source, left, right, 0)
-                .unwrap_err();
-            assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
-            assert!(source.log.is_empty());
-            crate::shamir::dealer_mints::reset();
-            let err = join.batched_join(left, right, 0).unwrap_err();
-            assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
-            assert_eq!(crate::shamir::dealer_mints::count(), 0);
+            let output = join.batched_join_through(&mut source, left, right, 0);
+            assert!(output.is_ok());
+            let (result, cost) = output.unwrap();
+            assert!(result.rows.is_empty());
+            assert_eq!(cost.bound, 0);
+            assert_eq!(cost.opens, 0);
+            let output = join.batched_join(left, right, 0);
+            assert!(output.is_ok());
+            let (result, cost) = output.unwrap();
+            assert!(result.rows.is_empty());
+            assert_eq!(cost.bound, 0);
+            assert_eq!(cost.opens, 0);
             // The fully oblivious path shares only candidate keys; these groups
             // do not overlap, so it has no party-dependent work at all.
             let (result, _) = join.fully_oblivious_batched_join(left, right, 0).unwrap();
             assert!(result.rows.is_empty());
         }
+    }
+
+    #[test]
+    fn batched_join_refuses_output_slots_above_the_party_cap() {
+        use crate::randomness::test_sources::RecordingSource;
+        let backend = ShamirBackend::new_seeded(1025, 0xBA7D4).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let left = input("L", "l", &[(5, "x")], RowBinding::Keyed(vec!["a".into()]));
+        let right = input("R", "r", &[(7, "y")], RowBinding::Keyed(vec!["b".into()]));
+        let mut source = RecordingSource::new(backend.dealer());
+        for result in [
+            join.batched_join_through(&mut source, &left, &right, 1),
+            join.batched_join(&left, &right, 1),
+        ] {
+            let err = result.expect_err("output slots must refuse 1025 parties at B = 1");
+            assert!(matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+        }
+        assert!(
+            source.log.is_empty(),
+            "the output cap must precede key sharing"
+        );
     }
 
     #[test]
