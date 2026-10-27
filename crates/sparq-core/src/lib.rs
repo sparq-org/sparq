@@ -14536,6 +14536,27 @@ mod tests {
         let g2 = Graph::open(&dir).unwrap();
         assert_eq!(dump_terms(&g2).len(), 1, "checksum-failing batch must not apply");
         assert_eq!(std::fs::read(&wal_path).unwrap().len(), 0, "corrupt leading batch truncates the whole log");
+        drop(g2);
+        let expected: Vec<_> = (0..=1)
+            .map(|i| {
+                (
+                    term_iri(i, "s").to_string(),
+                    term_iri(i, "p").to_string(),
+                    term_iri(i, "o").to_string(),
+                )
+            })
+            .collect();
+        for header_bytes in 0..12 {
+            std::fs::write(&wal_path, &full[..first_batch_len + header_bytes]).unwrap();
+            let reopened = std::panic::catch_unwind(|| Graph::open(&dir))
+                .expect("a header prefix returns an I/O result")
+                .unwrap();
+            assert_eq!(dump_terms(&reopened), expected);
+            assert_eq!(
+                std::fs::read(&wal_path).unwrap().as_slice(),
+                &full[..first_batch_len]
+            );
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -15671,20 +15692,22 @@ mod tests {
             &txn_record(0, Some("<http://ex/s1> <http://ex/p> <http://ex/o1> .\n")),
         );
         let journal = TxnJournal::path(&dir);
-        std::fs::write(&journal, &frame).unwrap();
-        match Graph::open(&dir) {
-            Ok(_) => panic!("a future journal format must not open"),
-            Err(e) => assert!(
-                e.to_string().contains("newer build"),
-                "unexpected error: {}",
-                e
-            ),
+        for bytes in [&frame[..], &frame[..12]] {
+            std::fs::write(&journal, bytes).unwrap();
+            match Graph::open(&dir) {
+                Ok(_) => panic!("a future journal format must not open"),
+                Err(e) => assert!(
+                    e.to_string().contains("newer build"),
+                    "unexpected error: {}",
+                    e
+                ),
+            }
+            assert_eq!(
+                std::fs::read(&journal).unwrap().as_slice(),
+                bytes,
+                "the frame must still be on disk, byte for byte"
+            );
         }
-        assert_eq!(
-            std::fs::read(&journal).unwrap(),
-            frame,
-            "the frame must still be on disk, byte for byte"
-        );
         std::fs::write(
             &journal,
             txn_frame(
