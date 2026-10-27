@@ -2640,9 +2640,10 @@ pub struct AppState {
     /// the cap is on authorization builds in flight rather than per lane.
     #[cfg(feature = "solid-authz")]
     authz_build_pool: Arc<crate::solid_authz::AuthBuildPool>,
-    /// Admission control for streamed read bodies (SELECT JSON, CONSTRUCT / DESCRIBE). The
-    /// `concurrency_limit` layer releases its slot as soon as the handler returns the
-    /// `Response`, but a streamed body's worker keeps running on the blocking pool while the
+    /// Admission control for streamed read bodies (SELECT JSON, CONSTRUCT / DESCRIBE)
+    /// and authorization-query workers. The `concurrency_limit` layer releases its slot
+    /// as soon as the handler returns the `Response`, but a streamed body's worker
+    /// keeps running on the blocking pool while the
     /// client reads. Each such worker holds one of these `max_concurrent` permits until it
     /// exits, so a burst of slow or stalled readers is shed with 429 instead of piling up
     /// blocking-pool threads.
@@ -3076,9 +3077,9 @@ impl AppState {
         })
     }
 
-    /// Claims a streamed-body worker slot (see [`AppState::stream_workers`]), or `None` when
-    /// every slot is held by a worker that is still streaming.
-    fn try_stream_worker(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    /// Claims a query-worker slot (see [`AppState::stream_workers`]), or `None` when
+    /// every slot is held by a streamed read or authorization-query worker.
+    pub(crate) fn try_stream_worker(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         Arc::clone(&self.stream_workers).try_acquire_owned().ok()
     }
 
@@ -7021,16 +7022,17 @@ pub(crate) async fn await_worker(task: tokio::task::JoinHandle<Response>, config
         },
         None => task.await,
     };
-    match joined {
-        Ok(resp) => resp,
-        Err(e) if e.is_panic() => {
-            json_error(StatusCode::INTERNAL_SERVER_ERROR, "query worker panicked")
-        }
-        Err(_) => json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "query worker was cancelled",
-        ),
-    }
+    joined.unwrap_or_else(query_worker_error)
+}
+
+/// Shared response mapping for blocking query workers.
+pub(crate) fn query_worker_error(error: tokio::task::JoinError) -> Response {
+    let message = if error.is_panic() {
+        "query worker panicked"
+    } else {
+        "query worker was cancelled"
+    };
+    json_error(StatusCode::INTERNAL_SERVER_ERROR, message)
 }
 
 /// (sq-ebii) The result of awaiting a SPARQL Update worker under the timeout cap.
@@ -7615,9 +7617,9 @@ struct StreamHeld {
     slot: tokio::sync::OwnedSemaphorePermit,
 }
 
-/// Every streamed-body worker slot is taken by a worker that is still streaming: shed the
-/// request exactly as the `concurrency_limit` layer does.
-fn stream_workers_exhausted() -> Response {
+/// Every query-worker slot is still held: shed the request exactly as the
+/// `concurrency_limit` layer does.
+pub(crate) fn stream_workers_exhausted() -> Response {
     json_error(StatusCode::TOO_MANY_REQUESTS, "server is at its concurrent-request limit, retry later")
 }
 

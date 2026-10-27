@@ -682,7 +682,7 @@ fn valid_target(url: &str, budget: sparq_solid::AuthBudget) -> Result<NamedNode,
     if !is_control_doc(url) {
         budget
             .validate_resource_iri(url)
-            .map_err(|e| format!("invalid target <{url}>: {e}"))?;
+            .map_err(|e| format!("invalid target <{url}>: {e}; write refused"))?;
     }
     Ok(name)
 }

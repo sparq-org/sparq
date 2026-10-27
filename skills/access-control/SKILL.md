@@ -984,15 +984,25 @@ ACL discovery indexes control documents once per view by their target IRI, with 
 preceding `.acr`. Targets beyond that view's `max_resource_iri_bytes` or
 `max_resource_path_depth` are omitted: an admitted resource cannot name them. Each
 ancestor-prefix lookup hashes at most the byte cap, and prefixes deeper than the indexed
-targets are skipped. Resolution probes the resource itself and at most
-`max_resource_path_depth` ancestor containers, so the total lookup-key bytes are bounded
+targets are skipped. Resolution submits at most `max_resource_path_depth + 1`
+lookup keys in total, so the total lookup-key bytes are bounded
 by `(max_resource_path_depth + 1) * max_resource_iri_bytes`, including when the depth cap
 is zero. This counts the keys submitted to the hash table. The borrowed ancestor walks
-scan the resource linearly. The HTTP
-server runs warm stateful decisions and
-`WAC-Allow` calculation inline on the async worker; stateless builds and stateful misses
-retain their work on the bounded blocking pool. Queries run on a blocking worker even on
-a cache hit, under the request deadline and await grace.
+scan the resource linearly. Request names face the view's captured byte and depth caps
+before discovery: `decide` and `decide_batch` return a definitive `NoAcl` deny without a
+governing ACL, `resolve_acl` returns `None`, and `wac_allow` advertises empty modes.
+`AuthBudget::validate_resource_iri` returns the `AuthAllowance::ResourceIri` cap clause;
+callers add their operation's context, and materialization appends its view-build refusal.
+The HTTP server maps request-name cap refusals to its existing resource-budget refusal.
+
+The HTTP server runs warm stateful decisions and `WAC-Allow` calculation inline on the
+async worker. Waiters use that same placement after view publication without claiming
+a build permit. Stateless requests and stateful miss leaders retain their work on the
+bounded blocking pool. Queries run on a blocking worker even on a cache hit, under the
+request deadline and await grace. Every HTTP authorization query also holds a permit
+from the existing `max_concurrent` worker semaphore until its work finishes. Handler
+drop signals the query budget's cooperative cancellation flag, including with timeout
+disabled. Worker admission uses the existing concurrent-request-limit response.
 
 The store's provenance pruning owns container strings and uses the same three caps, with
 its own aggregate allowance for that pass. Lifecycle replay (`rematerialize_after_edit`

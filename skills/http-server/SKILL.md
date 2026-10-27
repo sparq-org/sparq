@@ -1477,21 +1477,30 @@ build plus policy evaluation and index rebuild under **one claim**, and the
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
 The stateless build and the stateful miss leader keep the decision, ACL discovery,
 `WAC-Allow` calculation, or query in the same blocking closure under that one permit.
-Other misses await the shared view without a permit, then claim a pool permit for their
-request work. A completed view is published while the leader retains its permit through
+Other misses await the shared view without a permit. After publication, waiter decisions
+and `WAC-Allow` calculation run inline on the async worker, as cache hits do, without a
+build claim. A completed view is published while the leader retains its permit through
 request completion. Only a completed outcome from the shared read-lock lookup is a warm hit.
-Stateful cache-hit decisions and `WAC-Allow` calculation run inline on the async worker,
-without a build claim. ACL targets are indexed once per view; targets longer than
+ACL targets are indexed once per view; targets longer than
 `max_resource_iri_bytes` or deeper than `max_resource_path_depth` are omitted. Each
 borrowed ancestor-prefix lookup hashes at most the byte cap; prefixes deeper than the
-indexed targets are skipped. Resolution includes the resource's own target plus at most
-`max_resource_path_depth` ancestor probes, bounding the total lookup-key bytes by
+indexed targets are skipped. Resolution submits at most `max_resource_path_depth + 1`
+lookup keys in total, bounding the total lookup-key bytes by
 `(max_resource_path_depth + 1) * max_resource_iri_bytes`, including a zero depth cap.
 This counts keys submitted to the hash table. The ancestor walks scan the request resource linearly.
-Cache-hit queries use a blocking worker so the handler can
-bound their await; they also claim no build slot. A saturated build pool therefore keeps
-serving cached requests. A stateless or cache-miss query holds its build permit through
-query completion, so other builds can be shed during that interval.
+Request names beyond the view's byte or depth cap are refused before discovery, with
+`AuthAllowance::ResourceIri` and the existing `503` resource-budget response
+(`could not materialise the authorization view`), without an ACL link.
+Cache-hit and published-view waiter queries use a blocking worker so the handler can
+bound their await; they claim no build slot. Every `/authz/query` request holds a permit
+from the existing `max_concurrent` worker semaphore until its blocking work exits,
+shared with streamed read workers. Exhausted worker admission returns the existing
+`429` concurrent-request-limit response. Handler drop, including deadline expiry,
+signals the engine's cooperative cancellation flag, even when `SPARQ_QUERY_TIMEOUT=0`.
+A panicked cached-query worker returns `500` with `query worker panicked`, as `/sparql` does.
+A saturated build pool continues serving completed-view decisions and `WAC-Allow`.
+A stateless or miss-leader query holds its build permit through query completion, so
+other builds can be shed during that interval.
 The permit remains in the blocking task until it finishes, even if the handler is cancelled.
 `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` is clamped to `1..=tokio::sync::Semaphore::MAX_PERMITS`
 (0 becomes 1), and caps the

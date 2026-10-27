@@ -1305,7 +1305,11 @@ impl PodStore {
     /// assert_eq!(store.wac_allow(&Session::default(), &resource), r#"user="read",public="read""#);
     /// # Ok::<(), String>(())
     /// ```
+    /// Names outside the installed view's resource caps advertise empty modes.
     pub fn wac_allow(&self, session: &Session, resource: &NamedNode) -> String {
+        if self.acl_index().validate_resource_iri(resource.as_str()).is_err() {
+            return r#"user="",public="""#.to_owned();
+        }
         let user = self.modes_held(session, resource);
         // The `public` field is what an anonymous caller (no WebID) holds — `acl:Read`
         // granted to `foaf:Agent` etc. — independent of the authenticated session.
@@ -1397,6 +1401,8 @@ impl PodStore {
     /// assert!(!anon.allow && anon.status == AclStatus::Resolved);
     /// # Ok::<(), String>(())
     /// ```
+    /// Names outside the installed view's resource caps return a definitive
+    /// [`AclStatus::NoAcl`] deny before discovery, without a governing ACL.
     pub fn decide(&self, session: &Session, resource: &str, mode: Mode) -> WacDecision {
         // sq-j8qtt: reuse the persistent per-generation index (built once,
         // dropped on `reindex`) instead of rebuilding it on every call.
@@ -1836,9 +1842,12 @@ impl PodStore {
     /// assert!(store.resolve_acl("https://other.ex/x").is_none()); // no ACL anywhere
     /// # Ok::<(), String>(())
     /// ```
+    /// Names outside the installed view's resource caps return `None` before discovery.
     pub fn resolve_acl(&self, resource: &str) -> Option<EffectiveAcl> {
         // sq-j8qtt: reuse the persistent per-generation index.
-        self.acl_index().resolve_acl(resource)
+        let index = self.acl_index();
+        index.validate_resource_iri(resource).ok()?;
+        index.resolve_acl(resource)
     }
 
     /// The memoized [`SessionSets`] for this session+mode, re-derived at most the

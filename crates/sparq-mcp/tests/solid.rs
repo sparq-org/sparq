@@ -2586,6 +2586,8 @@ fn write_names_observe_store_caps_before_content_or_containment() {
                 }),
             );
             assert!(error && text.contains(cap) && text.contains("invalid target <"), "{text}");
+            assert!(text.contains("write refused"), "{text}");
+            assert!(!text.contains("authorization view is not built"), "{text}");
             assert_eq!(snapshot(&server), before);
         }
         let (text, error) = tool(

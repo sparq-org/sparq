@@ -140,11 +140,6 @@ fn decisions_match_main_over_wac_fixtures_and_name_boundaries() {
     for resource in [
         at_cap,
         "https://pod.ex/".into(),
-        format!("https://pod.ex/{}leaf", "a/".repeat(4096)),
-        format!(
-            "https://pod.ex/{}leaf",
-            format!("{}/", "a".repeat(4095)).repeat(63)
-        ),
         "https://pod.ex//a///leaf?x#part".into(),
     ] {
         for agent in [None, Some("https://alice.ex/card#me")] {
@@ -156,6 +151,35 @@ fn decisions_match_main_over_wac_fixtures_and_name_boundaries() {
                     ..Session::default()
                 },
             );
+        }
+    }
+    for resource in [
+        format!("https://pod.ex/{}leaf", "a/".repeat(4096)),
+        format!(
+            "https://pod.ex/{}leaf",
+            format!("{}/", "a".repeat(4095)).repeat(63)
+        ),
+    ] {
+        for agent in [None, Some("https://alice.ex/card#me")] {
+            for mode in [Mode::Read, Mode::Write, Mode::Append, Mode::Control] {
+                assert_eq!(
+                    store.decide(
+                        &Session {
+                            agent,
+                            ..Session::default()
+                        },
+                        &resource,
+                        mode
+                    ),
+                    WacDecision {
+                        allow: false,
+                        granted_modes: Vec::new(),
+                        governing_acl: None,
+                        scope: None,
+                        status: AclStatus::NoAcl,
+                    }
+                );
+            }
         }
     }
 }
@@ -227,7 +251,7 @@ fn acl_resolution_matches_original_over_random_ancestors() {
                 dataset.push_str(&format!("<urn:s> <urn:p> <urn:o> <{resource}.acl> .\n"));
             }
         }
-        resources.push(format!("{resource}{}", "x/".repeat(2048)));
+        let outside_caps = format!("{resource}{}", "x/".repeat(2048));
         resources.push(format!("{resource}leaf"));
         let mut store = PodStore::new(Graph::load_dataset(&dataset, "nquads").unwrap());
         // This generated corpus admits targets beyond the default container cap.
@@ -241,6 +265,7 @@ fn acl_resolution_matches_original_over_random_ancestors() {
                 "resource {r}"
             );
         }
+        assert!(store.resolve_acl(&outside_caps).is_none());
     }
 }
 
@@ -268,4 +293,78 @@ fn name_caps_are_captured_when_the_view_is_materialized() {
         store.resolve_acl(&resource).is_none(),
         "a rebuilt view uses the lowered cap"
     );
+}
+
+#[test]
+fn acl_precedes_acr_in_both_document_orders() {
+    for suffixes in [[".acl", ".acr"], [".acr", ".acl"]] {
+        let mut graph = Graph::default();
+        for suffix in suffixes {
+            graph
+                .add_named(
+                    Term::NamedNode(NamedNode::new_unchecked(format!(
+                        "https://pod.ex/r{suffix}"
+                    ))),
+                    Graph::default(),
+                )
+                .unwrap();
+        }
+        let store = PodStore::new(graph);
+        let effective = store.resolve_acl("https://pod.ex/r").unwrap();
+        assert_eq!(effective.acl.as_str(), "https://pod.ex/r.acl");
+        assert_eq!(effective.scope, AclScope::AccessTo);
+    }
+}
+
+#[test]
+fn request_names_outside_view_caps_are_refused_before_discovery() {
+    let mut budget = sparq_solid::default_auth_budget();
+    budget.max_resource_iri_bytes = 64;
+    budget.max_resource_path_depth = 2;
+    let long = format!("https://pod.ex/{}", "x".repeat(51));
+    for resource in [long.as_str(), "https://pod.ex/a/b/c"] {
+        let refusal = budget.validate_resource_iri(resource).unwrap_err();
+        assert_eq!(
+            sparq_solid::auth_allowance_refusal(&refusal),
+            Some(sparq_solid::AuthAllowance::ResourceIri)
+        );
+        for ancestor in [false, true] {
+            let mut dataset = format!(
+                r#"
+<{resource}.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#accessTo> <{resource}> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#agentClass> <http://xmlns.com/foaf/0.1/Agent> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <{resource}.acl> .
+"#
+            );
+            if ancestor {
+                dataset.push_str(r#"
+<https://pod.ex/.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#agentClass> <http://xmlns.com/foaf/0.1/Agent> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
+"#);
+            }
+            let mut store = PodStore::new(Graph::load_dataset(&dataset, "nquads").unwrap());
+            store.set_auth_budget(budget);
+            store.materialize_wac().unwrap();
+            let session = Session::default();
+            let decision = store.decide(&session, resource, Mode::Read);
+            assert!(!decision.allow);
+            assert_eq!(decision.status, AclStatus::NoAcl);
+            assert!(!decision.status.is_retryable());
+            assert!(decision.governing_acl.is_none());
+            assert!(decision.scope.is_none());
+            assert!(decision.granted_modes.is_empty());
+            assert_eq!(
+                store.decide_batch(&session, &[(resource, Mode::Read)]),
+                vec![decision]
+            );
+            assert!(store.resolve_acl(resource).is_none());
+            assert_eq!(
+                store.wac_allow(&session, &NamedNode::new(resource).unwrap()),
+                r#"user="",public="""#
+            );
+        }
+    }
 }

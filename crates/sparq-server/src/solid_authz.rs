@@ -189,6 +189,9 @@ struct BuildHook {
     entered: tokio::sync::Notify,
     running: std::sync::atomic::AtomicUsize,
     release: (std::sync::Mutex<bool>, std::sync::Condvar),
+    completed: tokio::sync::Notify,
+    result: std::sync::Mutex<Option<Result<String, String>>>,
+    panic_after_release: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(test)]
@@ -1028,9 +1031,9 @@ fn cached_server_view(
 
 /// Share one pool build per (serving lineage, generation, requested view kind).
 /// Waiters claim no permit while awaiting the shared view. The leader's request work
-/// stays in its build closure; other misses run work under their own pool permit.
+/// stays in its build closure; published-view waiters run decisions inline.
 /// A detached task publishes even if the initiating handler is cancelled. Warm
-/// decisions run inline; warm queries dispatch without claiming a build permit.
+/// decisions run inline; queries dispatch while retaining their query-worker permit.
 #[allow(clippy::result_large_err)]
 async fn server_store_with_work<T, F>(
     state: &AppState,
@@ -1046,26 +1049,7 @@ where
     if let Some(outcome) = cached_server_view(state, requested_view) {
         let store = outcome.map_err(server_view_error_response)?;
         let result = if let Some(work) = work {
-            if blocking_hit {
-                #[cfg(test)]
-                state
-                    .authz_build_pool()
-                    .hit_dispatches
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let working = store.clone();
-                Some(
-                    tokio::task::spawn_blocking(move || work(working))
-                        .await
-                        .map_err(|_| {
-                            json_error(
-                                StatusCode::SERVICE_UNAVAILABLE,
-                                "could not materialise the authorization view",
-                            )
-                        })?,
-                )
-            } else {
-                Some(work(store.clone()))
-            }
+            Some(published_view_work(state, store.clone(), blocking_hit, work).await?)
         } else {
             None
         };
@@ -1252,8 +1236,7 @@ where
             .map_err(|_| server_view_error_response(ServerViewError::Unavailable))?
             .map_err(server_view_error_response)?
     } else if let Some(work) = work {
-        let working = store.clone();
-        Some(on_build_pool(state, move || work(working)).await?)
+        Some(published_view_work(state, store.clone(), blocking_hit, work).await?)
     } else {
         None
     };
@@ -1268,6 +1251,34 @@ where
         }
     }
     Ok((store, result))
+}
+
+/// Decisions over a completed view are bounded inline work. Queries retain the
+/// worker permit captured by their endpoint and remain independently awaitable.
+#[allow(clippy::result_large_err)]
+async fn published_view_work<T, F>(
+    state: &AppState,
+    store: Arc<PodStore>,
+    blocking_query: bool,
+    work: F,
+) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(Arc<PodStore>) -> T + Send + 'static,
+{
+    if !blocking_query {
+        return Ok(work(store));
+    }
+    #[cfg(not(test))]
+    let _ = state;
+    #[cfg(test)]
+    state
+        .authz_build_pool()
+        .hit_dispatches
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    tokio::task::spawn_blocking(move || work(store))
+        .await
+        .map_err(crate::http::query_worker_error)
 }
 
 #[cfg(test)]
@@ -1325,8 +1336,8 @@ where
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
 /// per-request build ([`body_store`]) or the stateful per-generation view ([`server_store_with_work`]).
 /// A leader's build and request work share one blocking closure and one permit.
-/// Other misses await the shared build before claiming a permit for their work. Cache hits
-/// run decisions inline and queries on a blocking worker, with slot-free admission.
+/// Other misses await the shared build and then use the same placement as cache hits:
+/// inline decisions, or a blocking query worker retaining the endpoint's worker permit.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
 async fn with_store_work<T, F>(
@@ -1343,6 +1354,14 @@ where
     match req.source {
         AuthzSource::Body => body_store(state, req, mode, work).await,
         AuthzSource::Server => {
+            // Completed-view decisions borrow the request while running inline.
+            // Dispatched work below owns its request until the worker completes.
+            if !blocking_hit {
+                if let Some(outcome) = cached_server_view(state, req.view) {
+                    let store = outcome.map_err(server_view_error_response)?;
+                    return Ok(work(&store, req));
+                }
+            }
             let owned = req.clone();
             server_store_with_work(
                 state,
@@ -1354,6 +1373,15 @@ where
             .map(|(_, result)| result.expect("request work was supplied"))
         }
     }
+}
+
+/// Refuse names outside the view's caps before ACL discovery, using the same
+/// allowance kind and response wording as resource enumeration.
+fn validate_request_resource(store: &PodStore, resource: &str) -> Result<(), ServerViewError> {
+    store
+        .auth_budget()
+        .validate_resource_iri(resource)
+        .map_err(|error| ServerViewError::Materialize(materialize_refusal_kind(&error)))
 }
 
 /// `POST /authz/decide` — the per-request WAC/ACP decision (FR-1/FR-4). Body:
@@ -1444,11 +1472,13 @@ pub(crate) async fn decide_endpoint(
         }
     }
     let decision = match with_store_work(&state, &req, mode, false, move |store, req| {
-        store.decide(&req.session(), &resource, mode)
+        validate_request_resource(store, &resource)?;
+        Ok(store.decide(&req.session(), &resource, mode))
     })
     .await
     {
-        Ok(d) => d,
+        Ok(Ok(d)) => d,
+        Ok(Err(error)) => return server_view_error_response(error),
         Err(resp) => return resp,
     };
     #[cfg(feature = "odrl-authz")]
@@ -2233,6 +2263,9 @@ fn trust_authz_decide_blocking(
         Ok(store) => store,
         Err(response) => return response,
     };
+    if let Err(error) = validate_request_resource(&store, resource) {
+        return server_view_error_response(error);
+    }
     let decision = store.decide(&req.session(), resource, mode);
     let status = if decision.allow {
         StatusCode::OK
@@ -2394,7 +2427,10 @@ pub(crate) async fn wac_allow_endpoint(
     let resource_iri = match v.get("resource").and_then(|r| r.as_str()) {
         Some(r) => r.to_owned(),
         None => {
-            return json_error(StatusCode::BAD_REQUEST, "'resource' (IRI string) is required");
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "'resource' (IRI string) is required",
+            );
         }
     };
     // `wac_allow` takes a `NamedNode`; an un-IRI resource is a fail-closed 400 (never a grant).
@@ -2406,17 +2442,19 @@ pub(crate) async fn wac_allow_endpoint(
     };
     let (acl_link, value) =
         match with_store_work(&state, &req, Mode::Read, false, move |store, req| {
-        let acl_link = store
-            .resolve_acl(&resource_iri)
-            .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
-        let value = store.wac_allow(&req.session(), &resource);
-        (acl_link, value)
-    })
-    .await
-    {
-        Ok(result) => result,
-        Err(resp) => return resp,
-    };
+            validate_request_resource(store, &resource_iri)?;
+            let acl_link = store
+                .resolve_acl(&resource_iri)
+                .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
+            let value = store.wac_allow(&req.session(), &resource);
+            Ok((acl_link, value))
+        })
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => return server_view_error_response(error),
+            Err(resp) => return resp,
+        };
     #[cfg(feature = "odrl-authz")]
     let odrl_lane_fired = req.source == AuthzSource::Body && req.carries_odrl;
     // sq-3mu76 — read-scoped advertisement (module doc): the lane materialised
@@ -2671,6 +2709,16 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
     Ok(())
 }
 
+/// Owned by the handler, never the worker: dropping the request signals the engine's
+/// existing cooperative cancellation checks, including when no deadline is set.
+struct QueryCancellation(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for QueryCancellation {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// `POST /authz/query` — an ACCESS-CONTROLLED SPARQL query as `session` (FR-4). Body:
 /// `{ "dataset": nquads, "session": {..}, "mode"?: "read"|…, "query": sparql, "view"?: …,
 /// "source"?: "body"|"server" }` (sq-snopa.8: `"server"` omits `"dataset"` and
@@ -2707,7 +2755,10 @@ pub(crate) async fn query_endpoint(
     let query = match v.get("query").and_then(|q| q.as_str()) {
         Some(q) => q.to_owned(),
         None => {
-            return json_error(StatusCode::BAD_REQUEST, "'query' (SPARQL string) is required");
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "'query' (SPARQL string) is required",
+            );
         }
     };
     // A query is a READ; default the mode to Read. An explicit unknown mode is a fail-closed 400
@@ -2726,17 +2777,33 @@ pub(crate) async fn query_endpoint(
     };
     #[cfg(test)]
     let query_hook = state.authz_build_pool().query_hook.lock().unwrap().clone();
+    let Some(worker_permit) = state.try_stream_worker() else {
+        return crate::http::stream_workers_exhausted();
+    };
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _cancel_on_drop = QueryCancellation(cancel.clone());
     let work = with_store_work(&state, &req, mode, true, move |store, req| {
+        let _worker_permit = worker_permit;
         // Includes parsing, authorization rewrite, session view, and dataset setup.
         let budget = sparq_engine::QueryBudget {
             deadline,
             ..sparq_engine::QueryBudget::unlimited()
-        };
-        #[cfg(test)]
-        if let Some(hook) = query_hook {
-            hook.block();
         }
-        store.query_json_as_with_budget(&req.session(), mode, &query, &budget)
+        .with_cancel(cancel);
+        #[cfg(test)]
+        if let Some(hook) = &query_hook {
+            hook.block();
+            assert!(!hook
+                .panic_after_release
+                .load(std::sync::atomic::Ordering::Relaxed));
+        }
+        let result = store.query_json_as_with_budget(&req.session(), mode, &query, &budget);
+        #[cfg(test)]
+        if let Some(hook) = &query_hook {
+            *hook.result.lock().unwrap() = Some(result.clone());
+            hook.completed.notify_one();
+        }
+        result
     });
     let result = match deadline {
         Some(deadline) => {
@@ -3871,6 +3938,154 @@ mod build_pool_tests {
     }
 
     #[tokio::test]
+    async fn warm_query_disconnect_cancels_without_a_timeout_and_retains_admission() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                query_timeout: None,
+                max_concurrent: 1,
+                ..ServerConfig::default()
+            },
+        );
+        server_store(&st, None).await.unwrap();
+        let hook = Arc::new(BuildHook::default());
+        let _release = ReleaseOnDrop(hook.clone());
+        *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook.clone());
+        let request = || {
+            decide_bytes(serde_json::json!({
+                "source": "server", "query": "SELECT (COUNT(*) AS ?n) WHERE { VALUES ?a { 1 2 3 4 } VALUES ?b { 1 2 3 4 } }"
+            }))
+        };
+        let handler = tokio::spawn(query_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            request(),
+        ));
+        wait_for_running(&hook, 1).await;
+        assert_eq!(st.stream_workers_in_flight(), 1);
+        handler.abort();
+        assert!(handler.await.unwrap_err().is_cancelled());
+        assert_eq!(
+            st.stream_workers_in_flight(),
+            1,
+            "the worker retains admission after handler drop"
+        );
+        let saturated = query_endpoint(State(st.clone()), HeaderMap::new(), request()).await;
+        assert_eq!(saturated.status(), StatusCode::TOO_MANY_REQUESTS);
+        hook.release();
+        tokio::time::timeout(Duration::from_secs(2), hook.completed.notified())
+            .await
+            .expect("the disconnected request's worker completes");
+        let result = hook.result.lock().unwrap().take().unwrap();
+        assert!(result
+            .unwrap_err()
+            .contains("query budget exceeded (cancelled)"));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while st.stream_workers_in_flight() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the stopped worker releases admission");
+        *st.authz_build_pool().query_hook.lock().unwrap() = None;
+        let next = query_endpoint(State(st), HeaderMap::new(), request()).await;
+        assert_eq!(next.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_panicked_warm_query_uses_the_query_worker_error_response() {
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
+            ServerConfig {
+                solid_authz: true,
+                ..ServerConfig::default()
+            },
+        );
+        server_store(&st, None).await.unwrap();
+        let hook = Arc::new(BuildHook::default());
+        hook.panic_after_release
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        hook.release();
+        *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook);
+        let response = query_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            decide_bytes(serde_json::json!({
+                "source": "server", "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"
+            })),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"], "query worker panicked");
+        assert_eq!(st.stream_workers_in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn request_name_caps_use_the_resource_refusal_before_acl_discovery() {
+        let budget = sparq_solid::default_auth_budget();
+        let long = format!(
+            "https://pod.ex/{}",
+            "x".repeat(budget.max_resource_iri_bytes + 1 - "https://pod.ex/".len())
+        );
+        let deep = format!(
+            "https://pod.ex/{}leaf",
+            "a/".repeat(budget.max_resource_path_depth)
+        );
+        for resource in [&long, &deep] {
+            for ancestor in [false, true] {
+                let mut dataset = format!(
+                    r#"
+<{resource}.acl#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#accessTo> <{resource}> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#agentClass> <http://xmlns.com/foaf/0.1/Agent> <{resource}.acl> .
+<{resource}.acl#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <{resource}.acl> .
+"#
+                );
+                if ancestor {
+                    dataset.push_str(WAC_NQUADS);
+                }
+                let st = AppState::with_config(
+                    sparq_core::Graph::load_dataset(&dataset, "nquads").unwrap(),
+                    ServerConfig {
+                        solid_authz: true,
+                        ..ServerConfig::default()
+                    },
+                );
+                for server in [false, true] {
+                    let mut value = serde_json::json!({"resource": resource, "mode": "read", "session": {"agent": "https://alice.ex/card#me"}});
+                    if server {
+                        value["source"] = "server".into();
+                    } else {
+                        value["dataset"] = dataset.clone().into();
+                    }
+                    let body = decide_bytes(value);
+                    let responses = [
+                        decide_endpoint(State(st.clone()), HeaderMap::new(), body.clone()).await,
+                        wac_allow_endpoint(State(st.clone()), HeaderMap::new(), body).await,
+                    ];
+                    for response in responses {
+                        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+                        assert!(!response.headers().contains_key(header::LINK));
+                        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                            .await
+                            .unwrap();
+                        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                        assert_eq!(
+                            body["error"],
+                            "could not materialise the authorization view"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn warm_decisions_run_inline_on_the_async_worker() {
         let st = AppState::with_config(
             sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
@@ -3950,16 +4165,28 @@ mod build_pool_tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn authz_query_await_is_bounded_during_pre_evaluation_work() {
+        query_await_is_bounded(false).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn warm_authz_query_await_is_bounded_during_pre_evaluation_work() {
+        query_await_is_bounded(true).await;
+    }
+
+    async fn query_await_is_bounded(server: bool) {
         let st = AppState::with_config(
-            sparq_core::Graph::default(),
+            sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
             ServerConfig {
                 solid_authz: true,
                 query_timeout: Some(Duration::from_secs(1)),
                 ..ServerConfig::default()
             },
         );
+        if server {
+            server_store(&st, None).await.unwrap();
+        }
         let hook = Arc::new(BuildHook::default());
         *st.authz_build_pool().query_hook.lock().unwrap() = Some(hook.clone());
         let _release = ReleaseOnDrop(hook.clone());
@@ -3968,9 +4195,11 @@ mod build_pool_tests {
             query_endpoint(
                 State(request_state),
                 HeaderMap::new(),
-                decide_bytes(serde_json::json!({
-                    "dataset": WAC_NQUADS, "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"
-                })),
+                decide_bytes(if server {
+                    serde_json::json!({"source": "server", "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"})
+                } else {
+                    serde_json::json!({"dataset": WAC_NQUADS, "query": "SELECT ?a WHERE { VALUES ?a { 1 } }"})
+                }),
             )
             .await
         });
@@ -3981,14 +4210,25 @@ mod build_pool_tests {
         )
         .await;
         let available = st.authz_build_pool().available();
+        let workers = st.stream_workers_in_flight();
         hook.release();
         let response = response
             .expect("response arrives within the deadline and grace")
             .unwrap();
         assert_eq!(
             available,
-            st.config().solid_authz_build_concurrency - 1,
-            "unfinished blocking work retains its permit"
+            st.config().solid_authz_build_concurrency - usize::from(!server),
+            "unfinished miss work retains its build permit"
+        );
+        assert_eq!(
+            workers, 1,
+            "unfinished query work retains its worker permit"
+        );
+        assert_eq!(
+            st.authz_build_pool()
+                .hit_dispatches
+                .load(std::sync::atomic::Ordering::SeqCst),
+            usize::from(server)
         );
         let expected = crate::http::engine_error_response(
             "query budget exceeded (timeout)",
@@ -4470,57 +4710,86 @@ mod build_pool_tests {
     }
 
     #[tokio::test]
-    async fn stateful_miss_leader_and_waiter_work_hold_pool_permits() {
+    async fn published_view_waiter_decisions_need_no_build_permit() {
         let st = AppState::with_config(
             sparq_core::Graph::load_dataset(WAC_NQUADS, "nquads").unwrap(),
             ServerConfig {
                 solid_authz: true,
                 solid_authz_build_concurrency: 1,
+                solid_authz_build_wait: Duration::ZERO,
                 ..ServerConfig::default()
             },
         );
-        let hook = Arc::new(BuildHook::default());
-        let _release = ReleaseOnDrop(hook.clone());
-        *st.authz_build_pool().view_hook.lock().unwrap() = Some(hook.clone());
+        let view_hook = Arc::new(BuildHook::default());
+        let _release_view = ReleaseOnDrop(view_hook.clone());
+        *st.authz_build_pool().view_hook.lock().unwrap() = Some(view_hook.clone());
+        let work_hook = Arc::new(BuildHook::default());
+        let _release_work = ReleaseOnDrop(work_hook.clone());
+        let leader_state = st.clone();
+        let leader_hook = work_hook.clone();
         let caller = std::thread::current().id();
-        let start = || {
-            let st = st.clone();
-            tokio::spawn(async move {
-                let req = parse_request(&decide_bytes(serde_json::json!({
-                    "source": "server", "session": { "agent": "https://alice.ex/card#me" }
-                })))
-                .unwrap();
-                let pool = st.authz_build_pool().clone();
-                with_store_work(&st, &req, Mode::Read, false, move |store, req| {
-                    (
-                        store.decide(&req.session(), "https://pod.ex/n1", Mode::Read),
-                        std::thread::current().id(),
-                        pool.available(),
-                    )
-                })
-                .await
-                .unwrap()
+        let body = decide_bytes(serde_json::json!({
+            "source": "server", "resource": "https://pod.ex/n1", "mode": "read",
+            "session": {"agent": "https://alice.ex/card#me"}
+        }));
+        let leader_body = body.clone();
+        let leader = tokio::spawn(async move {
+            let req = parse_request(&leader_body).unwrap();
+            let pool = leader_state.authz_build_pool().clone();
+            with_store_work(&leader_state, &req, Mode::Read, false, move |store, req| {
+                leader_hook.block();
+                (
+                    store.decide(&req.session(), "https://pod.ex/n1", Mode::Read),
+                    std::thread::current().id(),
+                    pool.available(),
+                )
             })
-        };
-        let leader = start();
-        wait_for_running(&hook, 1).await;
-        let waiter = start();
-        wait_for_waiters(&st, None, 2).await;
-        assert_eq!(st.authz_build_pool().admitted(), 1);
-        hook.release();
-        for request in [leader, waiter] {
-            let (decision, worker, available) = request.await.unwrap();
-            assert!(decision.allow);
-            assert_ne!(worker, caller, "miss work runs on a blocking worker");
-            assert_eq!(available, 0, "miss work owns a pool permit");
-        }
+            .await
+            .unwrap()
+        });
+        wait_for_running(&view_hook, 1).await;
+        let decide_state = st.clone();
+        let decide_body = body.clone();
+        let decision = tokio::spawn(decide_endpoint(
+            State(decide_state),
+            HeaderMap::new(),
+            decide_body,
+        ));
+        let advertisement = tokio::spawn(wac_allow_endpoint(
+            State(st.clone()),
+            HeaderMap::new(),
+            body,
+        ));
+        wait_for_waiters(&st, None, 3).await;
+        view_hook.release();
+        wait_for_running(&work_hook, 1).await;
+        let decision = tokio::time::timeout(Duration::from_secs(2), decision)
+            .await
+            .unwrap()
+            .unwrap();
+        let advertisement = tokio::time::timeout(Duration::from_secs(2), advertisement)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(st.authz_build_pool().available(), 0);
+        assert_eq!(decision.status(), StatusCode::OK);
+        assert_eq!(advertisement.status(), StatusCode::OK);
         assert_eq!(
-            st.authz_build_pool()
-                .view_builds
-                .load(std::sync::atomic::Ordering::SeqCst),
-            1
+            decision.headers()[header::LINK],
+            "<https://pod.ex/.acl>; rel=\"acl\""
         );
-        assert_eq!(st.authz_build_pool().admitted(), 2);
+        let body = axum::body::to_bytes(advertisement.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["wacAllow"], r#"user="read",public="""#);
+        assert_eq!(st.authz_build_pool().admitted(), 1);
+        assert_eq!(st.authz_build_pool().refused(), 0);
+        work_hook.release();
+        let (decision, worker, available) = leader.await.unwrap();
+        assert!(decision.allow);
+        assert_ne!(worker, caller, "leader work remains on the blocking worker");
+        assert_eq!(available, 0, "leader work retains its build permit");
     }
 
     #[tokio::test]

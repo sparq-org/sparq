@@ -102,7 +102,8 @@ pub enum AclStatus {
     /// **authoritative**. `allow` is the real verdict. (An authoritative *deny* — the
     /// principal simply lacks the mode — is also `Resolved`; map it to **403**.)
     Resolved,
-    /// No governing ACL exists anywhere up the container chain (the resource is
+    /// No governing ACL is available: the resource name exceeds the view's byte or
+    /// depth cap, or no ACL exists anywhere up the container chain (the resource is
     /// **un-protected by any discoverable ACL**). Fail-closed ⇒ `allow == false`. A
     /// Solid server treats this as a definitive deny — the shipped shell maps it to **403**
     /// for every requester, though an LDP resource server owes an *anonymous* one the
@@ -263,6 +264,8 @@ impl WacDecision {
 /// Prepared once per materialized view and reused by point and batch decisions;
 /// unmaterialized stores build it lazily.
 pub(crate) struct AclIndex {
+    /// Name caps captured with this view, independently of the next build's budget.
+    budget: crate::AuthBudget,
     /// Control targets within the view's resource name caps, with `.acl` precedence.
     control: rustc_hash::FxHashMap<String, NamedNode>,
     /// Longest target of a stored control document, excluding its suffix.
@@ -310,6 +313,7 @@ impl AclIndex {
             }
         }
         AclIndex {
+            budget,
             control,
             max_target_len,
             max_target_depth,
@@ -322,6 +326,10 @@ impl AclIndex {
     /// A dropped view stays unavailable even if storage refused to remove its slot.
     pub(crate) fn mark_unmaterialized(&mut self) {
         self.materialized = false;
+    }
+
+    pub(crate) fn validate_resource_iri(&self, resource: &str) -> Result<(), String> {
+        self.budget.validate_resource_iri(resource)
     }
 
     /// The control-document IRI governing `resource`, if one exists in the dataset
@@ -353,8 +361,8 @@ impl AclIndex {
             return None;
         }
         // Count in a linear borrowed walk, then skip prefixes deeper than any
-        // admitted target. There is at most one own-target lookup plus as many
-        // ancestor lookups as the view's container-depth cap permits.
+        // admitted target. At most D + 1 lookup keys in total reach the table,
+        // where D is the view's container-depth cap.
         let mut depth = parent_iris(resource).count();
         // Own ACL → accessTo scope.
         if let Some(acl) = (depth <= self.max_target_depth)
@@ -393,6 +401,11 @@ pub(crate) fn decide_one(
     resource: &str,
     mode: Mode,
 ) -> WacDecision {
+    // Refused names have no discoverable ACL in this view. Keep the refusal
+    // definitive and independent of whether an ancestor happens to have an ACL.
+    if index.validate_resource_iri(resource).is_err() {
+        return WacDecision::deny(AclStatus::NoAcl);
+    }
     // A malformed resource IRI is a typed transient error — fail closed, retryable.
     let Ok(res_node) = NamedNode::new(resource) else {
         return WacDecision::deny(AclStatus::Transient);
@@ -773,6 +786,35 @@ mod tests {
             assert_eq!(bytes, expected_bytes);
             assert!(bytes <= (depth + 1) * budget.max_resource_iri_bytes);
         }
+    }
+
+    #[test]
+    fn acl_resolution_skips_the_own_probe_beyond_the_deepest_target() {
+        use std::sync::atomic::Ordering;
+        let mut budget = crate::default_auth_budget();
+        budget.max_resource_iri_bytes = 256;
+        budget.max_resource_path_depth = 1;
+        let root = format!("https://{}/", "h".repeat(240));
+        let other = format!("https://{}/1234567", "j".repeat(240));
+        let resource = format!("{root}a/b");
+        assert_eq!(parent_iris(&resource).count(), 2);
+        assert_eq!(other.len(), 256);
+        let mut g = Graph::default();
+        for target in [&root, &other] {
+            g.add_named(
+                Term::NamedNode(NamedNode::new_unchecked(format!("{target}.acl"))),
+                Graph::default(),
+            )
+            .unwrap();
+        }
+        let ix = AclIndex::build(&g, budget);
+        assert_eq!(ix.max_target_depth, 1);
+        let effective = ix.resolve_acl(&resource).unwrap();
+        assert_eq!(effective.acl.as_str(), format!("{root}.acl"));
+        assert_eq!(effective.scope, AclScope::Default);
+        let bytes = ix.lookup_bytes.load(Ordering::Relaxed);
+        assert_eq!(bytes, root.len() + format!("{root}a/").len());
+        assert!(bytes <= (budget.max_resource_path_depth + 1) * budget.max_resource_iri_bytes);
     }
 
     #[test]
