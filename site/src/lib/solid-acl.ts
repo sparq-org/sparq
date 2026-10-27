@@ -1,29 +1,24 @@
-// [OPUS-4.8] sq-4r4b — the in-tab FROM NAMED enforcement for the Solid flagship.
+// In-tab dataset-clause demo helper for the Solid flagship.
 //
-// This is a faithful mirror of `sparq-solid`'s `rewrite_for(sparql, allowed)` transform
-// (crates/sparq-solid/src/rewrite.rs:67): given a query and the authorized named-graph
-// set for an (agent, client) pair, inject a `FROM NAMED <g>` clause for each authorized
-// graph so the query is evaluated over EXACTLY those graphs and no others. The empty set
-// maps to a guaranteed-absent sentinel graph (`<urn:sparq:nothing>`) so the result stays
-// FAIL-CLOSED — zero rows, never an accidental union-of-everything.
-//
-// The wasm engine then runs the rewritten query for real. The access-control DECISION
-// (which graphs are authorized) is the materialized `sparq-solid` output, precomputed at
-// build time per the honesty framing; the RESTRICTION is the real SPARQL engine.
+// Append FROM NAMED clauses for the supplied graphs, preserving clauses the user wrote.
+// sparq-solid's rewrite_for instead intersects FROM NAMED with the grant and drops FROM.
+// This demo helper is not an access-control boundary. The wasm engine evaluates the
+// resulting dataset; the demo's supplied graph sets are precomputed sparq-solid output.
+// An empty supplied set adds a guaranteed-absent sentinel graph (<urn:sparq:nothing>).
 
 import { termToNTriples } from "@sparq/client";
 
-/** Guaranteed-absent graph used when a session has no authorized graphs (fail-closed). */
+/** Guaranteed-absent graph added when the supplied graph set is empty. */
 export const NOTHING_SENTINEL = "urn:sparq:nothing";
 
 /**
- * Rewrite `sparql` so it is evaluated only over `allowed` named graphs, by injecting a
- * `FROM NAMED` dataset clause. Mirrors sparq-solid's `rewrite_for`.
+ * Add `allowed` named graphs to the demo query's dataset with `FROM NAMED` clauses.
+ * Existing FROM / FROM NAMED clauses are preserved, unlike sparq-solid's `rewrite_for`.
  *
- * The clause is inserted after the SELECT projection and before the WHERE clause, which
- * is where SPARQL 1.1 expects dataset clauses. An empty `allowed` set injects the
- * sentinel graph so the query matches nothing (no grant ⇒ no data). Each graph IRI goes
- * through the shared `termToNTriples` writer, which throws on a character an IRIREF cannot
+ * The clause is inserted before WHERE (or an ASK's opening group when WHERE is omitted),
+ * where SPARQL 1.1 expects dataset clauses. An empty `allowed` set injects the
+ * sentinel graph. Each supplied graph IRI goes through the shared `termToNTriples`
+ * writer, which throws on a character an IRIREF cannot
  * hold, so a graph name cannot close its `<…>` early and add clauses to the query (#6719).
  */
 export function rewriteForGraphs(sparql: string, allowed: string[]): string {
@@ -32,24 +27,62 @@ export function rewriteForGraphs(sparql: string, allowed: string[]): string {
     .map((g) => `FROM NAMED ${termToNTriples({ type: "uri", value: g })}`)
     .join("\n");
 
-  // Find the WHERE keyword (case-insensitive) at a clause boundary and insert before it.
+  // Find the pattern boundary, including ASK's legal omission of WHERE.
   const whereIdx = findWhereIndex(sparql);
   if (whereIdx === -1) {
-    // No WHERE found (shouldn't happen for our SELECT) — append defensively.
+    // Leave unsupported or incomplete forms for the engine to diagnose.
     return `${sparql}\n${fromNamed}`;
   }
-  return `${sparql.slice(0, whereIdx)}${fromNamed}\n${sparql.slice(whereIdx)}`;
+  const prefix = sparql.slice(0, whereIdx);
+  return `${prefix}${/[ \t\r\n]$/.test(prefix) ? "" : "\n"}${fromNamed}\n${sparql.slice(whereIdx)}`;
 }
 
-/** Locate the top-level WHERE keyword so the dataset clause goes in the right place. */
+/** Locate WHERE or ASK's group, ignoring comments, IRIs, literals and nested expressions. */
 function findWhereIndex(sparql: string): number {
-  const re = /\bWHERE\b/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sparql)) !== null) {
-    // Skip matches inside a comment line.
-    const lineStart = sparql.lastIndexOf("\n", m.index) + 1;
-    const linePrefix = sparql.slice(lineStart, m.index);
-    if (!linePrefix.includes("#")) return m.index;
+  // Match IRIREF greedily, as the engine does, before scanning for boundary words.
+  // Escaped punctuation in prefixed names must not open strings or comments.
+  const iri = /<(?:[^\u0000-\u0020<>"{}|^`\\]|\\u[\da-fA-F]{4}|\\U[\da-fA-F]{8})*>/y;
+  const word = /[?$]?(?:\\[^\r\n]|[^ \t\r\n{}()[\]<>"';,=!?$+*/|&^#\\])+/y;
+  let depth = 0;
+  let ask = false;
+  for (let offset = 0; offset < sparql.length;) {
+    const char = sparql[offset];
+    if (char === "#") {
+      while (offset < sparql.length && !/[\r\n]/.test(sparql[offset])) offset += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      const delimiter = sparql.startsWith(char.repeat(3), offset) ? char.repeat(3) : char;
+      offset += delimiter.length;
+      while (offset < sparql.length) {
+        if (sparql[offset] === "\\") offset += 2;
+        else if (sparql.startsWith(delimiter, offset)) {
+          offset += delimiter.length;
+          break;
+        } else offset += 1;
+      }
+      continue;
+    }
+    iri.lastIndex = offset;
+    if (char === "<" && iri.test(sparql)) {
+      offset = iri.lastIndex;
+      continue;
+    }
+    word.lastIndex = offset;
+    const token = word.exec(sparql);
+    if (token) {
+      if (depth === 0) {
+        const keyword = token[0].toUpperCase();
+        if (keyword === "ASK") ask = true;
+        if (keyword === "WHERE") return offset;
+      }
+      offset = word.lastIndex;
+      continue;
+    }
+    if (char === "{" && depth === 0 && ask) return offset;
+    if (char === "{" || char === "(") depth += 1;
+    if (char === "}" || char === ")") depth -= 1;
+    offset += 1;
   }
   return -1;
 }
