@@ -53,7 +53,7 @@ fn every_embedded_update_uses_the_commit_helper() {
         .collect();
     assert_eq!(calls.len(), 2, "only the commit helper may execute updates");
     assert!(calls[0].contains("sparq_engine::update_in_place_atomic("));
-    assert!(calls[1].contains("sparq_engine::update_in_place_capturing("));
+    assert!(calls[1].contains("sparq_engine::update_in_place_algebra_capturing("));
     let helper = source
         .split("fn commit(")
         .nth(1)
@@ -868,4 +868,162 @@ async fn failed_saves_remove_only_empty_directories_they_created() {
     assert!(c.save(&dir.0.join("new/../file/deep")).await.is_err());
     assert!(!dir.0.join("new").exists());
     assert_eq!(std::fs::read(blocker).unwrap(), b"existing");
+}
+
+fn dataset_terms(graph: &Graph) -> Vec<(Option<oxrdf::Term>, Vec<[oxrdf::Term; 3]>)> {
+    fn triples(graph: &Graph) -> Vec<[oxrdf::Term; 3]> {
+        let mut rows: Vec<_> = graph
+            .iter_ids()
+            .map(|row| row.map(|id| graph.dict().term(id)))
+            .collect();
+        rows.sort_by_cached_key(|row| format!("{row:?}"));
+        rows
+    }
+    let mut rows = vec![(None, triples(graph))];
+    rows.extend(
+        graph
+            .named()
+            .iter()
+            .map(|(name, graph)| (Some(name.clone()), triples(graph))),
+    );
+    rows.sort_by_cached_key(|(name, _)| format!("{name:?}"));
+    rows
+}
+
+#[test]
+fn lws_builder_effects_match_full_forks() {
+    let parent = sparql::update_put_meta(PARENT, "text/turtle", "parent", "parent", None).unwrap();
+    let child = sparql::update_put_meta(CHILD, "text/plain", "child", "child", None).unwrap();
+    let body = sparql::insert_body_data(
+        CHILD,
+        &[(
+            "urn:s".into(),
+            "urn:p".into(),
+            sparql::BodyObject::Iri("urn:o".into()),
+        )],
+    )
+    .unwrap();
+    let corpus = [
+        parent.clone(),
+        child.clone(),
+        body,
+        sparql::update_put_meta(
+            CHILD,
+            "text/plain",
+            "new",
+            "new",
+            Some("2026-01-01T00:00:00Z"),
+        )
+        .unwrap(),
+        sparql::update_create_child(PARENT, CHILD, "text/plain", "new", "new", None, "create")
+            .unwrap(),
+        sparql::update_create_child_fenced(
+            PARENT,
+            CHILD,
+            "text/plain",
+            "new",
+            "new",
+            None,
+            "create",
+        )
+        .unwrap(),
+        sparql::update_delete_container_if_empty(PARENT, None, "delete").unwrap(),
+        sparql::update_delete_container_if_empty_fenced(CHILD, Some(PARENT), "delete").unwrap(),
+        sparql::update_fence("create"),
+        sparql::update_remove_child(PARENT, CHILD).unwrap(),
+        sparql::update_delete_resource(CHILD).unwrap(),
+        sparql::update_end_reclaim("unreferenced"),
+    ];
+    for populated in [false, true] {
+        let mut base = Graph::load_str("", "ntriples").unwrap();
+        if populated {
+            sparq_engine::update_in_place(&mut base, &format!("{parent}; {child}")).unwrap();
+        }
+        for update in &corpus {
+            let algebra = sparq_engine::parse_update_rec2013(update).unwrap();
+            let names = sparq_engine::update_graph_scope(&algebra).expect("concrete LWS builder");
+            let mut scoped = base.fork_scoped(&names);
+            let mut full = base.fork();
+            let budget = sparq_engine::QueryBudget::unlimited();
+            let a = sparq_engine::update_in_place_algebra_capturing(
+                &mut scoped,
+                &algebra,
+                None,
+                None,
+                &budget,
+            )
+            .unwrap();
+            let b = sparq_engine::update_in_place_algebra_capturing(
+                &mut full, &algebra, None, None, &budget,
+            )
+            .unwrap();
+            assert_eq!(a, b, "{update}");
+            let mut replay = base.fork();
+            sparq_engine::apply_effects(&mut replay, &a).unwrap();
+            assert_eq!(dataset_terms(&replay), dataset_terms(&full), "{update}");
+        }
+    }
+    // Reclaim admission examines references in every named graph.
+    let reclaim = sparq_engine::parse_update_rec2013(&sparql::update_begin_reclaim("key")).unwrap();
+    assert_eq!(sparq_engine::update_graph_scope(&reclaim), None);
+}
+
+#[tokio::test]
+async fn durable_single_resource_commit_forks_only_named_slots() {
+    let dir = Directory(std::env::temp_dir().join(format!(
+        "lws-scoped-fork-{}-{}",
+        std::process::id(),
+        next_nonce(),
+    )));
+    let mut data = String::new();
+    for i in 0..1000 {
+        data.push_str(&format!(
+            "<urn:s> <urn:p> \"{i}\" <https://pod.example/r{i}> .\n"
+        ));
+    }
+    Graph::load_dataset(&data, "nquads")
+        .unwrap()
+        .save(&dir.0)
+        .unwrap();
+    let client = dir.open();
+    client
+        .dispatch(|_| {
+            NAMED_GRAPH_FORKS.with(|count| count.set(0));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    client
+        .put_meta("https://pod.example/r999", meta("after"))
+        .await
+        .unwrap();
+    client
+        .dispatch(|graph| {
+            assert_eq!(NAMED_GRAPH_FORKS.with(|count| count.replace(0)), 1);
+            assert_eq!(graph.named().len(), 1000);
+            assert_eq!(
+                graph
+                    .named_graph(
+                        &oxrdf::NamedNode::new("https://pod.example/r0")
+                            .unwrap()
+                            .into()
+                    )
+                    .unwrap()
+                    .len(),
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // An enumeration operation takes the full-fork branch on the same durable path.
+    client
+        .dispatch(|graph| {
+            commit(graph, "CLEAR NAMED", "scoped fallback")?;
+            assert_eq!(NAMED_GRAPH_FORKS.with(|count| count.replace(0)), 1000);
+            assert!(graph.named().iter().all(|(_, graph)| graph.is_empty()));
+            Ok(())
+        })
+        .await
+        .unwrap();
 }

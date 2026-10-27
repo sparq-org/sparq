@@ -244,11 +244,18 @@ g.remove_triple(
 )?; // absent ⇒ no-op, never an error
 ```
 
+`Graph::fork_scoped(names)` omits every unlisted named graph, ignores absent names,
+and preserves dataset order without duplicating repeated names. It shares storage and
+mapping locks like `fork()`, carries no write-ahead log, and must only be used when the
+caller has bounded every graph the evaluation can observe. Commit resolved effects to
+the complete dataset rather than replacing it with this partial view.
+
 `sparq_core::Graph` — cheap snapshots / forks (the serving pattern):
 
 ```rust
 pub fn snapshot(&self) -> GraphSnapshot   // immutable COW view; O(pending delta), not O(triples)
 pub fn fork(&self) -> Graph               // mutable structural fork (Arc-shares base storage)
+pub fn fork_scoped(&self, names: &[Term]) -> Graph // default graph plus selected existing named graphs
 ```
 
 `sparq_core::GraphSnapshot` — `Send + Sync`, `Deref<Target = Graph>` (every read method:
