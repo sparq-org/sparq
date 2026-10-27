@@ -465,6 +465,11 @@ fn engine_err(context: &str, e: String) -> SparqError {
     SparqError::Backend(format!("fatal: embedded engine {context}: {e}"))
 }
 
+#[cfg(test)]
+thread_local! {
+    static NAMED_GRAPH_FORKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Preserve atomic in-memory updates; journal captured effects for directory-backed graphs.
 /// Never publish a durable graph's fork: it carries neither WAL nor transaction journal.
 fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqError> {
@@ -476,9 +481,18 @@ fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqErr
             .map_err(|e| engine_err(op, e));
     }
     let budget = sparq_engine::QueryBudget::unlimited();
-    let mut working = graph.graph.fork();
-    let effects = sparq_engine::update_in_place_capturing(&mut working, sparql, &budget)
-        .map_err(|e| engine_err(op, e))?;
+    let update = sparq_engine::parse_update_rec2013(sparql).map_err(|e| engine_err(op, e))?;
+    let mut working = match sparq_engine::update_graph_scope(&update) {
+        Some(names) => graph.graph.fork_scoped(&names),
+        None => graph.graph.fork(),
+    };
+    // Each member of the working dataset was forked once. Count the resulting
+    // named slots, rather than the requested names (which may include absent slots).
+    #[cfg(test)]
+    NAMED_GRAPH_FORKS.with(|count| count.set(count.get() + working.named().len()));
+    let effects = sparq_engine::update_in_place_algebra_capturing(
+        &mut working, &update, None, None, &budget,
+    ).map_err(|e| engine_err(op, e))?;
     drop(working);
     #[cfg(test)]
     let result = match graph.apply_failure.take() {

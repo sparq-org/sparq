@@ -315,3 +315,49 @@ fn named_graphs_fork_isolated() {
     assert_eq!(f.named()[0].1.len(), 2, "intermediate generation mutated");
     assert_eq!(base.named()[0].1.len(), 1);
 }
+
+#[test]
+fn scoped_fork_keeps_only_selected_slots_in_dataset_order() {
+    let mut base = Graph::load_dataset(
+        "<urn:s> <urn:p> \"0\" .\n<urn:s> <urn:p> \"1\" <urn:a> .\n<urn:s> <urn:p> \"2\" <urn:b> .",
+        "nquads",
+    )
+    .unwrap();
+    let empty = iri("urn:empty");
+    base.ensure_named(&empty).unwrap();
+    let a = iri("urn:a");
+    let names = [empty.clone(), iri("urn:absent"), a.clone(), a.clone()];
+    let mut scoped = base.fork_scoped(&names);
+    assert_eq!(
+        scoped
+            .named()
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        [&a, &empty]
+    );
+    assert_eq!(dump(&scoped), dump(&base));
+    assert_eq!(
+        dump(scoped.named_graph(&a).unwrap()),
+        dump(base.named_graph(&a).unwrap())
+    );
+    assert!(scoped.named_graph(&empty).unwrap().is_empty());
+    assert!(scoped.named_graph(&iri("urn:b")).is_none());
+    assert!(base.fork_scoped(&[]).named().is_empty());
+    let inserted = [iri("urn:new"), iri("urn:p"), iri("urn:o")];
+    scoped
+        .apply_delta(std::slice::from_ref(&inserted), &[])
+        .unwrap();
+    let index = scoped
+        .named()
+        .iter()
+        .position(|(name, _)| name == &a)
+        .unwrap();
+    scoped
+        .apply_delta_to_named(index, &[inserted], &[])
+        .unwrap();
+    assert_eq!(base.len(), 1);
+    assert_eq!(base.named_graph(&a).unwrap().len(), 1);
+    assert_eq!(scoped.len(), 2);
+    assert_eq!(scoped.named_graph(&a).unwrap().len(), 2);
+}

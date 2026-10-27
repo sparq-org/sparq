@@ -3634,6 +3634,22 @@ impl Graph {
     /// whatever owns the base. A fork of a directory-backed graph shares its memory-mapped
     /// files, so it holds that directory's lock while it lives, and cannot be saved over it.
     pub fn fork(&self) -> Graph {
+        self.fork_with_named(self.named.iter())
+    }
+
+    /// Fork the default graph and only the named graphs listed in `names`.
+    ///
+    /// Missing names are ignored; duplicates do not duplicate a graph. The selected
+    /// graphs retain their dataset order. Other named graphs are absent from the copy,
+    /// so callers must ensure their evaluation cannot observe or enumerate them.
+    /// Like [`fork`](Self::fork), this is an independently mutable in-memory view
+    /// without a write-ahead log, sharing storage and any mapping locks with the base.
+    /// Do not replace a complete dataset with this partial view.
+    pub fn fork_scoped(&self, names: &[Term]) -> Graph {
+        self.fork_with_named(self.named.iter().filter(|(name, _)| names.contains(name)))
+    }
+
+    fn fork_with_named<'a>(&self, named: impl Iterator<Item = &'a (Term, Graph)>) -> Graph {
         Graph {
             dict: self.dict.fork(),
             store: self.store.fork(),
@@ -3643,7 +3659,11 @@ impl Graph {
             exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
             float_literal: std::sync::atomic::AtomicU8::new(0),
-            named: self.named.iter().map(|(name, g)| (name.clone(), g.fork())).collect(),
+            named: named.map(|(name, g)| {
+                #[cfg(test)]
+                scoped_fork_cost::NAMED_FORKS.with(|count| count.set(count.get() + 1));
+                (name.clone(), g.fork())
+            }).collect(),
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -19349,3 +19369,34 @@ mod exact_temporal_cache_tests {
 
 #[cfg(all(test, feature = "mmap"))]
 mod layout_tests;
+
+#[cfg(test)]
+mod scoped_fork_cost {
+    use super::*;
+    thread_local! {
+        pub(super) static NAMED_FORKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn scoped_named_fork_count_depends_on_selected_members() {
+        let mut graph = Graph::load_str("", "ntriples").unwrap();
+        for i in 0..1000 {
+            graph
+                .add_named(
+                    oxrdf::NamedNode::new(format!("urn:graph{i}"))
+                        .unwrap()
+                        .into(),
+                    Graph::load_str("", "ntriples").unwrap(),
+                )
+                .unwrap();
+        }
+        let name = graph.named()[999].0.clone();
+        NAMED_FORKS.with(|count| count.set(0));
+        let scoped = graph.fork_scoped(&[name.clone(), name]);
+        assert_eq!(NAMED_FORKS.with(|count| count.replace(0)), 1);
+        assert_eq!(scoped.named().len(), 1);
+        let full = graph.fork();
+        assert_eq!(NAMED_FORKS.with(|count| count.replace(0)), 1000);
+        assert_eq!(full.named().len(), 1000);
+    }
+}

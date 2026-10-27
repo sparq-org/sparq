@@ -50,7 +50,7 @@
 
 use crate::{exec, QueryBudget, QueryResult};
 use spargebra::algebra::{
-    AggregateExpression, AggregateFunction, Expression, Function, GraphPattern, OrderExpression,
+    AggregateExpression, AggregateFunction, Expression, Function, GraphPattern,
 };
 use spargebra::Query;
 use std::collections::HashMap;
@@ -80,108 +80,28 @@ pub fn is_cacheable(query: &Query) -> bool {
 }
 
 fn pattern_is_deterministic(p: &GraphPattern) -> bool {
-    match p {
-        GraphPattern::Bgp { .. } | GraphPattern::Path { .. } | GraphPattern::Values { .. } => true,
-        // A remote SERVICE is time-varying and outside our data — never cache.
-        GraphPattern::Service { .. } => false,
-        GraphPattern::Join { left, right }
-        | GraphPattern::Union { left, right }
-        | GraphPattern::Minus { left, right } => {
-            pattern_is_deterministic(left) && pattern_is_deterministic(right)
+    struct Deterministic;
+    impl crate::algebra_walk::Visitor for Deterministic {
+        fn pattern(&mut self, p: &GraphPattern) -> bool {
+            !matches!(p, GraphPattern::Service { .. })
         }
-        // `Lateral` (SEP-0006) is unconditionally present — the workspace enables
-        // spargebra's `sep-0006`, which is a spargebra feature, not one of ours.
-        GraphPattern::Lateral { left, right } => {
-            pattern_is_deterministic(left) && pattern_is_deterministic(right)
+        fn expression(&mut self, e: &Expression) -> bool {
+            match e {
+                Expression::FunctionCall(func, _) => function_is_deterministic(func),
+                _ => true,
+            }
         }
-        GraphPattern::LeftJoin {
-            left,
-            right,
-            expression,
-        } => {
-            pattern_is_deterministic(left)
-                && pattern_is_deterministic(right)
-                && expression
-                    .as_ref()
-                    .map(expr_is_deterministic)
-                    .unwrap_or(true)
-        }
-        GraphPattern::Filter { expr, inner } => {
-            expr_is_deterministic(expr) && pattern_is_deterministic(inner)
-        }
-        GraphPattern::Graph { inner, .. }
-        | GraphPattern::Distinct { inner }
-        | GraphPattern::Reduced { inner }
-        | GraphPattern::Project { inner, .. }
-        | GraphPattern::Slice { inner, .. } => pattern_is_deterministic(inner),
-        GraphPattern::Extend {
-            inner, expression, ..
-        } => pattern_is_deterministic(inner) && expr_is_deterministic(expression),
-        GraphPattern::OrderBy { inner, expression } => {
-            pattern_is_deterministic(inner)
-                && expression.iter().all(|o| {
-                    let (OrderExpression::Asc(e) | OrderExpression::Desc(e)) = o;
-                    expr_is_deterministic(e)
-                })
-        }
-        GraphPattern::Group {
-            inner, aggregates, ..
-        } => {
-            pattern_is_deterministic(inner)
-                && aggregates
-                    .iter()
-                    .all(|(_, a)| aggregate_is_deterministic(a))
+        fn aggregate(&mut self, a: &AggregateExpression) -> bool {
+            !matches!(
+                a,
+                AggregateExpression::FunctionCall {
+                    name: AggregateFunction::Custom(_),
+                    ..
+                }
+            )
         }
     }
-}
-
-fn aggregate_is_deterministic(a: &AggregateExpression) -> bool {
-    match a {
-        AggregateExpression::CountSolutions { .. } => true,
-        AggregateExpression::FunctionCall { name, expr, .. } => {
-            // A custom aggregate's closure is opaque — refuse it. The standard
-            // aggregates (incl. SAMPLE, which is implementation-defined but stable
-            // for a fixed input on a fixed engine) are fine.
-            !matches!(name, AggregateFunction::Custom(_)) && expr_is_deterministic(expr)
-        }
-    }
-}
-
-fn expr_is_deterministic(e: &Expression) -> bool {
-    match e {
-        Expression::NamedNode(_)
-        | Expression::Literal(_)
-        | Expression::Variable(_)
-        | Expression::Bound(_) => true,
-        Expression::Or(a, b)
-        | Expression::And(a, b)
-        | Expression::Equal(a, b)
-        | Expression::SameTerm(a, b)
-        | Expression::Greater(a, b)
-        | Expression::GreaterOrEqual(a, b)
-        | Expression::Less(a, b)
-        | Expression::LessOrEqual(a, b)
-        | Expression::Add(a, b)
-        | Expression::Subtract(a, b)
-        | Expression::Multiply(a, b)
-        | Expression::Divide(a, b) => expr_is_deterministic(a) && expr_is_deterministic(b),
-        Expression::UnaryPlus(a) | Expression::UnaryMinus(a) | Expression::Not(a) => {
-            expr_is_deterministic(a)
-        }
-        Expression::In(a, list) => {
-            expr_is_deterministic(a) && list.iter().all(expr_is_deterministic)
-        }
-        Expression::If(a, b, c) => {
-            expr_is_deterministic(a) && expr_is_deterministic(b) && expr_is_deterministic(c)
-        }
-        Expression::Coalesce(list) => list.iter().all(expr_is_deterministic),
-        // EXISTS evaluates an inner pattern — a SERVICE or non-deterministic call in
-        // there would taint the result, so recurse.
-        Expression::Exists(inner) => pattern_is_deterministic(inner),
-        Expression::FunctionCall(func, args) => {
-            function_is_deterministic(func) && args.iter().all(expr_is_deterministic)
-        }
-    }
+    crate::algebra_walk::all_pattern(p, &mut Deterministic)
 }
 
 fn function_is_deterministic(f: &Function) -> bool {
