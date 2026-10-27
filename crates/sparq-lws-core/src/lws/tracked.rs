@@ -395,6 +395,59 @@ mod tests {
     use super::super::test_store::state;
     use super::*;
 
+    #[tokio::test]
+    async fn completed_change_allows_a_fresh_snapshot() {
+        let gate = std::sync::Arc::new(super::super::snapshot::Gate::default());
+        let before = gate.snapshot(false).await.expect("initial snapshot");
+        assert!(before.unchanged());
+
+        assert_eq!(gate.change(async { 42 }).await.unwrap(), 42);
+        assert!(!before.unchanged());
+        let after = gate
+            .snapshot(false)
+            .await
+            .expect("snapshot after completion");
+        assert!(after.unchanged());
+        let barrier = gate.snapshot(true).await.expect("barrier after completion");
+        assert!(barrier.unchanged());
+    }
+
+    #[tokio::test]
+    async fn cancelled_change_allows_a_fresh_snapshot() {
+        let gate = std::sync::Arc::new(super::super::snapshot::Gate::default());
+        let before = gate.snapshot(false).await.expect("initial snapshot");
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let changing = tokio::spawn({
+            let gate = gate.clone();
+            async move {
+                gate.change(async move {
+                    started.send(()).unwrap();
+                    std::future::pending::<()>().await;
+                })
+                .await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), ready)
+            .await
+            .expect("change started")
+            .unwrap();
+        assert!(gate.snapshot(false).await.is_none());
+        assert!(!before.unchanged());
+
+        changing.abort();
+        assert!(changing.await.unwrap_err().is_cancelled());
+        let after = gate
+            .snapshot(false)
+            .await
+            .expect("snapshot after cancellation");
+        assert!(after.unchanged());
+        let barrier = gate
+            .snapshot(true)
+            .await
+            .expect("barrier after cancellation");
+        assert!(barrier.unchanged());
+    }
+
     /// Codex review of #6836: an unsettled write was remembered until its fence, so one settled
     /// by a read instead leaked its entry. Nothing is kept per write now: the fence carries what
     /// the write changes, and fencing it moves those snapshots and leaves nothing in flight.

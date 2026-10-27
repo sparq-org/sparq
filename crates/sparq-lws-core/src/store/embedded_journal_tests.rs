@@ -869,3 +869,37 @@ async fn failed_saves_remove_only_empty_directories_they_created() {
     assert!(!dir.0.join("new").exists());
     assert_eq!(std::fs::read(blocker).unwrap(), b"existing");
 }
+
+#[test]
+fn directory_setup_reports_file_destinations_and_cleans_created_directories() {
+    let dir = Directory::empty();
+    let file = dir.0.join("destination");
+    std::fs::write(&file, b"existing").unwrap();
+    {
+        let mut created = SaveDirectories::default();
+        assert!(created.create(&file).is_err());
+        assert!(created.create(&file.join("child")).is_err());
+        let nested = dir.0.join("new/deep");
+        created.create(&nested).unwrap();
+        assert!(nested.is_dir());
+    }
+    assert!(!dir.0.join("new").exists());
+    assert_eq!(std::fs::read(&file).unwrap(), b"existing");
+}
+
+#[test]
+fn final_client_drop_finishes_and_releases_the_directory() {
+    let dir = Directory::empty();
+    let client = dir.open();
+    let (closed, ready) = std::sync::mpsc::channel();
+    let dropping = std::thread::spawn(move || {
+        drop(client);
+        let _ = closed.send(());
+    });
+    ready
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("final client dropped");
+    dropping.join().unwrap();
+    let reopened = dir.open();
+    drop(reopened);
+}
