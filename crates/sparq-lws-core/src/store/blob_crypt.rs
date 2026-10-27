@@ -1,7 +1,7 @@
 //! Native envelope encryption and index-backed wrapped keys.
 //!
-//! This library stage has no environment or data-directory format wiring. A single
-//! decorator owns reservations for one exclusive index. See the server skill for
+//! A single decorator owns reservations for one exclusive index. Native boot selects
+//! it with the encryption provider configuration. See the server skill for
 //! the integration boundary and the crypt crate README for the envelope format.
 
 use std::{
@@ -272,7 +272,7 @@ type PodSlot = Arc<Slot<[u8; 16]>>;
 ///
 /// Construct once per exclusive index and share the decorator across tasks. All
 /// reservations and provider calls are serialized per pod/key, across reads and writes.
-/// Runtime activation is a separate integration stage of #7189.
+/// Native boot assembles one decorator before sharing it with request and maintenance paths.
 pub struct EncryptingBlobStore<B, K: KeyProvider> {
     inner: B,
     provider: K,
@@ -636,7 +636,7 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
 
 impl<S: SparqClient + 'static, B: BlobStore> CompositeStore<S, B> {
     /// Assemble the library decorator over this store's index and byte plane.
-    /// Runtime activation and directory-format validation are separate integration work.
+    /// Native server boot also validates the data-directory format before serving requests.
     pub async fn encrypt_blobs<K: KeyProvider>(
         self,
         provider: K,

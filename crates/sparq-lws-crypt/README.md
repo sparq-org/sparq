@@ -94,11 +94,11 @@ outside HTTP and blob GC: `WrappedKey::to_bytes()`, random `dek_id`, pod, scheme
 creation time, current flag and `reserved_seals`. It durably reserves `2^16` attempts before use;
 restart/expiry skips unused attempts, and rotation starts a fresh key at `2^31`.
 Per-pod reservations and per-id unwraps share one TTL policy. Back up index, blobs and KEK together.
-Runtime activation awaits the [storage-runtime stage of #7189](https://github.com/sparq-org/sparq/issues/7189).
+The native server activates this with `--features crypt`, `SOLID_SERVER_CRYPT_PROVIDER=local` and `SOLID_SERVER_CRYPT_LOCAL_KEK_FILE`; boot validates keys and upgrades blobs to major 2, which provider `none` cannot reopen.
 
 ### Threat model
 
-Once integrated, this layer protects blob bytes on lost/stolen volumes and snapshots,
+This layer protects blob bytes on lost/stolen volumes and snapshots,
 from cloud/backup operators with byte-plane access and no KMS grant, and from storage
 admins without the KEK. It does **not** protect against a root admin dumping process
 memory or reading the mmap'd index on the running host (P3 scope). **The sparq index

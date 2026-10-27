@@ -363,7 +363,7 @@ h3-quinn = "0.0.10"
 
 
 [features]
-# Native library capability, like authn-saml: explicitly enabled, with no runtime wiring.
+# Native envelope encryption, like authn-saml: explicitly enabled at build and runtime.
 crypt = ["dep:sparq-lws-crypt"]
 # Linked Web Storage authentication suites, each in its own package; the server offers each one
 # compiled in that is configured (and that `SOLID_SERVER_LWS_AUTHN` names, when set). SAML 2.0

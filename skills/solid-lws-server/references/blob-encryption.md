@@ -1,18 +1,25 @@
 # Native blob encryption integration
 
-The default-off `sparq-lws-core/crypt` library layer uses the `e1` format from
-[sparq-lws-crypt](../../../crates/sparq-lws-crypt/README.md). Runtime activation is
-the final P1-2 stage of [#7189](https://github.com/sparq-org/sparq/issues/7189),
-following the storage-runtime integration in
-[#7232](https://github.com/sparq-org/sparq/pull/7232). These settings are reserved
-for that integration; the current binary does not read them.
+Build with `cargo build -p sparq-lws-core --features crypt` and set
+`SOLID_SERVER_CRYPT_PROVIDER=local`. The native runtime wraps the selected blob
+backend in one shared decorator per exclusive index. The default provider `none`
+preserves plaintext writes and needs no encryption build feature. Both ephemeral
+and data-directory backends support local encryption; only a data directory
+preserves bytes and wrapped keys across restart. The wasm graph excludes `crypt`.
+The envelope uses the `e1` format from
+[sparq-lws-crypt](../../../crates/sparq-lws-crypt/README.md).
 
-| Setting | Default | Effect at runtime integration |
+| Setting | Default | Effect |
 | --- | --- | --- |
-| `SOLID_SERVER_CRYPT_PROVIDER` | `none` | `none` preserves plaintext writes; `local` enables envelopes; `aws-kms` and `azure-kv` report “not built” until P1-3. |
+| `SOLID_SERVER_CRYPT_PROVIDER` | `none` | `none` preserves plaintext writes; `local` enables envelopes; `aws-kms` and `azure-kv` refuse startup as “not built”. |
 | `SOLID_SERVER_CRYPT_LOCAL_KEK_FILE` | unset | Required by `local`: exactly 32 raw bytes in a regular file with no group/other permissions, such as `0600`. |
-| `SOLID_SERVER_CRYPT_DEK_TTL_SECS` | `600` | TTL for all unwrapped keys, including the current write key; expiry unwraps the existing key and skips its unused reservation. |
-| `SOLID_SERVER_CRYPT_POD_SCOPE` | unset | Fixed Solid pod identity; otherwise Solid uses the first path segment. LWS uses the storage root. |
+| `SOLID_SERVER_CRYPT_DEK_TTL_SECS` | `600` | Non-negative integer seconds (`0` expires immediately) for all unwrapped keys, including the current write key; expiry unwraps the existing key and skips its unused reservation. |
+| `SOLID_SERVER_CRYPT_POD_SCOPE` | unset | Non-empty fixed Solid pod identity; otherwise Solid uses the first path segment. LWS uses the storage root. |
+
+Only provider `local` reads the KEK, TTL and scope settings. A missing or invalid
+KEK file aborts startup. Every existing DEK, including retired records, is
+validated before serving; a different local KEK returns `WrongKek` (reported as
+`wrong KEK`). Back up the KEK before enabling encryption.
 
 The library assembler is `CompositeStore::encrypt_blobs(provider, scheme, options)`.
 Assembly starts with an empty body cache, preserving its capacity, so existing
@@ -51,12 +58,17 @@ and one shared decorator per index. A retired key stays available for reads.
 Rotation retires the old record before publishing a new current record; a stop in
 between can leave no current key, and the next writer creates one.
 
-The runtime stage must atomically change `format.json` to
-`"blobs":{"major":2,"encryption":"envelope-v1"}` on first encrypted open. This
+The first encrypted data-directory open atomically changes `format.json` to
+`"blobs":{"major":2,"encryption":"envelope-v1"}`. This
 is a one-way major transition: older binaries accept only blob major 1, preventing
 them from serving ciphertext as plaintext. Opening a major-2 directory with
-provider `none` must refuse startup. Additive migration leaves older plaintext
-bodies readable and encrypts all subsequent body writes.
+provider `none` refuses startup. Additive migration leaves older plaintext
+bodies readable and encrypts all subsequent body writes. The marker upgrade runs with the index
+lock held, after key validation and before any encrypted body can be published.
+It uses a temporary file, file sync, rename and directory sync. Fresh marker
+publication never replaces an existing marker; waiting boots revalidate after
+acquiring the index lock. Reopening major 2 preserves the marker. Do not edit
+the marker back to major 1 or remove it to bypass these guards.
 
 Back up the KEK independently and keep it available with the index and blobs.
 Losing it makes the encrypted data unrecoverable. The index stays plaintext on

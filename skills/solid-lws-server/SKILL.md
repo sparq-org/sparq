@@ -187,7 +187,8 @@ only for an ephemeral test instance.
 
 ## Encryption at rest
 
-The native, default-off `crypt` feature adds the P1-2 library decorator
+Build the native server with `cargo build -p sparq-lws-core --features crypt`
+and set `SOLID_SERVER_CRYPT_PROVIDER=local` to enable the P1-2 decorator
 `store::blob_crypt::EncryptingBlobStore` over the P1-1
 [envelope and key-provider API](../../crates/sparq-lws-crypt/README.md).
 `BlobStore::put_scoped(&BlobScope, key, body)` defaults to `put` for ordinary
@@ -210,17 +211,33 @@ existing bodies; plaintext-derived ETags are preserved.
 Queued requests share a key-provider result, including a failed unwrap or initial
 generation. A later independent request can retry after a failed call.
 
-This is the library stage of [#7189](https://github.com/sparq-org/sparq/issues/7189).
+| Variable | Default | Effect |
+|---|---|---|
+| `SOLID_SERVER_CRYPT_PROVIDER` | `none` | `none` keeps plaintext writes. `local` requires the default-off native `crypt` feature. `aws-kms` and `azure-kv` refuse startup as not built. |
+| `SOLID_SERVER_CRYPT_LOCAL_KEK_FILE` | unset | Required for `local`: a regular file of exactly 32 raw bytes, with no group/other permissions (for example `0600`). |
+| `SOLID_SERVER_CRYPT_DEK_TTL_SECS` | `600` | Non-negative integer seconds for every unwrapped DEK, including the current write key. `0` expires immediately; expiry re-unwraps and skips the unused reservation. |
+| `SOLID_SERVER_CRYPT_POD_SCOPE` | unset | Non-empty fixed Solid pod identity, otherwise the first path segment. LWS and subscription pools use the storage root and ignore this override. |
+
+The other encryption variables are read only when the provider is `local`.
+Native boot constructs one decorator per exclusive index, before sharing it with
+the router and reconciler. Existing DEKs are validated before serving; a different
+local KEK fails startup with `WrongKek` (reported as `wrong KEK`).
+The protocol's fixed wrapping-context `scheme` is `solid` or `lws`.
+
+Opening a data directory with encryption atomically changes `format.json` to
+`"blobs":{"major":2,"encryption":"envelope-v1"}`. This is a **one-way major
+bump**: older binaries reject it, and provider `none` refuses to open it.
+Existing plaintext remains readable; subsequent writes are encrypted.
+**Back up the KEK independently with the index and blobs: losing the KEK makes
+encrypted data unrecoverable.** Legacy plaintext beginning with `SQLB` is treated
+as an envelope and fails closed; it is never retried as plaintext.
+See the [encryption reference](references/blob-encryption.md) for the on-disk
+contract. The wasm graph excludes this feature.
+
 Reinstate restores a held record only to its original resource, with or without
 `crypt`. Holds record that IRI in their internal directory metadata. Older holds
 without a recorded original IRI fail with a storage error when reinstated;
 they remain available for release.
-Runtime activation awaits the
-[#7232](https://github.com/sparq-org/sparq/pull/7232) storage-runtime integration;
-the binary accepts no encryption environment configuration at this stage.
-The [integration reference](references/blob-encryption.md) records the reserved
-environment settings, one-way major format transition, KEK backup requirement,
-and legacy `SQLB` limitation for that stage. The wasm graph excludes this feature.
 
 Blob encryption protects lost/stolen volumes and snapshots, cloud/backup
 operators with byte-plane access and no KMS grant, and storage admins without
