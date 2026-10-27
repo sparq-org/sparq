@@ -3,7 +3,7 @@
 #
 # Promotes the previously-INFORMATIONAL cargo-geiger report (ci.yml `geiger`, bead
 # sq-emay — whose own comment said "Promote to a gate later only with a checked-in
-# unsafe-count ratchet") into a TRUE merge-blocking gate, mirroring the conformance /
+# unsafe-count ratchet") into a failing CI job, mirroring the conformance /
 # coverage / perf ratchet idiom already in this repo (a committed snapshot, reviewed in
 # diffs, that a PR cannot silently raise above).
 #
@@ -15,7 +15,8 @@
 # above its committed snapshot in bench/unsafe-snapshot.json. A PR that adds an
 # `unsafe` site must therefore EITHER reduce one elsewhere OR re-seed the snapshot —
 # and re-seeding shows up in the diff next to the register row the author must add.
-# This is the mechanical backstop that keeps the register at 100% coverage.
+# --verify-register separately checks a one-to-one match between those live sites
+# and the register's File:line cells; equal counts alone cannot establish coverage.
 #
 # WHY A GREP-STYLE COUNTER, NOT `cargo geiger`
 # --------------------------------------------
@@ -48,8 +49,12 @@
 #                        bench/unsafe-snapshot.json.
 #   --list               Print every enumerated site as file:line:text (for the
 #                        register / a count cross-check). No snapshot needed.
+#   --verify-register [register.md]
+#                        FAIL on every stale cell, missing row or duplicate site.
+#                        Defaults to compliance/memsafety/unsafe-register.md.
+#   --self-test          Run fixtures and require the real register to pass.
 #
-# Exit 0 = pass, 1 = ratchet regression / missing crate, 2 = usage error.
+# Exit 0 = pass, 1 = ratchet / register mismatch, 2 = usage / input error.
 import json
 import os
 import re
@@ -57,11 +62,16 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SNAPSHOT = os.path.join(REPO_ROOT, "bench", "unsafe-snapshot.json")
+DEFAULT_REGISTER = os.path.join(REPO_ROOT, "compliance", "memsafety", "unsafe-register.md")
 SCAN_ROOT = os.path.join(REPO_ROOT, "crates")
 
 # The `unsafe` KEYWORD in statement/item position (not the `unsafe_code` lint name,
 # which has no following `{`/`fn`/`impl`/`trait`/`extern`).
 _KW = re.compile(r"\bunsafe\b(\s*\{|\s+fn\b|\s+impl\b|\s+trait\b|\s+extern\b)")
+_CRATE_HEADING = re.compile(r"^#{1,6}\s+`(sparq-[\w-]+)`")
+# The backticks delimit ONLY the location; a cell may also carry a feature suffix,
+# e.g. `src/simd.rs:98` (`approx-ann`). Do not full-match the entire cell.
+_REGISTER_CELL = re.compile(r"^`([^`:\s]+):([0-9]+)`(?:\s|$)")
 
 
 def _mask_line(line: str, in_block: bool):
@@ -229,13 +239,191 @@ def cmd_check(path):
     return 0
 
 
+def register_mismatches(source, sites):
+    """Compare File:line table cells to the SAME census used by --list.
+
+    Locations beginning with crates/ are repository-relative; all others are
+    relative to the crate named by the enclosing Markdown heading. Row numbers in
+    diagnostics refer to the register, not to the Rust source. Return ALL problems,
+    including uncovered live sites even when other cells are malformed or stale.
+    """
+    live = {(rel, ln): txt.strip() for _crate, rel, ln, txt in sites}
+    rows = {}
+    problems = []
+    crate = None
+    in_table = False
+    for row_number, raw in enumerate(source.splitlines(), 1):
+        line = raw.strip()
+        if line.startswith("#"):
+            heading = _CRATE_HEADING.match(line)
+            crate = heading.group(1) if heading else None
+        if not line.startswith("|"):
+            in_table = False
+            continue
+        cell = line.split("|", 2)[1].strip()
+        if cell == "File:line":
+            in_table = True
+            continue
+        if not in_table or re.fullmatch(r":?-+:?", cell):
+            continue
+        match = _REGISTER_CELL.match(cell)
+        if not match:
+            problems.append(f"register row {row_number}: malformed File:line cell: {cell}")
+            continue
+        path, ln = match.group(1), int(match.group(2))
+        if not path.startswith("crates/"):
+            if crate is None:
+                problems.append(
+                    f"register row {row_number}: crate-relative cell has no crate heading: {cell}"
+                )
+                continue
+            path = f"crates/{crate}/{path}"
+        path = os.path.normpath(path)
+        key = path, ln
+        rows.setdefault(key, []).append(row_number)
+        if key not in live:
+            problems.append(f"register row {row_number}: no live unsafe site at {path}:{ln}")
+    for (path, ln), row_numbers in sorted(rows.items()):
+        if len(row_numbers) > 1:
+            labels = ", ".join(map(str, row_numbers))
+            problems.append(f"duplicate register rows {labels} name {path}:{ln}")
+    for (path, ln), txt in sorted(live.items()):
+        if (path, ln) not in rows:
+            problems.append(f"live unsafe site has no register row: {path}:{ln}: {txt}")
+    return problems
+
+
+def cmd_verify_register(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            source = fh.read()
+    except (OSError, UnicodeError) as error:
+        print(f"::error::cannot read unsafe register {path}: {error}", file=sys.stderr)
+        return 2
+    sites = list(enumerate_sites())
+    problems = register_mismatches(source, sites)
+    if problems:
+        print(f"::error::unsafe-register: {len(problems)} mismatch(es) in {path}:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+    print(f"unsafe-register: PASS ({len(sites)} live sites each have exactly one register row).")
+    return 0
+
+
+def self_test():
+    """Build-free fixtures exercise the CLI, then check the real register too."""
+    import contextlib
+    import io
+    import tempfile
+    from unittest.mock import patch
+
+    header = "| File:line | Kind | Invariant relied on | Why sound / how bounded |\n|---|---|---|---|\n"
+    fn_row = "| `src/lib.rs:3` | unsafe fn | fixture | fixture |\n"
+    impl_row = "| `src/lib.rs:4` | unsafe impl | fixture | fixture |\n"
+    block_row = "| `crates/sparq-fixture/src/lib.rs:6` (`optional`) | block | fixture | fixture |\n"
+    baseline = (
+        "### `sparq-fixture` — fixture sites\n\n" + header + fn_row + impl_row
+        + "\nA second table in the same crate.\n\n" + header + block_row
+        + "\n### `sparq-other` — fixture sites\n\n" + header
+        + "| `src/lib.rs:1` | unsafe trait | fixture | fixture |\n"
+        + '| `crates/sparq-other/src/lib.rs:2` | unsafe extern | fixture | fixture |\n'
+    )
+    # Each case asserts the exit status AND its diagnostic(s), so an unrelated
+    # failure cannot masquerade as detection. The mixed case pins full reporting.
+    cases = [
+        ("valid/crate-relative-root-relative-and-suffix", baseline, 0,
+         ["PASS (5 live sites each have exactly one register row)"], 0),
+        ("stale-line", baseline.replace("src/lib.rs:3`", "src/lib.rs:30`"), 1,
+         ["no live unsafe site at crates/sparq-fixture/src/lib.rs:30",
+          "live unsafe site has no register row: crates/sparq-fixture/src/lib.rs:3:"], 2),
+        ("missing-row", baseline.replace(impl_row, ""), 1,
+         ["live unsafe site has no register row: crates/sparq-fixture/src/lib.rs:4:"], 1),
+        ("duplicate-row", baseline.replace(block_row, block_row + block_row), 1,
+         ["duplicate register rows", "name crates/sparq-fixture/src/lib.rs:6"], 1),
+        ("all-mismatches", baseline.replace("src/lib.rs:3`", "src/lib.rs:30`")
+         .replace(impl_row, "").replace(block_row, block_row + block_row), 1,
+         ["no live unsafe site at crates/sparq-fixture/src/lib.rs:30",
+          "live unsafe site has no register row: crates/sparq-fixture/src/lib.rs:3:",
+          "live unsafe site has no register row: crates/sparq-fixture/src/lib.rs:4:",
+          "duplicate register rows"], 4),
+        ("malformed-cell", baseline.replace("`src/lib.rs:3`", "`src/lib.rs:typo`"), 1,
+         ["malformed File:line cell", "live unsafe site has no register row:"], 2),
+        ("missing-crate-heading", baseline.replace("### `sparq-fixture`", "### Fixture"), 1,
+         ["crate-relative cell has no crate heading", "live unsafe site has no register row:"], 4),
+        ("missing-file", baseline.replace("src/lib.rs:3`", "src/gone.rs:3`"), 1,
+         ["no live unsafe site at crates/sparq-fixture/src/gone.rs:3"], 2),
+        ("empty-register", "", 1, ["live unsafe site has no register row:"], 5),
+        ("unreadable-register", None, 2, ["cannot read unsafe register"], 0),
+    ]
+    failures = 0
+    with tempfile.TemporaryDirectory(prefix="unsafe-register-test-") as root:
+        for crate, contents in (
+            ("sparq-fixture", '// unsafe {}\nconst TEXT: &str = "unsafe {}";\n'
+             'unsafe fn allocate() {}\nunsafe impl Send for Marker {}\nfn sample() {\n    unsafe {}\n}\n'),
+            ("sparq-other", 'unsafe trait Contract {}\nunsafe extern "C" {}\n'),
+        ):
+            directory = os.path.join(root, "crates", crate, "src")
+            os.makedirs(directory)
+            with open(os.path.join(directory, "lib.rs"), "w", encoding="utf-8") as fh:
+                fh.write(contents)
+        register = os.path.join(root, "register.md")
+        # Only scan the synthetic tree while driving the real CLI; restore both
+        # roots before the final case reads the repository's actual census.
+        with patch.dict(globals(), REPO_ROOT=root, SCAN_ROOT=os.path.join(root, "crates")):
+            for label, source, expected, messages, problem_count in cases:
+                if source is None:
+                    os.remove(register)
+                else:
+                    with open(register, "w", encoding="utf-8") as fh:
+                        fh.write(source)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                    rc = main(["unsafe-gate.py", "--verify-register", register])
+                diagnostic = output.getvalue()
+                ok = (rc == expected and all(message in diagnostic for message in messages)
+                      and diagnostic.count("  - ") == problem_count)
+                print(f"[self-test] {'OK' if ok else 'FAIL'} {label} (exit {rc}, expected {expected})")
+                if not ok:
+                    failures += 1
+                    print(diagnostic)
+            # Pin the handler itself as well as its CLI dispatch. This direct
+            # negative assertion must fail if cmd_verify_register stops checking.
+            with open(register, "w", encoding="utf-8") as fh:
+                fh.write(baseline.replace("src/lib.rs:3`", "src/lib.rs:30`"))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                rc = cmd_verify_register(register)
+            ok = (rc == 1 and "no live unsafe site at crates/sparq-fixture/src/lib.rs:30"
+                  in output.getvalue() and output.getvalue().count("  - ") == 2)
+            print(f"[self-test] {'OK' if ok else 'FAIL'} direct-verifier-stale-line")
+            if not ok:
+                failures += 1
+                print(output.getvalue())
+    # No expected-failure exception or crate allow-list: this must go green when
+    # the real register is reconciled, and red on any subsequent source drift.
+    rc = main(["unsafe-gate.py", "--verify-register"])
+    print(f"[self-test] {'OK' if rc == 0 else 'FAIL'} real-register (expected PASS)")
+    if rc != 0:
+        failures += 1
+    print(f"[self-test] {'FAIL' if failures else 'PASS'}: {len(cases) + 2} cases, {failures} failed")
+    return 1 if failures else 0
+
+
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("--check", "--seed", "--list"):
-        print("usage: unsafe-gate.py {--check|--seed} [snapshot.json] | --list", file=sys.stderr)
+    modes = ("--check", "--seed", "--list", "--verify-register", "--self-test")
+    if (len(argv) < 2 or argv[1] not in modes or len(argv) > 3
+            or (argv[1] in ("--list", "--self-test") and len(argv) != 2)):
+        print("usage: unsafe-gate.py {--check|--seed} [snapshot.json] | --list | "
+              "--verify-register [register.md] | --self-test", file=sys.stderr)
         return 2
     mode = argv[1]
+    if mode == "--self-test":
+        return self_test()
     if mode == "--list":
         return cmd_list()
+    if mode == "--verify-register":
+        return cmd_verify_register(argv[2] if len(argv) > 2 else DEFAULT_REGISTER)
     path = argv[2] if len(argv) > 2 else DEFAULT_SNAPSHOT
     return cmd_seed(path) if mode == "--seed" else cmd_check(path)
 

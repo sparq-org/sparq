@@ -7,6 +7,8 @@
 //! whole stack is testable without a running SPARQ or S3.
 
 pub mod blob;
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+pub mod blob_fs;
 // The blob-body LRU cache (read-4 — backend-read-path.md §3.4): `(blob_key, etag)`-keyed,
 // byte-budgeted, sat in front of BlobStore::get inside CompositeStore so a hot unchanged
 // resource's repeat read pays zero blob round-trips. Immutable-by-construction (unique-per-write
@@ -665,6 +667,15 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         }
     }
 
+    // A settled failure cannot publish another reference later. The index's reclaim
+    // guard preserves a record that committed before an error reply, and any holds.
+    // An unsettled commit may still publish the key, so its bytes must remain.
+    async fn reclaim_failed_write(&self, key: &str, error: &SparqError) {
+        if !matches!(error, SparqError::Unsettled { .. }) {
+            self.reclaim_blob(key).await;
+        }
+    }
+
     /// Whether a hold taken through this instance on the bytes under `key` stands.
     fn holds_locally(&self, key: &str) -> bool {
         self.holding
@@ -753,9 +764,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// forcing the elaborate `generation`-CAS + grace-window + snapshot-threading machinery in
     /// [`super::blob`] and [`super::reconcile`] to exist purely to make a reused key safe.
     ///
-    /// This mints a NEW key on EVERY write: an IRI-derived prefix (kept for operator-debuggability — a
-    /// key still traces back to its resource) plus a hyphen-joined **128-bit cryptographically-random
-    /// suffix** from the OS RNG. So:
+    /// This mints a NEW opaque key on EVERY write: `b1-` followed by a
+    /// **128-bit cryptographically-random suffix** from the OS RNG. No resource IRI is
+    /// encoded in the key. Service-pool keys retain their `$pool$` mark. So:
     ///
     /// - **Two concurrent writes to the same IRI get DIFFERENT keys** — they write to disjoint blob
     ///   objects and can never collide or interleave. The "latest committed" winner is decided solely by
@@ -773,7 +784,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; the IRI prefix is cosmetic (debuggability) and carries no uniqueness requirement.
+    /// negligible; no IRI-derived component is needed.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -786,9 +797,6 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
     fn mint_blob_key(iri: &str) -> ServerResult<String> {
-        // The IRI-derived prefix is for human/operator traceability only; uniqueness comes entirely from
-        // the random suffix, so the prefix need not be collision-free.
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -808,9 +816,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
         if limits::in_service_pool(iri) {
-            return Ok(format!("{}{prefix}-{hex}", limits::POOLED_BLOB_KEY_MARK));
+            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
         }
-        Ok(format!("{prefix}-{hex}"))
+        Ok(format!("b1-{hex}"))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -958,14 +966,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // bumps it, so a later conditional GET correctly re-serves the changed representation.
             last_modified: Some(crate::clock::now()),
         };
-        let previous = self
-            .sparq
-            .replace_meta(iri, meta.clone())
-            .await
-            .map_err(|e| match e {
-                SparqError::QuotaExceeded => ServerError::InsufficientStorage,
-                other => ServerError::Storage(format!("{other}")),
-            })?;
+        let previous = match self.sparq.replace_meta(iri, meta.clone()).await {
+            Ok(previous) => previous,
+            Err(e) => {
+                self.reclaim_failed_write(&meta.blob_key, &e).await;
+                return Err(map_sparq(e));
+            }
+        };
         // The index now points at `blob_key`; the superseded body is unreferenced. Reclaim it so
         // sustained rewrites cannot fill the blob store with dead versions.
         if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
@@ -982,21 +989,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
         refuse_marker(&[Some(container), Some(child)])?;
-        // Write the bytes FIRST (content-addressed by key; idempotent), then commit the child's
-        // metadata AND its containment edge in ONE atomic index operation (`create_child`). Because
-        // the metadata + the edge commit together, there is no window in which the edge exists
-        // without backing metadata — so the POST path needs NO removal-based compensation and a
-        // concurrent same-IRI creator can never observe or tear down a half-built containment. A
-        // missing container ⇒ 404; the bytes written above are then orphaned and GC'd by the
-        // reconciler — the same crash-consistency model `write` documents. (The handler only takes
-        // this path for an absent child; a concurrent same-IRI create that wins the race overwrites
-        // this record, and the key it replaced is left for the reconciler, as `create_child` does not
-        // report the record it replaced.)
-        //
-        // The child's blob key is minted UNIQUE PER WRITE (`mint_blob_key`), so a concurrent same-IRI
-        // create writes a disjoint object and cannot collide with this one on a shared key. Minting FAILS
-        // CLOSED on an unavailable OS RNG (the create errors rather than minting a weak, possibly-colliding
-        // key), so the no-shared-key invariant holds even then.
+        // Publish bytes before committing the child record and containment together. The
+        // native indexes report the replaced record so its bytes can be reclaimed; remote
+        // clients leave any superseded key to the reconciler.
         let blob_key = Self::mint_blob_key(child)?;
         let etag = Self::etag_for(content_type, &body);
         self.blob.put(&blob_key, body).await.map_err(|e| match e {
@@ -1013,16 +1008,18 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         match self
             .sparq
-            .create_child(container, child, meta.clone())
+            .replace_child(container, child, meta.clone())
             .await
         {
-            Ok(()) => Ok(meta),
-            Err(SparqError::NotFound) => Err(ServerError::NotFound),
-            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
-            // Its bytes stay: the record may still commit pointing at them.
-            Err(SparqError::Unsettled { detail, fence }) => {
-                Err(ServerError::Unsettled { detail, fence })
+            Ok(previous) => {
+                if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
+                    self.reclaim_blob(&old.blob_key).await;
+                }
+                Ok(meta)
+            }
+            Err(e) => {
+                self.reclaim_failed_write(&meta.blob_key, &e).await;
+                Err(map_sparq(e))
             }
         }
     }
@@ -1046,11 +1043,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             ..meta.clone()
         };
         let committed = match container {
-            Some(c) => self
-                .sparq
-                .create_child(c, iri, meta.clone())
-                .await
-                .map(|()| None),
+            Some(c) => self.sparq.replace_child(c, iri, meta.clone()).await,
             None => self.sparq.replace_meta(iri, meta.clone()).await,
         };
         match committed {
@@ -1130,11 +1123,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         refuse_marker(&[Some(iri), container])?;
         // As `restore`, pointing at the held bytes rather than a copy: the hold keeps them.
         let committed = match container {
-            Some(c) => self
-                .sparq
-                .create_child(c, iri, held.clone())
-                .await
-                .map(|()| None),
+            Some(c) => self.sparq.replace_child(c, iri, held.clone()).await,
             None => self.sparq.replace_meta(iri, held.clone()).await,
         };
         let previous = committed.map_err(map_sparq)?;
@@ -1211,7 +1200,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
         // pointing at missing bytes. The byte delete is best effort: the resource is already gone
         // from the index, so a failed blob delete must not fail the request; it stays an orphan.
-        let blob_key = self.sparq.delete_resource(iri, parent).await.map_err(map_sparq)?;
+        let blob_key = self
+            .sparq
+            .delete_resource(iri, parent)
+            .await
+            .map_err(map_sparq)?;
         if let Some(key) = blob_key {
             self.reclaim_blob(&key).await;
         }
@@ -1411,6 +1404,8 @@ fn fnv1a_chain<'a>(bytes: impl Iterator<Item = &'a u8>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    mod blob_lifecycle;
     use super::*;
     use crate::store::blob::InMemoryBlobStore;
     use crate::store::sparq::InMemorySparqClient;
@@ -1865,6 +1860,12 @@ mod tests {
         async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
             self.0.exists(iri).await
         }
+        fn raises_markers(&self) -> bool {
+            self.0.raises_markers()
+        }
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.0.raise_marker(iri, value).await
+        }
         fn exclusive(&self) -> Result<(), SparqError> {
             self.0.exclusive()
         }
@@ -1901,6 +1902,14 @@ mod tests {
             meta: ResourceMeta,
         ) -> Result<(), SparqError> {
             self.0.create_child(container, child, meta).await
+        }
+        async fn replace_child(
+            &self,
+            container: &str,
+            child: &str,
+            meta: ResourceMeta,
+        ) -> Result<Option<ResourceMeta>, SparqError> {
+            self.0.replace_child(container, child, meta).await
         }
         async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
             self.0.remove_child(container, child).await
@@ -2196,61 +2205,60 @@ mod tests {
     }
 
     #[test]
-    fn mint_blob_key_keeps_an_iri_derived_prefix_for_traceability() {
-        // Uniqueness comes from the random suffix; the IRI-derived prefix is retained (cosmetic) so an
-        // operator can still trace a key back to its resource. The minted key must START with the
-        // percent-flattened IRI followed by the `-` separator.
-        let iri = "https://pod.example/alice/data";
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        let key = S::mint_blob_key(iri).expect("the OS RNG must be available in tests");
-        assert!(
-            key.starts_with(&format!("{prefix}-")),
-            "minted key {key:?} must keep the IRI-derived prefix {prefix:?} for traceability"
-        );
-        // ...and the suffix is the 32-hex-char (128-bit) random tail.
-        let suffix = &key[prefix.len() + 1..];
-        assert_eq!(
-            suffix.len(),
-            32,
-            "the random suffix is 16 bytes = 32 hex chars"
-        );
-        assert!(
-            suffix.bytes().all(|b| b.is_ascii_hexdigit()),
-            "the suffix must be lowercase hex"
-        );
+    fn mint_blob_key_has_an_opaque_versioned_format() {
+        for (iri, pooled) in [
+            (
+                "https://pod.example/alice/private-report?secret=yes#section",
+                false,
+            ),
+            ("https://pod.example/.lws/subscriptions/private-topic", true),
+        ] {
+            let key = S::mint_blob_key(iri).expect("OS RNG available");
+            let opaque = if pooled {
+                key.strip_prefix("$pool$").expect("pool mark retained")
+            } else {
+                key.as_str()
+            };
+            assert_eq!(opaque.len(), 35);
+            assert!(opaque.starts_with("b1-"));
+            assert!(opaque[3..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            for part in [
+                "https",
+                "pod.example",
+                "alice",
+                "private",
+                "secret",
+                "section",
+                "subscriptions",
+            ] {
+                assert!(!key.contains(part), "resource information in blob key");
+            }
+        }
     }
 
     #[test]
-    fn mint_blob_key_is_fallible_and_succeeds_on_a_working_os_rng() {
-        // The Medium fix: `mint_blob_key` is FALLIBLE — it propagates an RNG failure (fails closed) rather
-        // than minting a weak, possibly-colliding key from a timestamp-only fallback. On every supported
-        // platform the OS RNG IS available, so it returns `Ok`; the contract this pins is that the return
-        // type is a `Result` carrying a `ServerError::Storage` on the (unreachable here) RNG-failure path —
-        // verified by the `?` propagation at the `write`/`create_in_container` call sites compiling, and by
-        // the success here. There is NO infallible fallback that could mint a same-tick-colliding key.
-        let iri = "https://pod.example/alice/data";
-        let key =
-            S::mint_blob_key(iri).expect("the OS RNG is available on every supported platform");
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        assert!(
-            key.starts_with(&format!("{prefix}-")) && key.len() == prefix.len() + 1 + 32,
-            "the success path still mints a prefix + 32-hex-char random suffix"
-        );
-
-        // And a write through the public API succeeds end-to-end (the fallible mint does not regress the
-        // happy path): the resource is then readable, its bytes resolved through the minted blob key.
+    fn write_persists_an_opaque_blob_pointer() {
+        let iri = "https://pod.example/alice/private-report";
         let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
         tokio_test_block_on(async {
             let meta = store
                 .write(iri, Bytes::from_static(b"body"), "text/turtle")
                 .await
-                .expect("a write with a working RNG must succeed");
-            assert!(
-                meta.blob_key.starts_with(&format!("{prefix}-")),
-                "the persisted pointer names the minted unique key"
+                .expect("write with a working RNG");
+            assert_eq!(meta.blob_key.len(), 35);
+            assert!(meta.blob_key.starts_with("b1-"));
+            assert!(meta.blob_key[3..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            for part in ["https", "pod.example", "alice", "private-report"] {
+                assert!(!meta.blob_key.contains(part));
+            }
+            assert_eq!(
+                store.read(iri).await.unwrap().body,
+                Bytes::from_static(b"body")
             );
-            let resource = store.read(iri).await.expect("read-after-write");
-            assert_eq!(resource.body, Bytes::from_static(b"body"));
         });
     }
 

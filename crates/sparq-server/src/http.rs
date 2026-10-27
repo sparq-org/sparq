@@ -812,10 +812,11 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
-    /// Maximum potential rule/credential pairs in a trust block.
+    /// Maximum combined signature-verification budget in a trust block.
     ///
-    /// Default: 4096. Depth-one certifications each count as one potential rule.
-    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits no pairs.
+    /// Default: 4096. Counts certifications plus potential rule/credential pairs;
+    /// depth-one certifications each also count as one potential rule in those pairs.
+    /// `SPARQ_SOLID_AUTHZ_TRUST_MAX_PAIRS` overrides it; zero permits neither certifications nor pairs.
     /// Exceeding it refuses the whole block with 403 before signature verification.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust_max_pairs: usize,
@@ -2619,7 +2620,8 @@ pub struct AppState {
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
     /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
-    /// the server's OWN loaded store, cached per serving lineage and generation. `None` until the first
+    /// the server's OWN loaded store, with independent single-flight slots per serving
+    /// lineage, generation and requested view kind. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
     /// WHERE THE AUTH VIEW LIVES relative to the ring's immutable generations (the design
@@ -3494,8 +3496,21 @@ impl AppState {
             // Serialize the lineage swap with auth-view installation. A pre-restore build
             // holding this lock either installs before the swap or observes the new core.
             #[cfg(feature = "solid-authz")]
-            let _cache = self.authz_view.write().ok();
+            let mut cache = self.authz_view.write().unwrap_or_else(|e| e.into_inner());
             self.core.store(Arc::new(ServingCore { ring, writer }));
+            #[cfg(feature = "solid-authz")]
+            {
+                #[cfg(test)]
+                let clear = !self
+                    .authz_build_pool()
+                    .skip_restore_cache_clear
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                #[cfg(not(test))]
+                let clear = true;
+                if clear {
+                    *cache = None;
+                }
+            }
         }
         // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
         // generation-zero index from the prior lineage so equality on the numeric generation
@@ -6323,8 +6338,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
             "compaction complete\n".to_string(),
             false,
         ),
-        // A compaction failure (e.g. durable-write I/O error) is retryable: the writer thread
-        // stays alive and reads keep flowing from the last published snapshot.
+        // Compaction errors preserve the published read snapshot. Recovery status is logged.
         // (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
         // the server's `--persist` filesystem path (an I/O error embeds the absolute path).
         // Although this route is write/admin-gated, withhold the path from the response body —
@@ -6332,7 +6346,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
         Ok(Err(e)) => sanitized_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "compaction",
-            "compaction failed (retryable)",
+            "compaction failed; see server logs for recovery status",
             &e,
         ),
         Err(_) => json_error(

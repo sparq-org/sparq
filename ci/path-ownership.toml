@@ -554,6 +554,13 @@ readers = ["sparq-acbench"]
 # entry can still never rescue a §4.1 trigger or a `crates/`-owned path.
 # ---------------------------------------------------------------------------
 
+# Pattern-scope README + measurement JSONs. No crate reads these files;
+# sparq-solid's pattern_scope_bench example emits JSON to stdout for humans to
+# commit here. Its references to this directory are docs/comments only.
+[[map]]
+pattern = "bench/pattern-scope/**"
+safe = true
+
 # Design records / research notes. No crate compiles or reads research/.
 [[map]]
 pattern = "research/**"
