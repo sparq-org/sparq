@@ -150,7 +150,7 @@ pub(crate) fn cases() -> Vec<Case> {
     cases
 }
 
-fn views(graph: &Graph) -> BTreeMap<String, Vec<String>> {
+fn views(graph: &Graph) -> BTreeMap<String, Value> {
     let mut views = BTreeMap::new();
     for (name, graph) in graph.named() {
         let Term::NamedNode(name) = name else {
@@ -174,9 +174,101 @@ fn views(graph: &Graph) -> BTreeMap<String, Vec<String>> {
             })
             .collect();
         triples.sort();
-        views.insert(name.as_str().into(), triples);
+        views.insert(name.as_str().into(), compact_view(&triples));
     }
     views
+}
+
+fn intern_snapshot(pool: &mut Vec<Value>, value: Value) -> usize {
+    pool.iter()
+        .position(|entry| *entry == value)
+        .unwrap_or_else(|| {
+            pool.push(value);
+            pool.len() - 1
+        })
+}
+
+fn compact_view(triples: &[String]) -> Value {
+    if triples.iter().map(String::len).sum::<usize>() <= 1024 {
+        return json!({"triples": triples});
+    }
+    let mut digest = 0x6c62272e07bb014262b821756295c58du128;
+    for triple in triples {
+        for byte in (triple.len() as u64)
+            .to_le_bytes()
+            .iter()
+            .chain(triple.as_bytes())
+        {
+            digest ^= u128::from(*byte);
+            digest = digest.wrapping_mul(0x0000000001000000000000000000013bu128);
+        }
+    }
+    json!({"count": triples.len(), "fnv1a128": format!("{digest:032x}")})
+}
+
+fn first_difference(expected: &Value, actual: &Value, path: &str) -> Option<String> {
+    if expected == actual {
+        return None;
+    }
+    match (expected, actual) {
+        (Value::Object(expected), Value::Object(actual)) => {
+            for key in expected
+                .keys()
+                .chain(actual.keys())
+                .collect::<BTreeSet<_>>()
+            {
+                let child = format!("{path}/{key}");
+                match (expected.get(key), actual.get(key)) {
+                    (Some(expected), Some(actual)) => {
+                        if let Some(diff) = first_difference(expected, actual, &child) {
+                            return Some(diff);
+                        }
+                    }
+                    (expected, actual) => {
+                        return Some(format!("{child}: expected {expected:?}, actual {actual:?}"))
+                    }
+                }
+            }
+        }
+        (Value::Array(expected), Value::Array(actual)) => {
+            if expected.iter().chain(actual).all(Value::is_string) {
+                let expected: BTreeSet<_> = expected.iter().map(|v| v.as_str().unwrap()).collect();
+                let actual: BTreeSet<_> = actual.iter().map(|v| v.as_str().unwrap()).collect();
+                let missing: Vec<_> = expected.difference(&actual).take(8).copied().collect();
+                let unexpected: Vec<_> = actual.difference(&expected).take(8).copied().collect();
+                return Some(format!(
+                    "{path}: missing triples {missing:#?}; unexpected triples {unexpected:#?}"
+                ));
+            }
+            for i in 0..expected.len().max(actual.len()) {
+                let child = format!("{path}/{i}");
+                match (expected.get(i), actual.get(i)) {
+                    (Some(expected), Some(actual)) => {
+                        if let Some(diff) = first_difference(expected, actual, &child) {
+                            return Some(diff);
+                        }
+                    }
+                    (expected, actual) => {
+                        return Some(format!("{child}: expected {expected:?}, actual {actual:?}"))
+                    }
+                }
+            }
+        }
+        _ => return Some(format!("{path}: expected {expected}, actual {actual}")),
+    }
+    None
+}
+
+#[test]
+fn small_view_mismatches_show_the_missing_and_unexpected_triples() {
+    let missing = "<urn:a> <urn:p> <urn:b>";
+    let unexpected = "<urn:a> <urn:p> <urn:c>";
+    let expected = compact_view(&[missing.into()]);
+    let actual = compact_view(&[unexpected.into()]);
+    let diff = first_difference(&expected, &actual, "view").unwrap();
+    assert!(diff.contains(missing), "{diff}");
+    assert!(diff.contains(unexpected), "{diff}");
+    assert!(first_difference(&expected, &expected, "view").is_none());
 }
 
 pub(crate) fn assert_golden(name: &str, actual: &Value, expected: &str) {
@@ -190,7 +282,14 @@ pub(crate) fn assert_golden(name: &str, actual: &Value, expected: &str) {
         .unwrap();
     } else {
         let expected: Value = serde_json::from_str(expected).unwrap();
-        assert_eq!(*actual, expected, "baseline parity: {name}");
+        if name == "auth-ledger-views.json" {
+            if let Some(diff) = first_difference(&expected["views"], &actual["views"], "views") {
+                panic!("baseline parity: {name}: {diff}");
+            }
+        }
+        if let Some(diff) = first_difference(&expected, actual, name) {
+            panic!("baseline parity: {diff}");
+        }
     }
 }
 
@@ -198,7 +297,7 @@ pub(crate) fn assert_golden(name: &str, actual: &Value, expected: &str) {
 fn installed_views_and_named_requests_match_the_baseline() {
     let mut snapshots = BTreeMap::new();
     // Store each sorted view once: filler content and context often share it.
-    let mut unique_views: Vec<BTreeMap<String, Vec<String>>> = Vec::new();
+    let mut unique_views: Vec<BTreeMap<String, Value>> = Vec::new();
     for case in cases() {
         let store = case.run();
         let view = views(store.graph());
@@ -252,9 +351,20 @@ fn installed_views_and_named_requests_match_the_baseline() {
             json!({"view": view_id, "resources": resources, "decisions": decisions}),
         );
     }
+    // Requests remain exact: share repeated resource lists and decision bitmaps.
+    let mut resource_lists = Vec::new();
+    let mut bitmaps = Vec::new();
+    for case in snapshots.values_mut() {
+        let resources = case["resources"].take();
+        case["resources"] = json!(intern_snapshot(&mut resource_lists, resources));
+        for bitmap in case["decisions"].as_object_mut().unwrap().values_mut() {
+            let bits = bitmap.take();
+            *bitmap = json!(intern_snapshot(&mut bitmaps, bits));
+        }
+    }
     assert_golden(
         "auth-ledger-views.json",
-        &json!({"views":unique_views, "cases":snapshots}),
+        &json!({"views":unique_views, "cases":snapshots, "resources":resource_lists, "bitmaps":bitmaps}),
         include_str!("fixtures/auth-ledger-views.json"),
     );
 }

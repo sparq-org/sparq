@@ -133,7 +133,8 @@ Materialize the authorization view from the access-control documents, then enfor
   [Input and whole-decision budget](#input-and-whole-decision-budget)). It covers what the
   per-closure `ClosureLimits` cannot: the reasoning INPUT the pod's control documents become
   (`max_document_bytes` 64 KiB per document, `max_input_bytes` 1 MiB over all of them AND
-  over the resource enumeration and generated lexical strings, `max_input_facts` 32,000,
+  over the resource enumeration, `max_generated_bytes` 64 GiB for generated lexical
+  strings (unbounded on narrower pointer widths), `max_input_facts` 32,000,
   `max_input_term_bytes` 4 KiB for
   one term, `max_resource_iri_bytes` 2 KiB and `max_resource_path_depth` 64 for one resource
   IRI the enumeration walks) and the AGGREGATE of
@@ -147,7 +148,7 @@ Materialize the authorization view from the access-control documents, then enfor
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
   -> bool` — whether a materialization error is a refusal by that allowance or budget rather
   than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
-  RoundsOrFacts, TermBytes, InputBytes, InputFacts, InputTermBytes, ResourceIri,
+  RoundsOrFacts, TermBytes, InputBytes, GeneratedBytes, InputFacts, InputTermBytes, ResourceIri,
   DecisionWork, Deadline, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
   as a tag directly after the refusal wording, and the pair is read from ANYWHERE in the
   message, so it still matches when a write path wraps the failed rebuild's error in its own
@@ -956,20 +957,31 @@ and `AuthBudget` (`PodStore::set_auth_budget`, `default_auth_budget()`) bounds t
 and are interned into the closure's dictionary before any rule runs, and
 `ClosureLimits::max_term_bytes` bounds only the terms the rules DERIVE — not a term an
 untrusted writer put in a document. So the input has its own budget: `max_document_bytes` for
-what ONE document may contribute, `max_input_bytes` for all of them together,
+what ONE document may contribute, `max_input_bytes` for all of them together and the
+resource enumeration, `max_generated_bytes` separately for generated lexical strings,
 `max_input_term_bytes` for one term, and `max_input_facts` for the assembled fact set
 (document content plus the structural, provenance and credential facts). The per-document and
 per-term dimensions are checked against stored dictionary parts **before a term is
-reconstructed**. The row count is admitted before reserving a document vector, and every
-generated fact is charged before reserving its output row. Control documents and WAC
-group documents use the same path. Rejected document rows still consume input-fact
-allowance because they were read. Skolem names, structural and `inDoc` facts, trusted
+reconstructed**. The existing byte caps bound a document's row count before its vector
+is reserved: each
+row contributes at least three fixed term-node costs. Every accepted source or generated
+fact is charged before reserving its assembled output row. Control documents and WAC
+group documents use the same path. Rejected control-document rows and filtered group
+rows consume source byte allowance,
+while only rows actually assembled consume input-fact allowance. Skolem names,
+structural and `inDoc` facts, trusted
 provenance, credential holdings and WebID facts charge their generated lexical strings
-before allocation. Generated strings use the aggregate byte cap; source-document and
-stored-term caps retain their existing scope. The fixed stored triple-term nesting guard
-also reports `InputTermBytes`; it is independent of the configurable byte cap. These
-charges can refuse an input whose stored documents fit but whose generated input
-exceeds the same aggregate cap.
+before allocation. Generated strings use `max_generated_bytes`, independently of
+`max_input_bytes`; existing source, document and term caps retain their scope. The new
+allowance defaults to 64 GiB on 64-bit targets and is unbounded on narrower targets. Set
+`AuthBudget::max_generated_bytes` through `PodStore::set_auth_budget` to lower it. Its
+refusal is `AuthAllowance::GeneratedBytes`, with `limit_name() == "max_generated_bytes"`
+and tag `[allowance=generated-bytes]`. It has no environment-variable exposure.
+The fixed stored triple-term nesting guard
+also reports `InputTermBytes`; it matches the dictionary's existing reconstruction
+guard and is independent of the configurable byte cap. The generated-string default
+sits beyond the baseline materializer's usable memory range; it does not reuse the
+source-byte default as a new generated-input limit.
 
 `ClosureLimits::max_facts` is now charged over the GIVEN facts too, so a refused closure does
 not first hold and copy an input of the caller's choosing.
@@ -997,7 +1009,7 @@ place and grants nothing to the refused resource.
 
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
 a bridged ODRL policy's five strata could each spend the full allowance. One crate-internal
-`AuthLedger` wraps `sparq_core::meter::Ledger` and the store's unchanged `AuthBudget`.
+`AuthLedger` wraps `sparq_core::meter::Ledger` and the store's `AuthBudget`.
 WAC and ACP share it between input assembly and every stratum of one materialization;
 the ODRL bridge shares it across its strata. Each closure runs through `eval_metered` under the
 smaller of its own count caps and the ledger's remaining `max_decision_join_rows` /
@@ -1008,10 +1020,11 @@ cannot spend a fresh decision allowance. Each stratum's fixpoint conservatively 
 the facts it was given again. Deadline cuts map to `AuthAllowance::Deadline`; aggregate
 join/fact cuts map to `DecisionWork`, with the existing refusal prefix and kind tags.
 
-The configured defaults are unchanged. The baseline fixture snapshots pin accepted views,
+The existing defaults are unchanged; generated strings have their own default allowance.
+The baseline fixture snapshots pin accepted views,
 decisions and summed closure charges. A refusal uses the reasoning-allowance refusal
 family, with the same fail-closed routes and the same typed `AuthAllowance` kinds
-(`InputBytes`, `InputFacts`, `InputTermBytes`, `ResourceIri`, `DecisionWork`), so a caller
+(`InputBytes`, `GeneratedBytes`, `InputFacts`, `InputTermBytes`, `ResourceIri`, `DecisionWork`), so a caller
 that already tells an allowance refusal from a deny needs no second check.
 
 > The ODRL **parse** has its own, non-configurable budget on the other side of this seam:

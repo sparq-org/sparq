@@ -44,6 +44,8 @@ pub enum Dim {
     Alloc,
     /// Elapsed deadline, a refusal tag supplied by a consumer; no limit field.
     Deadline,
+    /// Generated lexical bytes, separate from source and document bytes.
+    GeneratedBytes,
 }
 
 impl Dim {
@@ -63,6 +65,7 @@ impl Dim {
             Self::TermDepth => "term_depth",
             Self::Alloc => "alloc",
             Self::Deadline => "deadline",
+            Self::GeneratedBytes => "generated_bytes",
         }
     }
 }
@@ -75,6 +78,8 @@ pub struct Limits {
     pub source_bytes: usize,
     /// Maximum aggregate lexical and fixed-node bytes across documents.
     pub bytes: usize,
+    /// Maximum generated lexical bytes, independent of source/document bytes.
+    pub generated_bytes: usize,
     /// Maximum bytes in each document; the current value resets on opening one.
     pub document_bytes: usize,
     /// Maximum size of each term; this cap is checked but never debited by term sizing.
@@ -98,6 +103,7 @@ impl Default for Limits {
         Self {
             source_bytes: usize::MAX,
             bytes: usize::MAX,
+            generated_bytes: usize::MAX,
             document_bytes: usize::MAX,
             term_bytes: usize::MAX,
             facts: usize::MAX,
@@ -191,7 +197,7 @@ impl<'a> From<&'a Term> for TermRef<'a> {
 #[non_exhaustive]
 pub struct Ledger {
     limits: Limits,
-    spent: [usize; 13],
+    spent: [usize; 14],
     document_open: bool,
 }
 
@@ -200,7 +206,7 @@ impl Ledger {
     pub fn new(limits: Limits) -> Self {
         Self {
             limits,
-            spent: [0; 13],
+            spent: [0; 14],
             document_open: true,
         }
     }
@@ -214,6 +220,7 @@ impl Ledger {
         match dim {
             Dim::SourceBytes => self.limits.source_bytes,
             Dim::Bytes => self.limits.bytes,
+            Dim::GeneratedBytes => self.limits.generated_bytes,
             Dim::DocumentBytes => self.limits.document_bytes,
             Dim::TermBytes => self.limits.term_bytes,
             Dim::Facts => self.limits.facts,
@@ -378,7 +385,19 @@ impl Ledger {
     /// # Errors
     /// Refuses the compound byte charge, or returns `Alloc` and refunds it on reservation failure.
     pub fn mint(&mut self, parts: &[&str]) -> Result<String, Exceeded> {
-        self.mint_using(parts, |size| {
+        self.mint_using(parts, Dim::Bytes, |size| {
+            let mut out = String::new();
+            out.try_reserve_exact(size)?;
+            Ok(out)
+        })
+    }
+
+    /// Charges generated lexical bytes before fallibly allocating exact capacity.
+    /// Source and document byte counters are unaffected.
+    /// # Errors
+    /// Returns a generated-byte refusal, or `Alloc` and refunds the charge on failure.
+    pub fn mint_generated(&mut self, parts: &[&str]) -> Result<String, Exceeded> {
+        self.mint_using(parts, Dim::GeneratedBytes, |size| {
             let mut out = String::new();
             out.try_reserve_exact(size)?;
             Ok(out)
@@ -390,14 +409,15 @@ impl Ledger {
     fn mint_using(
         &mut self,
         parts: &[&str],
+        dim: Dim,
         allocate: impl FnOnce(usize) -> Result<String, std::collections::TryReserveError>,
     ) -> Result<String, Exceeded> {
         let size = parts.iter().fold(0usize, |n, s| n.saturating_add(s.len()));
-        let before_bytes = self.spent(Dim::Bytes);
+        let before_bytes = self.spent(dim);
         let before_document = self.spent(Dim::DocumentBytes);
-        self.charge(Dim::Bytes, size)?;
+        self.charge(dim, size)?;
         let mut out = allocate(size).map_err(|_| {
-            self.spent[Dim::Bytes as usize] = before_bytes;
+            self.spent[dim as usize] = before_bytes;
             self.spent[Dim::DocumentBytes as usize] = before_document;
             Exceeded::new(Dim::Alloc, usize::MAX, size)
         })?;
@@ -703,13 +723,42 @@ mod tests {
     }
 
     #[test]
+    fn generated_mints_have_independent_limits_and_refund_allocation_failure() {
+        let limits = Limits {
+            bytes: 1,
+            document_bytes: 1,
+            generated_bytes: 4,
+            ..Limits::default()
+        };
+        let mut ledger = Ledger::new(limits);
+        ledger.charge(Dim::Bytes, 1).unwrap();
+        assert_eq!(ledger.mint_generated(&["ab", "cd"]).unwrap(), "abcd");
+        assert_eq!(ledger.spent(Dim::Bytes), 1);
+        assert_eq!(ledger.spent(Dim::DocumentBytes), 1);
+        assert_eq!(ledger.spent(Dim::GeneratedBytes), 4);
+        let error = ledger.mint_generated(&["e"]).unwrap_err();
+        assert_eq!(error.dim, Dim::GeneratedBytes);
+        assert_eq!(ledger.spent(Dim::GeneratedBytes), 4);
+        ledger = Ledger::new(limits);
+        let error = ledger
+            .mint_using(&["abcd"], Dim::GeneratedBytes, |_| {
+                let mut impossible = Vec::<u64>::new();
+                Err(impossible.try_reserve(usize::MAX).unwrap_err())
+            })
+            .unwrap_err();
+        assert_eq!(error.dim, Dim::Alloc);
+        assert_eq!(ledger.spent(Dim::GeneratedBytes), 0);
+        assert_eq!(ledger.spent(Dim::Bytes), 0);
+    }
+
+    #[test]
     fn mint_refunds_failed_allocation() {
         let mut l = Ledger::new(Limits::default());
         l.charge(Dim::Bytes, 3).unwrap();
         // Real exhaustion cannot be forced safely from valid string slices.
         // Inject a deterministic capacity-overflow reservation error at the allocation seam.
         let e = l
-            .mint_using(&["ab", "cd"], |size| {
+            .mint_using(&["ab", "cd"], Dim::Bytes, |size| {
                 assert_eq!(size, 4);
                 let mut out = String::new();
                 out.try_reserve_exact(usize::MAX)?;
@@ -735,9 +784,11 @@ mod tests {
         assert_eq!(l.spent(Dim::DocumentBytes), 4);
         assert_eq!(l.mint(&["ef"]).unwrap_err().dim, Dim::Bytes);
         assert_eq!(
-            l.mint_using(&["ef"], |_| panic!("allocation before byte refusal"))
-                .unwrap_err()
-                .dim,
+            l.mint_using(&["ef"], Dim::Bytes, |_| panic!(
+                "allocation before byte refusal"
+            ))
+            .unwrap_err()
+            .dim,
             Dim::Bytes
         );
         assert_eq!(l.spent(Dim::Bytes), 4);

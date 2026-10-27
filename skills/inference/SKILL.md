@@ -351,6 +351,13 @@ component, matching oxrdf terms. `Ledger::mint` reserves capacity fallibly; a
 reservation failure refunds both byte counters and returns `Dim::Alloc`, whose
 display describes the requested element count without an unbounded-limit sentinel.
 
+Generated lexical strings can use `Limits::generated_bytes` independently of source
+and document bytes. This dimension defaults to `usize::MAX`. `mint_generated(parts)`
+charges `Dim::GeneratedBytes` before fallible allocation and refunds that counter on
+allocation failure; `mint(parts)` retains its source/document byte accounting. The
+Solid input ledger maps its separate `AuthBudget::max_generated_bytes` onto this
+counter, preserving the original source-byte cap.
+
 **Closure deadline.** `ClosureLimits::deadline: Option<std::time::Instant>` defaults
 to `None`. On native targets, every forward closure samples the absolute deadline
 once at the start of each round, including nested closures, which inherit the same

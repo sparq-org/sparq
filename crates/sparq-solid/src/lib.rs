@@ -582,8 +582,9 @@ impl PodStore {
     ///
     /// [`PodStore::set_auth_limits`] bounds what the RULES may do inside ONE closure. This
     /// bounds the two things that sit outside that: the reasoning INPUT the pod's control
-    /// documents become (per-document and aggregate bytes, the length of one term, the
-    /// number of facts), and the AGGREGATE work of all the closures one materialization
+    /// documents become (per-document and source/resource aggregate bytes, generated
+    /// lexical bytes separately via [`AuthBudget::max_generated_bytes`], the length of
+    /// one term, and the number of facts), and the AGGREGATE work of all the closures one materialization
     /// runs — three for an ACP view, five for a bridged ODRL policy — which a per-closure
     /// allowance cannot bound.
     ///

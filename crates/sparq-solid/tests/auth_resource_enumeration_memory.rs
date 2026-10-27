@@ -251,7 +251,7 @@ fn document_row_case(group: bool) {
         let document = Graph::from_parts(dict, rows);
         measured_refusal(
             document_store(document, group),
-            sparq_solid::AuthAllowance::InputFacts,
+            sparq_solid::AuthAllowance::InputBytes,
             8 << 20,
         );
     }
@@ -286,8 +286,9 @@ fn skolem_expansion_is_charged_before_its_strings_are_allocated() {
     // Admit all stored terms; the refusal must account for the generated strings.
     budget.max_document_bytes = usize::MAX;
     budget.max_input_bytes = 4 << 20;
+    budget.max_generated_bytes = 4 << 20;
     store.set_auth_budget(budget);
-    measured_refusal(store, sparq_solid::AuthAllowance::InputBytes, 8 << 20);
+    measured_refusal(store, sparq_solid::AuthAllowance::GeneratedBytes, 8 << 20);
 }
 
 #[test]
