@@ -8,7 +8,8 @@
 //! [`write_statement`], [`serialize_facts`], [`write_rule`]) return text that parses back
 //! to the same terms — blank labels verbatim, language tags already lowercase, plain strings
 //! re-acquiring `xsd:string`, IRIs `IRIREF`-escaped — or a [`NotRepresentable`] error, never
-//! a fallback spelling; the DISPLAY writers ([`display_lossy`], [`statement_display_lossy`])
+//! a fallback spelling; ordinary backward variables receive a bijective legal spelling.
+//! The DISPLAY writers ([`display_lossy`], [`statement_display_lossy`])
 //! always produce text, for people to read only. Identity comes from [`statement_keys`].
 //!
 //! # Echoing rules back out (EYE `--pass-all` / `--pass-all-ground`)
@@ -98,23 +99,29 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
     Some((n.bytes().fold(0, |a, b| a * 10 + usize::from(b - b'0')), iri))
 }
 
-/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, one chunk per rule
+/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>.`, one chunk per rule
 /// application the variable was standardized apart by, `<n>` the FINGERPRINT of the proof-tree
 /// node that application sits at — `BwPath`) stripped, when what remains is an `@forAll`
-/// universal. Each chunk's digits are read by maximal munch, so a name decomposes only one
-/// way.
+/// universal. Escaped `__bx<n>.` copies retain the same universal-copy refusal at output.
+/// Each chunk's digits are read by maximal munch, so a name decomposes only one way.
 fn universal_base(v: &str) -> Option<&str> {
+    // A copied universal starts with its own marker, or has another internal prefix
+    // after the first application separator. Ordinary original names need no decoding.
+    if !v.starts_with(UNIVERSAL_VAR)
+        && !v
+            .split_once(super::MINTED_VAR_SEPARATOR)
+            .is_some_and(|(_, original)| original.starts_with("__"))
+    {
+        return None;
+    }
     let mut rest = v;
     loop {
         if rest.starts_with(UNIVERSAL_VAR) {
             return Some(rest);
         }
-        let r = rest.strip_prefix("__bw")?;
-        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
-        if digits == 0 {
-            return None;
-        }
-        rest = r[digits..].strip_prefix('_')?;
+        rest = super::minted_parts(rest)
+            .or_else(|| super::escaped_parts(rest))?
+            .1;
     }
 }
 
@@ -122,7 +129,7 @@ fn universal_base(v: &str) -> Option<&str> {
 /// (backward-chaining copy prefixes stripped). `None` for any other variable.
 ///
 /// Besides the parser's own names this accepts the backward chainer's freshened copies
-/// (`rename_vars` prefixes `__bw<n>_`): standardizing a rule apart must not strip a
+/// (`rename_vars` prefixes `__bw<n>.`): standardizing a rule apart must not strip a
 /// universal of its provenance. Exact, not heuristic: the `.` cannot occur in a source
 /// variable name.
 pub(super) fn universal(v: &str) -> Option<(&str, &str)> {
@@ -158,6 +165,28 @@ fn local_name(iri: &str) -> String {
 /// Can `?name` be written as is — does the parser's `read_name` read exactly `name` back?
 fn spellable_var(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || !c.is_ascii())
+}
+
+/// The common generated spelling needs only its one internal separator changed to `_`.
+/// Complex original names retain an explicit spelling in the unit's plan.
+fn default_generated(v: &str) -> Option<(&str, &str)> {
+    let (_, original) = super::minted_parts(v).or_else(|| super::escaped_parts(v))?;
+    spellable_var(original).then(|| {
+        let end = v.len() - original.len() - super::MINTED_VAR_SEPARATOR.len_utf8();
+        (&v[..end], original)
+    })
+}
+
+/// Simple generated spellings are injective: tag, digits and original name each retain
+/// their own boundary. Only a source spelling with a generated tag, or a complex name,
+/// can require an exception. Display plans still reserve their universal fallback names.
+fn needs_generated_plan(v: &str) -> bool {
+    // This is a collision hint, not validation: Unit::exact still rejects unsupported
+    // prefixes. A simple suffix needs no repeated fingerprint decoding here.
+    match v.split_once(super::MINTED_VAR_SEPARATOR) {
+        Some((_, original)) => !spellable_var(original),
+        None => v.starts_with(super::MINTED_VAR) || v.starts_with(super::ESCAPED_VAR),
+    }
 }
 
 /// Write `iri` as an N3 `IRIREF`, `<…>`. A backslash is the one character the parser can
@@ -271,9 +300,10 @@ enum Unplaced {
 }
 
 /// Every naming decision for ONE top-level unit of output — a statement (fact), a rule, or
-/// a lone term — made before anything is written. A unit is planned from its own terms
-/// (plus, for a rule in a document's trailer, the document-level declarations it sits
-/// under), so it renders the same whatever else is in the document.
+/// a lone term — made before anything is written. A standalone unit plans its own names;
+/// a document unit borrows the document-wide ordinary-variable spelling plan, alongside
+/// the document-level declarations it sits under. Other units can therefore reserve a
+/// spelling that this unit would otherwise use.
 ///
 /// # Two writers, split by construction
 ///
@@ -313,30 +343,31 @@ enum Unplaced {
 /// The GATE is the re-parse: every exact writer re-parses its whole output and requires the
 /// same terms up to one variable bijection under which every universal keeps its EXACT
 /// internal name (`log:equalTo` compares names). A placement that would change anything is
-/// a refusal. A backward-chaining copy of a universal (`__bw<n>___ua.<iri>`) can only be
+/// a refusal. A backward-chaining copy of a universal (`__bw<n>.__ua.<iri>`) can only be
 /// spelled as `<iri>`, which reads back as the universal itself — a different term — so it
 /// is refused ([`NotRepresentable::Unspellable`]).
 ///
 /// Also refused: two distinct variables for one universal anywhere in the output (a
 /// universal and its backward-chaining copy, or two copies:
 /// [`NotRepresentable::MergesVariables`]); a variable whose internal name has no legal
-/// spelling ([`NotRepresentable::Unspellable`]).
+/// spelling, except ordinary backward names written under a bijection
+/// ([`NotRepresentable::Unspellable`]).
 ///
 /// The display writers write every universal, throughout the unit, as a plain variable named the IRI's local name, then `_2`, `_3`, …
 /// until it differs from every variable name in the unit (unspellable variables are
 /// renamed the same way). Two different facts can therefore display alike, so identity —
 /// provenance addressing — comes from [`statement_keys`], never from display strings.
-struct Unit {
+struct Unit<'a> {
     /// Document-level universals (base names) declared OUTSIDE the unit, before it.
     outer: BTreeSet<String>,
     /// Universals (base names) written as a plain variable (display only) → that name.
     names: BTreeMap<String, String>,
-    /// Non-universal variables whose internal name is not a legal variable name (display
-    /// only) → their written name.
-    renamed: BTreeMap<String, String>,
+    /// Spelling exceptions: collisions with a default generated spelling, and complex
+    /// unspellable names. Ordinary generated names use their separator-replaced default.
+    renamed: std::borrow::Cow<'a, BTreeMap<String, String>>,
 }
 
-impl Unit {
+impl<'a> Unit<'a> {
     /// The universals of the unit made of `terms` that cannot be written under `outer` (the
     /// universals, by base name, whose document-level `@forAll` is already declared before
     /// the unit), by base name with IRI and why.
@@ -356,14 +387,22 @@ impl Unit {
 
     /// Plan the unit made of `terms` for an EXACT writer, under the document-level
     /// declarations `outer`: the plan, or why no exact N3 form exists.
-    fn exact(terms: &[&Term], outer: &BTreeSet<String>) -> Result<Unit, NotRepresentable> {
+    fn exact(
+        terms: &[&Term],
+        outer: &BTreeSet<String>,
+        renamed: Option<&'a BTreeMap<String, String>>,
+    ) -> Result<Unit<'a>, NotRepresentable> {
         let mut vars = BTreeSet::new();
         terms.iter().for_each(|t| all_vars(t, &mut vars));
         check_no_merge(vars.iter().copied())?;
-        if let Some(v) = vars.iter().find(|v| !binder_named(v) && !spellable_var(v)) {
-            return Err(NotRepresentable::Unspellable(format!("the variable `{v}` has no N3 spelling")));
+        if let Some(v) = vars.iter().find(|v| {
+            !binder_named(v) && !spellable_var(v) && !super::minted_var(v) && !super::escaped_var(v)
+        }) {
+            return Err(NotRepresentable::Unspellable(format!(
+                "the variable `{v}` has no N3 spelling"
+            )));
         }
-        // A backward-chaining copy (`__bw<n>___ua.<iri>`) is a DIFFERENT term from the
+        // A backward-chaining copy (`__bw<n>.__ua.<iri>`) is a DIFFERENT term from the
         // universal: N3 text can only spell it as `<iri>`, which reads back as `__ua.<iri>`
         // and so compares differently under `log:equalTo` (GH #6701 review round 13).
         if let Some((v, iri)) = vars.iter().find_map(|v| universal(v).filter(|u| u.1 != *v).map(|u| (v, u.0))) {
@@ -386,36 +425,106 @@ impl Unit {
                 ),
             }));
         }
-        Ok(Unit { outer: outer.clone(), names: BTreeMap::new(), renamed: BTreeMap::new() })
+        // Ordinary backward names can be written under a bijective plain-variable
+        // renaming. Universal copies still require the exact-name refusal above.
+        let renamed = match renamed {
+            Some(plan) => std::borrow::Cow::Borrowed(plan),
+            None => std::borrow::Cow::Owned(Unit::generated_names(terms)),
+        };
+        Ok(Unit {
+            outer: outer.clone(),
+            names: BTreeMap::new(),
+            renamed,
+        })
+    }
+
+    /// Reserve a legal spelling, adding a suffix only when another variable owns it.
+    fn fresh_name(base: String, taken: &mut BTreeMap<String, ()>) -> String {
+        let mut name = base.clone();
+        let mut n = 2;
+        while taken.insert(name.clone(), ()).is_some() {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        name
+    }
+
+    /// Legal names for ordinary backward variables, reserved against all source names
+    /// in `terms`. Document writers share this plan across their statement/rule units.
+    fn generated_names(terms: &[&Term]) -> BTreeMap<String, String> {
+        if terms
+            .iter()
+            .any(|t| super::mentions_var(t, &needs_generated_plan))
+        {
+            Unit::name_plan(terms, false).renamed.into_owned()
+        } else {
+            BTreeMap::new()
+        }
     }
 
     /// Plan the unit made of `terms` for DISPLAY: always succeeds; what [`Unit::exact`]
     /// refuses gets a collision-free plain-variable spelling unit-wide.
-    fn lossy(terms: &[&Term]) -> Unit {
-        let unplaced = Unit::unplaced(terms, &BTreeSet::new());
+    fn lossy(terms: &[&Term]) -> Unit<'a> {
+        Unit::name_plan(terms, true)
+    }
+
+    /// The shared spelling plan. Exact generated-name planning needs no display-only
+    /// universal placement or fallback names.
+    fn name_plan(terms: &[&Term], display: bool) -> Unit<'a> {
+        let unplaced = if display {
+            Unit::unplaced(terms, &BTreeSet::new())
+        } else {
+            Vec::new()
+        };
         let mut vars = BTreeSet::new();
         terms.iter().for_each(|t| all_vars(t, &mut vars));
-        let mut taken: BTreeSet<String> = vars
+        let mut taken: BTreeMap<String, ()> = vars
             .iter()
             .filter(|v| !binder_named(v) && spellable_var(v))
-            .map(|v| v.to_string())
+            .map(|v| (v.to_string(), ()))
             .collect();
-        let mut fresh = |base: String| {
-            let mut name = base.clone();
-            let mut n = 2;
-            while !taken.insert(name.clone()) {
-                name = format!("{base}_{n}");
-                n += 1;
-            }
-            name
-        };
-        let names = unplaced.into_iter().map(|(base, iri, _)| (base, fresh(local_name(&iri)))).collect();
+        let names = unplaced
+            .into_iter()
+            .map(|(base, iri, _)| (base, Unit::fresh_name(local_name(&iri), &mut taken)))
+            .collect();
         let renamed = vars
             .iter()
             .filter(|v| !binder_named(v) && !spellable_var(v))
-            .map(|v| (v.to_string(), fresh(sanitize_name(v))))
+            .filter_map(|v| {
+                let default = default_generated(v);
+                let base = match default {
+                    Some((prefix, original)) => {
+                        let mut name = String::with_capacity(v.len());
+                        name.push_str(prefix);
+                        name.push('_');
+                        name.push_str(original);
+                        name
+                    }
+                    None => sanitize_name(v),
+                };
+                match taken.entry(base) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        if default.is_some() {
+                            entry.insert(());
+                            None
+                        } else {
+                            let name = entry.key().clone();
+                            entry.insert(());
+                            Some((v.to_string(), name))
+                        }
+                    }
+                    std::collections::btree_map::Entry::Occupied(entry) => {
+                        let base = entry.key().clone();
+                        Some((v.to_string(), Unit::fresh_name(base, &mut taken)))
+                    }
+                }
+            })
             .collect();
-        Unit { outer: BTreeSet::new(), names, renamed }
+        Unit {
+            outer: BTreeSet::new(),
+            names,
+            renamed: std::borrow::Cow::Owned(renamed),
+        }
     }
 
     /// Write `t`, a term at the unit's top level.
@@ -468,7 +577,18 @@ impl Unit {
                 },
                 None => {
                     out.push('?');
-                    out.push_str(self.renamed.get(v.as_str()).map_or(v.as_str(), String::as_str));
+                    if let Some(name) = self.renamed.get(v.as_str()) {
+                        out.push_str(name);
+                    } else if let Some((prefix, original)) =
+                        v.split_once(super::MINTED_VAR_SEPARATOR)
+                    {
+                        debug_assert!(default_generated(v).is_some());
+                        out.push_str(prefix);
+                        out.push('_');
+                        out.push_str(original);
+                    } else {
+                        out.push_str(v);
+                    }
                 }
             },
             Term::List(ms) => {
@@ -665,13 +785,13 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// No normalisation the engine does not do: a formula is an ORDERED vector of rows to the
 /// engine, so two formulae with the same rows in another order, or with a duplicated row,
 /// are different facts and get different keys. Blank-node labels and backward-chaining
-/// copies (`__bw<n>___ua.<iri>`) are likewise kept as the distinct terms they are. The
+/// copies (`__bw<n>.__ua.<iri>`) are likewise kept as the distinct terms they are. The
 /// key itself uses no interning ids, pointers, hashes, locale or number formatting, but it is
 /// only as reproducible as the TERMS. For the same parsed input, an existential's skolem
 /// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
 /// numbered in the sorted order of each round's firing keys (GH #6749), and a
 /// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). A
-/// backward-chaining copy's `__bw<n>_` prefix is likewise the fingerprint of the derivation
+/// backward-chaining copy's `__bw<n>.` prefix is likewise the fingerprint of the derivation
 /// that standardized that rule application apart — its evaluation scope, its place in the
 /// proof tree and the goal it was proving — not how many applications ran before it
 /// (GH #6844). It is not canonical across reordered isomorphic documents, and a binding value
@@ -991,7 +1111,7 @@ thread_local! {
 }
 
 /// `t` as its written text re-parses: a backward-chaining copy of a universal
-/// (`__bw<n>___ua.<iri>`) reads back as the universal itself — a change, used only to name
+/// (`__bw<n>.__ua.<iri>`) reads back as the universal itself — a change, used only to name
 /// the refusal (the exact writers refuse copies before writing).
 fn as_reparsed(t: &Term) -> Term {
     match t {
@@ -1096,8 +1216,8 @@ type RuleOut = ([Term; 2], RuleKind);
 /// `rdf:nil` read as `()`, a formula-`log:implies`-formula statement read as a rule, an IRI
 /// the `IRIREF` grammar rejects, a universal read under a different `@forAll`, …): whatever
 /// the parser would change, the writer refuses. Because the bijection spans the document,
-/// two variables that are distinct in different statements (`__bw0___ua.x` in one,
-/// `__bw1___ua.x` in another) can never both read back as one.
+/// two variables that are distinct in different statements (`__bw0.__ua.x` in one,
+/// `__bw1.__ua.x` in another) can never both read back as one.
 fn verify_document(
     text: &str,
     facts: &[&[Term; 3]],
@@ -1148,7 +1268,7 @@ const CHECK_IRI: &str = "urn:sparq:serialize:check";
 /// `Unit`). The check costs one parse of the written text.
 pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
     let mut s = String::new();
-    Unit::exact(&[t], &BTreeSet::new())?.term(t, &mut s);
+    Unit::exact(&[t], &BTreeSet::new(), None)?.term(t, &mut s);
     let k = Term::Iri(CHECK_IRI.into());
     verify_document(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[&[k.clone(), k, t.clone()]], &[], &super::bounded::Truncation::top_level())?;
     out.push_str(&s);
@@ -1189,9 +1309,15 @@ pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3] {
 
 /// Plan and write one statement of a document as its own unit, under the document-level
 /// universals `outer` declared before it (not yet verified).
-fn statement_text(f: &[Term; 3], outer: &BTreeSet<String>) -> Result<String, NotRepresentable> {
+fn statement_text(
+    f: &[Term; 3],
+    outer: &BTreeSet<String>,
+    renamed: &BTreeMap<String, String>,
+) -> Result<String, NotRepresentable> {
     let mut s = String::new();
-    Unit::exact(&[&f[0], &f[1], &f[2]], outer).map_err(|e| in_statement(f, e))?.statement(f, &mut s);
+    let unit = Unit::exact(&[&f[0], &f[1], &f[2]], outer, Some(renamed))
+        .map_err(|e| in_statement(f, e))?;
+    unit.statement(f, &mut s);
     Ok(s)
 }
 
@@ -1245,11 +1371,13 @@ fn vars_of<'a>(terms: impl Iterator<Item = &'a Term>) -> BTreeSet<&'a str> {
 pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result<String, NotRepresentable> {
     let facts: Vec<&[Term; 3]> = facts.collect();
     check_no_merge(vars_of(facts.iter().flat_map(|f| f.iter())).into_iter())?;
+    let terms: Vec<&Term> = facts.iter().flat_map(|f| f.iter()).collect();
+    let renamed = Unit::generated_names(&terms);
     let mut binders = DocumentBinders::default();
     let mut out = String::new();
     for f in &facts {
         let outer = binders.before(f.iter(), &mut out).map_err(|e| in_statement(f, e))?;
-        out.push_str(&statement_text(f, &outer)?);
+        out.push_str(&statement_text(f, &outer, &renamed)?);
     }
     verify_document(&out, &facts, &[], &super::bounded::Truncation::top_level())?;
     Ok(out)
@@ -1262,8 +1390,8 @@ fn in_statement(f: &[Term; 3], e: NotRepresentable) -> NotRepresentable {
 }
 
 /// Write one output DOCUMENT: closure `facts` and `rules` — the `--pass-all` layout
-/// ([`crate::reason_n3_pass_all`]). Every statement and rule is its own unit, so none
-/// renders differently for its neighbours. Each universal gets a document `@forAll` line
+/// ([`crate::reason_n3_pass_all`]). Statements and rules share one ordinary-variable
+/// spelling plan across the document. Each universal gets a document `@forAll` line
 /// right before the first unit that uses it, so every unit that mentions its IRI PLAINLY
 /// must come before every unit that uses the universal: units are laid out in a stable
 /// topological order of those constraints, ties broken by the plain layout (facts sorted
@@ -1280,10 +1408,21 @@ pub(super) fn write_document(
 ) -> Result<(), NotRepresentable> {
     let sides: Vec<RuleOut> = rules.iter().map(|(r, kind)| (rule_sides(r, *kind, vars), *kind)).collect();
     check_no_merge(vars_of(facts.iter().flat_map(|f| f.iter()).chain(sides.iter().flat_map(|r| r.0.iter()))).into_iter())?;
+    // Plan ordinary generated names across the whole document, so a name in one
+    // statement cannot coincide with a source variable in another statement.
+    let terms: Vec<&Term> = facts
+        .iter()
+        .flat_map(|f| f.iter())
+        .chain(sides.iter().flat_map(|r| r.0.iter()))
+        .collect();
+    let renamed = Unit::generated_names(&terms);
     // The units in their plain layout (sorted facts, then rules), each with its terms.
     let mut lines = Vec::with_capacity(facts.len());
     for f in facts {
-        lines.push((statement_text(f, &document_universals(f.iter()))?, *f));
+        lines.push((
+            statement_text(f, &document_universals(f.iter()), &renamed)?,
+            *f,
+        ));
     }
     lines.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let units: Vec<Vec<&Term>> =
@@ -1368,8 +1507,11 @@ pub(super) fn write_document(
             }
             Some(r) => {
                 let (s, kind) = &sides[r];
-                let outer = binders.before(s.iter(), &mut doc).map_err(|e| in_rule(s, *kind, e))?;
-                let unit = Unit::exact(&[&s[0], &s[1]], &outer).map_err(|e| in_rule(s, *kind, e))?;
+                let outer = binders
+                    .before(s.iter(), &mut doc)
+                    .map_err(|e| in_rule(s, *kind, e))?;
+                let unit = Unit::exact(&[&s[0], &s[1]], &outer, Some(&renamed))
+                    .map_err(|e| in_rule(s, *kind, e))?;
                 write_rule_sides(&unit, s, *kind, &mut doc);
                 rule_order.push((s.clone(), *kind));
             }
@@ -1425,7 +1567,8 @@ pub enum RuleKind {
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) -> Result<(), NotRepresentable> {
     let sides = rule_sides(r, kind, vars);
     check_no_merge(vars_of(sides.iter()).into_iter()).map_err(|e| in_rule(&sides, kind, e))?;
-    let unit = Unit::exact(&[&sides[0], &sides[1]], &BTreeSet::new()).map_err(|e| in_rule(&sides, kind, e))?;
+    let unit = Unit::exact(&[&sides[0], &sides[1]], &BTreeSet::new(), None)
+        .map_err(|e| in_rule(&sides, kind, e))?;
     let mut s = String::new();
     write_rule_sides(&unit, &sides, kind, &mut s);
     verify_document(&s, &[], &[(sides.clone(), kind)], &super::bounded::Truncation::top_level()).map_err(|e| in_rule(&sides, kind, e))?;
@@ -1468,7 +1611,7 @@ fn rule_sides(r: &Rule, kind: RuleKind, vars: RuleVars) -> [Term; 2] {
     [side(left), side(right)]
 }
 
-fn write_rule_sides(unit: &Unit, sides: &[Term; 2], kind: RuleKind, out: &mut String) {
+fn write_rule_sides(unit: &Unit<'_>, sides: &[Term; 2], kind: RuleKind, out: &mut String) {
     unit.term(&sides[0], out);
     out.push_str(match kind {
         RuleKind::Forward => " => ",
@@ -1592,6 +1735,141 @@ mod tests {
     const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
     #[test]
+    fn complex_generated_names_keep_defaults_distinct() {
+        let iri = |name: &str| Term::Iri(format!("http://ex/{name}"));
+        let fact = |subject: &str, name: &str| {
+            let v = Term::Var(name.into());
+            [
+                iri(subject),
+                iri("p"),
+                Term::Formula(vec![[v.clone(), iri("same"), v]]),
+            ]
+        };
+        // Both sanitize to the same base. No legal source name can force the slow path:
+        // the complex original name itself must keep the shared exception plan active.
+        let complex = fact("complex", "__bx7.__bw8.y");
+        let simple = fact("simple", "__bx7.__bw8_y");
+        let text = serialize_facts([&complex, &simple].into_iter())
+            .expect("complex names and defaults stay distinct");
+        let parsed = super::super::parser::parse(&text).expect("the complete document parses");
+        assert_eq!(parsed.facts.len(), 2);
+        let variable = |subject: &str| {
+            let row = parsed.facts.iter().find(|r| r[0] == iri(subject)).unwrap();
+            assert_eq!(row[1], iri("p"));
+            let Term::Formula(ts) = &row[2] else {
+                panic!("{row:?}")
+            };
+            assert_eq!(ts.len(), 1);
+            assert_eq!(ts[0][1], iri("same"));
+            assert_eq!(ts[0][0], ts[0][2], "repeated occurrences keep sharing");
+            let Term::Var(v) = &ts[0][0] else {
+                panic!("{row:?}")
+            };
+            v.clone()
+        };
+        assert_ne!(
+            variable("complex"),
+            variable("simple"),
+            "distinct variables never merge"
+        );
+    }
+
+    #[test]
+    fn ordinary_backward_names_round_trip_in_every_exact_writer() {
+        let iri = |name: &str| Term::Iri(format!("http://ex/{name}"));
+        let minted = Term::Var("__bw7.x".into());
+        let source = [iri("source"), iri("p"), Term::Var("__bw7_x".into())];
+        let formula = Term::Formula(vec![[minted.clone(), iri("p"), minted.clone()]]);
+        let returned = [iri("returned"), iri("p"), formula.clone()];
+        let rule = Rule {
+            premise: vec![[minted.clone(), iri("p"), iri("c")]],
+            conclusion: vec![[minted, iri("q"), iri("c")]],
+        };
+
+        let mut term_text = String::new();
+        write_term(&formula, &mut term_text).expect("a backward formula has a legal spelling");
+        let parsed_term = super::super::parser::parse(&format!(
+            "<http://ex/returned> <http://ex/p> {term_text} ."
+        ))
+        .expect("term export parses");
+        assert_eq!(parsed_term.facts.len(), 1);
+        let mut statement_text = String::new();
+        write_statement(&returned, &mut statement_text)
+            .expect("a backward fact has a legal spelling");
+        let parsed_statement =
+            super::super::parser::parse(&statement_text).expect("statement export parses");
+        assert_eq!(parsed_statement.facts, parsed_term.facts);
+        let Term::Formula(rows) = &parsed_term.facts[0][2] else {
+            panic!("{:?}", parsed_term.facts)
+        };
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0][0], Term::Var(_)));
+        assert_eq!(rows[0][1], iri("p"));
+        assert_eq!(rows[0][0], rows[0][2], "standalone exports retain sharing");
+        for kind in [RuleKind::Forward, RuleKind::Backward] {
+            let mut rule_text = String::new();
+            write_rule(&rule, kind, RuleVars::N3, &mut rule_text)
+                .expect("a backward name in a rule has a legal spelling");
+            let parsed_rule = super::super::parser::parse(&rule_text).expect("rule export parses");
+            assert!(parsed_rule.facts.is_empty());
+            let rules = match kind {
+                RuleKind::Forward => &parsed_rule.rules,
+                RuleKind::Backward => &parsed_rule.backward_rules,
+            };
+            assert_eq!(rules.len(), 1);
+            let written = rules[0].premise[0][0].clone();
+            assert!(matches!(&written, Term::Var(_)));
+            assert_eq!(
+                rules[0].premise,
+                vec![[written.clone(), iri("p"), iri("c")]]
+            );
+            assert_eq!(rules[0].conclusion, vec![[written, iri("q"), iri("c")]]);
+            let mut text = String::new();
+            write_document(
+                &[&source, &returned],
+                &[(&rule, kind)],
+                RuleVars::N3,
+                &super::super::bounded::Truncation::top_level(),
+                &mut text,
+            )
+            .expect("facts and rules share one bijective spelling plan");
+            let parsed = super::super::parser::parse(&text).expect("export parses");
+            assert_eq!(parsed.facts.len(), 2);
+            assert!(
+                parsed.facts.contains(&source),
+                "the source spelling is retained"
+            );
+            let fact = parsed
+                .facts
+                .iter()
+                .find(|f| f[0] == iri("returned"))
+                .unwrap();
+            let Term::Formula(rows) = &fact[2] else {
+                panic!("{fact:?}")
+            };
+            let written = &rows[0][0];
+            assert_eq!(&rows[0][2], written, "a repeated variable remains shared");
+            assert_ne!(
+                written, &source[2],
+                "source and generated variables stay distinct"
+            );
+            let rules = match kind {
+                RuleKind::Forward => &parsed.rules,
+                RuleKind::Backward => &parsed.backward_rules,
+            };
+            assert_eq!(rules.len(), 1);
+            assert_eq!(
+                &rules[0].premise[0][0], written,
+                "fact and premise share the variable"
+            );
+            assert_eq!(
+                &rules[0].conclusion[0][0], written,
+                "fact and conclusion share the variable"
+            );
+        }
+    }
+
+    #[test]
     fn a_goal_key_is_injective_over_the_goals_terms() {
         // Goals that differ in any term get different keys, so the proof-tree node
         // identities holding them differ and their fingerprints name different
@@ -1663,7 +1941,7 @@ mod tests {
     /// reuse one pre-sized buffer and to write the length's digits straight into the
     /// output. The reference here IS that arithmetic, spelled out, so the two are compared
     /// rather than the new one being trusted — and a fold is only as stable as these bytes,
-    /// so a drift would move every `__bw<n>_` name the engine mints.
+    /// so a drift would move every `__bw<n>.` name the engine mints.
     #[test]
     fn the_framing_is_byte_identical_to_the_arithmetic_it_replaced() {
         let reference_goal = |g: &[Term; 3]| {
@@ -1860,12 +2138,29 @@ mod tests {
         assert_eq!(display_lossy(&both), "{ ?x_3 <http://ex/x> ?x . ?x_2 <http://ex/q> ?x_3 . }");
         assert_eq!(display_lossy(&x), "?x");
         // Freshened backward-rule copies keep their provenance.
-        assert_eq!(universal_iri("__bw3___bw0___ua.http://ex/x"), Some("http://ex/x"));
+        assert_eq!(
+            universal_iri("__bw3.__bw0.__ua.http://ex/x"),
+            Some("http://ex/x")
+        );
         assert_eq!(universal_iri("__bw3_x"), None);
-        assert_eq!(display_lossy(&Term::Var("__bw0___ua.http://ex/x".into())), display_lossy(&x));
+        assert_eq!(
+            display_lossy(&Term::Var("__bw0.__ua.http://ex/x".into())),
+            display_lossy(&x)
+        );
         // … but no exact writer writes a copy: its only spelling reads back as the universal.
-        let copy = [k.clone(), k.clone(), Term::Formula(vec![[Term::Var("__bw0___ua.http://ex/x".into()), k.clone(), k.clone()]])];
-        assert!(matches!(serialize_facts(std::iter::once(&copy)), Err(NotRepresentable::Unspellable(_))));
+        let copy = [
+            k.clone(),
+            k.clone(),
+            Term::Formula(vec![[
+                Term::Var("__bw0.__ua.http://ex/x".into()),
+                k.clone(),
+                k.clone(),
+            ]]),
+        ];
+        assert!(matches!(
+            serialize_facts(std::iter::once(&copy)),
+            Err(NotRepresentable::Unspellable(_))
+        ));
     }
 
     /// GH #6701 review round 9: the re-parse comparison is a BIJECTION, never by name —
@@ -1876,7 +2171,7 @@ mod tests {
         let b = |s: &str| Term::Blank(s.into());
         let k = Term::Iri("http://ex/k".into());
         let f = |rows: Vec<[Term; 3]>| Term::Formula(rows);
-        let (ua, c0) = (v("__ua.http://ex/x"), v("__bw0___ua.http://ex/x"));
+        let (ua, c0) = (v("__ua.http://ex/x"), v("__bw0.__ua.http://ex/x"));
         // A universal and its copy read back as ONE variable: a merge, refused.
         let e = same_terms(&[f(vec![[ua.clone(), k.clone(), c0.clone()]])], &[f(vec![[ua.clone(), k.clone(), ua.clone()]])]);
         assert!(matches!(e, Err(NotRepresentable::MergesVariables(_))));

@@ -514,6 +514,24 @@ mod run_shared {
             std::rc::Rc::new(std::cell::RefCell::new(shared))
         }
 
+        /// Is the specified application (or any application for `None`) live at `at`?
+        /// Registered siblings and completed producers are not live ancestors.
+        pub(super) fn live_application(&self, mut at: u64, application: Option<u64>) -> Option<u64> {
+            while let Some(key) = self.nodes.get(&at) {
+                match *key {
+                    NodeKey::Site { parent, site, .. } => {
+                        if application.is_none_or(|id| at == id) {
+                            return Some(site);
+                        }
+                        at = parent;
+                    }
+                    NodeKey::Step { parent, .. } => at = parent,
+                    NodeKey::Root { .. } => break,
+                }
+            }
+            None
+        }
+
         /// The fingerprint of the proof-tree node `key` names: its fold
         /// ([`NodeKey::fold`]), registered against `key` so it can never name a second,
         /// different key ([`RunShared::nodes`]).
@@ -1104,9 +1122,14 @@ pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, Str
 /// itself is an unordered set), then rules in document order.
 ///
 /// Re-running this over its own output is a FIXPOINT for a monotone rule set whose
-/// conclusions mint no fresh existentials: the closure is already saturated and the rules
-/// round-trip. A rule with a blank node in its CONCLUSION mints a fresh `_:__sk…` label per
-/// firing, so such a document grows on each re-run — the same caveat EYE carries.
+/// conclusions mint no fresh existentials and whose output retains no unbound backward
+/// variables: the closure is already saturated and the rules round-trip. There are two
+/// exceptions. A blank node in a rule's CONCLUSION mints a fresh `_:__sk…` label per firing,
+/// so the document grows on each re-run — the same existential caveat EYE carries. An unbound
+/// backward variable is written under a legal, bijective spelling; reading it back makes it
+/// an ordinary source variable. Re-deriving its formula adds another distinct variable and
+/// fact on each pass, so this output can grow too. The bijection preserves one document's
+/// variable sharing; it does not preserve a generated name across separate reasoning runs.
 ///
 /// HONESTY: the mapping onto the two EYE flags is BY CONSTRUCTION — closure + echoed rules,
 /// and "ground" read as "no syntactic variable survives IN A RULE" — not a differential
@@ -1118,8 +1141,8 @@ pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, Str
 ///
 /// # Errors
 ///
-/// A parse error, or — the output must re-reason exactly as the input did — a closure fact
-/// or rule that has no lossless N3 form ([`serialize::NotRepresentable`]): a unit mixing a
+/// A parse error, or a closure fact or rule that has no lossless N3 form under the
+/// document-wide variable bijection ([`serialize::NotRepresentable`]): a unit mixing a
 /// plain mention of an `@forAll` IRI with its universal (the one document-level declaration
 /// would capture it), units whose plain mentions and universals need each other first (a
 /// cycle), or a backward-chaining copy of a universal. No fallback spelling is written.
@@ -1275,7 +1298,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple(&c, b, &bw.truncated) {
+                if let Some(g) = ground_triple::<true>(&c, b, &bw.truncated) {
                     // A conclusion past the term-depth limit is dropped, as a cut.
                     if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
                     {
@@ -2416,7 +2439,7 @@ fn run_closure_in(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple(&c, b, &bw.truncated) {
+                        if let Some(g) = ground_triple::<true>(&c, b, &bw.truncated) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
                             if !facts.contains(&g)
                                 && bw.settle(bounded::generated(&bw.truncated, &g))
@@ -2427,7 +2450,7 @@ fn run_closure_in(
                                     rule.premise
                                         .iter()
                                         .filter_map(|p| match universals {
-                                            None => ground_triple(p, b, &bw.truncated),
+                                            None => ground_triple::<false>(p, b, &bw.truncated),
                                             // The stored facts a premise universal was
                                             // proved from mention a store universal.
                                             Some(_) => premise_instance(p, b, &bw.truncated),
@@ -3008,6 +3031,7 @@ fn match_premise_admitted(
         // `log:includes` may BIND free variables of the object pattern (one
         // binding per match, like EYE); `log:notIncludes` holds iff no match.
         if let Some(op) = scope_op(&pat[1]) {
+            let in_backward = path.in_backward(bw);
             let written: &[[Term; 3]] = match &pat[2] {
                 Term::Formula(t) => t,
                 _ => &[],
@@ -3018,14 +3042,32 @@ fn match_premise_admitted(
                 // A pattern reached through a variable was not visible to
                 // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
                 // the same way, failing the run.
-                if !matches!(&pat[2], Term::Formula(_)) {
-                    if let Term::Var(v) = &pat[2] {
-                        if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
-                            bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
-                            continue;
-                        }
-                    }
+                if quantified_arrival(Some(&pat[2]), &pat[2], &b) {
+                    bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
+                    continue;
                 }
+                // GH #6943 / ANSWER SAFETY: a pattern that ARRIVED through a variable used
+                // to be matched AS STORED inside a backward proof, where any variable left
+                // in it made `stored_ground_statements` read it as non-ground and fall back
+                // to the EMPTY pattern — which makes `log:includes` hold of everything and
+                // `log:notIncludes` of nothing, a wrong answer either way. It is now
+                // prepared by [`arrived`]: the names the proof minted are resolved, the
+                // formula's own free variables are renamed apart, and the result is matched
+                // as the pattern the document configured. An unresolved minted name is
+                // kept only if its application is on the live path, so a rule-built
+                // pattern shares with its rule but a finished producer's names do not.
+                //
+                // A chain that LANDS on a formula or literal is prepared. Any other arriving value
+                // is no pattern at all and keeps the handling it had before, as does the
+                // scope (`pat[0]`), which is searched data and is not required to be ground.
+                let mut pfx = BwPrefix::EMPTY;
+                let local = if in_backward
+                    && matches!(walk_ref(&pat[2], &b), Term::Formula(_) | Term::Lit(..))
+                {
+                    arrived(Some(&pat[2]), &pat[2], &b, pfx.pattern(path.fold), bw, path)
+                } else {
+                    Arrived::AsWritten
+                };
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
                 };
@@ -3043,11 +3085,26 @@ fn match_premise_admitted(
                     Term::Lit(v, _, _) => v == "true",
                     _ => false,
                 };
-                let bound = match &pat[2] {
-                    Term::Var(v) if formula_scope => b.get(v).and_then(|val| match val {
-                        Term::Formula(ts) => stored_ground_statements(ts).map(|n| (ts, n)),
-                        _ => None,
-                    }),
+                // The prepared pattern is matched whatever the scope is, because the empty
+                // pattern it used to fall back to is wrong against a formula scope and
+                // against the store alike. Forward evaluation keeps the GH #6936 rule
+                // exactly — the stored formula a variable is DIRECTLY bound to, and only
+                // when it holds no variable at any depth — which is what
+                // `tests/n3_bound_containment.rs` pins.
+                let bound = match (&local, &pat[2]) {
+                    (Arrived::Local(Term::Formula(ts)), _) => {
+                        let mut ground = true;
+                        Some((&ts[..], stored_statements(ts, &mut ground)))
+                    }
+                    (Arrived::Local(_), _) => None,
+                    (Arrived::AsWritten, Term::Var(v)) if formula_scope => {
+                        b.get(v).and_then(|val| match val {
+                            Term::Formula(ts) => {
+                                stored_ground_statements(ts).map(|n| (&ts[..], n))
+                            }
+                            _ => None,
+                        })
+                    }
                     _ => None,
                 };
                 let inner: &[[Term; 3]] = match bound {
@@ -3084,10 +3141,16 @@ fn match_premise_admitted(
                     },
                 };
                 // A containment's existential witnesses (`__w.` bindings of the pattern's
-                // blank nodes) stay inside it: each test gets fresh ones.
+                // blank nodes) stay inside it: each test gets fresh ones. So do the
+                // `__bp.` bindings of a prepared pattern's renamed-apart variables
+                // ([`BOUND_PATTERN_VAR`]) — those names are minted here, for this one match,
+                // and nothing outside this atom can mention them.
                 let mut matches = matches;
                 for nb in &mut matches {
-                    nb.retain(|k| !k.starts_with(PATTERN_WILDCARD));
+                    nb.retain(|k| {
+                        !k.starts_with(PATTERN_WILDCARD) && !k.starts_with(BOUND_PATTERN_VAR)
+                            && (!in_backward || b.get(k).is_some() || !minted_var(k) || live_var(k, bw, path))
+                    });
                 }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
@@ -3129,11 +3192,21 @@ fn match_premise_admitted(
         // subject (wrong arity, non-formula clause) FAILS the premise for
         // that binding (fail-closed).
         if let Some(op) = collect_op(&pat[1]) {
+            let in_backward = path.in_backward(bw);
             let mut next = Vec::new();
             for b in bindings {
                 // Solutions of a `{ clause }` value under `seed`, against the
                 // applied scope (`None` ⇒ the clause is not a formula).
                 let solve = |clause: &Term, seed: &Binding, ci: u64| -> Option<Vec<Binding>> {
+                    // The clause is matched AS IT STANDS, under `seed`. It is never
+                    // pre-substituted: splicing a value in would put a stored formula into
+                    // an inline clause position, where the matcher reads a formula as a
+                    // structural PATTERN rather than as the opaque term `unify_term`
+                    // compares by identity — and
+                    // `( { :d :has ?f } { :k0 :ok ?f } ) log:forAllIn` would then hold of two
+                    // formulas that are not the same formula. A clause that arrived through
+                    // a variable was already prepared by [`arrived`] before it got here, and
+                    // the `__bp.` names it carries are bound in `seed` like any other.
                     let atoms: &[[Term; 3]] = match clause {
                         Term::Formula(ts) => ts,
                         // `{}` parses as the literal true: no constraint —
@@ -3175,11 +3248,65 @@ fn match_premise_admitted(
                 // matched by identity.
                 if aggregation_clauses(op, &subj).iter().enumerate().any(|(i, c)| {
                     let written = aggregation_clauses(op, &pat[0]).get(i);
-                    !matches!(written, Some(Term::Formula(_) | Term::Lit(..))) && quantified_clause(c)
+                    quantified_arrival(written, c, &b)
                 }) {
                     bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                     continue;
                 }
+                // GH #6943 / ANSWER SAFETY: a CLAUSE or TEMPLATE that ARRIVED through a
+                // variable — through its own slot, or because the whole subject list did —
+                // is prepared by [`arrived`]: the names the proof minted are resolved, the
+                // arriving formula's own free variables are renamed apart, and the result is
+                // matched as the clause the document configured. Before this change it was
+                // matched with those variables still in it, against a proof that had
+                // standardized its own atoms apart, so nothing constrained the match:
+                // `forAllIn` held VACUOUSLY and fired a rule that must not fire, and
+                // `collectAllIn` collected against a constraint that was not there.
+                //
+                // ONE prefix serves every slot of this atom evaluation, so a name shared
+                // between its arriving values stays shared — `( ?template ?clause ?list )`
+                // whose template and clause come from one configured list, and
+                // `( ?clause-a ?clause-b )` whose two clauses do — exactly as they shared
+                // before this change, through the one flat binding domain.
+                //
+                // The result list of `( template clause list )` is an OUTPUT, not a clause,
+                // and the SCOPE (`pat[2]`) is the data the clause is searched against rather
+                // than a pattern that has to match; neither is prepared.
+                let mut pfx = BwPrefix::EMPTY;
+                let subj = if in_backward {
+                    let prefix = pfx.pattern(path.fold);
+                    let written = match &pat[0] {
+                        Term::List(w) => Some(w),
+                        _ => None,
+                    };
+                    Term::List(
+                        members
+                            .iter()
+                            .enumerate()
+                            .map(|(i, m)| {
+                                // Slots 0 and 1 are the executable ones under both
+                                // operators: template and clause, or clause-a and clause-b.
+                                if i >= 2 {
+                                    return m.clone();
+                                }
+                                match arrived(
+                                    written.and_then(|w| w.get(i)),
+                                    m,
+                                    &b,
+                                    prefix,
+                                    bw,
+                                    path,
+                                ) {
+                                    Arrived::AsWritten => m.clone(),
+                                    Arrived::Local(t) => t,
+                                }
+                            })
+                            .collect(),
+                    )
+                } else {
+                    subj
+                };
+                let Term::List(members) = &subj else { continue };
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
@@ -3203,6 +3330,7 @@ fn match_premise_admitted(
                             continue;
                         };
                         let collected = Term::List(items);
+                        let collected = if in_backward { restore_pattern_names(collected) } else { collected };
                         let mut nb = b.clone();
                         if unify_term(list_pat, &collected, &mut nb, &bw.truncated) && within_depth(&nb, bw) {
                             next.push(nb);
@@ -3624,7 +3752,15 @@ fn backward_prove(
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, BwPath::at(fold)) {
+            for sol in match_premise_seeded(
+                &prem,
+                facts,
+                &subst,
+                JoinMode::All,
+                bw,
+                depth,
+                BwPath::at(fold),
+            ) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -3641,6 +3777,22 @@ fn backward_prove(
                         else {
                             ok = false;
                             break;
+                        };
+                        // A quoted formula is opaque to that substitution, so a variable
+                        // the PROOF produced stays inside one — and `sol`, the only thing
+                        // that binds it, is dropped at the end of this loop, which left the
+                        // value naming a variable nothing will ever bind (GH #6943 case 1:
+                        // `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }`
+                        // proved for `:c` returned `{ ?__bw<n>.x :p :b }` where `?__bw<n>.x`
+                        // was bound to `:c`). Those variables are instantiated here, while
+                        // `sol` still holds them, and ONLY those ([`Produced`]).
+                        let val = match Produced::new(&sol, b, pat).resolve(val, &bw.truncated)
+                        {
+                            Some(v) => v,
+                            None => {
+                                ok = false;
+                                break;
+                            }
                         };
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
                             && !unify_term(g, &val, &mut nb, &bw.truncated)
@@ -3666,24 +3818,177 @@ fn backward_prove(
 /// `t` with every variable renamed into the standardize-apart space named by `prefix` (a
 /// [`BwPath::prefix`]), recursing into quoted formulae.
 fn rename_vars(t: &Term, prefix: &str) -> Term {
+    map_vars(t, &|v| (!quoted_universal(v)).then(|| prefixed_var(prefix, v)))
+}
+
+/// Concatenate a generated prefix and a variable name without formatting machinery.
+#[inline]
+fn prefixed_var(prefix: &str, name: &str) -> String {
+    let mut renamed = String::with_capacity(prefix.len() + name.len());
+    renamed.push_str(prefix);
+    renamed.push_str(name);
+    renamed
+}
+
+/// Copy a term, rewriting only the variable names selected by `rename`.
+fn map_vars(t: &Term, rename: &impl Fn(&str) -> Option<String>) -> Term {
     match t {
-        // A quoted formula's own universal is not a rule variable (GH #6754).
-        Term::Var(v) if quoted_universal(v) => t.clone(),
-        Term::Var(v) => Term::Var(format!("{prefix}{v}")),
+        Term::Var(v) => rename(v).map(Term::Var).unwrap_or_else(|| t.clone()),
         Term::Formula(ts) => Term::Formula(
-            ts.iter()
-                .map(|tr| {
-                    [rename_vars(&tr[0], prefix), rename_vars(&tr[1], prefix), rename_vars(&tr[2], prefix)]
-                })
-                .collect(),
+            ts.iter().map(|tr| tr.each_ref().map(|m| map_vars(m, rename))).collect(),
         ),
-        Term::List(ms) => Term::List(ms.iter().map(|m| rename_vars(m, prefix)).collect()),
-        Term::Triple(tr) => Term::Triple(Box::new([
-            rename_vars(&tr[0], prefix),
-            rename_vars(&tr[1], prefix),
-            rename_vars(&tr[2], prefix),
-        ])),
+        Term::List(ms) => Term::List(ms.iter().map(|m| map_vars(m, rename)).collect()),
+        Term::Triple(tr) => Term::Triple(Box::new(tr.each_ref().map(|m| map_vars(m, rename)))),
         _ => t.clone(),
+    }
+}
+
+/// Local pattern names must not become part of an aggregation result's term identity.
+fn restore_pattern_names(t: Term) -> Term {
+    if !mentions_var(&t, &|v| v.starts_with(BOUND_PATTERN_VAR)) {
+        return t;
+    }
+    map_vars(&t, &|v| {
+        let mut original = v;
+        while let Some((_, rest)) = original
+            .strip_prefix(BOUND_PATTERN_VAR)
+            .and_then(|name| name.split_once('.'))
+        {
+            original = rest;
+        }
+        (original != v).then(|| original.to_string())
+    })
+}
+
+/// The part of a finished proof's substitution that the PROOF ITSELF produced, as a
+/// [`bounded::Subst`] — the view [`backward_prove`]'s projection instantiates a returned
+/// quoted formula through.
+///
+/// A projected value may carry a quoted formula, and a quoted formula is opaque to
+/// substitution, so a variable inside one survives the projection. If that variable is one
+/// the proof produced (a conclusion variable the application standardized apart, say), the
+/// substitution that binds it is dropped the moment the projection ends: the value then
+/// names a variable nothing will ever bind, and whatever reads it later — a consumer, a
+/// derived fact's term identity, a `why()` string — reads a name instead of the term the
+/// proof actually found. Instantiating it here, before `sol` goes away, is what makes a
+/// returned formula carry its producer's bindings (GH #6943).
+///
+/// Two kinds of name are deliberately NOT instantiated, and they are the whole reason this
+/// is a view and not simply `sol`:
+/// - a name the CALLER already binds (`caller`). That binding is the caller's own and the
+///   caller resolves it where it uses the value; substituting it here would bake one
+///   caller's value into a term the caller supplied, changing that term's identity.
+/// - a name the GOAL itself writes (`goal`, the goal atom as the caller wrote it).
+///   Unifying a goal against a conclusion can bind a goal variable to one of the
+///   application's, so such a name IS in `sol` even though it is the caller's to resolve.
+///
+/// What is left is exactly what this proof bound and nobody above it can see. A quoted
+/// formula's own binders (a formula-level `@forAll`, [`quoted_universal`]) are never bound
+/// in a substitution at all, so they are untouched without a test for them.
+struct Produced<'a> {
+    sol: &'a Binding,
+    caller: &'a Binding,
+    goal: &'a [Term; 3],
+}
+
+impl<'a> Produced<'a> {
+    fn new(sol: &'a Binding, caller: &'a Binding, goal: &'a [Term; 3]) -> Self {
+        Produced { sol, caller, goal }
+    }
+
+    /// `val` with every variable this view binds instantiated, inside quoted formulae too
+    /// ([`bounded::substitute_resolved`], which checks the resolved term's size and depth
+    /// before building it). `None`, with a refusal recorded, past the run's term allowance.
+    ///
+    /// It takes `val` by value and hands it straight back when nothing in it still needs
+    /// instantiating, which is every value of an ordinary proof: the walk that decides
+    /// ([`Produced::unresolved`]) reads the borrowed term and allocates nothing, so the
+    /// projection pays no copy for the case this does not apply to.
+    #[inline]
+    fn resolve(&self, val: Term, run: &Truncation) -> Option<Term> {
+        // Ordinary scalar answers need no projection walk. Compound answers without
+        // minted names likewise cannot contain a binding this view may resolve.
+        if matches!(val, Term::Iri(_) | Term::Blank(_) | Term::Lit(..))
+            || !mentions_var(&val, &engine_var) || !self.unresolved(&val) {
+            return Some(val);
+        }
+        bounded::substitute_resolved(&val, self, self.sol.len() + 1, run)
+    }
+
+    /// Does `t` still hold a variable this view binds?
+    ///
+    /// `val` has already had ONE level of `sol` substituted into it, so a name this view
+    /// binds survives that only in two places, and nothing else reaches this walk — which is
+    /// what keeps the projection free for an ordinary proof:
+    ///
+    /// * inside a quoted FORMULA, which that substitution is opaque to;
+    /// * at the tail of an ALIAS CHAIN, formula or not: one hop of `?a → ?b → :c` leaves
+    ///   `?b`, which `sol` still binds. In a list or a triple term nothing else resolves it,
+    ///   and the projection then declines to bind the goal variable at all, so the derived
+    ///   fact is dropped (GH #6943: `{ ( ?x ?y ) :cl ( ?x ) } <= { :seed :value ?y }`, asked
+    ///   as `( ?t ?t ) :cl ?cl`, derived nothing where `{ :a :q ?x }` in the same position
+    ///   derived `{ :a :q :c }`).
+    fn unresolved(&self, t: &Term) -> bool {
+        match t {
+            Term::Var(v) => bounded::Subst::bound(self, v).is_some(),
+            Term::Formula(ts) => ts.iter().flatten().any(|m| self.unresolved(m)),
+            Term::List(ms) => ms.iter().any(|m| self.unresolved(m)),
+            Term::Triple(tr) => tr.iter().any(|m| self.unresolved(m)),
+            _ => false,
+        }
+    }
+}
+
+impl Produced<'_> {
+    /// Is `v` a name only the CALLER may resolve — one its binding already values, or one
+    /// the goal atom itself writes at any depth?
+    ///
+    /// The goal is read as it stands, rather than its names collected up front: a goal has
+    /// three terms and this is asked only of a variable that reached a quoted formula and
+    /// is bound by the proof, so collecting them would be a per-goal allocation on the
+    /// proof-search path for a question almost no goal asks ([`mentions_var`] descends into
+    /// a quoted formula, which is where a caller's own name sits).
+    fn callers(&self, v: &str) -> bool {
+        self.caller.get(v).is_some()
+            || self.goal.iter().any(|t| mentions_var(t, &|n: &str| n == v))
+    }
+}
+
+impl bounded::Subst for Produced<'_> {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        // The chain is followed to its end, not read one hop deep. A variable is routinely
+        // bound to ANOTHER variable — head unification aliases a goal's name to an
+        // application's, and the premise then binds that one to a value — so a one-hop read
+        // returns the alias and the answer carries a variable name where the proof found a
+        // term (GH #6943: `{ (?x ?y) :cl { :a :q ?x } } <= { :seed :value ?y }` asked as
+        // `( ?t ?t ) :cl ?cl` returned the alias instead of the value). Bounded by the
+        // binding's own length, so a cycle ends the walk.
+        // Only a name the ENGINE minted is resolved ([`engine_var`]). A variable written in
+        // DATA, or by a caller, belongs to the formula it is written in: substituting into it
+        // from this proof's binding would rewrite a stored term because some rule in the
+        // document happened to spell a variable the same way.
+        if !engine_var(v) {
+            return None;
+        }
+        let mut name = v;
+        for _ in 0..self.sol.len() + 1 {
+            // The binding lookup comes FIRST. A name this proof has no value for resolves to
+            // nothing whichever test runs first, and [`Produced::callers`] scans the goal
+            // atom (descending into quoted formulae) to answer, so asking it about such a
+            // name was the walk's whole cost on a value that needed no instantiating.
+            let val = self.sol.get(name)?;
+            if self.callers(name) {
+                return None;
+            }
+            match val {
+                // One more link of the same chain: keep walking, and apply the SAME
+                // exclusions to the name it lands on, so a chain that reaches the caller's
+                // is still left to the caller.
+                Term::Var(next) => name = next,
+                landed => return Some(landed),
+            }
+        }
+        None
     }
 }
 
@@ -3692,9 +3997,9 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
 /// node's identity to 64 bits and refuses to hand the same fold to two different identities,
 /// so a fold names a derivation and nothing else.
 ///
-/// A renamed variable is not confined to the proof. A rule conclusion can bind a goal
-/// variable to a quoted formula that still holds one, and that value reaches a derived fact,
-/// where it becomes part of the fact's term identity — its `term_key`, its `why()` string and
+/// A rule conclusion can bind a goal variable to a quoted formula that still holds a
+/// renamed variable. Its escaped spelling reaches a derived fact, where it becomes part
+/// of the fact's term identity — its `term_key`, its `why()` string and
 /// its `sparq-prov` IRI. So the name has to be a function of the derivation, not of how much
 /// proving happened first: a counter bumped once per rule application made every such name
 /// depend on the order bindings arrived out of a fact set, and so on insertion history and on
@@ -3727,29 +4032,24 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
 ///   closures at one nesting depth apart ([`BwCtx::scope_salt`]): both go into the root
 ///   identity ([`BwCtx::root_path`]).
 ///
-/// Keying the name to the goal is also what makes it safe ACROSS ROUNDS. The same goal
-/// re-proved at the same node in a later round takes the same name and derives the same fact
-/// — which is why a program whose only growth was the old counter now saturates. A goal that
-/// a later round reaches carrying a renamed variable leaked out of an earlier one (through a
-/// stored quoted formula and a forward `log:includes`, say) is a DIFFERENT goal, so it takes
-/// a different name and cannot capture the node that minted that variable.
+/// The same goal re-proved at the same node in a later round takes the same name and
+/// derives the same fact, so in-run deduplication is stable. Before a result enters a fact
+/// or query output, [`finish_conclusion_names`] moves any surviving application names into
+/// the deterministic `__bx<fold>.` namespace. Such a name is an ordinary free variable:
+/// [`minted_parts`] and [`live_var`] never recognize it as a live application name, even
+/// when a later round proves the same goal at the same node.
 ///
 /// A path is ONE `u64`, not a chain: each step's fingerprint is folded from the step and the
 /// fingerprint it is taken from ([`NodeKey::Step`]), and registered like any other, so the
 /// whole path above a node is accounted for by one word and nothing is re-encoded as the
 /// proof descends.
 ///
-/// The fingerprint renders as the one `__bw<n>_` chunk [`rename_vars`] prefixes, which is the
-/// format `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes
-/// — so no downstream consumer changes: spellability, the exact writers' backward-copy
-/// refusal and the display writers' renaming all see the same shape of name as before, and a
-/// name's LENGTH no longer grows with the depth of the proof that minted it. Two renamed
-/// names are equal only if their folds and the variables behind them are (the chunk's digits
-/// are read by maximal munch), and two folds are equal only if the keys behind them are
-/// ([`BwCtx::node`] fails the run otherwise). It does NOT make a renamed name distinct
-/// from a variable a document itself spells `__bw…`: that namespace is not reserved, so such
-/// a variable can still be captured, here as before this name was ([`rename_vars`] renames
-/// it like any other).
+/// The fingerprint renders as one `__bw<n>.` chunk, which [`rename_vars`] prefixes
+/// and `serialize::universal_base` reads back. The `.` cannot occur in a source variable
+/// name, so application variables have a separate spelling from document variables.
+/// A name's length does not grow with proof depth. Two renamed names are equal only if
+/// their folds and original variables are equal, and two folds are equal only if the keys
+/// behind them are ([`BwCtx::node`] fails the run otherwise).
 #[derive(Clone, Copy)]
 struct BwPath {
     /// The fingerprint of the proof-tree node this path names.
@@ -3787,21 +4087,36 @@ impl NodeKey {
     }
 }
 
-/// The buffer a node's renaming prefix `__bw<fold>_` is rendered into, on the STACK: the
-/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `_`, so it has a
+/// The buffer a node's renaming prefix `__bw<fold>.` is rendered into, on the STACK: the
+/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `.`, so it has a
 /// fixed upper bound and never needed a heap `String` of its own. One per candidate site on
 /// the backward path, where `format!` took an allocation and a free each time.
 ///
-/// It renders the same bytes as `format!("__bw{fold}_")`, which `rename_vars` prefixes and
+/// It renders the same bytes as `format!("__bw{fold}.")`, which `rename_vars` prefixes and
 /// `serialize::universal_base` reads back.
-struct BwPrefix([u8; 25]);
+struct BwPrefix([u8; 26]);
 
 impl BwPrefix {
-    const EMPTY: BwPrefix = BwPrefix([0u8; 25]);
+    const EMPTY: BwPrefix = BwPrefix([0u8; 26]);
 
-    /// `__bw<fold>_`, borrowed from this buffer.
+    /// `__bw<fold>.`, borrowed from this buffer.
     fn render(&mut self, fold: u64) -> &str {
-        self.0[..4].copy_from_slice(b"__bw");
+        self.rendered(MINTED_VAR, MINTED_VAR_SEPARATOR as u8, fold)
+    }
+
+    /// `__bp.<fold>.`, the prefix [`arrived`] renames an arriving formula's own free
+    /// variables apart with ([`BOUND_PATTERN_VAR`]).
+    fn pattern(&mut self, fold: u64) -> &str {
+        self.rendered(BOUND_PATTERN_VAR, b'.', fold)
+    }
+
+    /// `<head><fold><tail>`, borrowed from this buffer. The buffer holds the longest
+    /// rendering either caller asks for — five bytes of `head`, twenty decimal digits of a
+    /// `u64` and one of `tail` — so neither ever needed a heap `String` of its own.
+    #[inline]
+    fn rendered(&mut self, head: &str, tail: u8, fold: u64) -> &str {
+        let h = head.len();
+        self.0[..h].copy_from_slice(head.as_bytes());
         let mut at = self.0.len();
         let mut rest = fold;
         loop {
@@ -3813,19 +4128,29 @@ impl BwPrefix {
             }
         }
         // The digits were written to the END of the buffer, so shift them up against the
-        // `__bw` and put the trailing `_` after them.
+        // head and put the tail after them.
         let digits = self.0.len() - at;
-        self.0.copy_within(at.., 4);
-        self.0[4 + digits] = b'_';
+        self.0.copy_within(at.., h);
+        self.0[h + digits] = tail;
         // ASCII by construction, so the `from_utf8` cannot fail.
-        std::str::from_utf8(&self.0[..4 + digits + 1]).unwrap_or_default()
+        std::str::from_utf8(&self.0[..h + digits + 1]).unwrap_or_default()
     }
 }
+
+/// The common proof path carries only its fingerprint. Backward context is read
+/// from the registered ancestry only when a scoped operator needs it.
+const _: () = assert!(std::mem::size_of::<BwPath>() == 8);
 
 impl BwPath {
     /// The path that is just the node `fold` names.
     fn at(fold: u64) -> BwPath {
         BwPath { fold }
+    }
+
+    /// A scoped operator under any enclosing application needs arriving values prepared.
+    /// Forward-only contexts have no registered paths and cannot be inside an application.
+    fn in_backward(&self, bw: &BwCtx) -> bool {
+        !bw.unnamed() && bw.visited.borrow().live_application(self.fold, None).is_some()
     }
 
     /// The path one `step` further down, as its own registered node
@@ -4094,6 +4419,205 @@ fn frees_quoted_universal(t: &Term) -> bool {
 /// rule's own premise universals in stored-predicate atoms are supported (GH #6882,
 /// [`premise_universals_matchable`]); every other quantified antecedent is refused.
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
+
+/// The prefix a backward application mints its renamed variables with.
+const MINTED_VAR: &str = "__bw";
+/// The separator cannot occur in a source variable name.
+const MINTED_VAR_SEPARATOR: char = '.';
+
+/// The application identity and original name in an exact `__bw<digits>.` prefix.
+fn minted_parts(v: &str) -> Option<(&str, &str)> {
+    let (digits, original) = v
+        .strip_prefix(MINTED_VAR)?
+        .split_once(MINTED_VAR_SEPARATOR)?;
+    (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())).then_some((digits, original))
+}
+
+fn minted_var(v: &str) -> bool {
+    minted_parts(v).is_some()
+}
+
+/// Escaped application names are ordinary free variables outside their producing proof.
+const ESCAPED_VAR: &str = "__bx";
+
+/// Recognize the deterministic escaped spelling for exact output and universal-copy checks.
+fn escaped_parts(v: &str) -> Option<(&str, &str)> {
+    let (digits, original) = v
+        .strip_prefix(ESCAPED_VAR)?
+        .split_once(MINTED_VAR_SEPARATOR)?;
+    (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())).then_some((digits, original))
+}
+
+fn escaped_var(v: &str) -> bool {
+    escaped_parts(v).is_some()
+}
+
+/// Keep a rule-built variable only while its application is on the live proof path.
+fn live_var(v: &str, bw: &BwCtx, path: BwPath) -> bool {
+    let Some((digits, original)) = minted_parts(v) else { return false };
+    // Require the canonical prefix and an original variable that application renamed.
+    if (digits.len() > 1 && digits.starts_with('0')) || quoted_universal(original) {
+        return false;
+    }
+    let Ok(application) = digits.parse::<u64>() else { return false };
+    let Some(site) = bw.visited.borrow().live_application(path.fold, Some(application)) else {
+        return false;
+    };
+    let Ok(mut site) = usize::try_from(site) else { return false };
+    for rule in bw.rules {
+        if site < rule.conclusion.len() {
+            return rule.premise.iter().chain(&rule.conclusion).flatten()
+                .any(|t| mentions_var(t, &|name| name == original));
+        }
+        site -= rule.conclusion.len();
+    }
+    false
+}
+
+/// Is `v` a name the ENGINE minted, rather than one a document wrote? Either a backward
+/// application's renaming ([`MINTED_VAR`]) or an arriving formula's rename-apart
+/// ([`BOUND_PATTERN_VAR`]).
+///
+/// This is the line the resolution rule for a bound formula is drawn on. A name the engine
+/// minted belongs to the proof, which is entitled to substitute what it has bound for it. A
+/// name the DOCUMENT wrote belongs to the formula it is written in, and is never looked up:
+/// the binding is one flat domain in which a stored formula's own variable and a caller's can
+/// be spelled the same, so looking one up would read whichever the document happened to
+/// spell, and the answer would turn on a caller's arbitrary choice of name (GH #6943).
+fn engine_var(v: &str) -> bool {
+    minted_var(v) || v.starts_with(BOUND_PATTERN_VAR)
+}
+
+/// The prefix the free variables of an ARRIVING formula are renamed apart with. The `.`
+/// cannot occur in a source variable name, exactly as for `serialize::UNIVERSAL_VAR`, so a
+/// renamed name collides with nothing the document spells, with no minted name, and with
+/// nothing in the data it is matched against.
+const BOUND_PATTERN_VAR: &str = "__bp.";
+
+/// Read a binding through names owned by a live backward application, or local pattern
+/// names. Resolve each to the end of its chain, leaving a stored formula's free names
+/// alone even when the caller binds the same source spelling.
+///
+/// This is the resolver an arriving formula is instantiated with ([`arrived`]) and the one an
+/// aggregation clause is matched through. It drives `bounded::substitute_deep`, so following
+/// a chain means following it until it reaches the value and then STOPPING: the value is put
+/// in place as the term it is, and nothing is substituted into it.
+///
+/// Stopping there is what keeps a quoted formula OPAQUE. A stored formula spliced into an
+/// inline clause position and then descended into would stop being a term matched by
+/// identity and start being a PATTERN of match variables, so
+/// `( { :d :has ?f } { :k0 :ok ?f } ) log:forAllIn` would hold of two formulas that are not
+/// the same formula. The variables written inside the value belong to it, and [`arrived`]
+/// renames them apart ([`rename_free_apart`]) rather than looking them up.
+struct Owned<'a, 'r> {
+    binding: &'a Binding,
+    bw: &'a BwCtx<'r>,
+    path: BwPath,
+}
+
+impl bounded::Subst for Owned<'_, '_> {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        if !engine_var(v) {
+            return None;
+        }
+        let mut val = self.binding.get(v)?;
+        // A source spelling or completed producer's name must not read a caller's
+        // unrelated binding before rename_free_apart has a chance to isolate it.
+        if minted_var(v) && !live_var(v, self.bw, self.path) {
+            return None;
+        }
+        // Bound by the binding's own length, so a cycle ends the walk. Once a live
+        // variable starts a chain, its aliases may legitimately name caller variables.
+        for _ in 0..self.binding.len() + 1 {
+            match val {
+                Term::Var(next) => val = self.binding.get(next)?,
+                landed => return Some(landed),
+            }
+        }
+        None
+    }
+}
+
+/// A builtin's executable slot — a `log:includes` pattern, an aggregation clause, a
+/// `log:collectAllIn` template — prepared for matching inside a backward proof.
+enum Arrived {
+    /// Left exactly as the document spells it.
+    AsWritten,
+    /// A value ARRIVED through a variable: the names the surrounding proof owns resolved or
+    /// kept, the arriving formula's own free variables renamed apart.
+    Local(Term),
+}
+
+/// Check an executable value through the same complete chain that arrival follows.
+fn quantified_arrival(written: Option<&Term>, slot: &Term, b: &Binding) -> bool {
+    !matches!(written, Some(Term::Formula(_) | Term::Lit(..)))
+        && quantified_clause(walk_ref(slot, b))
+}
+
+/// Prepare an arriving slot: resolve, then rename apart (GH #6943).
+///
+/// `written` is the slot as the document spells it, `None` when the whole subject list
+/// arrived through one variable and `slot` is therefore itself the value that arrived. Three
+/// spellings are left [`Arrived::AsWritten`], because nothing arrived through them:
+///
+/// * a `{ … }` formula (or `{}`) written in place — the rule's own text, renamed with the
+///   rest of the rule, so it already shares with the rule correctly;
+/// * a variable with no binding entry at all — the ordinary spelling of a `collectAllIn`
+///   TEMPLATE (`( ?t { ?t :type :T } ?l )`) and of a clause the rule means its own matching
+///   to bind. Renaming it apart would cut it off from the rule that wrote it;
+/// * anything that is not a variable — there is no chain to follow.
+///
+/// Otherwise a value arrived. It is instantiated through [`Owned`], which resolves the names
+/// the proof owns and leaves the formula's own, and its remaining free variables are then
+/// renamed apart under `prefix` ([`rename_free_apart`]).
+///
+/// `prefix` is shared by every slot of ONE atom evaluation, so names shared between the
+/// arriving values of that atom stay shared — `( ?template ?clause ?list )` whose template
+/// and clause both arrive from one configured list, and `( ?clause-a ?clause-b )` whose two
+/// clauses come from one list — exactly as they shared before this change, when they shared
+/// the one flat binding domain. Containment-local bindings are removed at the atom
+/// boundary, so later atoms match afresh even when their prefixes coincide.
+fn arrived(
+    written: Option<&Term>,
+    slot: &Term,
+    b: &Binding,
+    prefix: &str,
+    bw: &BwCtx,
+    path: BwPath,
+) -> Arrived {
+    match written {
+        // The rule's own `{ … }` text.
+        Some(Term::Formula(_) | Term::Lit(..)) => Arrived::AsWritten,
+        // A variable nothing arrived through: the rule's own, for its own matching to bind.
+        Some(Term::Var(v)) if b.get(v).is_none() => Arrived::AsWritten,
+        // A value arrived through this slot's own variable.
+        Some(Term::Var(_)) => prepare(slot, b, prefix, bw, path),
+        // Any other spelling: no chain to follow.
+        Some(_) => Arrived::AsWritten,
+        // The whole subject list arrived through one variable, so `slot` IS the value.
+        None => prepare(slot, b, prefix, bw, path),
+    }
+}
+
+/// The arriving half of [`arrived`]: instantiate, then rename apart.
+fn prepare(slot: &Term, b: &Binding, prefix: &str, bw: &BwCtx, path: BwPath) -> Arrived {
+    // The instantiation is sized and charged like every other term this module builds. A
+    // refused size has already recorded the run's refusal, which fails the run, so the slot
+    // is left as it arrived rather than half-prepared.
+    match bounded::substitute_deep(slot, &Owned { binding: b, bw, path }, &bw.truncated) {
+        None => Arrived::AsWritten,
+        Some(inst) => Arrived::Local(rename_free_apart(&inst, prefix, bw, path)),
+    }
+}
+
+/// Rename an arriving formula's free variables apart. Formula-local binders and
+/// variables owned by a current or enclosing application keep sharing with that rule.
+/// A name from a completed proof is free here, even if it has the engine's spelling.
+fn rename_free_apart(t: &Term, prefix: &str, bw: &BwCtx, path: BwPath) -> Term {
+    map_vars(t, &|v| {
+        (!quoted_universal(v) && !live_var(v, bw, path)).then(|| prefixed_var(prefix, v))
+    })
+}
 
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
 /// clause of `( template clause list )`, both clauses of `( clause-a clause-b )`. The
@@ -4473,6 +4997,16 @@ fn formula_statements(ts: &[[Term; 3]]) -> usize {
 /// within the run's term-depth allowance), not with its size, and it takes no call stack
 /// per level.
 fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
+    let mut ground = true;
+    let n = stored_statements(ts, &mut ground);
+    ground.then_some(n)
+}
+
+/// The statements a formula charges to the round's work allowance, counted the way
+/// [`stored_ground_statements`] counts them, with `ground` cleared if a variable is reached
+/// at any depth. A pattern prepared by [`arrived`] is charged through this: it is matched
+/// with its own variables renamed apart, so it does not have to be ground (GH #6943).
+fn stored_statements(ts: &[[Term; 3]], ground: &mut bool) -> usize {
     enum Frame<'a> {
         Statements(std::slice::Iter<'a, [Term; 3]>),
         Terms(std::slice::Iter<'a, Term>),
@@ -4500,7 +5034,7 @@ fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
             },
         };
         match t {
-            Term::Var(_) => return None,
+            Term::Var(_) => *ground = false,
             Term::Formula(rs) => {
                 n = n.saturating_add(rs.len());
                 stack.push(Frame::Statements(rs.iter()));
@@ -4510,7 +5044,7 @@ fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
             _ => {}
         }
     }
-    Some(n)
+    n
 }
 
 /// The search of [`formula_unify`].
@@ -4576,7 +5110,11 @@ fn formula_search(
 /// statements include rules — cwm keeps those rule variables quoted in the
 /// emitted formula). Only a variable at the triple level (or inside a list)
 /// leaves the conclusion genuinely uninstantiated.
-fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 3]> {
+fn ground_triple<const ESCAPE: bool>(
+    t: &[Term; 3],
+    b: &Binding,
+    run: &Truncation,
+) -> Option<[Term; 3]> {
     fn instantiated(t: &Term) -> bool {
         match t {
             Term::Var(_) => false,
@@ -4595,7 +5133,7 @@ fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 
     ];
     // The conclusion's own `@forAll` universals, now asserted, are document-level ones
     // (GH #6754). After substitution, so no binding can reach them.
-    g.iter_mut().for_each(assert_conclusion_universals);
+    g.iter_mut().for_each(finish_conclusion_names::<ESCAPE>);
     if g.iter().all(instantiated) {
         Some(g)
     } else {
@@ -4637,18 +5175,27 @@ fn rename_var_prefix(stmts: &mut [[Term; 3]], from: &str, to: &str) {
 /// that run's document level, `__ul.<k>.<iri>`, so the result formula gets them back as its
 /// own: asserting `∀x. S(x)` beside a document under `∀x` is the
 /// same as conjoining `S(x)` under it, since `x` does not occur in what is already there.
-fn assert_conclusion_universals(t: &mut Term) {
+///
+/// Fact and query emission also escape still-unbound application names to `__bx<fold>.`
+/// in this same walk, preserving the fold and original name for deterministic deduplication.
+/// Premise instantiation keeps its live names (`ESCAPE = false`).
+fn finish_conclusion_names<const ESCAPE: bool>(t: &mut Term) {
     match t {
         Term::Var(v) => {
             if let Some(iri) = v.strip_prefix(serialize::CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{}{iri}", serialize::UNIVERSAL_VAR));
             } else if let Some(rest) = v.strip_prefix(CLOSURE_CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{LIFTED_UNIVERSAL}{rest}"));
+            } else if ESCAPE && minted_var(v) {
+                v.replace_range(..MINTED_VAR.len(), ESCAPED_VAR);
             }
         }
-        Term::Formula(ts) => ts.iter_mut().flatten().for_each(assert_conclusion_universals),
-        Term::List(ms) => ms.iter_mut().for_each(assert_conclusion_universals),
-        Term::Triple(tr) => tr.iter_mut().for_each(assert_conclusion_universals),
+        Term::Formula(ts) => ts
+            .iter_mut()
+            .flatten()
+            .for_each(finish_conclusion_names::<ESCAPE>),
+        Term::List(ms) => ms.iter_mut().for_each(finish_conclusion_names::<ESCAPE>),
+        Term::Triple(tr) => tr.iter_mut().for_each(finish_conclusion_names::<ESCAPE>),
         _ => {}
     }
 }
@@ -8102,6 +8649,215 @@ mod runtime_doc_key_golden {
 
 #[cfg(test)]
 mod tests {
+    // The text parser excludes dots from variable names. Build the two ownership cases
+    // through Term so they exercise minted-shaped data, rather than a lexer rejection.
+    #[test]
+    fn a_live_application_id_does_not_own_unminted_source_names() {
+        use super::*;
+        let closure = |variable: &str, backward: bool| {
+            let data = ":seed :value :g . :cfg :pat { :v0 :inner ?source } .\n\
+                        :k :s1 { :v0 :inner :A } . :k :s2 { :v0 :inner :B } .";
+            let head = "?q :odd { :tag :v ?z }";
+            let body = ":seed :value ?q . :cfg :pat ?f . :k :s1 ?s1 . :k :s2 ?s2 . ?s1 log:includes ?f . ?s2 log:includes ?f";
+            let rule = if backward {
+                format!("{{ {head} }} <= {{ {body} }} .")
+            } else {
+                format!("{{ {body} }} => {{ {head} }} .")
+            };
+            let src = format!("@prefix : <http://ex/> . @prefix log: <{LOG}> .\n\
+                               {data} {rule} {{ :g :odd ?r }} => {{ :trace :got ?r . :out :fired :yes }} .");
+            let mut parsed = parser::parse(&src).unwrap();
+            let pattern = parsed
+                .facts
+                .iter_mut()
+                .find(|t| t[0] == Term::Iri("http://ex/cfg".into()))
+                .unwrap();
+            let Term::Formula(ts) = &mut pattern[2] else {
+                panic!("{pattern:?}")
+            };
+            ts[0][2] = Term::Var(variable.into());
+            let run = Truncation::top_level();
+            run_closure(
+                parsed,
+                None,
+                None,
+                &run,
+                StepMode::None,
+                NegationCycles::Reject,
+                None,
+            )
+            .unwrap()
+            .top_level()
+            .0
+        };
+        let baseline = closure("source", true);
+        let formula = &baseline
+            .all
+            .iter()
+            .find(|t| t[0] == Term::Iri("http://ex/trace".into()))
+            .unwrap()[2];
+        let Term::Formula(ts) = formula else {
+            panic!("{formula:?}")
+        };
+        let Term::Var(name) = &ts[0][2] else {
+            panic!("{formula:?}")
+        };
+        let (application, _) = name.strip_prefix("__bx").unwrap().split_once('.').unwrap();
+        let fired = [
+            Term::Iri("http://ex/out".into()),
+            Term::Iri("http://ex/fired".into()),
+            Term::Iri("http://ex/yes".into()),
+        ];
+        assert!(
+            baseline.contains(&fired),
+            "the ordinary pattern is matched afresh"
+        );
+        for name in [
+            format!("__bw0{application}.z"),
+            format!("__bw{application}.not_written"),
+        ] {
+            assert!(
+                minted_var(&name),
+                "the ownership guard must see a minted-shaped name"
+            );
+            let forward = closure(&name, false);
+            let backward = closure(&name, true);
+            assert!(forward.contains(&fired), "forward case {name}");
+            assert!(
+                backward.contains(&fired),
+                "unowned source name {name} matches each scope afresh"
+            );
+        }
+    }
+
+    #[test]
+    fn arriving_patterns_keep_only_live_application_names() {
+        use super::{
+            BwCtx, BwPath, NodeKey, Term, Truncation, rename_free_apart, run_shared::RunShared,
+        };
+        let rules = vec![super::Rule {
+            premise: Vec::new(),
+            conclusion: vec![[Term::Var("x".into()), Term::Iri("http://ex/p".into()), Term::Iri("http://ex/o".into())]],
+        }];
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        let root = bw
+            .node(NodeKey::Root {
+                scope: 0,
+                salt: 0,
+                rule: 0,
+            })
+            .unwrap();
+        let outer = bw
+            .node(NodeKey::Site {
+                parent: root,
+                goal: 1,
+                site: 0,
+            })
+            .unwrap();
+        let inner = bw
+            .node(NodeKey::Site {
+                parent: outer,
+                goal: 2,
+                site: 0,
+            })
+            .unwrap();
+        let step = bw
+            .node(NodeKey::Step {
+                parent: inner,
+                step: 0,
+            })
+            .unwrap();
+        let sibling = bw
+            .node(NodeKey::Site {
+                parent: root,
+                goal: 3,
+                site: 0,
+            })
+            .unwrap();
+        assert!(!BwPath::at(root).in_backward(&bw));
+        assert!(BwPath::at(outer).in_backward(&bw));
+        assert!(BwPath::at(step).in_backward(&bw));
+        let names = [
+            format!("__bw{outer}.x"),
+            format!("__bw{inner}.x"),
+            format!("__bw{sibling}.x"),
+            format!("__bw{step}.x"),
+            "__bwfoo".into(),
+            "__uf.0.http://ex/u".into(),
+        ];
+        let t = Term::List(names.iter().cloned().map(Term::Var).collect());
+        let got = rename_free_apart(&t, "__bp.1.", &bw, BwPath::at(step));
+        let expected = Term::List(
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    Term::Var(if matches!(i, 0 | 1 | 5) {
+                        n.clone()
+                    } else {
+                        format!("__bp.1.{n}")
+                    })
+                })
+                .collect(),
+        );
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn minted_variables_require_digits_and_a_separator() {
+        for name in ["__bw1.z", "__bw0.x", "__bw99999999999999999999999.z"] {
+            assert!(super::minted_var(name), "{name}");
+        }
+        for name in [
+            "__bw1_z", "__bwfoo", "__bw1", "__bw.x", "__bw-1.x", "__bw1x.z",
+        ] {
+            assert!(!super::minted_var(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn quantified_arrival_follows_the_entire_alias_chain() {
+        use super::{Binding, Term, quantified_arrival};
+        let var = |v: &str| Term::Var(v.into());
+        let clause = Term::Formula(vec![[var("__uf.0.http://ex/u"), var("p"), var("o")]]);
+        let mut b = Binding::default();
+        b.insert("first", var("second"));
+        b.insert("second", var("third"));
+        b.insert("third", clause.clone());
+        assert!(quantified_arrival(Some(&var("first")), &var("first"), &b));
+        assert!(quantified_arrival(None, &var("second"), &b));
+        assert!(!quantified_arrival(Some(&clause), &clause, &b));
+        assert!(!quantified_arrival(None, &var("unbound"), &b));
+    }
+
+    /// GH #6943: the projection of a backward answer resolves ONLY the names the engine
+    /// minted ([`super::engine_var`]). A name a document WROTE belongs to the formula it is
+    /// written in, so it is left alone even when the proof's own binding has a value for it.
+    ///
+    /// This is a direct test because no document can reach the difference: a caller's names
+    /// are excluded by [`super::Produced::callers`] as well, and every other name a backward
+    /// binding holds is already engine-minted. The check is the projection's own guarantee
+    /// rather than a consequence of those two, so it is asserted here rather than left to
+    /// hold by accident.
+    #[test]
+    fn the_projection_resolves_only_names_the_engine_minted() {
+        use super::bounded::Subst;
+        use super::{Binding, BwPrefix, Produced, Term};
+        let iri = |s: &str| Term::Iri(s.into());
+        let mut sol = Binding::default();
+        // One engine-minted name and one a document wrote, both bound to a value, and
+        // neither mentioned by the caller or by the goal.
+        let mut pfx = BwPrefix::EMPTY;
+        let minted = pfx.render(7).to_string() + "x";
+        sol.insert(std::rc::Rc::from(minted.as_str()), iri("http://ex/v"));
+        sol.insert(std::rc::Rc::from("y"), iri("http://ex/w"));
+        let caller = Binding::default();
+        let goal = [iri("http://ex/g"), iri("http://ex/p"), iri("http://ex/o")];
+        let p = Produced::new(&sol, &caller, &goal);
+        assert_eq!(p.bound(&minted), Some(&iri("http://ex/v")), "a minted name resolves");
+        assert_eq!(p.bound("y"), None, "a name the document wrote is left alone");
+    }
+
     /// GH #6901: the length of a numeral's lexical form, computed from its value, equals
     /// the length of the literal it renders, for every rendering (integer, decimal at any
     /// scale, whole and fractional `f64`, `xsd:double` e-notation, non-finite values), and
@@ -10895,13 +11651,13 @@ mod tests {
     #[test]
     fn the_substitution_answers_what_the_string_keyed_map_answered() {
         let mut r = rng(0x7080);
-        // Names that collide on prefixes, plus the long `__bw<fold>_` shape a backward
+        // Names that collide on prefixes, plus the long `__bw<fold>.` shape a backward
         // renaming actually produces, so the keys under test are the keys the engine uses.
         let names: Vec<String> = (0..12)
             .map(|i| match i % 4 {
                 0 => format!("x{i}"),
                 1 => format!("x{i}x"),
-                2 => format!("__bw1844674407370955161{i}_y"),
+                2 => format!("__bw1844674407370955161{i}.y"),
                 _ => format!("__up.{i}"),
             })
             .collect();
@@ -11089,16 +11845,16 @@ mod tests {
         assert!(reached_false > 100, "the refusing arms are reached: {reached_false}");
     }
 
-    /// Every fact a backward proof derives is BYTE IDENTICAL to what the
-    /// `HashMap<String, Term>`-keyed substitution derived, and so is every proof step.
+    /// Backward proofs preserve the captured substitution results and derivation folds.
+    /// Ground answers and proof steps match the `HashMap<String, Term>`-keyed substitution;
+    /// surviving unbound names use the current escaped prefix around the captured folds.
     ///
-    /// The expectations are not computed: they are the literal output of the engine as it
-    /// stood BEFORE this change, captured from the parent commit and pasted in. That is
-    /// what makes this a differential and not a tautology — the new representation cannot
-    /// talk its way into agreeing with itself.
+    /// The expected bindings and folds were captured before the substitution representation
+    /// changed, not computed from the implementation being tested. The returned-formula
+    /// expectations also apply the projection and escaped-name corrections (GH #6943).
     ///
     /// What they pin is exactly the part a representation change could move. A backward
-    /// renaming's `__bw<fold>_` name is a function of the goal with its variables resolved
+    /// renaming's `__bw<fold>.` name is a function of the goal with its variables resolved
     /// to the END of their binding chains, so it reads the substitution's whole contents;
     /// and a quoted formula is opaque to substitution, so that name survives into a derived
     /// fact, where it becomes part of the fact's term identity, its `why()` string and its
@@ -11128,14 +11884,23 @@ mod tests {
         };
         let cases: Vec<(&str, &str, &str, &[&str])> = vec![
             (
-                "a renamed variable leaked into the answer",
+                // The returned formula carries what the proof BOUND (`?y` = each subject's
+                // own object) and still names what it did not (`?z`, which no premise
+                // binds): GH #6943 case 1, `Produced`. The subject used to read
+                // `Var("__bw<n>.y")` here — a name whose only binding was dropped with the
+                // proof's substitution — and that name, not `:v0`, was what the derived
+                // fact's identity, its `why()` and its `sparq-prov` IRI were built from.
+                // The renaming property this case is in the list for is untouched: one
+                // distinct escaped `__bx<n>.` chunk per goal, in `?z`, which is still the
+                // fingerprint of the derivation and nothing else.
+                "a renamed variable the proof bound, instantiated; one it did not, kept",
                 "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n:s2 :p :v2 .\n\
                  { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n",
                 "@prefix : <http://ex/> .\n{ ?x :p ?any . ?x :has ?f } => { ?x :vals ?f } .\n",
                 &[
-                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Var("__bw13293826320743913544_y"), Iri("http://ex/inner"), Var("__bw13293826320743913544_z")]])"#,
-                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Var("__bw14225706374877674727_y"), Iri("http://ex/inner"), Var("__bw14225706374877674727_z")]])"#,
-                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Var("__bw8776505594191193573_y"), Iri("http://ex/inner"), Var("__bw8776505594191193573_z")]])"#,
+                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Iri("http://ex/v0"), Iri("http://ex/inner"), Var("__bx13293826320743913544.z")]])"#,
+                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Iri("http://ex/v1"), Iri("http://ex/inner"), Var("__bx14225706374877674727.z")]])"#,
+                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Iri("http://ex/v2"), Iri("http://ex/inner"), Var("__bx8776505594191193573.z")]])"#,
                 ],
             ),
             (
@@ -11160,8 +11925,12 @@ mod tests {
                  { ?x :has { ?y :inner ?z } } <= { ?x :q ?y } .\n",
                 "@prefix : <http://ex/> .\n{ :a :has ?f } => { :all :vals ?f } .\n",
                 &[
-                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Var("__bw17784778144888223834_y"), Iri("http://ex/inner"), Var("__bw17784778144888223834_z")]])"#,
-                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Var("__bw17784779244399852045_y"), Iri("http://ex/inner"), Var("__bw17784779244399852045_z")]])"#,
+                    // Each site's own `?y` instantiated to what THAT site proved
+                    // (`:v` / `:w`), its `?z` still the site's own fingerprint: the two
+                    // rows this case is about stay two rows, and now differ in what was
+                    // proved as well as in the name (GH #6943 case 1, `Produced`).
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/v"), Iri("http://ex/inner"), Var("__bx17784778144888223834.z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Iri("http://ex/w"), Iri("http://ex/inner"), Var("__bx17784779244399852045.z")]])"#,
                 ],
             ),
             (
@@ -11407,8 +12176,8 @@ mod tests {
         }
     }
 
-    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
-    /// the one `__bw<n>_` chunk `serialize::universal_base` reads back and that every
+    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}.")` wrote. That rendering is
+    /// the one `__bw<n>.` chunk `serialize::universal_base` reads back and that every
     /// renamed variable carries, so a drift here would rename every standardize-apart
     /// space. Checked at the digit-count boundaries and at both extremes of a `u64`.
     #[test]
@@ -11423,7 +12192,7 @@ mod tests {
         }
         for f in folds {
             let mut pfx = BwPrefix::EMPTY;
-            assert_eq!(pfx.render(f), format!("__bw{f}_"), "BwPrefix::render({f})");
+            assert_eq!(pfx.render(f), format!("__bw{f}."), "BwPrefix::render({f})");
         }
     }
 
@@ -11626,11 +12395,17 @@ mod tests {
     fn backward_renaming_does_not_depend_on_traversal_order() {
         // GH #6844 item 2: a backward rule's conclusion can bind a goal variable to a
         // QUOTED FORMULA that still holds the rule's freshened variables, and that value
-        // reaches a derived fact — where the `__bw<n>_` name is part of the fact's term
+        // reaches a derived fact — where the `__bx<n>.` name is part of the fact's term
         // identity (its `term_key`, its `why()` string, its `sparq-prov` IRI). The name came
         // from a counter bumped once per rule application, and the applications here run one
         // per binding of the preceding conjunct, in the order the fact set yields them: so
-        // which subject got `__bw0_z` moved with insertion history and hasher width.
+        // which subject got the old `__bw0_z` moved with insertion history and hasher width.
+        //
+        // The variable this reads is `?z`, which NO premise binds. Its sibling `?y` is bound
+        // by the premise, so the projection instantiates it (GH #6943 case 1, `Produced`)
+        // and it is no longer a name at all; what this case is about — that a surviving
+        // name is the derivation's own fingerprint, one chunk, one per goal, and the same
+        // whatever order the statements arrive in — is exactly what `?z` still carries.
         let n = 6;
         let prefixes = "@prefix : <http://ex/> .\n{ ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
         let body: Vec<String> =
@@ -11642,22 +12417,29 @@ mod tests {
         for (i, r) in runs.iter().enumerate().skip(1) {
             assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
         }
-        // The name is the derivation's own fingerprint and nothing else: one `__bw<n>_`
+        // The name is the derivation's own fingerprint and nothing else: one `__bx<n>.`
         // chunk, so its length does not grow with the depth of the proof that minted it.
         let names: Vec<&str> = runs[0]
             .iter()
             .map(|r| {
-                let at = r.find("Var(\"__bw").expect("the value carries a renamed variable");
+                let at = r
+                    .find("Var(\"__bx")
+                    .expect("the value carries a renamed variable");
                 &r[at..]
             })
             .collect();
-        for v in &names {
-            let rest = v.strip_prefix("Var(\"__bw").expect("a renamed variable");
+        for (r, v) in runs[0].iter().zip(&names) {
+            assert_eq!(
+                r.matches("Var(\"__bx").count(),
+                1,
+                "one surviving name per row: {r}"
+            );
+            let rest = v.strip_prefix("Var(\"__bx").expect("a renamed variable");
             let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
             assert!(digits > 0, "{v}");
             assert!(
-                rest[digits..].starts_with("_y\"), Iri(\"http://ex/inner\")"),
-                "one chunk, then the rule's own variable: {v}"
+                rest[digits..].starts_with(".z\")]])"),
+                "one chunk, then the rule's own unbound variable, last in the row: {v}"
             );
         }
         // Each subject is a different GOAL, so each takes a name of its own: one derived

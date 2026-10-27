@@ -15,7 +15,7 @@
 //! fails if a limit or a raw `Regex::new` appears in another N3 evaluator source.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::rc::Rc;
 
@@ -80,7 +80,6 @@ pub(crate) enum CutKind {
     #[cfg(feature = "compiled-rules")]
     Rounds,
     TermBytes,
-    #[cfg(feature = "compiled-rules")]
     Other,
 }
 
@@ -109,7 +108,8 @@ pub(crate) fn rounds_error(limits: ClosureLimits) -> String {
 /// The record also carries the run's [`ClosureLimits`], so every forward closure of the
 /// run (nested ones included) gets the allowance its entry point was given, the run's
 /// stack allowance ([`RUN_STACK`]), so one allowance is shared by every level, and the
-/// run's refusal: the error of the first term refused for its size ([`derived_term`]),
+/// run's refusal: the error of the first term refused for its size ([`derived_term`])
+/// or resolved depth ([`substitute_resolved`]),
 /// which fails every closure of the run that sees it.
 ///
 /// The fields are private and there is no `Default`: the only ways to make a fresh record
@@ -151,7 +151,7 @@ impl Truncation {
         self.cut.get()
     }
 
-    /// The error of the first term the run refused for its size, if any: every closure of
+    /// The error of the first term the run refused for its size or resolved depth: every closure of
     /// the run that ends after it fails with it.
     pub(crate) fn refusal(&self) -> Option<String> {
         self.refusal
@@ -952,14 +952,103 @@ pub(crate) fn substitute<B: Subst + ?Sized>(
 /// [`substitute`], also substituting inside quoted formulae (a conclusion's
 /// instantiation): a variable left inside a formula after substitution is the formula's
 /// own.
-#[inline]
-pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
+#[inline(always)]
+pub(crate) fn substitute_deep<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    run: &Truncation,
+) -> Option<Term> {
     match t {
+        // A root variable copies one opaque value. Keep ordinary conclusion slots
+        // out of the recursive generic walk.
+        Term::Var(v) => Some(b.bound(v).cloned().unwrap_or_else(|| t.clone())),
         Term::List(_) | Term::Triple(_) | Term::Formula(_) if compound_refused(t, b, run, true) => {
             None
         }
         _ => Some(apply_deep(t, b)),
     }
+}
+
+/// Size the fully resolved unfolding before building it. Shared bound values form a
+/// DAG whose unfolding can grow exponentially, so each (address, alias fuel, depth room)
+/// is memoized. Fuel counts only binding hops; containers spend structural depth room.
+/// Different paths can reach a value with different allowances, and must not reuse a
+/// measurement made with more room. Default SipHash protects these input-derived keys.
+fn resolved_bytes_deep<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    fuel: usize,
+    room: usize,
+    open: &mut HashSet<*const Term>,
+    memo: &mut HashMap<(*const Term, usize, usize), usize>,
+) -> Option<usize> {
+    let all = |ts: &mut dyn Iterator<Item = &Term>, open: &mut HashSet<*const Term>, memo: &mut _| {
+        let below = room.checked_sub(1)?;
+        let mut n = TERM_NODE_BYTES;
+        for m in ts {
+            n = n.saturating_add(resolved_bytes_deep(m, b, fuel, below, open, memo)?);
+        }
+        Some(n)
+    };
+    match t {
+        Term::Var(v) => match b.bound(v) {
+            Some(val) => {
+                if super::mentions_var(val, &|n| n == v) {
+                    return fits(val, room).then(|| term_bytes(val));
+                }
+                let at: *const Term = val;
+                if open.contains(&at) {
+                    return Some(term_bytes(t));
+                }
+                debug_assert!(fuel > 0, "a binding path cannot exceed the binding length");
+                let fuel = fuel.saturating_sub(1);
+                let key = (at, fuel, room);
+                if let Some(n) = memo.get(&key) {
+                    return Some(*n);
+                }
+                open.insert(at);
+                let n = resolved_bytes_deep(val, b, fuel, room, open, memo);
+                open.remove(&at);
+                let n = n?;
+                memo.insert(key, n);
+                Some(n)
+            }
+            None => Some(term_bytes(t)),
+        },
+        Term::List(ms) => all(&mut ms.iter(), open, memo),
+        Term::Triple(tr) => all(&mut tr.iter(), open, memo),
+        Term::Formula(ts) => all(&mut ts.iter().flatten(), open, memo),
+        _ => Some(term_bytes(t)),
+    }
+}
+
+/// Resolve inside landed values, after checking both the unfolding's size and depth.
+/// `fuel` is the binding length plus one, enough for every acyclic binding path.
+/// Exhausted structural depth refuses the run explicitly, including positive-only rules.
+pub(crate) fn substitute_resolved<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    fuel: usize,
+    run: &Truncation,
+) -> Option<Term> {
+    let Some(bytes) = resolved_bytes_deep(
+        t,
+        b,
+        fuel,
+        run.term_depth.get(),
+        &mut HashSet::new(),
+        &mut HashMap::new(),
+    ) else {
+        run.refuse(CutKind::Other, || format!(
+            "n3: backward projection exceeded the term-depth limit (allowance: {} nested containers)",
+            run.term_depth.get(),
+        ));
+        return None;
+    };
+    if substituted_refused(run, bytes) {
+        return None;
+    }
+    Some(apply_resolved(t, b, fuel, &mut HashSet::new()))
 }
 
 /// Backward goal `g` with every variable resolved to the END of its binding chain in `b`
@@ -1199,9 +1288,10 @@ fn apply<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
 
 /// [`apply`] through quoted formulae too. Private: callers go through
 /// [`substitute_deep`].
-fn apply_deep(t: &Term, b: &super::Binding) -> Term {
+#[inline]
+fn apply_deep<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
     match t {
-        Term::Var(v) => match b.get(v) {
+        Term::Var(v) => match b.bound(v) {
             Some(val) => val.clone(),
             None => t.clone(),
         },
@@ -1215,6 +1305,77 @@ fn apply_deep(t: &Term, b: &super::Binding) -> Term {
             apply_deep(&tr[0], b),
             apply_deep(&tr[1], b),
             apply_deep(&tr[2], b),
+        ])),
+        _ => t.clone(),
+    }
+}
+
+/// [`apply_deep`], and then INTO whatever each variable landed on.
+///
+/// A term a substitution binds a variable to can itself hold variables the same substitution
+/// binds. [`apply_deep`] clones such a value and stops, which left them behind:
+/// `{ ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }` returned
+/// `{ { ?__bw<n>.y :q :r } :p :b }` with `?y` bound to its value all along (GH #6943).
+///
+/// This is NOT what ordinary substitution should do — a quoted formula is a value, and a
+/// formula a caller passes in has to come back as the caller wrote it, which is why
+/// [`apply_deep`] stops where it does. The projection of a backward proof uses the
+/// resolving form to instantiate what the proof itself produced, through
+/// [`substitute_resolved`]. Arriving patterns use ordinary deep substitution and stop
+/// at the value their chain reaches.
+///
+/// `fuel` bounds binding hops only. Structural depth was checked by the sizing walk
+/// before building. `open` holds the bound values currently being expanded: re-entering
+/// one leaves the variable unresolved, and a direct self-reference clones its value once,
+/// as ordinary deep substitution does.
+fn apply_resolved<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    fuel: usize,
+    open: &mut HashSet<*const Term>,
+) -> Term {
+    match t {
+        Term::Var(v) => match b.bound(v) {
+            Some(val) => {
+                // Occurs check: a value that mentions the very variable it is bound to is an
+                // infinite term, and expanding it once more only renders one more level of
+                // it. Take it as it stands, which is the term [`apply_deep`] produces.
+                if super::mentions_var(val, &|n| n == v) {
+                    return val.clone();
+                }
+                let at: *const Term = val;
+                if open.contains(&at) {
+                    // Already being resolved further up: this is a cycle through the
+                    // substitution. Leave the VARIABLE as it stands rather than expanding
+                    // the value once more, which is what [`apply_deep`] does and so keeps a
+                    // cyclic binding rendering exactly as it did before.
+                    return t.clone();
+                }
+                open.insert(at);
+                let out = apply_resolved(val, b, fuel.saturating_sub(1), open);
+                open.remove(&at);
+                out
+            }
+            None => t.clone(),
+        },
+        Term::List(ms) => {
+            Term::List(ms.iter().map(|m| apply_resolved(m, b, fuel, open)).collect())
+        }
+        Term::Formula(ts) => Term::Formula(
+            ts.iter()
+                .map(|r| {
+                    [
+                        apply_resolved(&r[0], b, fuel, open),
+                        apply_resolved(&r[1], b, fuel, open),
+                        apply_resolved(&r[2], b, fuel, open),
+                    ]
+                })
+                .collect(),
+        ),
+        Term::Triple(tr) => Term::Triple(Box::new([
+            apply_resolved(&tr[0], b, fuel, open),
+            apply_resolved(&tr[1], b, fuel, open),
+            apply_resolved(&tr[2], b, fuel, open),
         ])),
         _ => t.clone(),
     }
@@ -1810,6 +1971,33 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resolved_size_memo_respects_alias_fuel_and_depth_room() {
+        use super::*;
+        use crate::n3::Binding;
+        let var = |v: &str| Term::Var(v.into());
+        let mut b = Binding::default();
+        b.insert("x", var("y"));
+        b.insert("y", Term::List(vec![Term::Iri("http://ex/c".into())]));
+        let t = var("x");
+        let mut open = HashSet::new();
+        let mut memo = HashMap::new();
+        assert!(resolved_bytes_deep(&t, &b, 3, 2, &mut open, &mut memo).is_some());
+        #[cfg(debug_assertions)]
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                resolved_bytes_deep(&t, &b, 1, 2, &mut HashSet::new(), &mut HashMap::new())
+            }))
+            .is_err(),
+            "an impossible hop bound must trip the debug invariant"
+        );
+        assert_eq!(
+            resolved_bytes_deep(&t, &b, 3, 0, &mut open, &mut memo),
+            None
+        );
+        assert!(resolved_bytes_deep(&t, &b, 2, 1, &mut open, &mut memo).is_some());
+    }
+
     use super::*;
 
     /// #6953: a formula match's free allowance covers only that match: what it leaves
