@@ -59,6 +59,9 @@ mod reconcile_runtime;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage_runtime;
 
+#[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+mod open_retry;
+
 #[cfg(not(target_arch = "wasm32"))]
 macro_rules! native_main {
     ($($item:item)*) => {

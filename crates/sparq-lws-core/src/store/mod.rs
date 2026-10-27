@@ -24,8 +24,6 @@ pub mod counting;
 // + `research/lws-design-records.md` §3.
 #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
 pub mod embedded;
-#[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
-mod open_retry;
 // The live SPARQL-over-HTTP client (opt-in `http-sparq` feature — sq-gg0qq.3): the REMOTE
 // shared-service backend, `PSS_SPARQ_BACKEND=http`. Off by default — in-workspace builds bind the
 // engine in-process (`embedded` above) instead of paying an HTTP round-trip per index operation.

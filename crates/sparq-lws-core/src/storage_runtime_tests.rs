@@ -877,3 +877,34 @@ mod embedded {
         );
     }
 }
+
+#[cfg(feature = "embedded-sparq")]
+#[test]
+fn retry_keeps_zero_wait_lock_context_and_other_errors() {
+    let mut attempts = 0;
+    let error = open_index_with_retry(std::path::Path::new("index"), Duration::ZERO, |_| {
+        attempts += 1;
+        Err::<(), _>(io::Error::new(io::ErrorKind::WouldBlock, "held"))
+    })
+    .unwrap_err();
+    assert_eq!(attempts, 1);
+    assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(
+        error.to_string(),
+        "cannot acquire data-directory index lock index.lock (inside index/sparq.lock): held"
+    );
+
+    let mut attempts = 0;
+    let error = open_index_with_retry(
+        std::path::Path::new("index"),
+        Duration::from_secs(1),
+        |_| {
+            attempts += 1;
+            Err::<(), _>(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
+        },
+    )
+    .unwrap_err();
+    assert_eq!(attempts, 1);
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(error.to_string(), "denied");
+}

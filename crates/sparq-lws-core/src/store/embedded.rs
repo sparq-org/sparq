@@ -79,12 +79,13 @@ use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use sparq_core::Graph;
 use tokio::sync::{mpsc, oneshot};
 
-use super::open_retry::{open_with_retry, OPEN_RETRY_TIMEOUT};
+use crate::open_retry::open_with_retry;
 use super::sparq::{DeleteOutcome, ReadPlan, ResourceMeta, SparqClient, SparqError};
 use super::sparql;
 use super::timestamp;
@@ -97,6 +98,8 @@ const ACTOR_THREAD_NAME: &str = "sparq-embedded-graph";
 /// The fail-closed error after a panic, indeterminate commit, or actor thread failure.
 /// Reopen the graph before serving any further operations.
 const ACTOR_STOPPED: &str = "fatal: embedded graph actor stopped; restart to recover";
+
+const OPEN_RETRY_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// One unit of work for the [`GraphActor`]: a closure run ON the actor thread with EXCLUSIVE
 /// `&mut Graph` access. The job is type-erased (it carries and completes its OWN reply channel
@@ -298,7 +301,13 @@ impl EmbeddedSparqClient {
     /// retain a dropped graph's lock descriptors. A holder that remains live is still refused
     /// once that retry budget expires; other I/O errors are returned immediately.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
-        let graph = open_with_retry(OPEN_RETRY_TIMEOUT, || Graph::open(dir)).map_err(|e| {
+        let graph = open_with_retry(
+            OPEN_RETRY_TIMEOUT,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            || Graph::open(dir),
+        )
+        .map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
         })?;
         Self::over(graph)

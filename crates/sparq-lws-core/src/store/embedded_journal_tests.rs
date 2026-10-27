@@ -140,18 +140,23 @@ async fn directory_open_retries_both_lock_files_after_transient_contention() {
         };
         let mut held = Some(DirLock::acquire(LockLocation::sibling_of(&target).unwrap()).unwrap());
         let mut attempts = 0;
-        let graph = open_with_retry(OPEN_RETRY_TIMEOUT, || {
-            attempts += 1;
-            let result = Graph::open(&dir.0);
-            if let Some(lock) = held.take() {
-                assert_eq!(
-                    result.as_ref().err().unwrap().kind(),
-                    std::io::ErrorKind::WouldBlock
-                );
-                drop(lock);
-            }
-            result
-        })
+        let graph = open_with_retry(
+            OPEN_RETRY_TIMEOUT,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            || {
+                attempts += 1;
+                let result = Graph::open(&dir.0);
+                if let Some(lock) = held.take() {
+                    assert_eq!(
+                        result.as_ref().err().unwrap().kind(),
+                        std::io::ErrorKind::WouldBlock
+                    );
+                    drop(lock);
+                }
+                result
+            },
+        )
         .unwrap();
         // Other tests can fork while `held` is live, retaining its descriptor past drop.
         assert!(attempts >= 2, "the entire open must be tried again");
