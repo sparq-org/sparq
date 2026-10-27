@@ -1705,6 +1705,205 @@ async fn minimal_writer_grants(mode: bool) {
     .unwrap();
 }
 
+async fn compaction_requires_delete_authority(mode: bool) {
+    let document_bytes = 4096;
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            compact_after: 1,
+            document_bytes,
+            ..Default::default()
+        },
+    )
+    .await;
+    restrict_writer(&h, true, true).await;
+    let mut expected = String::new();
+    let mut expected_vector = StateVector::default();
+    for round in 0..5 {
+        // Requiring a fresh listing proves the previous room actually retired.
+        gate.listing.store(true, Ordering::SeqCst);
+        let release = async {
+            tokio::time::timeout(Duration::from_secs(4), gate.entered.notified())
+                .await
+                .expect("rejoining must load the persisted room");
+            gate.listing.store(false, Ordering::SeqCst);
+            gate.released.notify_one();
+        };
+        let (mut writer, ()) = tokio::join!(h.client(WRITER, 1600 + round), release);
+        assert_eq!(writer.text(), expected);
+        assert_eq!(writer.vector(), expected_vector);
+        let before = writer.vector();
+        let addition = if round == 0 {
+            "x".repeat(3500)
+        } else {
+            format!("-{round}")
+        };
+        expected.push_str(&addition);
+        writer
+            .doc
+            .get_or_insert_text("text")
+            .push(&mut writer.doc.transact_mut(), &addition);
+        let update = writer.doc.transact().encode_state_as_update_v1(&before);
+        writer
+            .send(Message::Sync(SyncMessage::Update(update)))
+            .await;
+        expected_vector = writer.vector();
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                if h.file_state().await.transact().state_vector() == expected_vector {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("each accepted edit must reach the room files");
+        let encoded = writer
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        assert!(encoded.len() < document_bytes);
+        assert!(encoded.len() * 5 > document_bytes * 4);
+        writer.finish_close().await;
+        drop(writer);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(61)).await;
+        tokio::time::resume();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut updates = 0;
+        for child in h.store.list_children(ROOM).await.unwrap() {
+            if child.as_str().ends_with(".meta") {
+                continue;
+            }
+            let body = h.store.read(child.as_str()).await.unwrap().body;
+            assert!(
+                body.starts_with(b"JYU1"),
+                "compaction requires delete authority"
+            );
+            updates += 1;
+        }
+        assert_eq!(updates, round as usize + 1);
+    }
+    let mut owner = h.client(OWNER, 1700).await;
+    assert_eq!(owner.text(), expected);
+    assert_eq!(owner.vector(), expected_vector);
+    // The last departing writer need not be the eligible compactor.
+    let mut writer = h.client(WRITER, 1701).await;
+    owner.finish_close().await;
+    writer.finish_close().await;
+    drop((owner, writer));
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(61)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let mut logs = Vec::new();
+            for child in h.store.list_children(ROOM).await.unwrap() {
+                if !child.as_str().ends_with(".meta") {
+                    logs.push(h.store.read(child.as_str()).await.unwrap().body);
+                }
+            }
+            if logs.len() == 1 && logs[0].starts_with(b"JYS1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("eligible writer must compact to one confirmed snapshot");
+    let mut reloaded = h.client(OWNER, 1702).await;
+    reloaded.until_text(&expected).await;
+    assert_eq!(reloaded.vector(), expected_vector);
+}
+
+#[tokio::test]
+async fn compaction_requires_delete_authority_solid() {
+    compaction_requires_delete_authority(false).await;
+}
+#[tokio::test]
+async fn compaction_requires_delete_authority_lws() {
+    compaction_requires_delete_authority(true).await;
+}
+
+async fn socket_decoder_capacity(mode: bool) {
+    use tokio_tungstenite::tungstenite::protocol::frame::{
+        coding::{Data, OpCode},
+        Frame,
+    };
+    for fragmented in [false, true] {
+        let h = Harness::new(
+            mode,
+            Limits {
+                message_bytes: 256,
+                document_bytes: 1024,
+                ..Default::default()
+            },
+        )
+        .await;
+        let mut client = h.client(OWNER, 1750).await;
+        if fragmented {
+            for (opcode, final_frame) in [(Data::Binary, false), (Data::Continue, true)] {
+                client
+                    .ws
+                    .send(Ws::Frame(Frame::message(
+                        vec![0; 300],
+                        OpCode::Data(opcode),
+                        final_frame,
+                    )))
+                    .await
+                    .unwrap();
+            }
+        } else {
+            client
+                .ws
+                .send(Ws::Binary(vec![0; 600].into()))
+                .await
+                .unwrap();
+        }
+        assert_eq!(client.close_code().await, 4413);
+    }
+}
+
+#[tokio::test]
+async fn socket_decoder_capacity_solid() {
+    socket_decoder_capacity(false).await;
+}
+#[tokio::test]
+async fn socket_decoder_capacity_lws() {
+    socket_decoder_capacity(true).await;
+}
+
+async fn malformed_transport_drops_connection(mode: bool) {
+    use tokio::io::AsyncWriteExt;
+    let h = Harness::new(mode, Limits::default()).await;
+    let mut client = h.client(OWNER, 1800).await;
+    let MaybeTlsStream::Plain(stream) = client.ws.get_mut() else {
+        panic!("fixture uses a plain local connection");
+    };
+    // An unmasked client frame is a protocol receive error, not an oversized message.
+    stream.write_all(&[0x82, 0x01, 0x00]).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            match client.ws.next().await {
+                Some(Ok(Ws::Close(frame))) => panic!("unexpected error close frame: {frame:?}"),
+                Some(Err(_)) | None => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("malformed transport must be dropped");
+}
+
+#[tokio::test]
+async fn malformed_transport_drops_connection_solid() {
+    malformed_transport_drops_connection(false).await;
+}
+#[tokio::test]
+async fn malformed_transport_drops_connection_lws() {
+    malformed_transport_drops_connection(true).await;
+}
+
 #[tokio::test]
 async fn read_and_append_grants_allow_edits_solid() {
     minimal_writer_grants(false).await;

@@ -24,6 +24,8 @@ pub struct Agent {
 pub struct Access {
     pub read: bool,
     pub write: bool,
+    /// Authority required by ordinary deletion of a room member.
+    pub delete: bool,
 }
 
 #[async_trait]
@@ -123,7 +125,7 @@ struct Room {
     flushing: Option<(Agent, u64)>,
     files: Vec<String>,
     update_files: usize,
-    last_writer: Option<Agent>,
+    writers: Vec<Agent>,
     last_left: Instant,
     sequence: u64,
     newest_ms: u64,
@@ -132,6 +134,17 @@ struct Room {
 }
 
 impl Room {
+    fn remember_writer(&mut self, agent: &Agent, limit: usize) {
+        if limit == 0 {
+            return;
+        }
+        self.writers.retain(|writer| writer != agent);
+        if self.writers.len() >= limit {
+            self.writers.remove(0);
+        }
+        self.writers.push(agent.clone());
+    }
+
     fn broadcast(&mut self, except: u64, bytes: Vec<u8>) {
         let bytes: Arc<[u8]> = bytes.into();
         for (id, peer) in &self.peers {
@@ -283,7 +296,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
             let _ = tx.try_send(Ok(frame.into()));
         }
         if ticket.write && access.write {
-            guard.last_writer = Some(ticket.agent.clone());
+            guard.remember_writer(&ticket.agent, self.0.limits.peers_per_room);
         }
         guard.peers.insert(
             id,
@@ -315,7 +328,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
             flushing: None,
             files,
             update_files,
-            last_writer: None,
+            writers: Vec::new(),
             last_left: Instant::now(),
             sequence: 0,
             newest_ms,
@@ -440,7 +453,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                                 delay,
                             },
                         );
-                        room.last_writer = Some(session.agent.clone());
+                        room.remember_writer(&session.agent, self.0.limits.peers_per_room);
                         room.broadcast(
                             session.id,
                             Message::Sync(SyncMessage::Update(update)).encode_v1(),
@@ -582,38 +595,46 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 {
                     guard.unloading = true;
                     let snapshot = if guard.update_files >= relay.0.limits.compact_after {
-                        guard
-                            .last_writer
-                            .clone()
-                            .zip(nonce().ok())
-                            .map(|(agent, random)| {
-                                (
-                                    agent,
-                                    LogFile {
-                                        kind: LogKind::Snapshot,
-                                        millis: guard.newest_ms,
-                                        nonce: random,
-                                        update: guard.doc.state.clone(),
-                                    },
-                                    guard.files.clone(),
-                                )
-                            })
+                        nonce().ok().map(|random| {
+                            (
+                                guard.writers.clone(),
+                                LogFile {
+                                    kind: LogKind::Snapshot,
+                                    millis: guard.newest_ms,
+                                    nonce: random,
+                                    update: guard.doc.state.clone(),
+                                },
+                                guard.files.clone(),
+                            )
+                        })
                     } else {
                         None
                     };
                     drop(guard);
-                    if let Some((agent, snapshot, folded)) = snapshot {
-                        // Confirm the snapshot before any deletion; ordinary DELETE checks apply.
-                        if relay
-                            .0
-                            .backend
-                            .create(&name, &agent, &snapshot)
-                            .await
-                            .is_ok()
-                        {
-                            for file in folded {
-                                let _ = relay.0.backend.delete(&name, &agent, &file).await;
+                    if let Some((writers, snapshot, folded)) = snapshot {
+                        for agent in writers.into_iter().rev() {
+                            if !relay
+                                .0
+                                .backend
+                                .access(&name, &agent)
+                                .await
+                                .is_ok_and(|access| access.read && access.write && access.delete)
+                            {
+                                continue;
                             }
+                            // Confirm the snapshot before any deletion; ordinary DELETE checks apply.
+                            if relay
+                                .0
+                                .backend
+                                .create(&name, &agent, &snapshot)
+                                .await
+                                .is_ok()
+                            {
+                                for file in folded {
+                                    let _ = relay.0.backend.delete(&name, &agent, &file).await;
+                                }
+                            }
+                            break;
                         }
                     }
                     relay.0.rooms.lock().await.remove(&name);

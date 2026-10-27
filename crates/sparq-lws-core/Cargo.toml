@@ -218,6 +218,8 @@ itoa = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sparq-lws-ysync = { path = "../sparq-lws-ysync", optional = true }
+# Name the existing socket error type for capacity classification.
+tokio-tungstenite = { version = "0.29", default-features = false, optional = true }
 sparq-lws-blob-fs = { path = "../sparq-lws-blob-fs", optional = true }
 # Existing default-member JSON-LD processor for compact storage-description output.
 sparq-jsonld = { path = "../sparq-jsonld" }
@@ -364,7 +366,7 @@ h3-quinn = "0.0.10"
 
 [features]
 # Optional Yjs collaboration service in both native protocol modes.
-crdt-sync = ["dep:sparq-lws-ysync"]
+crdt-sync = ["dep:sparq-lws-ysync", "dep:tokio-tungstenite"]
 # Linked Web Storage authentication suites, each in its own package; the server offers each one
 # compiled in that is configured (and that `SOLID_SERVER_LWS_AUTHN` names, when set). SAML 2.0
 # subject tokens (`sparq-lws-authn-saml`), offered when

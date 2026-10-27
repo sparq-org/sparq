@@ -1496,7 +1496,7 @@ pub async fn delete_handler<S: Store>(
     let target_mode = if is_acl || target.is_container {
         AccessMode::Control
     } else {
-        AccessMode::Write
+        mode_for_operation("DELETE", &target.iri, false)
     };
     let origin = request_origin(&headers);
     let granted = state

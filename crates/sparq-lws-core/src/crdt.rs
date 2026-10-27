@@ -17,7 +17,7 @@ use sparq_lws_ysync::{Access, Agent, Authorizer, Fault, Limits, LogFile, Relay, 
 
 use crate::auth::VerifiedToken;
 use crate::authz::wac::{Decision, WacAuthorizer};
-use crate::authz::AccessMode;
+use crate::authz::{mode_for_operation, AccessMode};
 use crate::ldp::handler::{delete_handler, post_handler, LdpState};
 use crate::lws::{self, access::Action, LwsRequest, LwsState};
 use crate::store::Store;
@@ -147,6 +147,7 @@ impl<S: Store + 'static> Authorizer for Backend<S> {
                     return Ok(Access {
                         read: false,
                         write: false,
+                        delete: false,
                     });
                 }
                 let write = matches!(
@@ -160,9 +161,21 @@ impl<S: Store + 'static> Authorizer for Backend<S> {
                     .map_err(|_| Fault::Store)?,
                     Decision::Allow(_)
                 );
+                let delete = matches!(
+                    auth.authorize(
+                        room,
+                        mode_for_operation("DELETE", room, false),
+                        Some(&agent.subject),
+                        agent.origin.as_deref(),
+                    )
+                    .await
+                    .map_err(|_| Fault::Store)?,
+                    Decision::Allow(_)
+                );
                 Ok(Access {
                     read: state.store.exists(room).await.map_err(|_| Fault::Store)?,
                     write,
+                    delete,
                 })
             }
             Self::Lws(weak) => {
@@ -177,15 +190,25 @@ impl<S: Store + 'static> Authorizer for Backend<S> {
                     return Ok(Access {
                         read: false,
                         write: false,
+                        delete: false,
                     });
                 }
                 let write = state
                     .check(Action::Create, room, &agent)
                     .await
                     .map_err(|_| Fault::Store)?;
+                let delete = state
+                    .check(
+                        lws::resources::action_for_method(&Method::DELETE),
+                        room,
+                        &agent,
+                    )
+                    .await
+                    .map_err(|_| Fault::Store)?;
                 Ok(Access {
                     read: state.store.exists(room).await.map_err(|_| Fault::Store)?,
                     write,
+                    delete,
                 })
             }
         }
@@ -304,7 +327,7 @@ impl<S: Store + 'static> RoomStore for Backend<S> {
 
     async fn delete(&self, room: &str, agent: &Agent, file: &str) -> Result<(), Fault> {
         let access = self.access(room, agent).await?;
-        if !access.read || !access.write {
+        if !access.read || !access.delete {
             return Err(Fault::Forbidden);
         }
         let path = url::Url::parse(file)
@@ -573,6 +596,21 @@ async fn close(socket: &mut WebSocket, fault: Fault) {
     .await;
 }
 
+fn receive_fault(error: axum::Error) -> Option<Fault> {
+    use tokio_tungstenite::tungstenite::{error::CapacityError, Error};
+    match error.into_inner().downcast::<Error>() {
+        Ok(error)
+            if matches!(
+                *error,
+                Error::Capacity(CapacityError::MessageTooLong { .. })
+            ) =>
+        {
+            Some(Fault::TooLarge)
+        }
+        _ => None,
+    }
+}
+
 async fn serve<S: Store + 'static>(state: Arc<CrdtState<S>>, query: Join, mut socket: WebSocket) {
     let Ok(_permit) = state.connections.clone().try_acquire_owned() else {
         close(&mut socket, Fault::Capacity).await;
@@ -626,7 +664,7 @@ async fn serve<S: Store + 'static>(state: Arc<CrdtState<S>>, query: Join, mut so
                     Some(Ok(Message::Ping(bytes))) => { if let Err(error) = send(&mut socket, Message::Pong(bytes)).await { break Some(error); } },
                     Some(Ok(Message::Pong(_))) => {},
                     Some(Ok(Message::Close(_))) | None => break None,
-                    Some(Err(_)) => break Some(Fault::TooLarge),
+                    Some(Err(error)) => break receive_fault(error),
                     _ => break Some(Fault::Malformed),
                 }
             }

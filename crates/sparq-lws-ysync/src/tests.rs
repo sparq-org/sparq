@@ -22,6 +22,7 @@ impl Authorizer for Memory {
         Ok(Access {
             read: true,
             write: true,
+            delete: true,
         })
     }
 }

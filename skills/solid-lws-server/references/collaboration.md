@@ -20,8 +20,12 @@ response is `201 application/json`, with `url` containing the socket URL and
 its `ticket` query parameter, and `expires` containing a UTC RFC 3339 timestamp.
 The response carries `Cache-Control: no-store`. Open exactly that returned URL.
 Tickets contain 32 random bytes, expire after 60 seconds and can be used once.
+The ticket travels in the socket URL’s query string; deployments should keep query
+strings for the socket path out of access logs.
 The container must exist. Read permits observation; adding members also permits
 sending document changes (WAC Append or Write in Solid, `create` in LWS).
+Read on the room container authorizes reading every log resource in it; the relay
+does not evaluate per-resource ACLs on individual log files.
 
 Sockets speak the y-websocket binary message protocol: sync step 1, sync step 2,
 updates and awareness. Both endpoints exchange state vectors and missing updates
@@ -43,8 +47,9 @@ forwarding does not transfer responsibility for close cleanup to the forwarding 
 | 4413 | Message or room document exceeds its byte limit |
 | 4429 | Room, peer or queue capacity reached |
 
-Ticket capacity returns HTTP `429`. Invalid protocol input uses `1002`; storage
-failures use `1011`. Clients should reconnect and perform a complete Yjs sync.
+Ticket capacity returns HTTP `429`. Invalid collaboration messages use `1002`;
+storage failures use `1011`. Other socket receive failures drop the connection.
+Clients should reconnect and perform a complete Yjs sync.
 
 The relay broadcasts accepted updates before persistence. Live clients keep
 those updates locally and fall back to appending log resources on socket loss;
@@ -71,10 +76,12 @@ Apply the newest snapshot first, then update resources
 whose timestamp is at least the snapshot's. Orphaned older updates are harmless.
 After the last peer leaves, the room remains loaded for sixty seconds. Unloading
 waits for queued writes to complete. At the
-compaction threshold, an admitted writer is used to create a snapshot during
-unloading. Only confirmed creation permits ordinary authorized deletion of the
-folded files. Without confirmation the original resources remain. Restart reconstructs
-a room from those same files.
+compaction threshold, compaction requires delete authority: it runs only under
+a writer who may delete room members. A room whose writers can only append keeps
+its update files until a writer with delete authority ends a session, subject to
+`MAX_LOG_FILES` and the aggregate byte limit. Only confirmed snapshot creation permits ordinary
+authorized deletion of the folded files. Without confirmation the original
+resources remain. Restart reconstructs a room from those same files.
 Loading and compaction do not hold the service-wide room admission lock during
 storage operations. A room being unloaded refuses new joins until retirement ends.
 
@@ -85,7 +92,7 @@ Limits can be set before router assembly. Library embedders may set
 | Variable prefix `SOLID_SERVER_CRDT_` | Default | Effect |
 | --- | --- | --- |
 | `MAX_ROOMS` | 128 | Loaded rooms per service |
-| `PEERS_PER_ROOM` | 32 | Connections per room; pending authors per room |
+| `PEERS_PER_ROOM` | 32 | Connections, pending authors and remembered writers per room |
 | `MESSAGE_BYTES` | 1048576 | Incoming binary messages; retained awareness bytes |
 | `FRAME_MESSAGES` | 32 | Protocol records in one incoming binary WebSocket message |
 | `DOCUMENT_BYTES` | 16777216 | Merged encoded room state and pending updates |

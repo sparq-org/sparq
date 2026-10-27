@@ -108,6 +108,15 @@ fn full<S: Store + 'static>(state: &LwsState<S>, method: &Method) -> Option<Resp
         .then(|| retry_later("failed changes are still being put back"))
 }
 
+pub(crate) fn action_for_method(method: &Method) -> Action {
+    match *method {
+        Method::GET | Method::HEAD | Method::OPTIONS => Action::Read,
+        Method::POST => Action::Create,
+        Method::DELETE => Action::Delete,
+        _ => Action::Modify,
+    }
+}
+
 async fn handle_now<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -152,12 +161,7 @@ async fn handle_now<S: Store + 'static>(
         && names_description(accept)
         && serves_description(Some(accept));
     if !description {
-        let action = match req.method {
-            Method::GET | Method::HEAD | Method::OPTIONS => Action::Read,
-            Method::POST => Action::Create,
-            Method::DELETE => Action::Delete,
-            _ => Action::Modify,
-        };
+        let action = action_for_method(&req.method);
         if let Some(refused) = unread_precondition(state, req, agent, &uri, true).await {
             return refused;
         }
