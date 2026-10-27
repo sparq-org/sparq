@@ -121,12 +121,16 @@
       ]
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+        ]
+      }
     }
   },
   "B1/urn:alice/2027-01-01T00:00:00Z": {
@@ -139,12 +143,16 @@
       ]
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#read> <urn:t/1>"
+        ]
+      }
     }
   },
   "B1/urn:bob/2026-01-01T00:00:00Z": {
@@ -171,12 +179,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "C1/urn:alice/2027-01-01T00:00:00Z": {
@@ -189,12 +201,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "C1/urn:bob/2026-01-01T00:00:00Z": {
@@ -221,12 +237,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "C2/urn:alice/2027-01-01T00:00:00Z": {
@@ -239,12 +259,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "C2/urn:bob/2026-01-01T00:00:00Z": {
@@ -383,12 +407,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "E1/urn:alice/2027-01-01T00:00:00Z": {
@@ -422,12 +450,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "E2/urn:alice/2027-01-01T00:00:00Z": {
@@ -461,12 +493,16 @@
       "grant": null
     },
     "views": {
-      "urn:sparq:auth": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ],
-      "urn:sparq:auth-bridged": [
-        "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
-      ]
+      "urn:sparq:auth": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      },
+      "urn:sparq:auth-bridged": {
+        "triples": [
+          "<urn:alice> <https://sparq.dev/ns/auth#denyRead> <urn:t/1>"
+        ]
+      }
     }
   },
   "E3/urn:alice/2027-01-01T00:00:00Z": {

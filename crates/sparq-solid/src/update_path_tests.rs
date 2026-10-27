@@ -674,6 +674,7 @@ fn removing_the_deadline_preserves_configured_count_and_size_caps() {
     let mut budget = default_auth_budget();
     budget.max_document_bytes = 17;
     budget.max_input_bytes = 31;
+    budget.max_generated_bytes = 17;
     budget.max_input_facts = 7;
     budget.max_input_term_bytes = 11;
     budget.max_resource_iri_bytes = 23;
