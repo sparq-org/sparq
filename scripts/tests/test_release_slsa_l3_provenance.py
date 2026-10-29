@@ -125,7 +125,7 @@ GUI_SUBJECTS_DIR = "../gui-subjects/"
 # The collector requires each singleton lane BY NAME. A subjects blob that silently lost a lane
 # still signs cleanly over a smaller set while the release notes claim the lane is covered.
 REQUIRED_LANES_LINE = (
-    "for required in subject-hashes-sbom.txt subject-hashes-conformance.txt; do"
+    "for required in subject-hashes-sbom.txt subject-hashes-conformance.txt subject-hashes-native.txt; do"
 )
 
 # A line that is a YAML key (optionally a sequence item) — the only shape we strip a trailing
@@ -428,7 +428,7 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
     bad += check_collector(
         job_block(release_text, "artifact-subjects"),
         "release.yml#artifact-subjects",
-        ("sbom", "served-conformance", "gui-bundle"),
+        ("sbom", "served-conformance", "gui-bundle", "npm-native"),
     )
     # --- lane 3: dist.yml's tiered bare binaries (#4570).
     bad += check_trusted_builder(
@@ -490,7 +490,7 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
         else:
             if not any(REQUIRED_LANES_LINE in line for line in combine):
                 bad.append(
-                    "release.yml#artifact-subjects must require BOTH singleton lanes by name "
+                    "release.yml#artifact-subjects must require all singleton lanes by name "
                     f"(`{REQUIRED_LANES_LINE}`) — a missing lane must fail closed, not shrink "
                     "the subjects set silently"
                 )
@@ -505,6 +505,7 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
         ("sbom", SBOM_DIGEST_STEP, "subject-hashes-sbom"),
         ("served-conformance", CONFORMANCE_DIGEST_STEP, "subject-hashes-conformance"),
         ("gui-bundle", GUI_DIGEST_STEP, "subject-hashes-gui-"),
+        ("npm-native", "Record native package digests (subjects for the isolated provenance builder)", "subject-hashes-native"),
     ):
         body = job_block(release_text, job)
         if body is None:
@@ -879,6 +880,11 @@ MUTATIONS = {
         "release",
         REQUIRED_LANES_LINE,
         "for required in subject-hashes-sbom.txt; do",
+    ),
+    "collector stops requiring the native package lane": _sub(
+        "release",
+        REQUIRED_LANES_LINE,
+        "for required in subject-hashes-sbom.txt subject-hashes-conformance.txt; do",
     ),
     # MA7 — the SBOM lane stops publishing digests at all.
     "sbom lane drops its subjects artifact": _sub(

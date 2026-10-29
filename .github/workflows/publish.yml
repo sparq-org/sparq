@@ -67,6 +67,10 @@ on:
         description: "Publish @sparq-org/solid-server to npm (needs the one-time npm-side bootstrap — see job)"
         type: boolean
         default: false
+      publish_solid_server_native:
+        description: "Publish optional native Solid/LWS platform packages from the verified release"
+        type: boolean
+        default: false
       attest_crates:
         description: "Package + attest publishable crates (crates.io bytes)"
         type: boolean
@@ -100,7 +104,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
           PUBLISH_NPM: ${{ github.event_name == 'release' || inputs.publish_npm }}
-          PUBLISH_SOLID_SERVER: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_solid_server }}
+          PUBLISH_SOLID_SERVER: ${{ github.event_name == 'workflow_dispatch' && (inputs.publish_solid_server || inputs.publish_solid_server_native) }}
           PUBLISH_EYEREASONER_COMPAT: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_eyereasoner_compat }}
         run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --publish
 
@@ -400,6 +404,69 @@ jobs:
             exit 1
           fi
           echo "Provenance attestation present. Consumers verify with: npm audit signatures"
+
+  # Each new package needs a registry bootstrap and trusted publisher for this workflow.
+  npm-solid-server-native:
+    name: npm publish native Solid/LWS packages (OIDC trusted publishing)
+    needs: setup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_solid_server_native
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+      - name: Pin npm CLI >= 11.5.1 (trusted-publishing floor)
+        run: npm install -g 'npm@^11.5.1'
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release download "$RELEASE_TAG" --pattern 'sparq-cli-*.tar.gz' --pattern 'sparq-cli-*.zip' --dir native-archives
+      - name: Verify release archive provenance and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for archive in native-archives/*; do
+            gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA"
+          done
+      - name: Assemble platform packages
+        run: node packages/solid-server/native/assemble.mjs native-archives native-packages
+      - name: Reverify remote release tag immediately before publish
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
+      - name: Publish to npm (OIDC trusted publishing + provenance)
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          for package in native-packages/*; do
+            python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
+            (cd "$package" && npm publish --provenance --access public)
+          done
+      - name: Verify published provenance attestations
+        run: |
+          for package in native-packages/*; do
+            name=$(node -p "require('./$package/package.json').name")
+            version=$(node -p "require('./$package/package.json').version")
+            att=""
+            for _ in $(seq 1 20); do
+              att=$(npm view "$name@$version" dist.attestations 2>/dev/null || true)
+              if [ -n "$att" ] && [ "$att" != "undefined" ]; then break; fi
+              sleep 30
+            done
+            if [ -z "$att" ] || [ "$att" = "undefined" ]; then
+              echo "::error::no provenance attestation recorded for $name@$version"
+              exit 1
+            fi
+          done
 
   # ---- crates.io: attest the packaged .crate artifacts (provenance over the publish bytes) ----
   # crates.io has no native provenance; we attest the `cargo package` output (identical bytes to

@@ -207,7 +207,8 @@ jobs:
         working-directory: packages/solid-server
         run: |
           npm run build:lws-wasm
-          npm test
+          cargo build --locked -p sparq-lws-core --features authn-saml
+          SPARQ_NATIVE_TEST_BINARY="$GITHUB_WORKSPACE/target/debug/sparq-lws-core" npm test
           npm run check:package
 
       # Publish guardrail + git-pin verification (sq-bkag): `prepare` wired, the
