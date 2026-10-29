@@ -500,6 +500,9 @@ fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqErr
     })
 }
 
+#[path = "history_embedded.rs"]
+mod history_ops;
+
 #[cfg(test)]
 #[path = "embedded_journal_tests.rs"]
 mod journal_tests;
@@ -676,6 +679,81 @@ impl SparqClient for EmbeddedSparqClient {
         .await
     }
 
+    async fn replace_meta_retaining(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+        member: &str,
+        fields: super::history::VersionFields,
+    ) -> Result<Vec<String>, SparqError> {
+        let (iri, member) = (iri.to_string(), member.to_string());
+        self.dispatch(move |g| history_ops::replace(g, &iri, meta, &member, fields))
+            .await
+    }
+    async fn move_to_trash(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        member: &str,
+        fields: super::history::TrashFields,
+    ) -> Result<(), SparqError> {
+        let (iri, parent, member) = (
+            iri.to_string(),
+            parent.map(str::to_string),
+            member.to_string(),
+        );
+        self.dispatch(move |g| {
+            history_ops::move_to_trash(g, &iri, parent.as_deref(), &member, fields)
+        })
+        .await
+    }
+    async fn restore_from_trash(
+        &self,
+        member: &str,
+        target: &str,
+        parent: &str,
+    ) -> Result<(), SparqError> {
+        let (member, target, parent) = (member.to_string(), target.to_string(), parent.to_string());
+        self.dispatch(move |g| history_ops::restore(g, &member, &target, &parent))
+            .await
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> Result<Vec<super::history::VersionEntry>, SparqError> {
+        let original = original.map(str::to_string);
+        self.dispatch(move |g| history_ops::versions(g, original.as_deref()))
+            .await
+    }
+    async fn trash_entries(&self) -> Result<Vec<super::history::TrashEntry>, SparqError> {
+        self.dispatch(move |g| history_ops::trash(g)).await
+    }
+
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<super::history::VersionEntry>, SparqError> {
+        let member = member.to_string();
+        self.dispatch(move |g| history_ops::version_entry(g, &member))
+            .await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<super::history::TrashEntry>, SparqError> {
+        let member = member.to_string();
+        self.dispatch(move |g| history_ops::trash_entry(g, &member))
+            .await
+    }
+    async fn expired_history(
+        &self,
+        versions_before: std::time::SystemTime,
+        trash_before: std::time::SystemTime,
+        limit: usize,
+    ) -> Result<Vec<super::history::ExpiredEntry>, SparqError> {
+        self.dispatch(move |g| history_ops::expired(g, versions_before, trash_before, limit))
+            .await
+    }
     fn raises_markers(&self) -> bool {
         true
     }
@@ -770,9 +848,27 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        self.delete_resource_retiring(iri, parent)
+            .await
+            .map(|r| r.live_key)
+    }
+
+    async fn delete_resource_retiring(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<super::history::RetiredResource, SparqError> {
         let q = sparql::select_meta(iri)?;
-        let u = sparql::update_delete_resource_with_parent(iri, parent)?;
+        let mut u = sparql::update_delete_resource_with_parent(iri, parent)?;
+        let iri = iri.to_string();
         self.dispatch(move |graph| {
+            let mut version_keys = Vec::new();
+            for v in history_ops::versions(graph, Some(&iri))? {
+                version_keys.push(v.meta.blob_key);
+                u.push_str("; ");
+                u.push_str(&sparql::update_delete_resource(&v.member)?);
+            }
+
             let result = sparq_engine::query(graph, &q)
                 .map_err(|e| engine_err("delete_resource/read", e))?;
             let key = match meta_from_result(&result) {
@@ -781,7 +877,10 @@ impl SparqClient for EmbeddedSparqClient {
                 Err(e) => return Err(e),
             };
             commit(graph, &u, "delete_resource")?;
-            Ok(key)
+            Ok(super::history::RetiredResource {
+                live_key: key,
+                version_keys,
+            })
         })
         .await
     }

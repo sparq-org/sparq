@@ -305,7 +305,7 @@ impl<S: Store> LdpState<S> {
 
     /// Serialize an LDP mutation against in-flight SPARQL dataset snapshots.
     #[cfg(feature = "sparql-endpoint")]
-    async fn sparql_snapshot_write(&self) -> async_lock::RwLockWriteGuard<'_, ()> {
+    pub(crate) async fn sparql_snapshot_write(&self) -> async_lock::RwLockWriteGuard<'_, ()> {
         self.sparql_snapshot.write().await
     }
 
@@ -499,7 +499,7 @@ impl<S: Store> LdpState<S> {
     /// path). Returns the granted modes on Allow, or the spec 401/403 on deny.
     ///
     /// write-2: planned walk — see [`authorize_planned_iri`](Self::authorize_planned_iri).
-    async fn authorize_iri(
+    pub(crate) async fn authorize_iri(
         &self,
         target_iri: &str,
         required: AccessMode,
@@ -1473,6 +1473,16 @@ pub async fn delete_handler<S: Store>(
     uri: axum::http::Uri,
     headers: HeaderMap,
 ) -> Result<Response, ServerError> {
+    delete_resource(state, token, uri, headers, false).await
+}
+
+pub(crate) async fn delete_resource<S: Store>(
+    state: Arc<LdpState<S>>,
+    token: VerifiedToken,
+    uri: axum::http::Uri,
+    headers: HeaderMap,
+    trash_post: bool,
+) -> Result<Response, ServerError> {
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let target = parse_target(&state.base_url, uri.path())?;
@@ -1611,7 +1621,28 @@ pub async fn delete_handler<S: Store>(
         }
     } else {
         // A plain resource: the (non-atomic) removal is fine — there is no empty-check to race.
-        state.store.delete(&target.iri, parent.as_deref()).await?;
+        let trashed = if state.store.history_config().trash
+            && crate::store::history::data_resource(&target.iri)
+        {
+            Some(
+                state
+                    .store
+                    .trash_resource(
+                        &target.iri,
+                        parent.as_deref(),
+                        crate::store::history::TrashFields {
+                            original: target.iri.clone(),
+                            trashed_at: crate::clock::now(),
+                            deleted_by: token.web_id.clone(),
+                            deleter_could_read: may_read(&target.iri, &granted),
+                        },
+                    )
+                    .await?,
+            )
+        } else {
+            state.store.delete(&target.iri, parent.as_deref()).await?;
+            None
+        };
         // A DELETE of an `.acl` removed the access rules (the resource now inherits): invalidate the
         // cached parse so the NEXT read no longer sees the deleted ACL's grants (the `meta` probe will
         // now report it absent and the walk inherits — invalidating frees the slot at once).
@@ -1622,7 +1653,21 @@ pub async fn delete_handler<S: Store>(
             .notifications
             .notify(&target.iri, ActivityType::Delete, parent.as_deref())
             .await;
-        Ok(StatusCode::NO_CONTENT.into_response())
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        if let Some(member) = trashed.filter(|_| trash_post) {
+            *response.status_mut() = StatusCode::CREATED;
+            let id = member
+                .strip_prefix(crate::store::history::TRASH)
+                .unwrap_or_default();
+            let location = format!("{}/.trash/{id}", state.base_url().trim_end_matches('/'));
+            response.headers_mut().insert(
+                header::LOCATION,
+                location
+                    .parse()
+                    .map_err(|_| ServerError::Storage("invalid trash location".into()))?,
+            );
+        }
+        Ok(response)
     }
 }
 

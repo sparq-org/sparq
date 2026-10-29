@@ -630,10 +630,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // HttpSparqClient (opt-in `http-sparq` feature — the remote shared-service shape). See
     // `research/lws-design-records.md` §3.
     let storage = StorageConfig::from_env()?;
+    let backend = &storage.backend;
+    sparq_lws_core::store::history::HistoryConfig::from_env()?.validate_backend(backend)?;
     // Data-directory boot pairs the durable index with filesystem bytes.
     // Legacy backends retain the in-memory blob guard.
     storage.check_durability(storage.has_data_dir())?;
-    let backend = &storage.backend;
 
     // GUARD #2 — refuse to seed test fixtures into a NON-`memory` backend. The dev seed flags
     // (SOLID_SERVER_SEED_CONFORMANCE / SOLID_SERVER_SEED_BENCH / SOLID_SERVER_SEED_DEMO) now run
@@ -1027,7 +1028,8 @@ where
             sparq.clone(),
             blob.clone(),
             body_cache_from_env(),
-        );
+        )
+        .with_history(sparq_lws_core::store::history::HistoryConfig::from_env()?)?;
         let app = build_app_for_store(
             store,
             base_url,
@@ -1041,7 +1043,8 @@ where
         let task = spawn_periodic_if_configured(sparq, blob, reconcile_interval);
         Ok((app, task))
     } else {
-        let store = CompositeStore::with_body_cache(sparq, blob, body_cache_from_env());
+        let store = CompositeStore::with_body_cache(sparq, blob, body_cache_from_env())
+            .with_history(sparq_lws_core::store::history::HistoryConfig::from_env()?)?;
         let app = build_app_for_store(
             store,
             base_url,

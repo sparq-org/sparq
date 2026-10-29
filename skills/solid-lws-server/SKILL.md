@@ -1237,3 +1237,13 @@ reconstructed from the code and cites it line by line; it also maps the source-r
   default-off `trust-graph` feature. It adds the library function
   `authz::trust_admit::trust_admit_verdict`, which is deliberately not wired
   into the request pipeline, so enabling it changes no request's outcome.
+
+## Optional versions and trash
+
+`SOLID_SERVER_VERSIONS=1` and `SOLID_SERVER_TRASH=1` enable the services in either protocol; both default to unset (off). `SOLID_SERVER_VERSIONS_MAX` defaults to `20` retained states per resource. `SOLID_SERVER_VERSIONS_RETENTION` and `SOLID_SERVER_TRASH_RETENTION` default to `P30D` and accept positive day/time XSD durations. An HTTP index with either service enabled is refused at startup. Trash covers data resources only. Empty-container deletion remains permanent; recursive LWS `Depth: infinity` deletes are permanent until #7236.
+
+History follows the resource through trash. Solid restore also requires Write on the target; LWS restore takes the create path's locks. Access-control documents ending in `.acl` or `.acr` are excluded.
+
+POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
+
+See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.

@@ -207,6 +207,50 @@ impl<S> std::ops::Deref for Tracked<S> {
 
 #[async_trait]
 impl<S: Store> Store for Tracked<S> {
+    fn history_config(&self) -> crate::store::history::HistoryConfig {
+        self.inner.history_config()
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> ServerResult<Vec<crate::store::history::VersionEntry>> {
+        self.inner.versions(original).await
+    }
+    async fn trash_entries(&self) -> ServerResult<Vec<crate::store::history::TrashEntry>> {
+        self.inner.trash_entries().await
+    }
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> ServerResult<Option<crate::store::history::VersionEntry>> {
+        self.inner.version_entry(member).await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> ServerResult<Option<crate::store::history::TrashEntry>> {
+        self.inner.trash_entry(member).await
+    }
+    async fn trash_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        fields: crate::store::history::TrashFields,
+    ) -> ServerResult<String> {
+        let _m = self.gens.mutating(&[iri]);
+        self.inner.trash_resource(iri, parent, fields).await
+    }
+    async fn restore_trash(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        let _m = self.gens.mutating(&[target, parent]);
+        self.inner.restore_trash(member, target, parent).await
+    }
+    async fn purge_trash(&self, member: &str) -> ServerResult<()> {
+        self.inner.purge_trash(member).await
+    }
+    async fn sweep_history(&self, now: std::time::SystemTime, limit: usize) -> ServerResult<usize> {
+        self.inner.sweep_history(now, limit).await
+    }
+
     async fn read(&self, iri: &str) -> ServerResult<Resource> {
         self.inner.read(iri).await
     }
