@@ -1166,8 +1166,8 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// The LWS metadata stored beside `iri`, or the default when there is none. Stored metadata
-    /// that does not parse is an error, never the default: that would quietly drop the creator,
-    /// the types and the links it records.
+    /// that does not parse is [`crate::error::ServerError::InvalidMetadata`], never the default:
+    /// that would quietly drop the creator, the types and the links it records.
     pub async fn resource_meta(
         &self,
         iri: &str,
@@ -2486,7 +2486,9 @@ pub(crate) fn parse_meta(
     body: &[u8],
 ) -> Result<ResourceMeta, crate::error::ServerError> {
     serde_json::from_slice(body).map_err(|e| {
-        crate::error::ServerError::Storage(format!("the metadata of {iri} is malformed: {e}"))
+        crate::error::ServerError::InvalidMetadata(format!(
+            "the metadata of {iri} is malformed: {e}"
+        ))
     })
 }
 

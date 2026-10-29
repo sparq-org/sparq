@@ -887,6 +887,24 @@ What the server exposes, all discoverable from the storage description
   Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
   WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
   DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
+  A confirmed denial returns `403` on connect or closes an open WebSocket with `4403`
+  (SSE sends `event: revoked`), withdrawing the subscription: subscribe again.
+  An undecided access check returns `503` with `Retry-After` on connect, or closes
+  an open WebSocket with `1013` (SSE ends without `revoked`). Keep the capability
+  and reconnect when access checks recover. A halted notification service also
+  closes for retry and keeps the subscription, including when it halts during a
+  pending topic check. Any confirmed readable topic wins, even while another waits;
+  otherwise a transient undecided topic keeps the whole check undecided, even if
+  another topic is denied. A hidden or changing topic uses its prior access state:
+  a confirmed denial still denies, while a readable hidden topic, a store read
+  failure or a check timeout is undecided. Stored metadata that does not parse
+  denies (`ServerError::InvalidMetadata` from the Rust metadata API, still HTTP
+  `500` for resource requests). An unreadable absent topic is denied like a stored one.
+  A slow WebSocket consumer also closes with `1013` but withdraws the subscription;
+  inspect its record before reconnecting. Capability lookup probes a SHA-256 digest
+  index and does not scan other principals' subscriptions; the token itself is never
+  retained. A second stored record with the same digest is quarantined and counted
+  in the service quotas until the owner deletes it.
   SSE retention is bounded by event count, age and serialized body bytes, with
   Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
   without holding the registration gate; webhooks enter their delivery queue independently
