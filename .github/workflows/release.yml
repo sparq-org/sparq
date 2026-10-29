@@ -147,10 +147,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-*
           path: native-archives
@@ -164,12 +164,12 @@ jobs:
           done
       - name: Record native package digests (subjects for the isolated provenance builder)
         run: (cd native-tarballs && sha256sum -- *.tgz) > subject-hashes-native.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: subject-hashes-native
           path: subject-hashes-native.txt
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-solid-server-native
           path: native-tarballs/*.tgz
@@ -260,11 +260,11 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-cyclonedx
       # sq-toze.27 (GS-3): Node for the JS/npm SBOM of the published WASM client.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       # sq-gl3cf: pass VERSION explicitly. gen-sbom-vex.sh honors $VERSION (falling
@@ -308,7 +308,7 @@ jobs:
           fi
           sha256sum -- "${files[@]}" > subject-hashes-sbom.txt
           cat subject-hashes-sbom.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # `subject-hashes-*` is the collector's download pattern and is deliberately DISJOINT
           # from both `pkg-*` (published release assets) and `archive-hashes-*` (the archives'
@@ -316,7 +316,7 @@ jobs:
           name: subject-hashes-sbom
           path: sbom/subject-hashes-sbom.txt
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-vex
           path: sbom/*.json
@@ -392,12 +392,12 @@ jobs:
           fi
           sha256sum -- "${reports[@]}" > subject-hashes-conformance.txt
           cat subject-hashes-conformance.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: subject-hashes-conformance
           path: conformance/subject-hashes-conformance.txt
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: served-conformance
           path: conformance/served-conformance-*.json
@@ -524,7 +524,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
@@ -782,13 +782,13 @@ jobs:
             shasum -a 256 -- "${bundles[@]}" > "$OUT"
           fi
           cat "$OUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: subject-hashes-gui-${{ matrix.label }}
           path: gui-subjects/subject-hashes-gui-${{ matrix.label }}.txt
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-gui-${{ matrix.label }}
           path: gui-bundles/*
@@ -816,7 +816,7 @@ jobs:
     outputs:
       hashes: ${{ steps.combine.outputs.hashes }}
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           # `subject-hashes-*` only: `archive-hashes-*` belongs to the archives' own bundle and
           # `pkg-*` are the published assets themselves.
@@ -949,20 +949,20 @@ jobs:
             echo "ERROR: signed provenance artifact names are missing or unexpected" >&2
             exit 1
           fi
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-*
           path: release-assets
           merge-multiple: true
       # sq-toze.3 (GX-2): pull the SBOM + VEX in alongside the archives so they
       # are covered by SHA256SUMS and attached to the release.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sbom-vex
           path: release-assets
       # sq-ro6if (PSS #1415/#1478): pull the served-surface conformance report in
       # alongside the archives + SBOM so it is covered by SHA256SUMS and attached to the release.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: served-conformance
           path: release-assets
@@ -972,14 +972,14 @@ jobs:
       # --provenance-path <this file> --source-uri github.com/<owner>/<repo>`. The artifact name
       # comes from the generator's own output; the guard above fails before download if a
       # future generator changes or omits that output.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.provenance.outputs.provenance-name }}
           path: release-assets
       # #4570 (GX-11 residual): the SECOND isolated-builder bundle — the one covering the
       # GUI bundles, SBOM/VEX and served-surface conformance report. Same fail-closed download by
       # the generator's own output name, so it lands in SHA256SUMS and on the Release too.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.provenance-artifacts.outputs.provenance-name }}
           path: release-assets
@@ -1170,7 +1170,7 @@ jobs:
           platforms: arm64
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to ghcr.io
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1245,7 +1245,7 @@ jobs:
           trivyignores: .trivyignore
       - name: Upload Trivy SARIF to code-scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy-results.sarif
           category: trivy-release-image
