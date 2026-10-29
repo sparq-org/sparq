@@ -387,6 +387,7 @@ impl<'a> Node<'a> {
     fn of(node: &'a ConstraintNode) -> Node<'a> {
         match node {
             ConstraintNode::Atomic(c) => Node::Atomic(c),
+            ConstraintNode::SharedAtomic(c) => Node::Atomic(c),
             ConstraintNode::Compound(lc) => Node::Compound(lc),
         }
     }

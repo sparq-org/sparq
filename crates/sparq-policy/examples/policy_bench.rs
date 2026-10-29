@@ -182,3 +182,12 @@ fn main() {
     }
     println!("=== END SPARQ_POLICY_BENCH ===");
 }
+
+#[cfg(test)]
+mod fixture_tests {
+    use super::*;
+    #[test]
+    fn vendored_policy_fixtures_keep_their_decisions() {
+        assert_oracle(&mixes());
+    }
+}

@@ -82,10 +82,8 @@ fn multi_object_right_operand_folds_to_set_encoding() {
         "several objects of one rightOperand are ONE constraint, not several"
     );
     let c = &p.permissions[0].constraints[0];
-    let Value::Str(s) = &c.right else {
-        panic!("multi-object rightOperand must fold to Value::Str, got {:?}", c.right);
-    };
-    let mut members: Vec<&str> = s.split('|').collect();
+    assert!(matches!(c.right, Value::Str(_) | Value::SharedStr(_)));
+    let mut members: Vec<&str> = c.right.as_str().split('|').collect();
     members.sort_unstable();
     assert_eq!(members, ["urn:purpose/education", "urn:purpose/research"]);
 }
@@ -201,7 +199,7 @@ fn single_element_list_keeps_typed_comparison() {
     let p = parse_policy_str(ttl, "turtle").unwrap();
     let c = &p.permissions[0].constraints[0];
     assert!(
-        matches!(c.right, Value::DateTime(_)),
+        matches!(c.right, Value::DateTime(_) | Value::SharedDateTime(_)),
         "one-element list must keep the typed dateTime value, got {:?}",
         c.right
     );
@@ -617,4 +615,64 @@ fn repeated_identical_left_operand_rows_still_fold() {
     assert!(!evaluate(&p, &purpose("urn:purpose/a")).allow);
     assert!(!evaluate(&p, &purpose("urn:purpose/b")).allow);
     assert!(evaluate(&p, &purpose("urn:purpose/c")).allow);
+}
+#[test]
+fn owned_and_shared_temporal_values_keep_instant_comparisons() {
+    for (operator, expected) in [
+        ("eq", [true, false]),
+        ("neq", [false, true]),
+        ("lt", [false, true]),
+        ("lteq", [true, true]),
+        ("gt", [false, false]),
+        ("gteq", [true, false]),
+        ("isA", [true, false]),
+    ] {
+        for list in [false, true] {
+            let right = r#""2000-01-02T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>"#;
+            let right = if list {
+                format!("({right})")
+            } else {
+                right.to_owned()
+            };
+            for kind in ["permission", "prohibition"] {
+                let base = if kind == "prohibition" {
+                    "<urn:p> o:permission [ o:action o:read ] ."
+                } else {
+                    ""
+                };
+                let rdf = format!("@prefix o: <http://www.w3.org/ns/odrl/2/> . {base} <urn:p> o:{kind} [ o:action o:read; o:constraint [ o:leftOperand o:dateTime; o:operator o:{operator}; o:rightOperand {right} ] ] .");
+                let policy = parse_policy_str(&rdf, "turtle").unwrap();
+                for (i, actual) in [
+                    "2000-01-02T02:00:00+02:00",
+                    "2000-01-01T00:00:00Z",
+                    "invalid",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    for shared in [false, true] {
+                        let value = if shared {
+                            Value::SharedDateTime(actual.into())
+                        } else {
+                            Value::DateTime(actual.into())
+                        };
+                        let request = Request::new("http://www.w3.org/ns/odrl/2/read")
+                            .with("http://www.w3.org/ns/odrl/2/dateTime", value);
+                        let allowed = if i == 2 {
+                            false
+                        } else if kind == "permission" {
+                            expected[i]
+                        } else {
+                            !expected[i]
+                        };
+                        assert_eq!(
+                            evaluate(&policy, &request).allow,
+                            allowed,
+                            "{operator}, {kind}, list={list}, shared={shared}, actual={actual}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
