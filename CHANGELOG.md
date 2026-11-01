@@ -835,6 +835,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core (capability streams, follow-up to #7214):** readable set-aside topics,
+  store read errors, a halted notification service and bounded access checks that
+  cannot finish keep the subscription for reconnect. Connect returns `503` with `Retry-After`; an open
+  WebSocket closes with `1013` and SSE ends without withdrawal. Confirmed denial
+  still withdraws the subscription (`403`, `4403` or SSE `revoked`), including for hidden
+  topics and stored metadata that does not parse. Any readable topic wins even while
+  another topic waits; otherwise an undecided topic keeps the check undecided even
+  when another topic is denied.
+  A slow WebSocket consumer closes with `1013` and withdraws its subscription.
+- **sparq-lws-core (capability lookup):** connections use a SHA-256 digest index
+  maintained with subscription registration, removal and restart.
+  A connection does not scan other principals' subscriptions. Duplicate stored digests
+  quarantine the second record; removing it preserves the digest mapping of the record still in force.
 - **sparq-zk-compose:** hardening: method-fold refusals now apply in every build.
   Default builds now return `SubProofCommitmentNotAuthenticated` for a bound
   commitment absent from the authenticated-method map, and `SubProofMethodUnresolved`

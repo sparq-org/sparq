@@ -109,7 +109,7 @@ fn topic_denied() -> Response {
 
 /// The response when the ACL chain could NOT be resolved (a store fault). A backend failure must
 /// never read as a grant, so it is a `500` — never an accept.
-fn authorization_unavailable() -> Response {
+pub(crate) fn authorization_unavailable() -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         "authorization could not be evaluated",
@@ -396,7 +396,7 @@ impl<S: Store> NotifyState<S> {
 
 /// What [`NotifyState::read_access`] decided.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReadAccess {
+pub(crate) enum ReadAccess {
     Allowed,
     Denied,
     /// The decision could not be made (a backend fault): neither a grant nor a denial.

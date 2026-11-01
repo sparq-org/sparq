@@ -1,6 +1,6 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query readable resources through `/sparql` (Solid) or `/.lws/sparql` (LWS), or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query readable resources through `/sparql` (Solid) or `/.lws/sparql` (LWS), or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server and the native modes of the `@sparq-org/solid-server` development host."
 license: MIT
 metadata:
   version: "0.1.0"
@@ -17,6 +17,46 @@ separate `@sparq-org/solid-server` loopback development host.
 Query entry points and structural rewrites retain VERSION announcements;
 see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
 or incompatible labels do not silently select REC 2013.
+
+## Start from npm
+
+`@sparq-org/solid-server` keeps its wasm Solid mode by default. Select the native
+executable for LWS or for Solid with WebSocketChannel2023 notifications:
+
+```sh
+npx @sparq-org/solid-server --protocol lws --port 3000 --base-url http://127.0.0.1:3000
+npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:3000
+```
+
+`--protocol` is `solid` by default and also accepts `lws`; LWS always selects the
+native executable. npm supplies optional platform packages for Linux x64/arm64,
+Darwin x64/arm64 and Windows x64, at exactly the host version. They install with
+`ignore-scripts=true`. Runtime resolution uses installed files; a missing
+package is an error naming the required package, and an installed version must
+match the host. Signals reach the native child and shutdown has a deadline.
+
+`startSolidServer({ protocol: 'lws', port, baseUrl })` and
+`startSolidServer({ protocol: 'solid', native: true, port, baseUrl })` return a
+handle with `child`, `exited` (a promise of `{ code, signal }`), `address()`,
+`scheme` (`http` or `https`) and `closeAsync(signal = 'SIGTERM')` (also accepts
+`SIGINT`). Native `signal: AbortSignal` cancels startup or stops the child after
+startup. Readiness comes from the child's bound listener, including the actual
+port when `port: 0` is used; provide `baseUrl` explicitly with an ephemeral port.
+Default Solid mode returns the existing Node server. Native mode
+uses the native authentication settings below; wasm `ownerWebid`/`oidc` options
+are rejected. `--port` sets `SOLID_SERVER_BIND=127.0.0.1:<port>`;
+`--base-url` sets `SOLID_SERVER_BASE_URL`. Other native environment settings are
+inherited. `PSS_SPARQ_BACKEND` defaults to `memory`; use the default ephemeral
+backend for local development. In the default wasm mode, the CLI closes
+gracefully on the first SIGINT/SIGTERM and exits immediately on a second signal
+with the corresponding signal exit status.
+
+`SOLID_SERVER_READY_STDOUT` defaults to unset. At `1`, the native binary emits
+one flushed JSON line on stdout after binding its TCP listener:
+`{"event":"native-listening","address":"127.0.0.1:3000","scheme":"http"}`.
+The scheme is `https` when terminating TLS. The npm launcher sets this variable
+and consumes the line; native callers can use it for process supervision. Other
+values leave stdout unchanged.
 
 ## Start a local server
 
@@ -135,7 +175,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
 ### Native data-directory boot
 
 `SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
-implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
+implies `PSS_SPARQ_BACKEND=embedded`, and refuses any other explicit backend or
+a non-empty `SOLID_SERVER_SPARQ_DIR`.
 The default native build opens the filesystem blob store after acquiring the
 index lock. Builds without `embedded-sparq` or `blob-fs` refuse data-directory boot.
 Without a data directory, the native binary uses in-memory blobs.
@@ -149,6 +190,51 @@ Without a data directory, the native binary uses in-memory blobs.
 
 See [native storage](references/native-storage.md) for the `format.json` contract,
 `EmbeddedSparqClient::open_or_create` / `compact`, lock ownership and shutdown.
+
+### Running durably in a container
+
+Mount a named volume and enable the data-directory contract:
+
+```sh
+docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
+  -v data:/data -e SOLID_SERVER_DATA_DIR=/data \
+  -e SOLID_SERVER_BASE_URL=https://solid.example \
+  -e SOLID_SERVER_TRUSTED_ISSUER=https://idp.example \
+  ghcr.io/sparq-org/sparq-lws-core:X.Y.Z
+```
+
+The image's empty `/data` is owned by `65532:65532`; a fresh named volume
+inherits that ownership. Mounting it alone keeps storage in-memory. Setting
+`SOLID_SERVER_DATA_DIR=/data` opts in to the boot contract above, including
+`/data/index`, `/data/blobs`, and `/data/format.json`.
+
+Building the image behind a TLS-intercepting proxy: pass
+`--secret id=build_ca,src=/path/to/ca-bundle.crt` (the bundle never enters a layer),
+and `--build-arg BUILD_JOBS=N` to cap cargo on a memory-limited builder.
+
+For Helm set `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and
+`persistence.accessMode=ReadWriteOnce`; optionally choose `persistence.storageClass`
+or `persistence.existingClaim`. The shared top-level persistence block mounts
+`/data`, sets the environment variable, and uses `Recreate` for upgrades.
+
+Use a filesystem on a **block volume** (EBS, PD, Azure Disk), never a network
+filesystem (EFS, Azure Files, NFS): the index relies on file locking and fsync
+semantics. Keep **one replica**; this is a single-instance index and blob store.
+**Stop the server before backing up** the whole volume (backup procedure: #7188 P0-8).
+
+### Child record replacement
+
+`SparqClient::replace_child(container, child, meta)` commits the child record and
+containment together, reporting the previous metadata when supported. The in-memory
+and embedded clients return it in the same index operation. The default calls
+`create_child` without reading the previous record and returns `None`; clients without
+an override, such as the remote HTTP client, leave any superseded blob key to the
+reconciler.
+`CompositeStore` uses this for contained creates, restores and reinstatements,
+reclaiming replaced bytes through the existing hold-aware path. A settled failed
+write also attempts to reclaim its unreferenced candidate; a committed reference
+or hold preserves it. Unsettled writes retain their bytes until their outcome is
+settled. Reclamation remains best effort when a backend fails.
 
 ### Filesystem blobs in library integrations
 
@@ -858,6 +944,24 @@ What the server exposes, all discoverable from the storage description
   Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
   WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
   DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
+  A confirmed denial returns `403` on connect or closes an open WebSocket with `4403`
+  (SSE sends `event: revoked`), withdrawing the subscription: subscribe again.
+  An undecided access check returns `503` with `Retry-After` on connect, or closes
+  an open WebSocket with `1013` (SSE ends without `revoked`). Keep the capability
+  and reconnect when access checks recover. A halted notification service also
+  closes for retry and keeps the subscription, including when it halts during a
+  pending topic check. Any confirmed readable topic wins, even while another waits;
+  otherwise a transient undecided topic keeps the whole check undecided, even if
+  another topic is denied. A hidden or changing topic uses its prior access state:
+  a confirmed denial still denies, while a readable hidden topic, a store read
+  failure or a check timeout is undecided. Stored metadata that does not parse
+  denies (`ServerError::InvalidMetadata` from the Rust metadata API, still HTTP
+  `500` for resource requests). An unreadable absent topic is denied like a stored one.
+  A slow WebSocket consumer also closes with `1013` but withdraws the subscription;
+  inspect its record before reconnecting. Capability lookup probes a SHA-256 digest
+  index and does not scan other principals' subscriptions; the token itself is never
+  retained. A second stored record with the same digest is quarantined and counted
+  in the service quotas until the owner deletes it.
   SSE retention is bounded by event count, age and serialized body bytes, with
   Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
   without holding the registration gate; webhooks enter their delivery queue independently
@@ -1083,6 +1187,10 @@ What the server exposes, all discoverable from the storage description
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
 `floor.json`) and run in `.github/workflows/lws-conformance.yml`.
+Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to test
+an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
+See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
+for the storage dependencies, byte/ETag checks and unchanged suite ratchets.
 
 ## Follow the normative specs, not this server
 
@@ -1146,3 +1254,13 @@ reconstructed from the code and cites it line by line; it also maps the source-r
   default-off `trust-graph` feature. It adds the library function
   `authz::trust_admit::trust_admit_verdict`, which is deliberately not wired
   into the request pipeline, so enabling it changes no request's outcome.
+
+## Optional versions and trash
+
+`SOLID_SERVER_VERSIONS=1` and `SOLID_SERVER_TRASH=1` enable the services in either protocol; both default to unset (off). `SOLID_SERVER_VERSIONS_MAX` defaults to `20` retained states per resource. `SOLID_SERVER_VERSIONS_RETENTION` and `SOLID_SERVER_TRASH_RETENTION` default to `P30D` and accept positive day/time XSD durations. An HTTP index with either service enabled is refused at startup. Trash covers data resources only. Empty-container deletion remains permanent; recursive LWS `Depth: infinity` deletes are permanent until #7236.
+
+History follows the resource through trash. Solid restore also requires Write on the target; LWS restore takes the create path's locks. Access-control documents ending in `.acl` or `.acr` are excluded.
+
+POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
+
+See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.

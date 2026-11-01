@@ -64,4 +64,10 @@ accepts other media types with a `+json` structured syntax suffix, without listi
 media-type patterns in the catalog.
 `ssd:RecursiveDelete` reflects `DELETE` with `Depth: infinity`.
 NotificationService's `subscriptionType` is currently `["WebhookSubscription"]`.
-Neither mode advertises move, CRDT sync, versions, trash, or unmounted channels.
+When enabled, versions and trash add `ssd:VersioningService` / `ssd:TrashService`
+and their `ssd:Versioning` / `ssd:Trash` capabilities in either mode. Versioning's
+`serviceEndpoint` is an IRI; its separate literal `ssd:listingTemplate` appends
+`?resource={resource}` to that endpoint. Trash covers data resources only;
+recursive deletes remain permanent until #7236. See [history services](history.md)
+for settings, requests and the draft additions used in their listings.
+Neither mode advertises move, CRDT sync, or unmounted channels.
