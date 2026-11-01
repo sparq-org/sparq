@@ -7,6 +7,7 @@ use axum::response::Response;
 use serde_json::{json, Value};
 use sparq_lws_core::lws::{self, tokens, LwsConfig, LWS_CONTEXT};
 use sparq_lws_core::store::{
+    history::{HistoryConfig, TRASH, VERSIONS},
     BlobEntry, BlobError, BlobStore, BodyCache, CompositeStore, InMemoryBlobStore,
     InMemorySparqClient, Store,
 };
@@ -35,11 +36,21 @@ impl Harness {
         blobs_configure: impl FnOnce(&mut LwsConfig),
         blobs: impl BlobStore + 'static,
     ) -> Self {
+        Self::with_history(blobs_configure, blobs, HistoryConfig::default()).await
+    }
+
+    async fn with_history(
+        blobs_configure: impl FnOnce(&mut LwsConfig),
+        blobs: impl BlobStore + 'static,
+        history: HistoryConfig,
+    ) -> Self {
         let mut cfg = LwsConfig::new(BASE);
         cfg.owner = Some(OWNER.into());
         blobs_configure(&mut cfg);
         let store =
-            CompositeStore::with_body_cache(InMemorySparqClient::new(), blobs, BodyCache::new(0));
+            CompositeStore::with_body_cache(InMemorySparqClient::new(), blobs, BodyCache::new(0))
+                .with_history(history)
+                .unwrap();
         // A malformed RDF representation can exist in storage independently of HTTP validation.
         store
             .write(&format!("{BASE}/"), Bytes::new(), "application/lws+json")
@@ -239,6 +250,162 @@ async fn each_agent_gets_exactly_its_readable_named_graphs_including_empty_graph
     // Malformed RDF remains an empty named graph when it is contained and readable.
     h.grant(A, &["/c/", "/broken"], json!([])).await;
     assert_eq!(h.graphs(A).await, iris(&["/r1", "/r2", "/c/", "/broken"]));
+}
+
+#[tokio::test]
+async fn query_dataset_contains_live_resources_only_with_versions_and_trash_enabled() {
+    let h = Harness::with_history(
+        |_| {},
+        InMemoryBlobStore::new(),
+        HistoryConfig {
+            versions: true,
+            trash: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let live = h
+        .create("live", "text/turtle", "<urn:state> <urn:p> <urn:prior> .")
+        .await;
+    let removed = h
+        .create(
+            "removed",
+            "text/turtle",
+            "<urn:state> <urn:p> <urn:removed> .",
+        )
+        .await;
+    h.grant(A, &["/live", "/removed"], json!([])).await;
+    assert_eq!(
+        h.call(
+            OWNER,
+            CLIENT,
+            "PUT",
+            "/live",
+            &[("content-type", "text/turtle")],
+            "<urn:state> <urn:p> <urn:current> .",
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        h.call(OWNER, CLIENT, "DELETE", "/removed", &[], "")
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+
+    // Establish the retained states through their HTTP services before querying.
+    let versions = h
+        .call(
+            OWNER,
+            CLIENT,
+            "GET",
+            &format!("/.lws/versions/?resource={live}"),
+            &[("accept", "application/lws+json")],
+            "",
+        )
+        .await;
+    assert_eq!(versions.status(), StatusCode::OK);
+    let versions = body_json(versions).await;
+    let retained = versions["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .filter(|id| *id != live)
+        .collect::<Vec<_>>();
+    assert_eq!(retained.len(), 1);
+    let trash = h
+        .call(
+            OWNER,
+            CLIENT,
+            "GET",
+            "/.lws/trash/",
+            &[("accept", "application/lws+json")],
+            "",
+        )
+        .await;
+    assert_eq!(trash.status(), StatusCode::OK);
+    let trash = body_json(trash).await;
+    let trashed = trash["items"].as_array().unwrap();
+    assert_eq!(trashed.len(), 1);
+    let trashed = trashed[0]["id"].as_str().unwrap();
+    for (record, body) in [(retained[0], "<urn:prior>"), (trashed, "<urn:removed>")] {
+        let response = h
+            .call(
+                OWNER,
+                CLIENT,
+                "GET",
+                record.strip_prefix(BASE).unwrap(),
+                &[],
+                "",
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(std::str::from_utf8(&bytes).unwrap().contains(body));
+    }
+    assert_eq!(
+        h.call(OWNER, CLIENT, "GET", "/removed", &[], "")
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let version_member = format!(
+        "{VERSIONS}{}",
+        retained[0]
+            .strip_prefix(&format!("{BASE}/.lws/versions/"))
+            .unwrap()
+    );
+    let trash_member = format!(
+        "{TRASH}{}",
+        trashed
+            .strip_prefix(&format!("{BASE}/.lws/trash/"))
+            .unwrap()
+    );
+    for who in [OWNER, A] {
+        assert_eq!(
+            h.graphs(who).await,
+            if who == OWNER {
+                iris(&["/", "/live", "/broken"])
+            } else {
+                iris(&["/live"])
+            }
+        );
+        let named = h
+            .query(
+                who,
+                "SELECT ?g ?o WHERE { GRAPH ?g { <urn:state> <urn:p> ?o } }",
+            )
+            .await;
+        assert_eq!(values(&named, "g"), [live.clone()].into());
+        assert_eq!(values(&named, "o"), ["urn:current".into()].into());
+        assert_eq!(named["results"]["bindings"].as_array().unwrap().len(), 1);
+        let union = h
+            .query(
+                who,
+                &format!("SELECT ?o FROM <{UNION}> WHERE {{ <urn:state> <urn:p> ?o }}"),
+            )
+            .await;
+        assert_eq!(values(&union, "o"), ["urn:current".into()].into());
+        assert_eq!(union["results"]["bindings"].as_array().unwrap().len(), 1);
+        for graph in [
+            &removed,
+            retained[0],
+            trashed,
+            &version_member,
+            &trash_member,
+        ] {
+            for text in [
+                format!("ASK {{ GRAPH <{graph}> {{}} }}"),
+                format!("ASK FROM <{graph}> {{ ?s ?p ?o }}"),
+            ] {
+                assert_eq!(h.query(who, &text).await["boolean"], false, "{who}: {text}");
+            }
+        }
+    }
 }
 
 #[tokio::test]

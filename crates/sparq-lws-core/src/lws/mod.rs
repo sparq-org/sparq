@@ -815,6 +815,7 @@ impl<S: Store + 'static> LwsState<S> {
         let (owner, closed) = tokio::sync::watch::channel(());
         let mut catalog = resources::service_catalog(&cfg);
         catalog.extend(additional);
+        crate::history_http::catalog(&mut catalog, &cfg.base_url, true, &store.history_config());
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
@@ -865,6 +866,7 @@ impl<S: Store + 'static> LwsState<S> {
         state.access.replace(loaded);
         state.settle_hidden(hidden);
         notify::spawn_expiry_sweeper(&state, closed);
+        crate::history_http::spawn_lws_sweep(&state);
         Ok(state)
     }
 
@@ -1165,8 +1167,8 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// The LWS metadata stored beside `iri`, or the default when there is none. Stored metadata
-    /// that does not parse is an error, never the default: that would quietly drop the creator,
-    /// the types and the links it records.
+    /// that does not parse is [`crate::error::ServerError::InvalidMetadata`], never the default:
+    /// that would quietly drop the creator, the types and the links it records.
     pub async fn resource_meta(
         &self,
         iri: &str,
@@ -2491,7 +2493,9 @@ pub(crate) fn parse_meta(
     body: &[u8],
 ) -> Result<ResourceMeta, crate::error::ServerError> {
     serde_json::from_slice(body).map_err(|e| {
-        crate::error::ServerError::Storage(format!("the metadata of {iri} is malformed: {e}"))
+        crate::error::ServerError::InvalidMetadata(format!(
+            "the metadata of {iri} is malformed: {e}"
+        ))
     })
 }
 
@@ -2659,6 +2663,9 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    if crate::history_http::recognizes(path, true, &state.store.history_config()) {
+        return crate::history_http::lws_handler(state, &req, &agent).await;
+    }
     #[cfg(feature = "sparql-endpoint")]
     if path == sparql::PATH {
         return sparql::handle(state, &req, &agent).await;
@@ -2675,7 +2682,20 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
     if path.starts_with("/.lws/") || path == "/.lws" {
         return problem(StatusCode::NOT_FOUND, None);
     }
-    resources::handle(state, &req, &agent).await
+    let original = state.cfg.absolute(&req.path);
+    let mut resp = resources::handle(state, &req, &agent).await;
+    if resp.status().is_success()
+        && state.store.history_config().versions
+        && crate::store::history::data_resource(&original)
+    {
+        add_link(
+            resp.headers_mut(),
+            &crate::history_http::listing_url(&state.cfg.base_url, true, &original),
+            "version-history",
+            None,
+        );
+    }
+    resp
 }
 
 // ---- response helpers ----
