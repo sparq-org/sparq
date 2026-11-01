@@ -89,6 +89,8 @@ pub mod body_limit;
 mod clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod describe;
+#[cfg(all(feature = "crdt-sync", not(target_arch = "wasm32")))]
+pub mod crdt;
 pub(crate) mod entity_tag;
 pub mod error;
 #[cfg(not(target_arch = "wasm32"))]

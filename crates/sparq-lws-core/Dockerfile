@@ -35,7 +35,7 @@ RUN --mount=type=secret,id=build_ca \
       export SSL_CERT_FILE=/run/secrets/build_ca CURL_CA_BUNDLE=/run/secrets/build_ca \
         CARGO_HTTP_CAINFO=/run/secrets/build_ca GIT_SSL_CAINFO=/run/secrets/build_ca RUSTUP_USE_CURL=1; \
     fi; \
-    cargo auditable build --release --locked ${BUILD_JOBS:+--jobs "$BUILD_JOBS"} -p sparq-lws-core ${CARGO_FLAGS}
+    cargo auditable build --release --locked ${BUILD_JOBS:+--jobs "$BUILD_JOBS"} -p sparq-lws-core --features crdt-sync ${CARGO_FLAGS}
 
 # Distroless has no mkdir; copy an empty mount point with the runtime ownership.
 RUN mkdir /data
