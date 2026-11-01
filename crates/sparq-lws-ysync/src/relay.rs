@@ -75,6 +75,18 @@ impl Default for Limits {
     }
 }
 
+impl Limits {
+    // Ordinary writes leave space for confirmed snapshot creation before source deletion.
+    fn replay_limit(&self, reserve_snapshot: bool) -> usize {
+        let full = self.document_bytes.saturating_mul(4);
+        if reserve_snapshot {
+            full.saturating_sub(self.document_bytes.saturating_add(16))
+        } else {
+            full
+        }
+    }
+}
+
 /// Internal container-create feed. No network subscription or polling is involved.
 #[derive(Clone, Default)]
 pub struct Changes(Arc<StdMutex<HashMap<String, broadcast::Sender<String>>>>);
@@ -421,7 +433,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
             }
             bytes = bytes.saturating_add(body.len());
             if body.len() > self.0.limits.document_bytes.saturating_add(16)
-                || bytes > self.0.limits.document_bytes.saturating_mul(4)
+                || bytes > self.0.limits.replay_limit(false)
             {
                 return Err(Fault::TooLarge);
             }
@@ -510,7 +522,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                         .saturating_add(pending_bytes)
                         .saturating_sub(existing.map_or(0, |p| p.update.len().saturating_add(16)))
                         .saturating_add(pending.len().saturating_add(16))
-                        > self.0.limits.document_bytes.saturating_mul(4)
+                        > self.0.limits.replay_limit(true)
                     {
                         return Err(Fault::Capacity);
                     }
@@ -797,8 +809,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 update: guard.doc.state.clone(),
             };
             let bytes = snapshot.update.len().saturating_add(16);
-            if guard.retained_bytes.saturating_add(bytes)
-                > self.0.limits.document_bytes.saturating_mul(4)
+            if guard.retained_bytes.saturating_add(bytes) > self.0.limits.replay_limit(false)
                 || guard.files.len() >= self.0.limits.max_log_files
             {
                 return Ok(false);
@@ -825,7 +836,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 .retained_bytes
                 .saturating_add(pending)
                 .saturating_add(bytes)
-                > self.0.limits.document_bytes.saturating_mul(4)
+                > self.0.limits.replay_limit(false)
                 || guard.files.len().saturating_add(guard.pending.len())
                     >= self.0.limits.max_log_files
             {
@@ -906,7 +917,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                     || guard
                         .retained_bytes
                         .saturating_add(batch.update.len().saturating_add(16))
-                        > self.0.limits.document_bytes.saturating_mul(4)
+                        > self.0.limits.replay_limit(true)
                 {
                     continue;
                 }
@@ -978,9 +989,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         if guard.files.len() >= self.0.limits.max_log_files {
             return Err(Fault::Capacity);
         }
-        if guard.retained_bytes.saturating_add(bytes.len())
-            > self.0.limits.document_bytes.saturating_mul(4)
-        {
+        if guard.retained_bytes.saturating_add(bytes.len()) > self.0.limits.replay_limit(false) {
             return Err(Fault::TooLarge);
         }
         let skip = guard.cutoff.is_some_and(|cutoff| match log.kind {
@@ -1030,7 +1039,7 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         if guard.files.len() > self.0.limits.max_log_files {
             return Err(Fault::Capacity);
         }
-        if guard.retained_bytes > self.0.limits.document_bytes.saturating_mul(4) {
+        if guard.retained_bytes > self.0.limits.replay_limit(false) {
             return Err(Fault::TooLarge);
         }
         if guard

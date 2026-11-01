@@ -127,10 +127,14 @@ Limits can be set before router assembly. Library embedders may set
 | `COMPACT_AFTER` | 64 | Update files before live or unload compaction |
 
 Retained log bodies, in-flight writes and queued updates reserve replay bytes
-before admission. A new update exceeding four times `DOCUMENT_BYTES` is refused
-with capacity before broadcast. Loading also bounds aggregate log bytes to the
-same limit and
+before admission. Admission keeps headroom for a compaction snapshot: admission
+and flush use four times `DOCUMENT_BYTES` minus (`DOCUMENT_BYTES` plus 16) bytes.
+Admission refuses excess updates with capacity before broadcast. Compaction and
+loading keep the full limit of four times `DOCUMENT_BYTES`; loading also bounds
 container-listing bytes to 8192 times `MAX_LOG_FILES`.
+External appends bypass admission and ingest keeps the full replay limit: the relay
+compacts when it can, and otherwise the room stays loadable but read-only until a
+writer with delete authority compacts it.
 Replies to one binary message share a byte budget equal to `DOCUMENT_BYTES` plus
 `MESSAGE_BYTES`; exceeding it ends the connection with the capacity code.
 Ticket request bodies are limited to 8192 bytes as they are read. Pending authors

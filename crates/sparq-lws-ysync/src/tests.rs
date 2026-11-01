@@ -377,8 +377,8 @@ async fn retry_reserves_retained_log_bytes() {
     assert!(store.calls.load(Ordering::SeqCst) >= 3);
     let bytes: usize = store.files.lock().unwrap().values().map(Vec::len).sum();
     assert!(
-        bytes <= limits.document_bytes * 4,
-        "retries must stay replayable"
+        bytes <= limits.document_bytes * 4 - (limits.document_bytes + 16),
+        "retries must leave room for one maximum-size snapshot"
     );
     let restart = Relay::new(store.clone(), limits, store.changes.clone());
     restart.ticket([42; 32], "room", agent).await.unwrap();
@@ -485,7 +485,7 @@ async fn concurrent_reload_reservation(by_bytes: bool) {
     let initial = base
         .transact()
         .encode_state_as_update_v1(&StateVector::default());
-    for nonce in 0..if by_bytes { 2 } else { 1 } {
+    for nonce in 0..1 {
         store.files.lock().unwrap().insert(
             format!("seed-{nonce}"),
             LogFile {

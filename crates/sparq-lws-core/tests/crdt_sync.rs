@@ -2275,6 +2275,7 @@ async fn retained_bytes_restart(mode: bool) {
     // Each full-state update carries the same large base plus one more integrated edit.
     // The writer has no delete authority, so byte admission must eventually refuse.
     let mut refused = false;
+    let mut expected_text = writer.text();
     for _ in 0..7 {
         tokio::time::sleep(Duration::from_millis(600)).await;
         writer.edit("y").await;
@@ -2310,8 +2311,11 @@ async fn retained_bytes_restart(mode: bool) {
         if refused {
             break;
         }
+        expected_text = writer.text();
+        observer.until_text(&expected_text).await;
     }
     assert!(refused, "retained bytes must bound new admissions");
+    observer.until_text(&expected_text).await;
     tokio::time::sleep(Duration::from_millis(650)).await;
     let mut total = 0;
     for file in h.store.list_children(ROOM).await.unwrap() {
@@ -2321,11 +2325,41 @@ async fn retained_bytes_restart(mode: bool) {
         }
     }
     assert!(total <= limits.document_bytes * 4);
-    let expected = h.file_state().await;
-    let expected_text = expected
-        .get_or_insert_text("text")
-        .get_string(&expected.transact());
-    assert!(expected_text.starts_with(&"x".repeat(780)));
+    let mut owner = h.client(OWNER, 8203).await;
+    owner.until_text(&expected_text).await;
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let mut updates = 0;
+            let mut snapshots = 0;
+            for file in h.store.list_children(ROOM).await.unwrap() {
+                let body = h.store.read(file.as_str()).await.unwrap().body;
+                updates += usize::from(body.starts_with(b"JYU1"));
+                snapshots += usize::from(body.starts_with(b"JYS1"));
+            }
+            if snapshots == 1 && updates == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("owner must compact the retained log to one snapshot");
+    assert_eq!(
+        h.file_state().await.transact().state_vector(),
+        observer.vector()
+    );
+    owner.edit("-after-compaction").await;
+    expected_text.push_str("-after-compaction");
+    observer.until_text(&expected_text).await;
+    let expected_vector = observer.vector();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while h.file_state().await.transact().state_vector() != expected_vector {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the edit after compaction must persist");
+    owner.finish_close().await;
     observer.finish_close().await;
     drop(observer);
     let store = h.store.clone();
@@ -2334,7 +2368,7 @@ async fn retained_bytes_restart(mode: bool) {
     let restart = Harness::with_store(mode, limits, store).await;
     let mut peer = restart.client(WRITER, 8202).await;
     peer.until_text(&expected_text).await;
-    assert_eq!(peer.vector(), expected.transact().state_vector());
+    assert_eq!(peer.vector(), expected_vector);
 }
 
 async fn replay_bytes_during_flush(mode: bool) {
@@ -2354,7 +2388,7 @@ async fn replay_bytes_during_flush(mode: bool) {
     let update = base
         .transact()
         .encode_state_as_update_v1(&StateVector::default());
-    for nonce in 0..3 {
+    for nonce in 0..2 {
         h.store
             .create_in_container(
                 ROOM,
