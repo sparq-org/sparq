@@ -253,7 +253,7 @@ mod tests {
             let (left, right, sweep) = tokio::join!(
                 store.write(IRI, Bytes::from(a.clone()), "text/plain"),
                 store.write(IRI, Bytes::from(b.clone()), "text/plain"),
-                reconcile_orphans(&store.sparq, &store.blob, &options)
+                reconcile_orphans(store.sparq.as_ref(), store.blob.as_ref(), &options)
             );
             left.unwrap();
             right.unwrap();
@@ -559,8 +559,8 @@ mod tests {
                 .unwrap();
             let delta = counters.snapshot().since(&before);
             assert_eq!(
-                delta.sparql_updates, 0,
-                "no reclaim when no version was pruned"
+                delta.sparql_updates, 1,
+                "only the retained metadata mutation when no version was pruned"
             );
             assert_eq!(delta.sparql_queries, 0);
         }

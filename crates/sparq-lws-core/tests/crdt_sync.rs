@@ -91,7 +91,7 @@ impl Store for GatedStore {
     async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
         self.inner.read_marker(iri).await
     }
-    fn lifecycle(&self) -> Option<Arc<sparq_lws_core::store::Lifecycle>> {
+    fn lifecycle(&self) -> Arc<sparq_lws_core::store::Lifecycle> {
         self.inner.lifecycle()
     }
     async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {

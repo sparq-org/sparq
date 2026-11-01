@@ -38,6 +38,8 @@
 //! - `create_child` / `replace_child`: **1 update + 1 query** (the guarded insert, then the create-marker ASK).
 //! - `delete_meta_if_empty`: **1 update**, then **1 query** (marker ASK) when the outcome is
 //!   `Deleted`, else **2 queries** (marker ASK + exists ASK).
+//! - History methods have no HTTP implementation; they model **1 query** per index lookup
+//!   or **1 update** per atomic history mutation.
 //!
 //! Error paths are counted best-effort (the live client may abort mid-sequence); the pinned tests
 //! only assert success paths, where the mapping is exact.
@@ -56,6 +58,9 @@ use super::sparq::{DeleteOutcome, ReadPlan, ResourceMeta, SparqClient, SparqErro
 /// `Arc` and diffs [`snapshot`](BackendCounters::snapshot)s around one operation.
 #[derive(Debug, Default)]
 pub struct BackendCounters {
+    #[cfg(test)]
+    methods: Mutex<Vec<&'static str>>,
+
     /// SPARQL Protocol **query** requests (SELECT / ASK / CONSTRUCT) the live client would issue.
     sparql_queries: AtomicU64,
     /// SPARQL Protocol **update** requests.
@@ -141,6 +146,20 @@ impl CounterSnapshot {
 }
 
 impl BackendCounters {
+    #[cfg(test)]
+    fn record_method(&self, method: &'static str) {
+        self.methods.lock().expect("methods lock").push(method);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_methods(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for method in std::mem::take(&mut *self.methods.lock().expect("methods lock")) {
+            *counts.entry(method).or_default() += 1;
+        }
+        counts
+    }
+
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -296,6 +315,19 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.reset_marker");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.inner.reset_marker(iri, value, lease).await
+    }
+
     async fn replace_meta_retaining(
         &self,
         iri: &str,
@@ -303,6 +335,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         member: &str,
         fields: crate::store::history::VersionFields,
     ) -> Result<Vec<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.replace_meta_retaining");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
         self.inner
             .replace_meta_retaining(iri, meta, member, fields)
             .await
@@ -314,6 +350,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         member: &str,
         fields: crate::store::history::TrashFields,
     ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.move_to_trash");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
         self.inner.move_to_trash(iri, parent, member, fields).await
     }
     async fn restore_from_trash(
@@ -322,27 +362,47 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         target: &str,
         parent: &str,
     ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.restore_from_trash");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
         self.inner.restore_from_trash(member, target, parent).await
     }
     async fn versions(
         &self,
         original: Option<&str>,
     ) -> Result<Vec<crate::store::history::VersionEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.versions");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.versions(original).await
     }
     async fn trash_entries(&self) -> Result<Vec<crate::store::history::TrashEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.trash_entries");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.trash_entries().await
     }
     async fn version_entry(
         &self,
         member: &str,
     ) -> Result<Option<crate::store::history::VersionEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.version_entry");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.version_entry(member).await
     }
     async fn trash_entry(
         &self,
         member: &str,
     ) -> Result<Option<crate::store::history::TrashEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.trash_entry");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.trash_entry(member).await
     }
     async fn expired_history(
@@ -351,17 +411,25 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         trash_before: std::time::SystemTime,
         limit: usize,
     ) -> Result<Vec<crate::store::history::ExpiredEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.expired_history");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner
             .expired_history(versions_before, trash_before, limit)
             .await
     }
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.get_meta");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.get_meta(iri).await
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.put_meta");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.put_meta(iri, meta).await
@@ -372,6 +440,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.replace_meta");
         let _g = self.counters.op_guard();
         // The live client has no atomic replace: it pays the trait default's metadata SELECT plus
         // the upsert UPDATE. Forwarded to `inner` so a wrapped atomic override still answers.
@@ -381,6 +451,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.exists");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.exists(iri).await
@@ -391,6 +463,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.begin_reclaim");
         let _g = self.counters.op_guard();
         // The live client: the guarded update, then the ASK that reads it back.
         self.counters.count_update();
@@ -399,18 +473,24 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.end_reclaim");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.end_reclaim(blob_key).await
     }
 
     async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.reclaiming");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.reclaiming().await
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.delete_meta");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.delete_meta(iri).await
@@ -421,6 +501,9 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<crate::store::history::RetiredResource, SparqError> {
+        #[cfg(test)]
+        self.counters
+            .record_method("index.delete_resource_retiring");
         let _g = self.counters.op_guard();
         let result = self.inner.delete_resource_retiring(iri, parent).await;
         if !matches!(result, Err(SparqError::Unsupported)) {
@@ -437,6 +520,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.delete_resource");
         let _g = self.counters.op_guard();
         // Model the HTTP default's SELECT + detach + DROP, while preserving the inner
         // backend's atomic override, just as replace_meta does.
@@ -453,6 +538,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.delete_meta_if_empty");
         let _g = self.counters.op_guard();
         // The live client: 1 guarded update, then the marker ASK; a non-Deleted outcome needs the
         // second (exists) ASK to split NotEmpty from NotFound.
@@ -473,6 +560,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.create_child");
         let _g = self.counters.op_guard();
         // The live client: 1 guarded update + 1 create-marker ASK (issued for BOTH the created and
         // the container-missing outcome — the ASK is how NotFound is learned).
@@ -487,6 +576,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.replace_child");
         let _g = self.counters.op_guard();
         // Model the HTTP default's single create_child (guarded update + create-marker ASK), while
         // preserving the inner client's atomic replacement.
@@ -496,12 +587,16 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.remove_child");
         let _g = self.counters.op_guard();
         self.counters.count_update();
         self.inner.remove_child(container, child).await
     }
 
     async fn fence(&self, fence: &super::sparq::Fence) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.fence");
         // The live client: one update (the fence).
         let _g = self.counters.op_guard();
         self.counters.count_update();
@@ -517,6 +612,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.raise_marker");
         // One update: the read and the write are one step.
         let _g = self.counters.op_guard();
         self.counters.count_update();
@@ -524,6 +621,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.list_children");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.list_children(container).await
@@ -534,12 +633,16 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         container: &str,
         max_bytes: usize,
     ) -> Result<Option<Vec<String>>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.list_children_within");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.list_children_within(container, max_bytes).await
     }
 
     async fn referenced_blob_keys(&self) -> Result<HashSet<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.referenced_blob_keys");
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
         self.inner.referenced_blob_keys().await
@@ -550,6 +653,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         target: &str,
         acl_candidates: &[String],
     ) -> Result<ReadPlan, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.read_plan");
         let _g = self.counters.op_guard();
         // ONE combined SELECT on the live client (§3.1) — the read-2 win this decorator exists to
         // evidence. Forwarded to `inner` (never the default loop), so the wrapped client's
@@ -575,36 +680,48 @@ impl<B: BlobStore> CountingBlobStore<B> {
 #[async_trait]
 impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.get");
         let _g = self.counters.op_guard();
         self.counters.blob_gets.fetch_add(1, Ordering::Relaxed);
         self.inner.get(key).await
     }
 
     async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.put");
         let _g = self.counters.op_guard();
         self.counters.blob_puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put(key, body).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.exists");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.exists(key).await
     }
 
     async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.delete");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.delete(key).await
     }
 
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.list");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.list().await
     }
 
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.stat");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner.stat(key).await
@@ -615,6 +732,8 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
         key: &str,
         expected_generation: u64,
     ) -> Result<bool, BlobError> {
+        #[cfg(test)]
+        self.counters.record_method("blob.delete_if_unchanged");
         let _g = self.counters.op_guard();
         self.counters.blob_others.fetch_add(1, Ordering::Relaxed);
         self.inner
@@ -624,9 +743,140 @@ impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
 }
 
 #[cfg(test)]
+impl CountingSparqClient<super::InMemorySparqClient> {
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) -> Result<(), SparqError> {
+        self.inner.plant_marker(iri, value).await
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::{InMemoryBlobStore, InMemorySparqClient};
+
+    #[tokio::test]
+    #[should_panic(expected = "unexpected backend methods")]
+    async fn a_history_lookup_is_visible_to_the_empty_log_assertion() {
+        let counters = BackendCounters::new();
+        let sparq = CountingSparqClient::new(InMemorySparqClient::new(), Arc::clone(&counters));
+        assert!(counters.take_methods().is_empty());
+        sparq.versions(None).await.unwrap();
+        let calls = counters.take_methods();
+        assert!(calls.is_empty(), "unexpected backend methods: {calls:?}");
+    }
+
+    #[tokio::test]
+    async fn mutation_and_history_methods_are_recorded_once() {
+        use crate::store::history::{TrashFields, VersionFields};
+        use std::time::SystemTime;
+
+        let counters = BackendCounters::new();
+        let sparq = CountingSparqClient::new(InMemorySparqClient::new(), Arc::clone(&counters));
+        let parent = "https://p/c/";
+        let child = "https://p/c/doc";
+        let version = "urn:x-sparq-lws:versions/v1";
+        let trash = "urn:x-sparq-lws:trash/t1";
+        let meta = ResourceMeta {
+            content_type: "text/plain".into(),
+            blob_key: "k1".into(),
+            etag: "\"e1\"".into(),
+            last_modified: Some(SystemTime::UNIX_EPOCH),
+        };
+        sparq.put_meta(parent, meta.clone()).await.unwrap();
+        counters.take_methods();
+        macro_rules! check {
+            ($call:expr, $method:literal, $queries:expr, $updates:expr) => {{
+                let scope = counters.measure();
+                let result = $call.await.unwrap();
+                assert_eq!(counters.take_methods(), [($method, 1)].into());
+                let delta = scope.delta();
+                assert_eq!(
+                    (delta.sparql_queries, delta.sparql_updates),
+                    ($queries, $updates)
+                );
+                assert_eq!(delta.max_in_flight, 1);
+                result
+            }};
+        }
+        check!(
+            sparq.replace_child(parent, child, meta.clone()),
+            "index.replace_child",
+            1,
+            1
+        );
+        check!(
+            sparq.replace_meta_retaining(
+                child,
+                meta,
+                version,
+                VersionFields {
+                    original: child.into(),
+                    max_versions: 2,
+                }
+            ),
+            "index.replace_meta_retaining",
+            0,
+            1
+        );
+        assert_eq!(
+            check!(sparq.versions(None), "index.versions", 1, 0).len(),
+            1
+        );
+        assert!(check!(sparq.version_entry(version), "index.version_entry", 1, 0).is_some());
+        check!(
+            sparq.move_to_trash(
+                child,
+                Some(parent),
+                trash,
+                TrashFields {
+                    original: child.into(),
+                    trashed_at: SystemTime::UNIX_EPOCH,
+                    deleted_by: None,
+                    deleter_could_read: true,
+                }
+            ),
+            "index.move_to_trash",
+            0,
+            1
+        );
+        assert_eq!(
+            check!(sparq.trash_entries(), "index.trash_entries", 1, 0).len(),
+            1
+        );
+        assert!(check!(sparq.trash_entry(trash), "index.trash_entry", 1, 0).is_some());
+        assert!(!check!(
+            sparq.expired_history(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH, 10),
+            "index.expired_history",
+            1,
+            0
+        )
+        .is_empty());
+        check!(
+            sparq.restore_from_trash(trash, child, parent),
+            "index.restore_from_trash",
+            0,
+            1
+        );
+        assert_eq!(
+            check!(
+                sparq.delete_resource_retiring(child, Some(parent)),
+                "index.delete_resource_retiring",
+                1,
+                2
+            )
+            .live_key,
+            Some("k1".into())
+        );
+        assert_eq!(
+            check!(
+                sparq.delete_resource(child, None),
+                "index.delete_resource",
+                1,
+                1
+            ),
+            None
+        );
+    }
 
     #[tokio::test]
     async fn counters_pin_the_per_method_mapping() {
