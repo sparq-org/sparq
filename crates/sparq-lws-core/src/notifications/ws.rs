@@ -316,14 +316,13 @@ impl<S: Store> NotifyState<S> {
         // permit-extends only for a plain Read), so watching a resource is never allowed where a
         // GET of it is refused.
         #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
-        let allowed = match self.ldp.odrl_gate.as_deref() {
-            None => allowed,
-            Some(gate) => match gate.decide_read(topic, Some(web_id)) {
-                crate::authz::odrl::OdrlVerdict::NotApplicable => allowed,
-                crate::authz::odrl::OdrlVerdict::Deny => false,
-                crate::authz::odrl::OdrlVerdict::Permit => allowed || required == AccessMode::Read,
-            },
-        };
+        let allowed = crate::authz::odrl::compose(
+            self.ldp.odrl_gate.as_deref(),
+            topic,
+            Some(web_id),
+            required,
+            allowed,
+        );
         match allowed {
             true => ReadAccess::Allowed,
             false => ReadAccess::Denied,

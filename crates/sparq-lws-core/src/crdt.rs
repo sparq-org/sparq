@@ -143,6 +143,14 @@ impl<S: Store + 'static> Authorizer for Backend<S> {
                     .map_err(|_| Fault::Store)?,
                     Decision::Allow(_)
                 );
+                #[cfg(feature = "odrl-authz")]
+                let read = crate::authz::odrl::compose(
+                    state.odrl_gate.as_deref(),
+                    room,
+                    Some(&agent.subject),
+                    AccessMode::Read,
+                    read,
+                );
                 if !read {
                     return Ok(Access {
                         read: false,
@@ -161,6 +169,14 @@ impl<S: Store + 'static> Authorizer for Backend<S> {
                     .map_err(|_| Fault::Store)?,
                     Decision::Allow(_)
                 );
+                #[cfg(feature = "odrl-authz")]
+                let write = crate::authz::odrl::compose(
+                    state.odrl_gate.as_deref(),
+                    room,
+                    Some(&agent.subject),
+                    AccessMode::Append,
+                    write,
+                );
                 let delete = matches!(
                     auth.authorize(
                         room,
@@ -171,6 +187,14 @@ impl<S: Store + 'static> Authorizer for Backend<S> {
                     .await
                     .map_err(|_| Fault::Store)?,
                     Decision::Allow(_)
+                );
+                #[cfg(feature = "odrl-authz")]
+                let delete = crate::authz::odrl::compose(
+                    state.odrl_gate.as_deref(),
+                    room,
+                    Some(&agent.subject),
+                    AccessMode::Write,
+                    delete,
                 );
                 Ok(Access {
                     read: state.store.exists(room).await.map_err(|_| Fault::Store)?,
@@ -366,11 +390,12 @@ impl<S: Store + 'static> RoomStore for Backend<S> {
 pub(crate) struct CrdtState<S: Store> {
     relay: Relay<Backend<S>>,
     socket_url: String,
+    cors: crate::ldp::cors::CorsPolicy,
     connections: Arc<tokio::sync::Semaphore>,
 }
 
 impl<S: Store + 'static> CrdtState<S> {
-    pub(crate) fn solid(state: Arc<LdpState<S>>) -> Arc<Self> {
+    pub(crate) fn solid(state: Arc<LdpState<S>>, cors: crate::ldp::cors::CorsPolicy) -> Arc<Self> {
         let socket_url = socket_url(state.base_url(), SOLID_SOCKET);
         let changes = state.notifications.crdt_changes.clone();
         let limits = state.crdt_limits.clone();
@@ -380,6 +405,7 @@ impl<S: Store + 'static> CrdtState<S> {
         Arc::new(Self {
             relay: Relay::new(Backend::Solid(state), limits, changes),
             socket_url,
+            cors,
             connections,
         })
     }
@@ -399,6 +425,7 @@ impl<S: Store + 'static> CrdtState<S> {
                     .saturating_mul(state.cfg.crdt_limits.peers_per_room),
             )),
             socket_url: socket_url(&state.cfg.base_url, LWS_SOCKET),
+            cors: state.cfg.cors.clone(),
         })
     }
 }
@@ -542,16 +569,40 @@ pub(crate) struct Join {
 pub(crate) async fn solid_socket<S: Store + 'static>(
     State(state): State<Arc<CrdtState<S>>>,
     Query(query): Query<Join>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    upgrade(state, query, ws)
+    upgrade(state, query, headers, ws).await
 }
 
-fn upgrade<S: Store + 'static>(
+async fn upgrade<S: Store + 'static>(
     state: Arc<CrdtState<S>>,
     query: Join,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
+    if let Some(origin) = headers.get(header::ORIGIN) {
+        let Ok(origin) = origin.to_str() else {
+            return refused(Fault::Forbidden);
+        };
+        if !state.cors.allows(Some(origin)) {
+            return refused(Fault::Forbidden);
+        }
+        let secret = URL_SAFE_NO_PAD
+            .decode(&query.ticket)
+            .ok()
+            .and_then(|s| s.try_into().ok());
+        let Some(secret) = secret else {
+            return refused(Fault::Ticket);
+        };
+        if let Err(error) = state
+            .relay
+            .check_origin(secret, &query.room, Some(origin))
+            .await
+        {
+            return refused(error);
+        }
+    }
     let max = state.relay.limits().message_bytes.saturating_mul(2);
     ws.max_message_size(max)
         .max_frame_size(max)
@@ -568,7 +619,13 @@ pub(crate) async fn lws_socket<S: Store + 'static>(state: &LwsState<S>, req: Req
         Ok(ws) => ws,
         Err(rejection) => return rejection.into_response(),
     };
-    upgrade(state.crdt.get().expect("mounted CRDT").clone(), query, ws)
+    upgrade(
+        state.crdt.get().expect("mounted CRDT").clone(),
+        query,
+        parts.headers,
+        ws,
+    )
+    .await
 }
 
 pub(crate) fn is_socket(path: &str) -> bool {

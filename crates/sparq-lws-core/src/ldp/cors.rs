@@ -85,7 +85,7 @@ impl CorsPolicy {
         self.origins.is_some()
     }
 
-    fn allows(&self, origin: Option<&str>) -> bool {
+    pub(crate) fn allows(&self, origin: Option<&str>) -> bool {
         match &self.origins {
             None => true,
             Some(origins) => origin

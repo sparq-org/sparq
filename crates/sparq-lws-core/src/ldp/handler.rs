@@ -442,29 +442,25 @@ impl<S: Store> LdpState<S> {
         web_id: Option<&str>,
         wac: ReadDecision,
     ) -> ReadDecision {
-        use crate::authz::odrl::OdrlVerdict;
-        let Some(gate) = self.odrl_gate.as_deref() else {
-            return wac;
-        };
-        match gate.decide_read(target_iri, web_id) {
-            OdrlVerdict::NotApplicable => wac,
-            OdrlVerdict::Deny => {
-                if web_id.is_none() {
-                    ReadDecision::Unauthenticated
-                } else {
-                    ReadDecision::Forbidden
-                }
-            }
-            OdrlVerdict::Permit => match wac {
+        let allowed = crate::authz::odrl::compose(
+            self.odrl_gate.as_deref(),
+            target_iri,
+            web_id,
+            required,
+            matches!(wac, ReadDecision::Allow(_)),
+        );
+        if allowed {
+            match wac {
                 allowed @ ReadDecision::Allow(_) => allowed,
-                _ if required == AccessMode::Read => {
-                    ReadDecision::Allow(crate::authz::EffectivePermissions {
-                        user: [AccessMode::Read].into_iter().collect(),
-                        public: std::collections::BTreeSet::new(),
-                    })
-                }
-                denied => denied,
-            },
+                _ => ReadDecision::Allow(crate::authz::EffectivePermissions {
+                    user: [AccessMode::Read].into_iter().collect(),
+                    public: std::collections::BTreeSet::new(),
+                }),
+            }
+        } else if web_id.is_none() {
+            ReadDecision::Unauthenticated
+        } else {
+            ReadDecision::Forbidden
         }
     }
 

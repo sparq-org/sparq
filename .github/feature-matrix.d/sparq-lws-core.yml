@@ -120,3 +120,9 @@
   crate: "sparq-lws-core"
   features: "blob-fs"
   test: true
+
+# Exercise room authorization with the optional read gate attached.
+- name: "sparq-lws-core (crdt-sync + odrl-authz)"
+  crate: "sparq-lws-core"
+  features: "crdt-sync,odrl-authz"
+  test: true

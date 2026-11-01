@@ -46,8 +46,33 @@ struct StorageGate {
     snapshot: AtomicBool,
     flush: AtomicBool,
     pause_flush: AtomicBool,
+    snapshot_delete: AtomicBool,
+    snapshot_delete_seen: tokio::sync::Notify,
+    #[cfg(feature = "odrl-authz")]
+    odrl_deny: AtomicBool,
+    #[cfg(feature = "odrl-authz")]
+    odrl_permit: AtomicBool,
+
     entered: tokio::sync::Notify,
     released: tokio::sync::Notify,
+}
+
+#[cfg(feature = "odrl-authz")]
+impl sparq_lws_core::authz::odrl::OdrlGate for StorageGate {
+    fn decide_read(
+        &self,
+        target: &str,
+        _: Option<&str>,
+    ) -> sparq_lws_core::authz::odrl::OdrlVerdict {
+        use sparq_lws_core::authz::odrl::OdrlVerdict;
+        if target == ROOM && self.odrl_deny.load(Ordering::SeqCst) {
+            OdrlVerdict::Deny
+        } else if target == ROOM && self.odrl_permit.load(Ordering::SeqCst) {
+            OdrlVerdict::Permit
+        } else {
+            OdrlVerdict::NotApplicable
+        }
+    }
 }
 
 struct GatedStore {
@@ -117,6 +142,18 @@ impl Store for GatedStore {
             .await
     }
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+        if self.gate.snapshot_delete.load(Ordering::SeqCst)
+            && self
+                .inner
+                .read(iri)
+                .await
+                .is_ok_and(|r| r.body.starts_with(b"JYS1"))
+        {
+            self.gate.snapshot_delete_seen.notify_one();
+            return Err(sparq_lws_core::error::ServerError::Storage(
+                "fixture delete failure".into(),
+            ));
+        }
         self.inner.delete(iri, parent).await
     }
     async fn delete_container_if_empty(
@@ -134,16 +171,29 @@ impl Store for GatedStore {
         iri: &str,
         bytes: usize,
     ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        let listed = self.inner.list_children_within(iri, bytes).await;
         if iri == ROOM && self.gate.listing.load(Ordering::SeqCst) {
             self.gate.entered.notify_one();
             self.gate.released.notified().await;
         }
-        self.inner.list_children_within(iri, bytes).await
+        listed
     }
     async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
         self.inner.holds().await
     }
     async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+        if self.gate.snapshot_delete.load(Ordering::SeqCst)
+            && self
+                .inner
+                .read(iri)
+                .await
+                .is_ok_and(|r| r.body.starts_with(b"JYS1"))
+        {
+            self.gate.snapshot_delete_seen.notify_one();
+            return Err(sparq_lws_core::error::ServerError::Storage(
+                "fixture hold failure".into(),
+            ));
+        }
         self.inner.hold(iri, holder).await
     }
     async fn reinstate(
@@ -190,17 +240,26 @@ impl Harness {
             gate: gate.clone(),
         };
         let app = if let Some(cfg) = &h.lws {
-            lws::router(store, cfg.clone()).await.unwrap()
+            let mut cfg = cfg.clone();
+            cfg.cors = sparq_lws_core::ldp::cors::CorsPolicy::from_origins(
+                "https://app.example,https://other.example",
+            )
+            .unwrap();
+            lws::router(store, cfg).await.unwrap()
         } else {
             let config = VerifierConfig::new(vec![common::ISSUER.into()], common::BASE_URL);
             let replay = InMemoryReplayStore::with_window(config.replay_ttl());
             let verifier = Verifier::new(config, common::jwks_provider(&h.issuer), replay).unwrap();
             let mut ldp = LdpState::new(store, common::BASE_URL);
             ldp.crdt_limits = limits;
-            build_router(AppState::new(
-                AuthContext::new(verifier, common::BASE_URL),
-                ldp,
-            ))
+            #[cfg(feature = "odrl-authz")]
+            ldp.set_odrl_gate(gate.clone());
+            let mut state = AppState::new(AuthContext::new(verifier, common::BASE_URL), ldp);
+            state.cors = sparq_lws_core::ldp::cors::CorsPolicy::from_origins(
+                "https://app.example,https://other.example",
+            )
+            .unwrap();
+            build_router(state)
         };
         h.server.abort();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -299,10 +358,26 @@ impl Harness {
         media: &str,
         body: impl Into<Body>,
     ) -> axum::response::Response {
+        self.call_origin(method, path, subject, media, body, None)
+            .await
+    }
+
+    async fn call_origin(
+        &self,
+        method: &str,
+        path: &str,
+        subject: &str,
+        media: &str,
+        body: impl Into<Body>,
+        origin: Option<&str>,
+    ) -> axum::response::Response {
         let mut req = Request::builder()
             .method(method)
             .uri(path)
             .header(header::CONTENT_TYPE, media);
+        if let Some(origin) = origin {
+            req = req.header(header::ORIGIN, origin);
+        }
         if let Some(cfg) = &self.lws {
             let token = lws::tokens::mint(cfg, subject, "https://client.example/id", &cfg.realm());
             req = req.header(header::AUTHORIZATION, format!("Bearer {token}"));
@@ -2156,4 +2231,714 @@ async fn protocol_response_bytes_are_bounded_solid() {
 #[tokio::test]
 async fn protocol_response_bytes_are_bounded_lws() {
     frame_response_bound(true).await;
+}
+
+#[cfg(feature = "odrl-authz")]
+#[tokio::test]
+async fn room_access_composes_odrl() {
+    let (h, gate) = Harness::gated(false, Limits::default()).await;
+    let mut peer = h.client(READER, 8100).await;
+    gate.odrl_deny.store(true, Ordering::SeqCst);
+    let response = h
+        .call(
+            "POST",
+            h.tickets(),
+            READER,
+            "application/json",
+            json!({"room": ROOM}).to_string(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(11)).await;
+    tokio::time::resume();
+    assert_eq!(peer.close_code().await, 4403);
+    gate.odrl_deny.store(false, Ordering::SeqCst);
+    gate.odrl_permit.store(true, Ordering::SeqCst);
+    let mut permitted = h.client("https://outsider.example/#me", 8101).await;
+    permitted.edit("read-only").await;
+    assert_eq!(permitted.close_code().await, 4403);
+}
+
+async fn retained_bytes_restart(mode: bool) {
+    let limits = Limits {
+        document_bytes: 1024,
+        compact_after: 100,
+        ..Default::default()
+    };
+    let h = Harness::new(mode, limits.clone()).await;
+    minimal_writer_grants_for(&h).await;
+    let mut writer = h.client(WRITER, 8200).await;
+    let mut observer = h.client(WRITER, 8201).await;
+    writer.edit(&"x".repeat(780)).await;
+    observer.until_text(&writer.text()).await;
+    // Each full-state update carries the same large base plus one more integrated edit.
+    // The writer has no delete authority, so byte admission must eventually refuse.
+    let mut refused = false;
+    for _ in 0..7 {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        writer.edit("y").await;
+        writer
+            .send(Message::Sync(
+                SyncMessage::SyncStep1(StateVector::default()),
+            ))
+            .await;
+        loop {
+            match tokio::time::timeout(Duration::from_secs(3), writer.ws.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+            {
+                Ws::Close(Some(close)) => {
+                    assert_eq!(u16::from(close.code), 4429);
+                    refused = true;
+                    break;
+                }
+                Ws::Binary(bytes)
+                    if matches!(
+                        Message::decode_v1(&bytes).unwrap(),
+                        Message::Sync(SyncMessage::SyncStep2(_))
+                    ) =>
+                {
+                    break
+                }
+                Ws::Ping(bytes) => writer.ws.send(Ws::Pong(bytes)).await.unwrap(),
+                _ => {}
+            }
+        }
+        if refused {
+            break;
+        }
+    }
+    assert!(refused, "retained bytes must bound new admissions");
+    tokio::time::sleep(Duration::from_millis(650)).await;
+    let mut total = 0;
+    for file in h.store.list_children(ROOM).await.unwrap() {
+        let body = h.store.read(file.as_str()).await.unwrap().body;
+        if body.starts_with(b"JYU1") || body.starts_with(b"JYS1") {
+            total += body.len();
+        }
+    }
+    assert!(total <= limits.document_bytes * 4);
+    let expected = h.file_state().await;
+    let expected_text = expected
+        .get_or_insert_text("text")
+        .get_string(&expected.transact());
+    assert!(expected_text.starts_with(&"x".repeat(780)));
+    observer.finish_close().await;
+    drop(observer);
+    let store = h.store.clone();
+    drop(h);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let restart = Harness::with_store(mode, limits, store).await;
+    let mut peer = restart.client(WRITER, 8202).await;
+    peer.until_text(&expected_text).await;
+    assert_eq!(peer.vector(), expected.transact().state_vector());
+}
+
+async fn replay_bytes_during_flush(mode: bool) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            document_bytes: 1024,
+            compact_after: 100,
+            ..Default::default()
+        },
+    )
+    .await;
+    minimal_writer_grants_for(&h).await;
+    let base = Doc::with_client_id(8250);
+    base.get_or_insert_text("text")
+        .push(&mut base.transact_mut(), &"x".repeat(850));
+    let update = base
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    for nonce in 0..3 {
+        h.store
+            .create_in_container(
+                ROOM,
+                &format!("{ROOM}seed-{nonce}"),
+                Bytes::from(envelope(b"JYU1", 100, nonce, &update)),
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+    }
+    let mut writer = h.client(WRITER, 8251).await;
+    let mut observer = h.client(WRITER, 8252).await;
+    gate.pause_flush.store(true, Ordering::SeqCst);
+    writer.edit("a").await;
+    observer.until_text(&writer.text()).await;
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    writer.edit("b").await;
+    assert_eq!(writer.close_code().await, 4429);
+    gate.pause_flush.store(false, Ordering::SeqCst);
+    gate.released.notify_one();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if h.file_state().await.transact().state_vector() == observer.vector() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(observer.text().ends_with('a'));
+}
+#[tokio::test]
+async fn in_flight_bytes_reserve_replay_limit_solid() {
+    replay_bytes_during_flush(false).await;
+}
+#[tokio::test]
+async fn in_flight_bytes_reserve_replay_limit_lws() {
+    replay_bytes_during_flush(true).await;
+}
+
+async fn minimal_writer_grants_for(h: &Harness) {
+    restrict_writer(h, true, true).await;
+}
+
+#[tokio::test]
+async fn retained_log_bytes_restart_solid() {
+    retained_bytes_restart(false).await;
+}
+#[tokio::test]
+async fn retained_log_bytes_restart_lws() {
+    retained_bytes_restart(true).await;
+}
+
+async fn live_compaction(mode: bool, by_bytes: bool) {
+    let h = Harness::new(
+        mode,
+        Limits {
+            compact_after: if by_bytes { 100 } else { 1 },
+            document_bytes: 1024,
+            ..Default::default()
+        },
+    )
+    .await;
+    let mut writer = h.client(OWNER, 8300).await;
+    let mut peer = h.client(READER, 8301).await;
+    let initial = if by_bytes {
+        "x".repeat(780)
+    } else {
+        "live".into()
+    };
+    writer.edit(&initial).await;
+    peer.until_text(&initial).await;
+    if by_bytes {
+        for _ in 0..2 {
+            tokio::time::sleep(Duration::from_millis(650)).await;
+            writer.edit("y").await;
+            peer.until_text(&writer.text()).await;
+        }
+    }
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let mut updates = 0;
+            let mut snapshots = 0;
+            for file in h.store.list_children(ROOM).await.unwrap() {
+                let body = h.store.read(file.as_str()).await.unwrap().body;
+                updates += usize::from(body.starts_with(b"JYU1"));
+                snapshots += usize::from(body.starts_with(b"JYS1"));
+            }
+            if snapshots == 1 && updates == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("connected room must compact");
+    writer.edit("-again").await;
+    peer.until_text(&writer.text()).await;
+}
+#[tokio::test]
+async fn connected_room_compacts_solid() {
+    live_compaction(false, false).await;
+}
+#[tokio::test]
+async fn connected_room_compacts_lws() {
+    live_compaction(true, false).await;
+}
+
+#[tokio::test]
+async fn connected_room_compacts_on_bytes_solid() {
+    live_compaction(false, true).await;
+}
+#[tokio::test]
+async fn connected_room_compacts_on_bytes_lws() {
+    live_compaction(true, true).await;
+}
+
+async fn partial_snapshot_delete(mode: bool, max_nonce: bool) {
+    let limits = Limits {
+        compact_after: 1,
+        ..Default::default()
+    };
+    let (h, gate) = Harness::gated(mode, limits.clone()).await;
+    let base = Doc::with_client_id(8400);
+    base.get_or_insert_text("text")
+        .push(&mut base.transact_mut(), "base");
+    let old = base
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    base.get_or_insert_text("text")
+        .push(&mut base.transact_mut(), "-edit");
+    let new = base
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    let suffix = if max_nonce { u32::MAX } else { u32::MAX - 1 };
+    for (name, marker, update) in [
+        ("original-snapshot", b"JYS1", old),
+        ("original-update", b"JYU1", new),
+    ] {
+        h.store
+            .create_in_container(
+                ROOM,
+                &format!("{ROOM}{name}"),
+                Bytes::from(envelope(marker, 200, suffix, &update)),
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+    }
+    gate.snapshot_delete.store(true, Ordering::SeqCst);
+    let mut peer = h.client(OWNER, 8401).await;
+    peer.until_text("base-edit").await;
+    tokio::time::timeout(Duration::from_secs(4), gate.snapshot_delete_seen.notified())
+        .await
+        .unwrap();
+    assert!(h
+        .store
+        .exists(&format!("{ROOM}original-update"))
+        .await
+        .unwrap());
+    let mut replacement = false;
+    for file in h.store.list_children(ROOM).await.unwrap() {
+        let body = h.store.read(file.as_str()).await.unwrap().body;
+        if body.starts_with(b"JYS1") && file.as_str() != format!("{ROOM}original-snapshot") {
+            let key = (
+                u64::from_be_bytes(body[4..12].try_into().unwrap()),
+                u32::from_be_bytes(body[12..16].try_into().unwrap()),
+            );
+            assert!(key > (200, suffix));
+            replacement = true;
+        }
+    }
+    assert!(replacement);
+    // Repeated deletion retries reuse the confirmed replacement.
+    tokio::time::timeout(Duration::from_secs(4), gate.snapshot_delete_seen.notified())
+        .await
+        .expect("cleanup must retry the retained folded files");
+    let mut snapshots = 0;
+    for file in h.store.list_children(ROOM).await.unwrap() {
+        snapshots += usize::from(
+            h.store
+                .read(file.as_str())
+                .await
+                .unwrap()
+                .body
+                .starts_with(b"JYS1"),
+        );
+    }
+    assert_eq!(snapshots, 2);
+    peer.finish_close().await;
+    drop(peer);
+    let store = h.store.clone();
+    drop(h);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let restart = Harness::with_store(mode, limits, store).await;
+    let mut rejoined = restart.client(OWNER, 8402).await;
+    rejoined.until_text("base-edit").await;
+}
+#[tokio::test]
+async fn partial_snapshot_delete_solid() {
+    partial_snapshot_delete(false, false).await;
+}
+#[tokio::test]
+async fn partial_snapshot_delete_lws() {
+    partial_snapshot_delete(true, false).await;
+}
+#[tokio::test]
+async fn snapshot_nonce_rollover_solid() {
+    partial_snapshot_delete(false, true).await;
+}
+#[tokio::test]
+async fn snapshot_nonce_rollover_lws() {
+    partial_snapshot_delete(true, true).await;
+}
+
+async fn snapshot_rollover_collision(mode: bool) {
+    let h = Harness::new(
+        mode,
+        Limits {
+            compact_after: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    let base = Doc::with_client_id(8450);
+    base.get_or_insert_text("text")
+        .push(&mut base.transact_mut(), "base");
+    let old = base
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    base.get_or_insert_text("text")
+        .push(&mut base.transact_mut(), "-new");
+    let new = base
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    for (name, kind, ms, suffix, update) in [
+        ("snapshot", b"JYS1", 200, u32::MAX, old),
+        ("update", b"JYU1", 201, 0, new),
+    ] {
+        h.store
+            .create_in_container(
+                ROOM,
+                &format!("{ROOM}{name}"),
+                Bytes::from(envelope(kind, ms, suffix, &update)),
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+    }
+    let mut peer = h.client(OWNER, 8451).await;
+    peer.until_text("base-new").await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let logs: Vec<_> = h
+        .store
+        .list_children(ROOM)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|f| !f.as_str().ends_with(".meta"))
+        .collect();
+    assert_eq!(logs.len(), 2);
+    assert!(h.store.exists(&format!("{ROOM}snapshot")).await.unwrap());
+    assert!(h.store.exists(&format!("{ROOM}update")).await.unwrap());
+    peer.send(Message::Sync(
+        SyncMessage::SyncStep1(StateVector::default()),
+    ))
+    .await;
+    loop {
+        if matches!(
+            peer.receive().await,
+            Message::Sync(SyncMessage::SyncStep2(_))
+        ) {
+            break;
+        }
+    }
+    assert_eq!(peer.text(), "base-new");
+}
+#[tokio::test]
+async fn snapshot_rollover_waits_for_update_solid() {
+    snapshot_rollover_collision(false).await;
+}
+#[tokio::test]
+async fn snapshot_rollover_waits_for_update_lws() {
+    snapshot_rollover_collision(true).await;
+}
+
+async fn ingest_cutoff(mode: bool) {
+    let h = Harness::new(mode, Limits::default()).await;
+    let current = Doc::with_client_id(8500);
+    current
+        .get_or_insert_text("text")
+        .push(&mut current.transact_mut(), "current");
+    let old = Doc::with_client_id(8501);
+    old.get_or_insert_text("text")
+        .push(&mut old.transact_mut(), "old");
+    let mut peer = h.client(OWNER, 8502).await;
+    for (marker, ms, nonce, doc) in [
+        (b"JYS1", 200, 2, &current),
+        (b"JYU1", 100, 9, &old),
+        (b"JYS1", 200, 1, &old),
+    ] {
+        let update = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        assert_eq!(
+            h.call(
+                "POST",
+                "/room/",
+                OWNER,
+                "application/octet-stream",
+                envelope(marker, ms, nonce, &update)
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        if ms == 200 && nonce == 2 {
+            peer.until_text("current").await;
+        }
+    }
+    // A subsequent admitted append acts as a barrier for the ordered create feed.
+    let update = current
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    assert_eq!(
+        h.call(
+            "POST",
+            "/room/",
+            OWNER,
+            "application/octet-stream",
+            envelope(b"JYU1", 201, 0, &update)
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    peer.send(Message::Sync(
+        SyncMessage::SyncStep1(StateVector::default()),
+    ))
+    .await;
+    loop {
+        if matches!(
+            peer.receive().await,
+            Message::Sync(SyncMessage::SyncStep2(_))
+        ) {
+            break;
+        }
+    }
+    assert_eq!(peer.text(), "current");
+    let live = peer.vector();
+    peer.finish_close().await;
+    drop(peer);
+    let store = h.store.clone();
+    drop(h);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let restart = Harness::with_store(mode, Limits::default(), store).await;
+    let mut peer = restart.client(OWNER, 8503).await;
+    peer.until_text("current").await;
+    assert_eq!(peer.vector(), live);
+}
+#[tokio::test]
+async fn ingest_obeys_snapshot_cutoff_solid() {
+    ingest_cutoff(false).await;
+}
+#[tokio::test]
+async fn ingest_obeys_snapshot_cutoff_lws() {
+    ingest_cutoff(true).await;
+}
+
+async fn clock_tombstone(mode: bool) {
+    let h = Harness::new(
+        mode,
+        Limits {
+            awareness_clients: 2,
+            ..Default::default()
+        },
+    )
+    .await;
+    let mut origin = h.client(WRITER, 8600).await;
+    let mut forwarder = h.client(READER, 8601).await;
+    let mut awareness = Awareness::new(Doc::with_client_id(8600));
+    awareness
+        .set_local_state(json!({"name": "present"}))
+        .unwrap();
+    let cached = awareness.update().unwrap();
+    origin.send(Message::Awareness(cached.clone())).await;
+    forwarder.wait_presence(8600, true).await;
+    // Other clients can enter and leave while the original client remains active.
+    for id in [8603, 8604] {
+        let mut transient = h.client(READER, id).await;
+        let mut presence = Awareness::new(Doc::with_client_id(id));
+        presence
+            .set_local_state(json!({"name": "transient"}))
+            .unwrap();
+        transient
+            .send(Message::Awareness(presence.update().unwrap()))
+            .await;
+        forwarder.wait_presence(id, true).await;
+        transient.finish_close().await;
+        forwarder.wait_presence(id, false).await;
+    }
+    origin.finish_close().await;
+    forwarder.wait_presence(8600, false).await;
+    forwarder.send(Message::Awareness(cached)).await;
+    // A sync reply orders the forwarded frame before the next join.
+    forwarder
+        .send(Message::Sync(
+            SyncMessage::SyncStep1(StateVector::default()),
+        ))
+        .await;
+    loop {
+        if matches!(
+            forwarder.receive().await,
+            Message::Sync(SyncMessage::SyncStep2(_))
+        ) {
+            break;
+        }
+    }
+    let mut newcomer = h.client(READER, 8602).await;
+    newcomer.send(Message::AwarenessQuery).await;
+    loop {
+        if let Message::Awareness(update) = newcomer.receive().await {
+            assert!(!update.clients.contains_key(&yrs::ClientID::new(8600)));
+            break;
+        }
+    }
+    awareness
+        .set_local_state(json!({"name": "new clock"}))
+        .unwrap();
+    forwarder
+        .send(Message::Awareness(awareness.update().unwrap()))
+        .await;
+    newcomer.wait_presence(8600, true).await;
+}
+#[tokio::test]
+async fn awareness_clock_tombstones_solid() {
+    clock_tombstone(false).await;
+}
+#[tokio::test]
+async fn awareness_clock_tombstones_lws() {
+    clock_tombstone(true).await;
+}
+
+async fn origin_upgrade(mode: bool) {
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Error};
+    let (h, _) = Harness::gated(mode, Limits::default()).await;
+    let response = h
+        .call_origin(
+            "POST",
+            h.tickets(),
+            READER,
+            "application/json",
+            json!({"room": ROOM}).to_string(),
+            Some("https://app.example"),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+    let url = url::Url::parse(body["url"].as_str().unwrap()).unwrap();
+    let local = format!("ws://{}{}?{}", h.addr, url.path(), url.query().unwrap());
+    // A ticket without a recorded Origin isolates the configured policy check.
+    let policy_ticket = h.ticket(READER).await;
+    let policy_url = url::Url::parse(&policy_ticket).unwrap();
+    let policy_local = format!(
+        "ws://{}{}?{}",
+        h.addr,
+        policy_url.path(),
+        policy_url.query().unwrap()
+    );
+    let mut refusals = vec![(policy_local, "https://unlisted.example")];
+    if !mode {
+        refusals.push((local.clone(), "https://other.example"));
+    }
+    for (socket_url, origin) in refusals {
+        let mut request = socket_url.into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert(header::ORIGIN, origin.parse().unwrap());
+        match tokio_tungstenite::connect_async(request).await {
+            Err(Error::Http(response)) => assert_eq!(response.status(), StatusCode::FORBIDDEN),
+            other => panic!("expected refused upgrade: {other:?}"),
+        }
+    }
+    let mut request = local.clone().into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert(header::ORIGIN, "https://app.example".parse().unwrap());
+    let mut allowed = tokio_tungstenite::connect_async(request).await.unwrap().0;
+    assert!(matches!(
+        allowed.next().await.unwrap().unwrap(),
+        Ws::Binary(_)
+    ));
+    // Origin-less clients can use a ticket issued from a browser request too.
+    let response = h
+        .call_origin(
+            "POST",
+            h.tickets(),
+            READER,
+            "application/json",
+            json!({"room": ROOM}).to_string(),
+            Some("https://app.example"),
+        )
+        .await;
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+    let mut allowed = h.socket(body["url"].as_str().unwrap()).await;
+    assert!(matches!(
+        allowed.next().await.unwrap().unwrap(),
+        Ws::Binary(_)
+    ));
+}
+#[tokio::test]
+async fn socket_upgrade_origin_solid() {
+    origin_upgrade(false).await;
+}
+#[tokio::test]
+async fn socket_upgrade_origin_lws() {
+    origin_upgrade(true).await;
+}
+
+async fn live_reload_allows_peer_messages(mode: bool) {
+    let (h, gate) = Harness::gated(
+        mode,
+        Limits {
+            compact_after: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    let mut owner = h.client(OWNER, 9500).await;
+    let mut observer = h.client(READER, 9501).await;
+    gate.listing.store(true, Ordering::SeqCst);
+    owner.edit("first").await;
+    observer.until_text("first").await;
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.notified())
+        .await
+        .unwrap();
+    // This edit and presence exchange complete while the reload's listing is paused.
+    owner.edit("-live").await;
+    observer.until_text("first-live").await;
+    let mut awareness = Awareness::new(Doc::with_client_id(9500));
+    awareness.set_local_state(json!({"name": "live"})).unwrap();
+    owner
+        .send(Message::Awareness(awareness.update().unwrap()))
+        .await;
+    observer.wait_presence(9500, true).await;
+    owner
+        .send(Message::Sync(
+            SyncMessage::SyncStep1(StateVector::default()),
+        ))
+        .await;
+    loop {
+        if matches!(
+            owner.receive().await,
+            Message::Sync(SyncMessage::SyncStep2(_))
+        ) {
+            break;
+        }
+    }
+    assert_eq!(owner.text(), "first-live");
+    gate.listing.store(false, Ordering::SeqCst);
+    gate.released.notify_one();
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let doc = h.file_state().await;
+            if doc.transact().state_vector() == owner.vector() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("edits accepted during reload must persist");
+}
+#[tokio::test]
+async fn live_reload_does_not_block_peer_messages_solid() {
+    live_reload_allows_peer_messages(false).await;
+}
+#[tokio::test]
+async fn live_reload_does_not_block_peer_messages_lws() {
+    live_reload_allows_peer_messages(true).await;
 }

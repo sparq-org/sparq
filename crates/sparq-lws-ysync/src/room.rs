@@ -49,6 +49,8 @@ pub(crate) struct Document {
     pub state: Vec<u8>,
     doc: Doc,
     presence: HashMap<ClientID, Presence>,
+    clocks: Vec<(ClientID, u32)>,
+    clock_limit: usize,
 }
 
 impl Document {
@@ -61,6 +63,8 @@ impl Document {
             state,
             doc,
             presence: HashMap::new(),
+            clocks: Vec::new(),
+            clock_limit: 0,
         })
     }
 
@@ -146,6 +150,14 @@ impl Document {
             if serde_json::from_str::<serde_json::Value>(&entry.json).is_err() {
                 return Err(Fault::Malformed);
             }
+            if entry.json.as_ref() != "null"
+                && self
+                    .clocks
+                    .iter()
+                    .any(|(held, clock)| *held == id && entry.clock <= *clock)
+            {
+                continue;
+            }
             if let Some(p) = self.presence.get(&id) {
                 if entry.clock < p.entry.clock
                     || (entry.clock == p.entry.clock && entry.json.as_ref() != "null")
@@ -169,7 +181,9 @@ impl Document {
         if size > max_bytes {
             return Err(Fault::TooLarge);
         }
+        self.clock_limit = max_ids;
         for (id, entry) in &clients {
+            self.clocks.retain(|(held, _)| held != id);
             self.presence
                 .entry(*id)
                 .and_modify(|p| p.entry = entry.clone())
@@ -183,8 +197,17 @@ impl Document {
 
     pub fn leave(&mut self, peer: u64) -> Vec<u8> {
         let mut clients = HashMap::new();
+        let clocks = &mut self.clocks;
+        let limit = self.clock_limit;
         self.presence.retain(|id, p| {
             if p.owner == peer {
+                clocks.retain(|(held, _)| held != id);
+                if limit > 0 {
+                    if clocks.len() >= limit {
+                        clocks.remove(0);
+                    }
+                    clocks.push((*id, p.entry.clock));
+                }
                 let mut entry = p.entry.clone();
                 entry.json = Arc::from("null");
                 clients.insert(*id, entry);

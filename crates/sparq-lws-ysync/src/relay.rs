@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -118,14 +118,42 @@ struct Pending {
     delay: Duration,
 }
 
+#[derive(Clone, Copy)]
+struct Retained {
+    kind: LogKind,
+    key: (u64, u32),
+    bytes: usize,
+}
+
+struct Loaded {
+    files: HashMap<String, Retained>,
+    state: Vec<u8>,
+    newest: u64,
+    update_files: usize,
+    bytes: usize,
+    cutoff: Option<(u64, u32)>,
+}
+
+#[derive(Clone)]
+struct Cleanup {
+    snapshot: String,
+    folded: Vec<(String, LogKind)>,
+}
+
 struct Room {
     doc: Document,
     peers: HashMap<u64, Peer>,
     pending: HashMap<Agent, Pending>,
-    flushing: Option<(Agent, u64)>,
-    files: Vec<String>,
+    flushing: Option<(Agent, u64, usize)>,
+    files: HashMap<String, Retained>,
+    retained_bytes: usize,
+    cutoff: Option<(u64, u32)>,
+    cleanup: Option<Cleanup>,
     update_files: usize,
     writers: Vec<Agent>,
+    writers_revision: u64,
+    compact_retry: Instant,
+    compact_delay: Duration,
     last_left: Instant,
     sequence: u64,
     newest_ms: u64,
@@ -137,6 +165,11 @@ impl Room {
     fn remember_writer(&mut self, agent: &Agent, limit: usize) {
         if limit == 0 {
             return;
+        }
+        if !self.writers.contains(agent) {
+            self.writers_revision = self.writers_revision.wrapping_add(1);
+            self.compact_retry = Instant::now();
+            self.compact_delay = Duration::from_secs(1);
         }
         self.writers.retain(|writer| writer != agent);
         if self.writers.len() >= limit {
@@ -225,6 +258,31 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 expires: Instant::now() + Duration::from_secs(60),
             },
         );
+        Ok(())
+    }
+
+    /// Validate a browser upgrade's Origin against the identity retained by its ticket.
+    /// An absent Origin permits non-browser clients.
+    pub async fn check_origin(
+        &self,
+        secret: [u8; 32],
+        room: &str,
+        origin: Option<&str>,
+    ) -> Result<(), Fault> {
+        let tickets = self.0.tickets.lock().await;
+        let ticket = tickets.get(&secret).ok_or(Fault::Ticket)?;
+        if ticket.room != room || ticket.expires <= Instant::now() {
+            return Err(Fault::Ticket);
+        }
+        if origin.is_some()
+            && ticket
+                .agent
+                .origin
+                .as_deref()
+                .is_some_and(|held| Some(held) != origin)
+        {
+            return Err(Fault::Forbidden);
+        }
         Ok(())
     }
 
@@ -320,18 +378,24 @@ impl<B: RoomStore + Authorizer> Relay<B> {
     async fn open_room(&self, name: &str) -> Result<Arc<Mutex<Room>>, Fault> {
         // Subscribe before listing so an overlapping committed append cannot be missed.
         let changes = self.0.changes.subscribe(name);
-        let (files, state, newest_ms, update_files) = self.read_room(name).await?;
+        let loaded = self.read_room(name).await?;
         let room = Arc::new(Mutex::new(Room {
-            doc: Document::new(state)?,
+            doc: Document::new(loaded.state)?,
             peers: HashMap::new(),
             pending: HashMap::new(),
             flushing: None,
-            files,
-            update_files,
+            files: loaded.files,
+            retained_bytes: loaded.bytes,
+            cutoff: loaded.cutoff,
+            cleanup: None,
+            update_files: loaded.update_files,
             writers: Vec::new(),
+            writers_revision: 0,
+            compact_retry: Instant::now(),
+            compact_delay: Duration::from_secs(1),
             last_left: Instant::now(),
             sequence: 0,
-            newest_ms,
+            newest_ms: loaded.newest,
             needs_reload: false,
             unloading: false,
         }));
@@ -339,13 +403,14 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         Ok(room)
     }
 
-    async fn read_room(&self, room: &str) -> Result<(Vec<String>, Vec<u8>, u64, usize), Fault> {
+    async fn read_room(&self, room: &str) -> Result<Loaded, Fault> {
         let files = self.0.backend.list(room).await?;
         if files.len() > self.0.limits.max_log_files {
             return Err(Fault::Capacity);
         }
         let mut decoded = Vec::new();
-        let mut logs = Vec::new();
+        let mut logs = HashMap::new();
+        let mut cutoff = None;
         let mut bytes = 0usize;
         let mut newest = 0;
         let mut update_files = 0;
@@ -363,15 +428,27 @@ impl<B: RoomStore + Authorizer> Relay<B> {
             let file = LogFile::decode(&body)?;
             update_files += usize::from(file.kind == LogKind::Update);
             newest = newest.max(file.millis);
-            logs.push(name);
+            if file.kind == LogKind::Snapshot {
+                cutoff = cutoff.max(Some((file.millis, file.nonce)));
+            }
+            logs.insert(
+                name,
+                Retained {
+                    kind: file.kind,
+                    key: (file.millis, file.nonce),
+                    bytes: body.len(),
+                },
+            );
             decoded.push(file);
         }
-        Ok((
-            logs,
-            load(decoded, self.0.limits.document_bytes)?,
+        Ok(Loaded {
+            files: logs,
+            state: load(decoded, self.0.limits.document_bytes)?,
             newest,
             update_files,
-        ))
+            bytes,
+            cutoff,
+        })
     }
 
     /// Handle all messages in one binary frame under the room's serialization lock.
@@ -394,13 +471,13 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                         continue;
                     };
                     let existing = room.pending.get(&session.agent);
-                    let split = room.flushing.as_ref().is_some_and(|(agent, revision)| {
+                    let split = room.flushing.as_ref().is_some_and(|(agent, revision, _)| {
                         agent == &session.agent && existing.is_some_and(|p| p.revision == *revision)
                     });
-                    let reserved = room.flushing.as_ref().is_some_and(|(agent, revision)| {
+                    let reserved = room.flushing.as_ref().is_some_and(|(agent, revision, _)| {
                         room.pending
                             .get(agent)
-                            .is_some_and(|p| p.revision != *revision)
+                            .is_none_or(|p| p.revision != *revision)
                     });
                     if (existing.is_none() || split)
                         && room
@@ -421,6 +498,22 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                     ])
                     .map_err(|_| Fault::Malformed)?;
                     let total: usize = room.pending.values().map(|p| p.update.len()).sum();
+                    let pending_bytes: usize = room
+                        .pending
+                        .values()
+                        .map(|p| p.update.len().saturating_add(16))
+                        .sum();
+                    let in_flight = room.flushing.as_ref().map_or(0, |(_, _, bytes)| *bytes);
+                    if room
+                        .retained_bytes
+                        .saturating_add(in_flight)
+                        .saturating_add(pending_bytes)
+                        .saturating_sub(existing.map_or(0, |p| p.update.len().saturating_add(16)))
+                        .saturating_add(pending.len().saturating_add(16))
+                        > self.0.limits.document_bytes.saturating_mul(4)
+                    {
+                        return Err(Fault::Capacity);
+                    }
                     if total
                         .saturating_sub(existing.map_or(0, |p| p.update.len()))
                         .saturating_add(pending.len())
@@ -528,30 +621,45 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         mut changes: broadcast::Receiver<String>,
     ) {
         let weak = Arc::downgrade(&self.0);
+        let (stopped, mut stop) = tokio::sync::oneshot::channel::<()>();
+        let listener_room = Arc::downgrade(&room);
+        let listener_inner = weak.clone();
+        let listener_name = name.clone();
         tokio::spawn(async move {
+            loop {
+                let change = tokio::select! {
+                    _ = &mut stop => break,
+                    change = changes.recv() => change,
+                };
+                let (Some(inner), Some(room)) = (listener_inner.upgrade(), listener_room.upgrade())
+                else {
+                    break;
+                };
+                let relay = Relay(inner);
+                let result = match change {
+                    Ok(file) => relay.ingest(&listener_name, &room, &file).await,
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        relay.reload(&listener_name, &room).await
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if let Err(error) = result {
+                    let mut guard = room.lock().await;
+                    guard.needs_reload = true;
+                    for peer in guard.peers.values() {
+                        let _ = peer.end.send(Some(error));
+                    }
+                }
+            }
+        });
+        tokio::spawn(async move {
+            let _stopped = stopped;
             let mut tick = tokio::time::interval(Duration::from_millis(500));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let mut retry = Instant::now();
             let mut backoff = Duration::from_millis(500);
             loop {
-                tokio::select! {
-                    _ = tick.tick() => {},
-                    change = changes.recv() => {
-                        let Some(inner) = weak.upgrade() else { break; };
-                        let relay = Relay(inner);
-                        let result = match change {
-                            Ok(file) => relay.ingest(&name, &room, &file).await,
-                            Err(broadcast::error::RecvError::Lagged(_)) => relay.reload(&name, &room).await,
-                            Err(broadcast::error::RecvError::Closed) => break,
-                        };
-                        if let Err(error) = result {
-                            let mut guard = room.lock().await;
-                            guard.needs_reload = true;
-                            for peer in guard.peers.values() { let _ = peer.end.send(Some(error)); }
-                        }
-                        continue;
-                    }
-                }
+                tick.tick().await;
                 let Some(inner) = weak.upgrade() else {
                     break;
                 };
@@ -577,16 +685,30 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 }
                 let compact = {
                     let guard = room.lock().await;
-                    guard.peers.is_empty()
+                    !guard.needs_reload
+                        && Instant::now() >= guard.compact_retry
                         && guard.pending.is_empty()
-                        && guard.last_left.elapsed() >= Duration::from_secs(60)
-                        && guard.update_files >= relay.0.limits.compact_after
+                        && (guard.update_files >= relay.0.limits.compact_after
+                            || guard.retained_bytes
+                                >= relay.0.limits.document_bytes.saturating_mul(2))
+                        && guard.update_files > 0
                 };
-                // Drain committed log appends before selecting the snapshot's folded set.
-                if compact && relay.reload(&name, &room).await.is_err() {
-                    continue;
+                if compact {
+                    let revision = room.lock().await.writers_revision;
+                    let progressed = relay.compact(&name, &room).await.unwrap_or(false);
+                    let mut guard = room.lock().await;
+                    // A newly remembered writer may now be eligible; preserve its reset.
+                    if guard.writers_revision == revision {
+                        if progressed {
+                            guard.compact_retry = Instant::now();
+                            guard.compact_delay = Duration::from_secs(1);
+                        } else {
+                            guard.compact_retry = Instant::now() + guard.compact_delay;
+                            guard.compact_delay =
+                                (guard.compact_delay * 2).min(Duration::from_secs(60));
+                        }
+                    }
                 }
-                // Retire this room without holding the service-wide admission lock over I/O.
                 let mut guard = room.lock().await;
                 if guard.peers.is_empty()
                     && guard.pending.is_empty()
@@ -594,54 +716,177 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                     && guard.last_left.elapsed() >= Duration::from_secs(60)
                 {
                     guard.unloading = true;
-                    let snapshot = if guard.update_files >= relay.0.limits.compact_after {
-                        nonce().ok().map(|random| {
-                            (
-                                guard.writers.clone(),
-                                LogFile {
-                                    kind: LogKind::Snapshot,
-                                    millis: guard.newest_ms,
-                                    nonce: random,
-                                    update: guard.doc.state.clone(),
-                                },
-                                guard.files.clone(),
-                            )
-                        })
-                    } else {
-                        None
-                    };
                     drop(guard);
-                    if let Some((writers, snapshot, folded)) = snapshot {
-                        for agent in writers.into_iter().rev() {
-                            if !relay
-                                .0
-                                .backend
-                                .access(&name, &agent)
-                                .await
-                                .is_ok_and(|access| access.read && access.write && access.delete)
-                            {
-                                continue;
-                            }
-                            // Confirm the snapshot before any deletion; ordinary DELETE checks apply.
-                            if relay
-                                .0
-                                .backend
-                                .create(&name, &agent, &snapshot)
-                                .await
-                                .is_ok()
-                            {
-                                for file in folded {
-                                    let _ = relay.0.backend.delete(&name, &agent, &file).await;
-                                }
-                            }
-                            break;
-                        }
-                    }
                     relay.0.rooms.lock().await.remove(&name);
                     break;
                 }
             }
         });
+    }
+
+    async fn compact(&self, name: &str, room: &Arc<Mutex<Room>>) -> Result<bool, Fault> {
+        let writers = room.lock().await.writers.clone();
+        let mut compactor = None;
+        for agent in writers.into_iter().rev() {
+            if self
+                .0
+                .backend
+                .access(name, &agent)
+                .await
+                .is_ok_and(|a| a.read && a.write && a.delete)
+            {
+                compactor = Some(agent);
+                break;
+            }
+        }
+        let Some(agent) = compactor else {
+            return Ok(false);
+        };
+        // Only an eligible compactor refreshes the folded set.
+        self.reload(name, room).await?;
+        // Preserve the current-authority check after the refresh as well.
+        if !self
+            .0
+            .backend
+            .access(name, &agent)
+            .await
+            .is_ok_and(|a| a.read && a.write && a.delete)
+        {
+            return Ok(false);
+        }
+        let cleanup = {
+            let guard = room.lock().await;
+            guard
+                .cleanup
+                .clone()
+                .filter(|c| guard.files.contains_key(&c.snapshot))
+        };
+        if let Some(cleanup) = cleanup {
+            self.delete_folded(name, room, &agent, &cleanup.folded)
+                .await?;
+            return Ok(true);
+        }
+        let (snapshot, folded) = {
+            let guard = room.lock().await;
+            if !guard.pending.is_empty() || guard.needs_reload {
+                return Ok(false);
+            }
+            let key = match guard.cutoff {
+                Some((ms, suffix)) => match suffix.checked_add(1) {
+                    Some(next) => (ms, next),
+                    None => {
+                        let Some(next_ms) = ms.checked_add(1) else {
+                            return Ok(false);
+                        };
+                        if guard
+                            .files
+                            .values()
+                            .any(|f| f.kind == LogKind::Update && f.key.0 == next_ms)
+                        {
+                            return Ok(false);
+                        }
+                        (next_ms, 0)
+                    }
+                },
+                None => (guard.newest_ms, 0),
+            };
+            let snapshot = LogFile {
+                kind: LogKind::Snapshot,
+                millis: key.0,
+                nonce: key.1,
+                update: guard.doc.state.clone(),
+            };
+            let bytes = snapshot.update.len().saturating_add(16);
+            if guard.retained_bytes.saturating_add(bytes)
+                > self.0.limits.document_bytes.saturating_mul(4)
+                || guard.files.len() >= self.0.limits.max_log_files
+            {
+                return Ok(false);
+            }
+            (
+                snapshot,
+                guard
+                    .files
+                    .iter()
+                    .map(|(n, f)| (n.clone(), f.kind))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        // Reserve the confirmed snapshot's storage while ordinary admission continues.
+        {
+            let mut guard = room.lock().await;
+            let bytes = snapshot.update.len().saturating_add(16);
+            let pending: usize = guard
+                .pending
+                .values()
+                .map(|p| p.update.len().saturating_add(16))
+                .sum();
+            if guard
+                .retained_bytes
+                .saturating_add(pending)
+                .saturating_add(bytes)
+                > self.0.limits.document_bytes.saturating_mul(4)
+                || guard.files.len().saturating_add(guard.pending.len())
+                    >= self.0.limits.max_log_files
+            {
+                return Ok(false);
+            }
+            guard.flushing = Some((agent.clone(), 0, bytes));
+        }
+        let created = self.0.backend.create(name, &agent, &snapshot).await;
+        let mut guard = room.lock().await;
+        guard.flushing = None;
+        let file = created?;
+        Self::retain(&mut guard, file.clone(), &snapshot);
+        guard.cleanup = Some(Cleanup {
+            snapshot: file,
+            folded: folded.clone(),
+        });
+        guard.cutoff = guard.cutoff.max(Some((snapshot.millis, snapshot.nonce)));
+        drop(guard);
+        self.delete_folded(name, room, &agent, &folded).await?;
+        Ok(true)
+    }
+
+    async fn delete_folded(
+        &self,
+        name: &str,
+        room: &Arc<Mutex<Room>>,
+        agent: &Agent,
+        folded: &[(String, LogKind)],
+    ) -> Result<(), Fault> {
+        // Snapshot deletion precedes update deletion. Any failure keeps all folded updates.
+        for kind in [LogKind::Snapshot, LogKind::Update] {
+            for (file, _) in folded.iter().filter(|(_, k)| *k == kind) {
+                if room.lock().await.files.contains_key(file) {
+                    self.0.backend.delete(name, agent, file).await?;
+                }
+                let mut guard = room.lock().await;
+                if let Some(removed) = guard.files.remove(file) {
+                    guard.retained_bytes = guard.retained_bytes.saturating_sub(removed.bytes);
+                    guard.update_files -= usize::from(removed.kind == LogKind::Update);
+                }
+                if let Some(cleanup) = &mut guard.cleanup {
+                    cleanup.folded.retain(|(n, _)| n != file);
+                }
+            }
+        }
+        room.lock().await.cleanup = None;
+        Ok(())
+    }
+
+    fn retain(room: &mut Room, name: String, file: &LogFile) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = room.files.entry(name) {
+            let bytes = file.update.len().saturating_add(16);
+            entry.insert(Retained {
+                kind: file.kind,
+                key: (file.millis, file.nonce),
+                bytes,
+            });
+            room.retained_bytes = room.retained_bytes.saturating_add(bytes);
+            room.update_files += usize::from(file.kind == LogKind::Update);
+        }
+        room.newest_ms = room.newest_ms.max(file.millis);
     }
 
     async fn flush(&self, name: &str, room: &Arc<Mutex<Room>>) {
@@ -655,10 +900,24 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                 if batch.retry > Instant::now() {
                     continue;
                 }
+                // A failed create may already have produced a retained resource.
+                // Keep its retry pending until another copy fits the replay bounds.
+                if guard.files.len() >= self.0.limits.max_log_files
+                    || guard
+                        .retained_bytes
+                        .saturating_add(batch.update.len().saturating_add(16))
+                        > self.0.limits.document_bytes.saturating_mul(4)
+                {
+                    continue;
+                }
                 let mut batch = batch.clone();
                 // Preserve replay ordering after a snapshot arrives while an update is queued.
                 batch.file.millis = millis().max(batch.file.millis).max(guard.newest_ms);
-                guard.flushing = Some((agent.clone(), batch.revision));
+                guard.flushing = Some((
+                    agent.clone(),
+                    batch.revision,
+                    batch.update.len().saturating_add(16),
+                ));
                 batch
             };
             let created = self.0.backend.create(name, &agent, &batch.file).await;
@@ -674,10 +933,17 @@ impl<B: RoomStore + Authorizer> Relay<B> {
                     continue;
                 }
             };
-            guard.newest_ms = guard.newest_ms.max(batch.file.millis);
-            if !guard.files.contains(&file) {
-                guard.files.push(file);
-                guard.update_files += 1;
+            Self::retain(&mut guard, file, &batch.file);
+            if guard
+                .cutoff
+                .is_some_and(|cutoff| batch.file.millis < cutoff.0)
+            {
+                let cutoff = guard.cutoff.unwrap();
+                if let Some(held) = guard.pending.get_mut(&agent) {
+                    held.file.millis = held.file.millis.max(cutoff.0);
+                    held.retry = Instant::now();
+                }
+                continue;
             }
             if guard
                 .pending
@@ -690,10 +956,13 @@ impl<B: RoomStore + Authorizer> Relay<B> {
     }
 
     async fn ingest(&self, name: &str, room: &Arc<Mutex<Room>>, file: &str) -> Result<(), Fault> {
-        if room.lock().await.files.iter().any(|f| f == file) {
+        if room.lock().await.files.contains_key(file) {
             return Ok(());
         }
-        let bytes = self.0.backend.read(file).await?;
+        let bytes = match self.0.backend.read(file).await {
+            Ok(bytes) => bytes,
+            Err(_) => return self.reload(name, room).await,
+        };
         if !bytes.starts_with(b"JYU1") && !bytes.starts_with(b"JYS1") {
             return Ok(());
         }
@@ -702,38 +971,80 @@ impl<B: RoomStore + Authorizer> Relay<B> {
         }
         let log = LogFile::decode(&bytes)?;
         let mut guard = room.lock().await;
+        // The notification may race completion of our own create.
+        if guard.files.contains_key(file) {
+            return Ok(());
+        }
         if guard.files.len() >= self.0.limits.max_log_files {
             return Err(Fault::Capacity);
         }
-        if guard
-            .doc
-            .merge(&log.update, true, self.0.limits.document_bytes)?
+        if guard.retained_bytes.saturating_add(bytes.len())
+            > self.0.limits.document_bytes.saturating_mul(4)
+        {
+            return Err(Fault::TooLarge);
+        }
+        let skip = guard.cutoff.is_some_and(|cutoff| match log.kind {
+            LogKind::Update => log.millis < cutoff.0,
+            LogKind::Snapshot => (log.millis, log.nonce) < cutoff,
+        });
+        if !skip
+            && guard
+                .doc
+                .merge(&log.update, true, self.0.limits.document_bytes)?
         {
             guard.broadcast(
                 0,
-                Message::Sync(SyncMessage::Update(log.update)).encode_v1(),
+                Message::Sync(SyncMessage::Update(log.update.clone())).encode_v1(),
             );
         }
-        guard.newest_ms = guard.newest_ms.max(log.millis);
-        guard.update_files += usize::from(log.kind == LogKind::Update);
-        guard.files.push(file.into());
-        let _ = name;
+        if log.kind == LogKind::Snapshot {
+            guard.cutoff = guard.cutoff.max(Some((log.millis, log.nonce)));
+        }
+        Self::retain(&mut guard, file.into(), &log);
         Ok(())
     }
 
     async fn reload(&self, name: &str, room: &Arc<Mutex<Room>>) -> Result<(), Fault> {
-        let (files, state, newest, update_files) = self.read_room(name).await?;
+        let started: HashSet<_> = room.lock().await.files.keys().cloned().collect();
+        let mut loaded = self.read_room(name).await?;
         let mut guard = room.lock().await;
+        // Retain files committed and recorded after this read's starting inventory.
+        for (file, retained) in &guard.files {
+            if !started.contains(file) {
+                loaded.files.entry(file.clone()).or_insert(*retained);
+            }
+        }
+        // A compaction may have deleted a starting file after this read observed it.
+        loaded
+            .files
+            .retain(|file, _| !started.contains(file) || guard.files.contains_key(file));
+        let retained_bytes = loaded.files.values().map(|file| file.bytes).sum();
+        let update_files = loaded
+            .files
+            .values()
+            .filter(|file| file.kind == LogKind::Update)
+            .count();
+        guard.files = loaded.files;
+        guard.retained_bytes = retained_bytes;
+        guard.update_files = update_files;
+        if guard.files.len() > self.0.limits.max_log_files {
+            return Err(Fault::Capacity);
+        }
+        if guard.retained_bytes > self.0.limits.document_bytes.saturating_mul(4) {
+            return Err(Fault::TooLarge);
+        }
         if guard
             .doc
-            .merge(&state, true, self.0.limits.document_bytes)?
+            .merge(&loaded.state, true, self.0.limits.document_bytes)?
         {
-            guard.broadcast(0, Message::Sync(SyncMessage::Update(state)).encode_v1());
+            guard.broadcast(
+                0,
+                Message::Sync(SyncMessage::Update(loaded.state)).encode_v1(),
+            );
         }
-        guard.files = files;
-        guard.update_files = update_files;
+        guard.cutoff = guard.cutoff.max(loaded.cutoff);
         guard.needs_reload = false;
-        guard.newest_ms = guard.newest_ms.max(newest);
+        guard.newest_ms = guard.newest_ms.max(loaded.newest);
         Ok(())
     }
 }

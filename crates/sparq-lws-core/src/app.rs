@@ -412,7 +412,7 @@ where
     #[cfg(feature = "crdt-sync")]
     {
         crate::crdt::register(&mut catalog, base, true);
-        let crdt = crate::crdt::CrdtState::solid(ldp.clone());
+        let crdt = crate::crdt::CrdtState::solid(ldp.clone(), cors.clone());
         router = router.merge(
             Router::new()
                 .route(
