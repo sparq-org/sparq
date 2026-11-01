@@ -559,8 +559,8 @@ mod tests {
                 .unwrap();
             let delta = counters.snapshot().since(&before);
             assert_eq!(
-                delta.sparql_updates, 0,
-                "no reclaim when no version was pruned"
+                delta.sparql_updates, 1,
+                "only the retained metadata mutation when no version was pruned"
             );
             assert_eq!(delta.sparql_queries, 0);
         }

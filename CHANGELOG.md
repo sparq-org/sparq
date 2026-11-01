@@ -865,6 +865,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated metadata fields such as `links` or `pending` no longer make `allowed()` answer `500`;
   its fast path returns false. Raw index mutations refuse service-marker operands; marker resets
   require a lifecycle guard.
+  Access decisions refresh grants after metadata reads, and malformed creator metadata remains
+  `InvalidMetadata`, so capability stream connects return `403`.
 
 - **sparq-lws-core (capability streams, follow-up to #7214):** readable set-aside topics,
   store read errors, a halted notification service and bounded access checks that

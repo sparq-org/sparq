@@ -932,6 +932,30 @@ async fn hidden_metadata_errors_keep_parse_failures_separate_from_store_failures
 }
 
 #[tokio::test(start_paused = true)]
+async fn malformed_creator_metadata_without_a_grant_denies_connect() {
+    for body in [b"{invalid".as_slice(), br#"{"creator":42}"#] {
+        let h = Harness::new().await;
+        let topic = h.create("malformed-creator").await;
+        let grant = h.grant(&[&topic]).await;
+        let doc = h.subscribe(SSE, READER, &[&topic]).await;
+        h.state
+            .access
+            .remove_grant_for_test(grant.rsplit('/').next().unwrap());
+        assert!(h.state.access.grant_policies().is_empty());
+        h.state
+            .store
+            .write(
+                &meta_key(&topic),
+                Bytes::copy_from_slice(body),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        assert_eq!(h.stream(&doc, None).await.status(), StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn malformed_metadata_denies_connect_and_revokes_an_open_stream() {
     let h = Harness::new().await;
     let topic = h.create("malformed").await;

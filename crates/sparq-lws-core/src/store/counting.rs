@@ -38,6 +38,8 @@
 //! - `create_child` / `replace_child`: **1 update + 1 query** (the guarded insert, then the create-marker ASK).
 //! - `delete_meta_if_empty`: **1 update**, then **1 query** (marker ASK) when the outcome is
 //!   `Deleted`, else **2 queries** (marker ASK + exists ASK).
+//! - History methods have no HTTP implementation; they model **1 query** per index lookup
+//!   or **1 update** per atomic history mutation.
 //!
 //! Error paths are counted best-effort (the live client may abort mid-sequence); the pinned tests
 //! only assert success paths, where the mapping is exact.
@@ -333,6 +335,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         member: &str,
         fields: crate::store::history::VersionFields,
     ) -> Result<Vec<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.replace_meta_retaining");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
         self.inner
             .replace_meta_retaining(iri, meta, member, fields)
             .await
@@ -344,6 +350,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         member: &str,
         fields: crate::store::history::TrashFields,
     ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.move_to_trash");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
         self.inner.move_to_trash(iri, parent, member, fields).await
     }
     async fn restore_from_trash(
@@ -352,27 +362,47 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         target: &str,
         parent: &str,
     ) -> Result<(), SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.restore_from_trash");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
         self.inner.restore_from_trash(member, target, parent).await
     }
     async fn versions(
         &self,
         original: Option<&str>,
     ) -> Result<Vec<crate::store::history::VersionEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.versions");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.versions(original).await
     }
     async fn trash_entries(&self) -> Result<Vec<crate::store::history::TrashEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.trash_entries");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.trash_entries().await
     }
     async fn version_entry(
         &self,
         member: &str,
     ) -> Result<Option<crate::store::history::VersionEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.version_entry");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.version_entry(member).await
     }
     async fn trash_entry(
         &self,
         member: &str,
     ) -> Result<Option<crate::store::history::TrashEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.trash_entry");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner.trash_entry(member).await
     }
     async fn expired_history(
@@ -381,6 +411,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         trash_before: std::time::SystemTime,
         limit: usize,
     ) -> Result<Vec<crate::store::history::ExpiredEntry>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.expired_history");
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
         self.inner
             .expired_history(versions_before, trash_before, limit)
             .await
@@ -467,6 +501,9 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<crate::store::history::RetiredResource, SparqError> {
+        #[cfg(test)]
+        self.counters
+            .record_method("index.delete_resource_retiring");
         let _g = self.counters.op_guard();
         let result = self.inner.delete_resource_retiring(iri, parent).await;
         if !matches!(result, Err(SparqError::Unsupported)) {
@@ -483,6 +520,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.delete_resource");
         let _g = self.counters.op_guard();
         // Model the HTTP default's SELECT + detach + DROP, while preserving the inner
         // backend's atomic override, just as replace_meta does.
@@ -537,6 +576,8 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.replace_child");
         let _g = self.counters.op_guard();
         // Model the HTTP default's single create_child (guarded update + create-marker ASK), while
         // preserving the inner client's atomic replacement.
@@ -712,6 +753,130 @@ impl CountingSparqClient<super::InMemorySparqClient> {
 mod tests {
     use super::*;
     use crate::store::{InMemoryBlobStore, InMemorySparqClient};
+
+    #[tokio::test]
+    #[should_panic(expected = "unexpected backend methods")]
+    async fn a_history_lookup_is_visible_to_the_empty_log_assertion() {
+        let counters = BackendCounters::new();
+        let sparq = CountingSparqClient::new(InMemorySparqClient::new(), Arc::clone(&counters));
+        assert!(counters.take_methods().is_empty());
+        sparq.versions(None).await.unwrap();
+        let calls = counters.take_methods();
+        assert!(calls.is_empty(), "unexpected backend methods: {calls:?}");
+    }
+
+    #[tokio::test]
+    async fn mutation_and_history_methods_are_recorded_once() {
+        use crate::store::history::{TrashFields, VersionFields};
+        use std::time::SystemTime;
+
+        let counters = BackendCounters::new();
+        let sparq = CountingSparqClient::new(InMemorySparqClient::new(), Arc::clone(&counters));
+        let parent = "https://p/c/";
+        let child = "https://p/c/doc";
+        let version = "urn:x-sparq-lws:versions/v1";
+        let trash = "urn:x-sparq-lws:trash/t1";
+        let meta = ResourceMeta {
+            content_type: "text/plain".into(),
+            blob_key: "k1".into(),
+            etag: "\"e1\"".into(),
+            last_modified: Some(SystemTime::UNIX_EPOCH),
+        };
+        sparq.put_meta(parent, meta.clone()).await.unwrap();
+        counters.take_methods();
+        macro_rules! check {
+            ($call:expr, $method:literal, $queries:expr, $updates:expr) => {{
+                let scope = counters.measure();
+                let result = $call.await.unwrap();
+                assert_eq!(counters.take_methods(), [($method, 1)].into());
+                let delta = scope.delta();
+                assert_eq!(
+                    (delta.sparql_queries, delta.sparql_updates),
+                    ($queries, $updates)
+                );
+                assert_eq!(delta.max_in_flight, 1);
+                result
+            }};
+        }
+        check!(
+            sparq.replace_child(parent, child, meta.clone()),
+            "index.replace_child",
+            1,
+            1
+        );
+        check!(
+            sparq.replace_meta_retaining(
+                child,
+                meta,
+                version,
+                VersionFields {
+                    original: child.into(),
+                    max_versions: 2,
+                }
+            ),
+            "index.replace_meta_retaining",
+            0,
+            1
+        );
+        assert_eq!(
+            check!(sparq.versions(None), "index.versions", 1, 0).len(),
+            1
+        );
+        assert!(check!(sparq.version_entry(version), "index.version_entry", 1, 0).is_some());
+        check!(
+            sparq.move_to_trash(
+                child,
+                Some(parent),
+                trash,
+                TrashFields {
+                    original: child.into(),
+                    trashed_at: SystemTime::UNIX_EPOCH,
+                    deleted_by: None,
+                    deleter_could_read: true,
+                }
+            ),
+            "index.move_to_trash",
+            0,
+            1
+        );
+        assert_eq!(
+            check!(sparq.trash_entries(), "index.trash_entries", 1, 0).len(),
+            1
+        );
+        assert!(check!(sparq.trash_entry(trash), "index.trash_entry", 1, 0).is_some());
+        assert!(!check!(
+            sparq.expired_history(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH, 10),
+            "index.expired_history",
+            1,
+            0
+        )
+        .is_empty());
+        check!(
+            sparq.restore_from_trash(trash, child, parent),
+            "index.restore_from_trash",
+            0,
+            1
+        );
+        assert_eq!(
+            check!(
+                sparq.delete_resource_retiring(child, Some(parent)),
+                "index.delete_resource_retiring",
+                1,
+                2
+            )
+            .live_key,
+            Some("k1".into())
+        );
+        assert_eq!(
+            check!(
+                sparq.delete_resource(child, None),
+                "index.delete_resource",
+                1,
+                1
+            ),
+            None
+        );
+    }
 
     #[tokio::test]
     async fn counters_pin_the_per_method_mapping() {

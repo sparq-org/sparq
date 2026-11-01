@@ -667,7 +667,7 @@ pub async fn allowed<S: Store + 'static>(
         }
         let meta: Creator = match state.store.read(&super::meta_key(uri)).await {
             Ok(r) => serde_json::from_slice(&r.body).map_err(|e| {
-                ServerError::Storage(format!("the metadata of {uri} is malformed: {e}"))
+                ServerError::InvalidMetadata(format!("the metadata of {uri} is malformed: {e}"))
             })?,
             Err(ServerError::NotFound) => Creator::default(),
             Err(e) => return Err(e),
@@ -676,7 +676,7 @@ pub async fn allowed<S: Store + 'static>(
         return Ok(meta.creator.as_deref() == Some(subject));
     }
     let meta = state.resource_meta(uri).await?;
-    decide_grants(state, uri, agent, &meta, None, &candidates).await
+    decide(state, action, uri, agent, &meta, None).await
 }
 
 /// Whether `agent` may learn that the set-aside resource at `uri` is set aside: never whether it
@@ -914,7 +914,7 @@ async fn decide<S: Store + 'static>(
     decide_grants(state, uri, agent, meta, format, &candidates).await
 }
 
-/// Decide against the already filtered grants so `allowed` scans the grant policies once.
+/// Decide against the filtered grants.
 async fn decide_grants<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
@@ -4143,6 +4143,56 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_grant_revoked_during_the_metadata_read_is_not_used() {
+        let (state, store) = test_store::closed_state(100).await;
+        let uri = test_store::data(&state, "there").await;
+        let caller = test_store::agent("https://reader.example/#me");
+        let grant =
+            test_store::grant_read(&state, caller.subject.as_deref().unwrap(), &[&uri]).await;
+        assert!(allowed(&state, Action::Read, &uri, &caller).await.unwrap());
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() =
+            Some((super::super::meta_key(&uri), gate.clone()));
+        let pending = {
+            let (state, uri) = (state.clone(), uri.clone());
+            tokio::spawn(async move { allowed(&state, Action::Read, &uri, &caller).await })
+        };
+        eventually("metadata read reached", || {
+            store.hold_next_read_reply_of.lock().unwrap().is_none()
+        })
+        .await;
+        assert!(!pending.is_finished());
+        state
+            .access
+            .remove_grant_for_test(grant.rsplit('/').next().unwrap());
+        gate.add_permits(1);
+        assert!(!pending.await.unwrap().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_creator_check_classifies_malformed_metadata() {
+        let (state, _) = test_store::closed_state(100).await;
+        let uri = test_store::data(&state, "there").await;
+        let caller = test_store::agent("https://reader.example/#me");
+        assert!(state.access.grant_policies().is_empty());
+        for body in [b"{invalid".as_slice(), br#"{"creator":42}"#] {
+            state
+                .store
+                .write(
+                    &super::super::meta_key(&uri),
+                    Bytes::copy_from_slice(body),
+                    "application/json",
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                allowed(&state, Action::Read, &uri, &caller).await,
+                Err(ServerError::InvalidMetadata(_))
+            ));
         }
     }
 
