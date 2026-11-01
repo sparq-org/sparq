@@ -409,6 +409,27 @@ where
     let protected = protected.with_state(ldp.clone());
 
     let mut router = Router::new();
+    #[cfg(feature = "crdt-sync")]
+    {
+        crate::crdt::register(&mut catalog, base, true);
+        let crdt = crate::crdt::CrdtState::solid(ldp.clone(), cors.clone());
+        router = router.merge(
+            Router::new()
+                .route(
+                    crate::crdt::SOLID_TICKETS,
+                    post(crate::crdt::solid_ticket::<S>).layer(
+                        axum::middleware::from_fn_with_state(
+                            auth.clone(), auth_middleware::<J, R>,
+                        ),
+                    ),
+                )
+                .route(crate::crdt::SOLID_SOCKET, get(crate::crdt::solid_socket::<S>))
+                .with_state(crdt)
+                .layer(axum::extract::DefaultBodyLimit::max(8192))
+                .layer(axum::middleware::from_fn_with_state(cors.clone(), cors_middleware)),
+        );
+    }
+
     let history = ldp.store.history_config();
     crate::history_http::catalog(&mut catalog, base, false, &history);
     if history.enabled() {

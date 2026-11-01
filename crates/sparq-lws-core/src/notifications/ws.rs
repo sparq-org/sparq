@@ -320,14 +320,13 @@ impl<S: Store> NotifyState<S> {
         // permit-extends only for a plain Read), so watching a resource is never allowed where a
         // GET of it is refused.
         #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
-        let allowed = match self.ldp.odrl_gate.as_deref() {
-            None => allowed,
-            Some(gate) => match gate.decide_read(topic, Some(web_id)) {
-                crate::authz::odrl::OdrlVerdict::NotApplicable => allowed,
-                crate::authz::odrl::OdrlVerdict::Deny => false,
-                crate::authz::odrl::OdrlVerdict::Permit => allowed || required == AccessMode::Read,
-            },
-        };
+        let allowed = crate::authz::odrl::compose(
+            self.ldp.odrl_gate.as_deref(),
+            topic,
+            Some(web_id),
+            required,
+            allowed,
+        );
         match allowed {
             true => ReadAccess::Allowed,
             false => ReadAccess::Denied,
@@ -2346,27 +2345,27 @@ mod tests {
         let topic = format!("{BASE}/doc");
         let ws = open_for_bob(&s, &topic).await;
         let (mut tx, mut rx) = ws.split();
-        let flood = tokio::spawn(async move {
-            loop {
-                for _ in 0..1024 {
-                    if tx.feed(M::Text("frame".into())).await.is_err() {
-                        return;
-                    }
-                }
-                if tx.flush().await.is_err() {
-                    return;
-                }
-            }
-        });
+        tx.send(M::Text("frame".into())).await.unwrap();
         revoke_bob(&s).await;
         let at_revoke = s.recheck_ticks.load(Ordering::SeqCst);
         let close = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-            while let Some(frame) = rx.next().await {
-                if let M::Close(Some(frame)) = frame.unwrap() {
-                    return frame;
+            // Poll the reader before each write. A separate task feeding large batches can
+            // monopolize the client's split transport and delay observing an already-sent close.
+            let mut writing = true;
+            loop {
+                tokio::select! {
+                    biased;
+                    frame = rx.next() => {
+                        match frame.expect("socket ended without a close").unwrap() {
+                            M::Close(Some(frame)) => return frame,
+                            _ => continue,
+                        }
+                    }
+                    sent = tx.send(M::Text("frame".into())), if writing => {
+                        writing = sent.is_ok();
+                    }
                 }
             }
-            panic!("socket ended without a close");
         })
         .await
         .expect("a_revoked_subscriber_flooding_frames_is_closed_within_two_recheck_ticks hung");
@@ -2374,7 +2373,6 @@ mod tests {
             s.recheck_ticks.load(Ordering::SeqCst) - at_revoke < 2,
             "frame flood delayed the revocation close by two timer ticks"
         );
-        flood.abort();
         assert_eq!(u16::from(close.code), 1008);
         assert_eq!(close.reason, REVOKED);
     }
