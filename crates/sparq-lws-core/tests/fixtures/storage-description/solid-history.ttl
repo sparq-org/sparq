@@ -1,0 +1,14 @@
+@prefix did: <https://www.w3.org/ns/did#> .
+@prefix lws: <https://www.w3.org/ns/lws#> .
+@prefix ssd: <https://jeswr.org/ns/solid-sd#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<https://pod.example/> did:service <https://pod.example/#versions>, <https://pod.example/#trash> ;
+    lws:capability [ a ssd:Versioning ], [ a ssd:Trash ] .
+<https://pod.example/#versions> a ssd:VersioningService ;
+    did:serviceEndpoint <https://pod.example/.versions/> ;
+    ssd:listingTemplate "https://pod.example/.versions/?resource={resource}" ;
+    ssd:retention "PT2592000S"^^xsd:duration .
+<https://pod.example/#trash> a ssd:TrashService ;
+    did:serviceEndpoint <https://pod.example/.trash/> ;
+    ssd:retention "PT2592000S"^^xsd:duration .

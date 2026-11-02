@@ -150,6 +150,9 @@ def derive_supplier($author):
       # This repository supplies the patched bytes; upstream registry
       # provenance is recorded separately in the accompanying UPSTREAM.json.
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
+    elif (($ref | test("^path\\+file://.*/vendor/smallstr-shim#")) and .name == "smallstr") then
+      # This compatibility implementation is supplied by the project, using only std.
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     # zkp-14.5: plus the separately pinned V5 guest workspace, by exact name.
     elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest|methods/guest-authrdf)#"))
           and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest|authrdf[-_]guest)$"))) then

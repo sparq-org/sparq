@@ -2038,6 +2038,20 @@ status      = "implemented"
 featured    = false
 
 [[benchmark]]
+id = "lws-ysync-contract"
+name = "Yjs relay protocol contract"
+category = "conformance"
+measures = "protocol convergence and persistence correctness"
+invoke = "cargo test -p sparq-lws-ysync && cargo test -p sparq-lws-core --features crdt-sync --test crdt_sync"
+source = "crates/sparq-lws-ysync/src/; crates/sparq-lws-core/tests/crdt_sync.rs; vendor/smallstr-shim/src/"
+dataset = "in-process room fixtures"
+quiet_box_sensitive = false
+pinning = "source-controlled protocol assertions"
+records_to = "test output"
+featured = false
+status = "ok"
+
+[[benchmark]]
 id          = "lws-crypt"
 name        = "LWS encryption primitives — registry stub"
 category    = "serve"
