@@ -54,6 +54,7 @@ on:
       - 'crates/sparq-engine-service/**'
       - 'crates/sparq-introspect/**'
       - 'crates/sparq-jsonld/**'
+      - 'vendor/smallstr-shim/**'
       - 'vendor/spargebra/**'
       - 'vendor/spargebra-shim/**'
       - 'vendor/zk-sdk/**'
