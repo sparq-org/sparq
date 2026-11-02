@@ -22,13 +22,15 @@
 //! (see [`assemble_facts`]). Principal values in the view's reserved spaces are refused
 //! ([`validate_principal_iri`]).
 
-use crate::budget::{AuthBudget, InputMeter, MaterializeDeadline};
+use crate::budget::AuthLedger;
+#[cfg(test)]
+use crate::budget::AuthBudget;
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
 use sparq_core::Graph;
-use sparq_reason::n3::encode_for_uri;
+use sparq_core::meter::Dim;
 
 pub(crate) const ACL_SUFFIX: &str = ".acl";
 pub(crate) const ACR_SUFFIX: &str = ".acr";
@@ -362,6 +364,14 @@ fn document_view<'a>(
     control_graphs: &[(&'a str, Vec<[Term; 3]>)],
     system: System,
 ) -> Documents<'a> {
+    document_view_metered(control_graphs, system, None).expect("unmetered document validation")
+}
+
+fn document_view_metered<'a>(
+    control_graphs: &[(&'a str, Vec<[Term; 3]>)],
+    system: System,
+    mut meter: Option<&mut AuthLedger>,
+) -> Result<Documents<'a>, String> {
     let loaded: FxHashSet<&'a str> = control_graphs.iter().map(|(iri, _)| *iri).collect();
     let mut rejected: FxHashSet<&str> = control_graphs
         .iter()
@@ -383,23 +393,34 @@ fn document_view<'a>(
                 if let Term::NamedNode(o) = &t[2] {
                     let target = group_doc_of(o.as_str());
                     if loaded.contains(target) {
-                        referrers.entry(target).or_default().push(iri);
+                        let refs = referrers.entry(target).or_default();
+                        if let Some(meter) = meter.as_deref_mut() {
+                            meter.reserve(refs, 1, Dim::Nodes)?;
+                        }
+                        refs.push(iri);
                     } else {
                         rejected.insert(iri);
                     }
                 }
             }
         }
-        let mut work: Vec<&str> = rejected.iter().copied().collect();
+        let mut work = Vec::new();
+        if let Some(meter) = meter.as_deref_mut() {
+            meter.reserve(&mut work, rejected.len(), Dim::Nodes)?;
+        }
+        work.extend(rejected.iter().copied());
         while let Some(doc) = work.pop() {
             for &referrer in referrers.get(doc).into_iter().flatten() {
                 if rejected.insert(referrer) {
+                    if let Some(meter) = meter.as_deref_mut() {
+                        meter.reserve(&mut work, 1, Dim::Nodes)?;
+                    }
                     work.push(referrer);
                 }
             }
         }
     }
-    Documents { loaded, rejected }
+    Ok(Documents { loaded, rejected })
 }
 
 /// Drop ALL named graphs in the reserved IRI space — including a pre-existing
@@ -534,19 +555,24 @@ pub(crate) enum System {
 pub(crate) fn graph_triples_metered(
     g: &Graph,
     iri: &str,
-    meter: &mut InputMeter,
+    meter: &mut AuthLedger,
 ) -> Result<Vec<[Term; 3]>, String> {
     meter.open()?;
     let pat: sparq_core::store::Pattern = [None, None, None];
     let scan = g.store().scan(&pat);
-    let mut out = Vec::with_capacity(scan.rows.len());
+    let mut out = Vec::new();
+    // The existing byte caps also bound the row vector before allocation.
+    meter.document_rows(&mut out, scan.rows.len(), iri)?;
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);
-        let triple = [g.dict().term(t[0]), g.dict().term(t[1]), g.dict().term(t[2])];
-        for term in &triple {
-            meter.term(iri, term)?;
+        for id in t {
+            meter.stored_term(iri, g.dict(), id)?;
         }
-        out.push(triple);
+        out.push([
+            g.dict().term(t[0]),
+            g.dict().term(t[1]),
+            g.dict().term(t[2]),
+        ]);
     }
     Ok(out)
 }
@@ -579,15 +605,24 @@ fn graph_iri(name: &Term) -> Option<&str> {
 /// Both components are percent-encoded so the separator cannot occur inside either
 /// component: distinct (graph IRI, label) pairs produce distinct, valid IRIs.
 /// Named nodes and literals pass through unchanged.
-fn skolemize(t: &Term, graph_iri: &str) -> Term {
+#[cfg(test)]
+fn skolemize(t: &Term, graph: &str) -> Term {
+    skolemize_metered(t, graph, &mut AuthLedger::new(crate::default_auth_budget())).unwrap()
+}
+
+fn skolemize_metered(t: &Term, graph: &str, ledger: &mut AuthLedger) -> Result<Term, String> {
     match t {
-        Term::BlankNode(b) => named(&format!(
-            "{SKOLEM_PREFIX}graph:{}:{}",
-            encode_for_uri(graph_iri),
-            encode_for_uri(b.as_str())
-        )),
-        other => other.clone(),
+        Term::BlankNode(b) => ledger
+            .skolem(SKOLEM_PREFIX, graph, b.as_str())
+            .map(|iri| NamedNode::new_unchecked(iri).into()),
+        other => Ok(other.clone()),
     }
+}
+
+fn minted(ledger: &mut AuthLedger, iri: &str) -> Result<Term, String> {
+    ledger
+        .mint(&[iri])
+        .map(|s| NamedNode::new_unchecked(s).into())
 }
 
 /// A term for the IRI `iri` (the loader only ever mints IRIs it built itself).
@@ -624,10 +659,8 @@ pub(crate) fn assemble_facts(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
-    budget: AuthBudget,
-    deadline: MaterializeDeadline,
+    meter: &mut AuthLedger,
 ) -> Result<Vec<[Term; 3]>, String> {
-    let mut meter = InputMeter::with_deadline(budget, deadline);
     meter.checkpoint()?;
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
@@ -636,19 +669,22 @@ pub(crate) fn assemble_facts(
     let owns = named(&format!("{SOLIDX_NS}{own_pred}"));
     let in_doc_p = named(&format!("{SOLIDX_NS}inDoc"));
     let is_webid = named(&format!("{SOLIDX_NS}isWebId"));
+    let true_term = xsd_true();
 
     // 1) resources (see [`enumerate`]).
     // The resources are enumerated under the SAME input meter as the documents, and
     // charged before their container chains are built: the enumeration's cost grows with
     // the pod's resource IRIs rather than with its documents' bytes or its fact count, so
     // neither of the budgets checked after this one bounds it.
-    let (resources, control_graphs) = enumerate(graph, suffix, Some(&mut meter))?;
+    let (resources, control_graphs) = enumerate(graph, suffix, Some(meter))?;
     // Under the input budget: each document's terms are charged as they are read, so the
     // whole set is never materialized past it (sq-7159 follow-up, `crate::AuthBudget`).
-    let control_graphs: Vec<(&str, Vec<[Term; 3]>)> = control_graphs
-        .into_iter()
-        .map(|(iri, sub)| graph_triples_metered(sub, iri, &mut meter).map(|ts| (iri, ts)))
-        .collect::<Result<_, String>>()?;
+    let mut documents = Vec::new();
+    meter.reserve(&mut documents, control_graphs.len(), Dim::Nodes)?;
+    for (iri, sub) in control_graphs {
+        documents.push((iri, graph_triples_metered(sub, iri, meter)?));
+    }
+    let control_graphs = documents;
     // A control document with a triple it may not state contributes nothing. For ACP,
     // whose policies also deny, so does every ACR that references a node of a rejected
     // document or a node no loaded document defines (transitively — see [`document_view`]),
@@ -657,7 +693,7 @@ pub(crate) fn assemble_facts(
     // while an allow elsewhere still applies. A rejected WAC ACL keeps governing its
     // resource with no authorizations, so no ancestor's default takes over.
     meter.checkpoint()?;
-    let rejected = document_view(&control_graphs, system).rejected;
+    let rejected = document_view_metered(&control_graphs, system, Some(meter))?.rejected;
     let blocked: FxHashSet<&str> = if system == System::Acp {
         rejected.iter().map(|iri| &iri[..iri.len() - suffix.len()]).collect()
     } else {
@@ -669,6 +705,18 @@ pub(crate) fn assemble_facts(
             && (blocked.contains(r)
                 || r.match_indices('/').any(|(i, _)| blocked.contains(&r[..=i])))
     };
+    macro_rules! generated {
+        ($triple:expr) => {{
+            meter.reserve(&mut out, 1, Dim::Facts)?;
+            out.push($triple);
+        }};
+    }
+    macro_rules! copied {
+        ($triple:expr) => {{
+            meter.reserve(&mut out, 1, Dim::Facts)?;
+            out.push($triple);
+        }};
+    }
     // Each resource's Solid slash-semantics parent, when that is a resource too: the one
     // container traversal ([`parent_iri`]) the store and the MCP server use, so the rules
     // walk exactly the containers the resource enumeration made.
@@ -678,16 +726,28 @@ pub(crate) fn assemble_facts(
             meter.checkpoint()?;
         }
         if !is_blocked(r) {
-            out.push([named(r), is_resource.clone(), xsd_true()]);
+            generated!([
+                minted(meter, r)?,
+                meter.copied_term(&is_resource)?,
+                meter.copied_term(&true_term)?
+            ]);
             if let Some(p) = parent_iri(r).filter(|p| resources.contains(*p) && !is_blocked(p)) {
-                out.push([named(r), parent_p.clone(), named(p)]);
+                generated!([
+                    minted(meter, r)?,
+                    meter.copied_term(&parent_p)?,
+                    minted(meter, p)?
+                ]);
             }
         }
     }
     // The auth view carries the blocked resources too, so no other grant source (an
     // attached or bridged ODRL permission, a trust grant) applies to them either.
     for b in &blocked {
-        out.push([named(b), named(crate::authindex::WITHHELD), xsd_true()]);
+        generated!([
+            minted(meter, b)?,
+            minted(meter, crate::authindex::WITHHELD)?,
+            meter.copied_term(&true_term)?
+        ]);
     }
     // WAC: a resource whose own ACL was rejected is marked, and so (when any was) is each
     // resource whose own ACL was accepted, so the index can tell which ACL governs any
@@ -701,7 +761,11 @@ pub(crate) fn assemble_facts(
             } else {
                 crate::authindex::ACCEPTED_ACL
             };
-            out.push([named(r), named(mark), xsd_true()]);
+            generated!([
+                minted(meter, r)?,
+                minted(meter, mark)?,
+                meter.copied_term(&true_term)?
+            ]);
         }
     }
 
@@ -712,7 +776,11 @@ pub(crate) fn assemble_facts(
         meter.checkpoint()?;
         let r = &iri[..iri.len() - suffix.len()];
         if !is_blocked(r) {
-            out.push([named(r), owns.clone(), named(iri)]);
+            generated!([
+                minted(meter, r)?,
+                meter.copied_term(&owns)?,
+                minted(meter, iri)?
+            ]);
         }
     }
 
@@ -728,13 +796,23 @@ pub(crate) fn assemble_facts(
         }
         let mut in_doc: FxHashSet<Term> = FxHashSet::default();
         for t in triples {
-            let s = skolemize(&t[0], iri);
-            in_doc.insert(s.clone());
-            out.push([s, skolemize(&t[1], iri), skolemize(&t[2], iri)]);
-            collect_agents(t, &mut webids, &mut group_docs, &mut principal_iris);
+            let s = skolemize_metered(&t[0], iri, meter)?;
+            if !in_doc.contains(&s) {
+                in_doc.insert(meter.copied_term(&s)?);
+            }
+            copied!([
+                s,
+                skolemize_metered(&t[1], iri, meter)?,
+                skolemize_metered(&t[2], iri, meter)?
+            ]);
+            collect_agents(t, &mut webids, &mut group_docs, &mut principal_iris, meter)?;
         }
         for s in in_doc {
-            out.push([s, in_doc_p.clone(), named(iri)]);
+            generated!([
+                s,
+                meter.copied_term(&in_doc_p)?,
+                minted(meter, iri)?
+            ]);
         }
     }
     if system == System::Wac {
@@ -754,19 +832,19 @@ pub(crate) fn assemble_facts(
             }
             // A group document only grants (it lists members), so a triple it may not
             // state is dropped on its own; the rest of the document still counts.
-            for t in graph_triples_metered(sub, iri, &mut meter)?
+            for t in graph_triples_metered(sub, iri, meter)?
                 .into_iter()
                 .filter(|t| admits(t, iri))
             {
-                out.push([
-                    skolemize(&t[0], iri),
-                    skolemize(&t[1], iri),
-                    skolemize(&t[2], iri),
+                copied!([
+                    skolemize_metered(&t[0], iri, meter)?,
+                    skolemize_metered(&t[1], iri, meter)?,
+                    skolemize_metered(&t[2], iri, meter)?,
                 ]);
                 if let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) {
                     if p.as_str() == VCARD_MEMBER {
-                        webids.insert(o.as_str().to_owned());
-                        principal_iris.insert(o.as_str().to_owned());
+                        insert_minted(&mut webids, o.as_str(), meter)?;
+                        insert_minted(&mut principal_iris, o.as_str(), meter)?;
                     }
                 }
             }
@@ -796,16 +874,24 @@ pub(crate) fn assemble_facts(
                 continue;
             }
             if let Some(c) = creator {
-                webids.insert(c.to_owned());
-                out.push([
-                    named(resource),
-                    named(&format!("{SOLIDX_NS}creator")),
-                    named(c),
+                if !webids.contains(c) {
+                    webids.insert(meter.mint(&[c])?);
+                }
+                generated!([
+                    minted(meter, resource)?,
+                    minted(meter, &format!("{SOLIDX_NS}creator"))?,
+                    minted(meter, c)?,
                 ]);
             }
             if let Some(o) = owner {
-                webids.insert(o.to_owned());
-                out.push([named(resource), named(&format!("{SOLIDX_NS}owner")), named(o)]);
+                if !webids.contains(o) {
+                    webids.insert(meter.mint(&[o])?);
+                }
+                generated!([
+                    minted(meter, resource)?,
+                    minted(meter, &format!("{SOLIDX_NS}owner"))?,
+                    minted(meter, o)?
+                ]);
             }
         }
         // sq-ysv3u: TRUSTED `acp:vc` holdings (ACP only), on exactly the same
@@ -819,16 +905,26 @@ pub(crate) fn assemble_facts(
                 meter.checkpoint()?;
             }
             validate_principal_iri(agent)?;
-            webids.insert(agent.to_owned());
-            out.push([named(agent), named(&format!("{SOLIDX_NS}holdsVc")), named(requirement)]);
+            if !webids.contains(agent) {
+                webids.insert(meter.mint(&[agent])?);
+            }
+            generated!([
+                minted(meter, agent)?,
+                minted(meter, &format!("{SOLIDX_NS}holdsVc"))?,
+                minted(meter, requirement)?
+            ]);
         }
     }
     for a in &webids {
-        out.push([named(a), is_webid.clone(), xsd_true()]);
+        generated!([
+            minted(meter, a)?,
+            meter.copied_term(&is_webid)?,
+            meter.copied_term(&true_term)?
+        ]);
     }
     // The assembled total — document content plus the structural, provenance and
     // credential facts — before any caller interns it.
-    meter.facts(out.len())?;
+    meter.checkpoint()?;
     Ok(out)
 }
 
@@ -846,8 +942,7 @@ pub(crate) fn assemble_facts_default(
         system,
         provenance,
         credentials,
-        crate::default_auth_budget(),
-        MaterializeDeadline::new(crate::default_auth_budget()),
+        &mut AuthLedger::new(crate::default_auth_budget()),
     )
 }
 
@@ -863,24 +958,20 @@ pub(crate) fn assemble_input_ids(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
-    budget: AuthBudget,
-    deadline: MaterializeDeadline,
+    meter: &mut AuthLedger,
 ) -> Result<Vec<[Id; 3]>, String> {
-    let facts = assemble_facts(graph, system, provenance, credentials, budget, deadline)?;
-    // The fact count is re-checked HERE, immediately before interning: this is the point
-    // the input is copied into the closure's dictionary, and `assemble_facts` is also
-    // reached by the text differential path, so the guard sits on both sides of the seam.
-    InputMeter::with_deadline(budget, deadline).facts(facts.len())?;
-    let mut ids = Vec::with_capacity(facts.len());
+    let facts = assemble_facts(graph, system, provenance, credentials, meter)?;
+    let mut ids = Vec::new();
+    meter.reserve(&mut ids, facts.len(), Dim::Nodes)?;
     for batch in facts.chunks(256) {
-        deadline.check()?;
+        meter.checkpoint()?;
         ids.extend(
             batch
                 .iter()
                 .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])]),
         );
     }
-    deadline.check()?;
+    meter.checkpoint()?;
     Ok(ids)
 }
 
@@ -906,8 +997,7 @@ pub(crate) fn assemble_input(
         system,
         provenance,
         credentials,
-        budget,
-        MaterializeDeadline::new(budget),
+        &mut AuthLedger::new(budget),
     )?;
     let mut out = String::new();
     for t in &facts {
@@ -967,6 +1057,18 @@ pub(crate) fn referenced_group_docs(graph: &Graph) -> FxHashSet<String> {
     docs
 }
 
+/// Admit the lexical copy before inserting a new generated name.
+fn insert_minted(
+    set: &mut FxHashSet<String>,
+    value: &str,
+    meter: &mut AuthLedger,
+) -> Result<(), String> {
+    if !set.contains(value) {
+        set.insert(meter.mint(&[value])?);
+    }
+    Ok(())
+}
+
 /// Concrete agents + group documents mentioned by an access-control triple; every
 /// pair/triple-principal ingredient (agents, group members, origins, clients, issuers)
 /// is recorded for reserved-encoding validation.
@@ -975,25 +1077,28 @@ fn collect_agents(
     webids: &mut FxHashSet<String>,
     groups: &mut FxHashSet<String>,
     principal_iris: &mut FxHashSet<String>,
-) {
-    let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else { return };
+    meter: &mut AuthLedger,
+) -> Result<(), String> {
+    let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else {
+        return Ok(());
+    };
     match p.as_str() {
         ACL_AGENT | ACP_AGENT | VCARD_MEMBER => {
             if !SPECIAL_AGENTS.contains(&o.as_str()) {
-                webids.insert(o.as_str().to_owned());
+                insert_minted(webids, o.as_str(), meter)?;
             }
-            principal_iris.insert(o.as_str().to_owned());
+            insert_minted(principal_iris, o.as_str(), meter)?;
         }
         ACL_ORIGIN | ACP_CLIENT | ACP_ISSUER => {
-            principal_iris.insert(o.as_str().to_owned());
+            insert_minted(principal_iris, o.as_str(), meter)?;
         }
         ACL_AGENT_GROUP => {
-            groups.insert(group_doc_of(o.as_str()).to_owned());
+            insert_minted(groups, group_doc_of(o.as_str()), meter)?;
         }
         _ => {}
     }
+    Ok(())
 }
-
 /// The origin (`scheme://authority`) of an IRI — the coarse pod boundary used to bucket
 /// the auth index + session cache for an ACL-write invalidation (sq-b7k7u).
 /// `https://pod.ex/a/b` → `https://pod.ex`; an authority with no path (`https://pod.ex`)
@@ -1038,7 +1143,7 @@ type Enumerated<'g> = (FxHashSet<String>, Vec<(&'g str, &'g Graph)>);
 fn enumerate<'g>(
     graph: &'g Graph,
     suffix: &str,
-    mut meter: Option<&mut InputMeter>,
+    mut meter: Option<&mut AuthLedger>,
 ) -> Result<Enumerated<'g>, String> {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
@@ -1060,6 +1165,9 @@ fn enumerate<'g>(
         }
         if is_control_graph(iri) {
             if iri.ends_with(suffix) && !is_authority_less(control_target(iri)) {
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.reserve(&mut control_graphs, 1, Dim::Nodes)?;
+                }
                 control_graphs.push((iri, sub));
             }
             continue;
@@ -1119,7 +1227,7 @@ fn is_container_name(iri: &str) -> bool {
 /// The chain is the whole cost of this: one owned prefix string per container, so an IRI of
 /// length L under D containers owns up to L x D bytes here. `meter`, when given, is charged
 /// for each of those strings BEFORE it is made, and refuses the IRI's length and depth
-/// before the walk starts at all ([`InputMeter::resource`]) — the one point where a single
+/// before the walk starts at all ([`AuthLedger::resource`]) — the one point where a single
 /// name can cost more than its own length, and the reason the length and depth are bounded
 /// rather than only the facts the names become.
 ///
@@ -1129,16 +1237,16 @@ fn is_container_name(iri: &str) -> bool {
 fn insert_with_containers(
     resources: &mut FxHashSet<String>,
     iri: &str,
-    mut meter: Option<&mut InputMeter>,
+    mut meter: Option<&mut AuthLedger>,
 ) -> Result<(), String> {
     if let Some(m) = meter.as_deref_mut() {
-        m.resource(iri)?;
+        m.resource_name(iri)?;
     }
     if resources.contains(iri) {
         return Ok(());
     }
     if let Some(m) = meter.as_deref_mut() {
-        m.resource_bytes(iri.len())?;
+        m.resource(iri)?;
     }
     resources.insert(iri.to_owned());
     let mut cur = iri;
@@ -1220,7 +1328,7 @@ impl<'a> ResourceGraphs<'a> {
     /// [`crate::AuthBudget::max_resource_path_depth`], or an enumeration past the aggregate
     /// [`crate::AuthBudget::max_input_bytes`], refuses rather than being walked.
     #[cfg(test)]
-    pub(crate) fn all(&self, meter: &mut InputMeter) -> Result<FxHashSet<String>, String> {
+    pub(crate) fn all(&self, meter: &mut AuthLedger) -> Result<FxHashSet<String>, String> {
         let mut out = FxHashSet::default();
         for name in &self.0 {
             insert_with_containers(&mut out, name, Some(meter))?;
@@ -1236,13 +1344,13 @@ impl<'a> ResourceGraphs<'a> {
     pub(crate) fn add(
         &mut self,
         name: &'a str,
-        meter: &mut InputMeter,
+        meter: &mut AuthLedger,
         mut appears: impl FnMut(&'a str),
     ) -> Result<(), String> {
         if !is_resource_graph(name) || self.0.contains(name) {
             return Ok(());
         }
-        meter.resource(name)?;
+        meter.resource_name(name)?;
         let mut cur = Some(name);
         while let Some(r) = cur {
             if self.holds(r) {
@@ -1313,7 +1421,7 @@ pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
 /// installed), rather than the walk being done unbounded.
 pub(crate) fn resources(
     graph: &Graph,
-    meter: &mut InputMeter,
+    meter: &mut AuthLedger,
 ) -> Result<FxHashSet<String>, String> {
     Ok(enumerate(graph, ACR_SUFFIX, Some(meter))?.0)
 }
@@ -1378,12 +1486,79 @@ mod tests {
     use rustc_hash::FxHashSet;
     use sparq_core::Graph;
 
+    #[test]
+    fn principal_and_group_copies_are_charged_before_insertion() {
+        for (predicate, value, copies) in [
+            (super::ACL_AGENT, "https://alice.ex/me", 2),
+            (super::ACP_CLIENT, "https://app.ex/", 1),
+            (super::ACL_AGENT_GROUP, "https://groups.ex/team#group", 1),
+            (super::VCARD_MEMBER, "https://alice.ex/me", 2),
+        ] {
+            let charged = if predicate == super::ACL_AGENT_GROUP {
+                super::group_doc_of(value).len()
+            } else {
+                copies * value.len()
+            };
+            let triple = [
+                named("https://pod.ex/.acl#a"),
+                named(predicate),
+                named(value),
+            ];
+            let mut webids = FxHashSet::default();
+            let mut groups = FxHashSet::default();
+            let mut principals = FxHashSet::default();
+            let mut budget = crate::default_auth_budget();
+            budget.max_generated_bytes = charged - 1;
+            let mut ledger = crate::budget::AuthLedger::new(budget);
+            let error = super::collect_agents(
+                &triple,
+                &mut webids,
+                &mut groups,
+                &mut principals,
+                &mut ledger,
+            )
+            .unwrap_err();
+            assert_eq!(
+                crate::auth_allowance_refusal(&error),
+                Some(crate::AuthAllowance::GeneratedBytes)
+            );
+            assert!(principals.is_empty());
+            assert!(groups.is_empty());
+            let mut ledger = meter();
+            webids.clear();
+            super::collect_agents(
+                &triple,
+                &mut webids,
+                &mut groups,
+                &mut principals,
+                &mut ledger,
+            )
+            .unwrap();
+            assert_eq!(
+                ledger.core().spent(sparq_core::meter::Dim::GeneratedBytes),
+                charged
+            );
+            super::collect_agents(
+                &triple,
+                &mut webids,
+                &mut groups,
+                &mut principals,
+                &mut ledger,
+            )
+            .unwrap();
+            assert_eq!(
+                ledger.core().spent(sparq_core::meter::Dim::GeneratedBytes),
+                charged
+            );
+        }
+    }
+
     const ACR: &str = "https://pod.ex/doc.acr";
     const OTHER_ACR: &str = "https://other.ex/doc.acr";
 
     /// A fresh input meter over the default budget, for the enumeration helpers.
-    fn meter() -> crate::budget::InputMeter {
-        crate::budget::InputMeter::new(crate::default_auth_budget())
+    fn meter() -> crate::budget::AuthLedger {
+        crate::budget::AuthLedger::new(crate::default_auth_budget())
     }
 
     /// A resource IRI under `depth` containers, inside the LENGTH cap so the depth cap is

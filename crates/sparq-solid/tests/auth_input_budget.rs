@@ -680,3 +680,116 @@ fn the_odrl_n3_lane_honours_a_configured_decision_budget() {
     );
     assert_eq!(graph.named().len(), before, "a refusal wrote to the graph");
 }
+
+#[test]
+fn generated_strings_have_a_separate_configurable_allowance() {
+    let source = wac_pod(1, 8, 1);
+    let mut budget = default_auth_budget();
+    budget.max_generated_bytes = 256;
+    let mut store = fresh(&source, budget, None);
+    assert_refused(
+        &mut store,
+        AuthAllowance::GeneratedBytes,
+        "generated strings need their own allowance",
+    );
+    assert_eq!(
+        AuthAllowance::GeneratedBytes.limit_name(),
+        "max_generated_bytes"
+    );
+    budget.max_generated_bytes = default_auth_budget().max_generated_bytes;
+    store.set_auth_budget(budget);
+    store.materialize_wac().unwrap();
+    assert!(grants_anything(&store));
+}
+
+#[test]
+fn default_budget_accepts_the_nested_resource_counterexample() {
+    use std::fmt::Write;
+    let mut source = String::new();
+    for i in 0..6_000 {
+        let resource = format!("https://pod.ex/a{}/d{i}", i / 16);
+        writeln!(
+            source,
+            "<{resource}#it> <https://ex.dev/p> \"v\" <{resource}> ."
+        )
+        .unwrap();
+    }
+    source.push_str(&format!(
+        "<https://pod.ex/.acl#a> <{RDF_TYPE}> <{ACL}Authorization> <https://pod.ex/.acl> .\n\
+         <https://pod.ex/.acl#a> <{ACL}default> <https://pod.ex/> <https://pod.ex/.acl> .\n\
+         <https://pod.ex/.acl#a> <{ACL}agent> <{ALICE}> <https://pod.ex/.acl> .\n\
+         <https://pod.ex/.acl#a> <{ACL}mode> <{ACL}Read> <https://pod.ex/.acl> .\n"
+    ));
+    let mut store = fresh(&source, default_auth_budget(), None);
+    store
+        .materialize_wac()
+        .expect("generated strings do not consume source bytes");
+    let allowed = store.accessible(&alice(), Mode::Read);
+    for i in 0..6_000 {
+        let resource = format!("https://pod.ex/a{}/d{i}", i / 16);
+        assert!(
+            allowed.iter().any(|iri| iri.as_str() == resource),
+            "{resource}"
+        );
+    }
+    assert!(
+        !store
+            .decide(&Session::default(), "https://pod.ex/a0/d0", Mode::Read)
+            .allow
+    );
+}
+
+#[test]
+fn rejected_document_rows_do_not_consume_assembled_facts() {
+    let mut source = String::new();
+    for i in 0..100 {
+        source.push_str(&format!(
+            "<https://else.ex/s> <urn:p> \"{i}\" <https://pod.ex/doc.acl> .\n"
+        ));
+    }
+    let mut budget = default_auth_budget();
+    // The rejected ACL contributes its governing-document and rejection markers only.
+    budget.max_input_facts = 2;
+    let mut store = fresh(&source, budget, None);
+    store.materialize_wac().unwrap();
+    assert!(!grants_anything(&store));
+    budget.max_input_facts = 1;
+    let mut store = fresh(&source, budget, None);
+    assert_refused(
+        &mut store,
+        AuthAllowance::InputFacts,
+        "assembled marker facts still count",
+    );
+}
+
+#[test]
+fn filtered_group_rows_do_not_consume_assembled_facts() {
+    let mut source = format!(
+        "<https://pod.ex/doc#it> <urn:p> \"v\" <https://pod.ex/doc> .\n\
+         <https://pod.ex/doc.acl#a> <{RDF_TYPE}> <{ACL}Authorization> <https://pod.ex/doc.acl> .\n\
+         <https://pod.ex/doc.acl#a> <{ACL}accessTo> <https://pod.ex/doc> <https://pod.ex/doc.acl> .\n\
+         <https://pod.ex/doc.acl#a> <{ACL}mode> <{ACL}Read> <https://pod.ex/doc.acl> .\n\
+         <https://pod.ex/doc.acl#a> <{ACL}agentGroup> <https://pod.ex/group#team> <https://pod.ex/doc.acl> .\n\
+         <https://pod.ex/group#team> <http://www.w3.org/2006/vcard/ns#hasMember> <{ALICE}> <https://pod.ex/group> .\n"
+    );
+    let mut budget = default_auth_budget();
+    budget.max_input_facts = 13;
+    let mut clean = fresh(&source, budget, None);
+    clean.materialize_wac().unwrap();
+    assert!(
+        clean
+            .decide(&alice(), "https://pod.ex/doc", Mode::Read)
+            .allow
+    );
+    for i in 0..100 {
+        source.push_str(&format!(
+            "<https://else.ex/s> <urn:p> \"{i}\" <https://pod.ex/group> .\n"
+        ));
+    }
+    let mut store = fresh(&source, budget, None);
+    store.materialize_wac().unwrap();
+    assert_eq!(
+        store.accessible(&alice(), Mode::Read),
+        clean.accessible(&alice(), Mode::Read)
+    );
+}

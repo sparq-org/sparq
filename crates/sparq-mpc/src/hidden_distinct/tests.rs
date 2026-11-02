@@ -205,7 +205,7 @@ fn too_few_parties_fails_closed() {
     // n = 3, t = 2 → 3 < 2t+1 = 5: the degree reduction has no headroom. The public
     // constructors can never build this (they pin t = ⌊(n−1)/2⌋), so use the
     // test-only unchecked-threshold escape hatch to hit the fail-closed guard.
-    let backend = ShamirBackend::with_unchecked_threshold(3, 2);
+    let backend = ShamirBackend::with_unchecked_threshold(3, 2).unwrap();
     let pairs = vec![pair(1, 1, "a", "a")];
     let err = distinct_hidden_pairs(&backend, &pairs, 1).unwrap_err();
     match err {

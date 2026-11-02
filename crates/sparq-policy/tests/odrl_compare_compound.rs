@@ -95,6 +95,7 @@ fn rule(id: &str, nodes: Vec<ConstraintNode>) -> Rule {
     for n in nodes {
         match n {
             ConstraintNode::Atomic(c) => r.constraints.push(c),
+            ConstraintNode::SharedAtomic(c) => r.constraints.push((*c).clone()),
             ConstraintNode::Compound(lc) => r.logical_constraints.push(lc),
         }
     }
