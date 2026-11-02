@@ -319,6 +319,11 @@ crates = ["sparq-zk-compose"]
 # reaches all three without a map entry. Do not re-add them; re-adding one would
 # mean a cross-package `include_str!` came back (see sq-3705).
 
+# Cross-crate ODRL fixture read by sparq-policy's differential parser test.
+[[map]]
+pattern = "crates/sparq-wac-oracle/fixtures/window-policy.ttl"
+readers = ["sparq-policy"]
+
 # sparq-reason's compiled-vs-interpreted N3 equivalence + incremental tests read
 # sparq-solid's WAC/ACP/ODRL-spike rule corpus READ-ONLY from ../sparq-solid/rules
 # at runtime. sparq-solid DEPENDS ON sparq-reason (crates/sparq-solid/Cargo.toml),
