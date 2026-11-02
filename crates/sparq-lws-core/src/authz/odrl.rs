@@ -72,6 +72,21 @@ pub trait OdrlGate: Send + Sync {
     fn decide_read(&self, target_graph: &str, web_id: Option<&str>) -> OdrlVerdict;
 }
 
+/// Compose a WAC grant with the optional gate. Only Read can be extended by Permit.
+pub(crate) fn compose(
+    gate: Option<&dyn OdrlGate>,
+    target: &str,
+    web_id: Option<&str>,
+    required: super::AccessMode,
+    allowed: bool,
+) -> bool {
+    match gate.map(|g| g.decide_read(target, web_id)) {
+        Some(OdrlVerdict::Deny) => false,
+        Some(OdrlVerdict::Permit) => allowed || required == super::AccessMode::Read,
+        _ => allowed,
+    }
+}
+
 /// The shipped [`OdrlGate`]: a static ODRL policy (parsed once, at construction) evaluated
 /// in-process with `sparq_policy::evaluate` for `(party = requester WebID, action = odrl:read,
 /// target = the graph)` — the requester is also supplied as the `odrl:recipient` evidence (the

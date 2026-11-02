@@ -10,6 +10,20 @@ const expectedName = '@sparq-org/solid-server';
 const failures = [];
 const fail = (message) => failures.push(message);
 const manifest = JSON.parse(readFileSync(resolve(packageDir, 'package.json'), 'utf8'));
+const platforms = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64'];
+for (const platform of platforms) {
+  const name = `@sparq-org/solid-server-native-${platform}`;
+  if (manifest.optionalDependencies?.[name] !== manifest.version) {
+    fail(`${name} must be an optional dependency at exactly ${manifest.version}`);
+  }
+}
+try {
+  execFileSync(process.execPath, [resolve(packageDir, 'guardrails/check-native-resolution.mjs')], {
+    cwd: packageDir, stdio: ['ignore', 'pipe', 'inherit'],
+  });
+} catch (error) {
+  fail(`offline native resolution check failed: ${error.message}`);
+}
 
 if (manifest.name !== expectedName) {
   fail(`package name is "${manifest.name}", expected "${expectedName}"`);

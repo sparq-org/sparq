@@ -86,3 +86,10 @@ CVE-2026-42767
 #   outside OpenSSL's threat model). Debian: no fix. sparq ships on x86_64 / aarch64, not ppc.
 #   Accepted (unfixable, not-affected — wrong architecture + out-of-threat-model).
 CVE-2025-27587
+# CVE-2026-84782: information disclosure via DTLS handshake retransmission in libssl3. Debian
+#   fixes it in 3.0.22-1~deb12u2, but the newest cc-debian12:nonroot digest still ships
+#   3.0.20-1~deb12u2, so a base bump cannot clear it yet. Not reachable: neither sparq-server nor
+#   sparq-lws-core links OpenSSL (TLS is rustls; `cargo tree -i openssl-sys` is empty for both,
+#   all features included), and neither speaks DTLS. Accepted (not-affected); drop this entry
+#   and bump the pinned distroless digests once the base ships 3.0.22.
+CVE-2026-84782

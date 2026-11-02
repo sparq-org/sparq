@@ -47,10 +47,10 @@
   },
   "scripts": {
     "_copy:wasm": "node scripts/copy-wasm.mjs",
-    "build:wasm": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm",
+    "build:wasm": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --features shacl,jsonld,jsonld-contexts,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm",
     "build:wasm:lean": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false && npm run _copy:wasm",
     "_copy:wasm:node": "node scripts/copy-wasm-node.mjs",
-    "build:wasm:node": "wasm-pack build ../crates/sparq-wasm --target nodejs --out-dir pkg-node --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm:node",
+    "build:wasm:node": "wasm-pack build ../crates/sparq-wasm --target nodejs --out-dir pkg-node --profile release-wasm --features shacl,jsonld,jsonld-contexts,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm:node",
     "_copy:wasm:dl": "node scripts/copy-wasm-dl.mjs",
     "build:wasm:dl": "wasm-pack build ../crates/sparq-dl-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false && npm run _copy:wasm:dl",
     "build:reason-wasm": "wasm-pack build ../crates/sparq-reason-wasm --target web --profile release-wasm --features explain --config profile.release-wasm.strip=false",
