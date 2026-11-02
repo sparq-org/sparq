@@ -72,6 +72,13 @@ locks while replacing the default graph with an in-memory view; that view's late
 updates are not logged. See [named accessors and durable layout operations](named-accessors.md)
 for slot persistence, journal operations and recovery methods.
 
+Writable `wal.log` and `txn.log` handles defer entry sync until their first append: after
+syncing the frame data, they sync the file and, on Unix, its parent directory before
+acknowledging that append. This also covers existing entries left by an interrupted open;
+opening a clean tree without writes does not sync logs or directories.
+Compaction packs sparse named slots throughout the tree even when no graph has pending
+triples, reclaiming both interior holes and the allocation cursor left by trailing drops.
+
 ## Quickstart
 
 Add the dependency (HDT is a separate, native-only crate):

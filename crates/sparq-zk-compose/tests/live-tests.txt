@@ -144,12 +144,14 @@ live tests/method_auth_binding.rs::live_hidden_issuer_proof_over_the_m5_message
 live tests/method_auth_binding.rs::live_verify_manifest_with_an_m5_attestation
 live tests/toolchain_gate.rs::a_tool_on_path_passes_the_gate
 live tests/toolchain_gate.rs::gate_child_probe
+structural src/driver.rs::concurrent_verification_workspaces_never_share_artifact_paths
 structural src/driver.rs::content_addressed_compile_cache_never_rewrites_returned_snapshots
 structural src/driver.rs::display_renders_each_variant_distinctly
 structural src/driver.rs::measurements_are_opt_in_and_spawn_errors_remain_failures
 structural src/driver.rs::run_missing_tool_is_spawn_error_not_panic
 structural src/driver.rs::tagged_input_symlink_cannot_overwrite_its_target
 structural src/driver.rs::tagged_witness_paths_do_not_collide
+structural src/driver.rs::test_command_environment_is_scoped_and_restored
 structural src/driver.rs::unsafe_witness_tags_reject_before_any_artifact_write
 structural src/result.rs::unknown_version_wrong_request_nonce_and_untrusted_issuer_reject
 structural src/result.rs::verify_result_refuses_a_legacy_member_under_the_default_policy
@@ -175,9 +177,12 @@ structural src/verifier.rs::every_hidden_issuer_entry_must_declare_the_message_i
 structural src/verifier.rs::every_value_member_is_refused_by_the_extended_entry_point
 structural src/verifier.rs::fragment_binding_edge_filter_indices_are_not_accepted
 structural src/verifier.rs::hidden_issuer_declared_depth_must_equal_policy_depth
+structural src/verifier.rs::non_fold_refusals_keep_their_existing_order
+structural src/verifier.rs::the_default_prepass_precedes_proof_bytes_but_follows_structural_errors
 structural src/verifier.rs::the_endpoint_gate_is_reached_on_a_query_only_the_extended_regime_accepts
 structural src/verifier.rs::the_extended_regime_validates_every_edge_not_only_the_first
 structural src/verifier.rs::the_filter_sweep_runs_even_with_no_branch_witness
+structural src/verifier.rs::the_verifier_runs_the_deferred_postpass_in_every_build
 structural src/verifier.rs::verify_fragment_manifest_coherent_scan_path_reaches_the_crypto_gate
 structural src/verifier.rs::verify_fragment_manifest_consistent_solution_reaches_the_crypto_gate
 structural src/verifier.rs::verify_fragment_manifest_refuses_inconsistent_solution_before_bb
@@ -219,7 +224,6 @@ structural tests/e2e.rs::entailment_rdfs_ungrounded_antecedent_rejected
 structural tests/e2e.rs::entailment_rdfs_without_steps_rejected
 structural tests/e2e.rs::entailment_simple_accepted_progresses_past_gate
 structural tests/e2e.rs::entailment_simple_with_steps_rejected
-structural tests/e2e.rs::missing_subproof_precedes_hidden_issuer_policy_check
 structural tests/e2e.rs::holder_binding_a_presents_b_rejected
 structural tests/e2e.rs::holder_binding_bearer_policy_required_vs_allowed
 structural tests/e2e.rs::holder_binding_correctly_bound_passes_binding_gate
@@ -230,6 +234,7 @@ structural tests/e2e.rs::holder_pop_invalid_signature_rejected
 structural tests/e2e.rs::holder_pop_unknown_cryptosuite_rejected
 structural tests/e2e.rs::holder_pop_untrusted_holder_rejected
 structural tests/e2e.rs::malformed_proof_hex_rejected_not_panicked
+structural tests/e2e.rs::missing_subproof_precedes_hidden_issuer_policy_check
 structural tests/e2e.rs::nonce_binding_mismatch_rejected
 structural tests/forge_gates.rs::forge_attribution_omitted_rejected
 structural tests/forge_gates.rs::forge_attribution_under_declared_rejected
