@@ -21,7 +21,8 @@
     },
     "replicaCount": {
       "type": "integer",
-      "const": 1
+      "const": 1,
+      "description": "Fixed to one: LWS index and blobs are single-instance; do not share a data directory between pods."
     },
     "image": {
       "type": "object",
@@ -104,6 +105,7 @@
     },
     "persistence": {
       "type": "object",
+      "description": "Shared settings for either server. LWS sets SOLID_SERVER_DATA_DIR=/data and uses Recreate. Its index requires a filesystem on a ReadWriteOnce block volume (EBS, PD, Azure Disk); network filesystems (EFS, Azure Files, NFS) are unsupported because of file locking and fsync semantics. Stop the server before backup.",
       "required": ["enabled", "existingClaim", "storageClass", "accessMode", "size"],
       "properties": {
         "enabled": { "type": "boolean" },
@@ -169,8 +171,7 @@
           },
           "persistence": {
             "properties": {
-              "enabled": { "const": false },
-              "existingClaim": { "maxLength": 0 }
+              "accessMode": { "const": "ReadWriteOnce" }
             }
           }
         }
