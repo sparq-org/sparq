@@ -267,15 +267,32 @@ pub struct LogicalConstraint {
 /// compound [`LogicalConstraint`]. sq-a0zef.
 ///
 /// This makes compound constraints arbitrarily nestable (an `odrl:or` of `odrl:and`s,
-/// etc.) while keeping the *atomic* [`Constraint`] type — used pervasively by the
-/// evaluator, the static analyser, and count enforcement — unchanged.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// etc.). Parsed leaves may share an allocation. The atomic [`Constraint`] type
+/// used by the evaluator, static analyser and count enforcement retains its fields.
+#[derive(Debug, Clone)]
 pub enum ConstraintNode {
     /// A leaf atomic constraint (`leftOperand`/`operator`/`rightOperand`).
     Atomic(Constraint),
+    /// A parsed leaf shared across operand references. It evaluates identically to `Atomic`.
+    SharedAtomic(std::sync::Arc<Constraint>),
     /// A nested compound `odrl:LogicalConstraint`.
     Compound(LogicalConstraint),
 }
+
+impl PartialEq for ConstraintNode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Atomic(a), Self::Atomic(b)) => a == b,
+            (Self::SharedAtomic(a), Self::SharedAtomic(b)) => a == b,
+            (Self::Atomic(a), Self::SharedAtomic(b)) | (Self::SharedAtomic(b), Self::Atomic(a)) => {
+                a == b.as_ref()
+            }
+            (Self::Compound(a), Self::Compound(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+impl Eq for ConstraintNode {}
 
 /// The logical combinator of an [`odrl:LogicalConstraint`](LogicalConstraint).
 /// sq-a0zef.
@@ -368,38 +385,112 @@ impl Operator {
     }
 }
 
+/// A textual set assembled from shared, ordered member groups.
+///
+/// Parsed sets retain their collection storage until text is requested through
+/// [`Value::as_str`]. The resulting text is memoized and deduplicated by the
+/// parser's member keys, preserving the first occurrence of each member.
+#[derive(Debug)]
+pub struct SharedSet {
+    parts: Vec<SetMembers>,
+    text: std::sync::OnceLock<String>,
+}
+
+pub(crate) type SetMembers = std::sync::Arc<[(String, String)]>;
+
+impl SharedSet {
+    pub(crate) fn new(parts: Vec<SetMembers>) -> Self {
+        Self {
+            parts,
+            text: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        self.text.get_or_init(|| {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut out = String::new();
+            for members in &self.parts {
+                for (key, value) in members.iter() {
+                    if seen.insert(key.as_str()) {
+                        if !out.is_empty() {
+                            out.push('|');
+                        }
+                        out.push_str(value);
+                    }
+                }
+            }
+            out
+        })
+    }
+}
+
 /// A constraint right-operand or request value, kept as a typed scalar so the
 /// evaluator can compare numerically / temporally where appropriate and fall
 /// back to string equality otherwise.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     /// An IRI (an `odrl:rightOperandReference` or a named resource/party/purpose).
     Iri(String),
+    /// An IRI retained by a shared singleton collection.
+    SharedIri(std::sync::Arc<str>),
     /// A plain or typed string literal (purpose codes, recipient ids, regions).
     Str(String),
+    /// A folded or singleton string retained by shared constraints.
+    SharedStr(std::sync::Arc<str>),
+    /// A textual set retaining shared collection groups and memoized text.
+    SharedSet(std::sync::Arc<SharedSet>),
     /// An `xsd:decimal`/`integer`/`double` numeric literal (for `odrl:count`, …).
     Num(f64),
     /// An `xsd:dateTime`/`xsd:date` literal, normalized to a comparable key.
     DateTime(String),
+    /// A temporal value retained by a shared singleton collection.
+    SharedDateTime(std::sync::Arc<str>),
 }
 
 impl Value {
+    pub(crate) fn is_datetime(&self) -> bool {
+        matches!(self, Self::DateTime(_) | Self::SharedDateTime(_))
+    }
+
     /// The value as a string for equality / membership comparison.
     pub fn as_str(&self) -> &str {
         match self {
             Value::Iri(s) | Value::Str(s) | Value::DateTime(s) => s,
+            Value::SharedIri(s) | Value::SharedStr(s) | Value::SharedDateTime(s) => s,
+            Value::SharedSet(set) => set.as_str(),
             Value::Num(_) => "",
         }
     }
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Str(_) | Self::SharedStr(_) | Self::SharedSet(_),
+                Self::Str(_) | Self::SharedStr(_) | Self::SharedSet(_),
+            ) => self.as_str() == other.as_str(),
+            (Self::Iri(_) | Self::SharedIri(_), Self::Iri(_) | Self::SharedIri(_))
+            | (
+                Self::DateTime(_) | Self::SharedDateTime(_),
+                Self::DateTime(_) | Self::SharedDateTime(_),
+            ) => self.as_str() == other.as_str(),
+            (Self::Num(a), Self::Num(b)) => a == b,
+            _ => false,
+        }
+    }
+}
 impl Eq for Value {}
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Iri(s) => write!(f, "<{s}>"),
+            Value::SharedIri(s) => write!(f, "<{s}>"),
             Value::Str(s) | Value::DateTime(s) => write!(f, "{s:?}"),
+            Value::SharedStr(s) | Value::SharedDateTime(s) => write!(f, "{s:?}"),
+            Value::SharedSet(set) => write!(f, "{:?}", set.as_str()),
             Value::Num(n) => write!(f, "{n}"),
         }
     }
@@ -420,4 +511,33 @@ pub struct Duty {
     /// Constraints refining the duty (e.g. compensate `count = 5`). Carried for
     /// justification; the base case checks discharge by action.
     pub constraints: Vec<Constraint>,
+}
+
+#[cfg(test)]
+mod shared_set_tests {
+    use super::*;
+
+    #[test]
+    fn text_is_deferred_ordered_and_memoized() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<Value>();
+        let first: SetMembers =
+            vec![("iri:a".into(), "a".into()), ("iri:b".into(), "b".into())].into();
+        let second: SetMembers = vec![
+            ("iri:b".into(), "b".into()),
+            ("literal:b".into(), "b".into()),
+            ("iri:c".into(), "c".into()),
+        ]
+        .into();
+        let set = std::sync::Arc::new(SharedSet::new(vec![first, second]));
+        assert!(set.text.get().is_none());
+        let value = Value::SharedSet(std::sync::Arc::clone(&set));
+        assert_eq!(value.as_str(), "a|b|b|c");
+        let allocation = value.as_str().as_ptr();
+        assert_eq!(set.text.get().unwrap().as_ptr(), allocation);
+        assert_eq!(value.clone().as_str().as_ptr(), allocation);
+        assert_eq!(value, Value::Str("a|b|b|c".into()));
+        assert_ne!(value, Value::Iri("a|b|b|c".into()));
+        assert_eq!(value.to_string(), "\"a|b|b|c\"");
+    }
 }

@@ -98,6 +98,53 @@ fn eq_means_at_most_n() {
     assert!(!evaluate_and_exercise(&p, &req, &store).allow);
 }
 
+#[test]
+fn singleton_text_count_bounds_keep_the_scalar_allowance() {
+    for (operator, allowance) in [("lteq", 2), ("eq", 2), ("lt", 1)] {
+        for (right, additional) in [
+            (r#""2""#, ""),
+            (r#"( "2" )"#, ""),
+            (
+                r#"( "2" )"#,
+                "; o:constraint [ o:leftOperand o:count; o:operator o:lteq; o:rightOperand 9 ]",
+            ),
+        ] {
+            let rdf = format!(
+                "@prefix o: <{ODRL}> . <urn:p> o:permission <urn:r> . \
+                 <urn:r> o:action o:read; o:constraint [ o:leftOperand o:count; \
+                 o:operator o:{operator}; o:rightOperand {right} ] {additional} ."
+            );
+            let policy = parse_policy_str(&rdf, "turtle").unwrap();
+            let store = InMemoryCounterStore::new();
+            let request = alice_reads();
+            let rule = &policy.permissions[0];
+            assert_eq!(
+                count_status(rule, &request, &store),
+                CountStatus::Satisfied {
+                    consumed: 0,
+                    limit: allowance
+                },
+                "{operator} {right}"
+            );
+            for consumed in 1..=allowance {
+                let decision = evaluate_and_exercise(&policy, &request, &store);
+                assert!(decision.allow, "{operator} {right}: {decision:?}");
+                assert_eq!(decision.consumed, Some(consumed));
+            }
+            let decision = evaluate_and_exercise(&policy, &request, &store);
+            assert!(!decision.allow, "{operator} {right}");
+            assert_eq!(decision.consumed, None);
+            assert_eq!(
+                count_status(rule, &request, &store),
+                CountStatus::DefinitelyUnsatisfied {
+                    consumed: allowance,
+                    limit: allowance
+                }
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 4. A base DENY (wrong party) burns NO budget.
 // ---------------------------------------------------------------------------
