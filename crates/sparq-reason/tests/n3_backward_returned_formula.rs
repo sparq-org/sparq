@@ -1212,3 +1212,178 @@ fn a_stored_backward_answer_keeps_its_free_name_across_rounds() {
         "the complete :out :got rows agree"
     );
 }
+
+fn assert_nested_closure_keeps_outer_binding(premise: &str) {
+    let src = format!(
+        "{P}:s :val :v .\n\
+         {{ ?x :res ?c }} <= {{ {premise} }} .\n\
+         {{ :s :res ?c }} => {{ :out :got ?c }} ."
+    );
+    let closure = reason_n3_terms(&src, None).expect("nested closure reasons");
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let answers: Vec<_> = closure
+        .facts
+        .iter()
+        .filter(|t| t[0] == iri("out"))
+        .collect();
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    let Term::Formula(rows) = &answers[0][2] else {
+        panic!("{:?}", answers[0])
+    };
+    let value = Term::Formula(vec![[iri("b"), iri("c"), iri("v")]]);
+    let mut values: Vec<_> = rows
+        .iter()
+        .filter(|t| t[0] == iri("a") && (t[1] == iri("p") || t[1] == iri("q")))
+        .cloned()
+        .collect();
+    values.sort_by_key(sparq_reason::n3::serialize::statement_keys);
+    assert_eq!(
+        values,
+        vec![
+            [iri("a"), iri("p"), value.clone()],
+            [iri("a"), iri("q"), value]
+        ],
+        "both the original and derived row carry the outer proof's bound term"
+    );
+}
+
+/// Round 8 lc4: a nested derivation must keep the enclosing application's live name.
+#[test]
+fn a_nested_closure_preserves_an_already_bound_outer_name() {
+    assert_nested_closure_keeps_outer_binding(
+        "?x :val ?y . \
+         { :a :p { :b :c ?y } . { :a :p ?w } => { :a :q ?w } . } log:conclusion ?c",
+    );
+}
+
+/// Round 8 lc3: the outer binding can also arrive after the nested closure returns.
+#[test]
+fn a_nested_closure_preserves_an_outer_name_bound_later() {
+    assert_nested_closure_keeps_outer_binding(
+        "{ :a :p { :b :c ?y } . { :a :p ?w } => { :a :q ?w } . } log:conclusion ?c . \
+         ?x :val ?y",
+    );
+}
+
+#[test]
+fn a_supports_closure_preserves_the_enclosing_proofs_live_name() {
+    assert_eq!(
+        out(":s :val :v . \
+            { ?x :check :yes } <= { ?x :val ?y . \
+            { :a :p { :b :c ?y } . { :a :p ?w } => { :a :q ?w } . } \
+            log:supports { :a :q { :b :c ?y } } } . \
+            { :s :check :yes } => { :out :fired :yes } ."),
+        fired()
+    );
+}
+
+#[test]
+fn the_forward_nested_closure_twin_keeps_its_existing_formula_value() {
+    let closure = reason_n3_terms(
+        &format!(
+            "{P}:s :val :v .\n\
+             {{ {{ :a :p {{ :b :c ?y }} . {{ :a :p ?w }} => {{ :a :q ?w }} . }} \
+             log:conclusion ?c . ?x :val ?y }} => {{ ?x :res ?c }} .\n\
+             {{ :s :res ?c }} => {{ :out :got ?c }} ."
+        ),
+        None,
+    )
+    .expect("forward twin reasons");
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let value = Term::Formula(vec![[iri("b"), iri("c"), Term::Var("y".into())]]);
+    let answer = [
+        iri("out"),
+        iri("got"),
+        Term::Formula(vec![
+            [iri("a"), iri("p"), value.clone()],
+            [
+                Term::Formula(vec![[iri("a"), iri("p"), Term::Var("w".into())]]),
+                Term::Iri("http://www.w3.org/2000/10/swap/log#implies".into()),
+                Term::Formula(vec![[iri("a"), iri("q"), Term::Var("w".into())]]),
+            ],
+            [iri("a"), iri("q"), value],
+        ]),
+    ];
+    let answers: Vec<_> = closure
+        .facts
+        .iter()
+        .filter(|t| t[0] == iri("out"))
+        .collect();
+    assert_eq!(answers, vec![&answer]);
+}
+
+#[test]
+fn a_query_escapes_a_backward_answer_after_its_nested_closure_finishes() {
+    let data = format!(
+        "{P}:s :val :v .\n\
+         {{ ?x :res ?c }} <= {{ ?x :val ?y . \
+         {{ :a :p {{ :b :c ?y }} . {{ :a :p ?w }} => {{ :a :q ?w }} . }} log:conclusion ?c }} ."
+    );
+    let query = format!("{P}{{ :s :res ?c }} => {{ :out :got ?c }} .");
+    let answers = sparq_reason::n3::reason_n3_query_terms(&data, &query).expect("query reasons");
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    let Term::Formula(rows) = &answers[0][2] else {
+        panic!("{answers:?}")
+    };
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let value = Term::Formula(vec![[iri("b"), iri("c"), iri("v")]]);
+    for predicate in ["p", "q"] {
+        assert!(
+            rows.contains(&[iri("a"), iri(predicate), value.clone()]),
+            "{rows:?}"
+        );
+    }
+    // The retained rule has an unbound ?w: query projection bypasses fact insertion,
+    // but must still escape it at this final boundary.
+    let debug = format!("{answers:?}");
+    assert!(
+        !debug.contains("__bw"),
+        "live name in query output: {debug}"
+    );
+    assert!(
+        debug.contains("__bx"),
+        "retained rule's free name escaped: {debug}"
+    );
+}
+
+#[test]
+fn a_nested_closure_from_parsed_text_keeps_its_enclosing_proofs_names_live() {
+    // Two levels of closure, the outer one obtained through a runtime parser builtin.
+    // The backward proof runs inside that document, with another closure inside it.
+    let document = ":s :val :v . \
+        { ?x :res ?c } <= { ?x :val ?y . \
+        { :a :p { :b :c ?y } . { :a :p ?w } => { :a :q ?w } . } log:conclusion ?c } . \
+        { :s :res ?c } => { :out :got ?c } .";
+    let document = format!("{P}{document}");
+    let src = format!(
+        "{P}{{ {document:?} log:parsedAsN3 ?f . ?f log:conclusion ?c }} => {{ :result :is ?c }} ."
+    );
+    let closure = reason_n3_terms(&src, None).expect("runtime document closes");
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let result = closure
+        .facts
+        .iter()
+        .find(|t| t[0] == iri("result"))
+        .expect("outer result");
+    let Term::Formula(rows) = &result[2] else {
+        panic!("{result:?}")
+    };
+    let answer = rows
+        .iter()
+        .find(|t| t[0] == iri("out"))
+        .expect("inner answer");
+    let Term::Formula(rows) = &answer[2] else {
+        panic!("{answer:?}")
+    };
+    let value = Term::Formula(vec![[iri("b"), iri("c"), iri("v")]]);
+    for predicate in ["p", "q"] {
+        assert!(
+            rows.contains(&[iri("a"), iri(predicate), value.clone()]),
+            "{rows:?}"
+        );
+    }
+    assert!(
+        !format!("{result:?}").contains("__bw"),
+        "top-level fact escaped: {result:?}"
+    );
+}

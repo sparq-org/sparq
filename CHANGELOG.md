@@ -929,8 +929,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds, and a name the goal itself writes, are the caller's to resolve and are left exactly
   as they are, so a formula a caller supplies and a formula read from the store come back as
   they went in. A variable no premise binds keeps its derivation fingerprint, escaped to
-  `__bx<fold>.name` before it enters a derived fact or query result. Re-proving the same
-  goal in a later round therefore treats the stored name as an ordinary free variable. A quoted
+  `__bx<fold>.name` before it enters the top-level fact store or query result. Nested
+  closures keep names live until the enclosing proof finishes. Re-proving the same
+  goal in a later round therefore treats the stored name as an ordinary free variable.
+  Proof-support lookup uses the store's same spelling, preserving `why()` support when
+  a later round re-proves the goal. A quoted
   formula's own `@forAll` binder is never bound by a proof, so it is untouched. Returned-formula
   expectations pin the change from a leaked name to the term the proof bound. Backward names
   use the internal `__bw<fold>.` prefix while their proof is live. For facts retaining

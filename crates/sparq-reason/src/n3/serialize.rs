@@ -169,12 +169,22 @@ fn spellable_var(name: &str) -> bool {
 
 /// The common generated spelling needs only its one internal separator changed to `_`.
 /// Complex original names retain an explicit spelling in the unit's plan.
-fn default_generated(v: &str) -> Option<(&str, &str)> {
-    let (_, original) = super::minted_parts(v).or_else(|| super::escaped_parts(v))?;
-    spellable_var(original).then(|| {
-        let end = v.len() - original.len() - super::MINTED_VAR_SEPARATOR.len_utf8();
-        (&v[..end], original)
-    })
+fn default_generated(v: &str, out: &mut String) -> bool {
+    let Some((_, original)) = super::minted_parts(v).or_else(|| super::escaped_parts(v)) else {
+        return false;
+    };
+    if !spellable_var(original) {
+        return false;
+    }
+    let end = v.len() - original.len() - super::MINTED_VAR_SEPARATOR.len_utf8();
+    write_generated(&v[..end], original, out);
+    true
+}
+
+fn write_generated(prefix: &str, original: &str, out: &mut String) {
+    out.push_str(prefix);
+    out.push('_');
+    out.push_str(original);
 }
 
 /// Simple generated spellings are injective: tag, digits and original name each retain
@@ -439,10 +449,10 @@ impl<'a> Unit<'a> {
     }
 
     /// Reserve a legal spelling, adding a suffix only when another variable owns it.
-    fn fresh_name(base: String, taken: &mut BTreeMap<String, ()>) -> String {
+    fn fresh_name(base: String, taken: &mut BTreeSet<String>) -> String {
         let mut name = base.clone();
         let mut n = 2;
-        while taken.insert(name.clone(), ()).is_some() {
+        while !taken.insert(name.clone()) {
             name = format!("{base}_{n}");
             n += 1;
         }
@@ -478,10 +488,10 @@ impl<'a> Unit<'a> {
         };
         let mut vars = BTreeSet::new();
         terms.iter().for_each(|t| all_vars(t, &mut vars));
-        let mut taken: BTreeMap<String, ()> = vars
+        let mut taken: BTreeSet<String> = vars
             .iter()
             .filter(|v| !binder_named(v) && spellable_var(v))
-            .map(|v| (v.to_string(), ()))
+            .map(|v| v.to_string())
             .collect();
         let names = unplaced
             .into_iter()
@@ -491,32 +501,15 @@ impl<'a> Unit<'a> {
             .iter()
             .filter(|v| !binder_named(v) && !spellable_var(v))
             .filter_map(|v| {
-                let default = default_generated(v);
-                let base = match default {
-                    Some((prefix, original)) => {
-                        let mut name = String::with_capacity(v.len());
-                        name.push_str(prefix);
-                        name.push('_');
-                        name.push_str(original);
-                        name
-                    }
-                    None => sanitize_name(v),
-                };
-                match taken.entry(base) {
-                    std::collections::btree_map::Entry::Vacant(entry) => {
-                        if default.is_some() {
-                            entry.insert(());
-                            None
-                        } else {
-                            let name = entry.key().clone();
-                            entry.insert(());
-                            Some((v.to_string(), name))
-                        }
-                    }
-                    std::collections::btree_map::Entry::Occupied(entry) => {
-                        let base = entry.key().clone();
-                        Some((v.to_string(), Unit::fresh_name(base, &mut taken)))
-                    }
+                let mut base = String::with_capacity(v.len());
+                let default = default_generated(v, &mut base);
+                if !default {
+                    base = sanitize_name(v);
+                }
+                if taken.insert(base.clone()) {
+                    (!default).then(|| (v.to_string(), base))
+                } else {
+                    Some((v.to_string(), Unit::fresh_name(base, &mut taken)))
                 }
             })
             .collect();
@@ -579,14 +572,7 @@ impl<'a> Unit<'a> {
                     out.push('?');
                     if let Some(name) = self.renamed.get(v.as_str()) {
                         out.push_str(name);
-                    } else if let Some((prefix, original)) =
-                        v.split_once(super::MINTED_VAR_SEPARATOR)
-                    {
-                        debug_assert!(default_generated(v).is_some());
-                        out.push_str(prefix);
-                        out.push('_');
-                        out.push_str(original);
-                    } else {
+                    } else if !default_generated(v, out) {
                         out.push_str(v);
                     }
                 }

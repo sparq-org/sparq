@@ -212,7 +212,7 @@ input a fact carrying one gets an IRI independent of hash-set traversal and hash
 width (native vs `wasm32`; GH #6749). A `log:conclusion` formula's derived rows, and the
 list-cell labels (`_l<k>_<n>`) interning a list value mints, are sorted / numbered in a
 canonical term order for the same reason (GH #6844). A backward-chaining application's `__bw<n>.`
-prefix, escaped to `__bx<n>.` before it enters a fact or query result, is the fingerprint of the derivation that standardized that rule application apart — a
+prefix, escaped to `__bx<n>.` before it enters a top-level fact or query result, is the fingerprint of the derivation that standardized that rule application apart — a
 64-bit fold of its place in the proof tree, the fully resolved goal proved (quoted formulas included) and the evaluation
 scope (a nested
 closure's own canonical key included, folded width-independently) — instead
@@ -227,7 +227,8 @@ order into a key (GH #6844). The numbering changed with GH #6749, and the nested
 order, the list-cell labels and the backward-renaming prefixes with GH #6844, so such a fact's
 IRI differs from one minted before them: regenerate as above.
 Backward application names use a dot, outside source variable syntax; surviving names
-are escaped to the deterministic `__bx<n>.` namespace before storage or query output.
+are escaped to the deterministic `__bx<n>.` namespace before top-level storage or query output.
+Nested closures keep names live until the enclosing proof finishes.
 These spelling changes change identity keys, `why()` strings and provenance IRIs for facts
 retaining an unbound backward variable; regenerate persisted N3 lineage for those facts.
 The `<hash>` is a 64-bit FNV-1a fold of the key: content-addressed, but

@@ -121,9 +121,11 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // variables renamed apart (__bp.<fold>., shared by the slots of one atom). A __bw<digits>.
 // prefix ends with a dot, which source variables cannot contain. A name stays shared
 // only when a live application minted it: the decimal prefix is canonical and its rule
-// writes the original variable. Before a result becomes a derived fact or query output,
+// writes the original variable. Nested closures keep these names live so the enclosing
+// proof can still bind them. At top-level fact-store insertion or query emission,
 // still-unbound application names become deterministic __bx<fold>.name variables. This
 // escaped namespace is never live, even when the same goal is proved in a later round.
+// Explain support keys use the same spelling as the fact store they reference.
 // Escaped names otherwise behave like ordinary source variables. Other names stay free and
 // cannot read unrelated caller bindings before renaming. Scoped operators read the
 // registered ancestry, including enclosing applications.

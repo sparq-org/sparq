@@ -2056,15 +2056,17 @@ fn run_closure(
     runtime: Option<&RuntimeDocs>,
 ) -> Result<Closure, String> {
     let own = serialize::UNIVERSAL_VAR;
-    run_closure_in(parsed, resolver, inherit, truncated, mode, cycles, runtime, own)
+    run_closure_in::<true>(parsed, resolver, inherit, truncated, mode, cycles, runtime, own)
 }
 
 /// [`run_closure`] over a document whose own universals are the variables named with the
 /// prefix `own_universals`: `__ua.` for a document, `__ul.<k>.` for the statements of a
 /// formula closed in the [`formula_closure`] run `k`. Only those can prove a rule
 /// premise's own universal ([`independent_firing`]).
+/// `TOP_LEVEL` escapes surviving backward names only when they leave every proof;
+/// nested closures preserve names that an enclosing proof can still bind.
 #[allow(clippy::too_many_arguments)]
-fn run_closure_in(
+fn run_closure_in<const TOP_LEVEL: bool>(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
     // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
@@ -2439,7 +2441,7 @@ fn run_closure_in(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple::<true>(&c, b, &bw.truncated) {
+                        if let Some(g) = ground_triple::<TOP_LEVEL>(&c, b, &bw.truncated) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
                             if !facts.contains(&g)
                                 && bw.settle(bounded::generated(&bw.truncated, &g))
@@ -2450,7 +2452,11 @@ fn run_closure_in(
                                     rule.premise
                                         .iter()
                                         .filter_map(|p| match universals {
-                                            None => ground_triple::<false>(p, b, &bw.truncated),
+                                            // The lookup key uses this store's emission
+                                            // boundary, including any escaped free names.
+                                            None => {
+                                                ground_triple::<TOP_LEVEL>(p, b, &bw.truncated)
+                                            }
                                             // The stored facts a premise universal was
                                             // proved from mention a store universal.
                                             Some(_) => premise_instance(p, b, &bw.truncated),
@@ -4033,11 +4039,12 @@ impl bounded::Subst for Produced<'_> {
 ///   identity ([`BwCtx::root_path`]).
 ///
 /// The same goal re-proved at the same node in a later round takes the same name and
-/// derives the same fact, so in-run deduplication is stable. Before a result enters a fact
-/// or query output, [`finish_conclusion_names`] moves any surviving application names into
-/// the deterministic `__bx<fold>.` namespace. Such a name is an ordinary free variable:
+/// derives the same fact, so in-run deduplication is stable. Before a result enters the
+/// top-level fact store or query output, [`finish_conclusion_names`] moves surviving names
+/// into the deterministic `__bx<fold>.` namespace. Such a name is an ordinary free variable:
 /// [`minted_parts`] and [`live_var`] never recognize it as a live application name, even
-/// when a later round proves the same goal at the same node.
+/// when a later round proves the same goal at the same node. Nested closures keep live
+/// names until the enclosing proof finishes and its result reaches that boundary.
 ///
 /// A path is ONE `u64`, not a chain: each step's fingerprint is folded from the step and the
 /// fingerprint it is taken from ([`NodeKey::Step`]), and registered like any other, so the
@@ -4427,9 +4434,12 @@ const MINTED_VAR_SEPARATOR: char = '.';
 
 /// The application identity and original name in an exact `__bw<digits>.` prefix.
 fn minted_parts(v: &str) -> Option<(&str, &str)> {
-    let (digits, original) = v
-        .strip_prefix(MINTED_VAR)?
-        .split_once(MINTED_VAR_SEPARATOR)?;
+    application_parts(v, MINTED_VAR)
+}
+
+/// The shared grammar of live and escaped application prefixes.
+fn application_parts<'a>(v: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
+    let (digits, original) = v.strip_prefix(prefix)?.split_once(MINTED_VAR_SEPARATOR)?;
     (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())).then_some((digits, original))
 }
 
@@ -4442,10 +4452,7 @@ const ESCAPED_VAR: &str = "__bx";
 
 /// Recognize the deterministic escaped spelling for exact output and universal-copy checks.
 fn escaped_parts(v: &str) -> Option<(&str, &str)> {
-    let (digits, original) = v
-        .strip_prefix(ESCAPED_VAR)?
-        .split_once(MINTED_VAR_SEPARATOR)?;
-    (!digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())).then_some((digits, original))
+    application_parts(v, ESCAPED_VAR)
 }
 
 fn escaped_var(v: &str) -> bool {
@@ -5176,9 +5183,10 @@ fn rename_var_prefix(stmts: &mut [[Term; 3]], from: &str, to: &str) {
 /// own: asserting `∀x. S(x)` beside a document under `∀x` is the
 /// same as conjoining `S(x)` under it, since `x` does not occur in what is already there.
 ///
-/// Fact and query emission also escape still-unbound application names to `__bx<fold>.`
+/// Top-level fact and query emission escape still-unbound application names to `__bx<fold>.`
 /// in this same walk, preserving the fold and original name for deterministic deduplication.
-/// Premise instantiation keeps its live names (`ESCAPE = false`).
+/// Nested closure emission keeps live names (`ESCAPE = false`). Proof supports use the
+/// same boundary as their store, so their keys match the emitted facts at lookup.
 fn finish_conclusion_names<const ESCAPE: bool>(t: &mut Term) {
     match t {
         Term::Var(v) => {
@@ -6170,7 +6178,7 @@ fn with_formula_closure<R>(
         NegationCycles::SinglePass => NegationCycles::SinglePass,
         _ => NegationCycles::Reject,
     };
-    let closed = match run_closure_in(
+    let closed = match run_closure_in::<false>(
         parsed,
         bw.resolver,
         Some(bw.visited.clone()),
@@ -12224,7 +12232,7 @@ mod tests {
         let registered = |src: &str| {
             let shared = run_shared::RunShared::for_sources(&[]);
             let parsed = bounded::parse_n3(src, "", &Truncation::top_level()).expect("parses");
-            let out = run_closure_in(
+            let out = run_closure_in::<true>(
                 parsed,
                 None,
                 Some(shared.clone()),
