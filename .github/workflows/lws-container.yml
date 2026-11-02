@@ -5,6 +5,14 @@ on:
   push:
     tags:
       - "v*"
+  # Draft-tier CI: skip draft heads and run smoke/scan when the PR is marked ready.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/sparq-lws-core/Dockerfile"
+      - "crates/sparq-lws-core/tests/container-smoke.sh"
+      - ".github/workflows/lws-container.yml"
+      - ".dockerignore"
   # Publish the LWS image on demand WITHOUT cutting a full `v*` release
   # (that tag also fires release.yml). A manual run tags only `:latest` (the semver
   # tags below require a git tag) — exactly what the deploy templates + demo reference.
@@ -16,6 +24,7 @@ permissions:
 jobs:
   publish:
     name: smoke + scan + publish LWS container
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,6 +32,8 @@ jobs:
     steps:
       - name: Check out release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Set up Buildx for native gate
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -38,7 +49,8 @@ jobs:
           platforms: linux/amd64
           tags: sparq-lws-core:smoke
           cache-from: type=gha,scope=sparq-lws-core
-          cache-to: type=gha,mode=max,scope=sparq-lws-core
+          # PR builds may read the shared cache but must not export source layers.
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=sparq-lws-core' || '' }}
           provenance: false
           sbom: false
 
@@ -61,12 +73,15 @@ jobs:
 
       # Only after the native artifact passes smoke + vulnerability gates do we
       # enable emulation, authenticate, and publish the multi-arch image index.
+      # PR runs stop after smoke and scan, before any registry steps below.
       - name: Set up QEMU for arm64
+        if: github.event_name != 'pull_request'
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: arm64
 
       - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -74,6 +89,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate stable release tags and OCI labels
+        if: github.event_name != 'pull_request'
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -84,6 +100,7 @@ jobs:
             type=raw,value=latest
 
       - name: Publish amd64 + arm64 image index
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .

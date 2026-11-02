@@ -676,7 +676,18 @@ fn parent_iri(iri: &str) -> Option<String> {
 
 /// Parse + validate a write-target IRI: syntactically an IRI and outside the reserved
 /// `urn:sparq:` space.
-fn valid_target(url: &str) -> Result<NamedNode, String> {
+fn valid_target(url: &str, budget: sparq_solid::AuthBudget) -> Result<NamedNode, String> {
+    let name = valid_target_name(url)?;
+    // Control documents are excluded from the materializer's resource enumeration.
+    if !is_control_doc(url) {
+        budget
+            .validate_resource_iri(url)
+            .map_err(|e| format!("invalid target <{url}>: {e}; write refused"))?;
+    }
+    Ok(name)
+}
+
+fn valid_target_name(url: &str) -> Result<NamedNode, String> {
     if url.starts_with(RESERVED_PREFIX) {
         return Err(format!(
             "invalid target <{url}>: the `{RESERVED_PREFIX}` graph space is reserved"
@@ -1528,7 +1539,7 @@ impl SolidMcpServer {
         let url = arg_str(args, "url")?.to_string();
         let content = arg_str(args, "content")?.to_string();
         let content_type = arg_str(args, "content_type")?.to_string();
-        let name = valid_target(&url)?;
+        let name = valid_target(&url, self.store.auth_budget())?;
         // RDF sources only. The refusal NAMES the scope-out (module docs: non-RDF
         // resources are a `sparq-solid` storage decision, not an MCP surface one) so a
         // caller learns the shape of the limit, not just that its body was rejected.
@@ -1611,7 +1622,7 @@ impl SolidMcpServer {
     fn tool_resource_delete(&mut self, args: &Value) -> Result<String, String> {
         self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
-        let name = valid_target(&url)?;
+        let name = valid_target_name(&url)?;
 
         if is_control_doc(&url) {
             self.gate_acl_write(&url)?;
@@ -1682,7 +1693,7 @@ impl SolidMcpServer {
     fn tool_container_create(&mut self, args: &Value) -> Result<String, String> {
         self.require_resource_slots()?;
         let url = arg_str(args, "url")?.to_string();
-        let name = valid_target(&url)?;
+        let name = valid_target(&url, self.store.auth_budget())?;
         if !url.ends_with('/') {
             return Err(format!("container IRI must be slash-terminated: <{url}>"));
         }
@@ -2021,9 +2032,9 @@ mod unit {
 
     #[test]
     fn valid_target_rejects_the_reserved_graph_space() {
-        assert!(valid_target("urn:sparq:auth").is_err());
-        assert!(valid_target("not an iri").is_err());
-        assert!(valid_target("https://p.ex/ok").is_ok());
+        assert!(valid_target("urn:sparq:auth", sparq_solid::default_auth_budget()).is_err());
+        assert!(valid_target("not an iri", sparq_solid::default_auth_budget()).is_err());
+        assert!(valid_target("https://p.ex/ok", sparq_solid::default_auth_budget()).is_ok());
     }
 
     #[test]

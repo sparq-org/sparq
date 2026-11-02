@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createConnection } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -72,6 +73,60 @@ test('startSolidServer boots a loopback listener', { timeout: 30_000 }, async ()
     assert.equal(response.status, 404);
   } finally {
     await server.closeAsync();
+  }
+});
+
+test('wasm CLI exits on a second SIGINT while graceful close waits for a request', { skip: process.platform === 'win32', timeout: 15_000 }, async (t) => {
+  const child = spawn(process.execPath, [join(packageDir, 'bin/solid-server.js'), '--port', '0', '--base-url', baseUrl], {
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('SPARQ_SOLID_'))),
+  });
+  t.after(() => stopChild(child));
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const exited = once(child, 'close');
+  const startup = await waitForStartup(child);
+  const { hostname, port } = new URL(startup.url);
+  const socket = createConnection({ host: hostname, port: Number(port) });
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  const continued = once(socket, 'data');
+  socket.write(`PUT /unfinished HTTP/1.1\r\nHost: ${hostname}:${port}\r\nContent-Type: text/plain\r\nContent-Length: 10\r\nExpect: 100-continue\r\n\r\nx`);
+  assert.match((await continued)[0].toString(), /HTTP\/1\.1 100 Continue/);
+
+  child.kill('SIGINT');
+  // Wait until close() has stopped accepting connections, while the body stays unfinished.
+  const deadline = Date.now() + 2_000;
+  while (true) {
+    const probe = createConnection({ host: hostname, port: Number(port) });
+    const error = await new Promise((resolve) => {
+      probe.once('connect', () => resolve(null));
+      probe.once('error', resolve);
+    });
+    probe.destroy();
+    if (error) {
+      assert.equal(error.code, 'ECONNREFUSED');
+      break;
+    }
+    assert.ok(Date.now() < deadline, 'first SIGINT must start graceful close');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(child.exitCode, null, 'unfinished request must keep graceful close pending');
+  assert.equal(child.signalCode, null);
+  assert.equal(socket.destroyed, false);
+
+  child.kill('SIGINT');
+  let timer;
+  try {
+    const result = await Promise.race([
+      exited,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('second SIGINT did not exit promptly')), 2_000); }),
+    ]);
+    assert.deepEqual(result, [130, null]);
+    assert.equal(stderr, '');
+  } finally {
+    clearTimeout(timer);
   }
 });
 

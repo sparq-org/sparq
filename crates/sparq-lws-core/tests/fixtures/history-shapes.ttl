@@ -1,0 +1,23 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix did: <https://www.w3.org/ns/did#> .
+@prefix ssd: <https://jeswr.org/ns/solid-sd#> .
+@prefix rel: <http://www.iana.org/assignments/relation/> .
+
+ssd:VersioningServiceShape a sh:NodeShape ;
+    sh:targetClass ssd:VersioningService ;
+    sh:property [ sh:path did:serviceEndpoint ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path ssd:listingTemplate ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ; sh:pattern "\\?resource=\\{resource\\}$" ] ;
+    sh:property [ sh:path ssd:retention ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:duration ] .
+
+ssd:TrashServiceShape a sh:NodeShape ;
+    sh:targetClass ssd:TrashService ;
+    sh:property [ sh:path did:serviceEndpoint ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path ssd:retention ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:duration ] ;
+    sh:property [ sh:path ssd:recursiveDelete ; sh:maxCount 0 ] .
+
+ssd:HistoryMemberShape a sh:NodeShape ;
+    sh:targetSubjectsOf ssd:etag ;
+    sh:property [ sh:path ssd:etag ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path rel:original ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path ssd:original ; sh:maxCount 0 ] .
