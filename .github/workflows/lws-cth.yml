@@ -30,9 +30,9 @@ on:
         type: string
         default: ubuntu-latest
       sparq_backend:
-        description: "SPARQ data-path backend for the run (memory = the conformance baseline; embedded = the in-process engine)."
+        description: "Storage mode (memory = baseline; embedded = ephemeral engine; durable = temp data directory with restart checks)."
         type: choice
-        options: [memory, embedded]
+        options: [memory, embedded, durable]
         default: memory
 
 # Cap the lane to a single concurrent run repo-wide. `cancel-in-progress: false` on purpose: cancelling
@@ -57,7 +57,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: shellcheck run.sh
-        run: shellcheck crates/sparq-lws-core/conformance/run.sh
+        run: shellcheck crates/sparq-lws-core/conformance/{run,server-lifecycle}.sh
+
+      - name: check restart and resource verification
+        run: python3 -B crates/sparq-lws-core/conformance/test-durable.py
 
       - name: validate the pinned baseline + config wiring
         run: python3 crates/sparq-lws-core/conformance/check-conformance-config.py

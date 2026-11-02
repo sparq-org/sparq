@@ -2909,6 +2909,11 @@ criteria = "safe-to-deploy"
 version = "0.8.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.yrs]]
+version = "0.28.0"
+criteria = "safe-to-deploy"
+notes = "Yjs v1 protocol and CRDT implementation from the established y-crdt/y-crdt repository; MIT. Used only by the optional native collaboration relay. Exemption pending a full dependency audit."
+
 [[exemptions.zerocopy]]
 version = "0.8.50"
 criteria = "safe-to-deploy"

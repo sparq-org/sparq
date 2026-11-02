@@ -63,6 +63,7 @@ export function RspPlayground() {
   const [lateDropped, setLateDropped] = React.useState(0);
   const [flushed, setFlushed] = React.useState(false);
   const configuration = React.useMemo(() => ({ example, range, step }), [example, range, step]);
+  const currentConfiguration = React.useRef(configuration);
   const [registered, setRegistered] = React.useState<typeof configuration | null>(null);
   const [resetting, setResetting] = React.useState(false);
   const [registrationError, setError] = React.useState<string | null>(null);
@@ -96,7 +97,7 @@ export function RspPlayground() {
     const { example, range, step } = configuration;
     return registerRsp(example.query, range, step, example.maxDelay, example.r2s).then(
       (h) => {
-        if (isCancelled()) return;
+        if (isCancelled() || currentConfiguration.current !== configuration) return;
         setEngine("ready");
         setError(null);
         setHandle(h);
@@ -108,7 +109,7 @@ export function RspPlayground() {
         setResetting(false);
       },
       (e) => {
-        if (isCancelled()) return;
+        if (isCancelled() || currentConfiguration.current !== configuration) return;
         const message = e instanceof Error ? e.message : String(e);
         setError(message);
         setHandle(null);
@@ -122,9 +123,10 @@ export function RspPlayground() {
   // Register the external wasm query; only its completion callbacks update React state.
   React.useEffect(() => {
     let cancelled = false;
+    currentConfiguration.current = configuration;
     void reset(() => cancelled);
     return () => { cancelled = true; };
-  }, [reset]);
+  }, [configuration, reset]);
 
   const selectExample = React.useCallback((id: string) => {
     const ex = RSP_EXAMPLES.find((e) => e.id === id);
