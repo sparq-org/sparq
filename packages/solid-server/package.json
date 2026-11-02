@@ -1,7 +1,7 @@
 {
   "name": "@sparq-org/solid-server",
   "version": "0.1.6",
-  "description": "Local-development Solid/LDP server backed by sparq WebAssembly.",
+  "description": "Local-development Solid/LDP server with WebAssembly and optional native Solid/LWS modes.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.js",
@@ -75,5 +75,12 @@
     "wac",
     "rdf",
     "wasm"
-  ]
+  ],
+  "optionalDependencies": {
+    "@sparq-org/solid-server-native-linux-x64": "0.1.6",
+    "@sparq-org/solid-server-native-linux-arm64": "0.1.6",
+    "@sparq-org/solid-server-native-darwin-x64": "0.1.6",
+    "@sparq-org/solid-server-native-darwin-arm64": "0.1.6",
+    "@sparq-org/solid-server-native-win32-x64": "0.1.6"
+  }
 }

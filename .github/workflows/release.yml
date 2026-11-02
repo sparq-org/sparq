@@ -136,7 +136,44 @@ jobs:
     uses: ./.github/workflows/build-matrix.yml
     with:
       mode: archive
+      solid-server-native: true
       version: ${{ needs.setup.outputs.version }}
+
+  npm-native:
+    name: assemble native Solid/LWS npm packages
+    needs: [setup, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-*
+          path: native-archives
+          merge-multiple: true
+      - name: Assemble and pack platform packages
+        run: |
+          node packages/solid-server/native/assemble.mjs native-archives native-packages
+          mkdir native-tarballs
+          for package in native-packages/*; do
+            npm pack "$PWD/$package" --ignore-scripts --pack-destination native-tarballs
+          done
+      - name: Record native package digests (subjects for the isolated provenance builder)
+        run: (cd native-tarballs && sha256sum -- *.tgz) > subject-hashes-native.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: subject-hashes-native
+          path: subject-hashes-native.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-solid-server-native
+          path: native-tarballs/*.tgz
+          if-no-files-found: error
 
   # ---- 1a. ISOLATED trusted-builder SLSA provenance over the release archives ----
   # sq-toze.25 (GX-11 / SL-B3-b) — the SLSA **Build L3** lane for the release archives.
@@ -772,7 +809,7 @@ jobs:
   # downloads text, validates its shape, base64-encodes it. Signing happens one job further out.
   artifact-subjects:
     name: collect artifact digests
-    needs: [sbom, served-conformance, gui-bundle]
+    needs: [sbom, served-conformance, gui-bundle, npm-native]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -799,7 +836,7 @@ jobs:
           set -euo pipefail
           cd subject-hashes
           shopt -s nullglob
-          for required in subject-hashes-sbom.txt subject-hashes-conformance.txt; do
+          for required in subject-hashes-sbom.txt subject-hashes-conformance.txt subject-hashes-native.txt; do
             if [ ! -s "$required" ]; then
               echo "ERROR: '$required' missing or empty — a release artifact lane produced no subjects" >&2
               exit 1
@@ -811,7 +848,7 @@ jobs:
             # published either (digests are uploaded before bundles), so coverage still holds.
             echo "::warning::no subject-hashes-gui-* list — this release ships no GUI installers"
           fi
-          cat -- subject-hashes-sbom.txt subject-hashes-conformance.txt "${gui[@]}" > all.sha256
+          cat -- subject-hashes-sbom.txt subject-hashes-conformance.txt subject-hashes-native.txt "${gui[@]}" > all.sha256
           while read -r digest name; do
             if ! printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || [ -z "$name" ]; then
               echo "ERROR: malformed sha256sum record: '$digest  $name'" >&2

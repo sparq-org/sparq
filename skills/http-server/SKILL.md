@@ -1422,6 +1422,12 @@ surface, `research/sparq-solid-scope.md` §4); this is exactly that missing shel
 - `POST /authz/query` — body `{ "dataset", "session", "mode"?, "query", "view"? }` runs an
   **access-controlled** SPARQL query as the session and returns SPARQL-results JSON; a grant-less
   session sees ZERO rows (empty view), never the whole store.
+  The query uses the server's existing `query_timeout` (`--query-timeout` /
+  `SPARQ_QUERY_TIMEOUT`, default 30 seconds; zero disables it), starting before request
+  parsing, pool admission, view construction, query rewrite, session-view setup, and
+  dataset construction. The blocking task is awaited until that deadline plus the same
+  two-second grace as `/sparql`. Only the deadline is applied here. A timeout returns
+  the same `503` JSON error as `/sparql`, with no partial query results.
   - **ODRL lane** (`odrl-authz` cargo feature, default OFF; sq-lrtc3.1 + sq-3mu76): when the
     request dataset carries ODRL policy rules (`odrl:permission`/`odrl:prohibition`), the handler
     parses them from the UNION of the dataset's graphs and runs the `sparq-solid` bridge
@@ -1470,6 +1476,32 @@ misses** (hits use a short cache lookup and claim no slot), the `odrl-authz` lan
 build plus policy evaluation and index rebuild under **one claim**, and the
 `solid-authz-trust` lane's **whole pipeline** (trust parsing, effective-rule derivation,
 credential N-Quads parsing, admission, augmented store build and decision) under one claim.
+The stateless build and the stateful miss leader keep the decision, ACL discovery,
+`WAC-Allow` calculation, or query in the same blocking closure under that one permit.
+Other misses await the shared view without a permit. After publication, waiter decisions
+and `WAC-Allow` calculation run inline on the async worker, as cache hits do, without a
+build claim. A completed view is published while the leader retains its permit through
+request completion. Only a completed outcome from the shared read-lock lookup is a warm hit.
+ACL targets are indexed once per view; targets longer than
+`max_resource_iri_bytes` or deeper than `max_resource_path_depth` are omitted. Each
+borrowed ancestor-prefix lookup hashes at most the byte cap; prefixes deeper than the
+indexed targets are skipped. Resolution submits at most `max_resource_path_depth + 1`
+lookup keys in total, bounding the total lookup-key bytes by
+`(max_resource_path_depth + 1) * max_resource_iri_bytes`, including a zero depth cap.
+This counts keys submitted to the hash table. The ancestor walks scan the request resource linearly.
+Request names beyond the view's byte or depth cap are refused before discovery, with
+`AuthAllowance::ResourceIri` and the existing `503` resource-budget response
+(`could not materialise the authorization view`), without an ACL link.
+Cache-hit and published-view waiter queries use a blocking worker so the handler can
+bound their await; they claim no build slot. Every `/authz/query` request holds a permit
+from the existing `max_concurrent` worker semaphore until its blocking work exits,
+shared with streamed read workers. Exhausted worker admission returns the existing
+`429` concurrent-request-limit response. Handler drop, including deadline expiry,
+signals the engine's cooperative cancellation flag, even when `SPARQ_QUERY_TIMEOUT=0`.
+A panicked cached-query worker returns `500` with `query worker panicked`, as `/sparql` does.
+A saturated build pool continues serving completed-view decisions and `WAC-Allow`.
+A stateless or miss-leader query holds its build permit through query completion, so
+other builds can be shed during that interval.
 The permit remains in the blocking task until it finishes, even if the handler is cancelled.
 `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` is clamped to `1..=tokio::sync::Semaphore::MAX_PERMITS`
 (0 becomes 1), and caps the
@@ -1490,7 +1522,8 @@ second, with the count shed since the preceding warning.
   graph of the loaded store, so `"resource"` must be that graph's absolute IRI; relative paths are
   not resolved. The pinned current generation is forked, materialised once, and cached in
   `AppState` keyed by **serving lineage, generation and requested view kind** (WAC, ACP or
-  inferred). Concurrent misses for one key share one build; waiters claim no pool slots.
+  inferred). Concurrent misses for one key share one build; waiters claim no pool slots
+  while awaiting that build.
   Selecting a new generation or lineage drops superseded slots; restore clears the cache.
   The three kinds have independent slots. Warm hits use a shared cache read lock and
   an `Arc` clone; only misses take the write lock and re-check the key. Successful views

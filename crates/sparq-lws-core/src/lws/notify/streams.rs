@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::future::{poll_fn, Future};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -13,6 +14,8 @@ use base64::Engine;
 use subtle::ConstantTimeEq;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, MissedTickBehavior};
+
+use crate::notifications::ws::{authorization_unavailable, ReadAccess};
 
 use super::*;
 
@@ -95,6 +98,7 @@ enum End {
     Replaced,
     Slow,
     Revoked,
+    Undecided,
 }
 
 struct Sender {
@@ -318,11 +322,12 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         return problem(StatusCode::NOT_FOUND, None);
     }
     let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-    // Fixed-size digests are always compared in constant time. No token-to-id lookup is retained.
+    // Index only SHA-256 digests of random 256-bit capabilities, never their tokens. A digest
+    // identifies the record without scanning other subscriptions; confirm it in constant time.
     let sub = {
         let subs = state.notify.subs.read().expect("lock");
-        subs.values()
-            .find(|s| {
+        subs.by_capability(&hash)
+            .filter(|s| {
                 s.kind == kind
                     && s.capability_hash
                         .is_some_and(|h| bool::from(h.ct_eq(&hash)))
@@ -332,8 +337,10 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
     let Some(sub) = sub else {
         return problem(StatusCode::NOT_FOUND, None);
     };
-    if !state.notify.stands_now(&state.store, &sub.id).await {
-        return problem(StatusCode::NOT_FOUND, None);
+    match state.notify.standing_now(&state.store, &sub.id).await {
+        Some(true) => {}
+        Some(false) => return problem(StatusCode::NOT_FOUND, None),
+        None => return retry(),
     }
     if kind == SubscriptionKind::Sse
         && !req
@@ -378,15 +385,21 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         return problem(StatusCode::NOT_FOUND, None);
     };
     let gate = slot.gate.clone().lock_owned().await;
-    if !state.notify.stands_now(&state.store, &sub.id).await {
-        return problem(StatusCode::NOT_FOUND, None);
+    match state.notify.standing_now(&state.store, &sub.id).await {
+        Some(true) => {}
+        Some(false) => return problem(StatusCode::NOT_FOUND, None),
+        None => return retry(),
     }
-    if !matches!(
-        tokio::time::timeout(RECHECK, readable(state, &sub)).await,
-        Ok(true)
-    ) {
-        deactivate(state, &sub.id).await;
-        return problem(StatusCode::FORBIDDEN, None);
+    match tokio::time::timeout(RECHECK, readable(state, &sub))
+        .await
+        .unwrap_or(ReadAccess::Undecided)
+    {
+        ReadAccess::Allowed => {}
+        ReadAccess::Denied => {
+            deactivate(state, &sub.id).await;
+            return problem(StatusCode::FORBIDDEN, None);
+        }
+        ReadAccess::Undecided => return retry(),
     }
     let (data_tx, data) = mpsc::channel(QUEUE);
     // A full replay snapshot plus reset fits without depending on client consumption.
@@ -486,8 +499,8 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
         let weak = state.downgrade();
         upgrade
             .on_upgrade(move |socket| async move {
-                socket_loop(socket, connection).await;
-                // WS has no resumption: once its current connection ends the client re-subscribes.
+                let retry = socket_loop(socket, connection).await;
+                // Retry closes keep the capability, although WebSocket has no event replay.
                 if let Some(state) = weak.upgrade() {
                     let current = slot
                         .channel
@@ -496,7 +509,7 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
                         .sender
                         .as_ref()
                         .is_some_and(|s| Arc::ptr_eq(s, &identity));
-                    if current {
+                    if current && !retry {
                         deactivate(&state, &sub.id).await;
                     }
                 }
@@ -519,17 +532,99 @@ pub(in crate::lws) async fn connect<S: Store + 'static>(
     }
 }
 
-async fn readable<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription) -> bool {
-    for topic in &sub.topics {
-        let uri = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
-        let Some(_guard) = state.locks.read(uri).await else {
-            continue;
-        };
-        if state.allowed(Action::Read, uri, &sub.agent()).await {
-            return true;
+fn retry() -> Response {
+    let mut response = authorization_unavailable();
+    *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+    set(response.headers_mut(), header::RETRY_AFTER, "1");
+    response
+}
+
+/// Any readable topic keeps the subscription usable. Check access before waiting on a busy
+/// topic, using its prior state while hidden or changing. A confirmed denial is the same for
+/// hidden, absent and stored topics. Only a topic without a denial can be undecided while
+/// hidden; backend errors and a caller's timeout also leave the decision open. Metadata that
+/// was read but does not parse denies access. Check topics together so a pending topic cannot
+/// prevent another readable topic from deciding the result. A halt during the check is undecided.
+async fn readable<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription) -> ReadAccess {
+    let mut access = ReadAccess::Denied;
+    let mut topics: Vec<_> = sub
+        .topics
+        .iter()
+        .map(|topic| Some(Box::pin(topic_readable(state, sub, topic))))
+        .collect();
+    let access = poll_fn(|cx| {
+        let mut pending = false;
+        for topic in &mut topics {
+            let Some(check) = topic else { continue };
+            match check.as_mut().poll(cx) {
+                Poll::Ready(ReadAccess::Allowed) => return Poll::Ready(ReadAccess::Allowed),
+                Poll::Ready(decided) => {
+                    *topic = None;
+                    if decided == ReadAccess::Undecided {
+                        access = ReadAccess::Undecided;
+                    }
+                }
+                Poll::Pending => pending = true,
+            }
         }
+        if pending {
+            Poll::Pending
+        } else {
+            Poll::Ready(access)
+        }
+    })
+    .await;
+    if state.notify.halted() {
+        ReadAccess::Undecided
+    } else {
+        access
     }
-    false
+}
+
+async fn topic_readable<S: Store + 'static>(
+    state: &LwsState<S>,
+    sub: &Subscription,
+    topic: &str,
+) -> ReadAccess {
+    let uri = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
+    let _guard = match state.locks.try_read(uri) {
+        Some(guard) => Some(guard),
+        None => {
+            let decided = super::super::resources::stably(state, uri, || async {
+                let hidden = !state.visible(uri);
+                if hidden || state.locks.changing(uri) {
+                    match access::aside_read_first(state, Action::Read, uri, &sub.agent()).await {
+                        Ok(access::Aside::Denied) => ReadAccess::Denied,
+                        Ok(_) if hidden => ReadAccess::Undecided,
+                        Ok(_) => ReadAccess::Allowed,
+                        Err(crate::error::ServerError::InvalidMetadata(_)) => ReadAccess::Denied,
+                        Err(_) => ReadAccess::Undecided,
+                    }
+                } else {
+                    read_decision(state.check(Action::Read, uri, &sub.agent()).await)
+                }
+            })
+            .await
+            .unwrap_or(ReadAccess::Undecided);
+            match decided {
+                ReadAccess::Allowed => {}
+                other => return other,
+            }
+            state.locks.read(uri).await
+        }
+    };
+    let Some(_guard) = _guard else {
+        return ReadAccess::Undecided;
+    };
+    read_decision(state.check(Action::Read, uri, &sub.agent()).await)
+}
+
+fn read_decision(result: Result<bool, crate::error::ServerError>) -> ReadAccess {
+    match result {
+        Ok(true) => ReadAccess::Allowed,
+        Ok(false) | Err(crate::error::ServerError::InvalidMetadata(_)) => ReadAccess::Denied,
+        Err(_) => ReadAccess::Undecided,
+    }
 }
 
 async fn deactivate<S: Store + 'static>(state: &LwsState<S>, id: &str) {
@@ -569,12 +664,23 @@ fn monitor<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription, sender: 
                     if !sender.active() { return }
                     let Some(state) = weak.upgrade() else { sender.close(End::Gone); return };
                     let decision = async {
-                        state.notify.stands_now(&state.store, &sub.id).await && readable(&state, &sub).await
+                        match state.notify.standing_now(&state.store, &sub.id).await {
+                            Some(true) => readable(&state, &sub).await,
+                            Some(false) => ReadAccess::Denied,
+                            None => ReadAccess::Undecided,
+                        }
                     };
-                    if !matches!(tokio::time::timeout(RECHECK, decision).await, Ok(true)) {
-                        sender.close(End::Revoked);
-                        deactivate(&state, &sub.id).await;
-                        return;
+                    match tokio::time::timeout(RECHECK, decision).await.unwrap_or(ReadAccess::Undecided) {
+                        ReadAccess::Allowed => {}
+                        ReadAccess::Denied => {
+                            sender.close(End::Revoked);
+                            deactivate(&state, &sub.id).await;
+                            return;
+                        }
+                        ReadAccess::Undecided => {
+                            sender.close(End::Undecided);
+                            return;
+                        }
                     }
                 }
                 _ = heartbeats.tick() => {
@@ -586,31 +692,61 @@ fn monitor<S: Store + 'static>(state: &LwsState<S>, sub: &Subscription, sender: 
     });
 }
 
-async fn socket_loop(mut socket: WebSocket, mut connection: Connection) {
+trait StreamSocket: Send {
+    type Error: Send;
+
+    fn receive(
+        &mut self,
+    ) -> impl std::future::Future<Output = Option<Result<Message, Self::Error>>> + Send;
+    fn transmit(
+        &mut self,
+        message: Message,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
+}
+
+impl StreamSocket for WebSocket {
+    type Error = axum::Error;
+
+    async fn receive(&mut self) -> Option<Result<Message, Self::Error>> {
+        self.recv().await
+    }
+
+    async fn transmit(&mut self, message: Message) -> Result<(), Self::Error> {
+        self.send(message).await
+    }
+}
+
+/// An undecided check closes with 1013 and keeps the capability. A slow consumer also closes
+/// with 1013 but withdraws the WebSocket subscription; clients inspect its record before
+/// reconnecting. A 4403 close withdraws it; SSE marks that case as `revoked`.
+async fn socket_loop(mut socket: impl StreamSocket, mut connection: Connection) -> bool {
     loop {
         let message = tokio::select! {
             biased;
             end = connection.end.recv() => {
-                let code = match end { Some(End::Revoked) => 4403, Some(End::Slow) => 1013, _ => 1000 };
-                let _ = tokio::time::timeout(WRITE_TIMEOUT, socket.send(Message::Close(Some(CloseFrame { code, reason: "".into() })))).await;
-                return;
+                let retry = matches!(end, Some(End::Undecided));
+                let code = match end { Some(End::Revoked) => 4403, Some(End::Slow | End::Undecided) => 1013, _ => 1000 };
+                let _ = tokio::time::timeout(WRITE_TIMEOUT, socket.transmit(Message::Close(Some(CloseFrame { code, reason: "".into() })))).await;
+                return retry;
             }
             frame = connection.data.recv() => match frame {
                 Some(Frame::Notification { body, .. }) => Message::Text(body.to_string().into()),
                 Some(Frame::Heartbeat) => Message::Ping(Bytes::new()),
                 Some(Frame::Reset) => continue,
-                None => return,
+                None => return false,
             },
-            incoming = socket.recv() => match incoming {
-                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
+            incoming = socket.receive() => match incoming {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return false,
                 _ => continue,
             },
         };
         if !matches!(
-            tokio::time::timeout(WRITE_TIMEOUT, socket.send(message)).await,
+            tokio::time::timeout(WRITE_TIMEOUT, socket.transmit(message)).await,
             Ok(Ok(()))
         ) {
-            return;
+            // A retry end can arrive while a write is pending. Preserve it even when that
+            // write fails or reaches its deadline before the next receive of the end queue.
+            return matches!(connection.end.try_recv(), Ok(End::Undecided));
         }
     }
 }
