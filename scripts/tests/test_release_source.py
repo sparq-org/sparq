@@ -274,7 +274,7 @@ class TestWorkflowWiring(unittest.TestCase):
                     self.assertEqual(check["env"], {
                         "RELEASE_TAG": "${{ github.event.release.tag_name || github.ref_name }}",
                         "PUBLISH_NPM": "${{ github.event_name == 'release' || inputs.publish_npm }}",
-                        "PUBLISH_SOLID_SERVER": "${{ github.event_name == 'workflow_dispatch' && inputs.publish_solid_server }}",
+                        "PUBLISH_SOLID_SERVER": "${{ github.event_name == 'workflow_dispatch' && (inputs.publish_solid_server || inputs.publish_solid_server_native) }}",
                         "PUBLISH_EYEREASONER_COMPAT": "${{ github.event_name == 'workflow_dispatch' && inputs.publish_eyereasoner_compat }}",
                     })
 
@@ -290,6 +290,41 @@ class TestWorkflowWiring(unittest.TestCase):
 
                 for job_id in jobs:
                     self.assertTrue(guarded(job_id), f"{name}/{job_id} bypasses setup")
+
+    def test_native_publish_is_manual_and_verifies_release_artifacts(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/publish.yml").read_text())
+        trigger = workflow.get("on", workflow.get(True))
+        self.assertFalse(trigger["workflow_dispatch"]["inputs"]["publish_solid_server_native"]["default"])
+        job = workflow["jobs"]["npm-solid-server-native"]
+        self.assertEqual(job["if"], "github.event_name == 'workflow_dispatch' && inputs.publish_solid_server_native")
+        self.assertEqual(job["permissions"], {"contents": "read", "id-token": "write"})
+        steps = job["steps"]
+        download = next(step for step in steps if "gh release download" in step.get("run", ""))
+        self.assertIn("--pattern 'sparq-cli-*.tar.gz'", download["run"])
+        self.assertIn("--pattern 'sparq-cli-*.zip'", download["run"])
+        verify = next(i for i, step in enumerate(steps) if "gh attestation verify" in step.get("run", ""))
+        assemble = next(i for i, step in enumerate(steps) if "native/assemble.mjs" in step.get("run", ""))
+        publish = next(i for i, step in enumerate(steps) if "npm publish" in step.get("run", ""))
+        self.assertIn('--source-digest "$GITHUB_SHA"', steps[verify]["run"])
+        self.assertLess(verify, assemble)
+        self.assertLess(assemble, publish)
+        self.assertIn("--provenance --access public", steps[publish]["run"])
+        self.assertLess(steps[publish]["run"].index("check-release-source.py"),
+                        steps[publish]["run"].index("npm publish"))
+
+    def test_native_release_uses_the_shared_matrix_and_requires_all_platforms(self):
+        release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        package = release["jobs"]["package"]
+        self.assertEqual(package["uses"], "./.github/workflows/build-matrix.yml")
+        self.assertTrue(package["with"]["solid-server-native"])
+        matrix = yaml.safe_load((ROOT / ".github/workflows/build-matrix.yml").read_text())
+        build = matrix["jobs"]["build"]
+        self.assertIn("!(inputs.solid-server-native && matrix.tier == 'arm64-linux')", build["continue-on-error"])
+        native = next(step for step in build["steps"] if step.get("name") == "Build native Solid/LWS server")
+        for tier in ("x64-baseline", "arm64-linux", "x64-darwin", "arm64-darwin", "win-x64-baseline"):
+            self.assertIn(f'"{tier}"', native["if"])
+        self.assertIn("cargo auditable build --release --locked -p sparq-lws-core --features authn-saml", native["run"])
+        self.assertNotIn("RUSTFLAGS", native["run"])
 
     def test_source_regressions_run_in_ci(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/docs-quality.yml").read_text())
@@ -308,6 +343,7 @@ class TestWorkflowWiring(unittest.TestCase):
             (publish["npm-eyereasoner-compat"],
              lambda step: "npm publish" in step.get("run", "")),
             (publish["npm-solid-server"], lambda step: "npm publish" in step.get("run", "")),
+            (publish["npm-solid-server-native"], lambda step: "npm publish" in step.get("run", "")),
             (publish["crates"],
              lambda step: step.get("uses", "").startswith("actions/attest-build-provenance@")),
             (publish["pypi-publish"],

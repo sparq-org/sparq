@@ -16,6 +16,7 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
+use super::history::{TrashEntry, TrashFields, VersionEntry, VersionFields};
 use super::InMemoryStoreLimits;
 
 /// The authoritative metadata SPARQ holds for a resource (the index record, not the bytes).
@@ -82,6 +83,9 @@ pub enum DeleteOutcome {
 /// A SPARQ-client error (opaque — never leaks backend detail to a client).
 #[derive(Debug, thiserror::Error)]
 pub enum SparqError {
+    /// This backend does not implement the required atomic operation.
+    #[error("operation unsupported by this index backend")]
+    Unsupported,
     #[error("resource not indexed")]
     NotFound,
     /// The configured in-memory resource-count ceiling would be exceeded.
@@ -173,6 +177,7 @@ pub trait SparqClient: Send + Sync {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         let previous = match self.get_meta(iri).await {
             Ok(m) => Some(m),
             Err(SparqError::NotFound) => None,
@@ -180,6 +185,86 @@ pub trait SparqClient: Send + Sync {
         };
         self.put_meta(iri, meta).await?;
         Ok(previous)
+    }
+
+    /// Atomically retain the current pointer and replace live metadata, returning pruned blob keys.
+    /// Never emulated; keys are returned only after the transaction commits.
+    async fn replace_meta_retaining(
+        &self,
+        iri: &str,
+        new_meta: ResourceMeta,
+        version_member: &str,
+        fields: VersionFields,
+    ) -> Result<Vec<String>, SparqError> {
+        let _ = (iri, new_meta, version_member, fields);
+        Err(SparqError::Unsupported)
+    }
+    /// Atomically transfer a live record and detach containment, without reclaiming its bytes.
+    async fn move_to_trash(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        trash_member: &str,
+        fields: TrashFields,
+    ) -> Result<(), SparqError> {
+        let _ = (iri, parent, trash_member, fields);
+        Err(SparqError::Unsupported)
+    }
+    /// Atomically restore to an absent target below an existing parent.
+    async fn restore_from_trash(
+        &self,
+        trash_member: &str,
+        target: &str,
+        parent: &str,
+    ) -> Result<(), SparqError> {
+        let _ = (trash_member, target, parent);
+        Err(SparqError::Unsupported)
+    }
+    /// Typed retained records. The default backend supports none.
+    async fn versions(&self, original: Option<&str>) -> Result<Vec<VersionEntry>, SparqError> {
+        let _ = original;
+        Ok(Vec::new())
+    }
+    async fn trash_entries(&self) -> Result<Vec<TrashEntry>, SparqError> {
+        Ok(Vec::new())
+    }
+
+    /// Look up one private record without enumerating the service.
+    async fn version_entry(&self, member: &str) -> Result<Option<VersionEntry>, SparqError> {
+        Ok(self
+            .versions(None)
+            .await?
+            .into_iter()
+            .find(|v| v.member == member))
+    }
+    async fn trash_entry(&self, member: &str) -> Result<Option<TrashEntry>, SparqError> {
+        Ok(self
+            .trash_entries()
+            .await?
+            .into_iter()
+            .find(|t| t.member == member))
+    }
+
+    /// The permanent-delete operation with every retired history key returned by its transaction.
+    /// Unsupported backends retain their legacy delete only while history is disabled.
+    async fn delete_resource_retiring(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<super::history::RetiredResource, SparqError> {
+        let _ = (iri, parent);
+        Err(SparqError::Unsupported)
+    }
+
+    /// Select no more than `limit` expired records, oldest first.
+    async fn expired_history(
+        &self,
+        versions_before: SystemTime,
+        trash_before: SystemTime,
+        limit: usize,
+    ) -> Result<Vec<super::history::ExpiredEntry>, SparqError> {
+        let _ = (versions_before, trash_before, limit);
+        Err(SparqError::Unsupported)
     }
 
     /// Whether the resource is indexed (the authoritative existence check — never an S3 HEAD).
@@ -238,6 +323,7 @@ pub trait SparqClient: Send + Sync {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let key = match self.get_meta(iri).await {
             Ok(meta) => Some(meta.blob_key),
             Err(SparqError::NotFound) => None,
@@ -282,14 +368,29 @@ pub trait SparqClient: Send + Sync {
     /// versa), so no removal-based compensation is needed and a concurrent same-IRI creator cannot
     /// observe — or have removed — a half-built containment. (The live impl is one SPARQL UPDATE with
     /// a `container`-EXISTS guard that inserts both triples.) The blob bytes are written by the caller
-    /// BEFORE this call; if this fails (missing container), those bytes are orphaned and GC'd by the
-    /// reconciler — the same crash-consistency model as [`SparqClient::put_meta`].
+    /// BEFORE this call; the caller reclaims them if the commit fails with a settled outcome.
     async fn create_child(
         &self,
         container: &str,
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError>;
+
+    /// Commit a child record and containment together, reporting the replaced record when supported.
+    ///
+    /// The default calls `create_child` and returns `None` without reading the previous record.
+    /// Clients without an override, such as the remote HTTP client, do not report the replaced
+    /// record; any superseded blob key is left to the reconciler. The in-memory and embedded
+    /// clients return the replaced record in the same index operation.
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        self.create_child(container, child, meta).await?;
+        Ok(None)
+    }
 
     /// Remove `child` from `container`'s membership. Idempotent on an absent edge.
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError>;
@@ -318,6 +419,22 @@ pub trait SparqClient: Send + Sync {
     /// `Store::call_timeout`). The default is [`crate::store::STORE_CALL_TIMEOUT`].
     fn call_timeout(&self) -> std::time::Duration {
         crate::store::STORE_CALL_TIMEOUT
+    }
+
+    /// Reset a marker under the running service's lifecycle lease.
+    ///
+    /// # Errors
+    /// Refuses by default; clients supporting resets write the marker in one operation.
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        let _ = (iri, value, lease);
+        Err(SparqError::Backend(
+            "this index cannot reset markers".into(),
+        ))
     }
 
     /// Raise the time stored as a marker under `iri` to `value`, unless a later one is stored,
@@ -535,10 +652,52 @@ impl Meta {
 #[derive(Default)]
 struct Index {
     meta: Meta,
+    versions: HashMap<String, VersionEntry>,
+    trash: HashMap<String, TrashEntry>,
+    version_order: u64,
+    // Commit order breaks timestamp ties before random member IDs.
+    version_times: std::collections::BTreeSet<(SystemTime, u64, String)>,
+    trash_times: std::collections::BTreeSet<(SystemTime, String)>,
     /// container IRI → its direct children, kept in insertion order (a `Vec`, de-duplicated).
     children: HashMap<String, Vec<String>>,
     /// The blob keys named as being reclaimed ([`SparqClient::begin_reclaim`]).
     reclaiming: std::collections::BTreeSet<String>,
+}
+
+impl Index {
+    fn rekey_versions(&mut self, from: &str, to: &str) {
+        let prefix = super::history::version_dir(from);
+        let entries: Vec<_> = self
+            .versions
+            .values()
+            .filter(|v| v.member.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for mut entry in entries {
+            self.remove_history(&entry.member);
+            entry.member = super::history::rekey_member(&entry.member, to);
+            entry.original = to.to_string();
+            if let Some(at) = entry.meta.last_modified {
+                self.version_times
+                    .insert((at, entry.order, entry.member.clone()));
+            }
+            self.meta.insert(entry.member.clone(), entry.meta.clone());
+            self.versions.insert(entry.member.clone(), entry);
+        }
+    }
+    fn remove_history(&mut self, member: &str) {
+        if let Some(v) = self.versions.remove(member) {
+            if let Some(at) = v.meta.last_modified {
+                self.version_times
+                    .remove(&(at, v.order, member.to_string()));
+            }
+        }
+        if let Some(t) = self.trash.remove(member) {
+            self.trash_times
+                .remove(&(t.fields.trashed_at, member.to_string()));
+        }
+        self.meta.remove(member);
+    }
 }
 
 impl InMemorySparqClient {
@@ -606,6 +765,34 @@ pub(crate) fn max_rows(container: &str, max_bytes: usize) -> usize {
     max_bytes / (container.len() + 1)
 }
 
+impl InMemorySparqClient {
+    async fn delete_meta_unchecked(&self, iri: &str) -> Result<(), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        guard.remove_history(iri);
+        // Parity with the live SPARQ path (`DROP SILENT GRAPH <iri>`): a resource's named graph
+        // holds BOTH its index record AND — for a container — its `ldp:contains` edges, so dropping
+        // record drops the containment set too. Mirror that here by clearing `iri`'s own children
+        // entry, so a delete-then-recreate of a container at the same IRI cannot inherit a stale
+        // (empty-or-not) membership list. (The empty-container DELETE check has already run in the
+        // handler, so any surviving entry would be a leak, not a live member.)
+        guard.children.remove(iri);
+        Ok(())
+    }
+
+    async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        self.admit_resource(&guard, iri)?;
+        guard.meta.insert(iri.to_string(), meta);
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl SparqClient for InMemorySparqClient {
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
@@ -617,13 +804,18 @@ impl SparqClient for InMemorySparqClient {
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        self.admit_resource(&guard, iri)?;
-        guard.meta.insert(iri.to_string(), meta);
-        Ok(())
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        self.put_meta_unchecked(iri, meta).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        _: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
+            .await
     }
 
     async fn replace_meta(
@@ -631,6 +823,7 @@ impl SparqClient for InMemorySparqClient {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // One step under the single lock: the returned record is exactly the one this insert replaced.
         let mut guard = self
             .inner
@@ -638,6 +831,210 @@ impl SparqClient for InMemorySparqClient {
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         self.admit_resource(&guard, iri)?;
         Ok(guard.meta.insert(iri.to_string(), meta))
+    }
+
+    async fn replace_meta_retaining(
+        &self,
+        iri: &str,
+        new_meta: ResourceMeta,
+        member: &str,
+        fields: VersionFields,
+    ) -> Result<Vec<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), Some(member)])?;
+        let mut index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        self.admit_resource(&index, iri)?;
+        let previous = index.meta.get(iri).cloned();
+        let mut pruned_keys = Vec::new();
+        if let Some(meta) = previous {
+            let prefix = super::history::version_dir(iri);
+            let mut versions: Vec<_> = index
+                .versions
+                .values()
+                .filter(|v| v.member.starts_with(&prefix))
+                .cloned()
+                .collect();
+            super::history::sort_versions(&mut versions);
+            let mut drop_count = versions
+                .len()
+                .saturating_add(1)
+                .saturating_sub(fields.max_versions);
+            if self.admit_resource(&index, member).is_err() {
+                drop_count = drop_count.max(1);
+            }
+            // No retained slot exists to exchange at a full index: keep only the new live state.
+            if drop_count > versions.len() {
+                index.meta.insert(iri.to_string(), new_meta);
+                return Ok(vec![meta.blob_key]);
+            }
+            for old in versions.into_iter().take(drop_count) {
+                index.remove_history(&old.member);
+                pruned_keys.push(old.meta.blob_key);
+            }
+            index.version_order += 1;
+            let v = VersionEntry {
+                member: member.to_string(),
+                original: fields.original,
+                meta,
+                order: index.version_order,
+            };
+            if let Some(at) = v.meta.last_modified {
+                index
+                    .version_times
+                    .insert((at, v.order, member.to_string()));
+            }
+            index.meta.insert(member.to_string(), v.meta.clone());
+            index.versions.insert(member.to_string(), v);
+        }
+        index.meta.insert(iri.to_string(), new_meta);
+        Ok(pruned_keys)
+    }
+    async fn move_to_trash(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        member: &str,
+        fields: TrashFields,
+    ) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent, Some(member)])?;
+        let mut index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let meta = index.meta.remove(iri).ok_or(SparqError::NotFound)?;
+        index.rekey_versions(iri, member);
+        index.children.remove(iri);
+        if let Some(children) = parent.and_then(|p| index.children.get_mut(p)) {
+            children.retain(|c| c != iri);
+        }
+        index.meta.insert(member.to_string(), meta.clone());
+        index
+            .trash_times
+            .insert((fields.trashed_at, member.to_string()));
+        index.trash.insert(
+            member.to_string(),
+            TrashEntry {
+                member: member.to_string(),
+                meta,
+                fields,
+            },
+        );
+        Ok(())
+    }
+    async fn restore_from_trash(
+        &self,
+        member: &str,
+        target: &str,
+        parent: &str,
+    ) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(member), Some(target), Some(parent)])?;
+        let mut index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        if index.meta.contains_key(target) || !index.meta.contains_key(parent) {
+            return Err(SparqError::Backend(
+                "Conflict: restore target or parent".into(),
+            ));
+        }
+        let t = index.trash.remove(member).ok_or(SparqError::NotFound)?;
+        index.rekey_versions(member, target);
+        index
+            .trash_times
+            .remove(&(t.fields.trashed_at, member.to_string()));
+        index.meta.remove(member);
+        index.meta.insert(target.to_string(), t.meta);
+        let children = index.children.entry(parent.to_string()).or_default();
+        if !children.iter().any(|c| c == target) {
+            children.push(target.to_string());
+        }
+        Ok(())
+    }
+    async fn versions(&self, original: Option<&str>) -> Result<Vec<VersionEntry>, SparqError> {
+        let index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let prefix = original.map(super::history::version_dir);
+        let mut v: Vec<_> = index
+            .versions
+            .values()
+            .filter(|v| prefix.as_ref().is_none_or(|p| v.member.starts_with(p)))
+            .cloned()
+            .collect();
+        super::history::sort_versions(&mut v);
+        Ok(v)
+    }
+    async fn trash_entries(&self) -> Result<Vec<TrashEntry>, SparqError> {
+        let index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let mut v: Vec<_> = index.trash.values().cloned().collect();
+        v.sort_by_key(|t| t.fields.trashed_at);
+        Ok(v)
+    }
+
+    async fn version_entry(&self, member: &str) -> Result<Option<VersionEntry>, SparqError> {
+        let index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        Ok(index.versions.get(member).cloned())
+    }
+    async fn trash_entry(&self, member: &str) -> Result<Option<TrashEntry>, SparqError> {
+        let index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        Ok(index.trash.get(member).cloned())
+    }
+    async fn expired_history(
+        &self,
+        versions_before: SystemTime,
+        trash_before: SystemTime,
+        limit: usize,
+    ) -> Result<Vec<super::history::ExpiredEntry>, SparqError> {
+        let index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let mut candidates = Vec::new();
+        for (at, _, member) in index
+            .version_times
+            .iter()
+            .take_while(|(at, _, _)| *at <= versions_before)
+            .take(limit)
+        {
+            if let Some(v) = index.versions.get(member) {
+                candidates.push(super::history::ExpiredEntry {
+                    member: member.clone(),
+                    blob_key: v.meta.blob_key.clone(),
+                    at: *at,
+                    trash: false,
+                });
+            }
+        }
+        for (at, member) in index
+            .trash_times
+            .iter()
+            .take_while(|(at, _)| *at <= trash_before)
+            .take(limit)
+        {
+            if let Some(t) = index.trash.get(member) {
+                candidates.push(super::history::ExpiredEntry {
+                    member: member.clone(),
+                    blob_key: t.meta.blob_key.clone(),
+                    at: *at,
+                    trash: true,
+                });
+            }
+        }
+        candidates.sort_by_key(|c| c.at);
+        candidates.truncate(limit);
+        Ok(candidates)
     }
 
     fn raises_markers(&self) -> bool {
@@ -704,19 +1101,8 @@ impl SparqClient for InMemorySparqClient {
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        guard.meta.remove(iri);
-        // Parity with the live SPARQ path (`DROP SILENT GRAPH <iri>`): a resource's named graph holds
-        // BOTH its index record AND — if it is a container — its `ldp:contains` edges, so dropping the
-        // record drops the containment set too. Mirror that here by clearing `iri`'s own children
-        // entry, so a delete-then-recreate of a container at the same IRI cannot inherit a stale
-        // (empty-or-not) membership list. (The empty-container DELETE check has already run in the
-        // handler, so any surviving entry would be a leak, not a live member.)
-        guard.children.remove(iri);
-        Ok(())
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        self.delete_meta_unchecked(iri).await
     }
 
     async fn delete_resource(
@@ -724,18 +1110,46 @@ impl SparqClient for InMemorySparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        self.delete_resource_retiring(iri, parent)
+            .await
+            .map(|r| r.live_key)
+    }
+
+    async fn delete_resource_retiring(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<super::history::RetiredResource, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let mut guard = self
             .inner
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        let key = guard.meta.remove(iri).map(|meta| meta.blob_key);
+        let prefix = super::history::version_dir(iri);
+        let history: Vec<_> = guard
+            .versions
+            .values()
+            .filter(|v| v.member.starts_with(&prefix))
+            .map(|v| (v.member.clone(), v.meta.blob_key.clone()))
+            .collect();
+        let mut version_keys = Vec::new();
+        for (member, key) in history {
+            guard.remove_history(&member);
+            version_keys.push(key);
+        }
+        let key = guard.meta.get(iri).map(|meta| meta.blob_key.clone());
+        guard.remove_history(iri);
+        guard.meta.remove(iri);
         guard.children.remove(iri);
         if let Some(parent) = parent {
             if let Some(children) = guard.children.get_mut(parent) {
                 children.retain(|child| child != iri);
             }
         }
-        Ok(key)
+        Ok(super::history::RetiredResource {
+            live_key: key,
+            version_keys,
+        })
     }
 
     async fn delete_meta_if_empty(
@@ -743,6 +1157,7 @@ impl SparqClient for InMemorySparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let mut guard = self
             .inner
             .lock()
@@ -782,6 +1197,16 @@ impl SparqClient for InMemorySparqClient {
         child: &str,
         meta: ResourceMeta,
     ) -> Result<(), SparqError> {
+        self.replace_child(container, child, meta).await.map(|_| ())
+    }
+
+    async fn replace_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let mut guard = self
             .inner
             .lock()
@@ -793,15 +1218,16 @@ impl SparqClient for InMemorySparqClient {
             return Err(SparqError::NotFound);
         }
         self.admit_resource(&guard, child)?;
-        guard.meta.insert(child.to_string(), meta);
+        let previous = guard.meta.insert(child.to_string(), meta);
         let entry = guard.children.entry(container.to_string()).or_default();
         if !entry.iter().any(|c| c == child) {
             entry.push(child.to_string());
         }
-        Ok(())
+        Ok(previous)
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let mut guard = self
             .inner
             .lock()
@@ -876,6 +1302,13 @@ impl SparqClient for InMemorySparqClient {
                 .map(|c| (c.clone(), guard.meta.get(c).map(|m| m.etag.clone())))
                 .collect(),
         })
+    }
+}
+
+#[cfg(test)]
+impl InMemorySparqClient {
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, marker_meta(value)).await
     }
 }
 
@@ -1006,10 +1439,11 @@ mod tests {
         index.raise_marker(a, 1).await.unwrap();
         index.raise_marker(b, 1).await.unwrap();
         assert_eq!(pooled(&index), 1);
-        index.delete_meta(a).await.unwrap();
+        // Exercise internal accounting for a legacy marker removal; public mutators refuse it.
+        index.delete_meta_unchecked(a).await.unwrap();
         index.raise_marker(b, 2).await.unwrap();
         assert_eq!(pooled(&index), 1, "moved into the slot");
-        index.delete_meta(b).await.unwrap();
+        index.delete_meta_unchecked(b).await.unwrap();
         assert_eq!(pooled(&index), 0);
         // The pool's two places are both free again, and the slot takes a new marker apart.
         for at in ["x", "y"] {
