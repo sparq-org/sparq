@@ -6,6 +6,7 @@ import {
   deriveFormWith,
   FormsBridgeUnavailableError,
   formOptionsJson,
+  formWorkspaceSnapshot,
   type DeriveFormRequest,
   type FormHostAdapters,
 } from "./forms-bridge.js";
@@ -21,6 +22,35 @@ const REQUEST: DeriveFormRequest = {
   mode: "edit",
   format: "nquads",
 };
+
+test("Forms skips the workspace snapshot without a selection or before readiness", () => {
+  let calls = 0;
+  const snapshotStore = () => { calls += 1; return DATASET; };
+  assert.deepEqual(formWorkspaceSnapshot(true, null, snapshotStore), {
+    snapshot: null, error: null,
+  });
+  assert.equal(calls, 0);
+  assert.deepEqual(formWorkspaceSnapshot(false, FOCUS, snapshotStore), {
+    snapshot: null, error: null,
+  });
+  assert.equal(calls, 0);
+  assert.deepEqual(formWorkspaceSnapshot(true, FOCUS, snapshotStore), {
+    snapshot: DATASET, error: null,
+  });
+  assert.equal(calls, 1);
+});
+
+test("Forms captures snapshot errors for a selected focus", () => {
+  assert.deepEqual(formWorkspaceSnapshot(true, FOCUS, () => { throw new Error("store failed"); }), {
+    snapshot: null, error: "store failed",
+  });
+  assert.deepEqual(formWorkspaceSnapshot(true, FOCUS, () => { throw "store failed"; }), {
+    snapshot: null, error: "store failed",
+  });
+  assert.deepEqual(formWorkspaceSnapshot(true, FOCUS, () => null), {
+    snapshot: null, error: null,
+  });
+});
 
 function response(mode = "edit", shape = SHAPE.value): string {
   return JSON.stringify({

@@ -265,6 +265,8 @@ gated rather than reusable today (§3, §6).
 The operator is a **composition of already-landed pieces** — its novelty is the reduction, not
 new crypto. Every primitive below is on `main`.
 
+`HiddenValueJoin::join` was removed; see `HiddenValueJoin::batched_join`.
+
 | Step in the construction | Existing primitive reused | Location (on `main`) | Status |
 |---|---|---|---|
 | Disclosed-key chain (cheap regime) | `DisclosedKeyJoin` fold; the 3-holder chain test IS a 3-pattern unroll | [`join.rs:119`](../crates/sparq-mpc/src/join.rs); test `differential_three_holder_chain_equals_union` ([`join.rs:656`](../crates/sparq-mpc/src/join.rs)) | **BUILT** |
@@ -483,6 +485,7 @@ honest majority — the registry-refusal discipline).
 (611/623), `operator_descriptor` (222);
 `crates/sparq-mpc/src/join.rs` — `secure_equal` (411), `HiddenValueJoin` (382),
 `HiddenKeyedRows` (326), `DisclosedKeyJoin` + chain test (119 / ~656);
+`HiddenValueJoin::join` was removed; see `HiddenValueJoin::batched_join`.
 `crates/sparq-mpc/src/oblivious_join.rs` — `oblivious_set_output` (254), `Candidate` (151),
 `MatchBit::SecretShared` (170), `OutputSlot` (207), `ObliviousOutputCost` (183), sq-jnkm;
 `crates/sparq-mpc/src/oblivious.rs` — `shuffle` (629), `WaksmanNetwork` (201), sq-18lk;

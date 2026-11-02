@@ -59,27 +59,56 @@ fn allow_missing() -> bool {
 ///
 /// Private to this module so no test NAMES it by accident, but it is not a security
 /// boundary: the variable is in the job environment and the path is in the workflow,
-/// so test code that set out to forge an entry could. What the ledger is evidence
-/// for is the accident — a live test that no step runs, or that returns before the
-/// gate. `zk-toolchain.yml` sets it at JOB level and its final step verifies that
-/// every gate call site in the ZK test sources left an entry. A skip appends nothing
-/// and a panic appends nothing, so a lane that skipped past the gate cannot produce
-/// a complete ledger. The ledger records at GATE ENTRY: it proves the gate was
-/// entered with the tools present, NOT that the body ran to completion or asserted
-/// anything.
+/// so test code that set out to write its own lines could. What the ledger is
+/// evidence for is the accident — a live test that no step runs, that returns before
+/// the gate, or that returns after the gate without reaching its assertions.
+/// `zk-toolchain.yml` sets it at JOB level and its final step verifies that every
+/// gate call site in the ZK test sources left BOTH lines:
+///
+/// * `enter <file>:<line>` — written by the gate when it lets the body run;
+/// * `complete <file>:<line>` — written by [`complete`],
+///   which each live test calls as its LAST statement, after its assertions. The key
+///   is the GATE's call site, carried from the gate to the completion call, so the
+///   two lines of one test are matched by construction.
+///
+/// A skip appends nothing and a panic appends nothing. A test that panics in an
+/// assertion, or returns early, after the gate leaves an `enter` line with no
+/// `complete` line, which the verify step reports.
 const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";
 
-/// Evidence that [`require_toolchain`]/[`gate`] found every requested tool on
-/// `PATH` and let the live body run.
+/// Evidence that [`gate`] found every requested tool on `PATH` and let the live
+/// body run, and the obligation to say so once the body has asserted what it is for.
 ///
-/// Only [`gate`] mints one — the field is private to this module — and
+/// Only [`gate`] mints one — the fields are private to this module — and
 /// [`live_tool`] takes one, so a live tool cannot be spawned without having passed
-/// the gate first. `#[allow(dead_code)]` because each test binary declaring
-/// `mod support;` uses a subset of this module.
+/// the gate first. The token carries the gate's call site, which [`complete`]
+/// records; it is neither `Clone` nor `Copy`, so it is completed exactly once.
+///
+/// Dropping a token that was never passed to [`complete`] PANICS (unless the thread
+/// is already panicking, so a failed assertion still reports itself rather than
+/// aborting the process). A test that returns early after the gate therefore fails
+/// where it runs, and leaves no completion line in the ledger either.
+/// `#[allow(dead_code)]` because each test binary declaring `mod support;` uses a
+/// subset of this module.
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[must_use = "a live test must pass its gate token to `support::complete` after its assertions"]
 pub struct LiveToolchain {
-    _seal: (),
+    site: &'static std::panic::Location<'static>,
+    completed: bool,
+}
+
+impl Drop for LiveToolchain {
+    fn drop(&mut self) {
+        if !self.completed && !std::thread::panicking() {
+            panic!(
+                "the live test gated at {} ended without calling `support::complete` on \
+                 its token: either it returned before its assertions, or the completion \
+                 call is missing. Call `support::complete(token)` as the test's last \
+                 statement.",
+                ledger_key(self.site)
+            );
+        }
+    }
 }
 
 /// The ledger key for a gate call: the CALL SITE, `<file>:<line>`.
@@ -93,15 +122,19 @@ fn ledger_key(loc: &std::panic::Location<'static>) -> String {
     format!("{}:{}", loc.file().replace('\\', "/"), loc.line())
 }
 
-/// Append the CALL SITE's key to the ledger, if the lane asked for one.
+/// Append `<kind> <key>` for the CALL SITE `loc` to the ledger, if the lane asked
+/// for one.
 ///
 /// Opened with `O_APPEND` (`append(true)`) and written as ONE line in ONE
 /// `write_all`, so entries from tests running in parallel, or from a re-exec'd child
 /// process, cannot interleave. Best-effort by design: a write failure must not turn
-/// a passing live test red, and a missing entry is what the verifier reports.
-fn record(path: &std::path::Path, loc: &std::panic::Location<'static>) {
+/// a passing live test red, and a missing line is what the verifier reports.
+fn record(kind: &str, loc: &std::panic::Location<'static>) {
     use std::io::Write;
-    let line = format!("{}\n", ledger_key(loc));
+    let Some(path) = ledger_path() else {
+        return;
+    };
+    let line = format!("{} {}\n", kind, ledger_key(loc));
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -146,10 +179,11 @@ thread_local! {
 /// A [`std::process::Command`] for a live tool.
 ///
 /// Takes a [`LiveToolchain`], which only [`gate`] mints, so the gate cannot be
-/// bypassed. It ALSO re-checks `PATH` itself and panics when the tool is absent, so
+/// skipped. It ALSO re-checks `PATH` itself and panics when the tool is absent, so
 /// neither a stale token nor an `is_err()` test on the spawn result can be turned
 /// into a soft pass. `scripts/check-zk-toolchain-gate.py` lints the ZK test trees
-/// for every other acquisition path.
+/// for every other acquisition path, and requires the spawned value's exit status
+/// (or its expected failure diagnostic) to be asserted.
 #[allow(dead_code)]
 pub fn live_tool(_gate: &LiveToolchain, tool: &str) -> std::process::Command {
     assert!(
@@ -162,9 +196,9 @@ pub fn live_tool(_gate: &LiveToolchain, tool: &str) -> std::process::Command {
 }
 
 /// Gate a LIVE test body on `tools` all being on `PATH`, returning the token
-/// [`live_tool`] needs.
+/// [`live_tool`] needs and [`complete`] consumes.
 ///
-/// * all present -> `Some(token)`, and the CALL SITE's key (`<file>:<line>`) is
+/// * all present -> `Some(token)`, and `enter <file>:<line>` for the CALL SITE is
 ///   appended to the ledger.
 /// * absent, [`ALLOW_MISSING_ENV`] set -> prints a skip line naming `test`, the
 ///   missing tool(s) and the variable, then `None`; NOTHING is recorded.
@@ -181,12 +215,14 @@ pub fn live_tool(_gate: &LiveToolchain, tool: &str) -> std::process::Command {
 #[allow(dead_code)]
 #[track_caller]
 pub fn gate(test: &str, tools: &[&str]) -> Option<LiveToolchain> {
+    let site = std::panic::Location::caller();
     let missing: Vec<&str> = tools.iter().copied().filter(|t| !on_path(t)).collect();
     if missing.is_empty() {
-        if let Some(path) = ledger_path() {
-            record(&path, std::panic::Location::caller());
-        }
-        return Some(LiveToolchain { _seal: () });
+        record("enter", site);
+        return Some(LiveToolchain {
+            site,
+            completed: false,
+        });
     }
     let missing = missing.join(", ");
     if allow_missing() {
@@ -208,21 +244,16 @@ pub fn gate(test: &str, tools: &[&str]) -> Option<LiveToolchain> {
     );
 }
 
-/// [`gate`] as a boolean, for the call sites that do not spawn a tool themselves.
-/// `#[track_caller]` so the ledger key is the TEST's line, not this forwarding
-/// call's line inside the gate module.
+/// Close a live test: append `complete <file>:<line>` for the GATE's call site that
+/// `token` carries, and discharge the token's drop obligation.
+///
+/// Call it as the test's LAST statement, after every assertion, so the line exists
+/// only for a body that ran its checks to the end. It is deliberately NOT done in
+/// `Drop`: a test that returns early must leave no completion line.
 #[allow(dead_code)]
-#[track_caller]
-pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
-    gate(test, tools).is_some()
-}
-
-/// Emit an explicit completion marker after a live test's final assertion.
-/// The existing ledger records gate entry; this marker does not alter its keys.
-#[allow(dead_code)]
-#[track_caller]
-pub fn complete(_gate: LiveToolchain) {
-    skip_line(&format!("COMPLETE {}", ledger_key(std::panic::Location::caller())));
+pub fn complete(mut token: LiveToolchain) {
+    record("complete", token.site);
+    token.completed = true;
 }
 
 // --------------------------------------------------------------------------- #
@@ -231,13 +262,14 @@ pub fn complete(_gate: LiveToolchain) {
 // Compiled into every binary that declares `mod support;` and into the crate's lib
 // target (which includes this same file with `#[path]`), so they run wherever the
 // gate does. They are about the LEDGER KEY: that it is the caller's own line, that
-// `#[track_caller]` carries that line through the `require_toolchain` wrapper, and
+// the token carries that line to completion, that
+// the completion line carries the GATE's key, that an uncompleted token fails, and
 // that nothing is recorded on the skip or panic paths.
 // --------------------------------------------------------------------------- #
 
 #[cfg(test)]
 mod gate_identity_tests {
-    use super::{ALLOW_MISSING_ENV, TEST_LEDGER, gate, require_toolchain};
+    use super::{complete, gate, ALLOW_MISSING_ENV, TEST_LEDGER};
 
     /// A name no executable resolves to, so the gate takes a non-recording path.
     const ABSENT: &str = "sparq-zk-gate-identity-no-such-tool-xyzzy";
@@ -259,10 +291,10 @@ mod gate_identity_tests {
     /// Run `body` with this THREAD's ledger pointed at `path`.
     ///
     /// The override is thread-local, so these tests cannot overwrite each other's
-    /// path and cannot divert a live test running in parallel. The one test that
-    /// provokes a panic catches it INSIDE `body`, so `body()` returns normally and
-    /// the redirect is always cleared; a panic escaping `body` would leave it set
-    /// for this thread, which reaches nothing but these tests.
+    /// path and cannot divert a live test running in parallel. The tests that
+    /// provoke a panic catch it INSIDE `body`, so `body()` returns normally and the
+    /// redirect is always cleared; a panic escaping `body` would leave it set for
+    /// this thread, which reaches nothing but these tests.
     fn redirected<T>(path: &std::path::Path, body: impl FnOnce() -> T) -> T {
         TEST_LEDGER.with(|cell| *cell.borrow_mut() = Some(path.to_path_buf()));
         let out = body();
@@ -275,8 +307,9 @@ mod gate_identity_tests {
     }
 
     /// The recorded key is the line of the GATE CALL in the calling test, not a line
-    /// inside the gate module. This is what makes the key unforgeable: the `test`
-    /// argument is a message, and the inventory recomputes these keys from source.
+    /// inside the gate module, and the completion line carries that same key. This
+    /// is what makes the key unforgeable: the `test` argument is a message, and the
+    /// inventory recomputes these keys from source.
     #[test]
     fn the_recorded_key_is_the_call_site_of_the_gate_call() {
         let path = scratch("call_site");
@@ -284,27 +317,68 @@ mod gate_identity_tests {
         let token = redirected(&path, || {
             gate("a name that is deliberately not this test's name", &["cargo"])
         });
-        assert!(token.is_some(), "cargo must be on PATH for this test to mean anything");
-        let want = format!("{}:{}\n", file!().replace('\\', "/"), line);
-        assert!(
-            ledger(&path).contains(&want),
-            "the ledger must hold {want:?}, got {:?}",
-            ledger(&path)
+        let token = token.expect("cargo must be on PATH for this test to mean anything");
+        let key = format!("{}:{}", file!().replace('\\', "/"), line);
+        assert_eq!(
+            ledger(&path),
+            format!("enter {key}\n"),
+            "the gate records the entry line only"
+        );
+        redirected(&path, || complete(token));
+        assert_eq!(
+            ledger(&path),
+            format!("enter {key}\ncomplete {key}\n"),
+            "the completion line carries the GATE's call site"
         );
     }
 
-    /// `require_toolchain` forwards the caller's location, so a test that uses the
-    /// boolean wrapper is recorded at ITS line and not at the wrapper's.
+    /// A token dropped without `complete` PANICS and records no completion: the
+    /// shape of a test that returns early after its gate.
     #[test]
-    fn require_toolchain_records_its_own_caller_not_the_wrapper() {
-        let path = scratch("wrapper");
-        let line = line!() + 1;
-        let ok = redirected(&path, || require_toolchain("wrapper probe", &["cargo"]));
-        assert!(ok, "cargo must be on PATH for this test to mean anything");
-        let want = format!("{}:{}\n", file!().replace('\\', "/"), line);
+    fn an_uncompleted_token_panics_and_records_no_completion() {
+        let path = scratch("early_return");
+        let line = line!() + 3;
+        let out = redirected(&path, || {
+            std::panic::catch_unwind(|| {
+                let token = gate("early return probe", &["cargo"]);
+                drop(token);
+            })
+        });
+        let key = format!("{}:{}", file!().replace('\\', "/"), line);
+        let err = out.expect_err("dropping an uncompleted token must panic");
+        let msg = err.downcast_ref::<String>().cloned().unwrap_or_default();
         assert!(
-            ledger(&path).contains(&want),
-            "the ledger must hold {want:?}, got {:?}",
+            msg.contains(&key) && msg.contains("support::complete"),
+            "the panic must name the gate site and the missing call, got {msg:?}"
+        );
+        assert_eq!(
+            ledger(&path),
+            format!("enter {key}\n"),
+            "an early return leaves the entry line and NO completion line"
+        );
+    }
+
+    /// A token dropped while the thread is ALREADY panicking (a failed assertion
+    /// after the gate) does not panic a second time — that would abort the process
+    /// and hide the assertion's own message — and still records no completion.
+    #[test]
+    fn a_token_dropped_during_a_failed_assertion_reports_that_assertion() {
+        let path = scratch("assert_fail");
+        let out = redirected(&path, || {
+            std::panic::catch_unwind(|| {
+                let _token = gate("failed assertion probe", &["cargo"]);
+                panic!("the assertion under test failed");
+            })
+        });
+        let err = out.expect_err("the assertion's panic must propagate");
+        assert_eq!(
+            err.downcast_ref::<&str>().copied(),
+            Some("the assertion under test failed"),
+            "the assertion's own message must be the one reported"
+        );
+        assert!(
+            !ledger(&path).contains("complete "),
+            "a failed assertion must leave no completion line, got {:?}",
             ledger(&path)
         );
     }
@@ -316,11 +390,11 @@ mod gate_identity_tests {
         let skipped = scratch("skip");
         let declared = std::env::var_os(ALLOW_MISSING_ENV).is_some();
         let out = redirected(&skipped, || {
-            std::panic::catch_unwind(|| require_toolchain("absent probe", &[ABSENT]))
+            std::panic::catch_unwind(|| gate("absent probe", &[ABSENT]))
         });
         match out {
             Ok(allowed) => assert!(
-                !allowed && declared,
+                allowed.is_none() && declared,
                 "an absent tool must not pass the gate"
             ),
             Err(_) => assert!(!declared, "the panic path is the undeclared one"),

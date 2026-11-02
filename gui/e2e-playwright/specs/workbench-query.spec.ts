@@ -109,4 +109,26 @@ test.describe("workbench-query", () => {
     const pager = page.locator("[data-result-pager]");
     await expect(pager).toBeVisible();
   });
+
+  test("new results and page-size changes reset pagination", async ({ page }) => {
+    const values = Array.from({ length: 20 }, (_, index) => index).join(" ");
+    await setEditorValue(page,
+      `SELECT (?a * 20 + ?b AS ?n) WHERE { VALUES ?a { ${values} } VALUES ?b { ${values} } } ORDER BY ?n`,
+    );
+    const run = page.getByRole("button", { name: "Run query" });
+    await run.click();
+    const pager = page.locator("[data-result-pager]");
+    const pageNumber = pager.locator("[data-pager-page]");
+    await expect(pageNumber).toHaveText("Page 1 / 4");
+    await pager.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(pageNumber).toHaveText("Page 2 / 4");
+
+    await pager.getByRole("combobox", { name: "Rows per page" }).selectOption("50");
+    await expect(pageNumber).toHaveText("Page 1 / 8");
+    await pager.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(pageNumber).toHaveText("Page 2 / 8");
+    await run.click();
+    await expect(pageNumber).toHaveText("Page 1 / 8");
+    await expect(page.locator('[data-result-view="table"] tbody tr').first()).toHaveText('"0"^^xsd:integer');
+  });
 });

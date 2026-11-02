@@ -620,8 +620,28 @@ fn run_job() -> Fallible<()> {
         return Err("job byte capacity".into());
     }
     let job: Value = serde_json::from_slice(&data)?;
-    fs::create_dir(&output)?;
-    let mut result = run(&job, &output)?;
+    // Native jobs use no external tools. Other tiers also check the pinned
+    // toolchain versions, so they require both binaries even for witness-only work.
+    let tools: &[&str] = if job["tier"] == "native" { &[] } else { &["nargo", "bb"] };
+    // The ledger is a set of completed sites: any completed corpus job satisfies
+    // this one run_job key. bench/zk-bindings/run.py grades every job and a campaign
+    // failure still fails its step, even if another job completed this site.
+    let Some(live) = crate::support::gate("result::proof_bindings::run_job", tools)
+    else {
+        return Err("the corpus adapter requires its tier's tools on PATH".into());
+    };
+    adapt_job(&job, &output)
+        .unwrap_or_else(|error| panic!("the corpus job did not complete: {error}"));
+    // Grading lives in bench/zk-bindings/run.py.
+    crate::support::complete(live);
+    Ok(())
+}
+
+/// The body of [`run_job`] after its gate: run one corpus job and write its
+/// `outcome.json` (with the artifact inventory) into `output`.
+fn adapt_job(job: &Value, output: &Path) -> Fallible<Value> {
+    fs::create_dir(output)?;
+    let mut result = run(job, output)?;
     for name in ["malicious-input.toml", "constraint-rejection.txt"] {
         let path = output.join(name);
         if path.is_file() {
@@ -638,7 +658,7 @@ fn run_job() -> Fallible<()> {
         .write(true)
         .open(output.join("outcome.json"))?;
     file.write_all(&serde_json::to_vec_pretty(&result)?)?;
-    Ok(())
+    Ok(result)
 }
 
 // beadzkp-15.1.1: native adapter tests. They execute no Noir and

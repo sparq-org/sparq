@@ -104,3 +104,14 @@ fn main() {
 
     println!("\nok");
 }
+
+#[cfg(test)]
+mod fixture_tests {
+    use super::*;
+    #[test]
+    fn generated_benchmark_policy_keeps_all_rules() {
+        let policy = parse_policy_str(&synth_policy(200), "turtle").unwrap();
+        assert_eq!(policy.permissions.len(), 200);
+        assert_eq!(policy.prohibitions.len(), 1);
+    }
+}

@@ -389,13 +389,6 @@ function QueryMonitor({
   tokenTransitRisk: boolean;
 }) {
   const running = React.useSyncExternalStore(subscribeRunning, getRunning, getRunning);
-  // Re-render each second while anything is in flight, so the elapsed readout is live.
-  const [, forceTick] = React.useReducer((n: number) => n + 1, 0);
-  React.useEffect(() => {
-    if (running.length === 0) return;
-    const t = setInterval(forceTick, 1000);
-    return () => clearInterval(t);
-  }, [running.length]);
 
   const [monitoredEndpoint, setMonitoredEndpoint] = React.useState<{
     url: string;
@@ -403,11 +396,12 @@ function QueryMonitor({
   } | null>(null);
   const canMonitor = endpointUrl !== "" && !tokenTransitRisk;
 
-  React.useEffect(() => {
-    setMonitoredEndpoint((current) =>
-      current && (current.url !== endpointUrl || current.token !== endpointToken) ? null : current,
-    );
-  }, [endpointUrl, endpointToken]);
+  if (
+    monitoredEndpoint &&
+    (monitoredEndpoint.url !== endpointUrl || monitoredEndpoint.token !== endpointToken)
+  ) {
+    setMonitoredEndpoint(null);
+  }
 
   return (
     <div className="px-3 py-2" data-plan-monitor>
@@ -515,7 +509,6 @@ function EndpointQueryMonitor({
     const controller = new AbortController();
     controllerRef.current = controller;
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    setState({ kind: "loading" });
     const poll = async () => {
       const sequence = ++requestSequence.current;
       try {
@@ -673,7 +666,11 @@ function EndpointMonitorRow({
 }
 
 function MonitorRow({ q }: { q: RunningQuery }) {
-  const elapsedMs = typeof performance !== "undefined" ? performance.now() - q.startedAt : 0;
+  const [elapsedMs, setElapsedMs] = React.useState(() => performance.now() - q.startedAt);
+  React.useEffect(() => {
+    const timer = setInterval(() => setElapsedMs(performance.now() - q.startedAt), 1000);
+    return () => clearInterval(timer);
+  }, [q.startedAt]);
   // Only an endpoint request has a genuine mid-flight cancellation point (aborting the
   // fetch); an in-tab/native explain is one engine call — Kill would be a lie there.
   const killable = q.target === "endpoint";

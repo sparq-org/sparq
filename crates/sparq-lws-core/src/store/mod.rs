@@ -7,11 +7,14 @@
 //! whole stack is testable without a running SPARQ or S3.
 
 pub mod blob;
+#[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
+pub mod blob_fs;
 // The blob-body LRU cache (read-4 — backend-read-path.md §3.4): `(blob_key, etag)`-keyed,
 // byte-budgeted, sat in front of BlobStore::get inside CompositeStore so a hot unchanged
 // resource's repeat read pays zero blob round-trips. Immutable-by-construction (unique-per-write
 // blob keys), so a hit can never be stale — see the module docs.
 pub mod body_cache;
+pub mod history;
 // Deterministic backend round-trip counters at the SparqClient/BlobStore seams (read-1 of the
 // read-path perf plan — `research/lws-design-records.md` §7). Decorators used by the pinned counter
 // tests + the bench harness; zero-cost when not wired in.
@@ -46,6 +49,8 @@ use oxrdf::NamedNode;
 #[derive(Debug, Default)]
 pub struct Lifecycle {
     held: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    released: tokio::sync::Notify,
 }
 
 impl Lifecycle {
@@ -58,6 +63,24 @@ impl Lifecycle {
             .map(|_| LifecycleGuard {
                 lease: self.clone(),
             })
+    }
+
+    /// Wait until the stopped service has released its lease.
+    #[cfg(test)]
+    pub(crate) async fn wait_for_release(self: &std::sync::Arc<Self>, caller: &str) {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let released = self.released.notified();
+                tokio::pin!(released);
+                released.as_mut().enable();
+                if self.acquire().is_some() {
+                    return;
+                }
+                released.await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{caller}: timed out waiting for the lifecycle lease release"));
     }
 }
 
@@ -73,6 +96,8 @@ impl Drop for LifecycleGuard {
         self.lease
             .held
             .store(false, std::sync::atomic::Ordering::Release);
+        #[cfg(test)]
+        self.lease.released.notify_waiters();
     }
 }
 
@@ -198,6 +223,55 @@ impl ValidatedChildIri {
 pub trait Store: Send + Sync {
     /// Read a resource by IRI: its authoritative metadata (SPARQ) + its bytes (blob store).
     async fn read(&self, iri: &str) -> ServerResult<Resource>;
+
+    /// Enabled version/trash policy for the protocol adapters.
+    fn history_config(&self) -> history::HistoryConfig {
+        Default::default()
+    }
+    async fn versions(&self, original: Option<&str>) -> ServerResult<Vec<history::VersionEntry>> {
+        let _ = original;
+        Ok(Vec::new())
+    }
+    async fn trash_entries(&self) -> ServerResult<Vec<history::TrashEntry>> {
+        Ok(Vec::new())
+    }
+    async fn version_entry(&self, member: &str) -> ServerResult<Option<history::VersionEntry>> {
+        Ok(self
+            .versions(None)
+            .await?
+            .into_iter()
+            .find(|v| v.member == member))
+    }
+    async fn trash_entry(&self, member: &str) -> ServerResult<Option<history::TrashEntry>> {
+        Ok(self
+            .trash_entries()
+            .await?
+            .into_iter()
+            .find(|t| t.member == member))
+    }
+    /// Atomically move a data resource to trash and return its private member IRI.
+    async fn trash_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        fields: history::TrashFields,
+    ) -> ServerResult<String> {
+        let _ = (iri, parent, fields);
+        Err(ServerError::Storage("atomic trash unsupported".into()))
+    }
+    async fn restore_trash(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        let _ = (member, target, parent);
+        Err(ServerError::Storage("atomic restore unsupported".into()))
+    }
+    async fn purge_trash(&self, member: &str) -> ServerResult<()> {
+        let _ = member;
+        Err(ServerError::Storage("trash unsupported".into()))
+    }
+    /// Remove at most `limit` expired records, oldest first. Live records are never swept.
+    async fn sweep_history(&self, now: std::time::SystemTime, limit: usize) -> ServerResult<usize> {
+        let _ = (now, limit);
+        Ok(0)
+    }
 
     /// Fetch just the authoritative metadata for a resource IRI (no bytes), or `None` if absent.
     ///
@@ -400,12 +474,11 @@ pub trait Store: Send + Sync {
         STORE_CALL_TIMEOUT
     }
 
-    /// The lease every handle to this backend shares, when it keeps one: a service built over
-    /// it takes the lease for as long as it runs. The default is none (each service built over
-    /// such a store takes a lease of its own).
-    fn lifecycle(&self) -> Option<std::sync::Arc<Lifecycle>> {
-        None
-    }
+    /// The lease shared by every handle to this backend.
+    ///
+    /// Implementations retain one lease; wrappers forward their inner store's lease and
+    /// clones return the same `Arc`. A service acquires it before any backend work.
+    fn lifecycle(&self) -> std::sync::Arc<Lifecycle>;
 
     /// Raise the time stored under `iri` to `value`, unless a later one is stored, in one
     /// indivisible step under the index's own write lock, and return the time stored once it is
@@ -519,17 +592,32 @@ pub const READ_RACE_RETRIES: usize = 3;
 /// The default [`Store`]: SPARQ (authoritative metadata) + a blob store (backup bytes), with a
 /// [`BodyCache`] (read-4 — `backend-read-path.md` §3.4) in front of the blob byte-fetch.
 pub struct CompositeStore<S: SparqClient, B: BlobStore> {
-    sparq: S,
-    blob: B,
+    sparq: std::sync::Arc<S>,
+    blob: std::sync::Arc<B>,
+    lifecycle: std::sync::Arc<Lifecycle>,
     /// The `(blob_key, etag)`-keyed blob-body LRU (read-4). Every lookup is keyed with THIS
     /// request's authoritative index metadata, so a hit is provably the bytes that metadata
     /// committed with — never stale, never an authz surface (see [`body_cache`]'s module docs).
-    body_cache: BodyCache,
+    body_cache: std::sync::Arc<BodyCache>,
+    history: history::HistoryConfig,
     /// The holds ([`Store::hold`]) taken through this instance and not yet released, counted by
     /// the blob key they hold: bytes this names are held, without asking the index. Bytes it does
     /// not name may still be held, through another instance over the same backends, so whether
     /// they are is then asked of the index (see [`CompositeStore::reclaim_blob`]).
-    holding: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    holding: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+impl<S: SparqClient, B: BlobStore> Clone for CompositeStore<S, B> {
+    fn clone(&self) -> Self {
+        Self {
+            sparq: self.sparq.clone(),
+            blob: self.blob.clone(),
+            lifecycle: self.lifecycle.clone(),
+            body_cache: self.body_cache.clone(),
+            history: self.history.clone(),
+            holding: self.holding.clone(),
+        }
+    }
 }
 
 /// The container every hold's record is a member of ([`Store::hold`]): outside every storage (a
@@ -571,11 +659,22 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// `SOLID_SERVER_BODY_CACHE_MAX_ENTRY_BYTES` boot wiring, or a disabled sentinel in tests).
     pub fn with_body_cache(sparq: S, blob: B, body_cache: BodyCache) -> Self {
         Self {
-            sparq,
-            blob,
-            body_cache,
+            sparq: std::sync::Arc::new(sparq),
+            blob: std::sync::Arc::new(blob),
+            body_cache: std::sync::Arc::new(body_cache),
+            lifecycle: Default::default(),
+            history: Default::default(),
             holding: Default::default(),
         }
+    }
+
+    /// Configure retention before exposing the store to either protocol adapter.
+    pub fn with_history(mut self, config: history::HistoryConfig) -> ServerResult<Self> {
+        if config.enabled() {
+            self.sparq.exclusive().map_err(map_sparq)?;
+        }
+        self.history = config;
+        Ok(self)
     }
 
     /// Fetch a resource's bytes through its AUTHORITATIVE metadata: body-cache first (keyed by this
@@ -662,6 +761,15 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
                 let _ = self.sparq.end_reclaim(key).await;
             }
             Err(_) => {}
+        }
+    }
+
+    // A settled failure cannot publish another reference later. The index's reclaim
+    // guard preserves a record that committed before an error reply, and any holds.
+    // An unsettled commit may still publish the key, so its bytes must remain.
+    async fn reclaim_failed_write(&self, key: &str, error: &SparqError) {
+        if !matches!(error, SparqError::Unsettled { .. }) {
+            self.reclaim_blob(key).await;
         }
     }
 
@@ -753,9 +861,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// forcing the elaborate `generation`-CAS + grace-window + snapshot-threading machinery in
     /// [`super::blob`] and [`super::reconcile`] to exist purely to make a reused key safe.
     ///
-    /// This mints a NEW key on EVERY write: an IRI-derived prefix (kept for operator-debuggability — a
-    /// key still traces back to its resource) plus a hyphen-joined **128-bit cryptographically-random
-    /// suffix** from the OS RNG. So:
+    /// This mints a NEW opaque key on EVERY write: `b1-` followed by a
+    /// **128-bit cryptographically-random suffix** from the OS RNG. No resource IRI is
+    /// encoded in the key. Service-pool keys retain their `$pool$` mark. So:
     ///
     /// - **Two concurrent writes to the same IRI get DIFFERENT keys** — they write to disjoint blob
     ///   objects and can never collide or interleave. The "latest committed" winner is decided solely by
@@ -773,7 +881,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; the IRI prefix is cosmetic (debuggability) and carries no uniqueness requirement.
+    /// negligible; no IRI-derived component is needed.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -786,9 +894,6 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
     fn mint_blob_key(iri: &str) -> ServerResult<String> {
-        // The IRI-derived prefix is for human/operator traceability only; uniqueness comes entirely from
-        // the random suffix, so the prefix need not be collision-free.
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -808,9 +913,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
         if limits::in_service_pool(iri) {
-            return Ok(format!("{}{prefix}-{hex}", limits::POOLED_BLOB_KEY_MARK));
+            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
         }
-        Ok(format!("{prefix}-{hex}"))
+        Ok(format!("b1-{hex}"))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -832,19 +937,18 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     }
 }
 
+#[cfg(test)]
+impl
+    CompositeStore<CountingSparqClient<InMemorySparqClient>, CountingBlobStore<InMemoryBlobStore>>
+{
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
+        self.sparq.plant_marker(iri, value).await.expect("planted");
+    }
+}
+
 // The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
-    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
-    /// plants to stand for an earlier, or a damaged, one.
-    #[cfg(test)]
-    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
-        self.sparq
-            .put_meta(iri, sparq::marker_meta(value))
-            .await
-            .expect("planted");
-    }
-
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
     pub fn in_memory_with_limits(limits: InMemoryStoreLimits) -> Self {
         Self::new(
@@ -863,6 +967,7 @@ impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
         let indexed = self.sparq.usage().map_err(|error| match error {
             SparqError::NotFound => ServerError::Storage("index usage lookup failed".into()),
             SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+            SparqError::Unsupported => ServerError::Storage("atomic operation unsupported".into()),
             SparqError::Backend(message) => ServerError::Storage(message),
             SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
         })?;
@@ -895,6 +1000,82 @@ fn refuse_marker(iris: &[Option<&str>]) -> ServerResult<()> {
 
 #[async_trait]
 impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
+    fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
+        self.lifecycle.clone()
+    }
+    fn history_config(&self) -> history::HistoryConfig {
+        self.history.clone()
+    }
+    async fn versions(&self, original: Option<&str>) -> ServerResult<Vec<history::VersionEntry>> {
+        self.sparq.versions(original).await.map_err(map_sparq)
+    }
+    async fn trash_entries(&self) -> ServerResult<Vec<history::TrashEntry>> {
+        self.sparq.trash_entries().await.map_err(map_sparq)
+    }
+    async fn version_entry(&self, member: &str) -> ServerResult<Option<history::VersionEntry>> {
+        self.sparq.version_entry(member).await.map_err(map_sparq)
+    }
+    async fn trash_entry(&self, member: &str) -> ServerResult<Option<history::TrashEntry>> {
+        self.sparq.trash_entry(member).await.map_err(map_sparq)
+    }
+    async fn trash_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        fields: history::TrashFields,
+    ) -> ServerResult<String> {
+        if !self.history.trash || !history::data_resource(iri) {
+            return Err(ServerError::Forbidden);
+        }
+        let member = history::mint(history::TRASH).map_err(map_sparq)?;
+        self.sparq
+            .move_to_trash(iri, parent, &member, fields)
+            .await
+            .map_err(map_sparq)?;
+        Ok(member)
+    }
+    async fn restore_trash(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        self.sparq
+            .restore_from_trash(member, target, parent)
+            .await
+            .map_err(|e| match e {
+                SparqError::Backend(s) if s.starts_with("Conflict:") => ServerError::Conflict(
+                    "restore requires an absent target and an existing parent".into(),
+                ),
+                e => map_sparq(e),
+            })
+    }
+    async fn purge_trash(&self, member: &str) -> ServerResult<()> {
+        self.delete(member, None).await
+    }
+    async fn sweep_history(&self, now: std::time::SystemTime, limit: usize) -> ServerResult<usize> {
+        let versions_before = now
+            .checked_sub(self.history.versions_retention)
+            .unwrap_or(std::time::UNIX_EPOCH);
+        let trash_before = now
+            .checked_sub(self.history.trash_retention)
+            .unwrap_or(std::time::UNIX_EPOCH);
+        let expired = self
+            .sparq
+            .expired_history(versions_before, trash_before, limit)
+            .await
+            .map_err(map_sparq)?;
+        let mut removed = 0;
+        for entry in expired {
+            if entry.trash {
+                self.purge_trash(&entry.member).await?;
+            } else {
+                self.sparq
+                    .delete_meta(&entry.member)
+                    .await
+                    .map_err(map_sparq)?;
+                self.reclaim_blob(&entry.blob_key).await;
+            }
+            removed += 1;
+        }
+        Ok(removed)
+    }
+
     async fn read(&self, iri: &str) -> ServerResult<Resource> {
         // Authoritative existence + metadata FIRST (SPARQ), then fetch the bytes it points at —
         // through the read-4 body cache, keyed by THIS lookup's authoritative `(blob_key, etag)`
@@ -910,6 +1091,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             Ok(m) => Ok(Some(m)),
             Err(SparqError::NotFound) => Ok(None),
             Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
+            Err(SparqError::Unsupported) => Err(map_sparq(SparqError::Unsupported)),
             Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
             Err(SparqError::Unsettled { detail, fence }) => {
                 Err(ServerError::Unsettled { detail, fence })
@@ -958,14 +1140,39 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // bumps it, so a later conditional GET correctly re-serves the changed representation.
             last_modified: Some(crate::clock::now()),
         };
-        let previous = self
-            .sparq
-            .replace_meta(iri, meta.clone())
-            .await
-            .map_err(|e| match e {
-                SparqError::QuotaExceeded => ServerError::InsufficientStorage,
-                other => ServerError::Storage(format!("{other}")),
-            })?;
+        if self.history.versions && history::data_resource(iri) {
+            let member = history::mint(&history::version_dir(iri)).map_err(map_sparq)?;
+            let pruned_keys = match self
+                .sparq
+                .replace_meta_retaining(
+                    iri,
+                    meta.clone(),
+                    &member,
+                    history::VersionFields {
+                        original: iri.to_string(),
+                        max_versions: self.history.versions_max,
+                    },
+                )
+                .await
+            {
+                Ok(pruned_keys) => pruned_keys,
+                Err(e) => {
+                    self.reclaim_failed_write(&meta.blob_key, &e).await;
+                    return Err(map_sparq(e));
+                }
+            };
+            for key in pruned_keys {
+                self.reclaim_blob(&key).await;
+            }
+            return Ok(meta);
+        }
+        let previous = match self.sparq.replace_meta(iri, meta.clone()).await {
+            Ok(previous) => previous,
+            Err(e) => {
+                self.reclaim_failed_write(&meta.blob_key, &e).await;
+                return Err(map_sparq(e));
+            }
+        };
         // The index now points at `blob_key`; the superseded body is unreferenced. Reclaim it so
         // sustained rewrites cannot fill the blob store with dead versions.
         if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
@@ -982,21 +1189,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
         refuse_marker(&[Some(container), Some(child)])?;
-        // Write the bytes FIRST (content-addressed by key; idempotent), then commit the child's
-        // metadata AND its containment edge in ONE atomic index operation (`create_child`). Because
-        // the metadata + the edge commit together, there is no window in which the edge exists
-        // without backing metadata — so the POST path needs NO removal-based compensation and a
-        // concurrent same-IRI creator can never observe or tear down a half-built containment. A
-        // missing container ⇒ 404; the bytes written above are then orphaned and GC'd by the
-        // reconciler — the same crash-consistency model `write` documents. (The handler only takes
-        // this path for an absent child; a concurrent same-IRI create that wins the race overwrites
-        // this record, and the key it replaced is left for the reconciler, as `create_child` does not
-        // report the record it replaced.)
-        //
-        // The child's blob key is minted UNIQUE PER WRITE (`mint_blob_key`), so a concurrent same-IRI
-        // create writes a disjoint object and cannot collide with this one on a shared key. Minting FAILS
-        // CLOSED on an unavailable OS RNG (the create errors rather than minting a weak, possibly-colliding
-        // key), so the no-shared-key invariant holds even then.
+        // Publish bytes before committing the child record and containment together. The
+        // native indexes report the replaced record so its bytes can be reclaimed; remote
+        // clients leave any superseded key to the reconciler.
         let blob_key = Self::mint_blob_key(child)?;
         let etag = Self::etag_for(content_type, &body);
         self.blob.put(&blob_key, body).await.map_err(|e| match e {
@@ -1013,16 +1208,18 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         match self
             .sparq
-            .create_child(container, child, meta.clone())
+            .replace_child(container, child, meta.clone())
             .await
         {
-            Ok(()) => Ok(meta),
-            Err(SparqError::NotFound) => Err(ServerError::NotFound),
-            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
-            // Its bytes stay: the record may still commit pointing at them.
-            Err(SparqError::Unsettled { detail, fence }) => {
-                Err(ServerError::Unsettled { detail, fence })
+            Ok(previous) => {
+                if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
+                    self.reclaim_blob(&old.blob_key).await;
+                }
+                Ok(meta)
+            }
+            Err(e) => {
+                self.reclaim_failed_write(&meta.blob_key, &e).await;
+                Err(map_sparq(e))
             }
         }
     }
@@ -1046,11 +1243,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             ..meta.clone()
         };
         let committed = match container {
-            Some(c) => self
-                .sparq
-                .create_child(c, iri, meta.clone())
-                .await
-                .map(|()| None),
+            Some(c) => self.sparq.replace_child(c, iri, meta.clone()).await,
             None => self.sparq.replace_meta(iri, meta.clone()).await,
         };
         match committed {
@@ -1076,6 +1269,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 Err(match e {
                     SparqError::NotFound => ServerError::NotFound,
                     SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                    SparqError::Unsupported => {
+                        ServerError::Storage("atomic operation unsupported".into())
+                    }
                     SparqError::Backend(e) => ServerError::Storage(e),
                     SparqError::Unsettled { detail, fence } => {
                         ServerError::Unsettled { detail, fence }
@@ -1130,11 +1326,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         refuse_marker(&[Some(iri), container])?;
         // As `restore`, pointing at the held bytes rather than a copy: the hold keeps them.
         let committed = match container {
-            Some(c) => self
-                .sparq
-                .create_child(c, iri, held.clone())
-                .await
-                .map(|()| None),
+            Some(c) => self.sparq.replace_child(c, iri, held.clone()).await,
             None => self.sparq.replace_meta(iri, held.clone()).await,
         };
         let previous = committed.map_err(map_sparq)?;
@@ -1211,8 +1403,19 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
         // pointing at missing bytes. The byte delete is best effort: the resource is already gone
         // from the index, so a failed blob delete must not fail the request; it stays an orphan.
-        let blob_key = self.sparq.delete_resource(iri, parent).await.map_err(map_sparq)?;
-        if let Some(key) = blob_key {
+        let retired = match self.sparq.delete_resource_retiring(iri, parent).await {
+            Ok(retired) => retired,
+            Err(SparqError::Unsupported) if !self.history.enabled() => history::RetiredResource {
+                live_key: self
+                    .sparq
+                    .delete_resource(iri, parent)
+                    .await
+                    .map_err(map_sparq)?,
+                version_keys: Vec::new(),
+            },
+            Err(error) => return Err(map_sparq(error)),
+        };
+        for key in retired.live_key.into_iter().chain(retired.version_keys) {
             self.reclaim_blob(&key).await;
         }
         Ok(())
@@ -1241,6 +1444,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             Ok(m) => Some(m.blob_key),
             Err(SparqError::NotFound) => None,
             Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
+            Err(SparqError::Unsupported) => return Err(map_sparq(SparqError::Unsupported)),
             Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
             Err(SparqError::Unsettled { detail, fence }) => {
                 return Err(ServerError::Unsettled { detail, fence })
@@ -1296,7 +1500,12 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .map_err(marker_error)
     }
 
-    async fn reset_marker(&self, iri: &str, value: i64, _: &LifecycleGuard) -> ServerResult<()> {
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &LifecycleGuard,
+    ) -> ServerResult<()> {
         if !self.sparq.raises_markers() {
             return Err(ServerError::Storage(
                 "this store cannot raise a marker atomically".into(),
@@ -1304,7 +1513,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         }
         // One record put: the index admits a marker's record apart from every ceiling.
         self.sparq
-            .put_meta(iri, sparq::marker_meta(&value.to_string()))
+            .reset_marker(iri, value, lease)
             .await
             .map_err(marker_error)
     }
@@ -1319,6 +1528,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .map_err(|e| match e {
                 SparqError::NotFound => ServerError::NotFound,
                 SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                SparqError::Unsupported => {
+                    ServerError::Storage("atomic operation unsupported".into())
+                }
                 SparqError::Backend(msg) => ServerError::Storage(msg),
                 SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
             })
@@ -1373,6 +1585,7 @@ fn map_sparq(e: SparqError) -> ServerError {
     match e {
         SparqError::NotFound => ServerError::NotFound,
         SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::Unsupported => ServerError::Storage("atomic operation unsupported".into()),
         SparqError::Backend(e) => ServerError::Storage(e),
         SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
     }
@@ -1411,6 +1624,8 @@ fn fnv1a_chain<'a>(bytes: impl Iterator<Item = &'a u8>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    mod blob_lifecycle;
     use super::*;
     use crate::store::blob::InMemoryBlobStore;
     use crate::store::sparq::InMemorySparqClient;
@@ -1727,6 +1942,58 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for PutBackFirst {
+        fn call_timeout(&self) -> std::time::Duration {
+            self.inner.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.inner.raises_markers()
+        }
+
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.inner.raise_marker(iri, value).await
+        }
+
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> Result<(), SparqError> {
+            self.inner.reset_marker(iri, value, lease).await
+        }
+
+        async fn fence(&self, fence: &crate::store::Fence) -> Result<(), SparqError> {
+            self.inner.fence(fence).await
+        }
+
+        async fn delete_resource(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<Option<String>, SparqError> {
+            self.inner.delete_resource(iri, parent).await
+        }
+
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> Result<Option<Vec<String>>, SparqError> {
+            self.inner.list_children_within(container, max_bytes).await
+        }
+
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> Result<crate::store::ReadPlan, SparqError> {
+            self.inner.read_plan(target, acl_candidates).await
+        }
+
+        fn exclusive(&self) -> Result<(), SparqError> {
+            self.inner.exclusive()
+        }
         async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
             self.inner.get_meta(iri).await
         }
@@ -1849,6 +2116,46 @@ mod tests {
 
     #[async_trait]
     impl<T: SparqClient> SparqClient for Shared<T> {
+        fn call_timeout(&self) -> std::time::Duration {
+            self.0.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.0.raises_markers()
+        }
+
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.0.raise_marker(iri, value).await
+        }
+
+        async fn fence(&self, fence: &crate::store::Fence) -> Result<(), SparqError> {
+            self.0.fence(fence).await
+        }
+
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> Result<Option<Vec<String>>, SparqError> {
+            self.0.list_children_within(container, max_bytes).await
+        }
+
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> Result<crate::store::ReadPlan, SparqError> {
+            self.0.read_plan(target, acl_candidates).await
+        }
+
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> Result<(), SparqError> {
+            self.0.reset_marker(iri, value, lease).await
+        }
         async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
             self.0.get_meta(iri).await
         }
@@ -1901,6 +2208,14 @@ mod tests {
             meta: ResourceMeta,
         ) -> Result<(), SparqError> {
             self.0.create_child(container, child, meta).await
+        }
+        async fn replace_child(
+            &self,
+            container: &str,
+            child: &str,
+            meta: ResourceMeta,
+        ) -> Result<Option<ResourceMeta>, SparqError> {
+            self.0.replace_child(container, child, meta).await
         }
         async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
             self.0.remove_child(container, child).await
@@ -1987,6 +2302,71 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for FailsDetaching {
+        // Keep the default delete_resource so detach/delete fault injection is observed.
+        async fn replace_meta(
+            &self,
+            iri: &str,
+            meta: ResourceMeta,
+        ) -> Result<Option<ResourceMeta>, SparqError> {
+            self.inner.replace_meta(iri, meta).await
+        }
+
+        async fn read_plan(
+            &self,
+            target: &str,
+            acl_candidates: &[String],
+        ) -> Result<crate::store::ReadPlan, SparqError> {
+            self.inner.read_plan(target, acl_candidates).await
+        }
+
+        fn call_timeout(&self) -> std::time::Duration {
+            self.inner.call_timeout()
+        }
+
+        fn raises_markers(&self) -> bool {
+            self.inner.raises_markers()
+        }
+
+        async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+            self.inner.raise_marker(iri, value).await
+        }
+
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> Result<(), SparqError> {
+            self.inner.reset_marker(iri, value, lease).await
+        }
+
+        async fn fence(&self, fence: &crate::store::Fence) -> Result<(), SparqError> {
+            self.inner.fence(fence).await
+        }
+
+        async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+            self.inner.begin_reclaim(blob_key).await
+        }
+
+        async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+            self.inner.end_reclaim(blob_key).await
+        }
+
+        async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+            self.inner.reclaiming().await
+        }
+
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> Result<Option<Vec<String>>, SparqError> {
+            self.inner.list_children_within(container, max_bytes).await
+        }
+
+        fn exclusive(&self) -> Result<(), SparqError> {
+            self.inner.exclusive()
+        }
         async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
             self.inner.get_meta(iri).await
         }
@@ -2196,61 +2576,60 @@ mod tests {
     }
 
     #[test]
-    fn mint_blob_key_keeps_an_iri_derived_prefix_for_traceability() {
-        // Uniqueness comes from the random suffix; the IRI-derived prefix is retained (cosmetic) so an
-        // operator can still trace a key back to its resource. The minted key must START with the
-        // percent-flattened IRI followed by the `-` separator.
-        let iri = "https://pod.example/alice/data";
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        let key = S::mint_blob_key(iri).expect("the OS RNG must be available in tests");
-        assert!(
-            key.starts_with(&format!("{prefix}-")),
-            "minted key {key:?} must keep the IRI-derived prefix {prefix:?} for traceability"
-        );
-        // ...and the suffix is the 32-hex-char (128-bit) random tail.
-        let suffix = &key[prefix.len() + 1..];
-        assert_eq!(
-            suffix.len(),
-            32,
-            "the random suffix is 16 bytes = 32 hex chars"
-        );
-        assert!(
-            suffix.bytes().all(|b| b.is_ascii_hexdigit()),
-            "the suffix must be lowercase hex"
-        );
+    fn mint_blob_key_has_an_opaque_versioned_format() {
+        for (iri, pooled) in [
+            (
+                "https://pod.example/alice/private-report?secret=yes#section",
+                false,
+            ),
+            ("https://pod.example/.lws/subscriptions/private-topic", true),
+        ] {
+            let key = S::mint_blob_key(iri).expect("OS RNG available");
+            let opaque = if pooled {
+                key.strip_prefix("$pool$").expect("pool mark retained")
+            } else {
+                key.as_str()
+            };
+            assert_eq!(opaque.len(), 35);
+            assert!(opaque.starts_with("b1-"));
+            assert!(opaque[3..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            for part in [
+                "https",
+                "pod.example",
+                "alice",
+                "private",
+                "secret",
+                "section",
+                "subscriptions",
+            ] {
+                assert!(!key.contains(part), "resource information in blob key");
+            }
+        }
     }
 
     #[test]
-    fn mint_blob_key_is_fallible_and_succeeds_on_a_working_os_rng() {
-        // The Medium fix: `mint_blob_key` is FALLIBLE — it propagates an RNG failure (fails closed) rather
-        // than minting a weak, possibly-colliding key from a timestamp-only fallback. On every supported
-        // platform the OS RNG IS available, so it returns `Ok`; the contract this pins is that the return
-        // type is a `Result` carrying a `ServerError::Storage` on the (unreachable here) RNG-failure path —
-        // verified by the `?` propagation at the `write`/`create_in_container` call sites compiling, and by
-        // the success here. There is NO infallible fallback that could mint a same-tick-colliding key.
-        let iri = "https://pod.example/alice/data";
-        let key =
-            S::mint_blob_key(iri).expect("the OS RNG is available on every supported platform");
-        let prefix = iri.replace([':', '/', '?', '#', '%'], "_");
-        assert!(
-            key.starts_with(&format!("{prefix}-")) && key.len() == prefix.len() + 1 + 32,
-            "the success path still mints a prefix + 32-hex-char random suffix"
-        );
-
-        // And a write through the public API succeeds end-to-end (the fallible mint does not regress the
-        // happy path): the resource is then readable, its bytes resolved through the minted blob key.
+    fn write_persists_an_opaque_blob_pointer() {
+        let iri = "https://pod.example/alice/private-report";
         let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
         tokio_test_block_on(async {
             let meta = store
                 .write(iri, Bytes::from_static(b"body"), "text/turtle")
                 .await
-                .expect("a write with a working RNG must succeed");
-            assert!(
-                meta.blob_key.starts_with(&format!("{prefix}-")),
-                "the persisted pointer names the minted unique key"
+                .expect("write with a working RNG");
+            assert_eq!(meta.blob_key.len(), 35);
+            assert!(meta.blob_key.starts_with("b1-"));
+            assert!(meta.blob_key[3..]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            for part in ["https", "pod.example", "alice", "private-report"] {
+                assert!(!meta.blob_key.contains(part));
+            }
+            assert_eq!(
+                store.read(iri).await.unwrap().body,
+                Bytes::from_static(b"body")
             );
-            let resource = store.read(iri).await.expect("read-after-write");
-            assert_eq!(resource.body, Bytes::from_static(b"body"));
         });
     }
 
@@ -2261,5 +2640,105 @@ mod tests {
             .build()
             .expect("test runtime")
             .block_on(f)
+    }
+    /// Every raw mutator refuses either marker operand before touching its backend.
+    async fn check_raw_mutators_refuse_a_marker(client: &impl SparqClient) {
+        let refused = |r: Result<(), SparqError>| {
+            assert!(
+                matches!(r, Err(SparqError::Backend(ref e))
+                    if e == "service markers require the lifecycle lease"),
+                "{r:?}"
+            );
+        };
+        refused(client.put_meta(MARKER, lower()).await);
+        refused(client.replace_meta(MARKER, lower()).await.map(|_| ()));
+        refused(client.delete_meta(MARKER).await);
+        for (iri, parent) in [(MARKER, None), (MARKER_CONTAINER, Some(MARKER))] {
+            refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
+            refused(client.delete_resource(iri, parent).await.map(|_| ()));
+        }
+        for (container, child) in [(MARKER, MARKER_CONTAINER), (MARKER_CONTAINER, MARKER)] {
+            refused(client.create_child(container, child, lower()).await);
+            refused(client.remove_child(container, child).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_mutators_refuse_a_marker_in_memory() {
+        let client = InMemorySparqClient::new();
+        client.raise_marker(MARKER, 7).await.unwrap();
+        check_raw_mutators_refuse_a_marker(&client).await;
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "7");
+        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        client.reset_marker(MARKER, 2, &lease).await.unwrap();
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn raw_mutators_refuse_a_marker_embedded() {
+        let client = EmbeddedSparqClient::in_memory().unwrap();
+        client.raise_marker(MARKER, 7).await.unwrap();
+        let before = client.engine_round_trips();
+        check_raw_mutators_refuse_a_marker(&client).await;
+        assert_eq!(
+            client.engine_round_trips(),
+            before,
+            "refusal reached the engine"
+        );
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "7");
+        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        client.reset_marker(MARKER, 2, &lease).await.unwrap();
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn raw_mutators_refuse_a_marker_http() {
+        // A backend that cannot be reached: only the fixed local refusal may answer.
+        let client = HttpSparqClient::new("http://127.0.0.1:1/sparql");
+        check_raw_mutators_refuse_a_marker(&client).await;
+    }
+
+    #[tokio::test]
+    async fn a_shared_client_forwards_a_marker_reset() {
+        let client = Shared(std::sync::Arc::new(InMemorySparqClient::new()));
+        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        client.0.raise_marker(MARKER, 42).await.unwrap();
+        client.reset_marker(MARKER, 2, &lease).await.unwrap();
+        assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_states_over_one_composite_store_are_refused() {
+        let counters = std::sync::Arc::new(BackendCounters::default());
+        let store = CompositeStore::new(
+            CountingSparqClient::new(InMemorySparqClient::new(), counters.clone()),
+            CountingBlobStore::new(InMemoryBlobStore::new(), counters.clone()),
+        );
+        let mut cfg = crate::lws::LwsConfig::new("https://pod.example");
+        cfg.open = true;
+        let first = crate::lws::LwsState::new(store.clone(), cfg.clone())
+            .await
+            .unwrap();
+        first.notify.pause_sweeper();
+        counters.take_methods();
+        let second = crate::lws::LwsState::new(store.clone(), cfg.clone());
+        tokio::pin!(second);
+        assert!(
+            std::future::poll_fn(|cx| match std::future::Future::poll(second.as_mut(), cx) {
+                std::task::Poll::Ready(result) => std::task::Poll::Ready(result),
+                std::task::Poll::Pending => panic!("a second state must be refused before any I/O"),
+            })
+            .await
+            .is_err()
+        );
+        assert!(counters.take_methods().is_empty());
+        drop(first);
+        store
+            .lifecycle()
+            .wait_for_release("two_states_over_one_composite_store_are_refused")
+            .await;
+        assert!(crate::lws::LwsState::new(store, cfg).await.is_ok());
     }
 }

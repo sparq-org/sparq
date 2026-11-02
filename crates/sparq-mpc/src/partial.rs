@@ -51,13 +51,38 @@ impl std::fmt::Display for HolderId {
 pub struct PartialResult {
     /// The holder that produced this partial.
     pub holder: HolderId,
-    /// The projected variables, in column order (matches `rows`).
+    /// The projected variables, unique and in column order (matches `rows`).
     pub vars: Vec<Variable>,
     /// Disclosed solution rows; one entry per `vars` column, `None` = unbound.
     pub rows: Vec<Vec<Option<Term>>>,
 }
 
 impl PartialResult {
+    /// Check that projected variables are unique and every disclosed row has
+    /// exactly one slot per variable. Refusals identify only public shape
+    /// metadata (holder, expected arity, row or column index), never term values.
+    pub fn check_shape(&self) -> Result<(), MpcError> {
+        let expected = self.vars.len();
+        let mut seen = std::collections::BTreeSet::new();
+        for (column, variable) in self.vars.iter().enumerate() {
+            if !seen.insert(variable.as_str()) {
+                return Err(MpcError::Protocol(format!(
+                    "holder {} repeats a projected variable at column {column} (expected arity {expected})",
+                    self.holder,
+                )));
+            }
+        }
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.len() != expected {
+                return Err(MpcError::Protocol(format!(
+                    "holder {} expected arity {expected} at row {index}",
+                    self.holder,
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Number of disclosed rows in this partial.
     pub fn len(&self) -> usize {
         self.rows.len()
@@ -98,12 +123,13 @@ pub enum MpcError {
     /// ([`MpcError::Protocol`]) nor a deferred stub ([`MpcError::NotYetImplemented`]):
     /// it means a party fed an inconsistent share value, so the result is
     /// REFUSED rather than silently corrupted. `cheaters` lists the evaluation
-    /// points (`Share::x`) identified as off-curve. On this abort path it is the
-    /// off-curve set of the MOST self-consistent (minimum-disagreement) reference
-    /// fit — sound (names only true cheaters) in the first abort band of `e+1`
-    /// errors, best-effort beyond it where the honest set is genuinely
-    /// unidentifiable: detection is sound, blame is heuristic. Sound, exact
-    /// attribution is available on the SUCCESS path via
+    /// points (`Share::x`) identified as off-curve. It is empty when the number
+    /// of reference subsets exceeds [`crate::robust::MAX_SUSPECT_FITS`] or its
+    /// checked computation overflows; `detail` explains the omitted attribution.
+    /// Otherwise it is the off-curve set of the minimum-disagreement reference
+    /// fit, with ties keeping the first minimum. This is best-effort and can name
+    /// honest parties even in the first abort band of `e+1` errors. The SUCCESS
+    /// path reports which shares it corrected via
     /// [`crate::robust::reconstruct_robust_attributed`]. NOTE: at exactly `t+1`
     /// shares (no redundancy) tampering is information-theoretically undetectable
     /// and this is NEVER returned there — see
@@ -235,3 +261,70 @@ impl std::fmt::Display for MpcError {
 }
 
 impl std::error::Error for MpcError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxrdf::Literal;
+
+    fn partial(holder: &str) -> PartialResult {
+        PartialResult {
+            holder: HolderId::new(holder),
+            vars: vec![Variable::new_unchecked("key")],
+            rows: vec![vec![Some(Term::Literal(Literal::new_simple_literal(
+                "shape-term-sentinel",
+            )))]],
+        }
+    }
+
+    fn shape_error(holder: &str, row: usize) -> MpcError {
+        MpcError::Protocol(format!("holder {holder} expected arity 1 at row {row}"))
+    }
+
+    #[test]
+    fn check_shape_refuses_short_and_long_rows_without_term_values() {
+        for width in [0, 2] {
+            for row in [0, 1] {
+                let mut p = partial("shape-holder");
+                p.rows = vec![p.rows[0].clone(); 2];
+                let slot = p.rows[0][0].clone();
+                p.rows[row].resize(width, slot);
+                assert_eq!(p.check_shape(), Err(shape_error("shape-holder", row)));
+            }
+        }
+    }
+
+    #[test]
+    fn check_shape_refuses_duplicate_variables_even_without_rows() {
+        for (names, column) in [(vec!["a", "a"], 1), (vec!["a", "b", "a"], 2)] {
+            let mut p = partial("duplicate-holder");
+            p.vars = names.into_iter().map(Variable::new_unchecked).collect();
+            for rows in [vec![], vec![vec![None; p.vars.len()]]] {
+                p.rows = rows;
+                assert_eq!(
+                    p.check_shape(),
+                    Err(MpcError::Protocol(format!(
+                        "holder duplicate-holder repeats a projected variable at column {column} (expected arity {})",
+                        p.vars.len(),
+                    )))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn check_shape_accepts_empty_and_unbound_rows_without_changing_them() {
+        let mut p = partial("valid-holder");
+        for rows in [vec![], vec![vec![None]], p.rows.clone()] {
+            p.rows = rows;
+            let before = p.clone();
+            assert_eq!(p.check_shape(), Ok(()));
+            assert_eq!(p, before);
+        }
+        p.vars.clear();
+        p.rows = vec![vec![]];
+        assert_eq!(p.check_shape(), Ok(()));
+        p.rows.clear();
+        assert_eq!(p.check_shape(), Ok(()));
+    }
+}

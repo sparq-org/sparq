@@ -18,7 +18,9 @@ use sparq_lws_core::describe::{ServiceCatalog, ServiceEntry};
 use sparq_lws_core::ldp::content::{parse_to_triples, serialize_triples, RdfFormat};
 use sparq_lws_core::ldp::handler::LdpState;
 use sparq_lws_core::lws::{self, LwsConfig};
-use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store};
+use sparq_lws_core::store::{
+    history::HistoryConfig, CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store,
+};
 use tower::ServiceExt;
 
 const ROOT: &str = "https://pod.example/";
@@ -38,7 +40,11 @@ fn store() -> Memory {
 }
 
 async fn solid(catalog: ServiceCatalog, public: bool) -> Router {
-    let store = store();
+    solid_history(catalog, public, HistoryConfig::default()).await
+}
+
+async fn solid_history(catalog: ServiceCatalog, public: bool, history: HistoryConfig) -> Router {
+    let store = store().with_history(history).unwrap();
     store
         .write(ROOT, Bytes::new(), "text/turtle")
         .await
@@ -62,12 +68,16 @@ async fn solid(catalog: ServiceCatalog, public: bool) -> Router {
 }
 
 async fn lws(catalog: ServiceCatalog, open: bool) -> Router {
+    lws_history(catalog, open, HistoryConfig::default()).await
+}
+
+async fn lws_history(catalog: ServiceCatalog, open: bool, history: HistoryConfig) -> Router {
     let mut cfg = LwsConfig::new(common::BASE_URL);
     cfg.open = open;
     cfg.notify_key =
         lws::jose::EcKey::from_jwk(include_str!("fixtures/storage-description/test-key.json"))
             .unwrap();
-    lws::router_with_catalog(store(), cfg, catalog)
+    lws::router_with_catalog(store().with_history(history).unwrap(), cfg, catalog)
         .await
         .unwrap()
 }
@@ -137,6 +147,44 @@ fn offline(mut value: Value) -> Value {
         })
         .collect();
     value
+}
+
+fn expected_description(name: &str, solid: bool) -> Value {
+    #[allow(unused_mut)]
+    let mut doc: Value = serde_json::from_slice(&fixture(name)).unwrap();
+    #[cfg(feature = "crdt-sync")]
+    {
+        let namespace = if solid { ".crdt" } else { ".lws/crdt" };
+        doc["service"].as_array_mut().unwrap().push(json!({
+            "id": format!("{ROOT}#crdt-sync"),
+            "type": format!("{SSD}CrdtSyncService"),
+            "serviceEndpoint": format!("{ROOT}{namespace}/tickets"),
+            "profile": format!("{SSD}y-protocol-v1"),
+            "roomTemplate": format!("wss://pod.example/{namespace}/socket?room={{room}}")
+        }));
+    }
+    let _ = solid;
+    doc
+}
+
+fn expected_solid_turtle(name: &str) -> Vec<Triple> {
+    #[allow(unused_mut)]
+    let mut graph = triples(RdfFormat::Turtle, &fixture(name));
+    #[cfg(feature = "crdt-sync")]
+    graph.extend(triples(
+        RdfFormat::Turtle,
+        format!(
+            r#"
+<{ROOT}> <{DID}service> <{ROOT}#crdt-sync>.
+<{ROOT}#crdt-sync> a <{SSD}CrdtSyncService>;
+ <{DID}serviceEndpoint> <https://pod.example/.crdt/tickets>;
+ <http://purl.org/dc/terms/conformsTo> <{SSD}y-protocol-v1>;
+ <{SSD}roomTemplate> "wss://pod.example/.crdt/socket?room={{room}}".
+"#
+        )
+        .as_bytes(),
+    ));
+    graph
 }
 
 fn triples(format: RdfFormat, body: &[u8]) -> Vec<Triple> {
@@ -238,7 +286,14 @@ async fn lws_public_catalog_and_shape() {
     assert!(!String::from_utf8_lossy(&body).contains("MoveResource"));
     assert_eq!(
         doc,
-        serde_json::from_slice::<Value>(&fixture("lws.jsonld")).unwrap()
+        expected_description(
+            if cfg!(feature = "sparql-endpoint") {
+                "lws.jsonld"
+            } else {
+                "lws-no-sparql.jsonld"
+            },
+            false,
+        )
     );
     let open = lws(ServiceCatalog::default(), true).await;
     assert_eq!(
@@ -261,13 +316,23 @@ async fn lws_public_catalog_and_shape() {
             "WebSocketSubscription"
         ])
     );
-    for absent in ["SparqlQueryService", "CrdtSyncService"] {
-        assert!(!doc["service"]
+    assert_eq!(
+        doc["service"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|s| s["type"] == format!("{SSD}{absent}")));
-    }
+            .any(|s| s["type"] == format!("{SSD}CrdtSyncService")),
+        cfg!(feature = "crdt-sync")
+    );
+    assert_eq!(
+        doc["service"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["type"] == format!("{SSD}SparqlQueryService")
+                && s["serviceEndpoint"] == "https://pod.example/.lws/sparql"),
+        cfg!(feature = "sparql-endpoint")
+    );
     let expanded = triples(
         RdfFormat::JsonLd,
         &serde_json::to_vec(&offline(doc)).unwrap(),
@@ -423,17 +488,14 @@ async fn solid_negotiation_graph_and_goldens() {
         canonical(&triples(
             RdfFormat::JsonLd,
             &serde_json::to_vec(&offline(
-                serde_json::from_slice(&fixture(&format!("solid{suffix}.jsonld"))).unwrap()
+                expected_description(&format!("solid{suffix}.jsonld"), true)
             ))
             .unwrap()
         ))
     );
     assert_eq!(
         canonical(&graph),
-        canonical(&triples(
-            RdfFormat::Turtle,
-            &fixture(&format!("solid{suffix}.ttl"))
-        ))
+        canonical(&expected_solid_turtle(&format!("solid{suffix}.ttl")))
     );
     assert_service(&graph, "storage-root", &format!("{LWS}StorageRoot"), ROOT);
     assert_service(
@@ -783,5 +845,190 @@ async fn advertised_patch_and_recursive_delete_operations_are_served() {
     assert_eq!(
         headers["accept-patch"],
         "text/n3, application/sparql-update"
+    );
+}
+
+fn history_shapes(graph: &[Triple], lws_mode: bool) -> Result<(), String> {
+    let shape = include_str!("fixtures/jlws-storage-description.ttl")
+        .replace("https://w3id.org/jeswr/lws#", LWS)
+        .replace(
+            "https://w3id.org/jeswr/lws/access-profile/odrl-1",
+            &format!("{LWS}AccessProfile"),
+        );
+    let shape = format!(
+        "{}\n{}",
+        if lws_mode { &shape } else { "" },
+        include_str!("fixtures/history-shapes.ttl")
+    );
+    let shapes = sparq_core::Graph::load_str(&shape, "turtle").unwrap();
+    let data = serialize_triples(RdfFormat::Turtle, graph).unwrap();
+    let data = sparq_core::Graph::load_str(std::str::from_utf8(&data).unwrap(), "turtle").unwrap();
+    let report = sparq_shacl::validate(&data, &shapes);
+    if report.conforms {
+        Ok(())
+    } else {
+        Err(report.to_text())
+    }
+}
+
+#[tokio::test]
+async fn history_catalog_endpoints_templates_capabilities_and_shapes() {
+    for lws_mode in [false, true] {
+        for (versions, trash) in [(false, false), (true, false), (false, true), (true, true)] {
+            let history = HistoryConfig {
+                versions,
+                trash,
+                ..Default::default()
+            };
+            let app = if lws_mode {
+                lws_history(ServiceCatalog::default(), false, history).await
+            } else {
+                solid_history(ServiceCatalog::default(), false, history).await
+            };
+            let path = if lws_mode { "/" } else { "/.well-known/solid" };
+            let accept = if lws_mode {
+                "application/lws+cid"
+            } else {
+                "application/ld+json"
+            };
+            let (status, _, body) = call(&app, "GET", path, &[("accept", accept)], "").await;
+            assert_eq!(status, StatusCode::OK);
+            let doc: Value = serde_json::from_slice(&body).unwrap();
+            let graph = triples(
+                RdfFormat::JsonLd,
+                &serde_json::to_vec(&offline(doc)).unwrap(),
+            );
+            history_shapes(&graph, lws_mode).unwrap();
+            let prefix = if lws_mode { ".lws/" } else { "." };
+            for (enabled, fragment, service_type, capability) in [
+                (versions, "versions", "VersioningService", "Versioning"),
+                (trash, "trash", "TrashService", "Trash"),
+            ] {
+                let id = format!("{ROOT}#{fragment}");
+                let endpoint = format!("{ROOT}{prefix}{fragment}/");
+                assert_eq!(
+                    has(&graph, &id, RDF_TYPE, &format!("{SSD}{service_type}")),
+                    enabled
+                );
+                let caps = graph
+                    .iter()
+                    .filter(|t| {
+                        t.predicate.as_str() == RDF_TYPE
+                            && t.object
+                                == oxrdf::Term::NamedNode(
+                                    NamedNode::new(format!("{SSD}{capability}")).unwrap(),
+                                )
+                    })
+                    .map(|t| t.subject.clone())
+                    .collect::<Vec<_>>();
+                assert_eq!(caps.len(), usize::from(enabled));
+                for cap in caps {
+                    assert!(graph.iter().any(|t| t.subject
+                        == oxrdf::NamedOrBlankNode::NamedNode(NamedNode::new(ROOT).unwrap())
+                        && t.predicate.as_str() == format!("{LWS}capability")
+                        && t.object == cap.clone().into()));
+                }
+                if enabled {
+                    assert_service(&graph, fragment, &format!("{SSD}{service_type}"), &endpoint);
+                    if fragment == "versions" {
+                        assert!(graph.iter().any(|t| t.subject
+                            == NamedNode::new(&id).unwrap().into()
+                            && t.predicate.as_str() == format!("{SSD}listingTemplate")
+                            && t.object
+                                == oxrdf::Literal::new_simple_literal(format!(
+                                    "{endpoint}?resource={{resource}}"
+                                ))
+                                .into()));
+                    }
+                }
+            }
+            assert!(!graph
+                .iter()
+                .any(|t| t.predicate.as_str() == format!("{SSD}recursiveDelete")));
+            if lws_mode {
+                assert!(graph.iter().any(|t| t.predicate.as_str() == RDF_TYPE
+                    && t.object
+                        == NamedNode::new(format!("{SSD}RecursiveDelete"))
+                            .unwrap()
+                            .into()));
+            } else {
+                let (_, _, turtle) =
+                    call(&app, "GET", path, &[("accept", "text/turtle")], "").await;
+                assert_eq!(
+                    canonical(&graph),
+                    canonical(&triples(RdfFormat::Turtle, &turtle))
+                );
+            }
+            if versions && trash {
+                let cap_subjects = graph
+                    .iter()
+                    .filter(|t| {
+                        t.predicate.as_str() == RDF_TYPE
+                            && ["Versioning", "Trash"].iter().any(|ty| {
+                                t.object == NamedNode::new(format!("{SSD}{ty}")).unwrap().into()
+                            })
+                    })
+                    .map(|t| t.subject.clone())
+                    .collect::<Vec<_>>();
+                let services = [format!("{ROOT}#versions"), format!("{ROOT}#trash")];
+                let projected = graph
+                    .iter()
+                    .filter(|t| {
+                        services.iter().any(|id| {
+                            t.subject == NamedNode::new(id).unwrap().into()
+                                || t.object == NamedNode::new(id).unwrap().into()
+                        }) || cap_subjects
+                            .iter()
+                            .any(|id| &t.subject == id || t.object == id.clone().into())
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    canonical(&projected),
+                    canonical(&triples(
+                        RdfFormat::Turtle,
+                        &fixture(if lws_mode {
+                            "lws-history.ttl"
+                        } else {
+                            "solid-history.ttl"
+                        })
+                    ))
+                );
+                // Each negative control changes a wire shape, leaving service targeting intact.
+                let mut invalid = graph.clone();
+                let endpoint = invalid
+                    .iter_mut()
+                    .find(|t| {
+                        t.subject == NamedNode::new(format!("{ROOT}#versions")).unwrap().into()
+                            && t.predicate.as_str() == format!("{DID}serviceEndpoint")
+                    })
+                    .unwrap();
+                endpoint.object = oxrdf::Literal::new_simple_literal(
+                    "https://pod.example/.versions/?resource={resource}",
+                )
+                .into();
+                assert!(history_shapes(&invalid, lws_mode).is_err());
+                let invalid = graph
+                    .iter()
+                    .filter(|t| t.predicate.as_str() != format!("{SSD}listingTemplate"))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                assert!(history_shapes(&invalid, lws_mode).is_err());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn lws_query_route_is_mounted_with_its_catalog_entry() {
+    let app = lws(ServiceCatalog::default(), true).await;
+    let (status, _, _) = call(&app, "GET", "/.lws/sparql?query=ASK%7B%7D", &[], "").await;
+    assert_eq!(
+        status,
+        if cfg!(feature = "sparql-endpoint") {
+            StatusCode::OK
+        } else {
+            StatusCode::NOT_FOUND
+        }
     );
 }

@@ -109,3 +109,20 @@
   crate: "sparq-lws-core"
   features: "authn-openid"
   test: true
+
+- name: "sparq-lws-core (crdt-sync)"
+  crate: "sparq-lws-core"
+  features: "crdt-sync"
+  test: true
+
+# Native filesystem adapter: run the real composite and reconciler paths.
+- name: "sparq-lws-core (blob-fs)"
+  crate: "sparq-lws-core"
+  features: "blob-fs"
+  test: true
+
+# Exercise room authorization with the optional read gate attached.
+- name: "sparq-lws-core (crdt-sync + odrl-authz)"
+  crate: "sparq-lws-core"
+  features: "crdt-sync,odrl-authz"
+  test: true

@@ -97,7 +97,7 @@ export function ZkCarHire() {
   const [phase, setPhase] = React.useState<Phase>({ kind: "idle" });
   const [verifyPhase, setVerifyPhase] = React.useState<VerifyPhase>({ kind: "idle" });
   const [mode, setMode] = React.useState<RunMode>("prove");
-  const [prover, setProver] = React.useState<ProverState>("cold");
+  const [prover, setProver] = React.useState<ProverState>("warming");
 
   // Pre-warm the in-browser ZK prover in the background on mount, off the render path.
   // A failure resets the indicator; proveAgeEligibility still awaits the shared init,
@@ -106,7 +106,6 @@ export function ZkCarHire() {
   // other routes — the prover assets stay off /try, /papers, /benchmarks, etc.
   React.useEffect(() => {
     let cancelled = false;
-    setProver("warming");
     prewarmProver()
       .then(() => {
         if (!cancelled) setProver("ready");

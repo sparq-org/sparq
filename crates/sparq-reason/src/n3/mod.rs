@@ -387,7 +387,12 @@ mod run_shared {
             // In place: only the blank labels are rewritten, nothing else is copied.
             fn go(t: &mut Term, p: &str) {
                 match t {
-                    Term::Blank(l) => l.insert_str(0, p),
+                    Term::Blank(l) => {
+                        let mut scoped = String::with_capacity(p.len() + l.len());
+                        scoped.push_str(p);
+                        scoped.push_str(l);
+                        *l = scoped;
+                    }
                     Term::List(ms) => ms.iter_mut().for_each(|m| go(m, p)),
                     Term::Formula(rs) => rs.iter_mut().flatten().for_each(|m| go(m, p)),
                     Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, p)),

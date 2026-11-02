@@ -49,9 +49,11 @@ export function GraphViewTool() {
     return { keys, onExplain: setExplainTarget };
   }, [inferenceMode, inferenceStatus, entailedTripleKeys]);
 
-  React.useEffect(() => {
+  const [previousInferenceMode, setPreviousInferenceMode] = React.useState(inferenceMode);
+  if (previousInferenceMode !== inferenceMode) {
+    setPreviousInferenceMode(inferenceMode);
     setExplainTarget(null);
-  }, [inferenceMode]);
+  }
 
   const onRun = React.useCallback(async () => {
     // A run already in flight: ignore (no parallel runs for this tool).

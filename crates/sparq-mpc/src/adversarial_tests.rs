@@ -1637,20 +1637,23 @@ mod no_fake_crypto {
     // A hidden join that leaked the key would be the join-layer's "fake privacy".
     #[test]
     fn row7_hidden_join_discloses_only_payload_not_the_private_key() {
-        use crate::join::HiddenKeyedRows;
+        use crate::batched::RowBinding;
+        use crate::join::BatchedHiddenInput;
         let lit = |s: &str| Some(Term::Literal(oxrdf::Literal::new_simple_literal(s)));
-        let left = HiddenKeyedRows {
+        let left = BatchedHiddenInput {
             holder: HolderId::new("L"),
+            binding: RowBinding::Keyed(vec!["candidate-group".to_string(); 2]),
             payload_vars: vec![Variable::new_unchecked("name")],
             rows: vec![(fp(100), vec![lit("Alice")]), (fp(200), vec![lit("Bob")])],
         };
-        let right = HiddenKeyedRows {
+        let right = BatchedHiddenInput {
             holder: HolderId::new("R"),
+            binding: RowBinding::Keyed(vec!["candidate-group".to_string(); 1]),
             payload_vars: vec![Variable::new_unchecked("city")],
             rows: vec![(fp(200), vec![lit("Leeds")])],
         };
         let join = HiddenValueJoin::new(ShamirBackend::new_seeded(3, 0xBEEF).unwrap());
-        let got = join.join(&left, &right).unwrap();
+        let (got, _) = join.batched_join(&left, &right, 2).unwrap();
         // Output schema is payload-only: the private key var is NOT projected.
         assert_eq!(
             got.vars,

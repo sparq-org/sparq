@@ -353,6 +353,13 @@ jobs:
       - name: no-dyn-dispatch (substrate) — GATING
         run: python3 scripts/check-no-dyn-dispatch.py
 
+      # Issuance hardening: audit every crate's non-test raw signer calls on
+      # every PR, independently of the path-filtered ZK toolchain workflow.
+      - name: Raw commitment signer inventory — GATING
+        run: python3 scripts/check-raw-commitment-signers.py
+      - name: Self-test raw commitment signer inventory
+        run: python3 scripts/tests/test_raw_commitment_signers.py
+
       # ---- former job: readme-template (template) ----
       # sq-8ic6 (deferred half): PROMOTED to a HARD gate. The README-overhaul epic
       # (sq-9jw5) cleared the backlog — sq-inzv (#751) brought 20 publish=true crate READMEs to

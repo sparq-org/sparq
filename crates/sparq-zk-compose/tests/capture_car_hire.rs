@@ -38,9 +38,12 @@ fn scratch(name: &str) -> std::path::PathBuf {
 /// covered toolchain-free in `capture.rs`'s unit tests.
 #[test]
 fn native_filter_proof_captures_into_manifest() {
-    if !support::require_toolchain("native_filter_proof_captures_into_manifest", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "native_filter_proof_captures_into_manifest",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     // 5 < 10 is true — the same minimal, known-satisfiable member the e2e suite proves.
     let operand_enc = encode_int_literal(5);
     let (filter, digits) = build_filter_int(operand_enc, 5, FilterOp::Lt, 10, true).unwrap();
@@ -70,4 +73,5 @@ fn native_filter_proof_captures_into_manifest() {
     assert!(json.contains("filter_int_d1"));
     // The honest caveat travels with the fixture.
     assert!(manifest.note.contains("sq-qhy4"));
+    support::complete(live);
 }

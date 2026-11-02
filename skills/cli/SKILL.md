@@ -213,3 +213,8 @@ child exercise the output refusal guard.
 - `hdt` — the opt-in HDT loader (`sparq_hdt::load`).
 - `hdt-write` — the opt-in `to-hdt` HDT exporter (`sparq_hdt::save`); implies `hdt`.
 - `http-server` — the HTTP SPARQL endpoint (`sparq-server`) for serving instead of one-shot CLI queries.
+
+Durable-store compaction replays committed journal operations, including named-graph creation
+and removal, before rewriting the image. Named-graph layout recovery validates declared slots
+before writable cleanup; read-only opens leave undeclared slots alone. Preserve a backup when
+upgrading a store if an older executable must remain usable.

@@ -27,7 +27,8 @@ fn has(g: &Graph, s: &str) -> bool {
 }
 
 fn sub<'a>(g: &'a Graph, name: &str) -> &'a Graph {
-    g.named_graph(&iri(name)).unwrap_or_else(|| panic!("no named graph {name}"))
+    g.named_graph(&iri(name))
+        .unwrap_or_else(|| panic!("no named graph {name}"))
 }
 
 /// A dataset (default `a`, `g0` holding `b`, `g1` holding `c`) saved at `dir`, opened, with
@@ -36,10 +37,16 @@ fn open_with_logged_update(dir: &Path) -> Graph {
     let nq = "<http://ex/a> <http://ex/p> <http://ex/o> .\n\
               <http://ex/b> <http://ex/p> <http://ex/o> <http://ex/g0> .\n\
               <http://ex/c> <http://ex/p> <http://ex/o> <http://ex/g1> .\n";
-    Graph::load_dataset(nq, "nquads").unwrap().save(dir).unwrap();
-    let mut g = Graph::open(dir).unwrap();
-    g.apply_delta_nquads("<http://ex/b2> <http://ex/p> <http://ex/o> <http://ex/g0> .", "")
+    Graph::load_dataset(nq, "nquads")
+        .unwrap()
+        .save(dir)
         .unwrap();
+    let mut g = Graph::open(dir).unwrap();
+    g.apply_delta_nquads(
+        "<http://ex/b2> <http://ex/p> <http://ex/o> <http://ex/g0> .",
+        "",
+    )
+    .unwrap();
     g.apply_delta(&[triple("a2")], &[]).unwrap();
     g
 }
@@ -48,9 +55,13 @@ fn open_with_logged_update(dir: &Path) -> Graph {
 fn assert_intact(dir: &Path) {
     let mut g = Graph::open(dir).unwrap_or_else(|e| panic!("reopen {}: {e}", dir.display()));
     assert!(has(&g, "a") && has(&g, "a2"), "default graph lost");
-    assert!(has(sub(&g, "g0"), "b") && has(sub(&g, "g0"), "b2"), "g0 lost");
+    assert!(
+        has(sub(&g, "g0"), "b") && has(sub(&g, "g0"), "b2"),
+        "g0 lost"
+    );
     assert!(has(sub(&g, "g1"), "c"), "g1 lost");
-    g.apply_delta(&[triple("after")], &[]).expect("writable after reopen");
+    g.apply_delta(&[triple("after")], &[])
+        .expect("writable after reopen");
 }
 
 fn would_block(dir: &Path) -> bool {
@@ -73,11 +84,14 @@ fn a_frozen_named_graph_freezes_the_root_and_a_drop_is_refused() {
     let mut g = open_with_logged_update(&dir);
     let old = is(&staging_path(&dir.join("named").join("0"), "compact-old"));
     fault::fail_every(move |step, p| step == "mark" && old(p));
-    assert!(g.compact().is_err());
+    assert!(g.named[0].1.compact().is_err());
     assert!(fault::disarm() > 0, "the step never failed");
     assert!(sub(&g, "g0").is_frozen(), "the named graph was not frozen");
     assert!(g.is_frozen(), "the root went on writing");
-    assert!(g.drop_named_durable(&iri("g1")).is_err(), "a drop was accepted");
+    assert!(
+        g.drop_named_durable(&iri("g1")).is_err(),
+        "a drop was accepted"
+    );
     assert!(g.drop_all_named_durable().is_err());
     drop(g);
     assert_intact(&dir);
@@ -94,14 +108,20 @@ fn a_rolled_back_named_swap_keeps_the_graph_writable() {
     let mut g = open_with_logged_update(&dir);
     let new = is(&staging_path(&dir.join("named").join("0"), "compact-new"));
     fault::fail_when(move |step, p| step == "rename" && new(p));
-    assert!(g.compact().is_err());
+    assert!(g.named[0].1.compact().is_err());
     assert_eq!(fault::disarm(), 1);
-    assert!(!g.is_frozen() && !sub(&g, "g0").is_frozen(), "frozen after a rollback");
+    assert!(
+        !g.is_frozen() && !sub(&g, "g0").is_frozen(),
+        "frozen after a rollback"
+    );
     assert!(has(sub(&g, "g0"), "b2"));
     assert!(g.drop_named_durable(&iri("g1")).unwrap());
     drop(g);
     let g = Graph::open(&dir).unwrap();
-    assert!(has(sub(&g, "g0"), "b") && has(sub(&g, "g0"), "b2"), "g0 lost its data");
+    assert!(
+        has(sub(&g, "g0"), "b") && has(sub(&g, "g0"), "b2"),
+        "g0 lost its data"
+    );
     assert!(g.named_graph(&iri("g1")).is_none());
     drop(g);
     std::fs::remove_dir_all(&root).ok();
@@ -134,7 +154,9 @@ fn a_failed_second_rename_rolls_back_and_keeps_writing() {
     assert_eq!(fault::disarm(), 1);
     assert!(!g.is_frozen(), "frozen after a rollback");
     g.apply_delta(&[triple("x")], &[]).unwrap();
-    assert!(!staging_path(&dir, "compact-new").exists() && !staging_path(&dir, "compact-old").exists());
+    assert!(
+        !staging_path(&dir, "compact-new").exists() && !staging_path(&dir, "compact-old").exists()
+    );
     drop(g);
     assert_intact(&dir);
     assert!(has(&Graph::open(&dir).unwrap(), "x"));
@@ -161,7 +183,10 @@ fn a_crash_at_any_step_of_a_rollback_is_recovered() {
             .filter(|n| !n.ends_with(".lock"))
             .collect();
         assert_eq!(names, ["g"], "after {after}: left {names:?}");
-        assert!(!dir.join(STAGING_MARKER).exists(), "after {after}: record left in the store");
+        assert!(
+            !dir.join(STAGING_MARKER).exists(),
+            "after {after}: record left in the store"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 }
@@ -171,26 +196,45 @@ fn a_crash_at_any_step_of_a_rollback_is_recovered() {
 /// `named/` sub-tree of a drop.
 #[test]
 fn a_crash_while_recovery_rolls_back_is_recovered() {
-    for (step, kind) in [("rename", "compact"), ("clear", "compact"), ("rename", "drop"), ("clear", "drop")] {
+    for (step, kind) in [
+        ("rename", "compact"),
+        ("clear", "compact"),
+        ("rename", "drop"),
+        ("clear", "drop"),
+    ] {
         let root = scratch(&format!("recovery-crash-{step}-{kind}"));
         let dir = root.join("g");
         drop(open_with_logged_update(&dir));
         let id = read_marker(&dir).unwrap().unwrap().id.unwrap();
         let (live, old, record) = if kind == "compact" {
-            (dir.clone(), staging_path(&dir, "compact-old"), "compact-old")
+            (
+                dir.clone(),
+                staging_path(&dir, "compact-old"),
+                "compact-old",
+            )
         } else {
             let named = dir.join("named");
             (named.clone(), staging_path(&named, "drop-old"), "drop-old")
         };
         std::fs::rename(&live, &old).unwrap();
         mark_staging(&old, record, &id).unwrap();
-        let target = if step == "rename" { old.clone() } else { live.clone() };
+        let target = if step == "rename" {
+            old.clone()
+        } else {
+            live.clone()
+        };
         let step_name = step;
         fault::crash_at(move |s, p| s == step_name && p == target);
-        assert!(Graph::open(&dir).is_err(), "{step} {kind}: the crash did not happen");
+        assert!(
+            Graph::open(&dir).is_err(),
+            "{step} {kind}: the crash did not happen"
+        );
         assert!(fault::disarm() > 0);
         assert_intact(&dir);
-        assert!(!live.join(STAGING_MARKER).exists(), "{step} {kind}: record left behind");
+        assert!(
+            !live.join(STAGING_MARKER).exists(),
+            "{step} {kind}: record left behind"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 }
@@ -217,7 +261,10 @@ fn a_crash_while_staging_is_removed_keeps_its_record() {
         // or in the removal after it: either way the compaction stops there.
         let _ = g.compact();
         assert!(fault::disarm() > 0, "the removal never reached entry {nth}");
-        assert!(old.join(STAGING_MARKER).exists(), "a part-removed half lost its record");
+        assert!(
+            old.join(STAGING_MARKER).exists(),
+            "a part-removed half lost its record"
+        );
         drop(g);
         assert_intact(&dir);
         assert!(!old.exists(), "the leftover half was not removed");
@@ -236,7 +283,10 @@ fn a_crash_before_the_staging_record_exists_is_harmless() {
     assert!(g.compact().is_err());
     assert!(fault::disarm() > 0);
     drop(g);
-    assert!(!staging_path(&dir, "compact-new").exists(), "an unrecorded staging directory");
+    assert!(
+        !staging_path(&dir, "compact-new").exists(),
+        "an unrecorded staging directory"
+    );
     assert_intact(&dir);
     let mut g = Graph::open(&dir).unwrap();
     g.apply_delta(&[triple("y")], &[]).unwrap();
@@ -261,7 +311,9 @@ fn a_swap_failing_after_its_first_rename_is_completed_at_once() {
     assert!(has(&g, "a2") && has(sub(&g, "g0"), "b2"));
     g.apply_delta(&[triple("z")], &[]).unwrap();
     assert!(would_block(&dir), "the lock was lost");
-    assert!(!staging_path(&dir, "compact-old").exists() && !staging_path(&dir, "compact-new").exists());
+    assert!(
+        !staging_path(&dir, "compact-old").exists() && !staging_path(&dir, "compact-new").exists()
+    );
     drop(g);
     assert_intact(&dir);
     assert!(has(&Graph::open(&dir).unwrap(), "z"));
@@ -280,20 +332,42 @@ fn a_swap_failing_after_its_renames_detaches_the_graph() {
     let live = dir.clone();
     // The second rename fails, and so does every removal of the record the rollback leaves in
     // the store: the rollback cannot finish, nor can the recovery after it.
-    fault::fail_every(move |step, p| (step == "rename" && p == new) || (step == "clear" && p == live));
+    fault::fail_every(move |step, p| {
+        (step == "rename" && p == new) || (step == "clear" && p == live)
+    });
     assert!(g.compact().is_err());
     assert!(fault::disarm() > 1);
     assert!(g.is_frozen());
     let t = triple("x");
-    assert!(g.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "a write was accepted");
-    assert!(has(&g, "a2") && has(sub(&g, "g0"), "b2"), "the frozen view lost the logged updates");
-    assert!(!g.named.is_empty(), "the frozen graph has no named graphs to check");
+    assert!(
+        g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+        "a write was accepted"
+    );
+    assert!(
+        has(&g, "a2") && has(sub(&g, "g0"), "b2"),
+        "the frozen view lost the logged updates"
+    );
+    assert!(
+        !g.named.is_empty(),
+        "the frozen graph has no named graphs to check"
+    );
     for (_, sub) in &mut g.named {
         assert!(sub.is_frozen());
-        assert!(sub.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "named too");
+        assert!(
+            sub.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "named too"
+        );
     }
-    assert!(would_block(&dir), "the frozen graph lost the directory's lock");
-    assert!(g.apply_delta_nquads("<http://ex/x> <http://ex/p> <http://ex/o> <http://ex/g9> .", "").is_err());
+    assert!(
+        would_block(&dir),
+        "the frozen graph lost the directory's lock"
+    );
+    assert!(g
+        .apply_delta_nquads(
+            "<http://ex/x> <http://ex/p> <http://ex/o> <http://ex/g9> .",
+            ""
+        )
+        .is_err());
     assert!(g.ensure_named(&iri("g9")).is_err());
     assert!(g.commit_txn(&[(true, None, t.clone())]).is_err());
     assert!(g.compact().is_err() && g.vacuum().is_err());
@@ -334,7 +408,8 @@ fn a_restore_failing_at_its_first_rename_keeps_logging() {
     let mut g = open_with_logged_update(&dir);
     let live = is(&dir);
     fault::fail_when(move |step, p| step == "rename" && live(p));
-    let fresh = Graph::load_str("<http://ex/new> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
+    let fresh =
+        Graph::load_str("<http://ex/new> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
     assert!(g.restore_in_place(fresh).is_err());
     assert_eq!(fault::disarm(), 1);
     g.apply_delta(&[triple("kept")], &[]).unwrap();
@@ -345,25 +420,26 @@ fn a_restore_failing_at_its_first_rename_keeps_logging() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-/// M5: a named-graph drop that fails once the in-memory named graphs are released re-opens them
-/// from the directory, so the graph does not go on with none (and lose them all at its next
-/// compaction).
+/// A failed slot cleanup freezes writes and preserves the committed named set on reopen.
 #[test]
-fn a_failed_drop_reloads_the_named_graphs() {
-    let root = scratch("drop-reload");
+fn a_failed_drop_cleanup_preserves_the_survivors() {
+    let root = scratch("drop-cleanup");
     let dir = root.join("g");
     let mut g = open_with_logged_update(&dir);
-    let named = is(&dir.join("named"));
-    fault::fail_when(move |step, p| step == "rename" && named(p));
+    let slot = is(&dir.join("named/1"));
+    fault::fail_when(move |step, p| step == "remove-tree" && slot(p));
     assert!(g.drop_named_durable(&iri("g1")).is_err());
     assert_eq!(fault::disarm(), 1);
-    assert!(!g.is_frozen());
-    assert!(g.named_graph(&iri("g0")).is_some() && g.named_graph(&iri("g1")).is_some());
-    g.apply_delta(&[triple("x")], &[]).unwrap();
-    g.compact().unwrap();
+    assert!(g.is_frozen());
+    assert!(g.apply_delta(&[triple("refused")], &[]).is_err());
+    assert!(has(sub(&g, "g0"), "b2"));
     drop(g);
-    assert_intact(&dir);
-    std::fs::remove_dir_all(&root).ok();
+    let g = Graph::open(&dir).unwrap();
+    assert!(has(&g, "a2") && has(sub(&g, "g0"), "b2"));
+    assert!(g.named_graph(&iri("g1")).is_none());
+    assert!(!dir.join("named/1").exists());
+    drop(g);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 /// L1: two handles on one log append after each other, never over each other.
@@ -375,7 +451,11 @@ fn two_handles_on_a_log_both_append() {
     first.append_batch(&[triple("one")], &[]).unwrap();
     second.append_batch(&[triple("two")], &[]).unwrap();
     first.append_batch(&[triple("three")], &[]).unwrap();
-    let ops: Vec<_> = Wal::replay(&root).unwrap().into_iter().map(|(_, t)| t[0].clone()).collect();
+    let ops: Vec<_> = Wal::replay(&root)
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t[0].clone())
+        .collect();
     assert_eq!(ops, [iri("one"), iri("two"), iri("three")]);
     std::fs::remove_dir_all(&root).ok();
 }
@@ -390,9 +470,13 @@ fn a_staging_lock_never_follows_a_link() {
     let mut g = open_with_logged_update(&dir);
     let elsewhere = root.join("elsewhere");
     std::fs::create_dir_all(elsewhere.join("target")).unwrap();
-    std::os::unix::fs::symlink(elsewhere.join("target"), staging_path(&dir, "compact-new")).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("target"), staging_path(&dir, "compact-new"))
+        .unwrap();
     assert!(g.compact().is_err(), "swapped through a link");
-    assert!(!elsewhere.join("target.lock").exists(), "a lock was made where the link leads");
+    assert!(
+        !elsewhere.join("target.lock").exists(),
+        "a lock was made where the link leads"
+    );
     assert!(root.join("g.compact-new.lock").exists());
     drop(g);
     std::fs::remove_dir_all(&root).ok();
@@ -418,8 +502,15 @@ fn an_inside_only_opener_never_gets_a_store_mid_swap() {
     });
     g.compact().unwrap();
     fault::disarm();
-    assert!(got.borrow().is_empty(), "an inside-only opener got the store at {:?}", got.borrow());
-    assert!(dir_lock::lock_inside(&dir, false).is_err(), "the swapped graph lost its inside lock");
+    assert!(
+        got.borrow().is_empty(),
+        "an inside-only opener got the store at {:?}",
+        got.borrow()
+    );
+    assert!(
+        dir_lock::lock_inside(&dir, false).is_err(),
+        "the swapped graph lost its inside lock"
+    );
     drop(g);
     assert_intact(&dir);
     std::fs::remove_dir_all(&root).ok();
@@ -457,14 +548,27 @@ fn a_crash_after_removing_the_last_staging_record_is_recovered() {
             } else {
                 staging_path(&dir.join("named"), kind)
             };
+            if kind == "drop-old" {
+                std::fs::create_dir(&target).unwrap();
+                for (i, (_, child)) in g.named.iter().enumerate() {
+                    child
+                        .save_unlocked(&target.join(i.to_string()), Role::Child)
+                        .unwrap();
+                }
+                let id = read_marker(&dir).unwrap().unwrap().id.unwrap();
+                mark_staging(&target, "drop-old", &id).unwrap();
+            }
             let at = is(&target);
             fault::crash_at(move |step, p| step == step_name && at(p));
             if kind == "compact-old" {
                 let _ = g.compact();
             } else {
-                let _ = g.drop_named_durable(&iri("g1"));
+                let _ = recover_named_drop(&dir);
             }
-            assert!(fault::disarm() > 0, "cleanup did not reach {kind} {step_name}");
+            assert!(
+                fault::disarm() > 0,
+                "cleanup did not reach {kind} {step_name}"
+            );
             drop(g);
             let reopened = Graph::open(&dir).unwrap();
             assert!(has(&reopened, "a2"));
@@ -476,7 +580,7 @@ fn a_crash_after_removing_the_last_staging_record_is_recovered() {
     }
 }
 
-/// A renamed survivor tree recovers its matching names if the manifest publication stops.
+/// A refused manifest publication keeps the previous named set.
 #[test]
 fn a_named_drop_recovers_the_manifest_matching_its_survivors() {
     let root = scratch("drop-manifest");
@@ -488,9 +592,9 @@ fn a_named_drop_recovers_the_manifest_matching_its_survivors() {
     assert!(fault::disarm() > 0);
     drop(g);
     let g = Graph::open(&dir).expect("recover matching graph names and directories");
-    assert!(g.named_graph(&iri("g0")).is_none());
+    assert!(has(sub(&g, "g0"), "b2"));
     assert!(has(sub(&g, "g1"), "c"));
-    assert_eq!(g.named().len(), 1);
+    assert_eq!(g.named().len(), 2);
     drop(g);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -505,20 +609,33 @@ fn a_frozen_view_replays_root_and_named_transaction_logs_without_writing() {
     g.commit_txn(&[
         (true, None, triple("root-txn")),
         (true, Some(iri("g9")), triple("new-named-txn")),
-    ]).unwrap();
-    g.named[0].1.commit_txn(&[(true, None, triple("child-txn"))]).unwrap();
-    let paths = [dir.join("txn.log"), dir.join("named/0/txn.log"), dir.join("wal.log")];
+    ])
+    .unwrap();
+    g.named[0]
+        .1
+        .commit_txn(&[(true, None, triple("child-txn"))])
+        .unwrap();
+    let paths = [
+        dir.join("txn.log"),
+        dir.join("named/0/txn.log"),
+        dir.join("wal.log"),
+    ];
     let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
     let new = is(&staging_path(&dir, "compact-new"));
     let live = is(&dir);
     fault::fail_every(move |step, p| (step == "rename" && new(p)) || (step == "clear" && live(p)));
-    assert!(g.publish_staged_base_or_freeze(|graph, target, role| graph.save_unlocked(target, role)).is_err());
+    assert!(g
+        .publish_staged_base_or_freeze(|graph, target, role| graph.save_unlocked(target, role))
+        .is_err());
     assert!(fault::disarm() > 1);
     assert!(g.is_frozen());
     assert!(has(&g, "root-txn"));
     assert!(has(sub(&g, "g0"), "child-txn"));
     assert!(has(sub(&g, "g9"), "new-named-txn"));
-    assert!(g.named().iter().all(|(_, sub)| sub.is_frozen() && sub.check_writable().is_err()));
+    assert!(g
+        .named()
+        .iter()
+        .all(|(_, sub)| sub.is_frozen() && sub.check_writable().is_err()));
     let after: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
     assert_eq!(before, after, "frozen replay changed a log");
     drop(g);
@@ -537,12 +654,14 @@ fn a_panicking_named_swap_freezes_the_root_and_keeps_its_data() {
     let mut g = open_with_logged_update(&dir);
     let live = is(&dir.join("named/0"));
     fault::panic_at(move |step, p| step == "rename" && live(p));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.compact()));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.named[0].1.compact()));
     assert!(fault::disarm() > 0);
     assert!(result.is_err());
     assert!(g.is_frozen() && g.check_writable().is_err());
     assert!(g.apply_delta(&[triple("refused")], &[]).is_err());
-    assert!(g.apply_delta_to_named(1, &[triple("refused")], &[]).is_err());
+    assert!(g
+        .apply_delta_to_named(1, &[triple("refused")], &[])
+        .is_err());
     assert!(g.drop_named_durable(&iri("g1")).is_err());
     assert!(g.drop_all_named_durable().is_err());
     assert!(would_block(&dir));
@@ -559,7 +678,7 @@ fn retrying_a_named_compaction_after_staging_failure_keeps_logged_updates() {
     let mut g = open_with_logged_update(&dir);
     g.compact().unwrap();
     g.apply_delta_to_named(0, &[triple("b3")], &[]).unwrap();
-    let new = is(&staging_path(&dir.join("named/0"), "compact-new"));
+    let new = is(&staging_path(&dir, "compact-new"));
     fault::fail_when(move |step, p| step == "create" && new(p));
     assert!(g.compact().is_err());
     assert_eq!(fault::disarm(), 1);
@@ -581,10 +700,22 @@ fn read_only_replays_pending_logs_without_changing_their_bytes() {
         .as_mut()
         .unwrap()
         .append(&[
-            (true, None, triple("transaction")),
-            (false, Some(iri("g0")), triple("b")),
-            (true, Some(iri("g0")), triple("transaction-named")),
-            (true, Some(iri("fresh")), triple("fresh")),
+            TxnOp::Insert {
+                slot: None,
+                triple: triple("transaction"),
+            },
+            TxnOp::Delete {
+                slot: Some(iri("g0")),
+                triple: triple("b"),
+            },
+            TxnOp::Insert {
+                slot: Some(iri("g0")),
+                triple: triple("transaction-named"),
+            },
+            TxnOp::Insert {
+                slot: Some(iri("fresh")),
+                triple: triple("fresh"),
+            },
         ])
         .unwrap();
     drop(g);

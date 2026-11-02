@@ -177,6 +177,7 @@ test.describe("plan-explorer (web persona)", () => {
   });
 
   test("monitor lists an in-flight endpoint explain and Kill aborts it", async ({ page }) => {
+    await page.clock.install();
     // Idle state first.
     await expect(page.locator("[data-plan-monitor-empty]")).toBeVisible();
 
@@ -190,6 +191,10 @@ test.describe("plan-explorer (web persona)", () => {
 
     const row = page.locator("[data-plan-monitor-row]");
     await expect(row).toBeVisible();
+    const elapsed = row.locator("span").last();
+    const initialElapsed = await elapsed.textContent();
+    await page.clock.fastForward(1000);
+    await expect(elapsed).not.toHaveText(initialElapsed!);
     const kill = row.locator("[data-plan-kill]");
     await expect(kill).toBeEnabled();
     await kill.click();
@@ -256,6 +261,28 @@ test.describe("plan-explorer (web persona)", () => {
     await expect(message).toHaveClass(/text-muted-foreground/);
     await page.clock.fastForward(5_000);
     expect(calls).toBe(1);
+  });
+
+  test("changing endpoint credentials stops monitoring until explicitly restarted", async ({ page }) => {
+    const tokens: (string | undefined)[] = [];
+    await page.route("http://127.0.0.1:7788/queries**", (route) => {
+      tokens.push(route.request().headers().authorization);
+      void route.fulfill({ json: { queries: [] } });
+    });
+    await page.locator("[data-plan-endpoint-url]").fill(MOCK_URL);
+    const token = page.locator("[data-plan-endpoint-token]");
+    await token.fill("first-token");
+    const toggle = page.locator("[data-plan-endpoint-monitor-toggle]");
+    await toggle.click();
+    await expect(page.locator("[data-plan-endpoint-monitor-empty]")).toBeVisible();
+    expect(tokens.at(-1)).toBe("Bearer first-token");
+
+    await token.fill("replacement-token");
+    await expect(toggle).toHaveText("Monitor endpoint");
+    await expect(page.locator("[data-plan-endpoint-monitor-empty]")).toBeHidden();
+    await toggle.click();
+    await expect(page.locator("[data-plan-endpoint-monitor-empty]")).toBeVisible();
+    expect(tokens.at(-1)).toBe("Bearer replacement-token");
   });
 
   test("endpoint monitoring blocks a token only for non-loopback plaintext", async ({ page }) => {

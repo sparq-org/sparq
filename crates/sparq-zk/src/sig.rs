@@ -84,6 +84,7 @@
 //! the ladder does not upgrade the *claim*. The crate remains **research-grade
 //! and externally unaudited** (CR-G1, `sq-qhy4`).
 
+use crate::commit::CommitmentMethod;
 use crate::field::Fr;
 use crate::poseidon2;
 use ark_ec::{twisted_edwards::Affine, AffineRepr, CurveGroup, PrimeGroup};
@@ -122,6 +123,15 @@ const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
 pub enum SignatureScheme {
     /// Schnorr over Baby-JubJub with a Poseidon2 challenge (`zk:poseidon2-schnorr-v1`).
     Poseidon2SchnorrV1,
+}
+
+/// A graph commitment paired with the method used to build it, for issuance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodCommitment {
+    /// The commitment's encoding method.
+    pub method: CommitmentMethod,
+    /// The graph commitment `C(G)`.
+    pub commitment: Fr,
 }
 
 impl SignatureScheme {
@@ -451,6 +461,32 @@ impl SecretKey {
         SecretKey(JjScalar::rand(&mut rng))
     }
 
+    /// Issue a method-bound attestation over a typed graph commitment.
+    ///
+    /// Always binds `scheme_iri_to_field(c.method.scheme_iri())`, the salt and
+    /// status reference. `None` selects the presentation message (`ZKSIG_M5`);
+    /// `Some` also binds the holder key digest (`ZKSIG_M4`).
+    pub fn attest(
+        &self,
+        c: &MethodCommitment,
+        salt: &Fr,
+        status_ref: &Fr,
+        holder_pk_digest: Option<&Fr>,
+    ) -> String {
+        let scheme_digest = scheme_iri_to_field(c.method.scheme_iri());
+        match holder_pk_digest {
+            None => self.sign_presentation_with_status_and_scheme(
+                &c.commitment, salt, status_ref, &scheme_digest,
+            ),
+            Some(holder) => self.sign_commitment_with_holder_and_scheme(
+                &c.commitment, salt, status_ref, holder, &scheme_digest,
+            ),
+        }
+    }
+
+    /// String-canonical (legacy) commitments only; for any other method use
+    /// [`SecretKey::attest`].
+    ///
     /// Sign a per-graph commitment under this key, returning the signature hex
     /// (`compressed(R) ‖ s`). The signed message is the domain-separated
     /// commitment message, matching [`verify`] on the verifier side.
@@ -474,6 +510,9 @@ impl SecretKey {
         signature_to_hex(&sig)
     }
 
+    /// String-canonical (legacy) commitments only; for any other method use
+    /// [`SecretKey::attest`].
+    ///
     /// Sign a per-graph commitment AND its salt (audit #9), returning the
     /// signature hex. The signed message is [`commitment_message_with_salt`], so
     /// the salt under which the graph was committed is issuer-attested. Same
@@ -484,6 +523,9 @@ impl SecretKey {
         signature_to_hex(&sig)
     }
 
+    /// String-canonical (legacy) commitments only; for any other method use
+    /// [`SecretKey::attest`].
+    ///
     /// Sign a per-graph commitment, its salt, AND its status-list reference
     /// digest (audit #12), returning the signature hex. The signed message is
     /// [`commitment_message_with_status`], so the credential's revocation
@@ -504,6 +546,9 @@ impl SecretKey {
         signature_to_hex(&sig)
     }
 
+    /// String-canonical (legacy) commitments only; for any other method use
+    /// [`SecretKey::attest`].
+    ///
     /// Sign a per-graph commitment, its salt, its status-list reference digest,
     /// AND a HOLDER-public-key digest (sq-y464, HolderPoP T1), returning the
     /// signature hex. The signed message is [`commitment_message_with_holder`], so

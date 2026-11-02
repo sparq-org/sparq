@@ -31,6 +31,7 @@
 // unsigned dev builds.
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { toast } from "sonner";
 import {
   Apple,
@@ -798,12 +799,9 @@ function CliServerCard({
 
 export function DownloadClient({ children }: { children?: React.ReactNode }) {
   // null until hydrated → SSR renders the full grid with nothing promoted (no hydration mismatch).
-  const [detected, setDetected] = React.useState<OsKey | null>(null);
+  const hydrated = useHydrated();
+  const detected = hydrated ? detectOs() : null;
   const release = useLatestRelease();
-
-  React.useEffect(() => {
-    setDetected(detectOs());
-  }, []);
 
   const primary = React.useMemo(
     () => (detected ? GUI_PLATFORMS.find((p) => p.os === detected) ?? null : null),

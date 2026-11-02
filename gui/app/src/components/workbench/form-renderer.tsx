@@ -26,8 +26,16 @@ function replaceField(description: FormDescription, gi: number, fi: number, fiel
 export function FormRenderer({ description, mode, onDescriptionChange, onModeRequest, onShapeRequest, showToolbar = true }: FormRendererProps) {
   const [draft, setDraft] = React.useState(description);
   const [localMode, setLocalMode] = React.useState<FormMode>(mode ?? description.mode);
-  React.useEffect(() => setDraft(description), [description]);
-  React.useEffect(() => setLocalMode(mode ?? description.mode), [description.mode, mode]);
+  const [previousDescription, setPreviousDescription] = React.useState(description);
+  const [previousMode, setPreviousMode] = React.useState({ mode, descriptionMode: description.mode });
+  if (previousDescription !== description) {
+    setPreviousDescription(description);
+    setDraft(description);
+  }
+  if (previousMode.mode !== mode || previousMode.descriptionMode !== description.mode) {
+    setPreviousMode({ mode, descriptionMode: description.mode });
+    setLocalMode(mode ?? description.mode);
+  }
   const updateField = (gi: number, fi: number, field: FormField) => {
     const next = replaceField(draft, gi, fi, field); setDraft(next); onDescriptionChange?.(next);
   };
@@ -51,11 +59,15 @@ export function FormRenderer({ description, mode, onDescriptionChange, onModeReq
 function FieldRow({ field, mode, onChange }: { field: FormField; mode: FormMode; onChange: (field: FormField) => void }) {
   const editing = mode === "edit" && field.editable && !!field.widget.editor;
   // The widget object is preserved when only values change. Depending on the whole field here
-  // would rebuild `options`, retrigger the selection effect, and erase a user's alternative.
+  // would rebuild `options` and erase a user's alternative.
   const options = React.useMemo(() => widgetChoiceOptions(field.widget, editing ? "edit" : "view"), [field.widget, editing]);
   const automatic = editing ? field.widget.editor : field.widget.viewer;
   const [widget, setWidget] = React.useState(automatic ?? options[0] ?? "");
-  React.useEffect(() => setWidget(automatic ?? options[0] ?? ""), [automatic, options]);
+  const [previousChoice, setPreviousChoice] = React.useState({ automatic, options });
+  if (previousChoice.automatic !== automatic || previousChoice.options !== options) {
+    setPreviousChoice({ automatic, options });
+    setWidget(automatic ?? options[0] ?? "");
+  }
   const updateTerm = (index: number, term: TermRef) => { const values = field.values.slice(); values[index] = values[index] ? { ...values[index], term } : { term }; onChange({ ...field, values }); };
   const updateNested = (index: number, nested: FormDescription) => onChange({ ...field, values: field.values.map((value, i) => i === index ? { ...value, nested } : value) });
   const minimum = field.constraints.min_count ?? (field.required ? 1 : 0);

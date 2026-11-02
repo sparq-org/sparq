@@ -130,7 +130,7 @@ export function SolidPairsDemo() {
     [ensureStore],
   );
 
-  const run = React.useCallback(async () => {
+  const run = React.useCallback(async (nextSession = session, nextCompare = compare) => {
     // A custom query is just text — guard the empty/whitespace case before touching wasm.
     if (query.trim().length === 0) {
       const message = "Enter a SPARQL query to run.";
@@ -145,8 +145,8 @@ export function SolidPairsDemo() {
       // A bad custom query throws inside the wasm engine — caught below and shown as a
       // friendly inline message (per pair) instead of crashing the page.
       const [a, b] = await Promise.all([
-        runFor(session, query),
-        runFor(compare, query),
+        runFor(nextSession, query),
+        runFor(nextCompare, query),
       ]);
       setState({ kind: "done", result: a });
       setCompareState({ kind: "done", result: b });
@@ -165,10 +165,6 @@ export function SolidPairsDemo() {
   // Re-run automatically when a selector changes, if we've already run once. (Editing the
   // query does NOT auto-run — the user drives that with the Run button.)
   const hasRun = state.kind === "done" || state.kind === "error";
-  React.useEffect(() => {
-    if (hasRun) void run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, compareId]);
 
   const busy = state.kind === "loading" || state.kind === "running";
 
@@ -244,17 +240,23 @@ export function SolidPairsDemo() {
           <SessionPicker
             legend="Pair A"
             value={sessionId}
-            onChange={setSessionId}
+            onChange={(id) => {
+              setSessionId(id);
+              if (hasRun && id !== sessionId) void run(SESSIONS.find((s) => s.id === id)!, compare);
+            }}
             accent="primary"
           />
           <SessionPicker
             legend="Pair B"
             value={compareId}
-            onChange={setCompareId}
+            onChange={(id) => {
+              setCompareId(id);
+              if (hasRun && id !== compareId) void run(session, SESSIONS.find((s) => s.id === id)!);
+            }}
             accent="muted"
           />
           <div className="md:col-span-2">
-            <Button onClick={run} disabled={busy}>
+            <Button onClick={() => void run()} disabled={busy}>
               {busy ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               ) : (

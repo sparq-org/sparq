@@ -33,7 +33,7 @@ use sparq_zk::commit::{commit_triples, GraphCommitment};
 use sparq_zk::encode::{encode_term, salt_from_bytes};
 use sparq_zk::field::{field_to_hex, Fr};
 use sparq_zk_compose::build::{build_filter_int, build_scan, Pattern, Slot};
-use sparq_zk_compose::driver::CircuitProver;
+use sparq_zk_compose::driver::{CircuitProver, DriverError};
 use sparq_zk_compose::manifest::{FieldHex, FilterOp, ProofInputs};
 use sparq_zk_compose::toml::prover_toml_for;
 
@@ -261,18 +261,65 @@ fn encode_value_hex(value: u64, salt: Fr) -> String {
 const DEFAULT_ITERS: u64 = 24;
 /// The heavy (`#[ignore]`) full-prove iteration count (each is ~1-2s of bb).
 const HEAVY_ITERS: u64 = 6;
+/// A run keeps drawing past its iteration count until it has exercised at least
+/// one FILTER leg (and, for the heavy variant, one proof), up to this many draws
+/// per requested iteration. Without it a base seed whose first draws carry no
+/// FILTER (`SPARQ_FUZZ_SEED=5` is one) would prove nothing and still pass.
+const MAX_DRAWS_PER_ITER: u64 = 16;
+
+/// The constraint `filter_int_check` asserts on the verdict (`filter_int.nr`). A
+/// flipped verdict counts as REFUSED only when nargo names it; a spawn, compile
+/// or I/O failure would also leave no witness and must not count.
+const VERDICT_DIAGNOSTIC: &str = "filter verdict mismatch";
+
+/// What one differential run actually exercised, counted per OPERATION so a run
+/// that only scanned cannot pass on the scan count alone.
+#[derive(Debug, Default)]
+struct FuzzCounts {
+    /// In-family cases: scan differential + honest scan witness.
+    scans: u64,
+    /// FILTER legs whose honest verdict produced a witness.
+    filters: u64,
+    /// Honest FILTER results that exclude the matched row.
+    false_verdicts: u64,
+    /// Flipped verdicts nargo refused with [`VERDICT_DIAGNOSTIC`].
+    lies_refused: u64,
+    /// Heavy only: `bb prove` runs of an honest FILTER.
+    proofs: u64,
+    /// Heavy only: `bb verify` accepted the proof just made.
+    verified: u64,
+    /// Heavy only: `prove_in` of a flipped verdict refused with the diagnostic.
+    lies_unproved: u64,
+}
+
+/// `result` must be nargo refusing a witness with [`VERDICT_DIAGNOSTIC`].
+fn assert_verdict_refused<T: std::fmt::Debug>(result: Result<T, DriverError>, what: &str) {
+    match result {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool.starts_with("nargo") && stderr.contains(VERDICT_DIAGNOSTIC),
+            "{what}: expected nargo to refuse with `{VERDICT_DIAGNOSTIC}`, got `{tool}`:\n{stderr}"
+        ),
+        Err(other) => panic!("{what}: infrastructure failure, not a constraint refusal: {other}"),
+        Ok(v) => panic!("SOUNDNESS VIOLATION: {what} was accepted: {v:?}"),
+    }
+}
 
 /// Core differential body shared by the cheap + heavy variants. `full_prove`
-/// selects whether each case runs a real `bb prove` + `verify_manifest` (heavy)
-/// or only `nargo execute` witness-gen (cheap, but still the full in-circuit
-/// relation). Returns the number of cases actually exercised (some are skipped
-/// as out-of-family, which is not a failure).
-fn run_differential(iters: u64, full_prove: bool) -> u64 {
+/// selects whether each case runs a real `bb prove` + `bb verify` (heavy) or only
+/// `nargo execute` witness-gen (cheap, but still the full in-circuit relation).
+/// Draws at least `iters` cases and keeps drawing (bounded) until a FILTER leg —
+/// and for the heavy variant a proof — has run. Returns what was exercised (some
+/// draws are skipped as out-of-family, which is not a failure).
+fn run_differential(iters: u64, full_prove: bool) -> FuzzCounts {
     let prover = CircuitProver::from_crate_root();
     let base = base_seed();
-    let mut exercised = 0u64;
+    let mut counts = FuzzCounts::default();
 
-    for i in 0..iters {
+    for i in 0..iters * MAX_DRAWS_PER_ITER {
+        let enough = counts.false_verdicts > 0 && (!full_prove || counts.proofs > 0);
+        if i >= iters && enough {
+            break;
+        }
         // Per-iteration seed derived from the base — printed on failure.
         let seed = base ^ (i.wrapping_mul(0x100_0000_01b3));
         let mut rng = Rng::new(seed);
@@ -289,7 +336,7 @@ fn run_differential(iters: u64, full_prove: bool) -> u64 {
             // Out-of-family input (no compiled member fits) — skip, not a bug.
             continue;
         };
-        exercised += 1;
+        counts.scans += 1;
 
         // ---- SCAN differential: disclosed rows vs cleartext matches. ----
         let zk_rows = zk_scan_disclosed_encodings(&scan.inputs);
@@ -362,9 +409,12 @@ fn run_differential(iters: u64, full_prove: bool) -> u64 {
                         )
                     });
 
+                counts.filters += 1;
+                counts.false_verdicts += u64::from(!expected);
+
                 // ...and the FLIPPED verdict must be UNPROVABLE (soundness: the
-                // circuit must not let a lie pass). nargo execute signals
-                // unsatisfiability by NOT writing a witness => gen_witness errs.
+                // circuit must not let a lie pass), refused on the verdict
+                // constraint itself rather than for any other reason.
                 let Some((lie_inputs, lie_digits)) =
                     build_filter_int(operand_enc, value, op, bound, !expected)
                 else {
@@ -373,14 +423,15 @@ fn run_differential(iters: u64, full_prove: bool) -> u64 {
                 let (lid, ltoml) =
                     prover_toml_for(&lie_inputs, &challenge, &[], &[], &lie_digits, None, None).unwrap();
                 let ltag = format!("fuzz_filter_lie_{i}");
-                let lie_witness = prover.gen_witness_tagged(&lid, &ltoml, &ltag);
-                assert!(
-                    lie_witness.is_err(),
-                    "SOUNDNESS VIOLATION (seed {seed:#x}): the circuit produced a \
-                     witness for the FALSE verdict {value} {op:?} {bound} = {} \
-                     (cleartext says {expected})",
-                    !expected
+                assert_verdict_refused(
+                    prover.gen_witness_tagged(&lid, &ltoml, &ltag),
+                    &format!(
+                        "(seed {seed:#x}) a witness for the FALSE verdict {value} {op:?} {bound} = {} \
+                         (cleartext says {expected})",
+                        !expected
+                    ),
                 );
+                counts.lies_refused += 1;
 
                 // Heavy variant: a real bb prove of the honest filter, then bb
                 // verify, asserting the proved PUBLIC verdict equals cleartext.
@@ -389,6 +440,7 @@ fn run_differential(iters: u64, full_prove: bool) -> u64 {
                     let art = prover
                         .prove_in(&fid, &ftoml, &out, &format!("fuzz_prove_{i}"))
                         .expect("honest filter proves");
+                    counts.proofs += 1;
                     let ok = prover
                         .verify(&art, &out.join("verify"))
                         .expect("bb verify runs");
@@ -397,26 +449,46 @@ fn run_differential(iters: u64, full_prove: bool) -> u64 {
                         "PROOF of the honest cleartext verdict failed to verify \
                          (seed {seed:#x}): {value} {op:?} {bound} = {expected}"
                     );
+                    counts.verified += 1;
+                    // FILTER-negative: the flipped verdict must not PROVE either.
+                    assert_verdict_refused(
+                        prover.prove_in(&lid, &ltoml, &out, &format!("fuzz_prove_lie_{i}")),
+                        &format!(
+                            "(seed {seed:#x}) a proof of the FALSE verdict {value} {op:?} \
+                             {bound} = {}",
+                            !expected
+                        ),
+                    );
+                    counts.lies_unproved += 1;
                     let _ = std::fs::remove_dir_all(&out);
                 }
             }
         }
     }
-    exercised
+    counts
 }
 
 /// sq-61g — the default CI-sane differential fuzzer (cheap witness path). Runs a
 /// modest number of random cases; each asserts the ZK disclosed scan rows equal
 /// cleartext matches, the honest FILTER verdict is provable, and the FLIPPED
-/// verdict is UNprovable (soundness). Skips cleanly if nargo/bb absent.
+/// verdict is UNprovable (soundness), refused on the verdict constraint.
 #[test]
 fn differential_fuzz_witness_path() {
-    if !support::require_toolchain("differential_fuzz_witness_path", &["nargo", "bb"]) {
+    let Some(live) = support::gate("differential_fuzz_witness_path", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let n = run_differential(DEFAULT_ITERS, false);
-    eprintln!("differential_fuzz_witness_path: {n} in-family cases exercised");
-    assert!(n > 0, "no in-family fuzz cases were exercised — generator is broken");
+    eprintln!("differential_fuzz_witness_path: {n:?}");
+    assert!(
+        n.scans > 0,
+        "no in-family fuzz cases were exercised — generator is broken"
+    );
+    assert!(
+        n.false_verdicts > 0 && n.lies_refused == n.filters,
+        "every exercised FILTER leg must refuse its flipped verdict, and at least one \
+         must run: {n:?}"
+    );
+    support::complete(live);
 }
 
 /// sq-61g (heavy) — the full prove→verify→compare-to-cleartext fuzzer. Each case
@@ -431,12 +503,26 @@ fn differential_fuzz_witness_path() {
 #[test]
 #[ignore = "slow: full bb prove per fuzz case (sq-61g heavy variant)"]
 fn differential_fuzz_full_prove() {
-    if !support::require_toolchain("differential_fuzz_full_prove", &["nargo", "bb"]) {
+    let Some(live) = support::gate("differential_fuzz_full_prove", &["nargo", "bb"]) else {
         return;
-    }
+    };
     let n = run_differential(HEAVY_ITERS, true);
-    eprintln!("differential_fuzz_full_prove: {n} in-family cases exercised (full bb prove)");
-    assert!(n > 0, "no in-family fuzz cases were exercised — generator is broken");
+    eprintln!("differential_fuzz_full_prove: {n:?}");
+    assert!(
+        n.scans > 0,
+        "no in-family fuzz cases were exercised — generator is broken"
+    );
+    // The proof count is what this variant exists for: a stream with no matched
+    // FILTER would otherwise pass after scans alone.
+    assert!(
+        n.false_verdicts > 0
+            && n.proofs > 0
+            && n.verified == n.proofs
+            && n.lies_unproved == n.proofs,
+        "the heavy fuzzer must prove AND verify at least one honest FILTER, and refuse \
+         to prove each flipped verdict: {n:?}"
+    );
+    support::complete(live);
 }
 
 // --- sq-wto: the FILTER digit-bucket completeness fix --------------------------
@@ -467,9 +553,12 @@ use sparq_zk_compose::manifest::CircuitId;
 /// preserved by the new member).
 #[test]
 fn sq_wto_three_digit_operand_proves_not_silently_unprovable() {
-    if !support::require_toolchain("sq_wto_three_digit_operand_proves_not_silently_unprovable", &["nargo", "bb"]) {
+    let Some(live) = support::gate(
+        "sq_wto_three_digit_operand_proves_not_silently_unprovable",
+        &["nargo", "bb"],
+    ) else {
         return;
-    }
+    };
     let value: u64 = 123; // 3 digits — the old smallest-bucket bug's witness.
     // Derivation picks the EXACT d=3 member (not the old wrong d=4).
     assert_eq!(
@@ -502,10 +591,14 @@ fn sq_wto_three_digit_operand_proves_not_silently_unprovable() {
         build_filter_int(operand_enc, value, op, bound, !expected).expect("builds");
     let (lid, ltoml) = prover_toml_for(&lie_inputs, &FieldHex("0x2a".into()), &[], &[], &lie_digits, None, None).unwrap();
     let lie = prover.gen_witness_tagged(&lid, &ltoml, "wto_d3_lie");
-    assert!(
-        lie.is_err(),
-        "sq-wto: the FALSE verdict over a 3-digit operand must remain UNprovable"
-    );
+    match lie {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool == "nargo execute" && stderr.contains("filter verdict mismatch"),
+            "sq-wto: the flipped verdict must fail its constraint, got {tool}: {stderr}"
+        ),
+        other => panic!("expected the FILTER-verdict diagnostic, got {other:?}"),
+    }
+    support::complete(live);
 }
 
 /// A 5-digit operand: out of the compiled family, so `build_filter_int` must

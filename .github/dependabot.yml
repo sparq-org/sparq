@@ -134,10 +134,10 @@ updates:
           - minor
           - patch
     ignore:
-      # eslint 10 breaks `next lint` in site/ and gui/app: eslint-config-next 15 fails
-      # to load ("Failed to patch ESLint because the calling module was not
-      # recognized"). Hold the major until both apps move to Next 16 and the ESLint
-      # CLI. Only version updates are held; security updates still come through.
+      # Both site/ and gui/app are on Next 16 and the ESLint CLI. The major hold stays
+      # until gui/app's React Compiler lint overrides are removed too (#6986), so an
+      # eslint major lands on two apps that lint clean.
+      # Only version updates are held; security updates still come through.
       - dependency-name: "eslint"
         update-types:
           - version-update:semver-major

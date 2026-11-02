@@ -12,7 +12,7 @@ import { useTheme } from "next-themes";
 import { Moon, Sun, Command, ExternalLink, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useEngine } from "@/lib/engine-context";
+import { subscribeRuntime as subscribeNoop, useEngine } from "@/lib/engine-context";
 import { useCommandPalette } from "@/components/workbench/command-palette";
 import { useImportDrawer } from "@/components/workbench/import-drawer";
 
@@ -44,8 +44,7 @@ function StatusLed() {
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => setMounted(true), []);
+  const mounted = React.useSyncExternalStore(subscribeNoop, () => true, () => false);
   if (!mounted) {
     return <Button variant="ghost" size="icon-sm" aria-label="Toggle theme" />;
   }

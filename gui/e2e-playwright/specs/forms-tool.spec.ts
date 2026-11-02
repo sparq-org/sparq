@@ -1,5 +1,6 @@
 // [GPT-5.6] sq-3eukz — desktop Forms journey over the active workspace + mocked Tauri adapter.
 import { test, expect, readIpcLog } from "../support/index.ts";
+import { readFile } from "node:fs/promises";
 
 const EX = "http://example.org/";
 
@@ -66,5 +67,34 @@ test.describe("forms-tool (desktop persona)", () => {
     await panel.locator("[data-load-form-json]").click();
     await expect(panel.getByRole("alert")).toContainText("focus");
     await expect(panel.locator("[data-form-focus]")).toContainText(`${EX}alice`);
+  });
+
+  test("manual form edits retain focus and widget choice until the mode changes", async ({ page }) => {
+    const panel = page.locator('[data-tool-panel="forms"]');
+    const json = await readFile(new URL(
+      "../../../crates/sparq-forms/tests/fixtures/person_groups.golden.json",
+      import.meta.url,
+    ), "utf8");
+    await panel.locator("[data-form-json-source]").evaluate((details: HTMLDetailsElement) => {
+      details.open = true;
+    });
+    await panel.getByRole("textbox", { name: "FormDescription JSON" }).fill(json);
+    await panel.locator("[data-load-form-json]").click();
+
+    const field = panel.locator('[data-form-field="Full name"]');
+    await expect(field).toBeVisible();
+    await expect(panel.getByRole("status").filter({ hasText: "Deriving the complete form" })).toBeHidden();
+    const widget = field.locator("[data-widget-switcher]");
+    await widget.selectOption({ label: "TextAreaEditor" });
+    const input = field.getByRole("textbox", { name: "Full name", exact: true });
+    await input.fill("Edited name");
+    await expect(input).toBeFocused();
+    await expect(field.locator('[data-field-editor="textarea"]')).toBeVisible();
+
+    await panel.locator('[data-form-mode-choice="view"]').click();
+    await expect(field).toContainText("Edited name");
+    await panel.locator('[data-form-mode-choice="edit"]').click();
+    await expect(field.locator('[data-field-editor="text"]')).toBeVisible();
+    await expect(input).toHaveValue("Edited name");
   });
 });

@@ -12,6 +12,7 @@ import { FormRenderer } from "@/components/workbench/form-renderer";
 import { useEngine, type FormResource } from "@/lib/engine-context";
 import {
   deriveForm,
+  formWorkspaceSnapshot,
   FormsBridgeUnavailableError,
   type DeriveFormResult,
 } from "@/lib/forms-bridge";
@@ -49,70 +50,86 @@ export function FormsTool() {
     listFormResources,
     wasmDeriveForm,
   } = useEngine();
-  const [resources, setResources] = React.useState<FormResource[]>([]);
   const [selection, setSelection] = React.useState<DeriveSelection | null>(null);
   const [description, setDescription] = React.useState<FormDescription | null>(null);
   const [descriptionOrigin, setDescriptionOrigin] = React.useState<"workspace" | "manual" | null>(
     null,
   );
-  const [deriveState, setDeriveState] = React.useState<DeriveState>({ kind: "idle" });
+  const [derivation, setDerivation] = React.useState<{
+    selection: DeriveSelection | null;
+    storeEpoch: number;
+    state: DeriveState;
+  } | null>(null);
   const [manualJson, setManualJson] = React.useState("");
   const [manualError, setManualError] = React.useState<string | null>(null);
   const requestGeneration = React.useRef(0);
-  const originRef = React.useRef<typeof descriptionOrigin>(null);
-  originRef.current = descriptionOrigin;
 
   const ready = status.kind === "ready";
 
   // Every content epoch (workspace hydration, import, or update) replaces the candidate list.
-  // Keeping the selected resource when it still exists lets the derivation effect below refresh
-  // that same description; otherwise the first resource becomes the operational default.
-  React.useEffect(() => {
-    if (!ready) return;
+  const candidates = React.useMemo(() => {
     try {
-      const next = listFormResources();
-      setResources(next);
-      setSelection((previous) => {
-        if (next.length === 0) return null;
-        const retained = previous
-          ? next.find((candidate) => resourceKey(candidate) === resourceKey(previous.focus))
-          : undefined;
-        if (retained && previous) return { ...previous, focus: retained };
-        return { focus: next[0], mode: previous?.mode ?? "edit" };
-      });
-      if (next.length === 0 && originRef.current === "workspace") {
-        requestGeneration.current += 1;
+      return {
+        storeEpoch,
+        resources: ready ? listFormResources() : [],
+        error: null,
+      };
+    } catch (cause) {
+      return {
+        storeEpoch, resources: [],
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  }, [ready, storeEpoch, listFormResources]);
+  const { resources } = candidates;
+  const [previousCandidates, setPreviousCandidates] = React.useState<typeof candidates | null>(null);
+  if (previousCandidates !== candidates) {
+    setPreviousCandidates(candidates);
+    if (ready) {
+      const retained = selection
+        ? resources.find((candidate) => resourceKey(candidate) === resourceKey(selection.focus))
+        : undefined;
+      setSelection(resources.length === 0
+        ? null
+        : retained && selection
+          ? { ...selection, focus: retained }
+          : { focus: resources[0], mode: selection?.mode ?? "edit" });
+      if (resources.length === 0 && !candidates.error && descriptionOrigin === "workspace") {
         setDescription(null);
         setDescriptionOrigin(null);
-        setDeriveState({ kind: "idle" });
       }
-    } catch (cause) {
-      setResources([]);
-      setSelection(null);
-      setDeriveState({
-        kind: "error",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
     }
-  }, [listFormResources, ready, storeEpoch]);
+  }
+  // Resolve resources and selection first; an unselected/manual form needs no dataset copy.
+  // Wait for candidate reconciliation so a store epoch serializes only the resolved selection.
+  const { snapshot, error: snapshotError } = React.useMemo(
+    () => formWorkspaceSnapshot(
+      ready && previousCandidates === candidates && candidates.error === null,
+      selection,
+      snapshotStore,
+    ),
+    [ready, previousCandidates, candidates, selection, snapshotStore],
+  );
+  let deriveState: DeriveState = { kind: "idle" };
+  const error = candidates.error ?? snapshotError;
+  if (error !== null) {
+    deriveState = { kind: "error", message: error };
+  } else if (ready && selection !== null) {
+    deriveState = snapshot === null ? {
+      kind: "error", message: "The active workspace could not be serialized for form derivation.",
+    }
+    : derivation?.selection === selection && derivation.storeEpoch === candidates.storeEpoch
+      ? derivation.state : { kind: "deriving" };
+  }
 
   // This is the only operational derivation path. The exact same N-Quads snapshot is the data
   // and shapes input on both hosts, so a store epoch, focus, mode, or shape change replaces the
   // entire validated description returned by Tauri/wasm.
   React.useEffect(() => {
-    if (!ready || selection === null) return;
-    const snapshot = snapshotStore();
-    if (snapshot === null) {
-      setDeriveState({
-        kind: "error",
-        message: "The active workspace could not be serialized for form derivation.",
-      });
-      return;
-    }
+    if (!ready || selection === null || snapshot === null) return;
 
     const generation = ++requestGeneration.current;
     let cancelled = false;
-    setDeriveState({ kind: "deriving" });
     void deriveForm(
       {
         data: snapshot,
@@ -129,16 +146,21 @@ export function FormsTool() {
         setDescription(result.description);
         setDescriptionOrigin("workspace");
         setManualError(null);
-        setDeriveState({ kind: "ready", source: result.source });
+        setDerivation({ selection, storeEpoch, state: { kind: "ready", source: result.source } });
       })
       .catch((cause: unknown) => {
         if (cancelled || generation !== requestGeneration.current) return;
         if (cause instanceof FormsBridgeUnavailableError) {
-          setDeriveState({ kind: "unavailable", message: cause.message });
+          setDerivation({
+            selection, storeEpoch, state: { kind: "unavailable", message: cause.message },
+          });
         } else {
-          setDeriveState({
-            kind: "error",
-            message: cause instanceof Error ? cause.message : String(cause),
+          setDerivation({
+            selection, storeEpoch,
+            state: {
+              kind: "error",
+              message: cause instanceof Error ? cause.message : String(cause),
+            },
           });
         }
       });
@@ -146,7 +168,7 @@ export function FormsTool() {
     return () => {
       cancelled = true;
     };
-  }, [ready, selection, snapshotStore, storeEpoch, wasmDeriveForm]);
+  }, [ready, selection, snapshot, storeEpoch, wasmDeriveForm]);
 
   const loadManualJson = () => {
     try {
@@ -156,7 +178,7 @@ export function FormsTool() {
       setDescription(parsed);
       setDescriptionOrigin("manual");
       setManualError(null);
-      setDeriveState({ kind: "idle" });
+      setDerivation({ selection: null, storeEpoch, state: { kind: "idle" } });
     } catch (cause) {
       setManualError(cause instanceof Error ? cause.message : String(cause));
     }

@@ -81,3 +81,9 @@
   crate: "sparq-zk"
   features: "vc-bridge"
   test: true
+
+# Cover ValueOnlyV1 typed issuance alongside the dual-leaf methods.
+- name: "sparq-zk (dual-leaf + commitment-value-only — typed issuance)"
+  crate: "sparq-zk"
+  features: "dual-leaf,commitment-value-only"
+  test: true

@@ -122,7 +122,9 @@ impl Drop for Mutating<'_> {
 pub struct Tracked<S> {
     inner: std::sync::Arc<S>,
     gens: std::sync::Arc<Generations>,
-    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one (so a
+    #[cfg(feature = "sparql-endpoint")]
+    snapshot: std::sync::Arc<super::snapshot::Gate>,
+    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own (so a
     /// `Tracked` over a `Tracked` shares its lease), shared by every clone, so a service built
     /// over a clone, or over a wrapper of one, is refused while this one runs.
     lifecycle: std::sync::Arc<crate::store::Lifecycle>,
@@ -133,21 +135,59 @@ impl<S> Clone for Tracked<S> {
         Self {
             inner: self.inner.clone(),
             gens: self.gens.clone(),
+            #[cfg(feature = "sparql-endpoint")]
+            snapshot: self.snapshot.clone(),
             lifecycle: self.lifecycle.clone(),
         }
     }
 }
 
 impl<S: Store> Tracked<S> {
-    /// Track `inner`, whose storage root is `root`. Its backend's lease is `inner`'s own when it
-    /// keeps one ([`Store::lifecycle`]), and a new one otherwise: no caller chooses it, so
+    /// Track `inner`, whose storage root is `root`. Its backend's lease is always `inner`'s own
+    /// ([`Store::lifecycle`]): no caller chooses it, so
     /// wrapping a store that is already tracked keeps the lease of the service running over it.
     pub fn new(inner: S, root: String) -> Self {
         Self {
-            lifecycle: inner.lifecycle().unwrap_or_default(),
+            lifecycle: inner.lifecycle(),
             inner: std::sync::Arc::new(inner),
             gens: std::sync::Arc::new(Generations::new(root)),
+            #[cfg(feature = "sparql-endpoint")]
+            snapshot: Default::default(),
         }
+    }
+
+    pub(crate) async fn change<T>(
+        &self,
+        work: impl std::future::Future<Output = T>,
+    ) -> ServerResult<T> {
+        #[cfg(feature = "sparql-endpoint")]
+        {
+            self.snapshot.change(work).await
+        }
+        #[cfg(not(feature = "sparql-endpoint"))]
+        {
+            Ok(work.await)
+        }
+    }
+
+    pub(crate) async fn publish<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        let mut work = std::pin::pin!(work);
+        loop {
+            if let Ok(out) = self.change(work.as_mut()).await {
+                return out;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[cfg(feature = "sparql-endpoint")]
+    pub(crate) async fn snapshot(&self, barrier: bool) -> Option<super::snapshot::Snapshot> {
+        self.snapshot.snapshot(barrier).await
+    }
+
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    pub(crate) fn barrier_pending(&self) -> bool {
+        self.snapshot.barrier_pending()
     }
 
     /// The snapshot counters.
@@ -167,6 +207,50 @@ impl<S> std::ops::Deref for Tracked<S> {
 
 #[async_trait]
 impl<S: Store> Store for Tracked<S> {
+    fn history_config(&self) -> crate::store::history::HistoryConfig {
+        self.inner.history_config()
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> ServerResult<Vec<crate::store::history::VersionEntry>> {
+        self.inner.versions(original).await
+    }
+    async fn trash_entries(&self) -> ServerResult<Vec<crate::store::history::TrashEntry>> {
+        self.inner.trash_entries().await
+    }
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> ServerResult<Option<crate::store::history::VersionEntry>> {
+        self.inner.version_entry(member).await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> ServerResult<Option<crate::store::history::TrashEntry>> {
+        self.inner.trash_entry(member).await
+    }
+    async fn trash_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        fields: crate::store::history::TrashFields,
+    ) -> ServerResult<String> {
+        let _m = self.gens.mutating(&[iri]);
+        self.inner.trash_resource(iri, parent, fields).await
+    }
+    async fn restore_trash(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        let _m = self.gens.mutating(&[target, parent]);
+        self.inner.restore_trash(member, target, parent).await
+    }
+    async fn purge_trash(&self, member: &str) -> ServerResult<()> {
+        self.inner.purge_trash(member).await
+    }
+    async fn sweep_history(&self, now: std::time::SystemTime, limit: usize) -> ServerResult<usize> {
+        self.inner.sweep_history(now, limit).await
+    }
+
     async fn read(&self, iri: &str) -> ServerResult<Resource> {
         self.inner.read(iri).await
     }
@@ -185,8 +269,11 @@ impl<S: Store> Store for Tracked<S> {
         body: Bytes,
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
-        let _m = self.gens.mutating(&[iri]);
-        self.inner.write(iri, body, content_type).await
+        self.change(async {
+            let _m = self.gens.mutating(&[iri]);
+            self.inner.write(iri, body, content_type).await
+        })
+        .await?
     }
 
     async fn create_in_container(
@@ -196,10 +283,13 @@ impl<S: Store> Store for Tracked<S> {
         body: Bytes,
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
-        let _m = self.gens.mutating(&[container, child]);
-        self.inner
-            .create_in_container(container, child, body, content_type)
-            .await
+        self.change(async {
+            let _m = self.gens.mutating(&[container, child]);
+            self.inner
+                .create_in_container(container, child, body, content_type)
+                .await
+        })
+        .await?
     }
 
     async fn restore(
@@ -210,8 +300,11 @@ impl<S: Store> Store for Tracked<S> {
         meta: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
-        let _m = self.gens.mutating(&keys);
-        self.inner.restore(iri, container, body, meta).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.restore(iri, container, body, meta).await
+        })
+        .await?
     }
 
     async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
@@ -225,8 +318,11 @@ impl<S: Store> Store for Tracked<S> {
         held: &ResourceMeta,
     ) -> ServerResult<ResourceMeta> {
         let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
-        let _m = self.gens.mutating(&keys);
-        self.inner.reinstate(iri, container, held).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.reinstate(iri, container, held).await
+        })
+        .await?
     }
 
     async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
@@ -247,8 +343,11 @@ impl<S: Store> Store for Tracked<S> {
 
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
-        let _m = self.gens.mutating(&keys);
-        self.inner.delete(iri, parent).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.delete(iri, parent).await
+        })
+        .await?
     }
 
     async fn delete_container_if_empty(
@@ -257,8 +356,11 @@ impl<S: Store> Store for Tracked<S> {
         parent: Option<&str>,
     ) -> ServerResult<DeleteOutcome> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
-        let _m = self.gens.mutating(&keys);
-        self.inner.delete_container_if_empty(iri, parent).await
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.delete_container_if_empty(iri, parent).await
+        })
+        .await?
     }
 
     /// A write not settled ([`crate::error::ServerError::Unsettled`]) may still land after its
@@ -266,8 +368,19 @@ impl<S: Store> Store for Tracked<S> {
     /// write changes (the fence carries it, so nothing is kept per unsettled write).
     async fn fence(&self, fence: &Fence) -> ServerResult<()> {
         let keys: Vec<&str> = fence.touches().iter().map(String::as_str).collect();
-        let _m = self.gens.mutating(&keys);
-        self.inner.fence(fence).await
+        if !keys.is_empty()
+            && keys
+                .iter()
+                .all(|key| crate::ldp::target::names_lws_service_record(key, &self.gens.root))
+        {
+            let _m = self.gens.mutating(&keys);
+            return self.inner.fence(fence).await;
+        }
+        self.change(async {
+            let _m = self.gens.mutating(&keys);
+            self.inner.fence(fence).await
+        })
+        .await?
     }
 
     async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
@@ -296,8 +409,8 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.reset_marker(iri, value, lease).await
     }
 
-    fn lifecycle(&self) -> Option<std::sync::Arc<crate::store::Lifecycle>> {
-        Some(self.lifecycle.clone())
+    fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+        self.lifecycle.clone()
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

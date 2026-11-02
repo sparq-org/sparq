@@ -6,6 +6,7 @@
 // `ex:age "thirty"` datatype violation from skills/shacl-validation/SKILL.md.
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import {
   Play,
   Loader2,
@@ -120,7 +121,9 @@ export function ShaclPlayground() {
   const [shapesMode, setShapesMode] = React.useState<ShapesMode>("turtle");
   const [state, setState] = React.useState<RunState>({ kind: "idle" });
   const [compact, setCompact] = React.useState<CompactState>({ kind: "idle" });
-  const [engine, setEngine] = React.useState<EngineState>("cold");
+  const [engineState, setEngine] = React.useState<EngineState>("cold");
+  const hydrated = useHydrated();
+  const engine = hydrated && engineState === "cold" ? "warming" : engineState;
   const [activeExample, setActiveExample] = React.useState<string>(DEFAULT.id);
   const [view, setView] = React.useState<View>("results");
 
@@ -140,7 +143,6 @@ export function ShaclPlayground() {
   // double-load, no call into an uninitialised wasm). A failure resets the indicator.
   React.useEffect(() => {
     let cancelled = false;
-    setEngine("warming");
     const handle = prewarmSparqWhenIdle({
       onReady: () => {
         if (!cancelled) setEngine("ready");

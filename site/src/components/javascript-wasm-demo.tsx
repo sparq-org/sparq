@@ -16,6 +16,7 @@
 // the same data and the demo is idempotent across reloads.
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import {
   Loader2,
   Play,
@@ -87,18 +88,40 @@ const DELETE_NQUADS = [
 type EngineState = "cold" | "warming" | "ready" | "error";
 
 export function JavascriptWasmDemo() {
-  const [engine, setEngine] = React.useState<EngineState>("cold");
+  const [engineState, setEngine] = React.useState<EngineState>("cold");
+  const hydrated = useHydrated();
+  const engine = hydrated && engineState === "cold" ? "warming" : engineState;
   // The live store, rebuilt from SEED on mount and on reset; null until first build.
   const storeRef = React.useRef<WasmStore | null>(null);
-  // Bumps whenever the store is rebuilt/mutated, so panels re-derive their read-outs.
-  const [version, setVersion] = React.useState(0);
+  const getStore = React.useCallback(() => storeRef.current, []);
+  const [listeners] = React.useState(() => new Set<() => void>());
+  const subscribe = React.useCallback((listener: () => void) => {
+    listeners.add(listener);
+    return () => { listeners.delete(listener); };
+  }, [listeners]);
+  const [summary, setSummary] = React.useState<{ size: number; people: number | null } | null>(null);
+  // Read the mutable wasm store only in its load/mutation callbacks; render uses a snapshot.
+  const publish = React.useCallback(() => {
+    const store = storeRef.current;
+    if (!store) return;
+    let people = null;
+    try {
+      people = store.count(
+        "PREFIX foaf: <http://xmlns.com/foaf/0.1/> SELECT * WHERE { ?p a foaf:Person }",
+      );
+    } catch {
+      // Keep the size visible even when the person query fails.
+    }
+    setSummary({ size: store.size, people });
+    for (const listener of listeners) listener();
+  }, [listeners]);
 
   const rebuild = React.useCallback(async () => {
     const Store = await loadSparq();
     setEngine("ready");
     storeRef.current = loadIntoStore(Store, SEED, "turtle");
-    setVersion((v) => v + 1);
-  }, []);
+    publish();
+  }, [publish]);
 
   // [OPUS-4.8] sq-4296 (#935 / #981) — pre-warm + seed on the next browser-IDLE slot (not
   // synchronously during mount) so the ~300 kB+ engine never blocks the initial page paint.
@@ -106,7 +129,6 @@ export function JavascriptWasmDemo() {
   // completes joins the in-flight load rather than calling into an uninitialised wasm.
   React.useEffect(() => {
     let cancelled = false;
-    setEngine("warming");
     const handle = prewarmSparqWhenIdle({
       onReady: () => {
         if (!cancelled) void rebuild();
@@ -121,7 +143,7 @@ export function JavascriptWasmDemo() {
     };
   }, [rebuild]);
 
-  const ready = engine === "ready" && storeRef.current !== null;
+  const ready = engine === "ready" && summary !== null;
 
   return (
     <section className="space-y-4" aria-labelledby="js-wasm-demo-heading">
@@ -137,14 +159,15 @@ export function JavascriptWasmDemo() {
         surface against it — the real Rust engine, compiled to wasm, running here.
       </p>
 
-      <StreamingCursorPanel store={storeRef} version={version} ready={ready} />
-      <MatchPanel store={storeRef} version={version} ready={ready} />
-      <CountPanel store={storeRef} version={version} ready={ready} />
+      <StreamingCursorPanel store={getStore} subscribe={subscribe} ready={ready} />
+      <MatchPanel store={getStore} subscribe={subscribe} ready={ready} />
+      <CountPanel store={getStore} subscribe={subscribe} ready={ready} />
       <DeltaPanel
-        store={storeRef}
-        version={version}
+        store={getStore}
+        subscribe={subscribe}
+        summary={summary}
         ready={ready}
-        onChanged={() => setVersion((v) => v + 1)}
+        onChanged={publish}
         onReset={rebuild}
       />
     </section>
@@ -152,8 +175,8 @@ export function JavascriptWasmDemo() {
 }
 
 interface PanelProps {
-  store: React.RefObject<WasmStore | null>;
-  version: number;
+  store: () => WasmStore | null;
+  subscribe: (listener: () => void) => () => void;
   ready: boolean;
 }
 
@@ -171,7 +194,7 @@ function StreamingCursorPanel({ store, ready }: PanelProps) {
   const [error, setError] = React.useState<string | null>(null);
 
   const run = React.useCallback(() => {
-    const s = store.current;
+    const s = store();
     if (!s) return;
     setRunning(true);
     setError(null);
@@ -295,7 +318,7 @@ const MATCH_PRESETS: { label: string; s: string; p: string; o: string }[] = [
   },
 ];
 
-function MatchPanel({ store, version, ready }: PanelProps) {
+function MatchPanel({ store, subscribe, ready }: PanelProps) {
   const [s, setS] = React.useState("");
   const [p, setP] = React.useState("<http://xmlns.com/foaf/0.1/knows>");
   const [o, setO] = React.useState("");
@@ -308,7 +331,7 @@ function MatchPanel({ store, version, ready }: PanelProps) {
   const arg = (v: string): MatchTerm => (v.trim() ? v.trim() : null);
 
   const run = React.useCallback(() => {
-    const store_ = store.current;
+    const store_ = store();
     if (!store_) return;
     setError(null);
     try {
@@ -320,11 +343,10 @@ function MatchPanel({ store, version, ready }: PanelProps) {
     }
   }, [store, s, p, o]);
 
-  // Re-run on a store change so the panel always reflects the live data (e.g. after a delta).
-  React.useEffect(() => {
+  // Store mutations notify the subscription callback, using the current input fields.
+  React.useEffect(() => subscribe(() => {
     if (ready && result) run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version]);
+  }), [subscribe, ready, result, run]);
 
   return (
     <Card>
@@ -463,12 +485,12 @@ function QuadTable({ rows }: { rows: SparqlResults["results"]["bindings"] }) {
 // 3. count()
 // ---------------------------------------------------------------------------
 
-function CountPanel({ store, version, ready }: PanelProps) {
+function CountPanel({ store, subscribe, ready }: PanelProps) {
   const [count, setCount] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const run = React.useCallback(() => {
-    const s = store.current;
+    const s = store();
     if (!s) return;
     setError(null);
     try {
@@ -478,10 +500,9 @@ function CountPanel({ store, version, ready }: PanelProps) {
     }
   }, [store]);
 
-  React.useEffect(() => {
+  React.useEffect(() => subscribe(() => {
     if (ready && count !== null) run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version]);
+  }), [subscribe, ready, count, run]);
 
   return (
     <Card>
@@ -523,33 +544,24 @@ function CountPanel({ store, version, ready }: PanelProps) {
 
 function DeltaPanel({
   store,
-  version,
+  summary,
   ready,
   onChanged,
   onReset,
-}: PanelProps & { onChanged: () => void; onReset: () => Promise<void> }) {
+}: PanelProps & {
+  summary: { size: number; people: number | null } | null;
+  onChanged: () => void;
+  onReset: () => Promise<void>;
+}) {
   const [error, setError] = React.useState<string | null>(null);
   const [resetting, setResetting] = React.useState(false);
 
-  // The live people count (default-graph triples is `size`; here we show distinct people).
-  const people = React.useMemo(() => {
-    const s = store.current;
-    if (!ready || !s) return null;
-    try {
-      return s.count(
-        "PREFIX foaf: <http://xmlns.com/foaf/0.1/> SELECT * WHERE { ?p a foaf:Person }",
-      );
-    } catch {
-      return null;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, ready, version]);
-
-  const size = ready ? (store.current?.size ?? null) : null;
+  const people = ready ? summary?.people : null;
+  const size = ready ? summary?.size : null;
 
   const apply = React.useCallback(
     (inserts: string, deletes: string) => {
-      const s = store.current;
+      const s = store();
       if (!s) return;
       setError(null);
       try {

@@ -11,8 +11,11 @@
 //! byte-matches `sparq_zk::encode` — so a passing execute is direct evidence the
 //! operand binding is sound (and a deliberately MISMATCHED enc must fail).
 //!
-//! Toolchain-gated: needs `nargo`. Skips cleanly when absent (like the other
-//! witness-gen tests in `e2e.rs`).
+//! Toolchain-gated: needs `nargo`, through the shared gate (a missing tool fails
+//! the test unless the lane declares itself toolchain-free). Each rejection test
+//! first proves the HONEST witness for the same anchor, and then requires the
+//! refusal to name the operand-binding constraint, so an infrastructure failure
+//! cannot pass as a rejection.
 
 use sparq_zk_compose::build::{encode_decimal_literal, encode_signed_int_literal};
 use sparq_zk_compose::manifest::FieldHex;
@@ -81,10 +84,24 @@ fn decimal_toml(
     )
 }
 
-/// Returns Ok(true) if `nargo execute` produced a witness (relation satisfiable),
-/// Ok(false) if it didn't (unsatisfiable / mismatched binding). `tag` isolates
-/// the Prover.toml + witness file so concurrent tests don't race.
-fn try_witness(gate: &support::LiveToolchain, pkg: &str, toml: &str, tag: &str) -> bool {
+/// What `nargo execute` made of one Prover.toml.
+#[derive(Debug)]
+enum Witness {
+    /// Execute exited 0 and wrote the witness: the relation is satisfiable.
+    Satisfied,
+    /// Execute wrote no witness; carries its constraint diagnostic.
+    Unsatisfied(String),
+}
+
+/// The constraint the operand binding asserts (`filter_signed.nr`). A refusal is
+/// evidence about the BINDING only when it names this; a spawn, parse or compile
+/// failure would also leave no witness, and must not count as a rejection.
+const BINDING_DIAGNOSTIC: &str = "operand encoding mismatch";
+
+/// Run `nargo compile` (asserted to succeed) and then `nargo execute` on `toml`,
+/// and report what execute did. `tag` isolates the Prover.toml + witness file so
+/// concurrent tests don't race.
+fn witness(gate: &support::LiveToolchain, pkg: &str, toml: &str, tag: &str) -> Witness {
     let dir = compose_dir();
     let prover_name = format!("Prover_{tag}");
     let witness_name = format!("{pkg}_w_{tag}");
@@ -93,14 +110,19 @@ fn try_witness(gate: &support::LiveToolchain, pkg: &str, toml: &str, tag: &str) 
     let witness_path = dir.join("target").join(format!("{witness_name}.gz"));
     let _ = std::fs::remove_file(&witness_path);
     // Compile is idempotent; required so target/<pkg>.json exists.
-    let _ = support::live_tool(gate, "nargo")
+    let compile = support::live_tool(gate, "nargo")
         .arg("compile")
         .arg("--package")
         .arg(pkg)
         .current_dir(&dir)
         .output()
         .expect("nargo compile runs");
-    let _ = support::live_tool(gate, "nargo")
+    assert!(
+        compile.status.success(),
+        "nargo compile --package {pkg} failed:\n{}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let execute = support::live_tool(gate, "nargo")
         .arg("execute")
         .arg(&witness_name)
         .arg("--package")
@@ -110,10 +132,41 @@ fn try_witness(gate: &support::LiveToolchain, pkg: &str, toml: &str, tag: &str) 
         .current_dir(&dir)
         .output()
         .expect("nargo execute runs");
-    let ok = witness_path.exists();
+    let produced = witness_path.exists();
     let _ = std::fs::remove_file(&witness_path);
     let _ = std::fs::remove_file(&toml_path);
-    ok
+    let diagnostic = format!(
+        "{}{}",
+        String::from_utf8_lossy(&execute.stdout),
+        String::from_utf8_lossy(&execute.stderr)
+    );
+    if produced {
+        assert!(
+            execute.status.success(),
+            "nargo wrote a witness but exited unsuccessfully: {diagnostic}"
+        );
+        Witness::Satisfied
+    } else {
+        // Pinned nargo can exit successfully on an unsatisfied relation. Require
+        // its constraint diagnostic as well as the absence of a witness.
+        assert!(
+            diagnostic.contains(BINDING_DIAGNOSTIC),
+            "nargo produced no witness without the expected binding diagnostic: {diagnostic}"
+        );
+        Witness::Unsatisfied(diagnostic)
+    }
+}
+
+/// `w` must be a refusal that names the operand-binding constraint.
+fn assert_binding_refused(w: Witness, what: &str) {
+    match w {
+        Witness::Unsatisfied(stderr) => assert!(
+            stderr.contains(BINDING_DIAGNOSTIC),
+            "{what}: nargo refused the witness, but not on the operand binding \
+             (expected `{BINDING_DIAGNOSTIC}`):\n{stderr}"
+        ),
+        Witness::Satisfied => panic!("{what}: the relation was satisfied"),
+    }
 }
 
 #[test]
@@ -127,11 +180,13 @@ fn signed_int_binding_matches_real_encode() {
     let enc = encode_signed_int_literal(-42);
     // -42 < +1 => lt true. Satisfiable iff the token rebuild byte-matches encode.
     let toml = signed_int_toml(&enc, 0, false, 1, true, true, b"42");
+    let got = witness(&gate, "filter_signed_int_d2", &toml, "sq1q9h_neg42_ok");
     assert!(
-        try_witness(&gate, "filter_signed_int_d2", &toml, "sq1q9h_neg42_ok"),
+        matches!(got, Witness::Satisfied),
         "signed-int -42 binding must satisfy the relation (token rebuild must \
-         byte-match sparq_zk::encode)"
+         byte-match sparq_zk::encode): {got:?}"
     );
+    support::complete(gate);
 }
 
 #[test]
@@ -140,15 +195,25 @@ fn signed_int_binding_rejects_sign_lie() {
         Some(g) => g,
         None => return,
     };
+    let enc_neg = encode_signed_int_literal(-42);
+    // The honest witness for the SAME anchor, operator and bound proves first: -42 >
+    // 0 is false, witnessed as neg=true. Without it, a refusal below could be any
+    // failure of this package rather than the binding.
+    let honest = signed_int_toml(&enc_neg, 2, false, 0, false, true, b"42");
+    let got = witness(&gate, "filter_signed_int_d2", &honest, "sq1q9h_sign_honest");
+    assert!(
+        matches!(got, Witness::Satisfied),
+        "the honest -42 witness must satisfy the relation: {got:?}"
+    );
     // Anchor encoding is for -42, but the prover witnesses +42 (neg=false). The
     // operand binding (h2(LITERAL, blake3("42"^^int)) != enc_for_"-42") must make
     // this UNSATISFIABLE — the sign cannot be forged against a committed value.
-    let enc_neg = encode_signed_int_literal(-42);
-    let toml = signed_int_toml(&enc_neg, 2, false, 0, true, false, b"42");
-    assert!(
-        !try_witness(&gate, "filter_signed_int_d2", &toml, "sq1q9h_signlie"),
-        "claiming +42 against the -42 anchor encoding must be unsatisfiable"
+    let lie = signed_int_toml(&enc_neg, 2, false, 0, true, false, b"42");
+    assert_binding_refused(
+        witness(&gate, "filter_signed_int_d2", &lie, "sq1q9h_signlie"),
+        "claiming +42 against the -42 anchor encoding",
     );
+    support::complete(gate);
 }
 
 #[test]
@@ -161,11 +226,13 @@ fn decimal_binding_matches_real_encode() {
     let enc = encode_decimal_literal(false, 123, "45");
     // 123.45 > 123.40 (bound_scaled = 12340) => gt true.
     let toml = decimal_toml(&enc, 2, false, 12340, true, false, b"123", b"45");
+    let got = witness(&gate, "filter_decimal_i3_f2", &toml, "sq1q9h_dec_ok");
     assert!(
-        try_witness(&gate, "filter_decimal_i3_f2", &toml, "sq1q9h_dec_ok"),
+        matches!(got, Witness::Satisfied),
         "decimal 123.45 binding must satisfy the relation (token rebuild must \
-         byte-match sparq_zk::encode)"
+         byte-match sparq_zk::encode): {got:?}"
     );
+    support::complete(gate);
 }
 
 #[test]
@@ -174,12 +241,20 @@ fn decimal_binding_rejects_fraction_lie() {
         Some(g) => g,
         None => return,
     };
+    let enc_45 = encode_decimal_literal(false, 123, "45");
+    // The honest witness for the SAME anchor, operator and bound proves first.
+    let honest = decimal_toml(&enc_45, 2, false, 0, true, false, b"123", b"45");
+    let got = witness(&gate, "filter_decimal_i3_f2", &honest, "sq1q9h_dec_honest");
+    assert!(
+        matches!(got, Witness::Satisfied),
+        "the honest 123.45 witness must satisfy the relation: {got:?}"
+    );
     // Anchor encoding is for 123.45; prover witnesses 123.99 fraction digits. The
     // binding (different token bytes => different enc) must be UNSATISFIABLE.
-    let enc_45 = encode_decimal_literal(false, 123, "45");
-    let toml = decimal_toml(&enc_45, 2, false, 0, true, false, b"123", b"99");
-    assert!(
-        !try_witness(&gate, "filter_decimal_i3_f2", &toml, "sq1q9h_dec_fraclie"),
-        "claiming .99 against the .45 anchor encoding must be unsatisfiable"
+    let lie = decimal_toml(&enc_45, 2, false, 0, true, false, b"123", b"99");
+    assert_binding_refused(
+        witness(&gate, "filter_decimal_i3_f2", &lie, "sq1q9h_dec_fraclie"),
+        "claiming .99 against the .45 anchor encoding",
     );
+    support::complete(gate);
 }

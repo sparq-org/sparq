@@ -55,3 +55,9 @@
   crate: "sparq-zk-compose"
   features: "extended-fragment,dual-leaf"
   test: true
+
+# Cover typed issuance with every opt-in composition and commitment feature.
+- name: "sparq-zk-compose (all opt-in features — typed issuance)"
+  crate: "sparq-zk-compose"
+  features: "successful-results,dual-leaf,extended-fragment,commitment-value-only"
+  test: true

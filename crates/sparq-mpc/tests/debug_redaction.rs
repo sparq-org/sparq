@@ -2,7 +2,7 @@
 //!
 //! The types in this crate are nested: a `Share` sits inside a `Message`, a
 //! `MatchBit`, a `Candidate`; a private join key sits inside `HiddenNode`,
-//! `HiddenKeyedRows`, `SecretEndpointPair`. A derived `Debug` on any one of them
+//! `BatchedHiddenInput`, `SecretEndpointPair`. A derived `Debug` on any one of them
 //! prints the secret from every container above it, so one stray `{:?}` in a log
 //! line, a panic message or an `assert_eq!` failure carries share values and join
 //! keys with it. The owning types therefore hand-write `Debug`.
@@ -19,7 +19,7 @@ use sparq_mpc::hidden_distinct::SecretEndpointPair;
 use sparq_mpc::hidden_path::{
     HiddenEdge, HiddenEdges, HiddenNode, PredicatedEdge, PredicatedEdges,
 };
-use sparq_mpc::join::{BatchedHiddenInput, HiddenKeyedRows};
+use sparq_mpc::join::BatchedHiddenInput;
 use sparq_mpc::oblivious_join::{Candidate, MatchBit};
 use sparq_mpc::partial::HolderId;
 use sparq_mpc::shamir::Share;
@@ -253,20 +253,6 @@ fn a_private_join_key_is_redacted_directly_and_in_every_container() {
 #[test]
 fn the_keyed_row_containers_redact_their_keys_and_payloads() {
     let rows = vec![(secret_fp(), vec![Some(secret_term())])];
-    let keyed = HiddenKeyedRows {
-        holder: HolderId::new("h"),
-        payload_vars: vec![Variable::new("name").unwrap()],
-        rows: rows.clone(),
-    };
-    assert_redacted("HiddenKeyedRows", &keyed);
-
-    let rendered = format!("{:?}", keyed);
-    assert!(
-        rendered.contains('h') && rendered.contains("name") && rendered.contains("row_count: 1"),
-        "the holder, the disclosed column names and the row count are public: {}",
-        rendered
-    );
-
     let batched = BatchedHiddenInput {
         holder: HolderId::new("h"),
         payload_vars: vec![Variable::new("name").unwrap()],
@@ -277,6 +263,12 @@ fn the_keyed_row_containers_redact_their_keys_and_payloads() {
         binding: RowBinding::Keyed(vec!["disclosed-row-key".to_string()]),
     };
     assert_redacted("BatchedHiddenInput", &batched);
+    let rendered = format!("{:?}", batched);
+    assert!(
+        rendered.contains('h') && rendered.contains("name") && rendered.contains("row_count: 1"),
+        "the holder, the disclosed column names and the row count are public: {}",
+        rendered
+    );
     assert!(
         format!("{:?}", batched).contains("disclosed-row-key"),
         "a Keyed binding's row keys are disclosed and must still print"

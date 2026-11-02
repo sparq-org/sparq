@@ -337,11 +337,10 @@ impl PodStore {
     }
 
     /// Restore a captured prior slot after a failed re-materialization (`failed`), then
-    /// rebuild the auth view from the restored content; the error to return. A failed
-    /// materialization leaves the previous view untouched, so after the restore view and rules
-    /// agree again. If rebuilding from the restored rules fails too, whether they still agree
-    /// is not established: the view is dropped, so every request is denied until a
-    /// re-materialization succeeds, and the error says so.
+    /// rebuild the auth view from the restored content; the error to return. Recovery omits
+    /// the elapsed-time deadline and preserves all count and size caps. If restoring the
+    /// document or rebuilding its view fails, the view is dropped: every request is denied
+    /// until a re-materialization succeeds, and the error says so.
     fn restore_named_slot(
         &mut self,
         name: &Term,
@@ -361,7 +360,8 @@ impl PodStore {
                 );
             }
         }
-        match self.rematerialize(acp) {
+        let rebuilt = crate::budget::untimed_rebuild(self, |store| store.rematerialize(acp));
+        match rebuilt {
             Ok(()) => failed,
             Err(e) => {
                 self.drop_auth_view();

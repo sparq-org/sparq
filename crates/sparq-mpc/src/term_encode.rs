@@ -4,7 +4,7 @@
 //!
 //! ## Why this module exists (the soundness gap it closes)
 //!
-//! [`crate::join::HiddenValueJoin`] (and the hidden property-path chain,
+//! [`crate::join::HiddenValueJoin::batched_join`] (and the hidden property-path chain,
 //! [`crate::hidden_path`]) joins two holders on a key WITHOUT revealing it, by a
 //! secret-shared **field-equality** test over [`Fp`]: it opens only the masked
 //! product `m = (key_L − key_R)·r`, and `m == 0 ⇔ key_L == key_R` *in the field*.
@@ -433,7 +433,8 @@ mod tests {
     // actual M3 secret-shared-equality path, not just standalone hashing. ===
     #[test]
     fn encoder_keys_drive_hidden_join_matching_on_term_equality() {
-        use crate::join::{HiddenKeyedRows, HiddenValueJoin};
+        use crate::batched::RowBinding;
+        use crate::join::{BatchedHiddenInput, HiddenValueJoin};
         use crate::partial::HolderId;
         use crate::shamir::ShamirBackend;
         use oxrdf::Variable;
@@ -445,16 +446,18 @@ mod tests {
         let bob = iri("http://example.org/people/bob");
         let carol = iri("http://example.org/people/carol");
 
-        let left = HiddenKeyedRows {
+        let left = BatchedHiddenInput {
             holder: HolderId::new("L"),
+            binding: RowBinding::Keyed(vec!["candidate-group".to_string(); 2]),
             payload_vars: vec![Variable::new_unchecked("name")],
             rows: vec![
                 (encode_term(&alice), vec![lit("Alice")]),
                 (encode_term(&bob), vec![lit("Bob")]),
             ],
         };
-        let right = HiddenKeyedRows {
+        let right = BatchedHiddenInput {
             holder: HolderId::new("R"),
+            binding: RowBinding::Keyed(vec!["candidate-group".to_string(); 2]),
             payload_vars: vec![Variable::new_unchecked("city")],
             rows: vec![
                 (encode_term(&bob), vec![lit("Leeds")]),
@@ -462,7 +465,7 @@ mod tests {
             ],
         };
         let join = HiddenValueJoin::new(ShamirBackend::new_seeded(3, 0xD181).unwrap());
-        let got = join.join(&left, &right).unwrap();
+        let (got, _) = join.batched_join(&left, &right, 4).unwrap();
         // Exactly the <…/bob> pair joins (equal encoded keys ⇔ equal terms).
         assert_eq!(got.rows.len(), 1, "only the equal-term pair must match");
         let rendered = format!("{:?}", got.rows);

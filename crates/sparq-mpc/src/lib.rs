@@ -68,8 +68,9 @@
 //! - [`join`] — **(§2 convention #6; §4.3 step 4; §5.2 Q3)** The [`GlobalJoin`]
 //!   trait + [`DisclosedKeyJoin`] (M2, crypto-free disclosed-key equi-join over
 //!   GLOBAL IRIs) AND [`HiddenValueJoin`] (M3): joining on a PRIVATE key via the
-//!   Shamir-backed secret-shared equality test, disclosing only the result
-//!   payload — the capability M2 could not provide. (The crypto-free path
+//!   bounded [`HiddenValueJoin::batched_join`] or
+//!   [`HiddenValueJoin::fully_oblivious_batched_join`] entry points with an
+//!   explicit candidate binding and public output bound. (The crypto-free path
 //!   remains the default where the key is a public global IRI, convention #4.)
 //! - [`oblivious`] — **(§3 the substrate gap; §4.1 L2; §8 step 1) — sq-18lk, the
 //!   keystone hidden-regime primitive.** Oblivious **shuffle** (Waksman/Beneš
@@ -406,8 +407,7 @@ pub use auth_disclose::experimental_tamper_evident_disclose_threshold_verdict;
 pub use field::Fp;
 pub use holder::{Holder, HolderResult};
 pub use join::{
-    BatchedHiddenInput, BatchedJoinOutput, DisclosedKeyJoin, GlobalJoin, HiddenKeyedRows,
-    HiddenValueJoin, JoinPlan,
+    BatchedHiddenInput, BatchedJoinOutput, DisclosedKeyJoin, GlobalJoin, HiddenValueJoin, JoinPlan,
 };
 pub use metrics::{CommCounter, FIELD_BYTES};
 pub use oblivious::{

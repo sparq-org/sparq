@@ -19,7 +19,6 @@
 use crate::dataset::{build, decode_triples, TripleSet, TripleTerms};
 use oxrdf::{BlankNode, NamedOrBlankNode, Term, Variable};
 use rustc_hash::FxHashMap;
-use sparq_core::Graph;
 use spargebra::algebra::{GraphTarget, QueryDataset};
 use spargebra::term::{
     GraphName, GraphNamePattern, GroundQuad, GroundQuadPattern, GroundTerm, GroundTermPattern,
@@ -28,6 +27,7 @@ use spargebra::term::{
 use spargebra::GraphUpdateOperation;
 use spargebra::SparqlParser;
 use spargebra::Update;
+use sparq_core::{Graph, TxnOp};
 
 /// A graph slot: `None` = the default graph, `Some(term)` = that named graph.
 type GraphSlot = Option<Term>;
@@ -1099,9 +1099,9 @@ pub fn apply_effects_checked(
     effects: &[UpdateEffect],
 ) -> Result<(), ApplyError> {
     // (sq-ycle) (1) RESOLVE + (2) COMMIT: the single durable commit point for the body.
-    let records = resolve_effect_records(graph, effects);
+    let ops = resolve_effect_ops(graph, effects);
     graph
-        .commit_txn_checked(&records)
+        .commit_txn_ops_checked(&ops)
         .map_err(|(written, message)| ApplyError {
             applied: written,
             message,
@@ -1167,19 +1167,10 @@ fn materialize_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<()
 
 /// (sq-ycle) RESOLVE a captured `&[UpdateEffect]` into the flat, ORDERED quad-delta
 /// that the atomic redo journal commits in ONE fsync — computed against the CURRENT `graph` state
-/// so structural ops are concrete:
-///   * `Delta { slot, inserts, deletes }` -> the deletes (false) then the inserts (true), the same
-///     per-slot order [`apply_effects`] materialises them in.
-///   * `Clear`/`Drop` -> scan the affected slot(s) NOW and emit a delete record (false) for every
-///     triple PRESENT (default graph: scan `graph`; a NamedNode: scan that named sub-graph if it
-///     exists; NamedGraphs: every named slot; AllGraphs: every named slot PLUS the default). The
-///     data retraction is all the journal needs for atomicity — `Drop`'s manifest/sub-dir removal
-///     stays a materialisation concern (already crash-safe via `recover_named_drop`).
-///   * `Create(_)` -> nothing (an empty graph carries no triples).
-///
-/// The result is the per-slot quad-delta whose single-frame commit makes the WHOLE body atomic.
-fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool, GraphSlot, TripleTerms)> {
-    let mut records: Vec<(bool, GraphSlot, TripleTerms)> = Vec::new();
+/// Data operations keep their per-slot order; creates and drops also record graph existence.
+/// CLEAR records retractions while retaining graph existence.
+fn resolve_effect_ops(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnOp> {
+    let mut records: Vec<TxnOp> = Vec::new();
 
     // (sq-aalh) A CLEAR/DROP retracts the triples PRESENT WHEN IT RUNS — i.e. the state
     // of its target slot AFTER every prior op in THIS body, not the pre-body state. Resolving it
@@ -1239,13 +1230,29 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
     // in the same body sees the emptied slot.
     fn clear_slot(
         graph: &Graph,
-        records: &mut Vec<(bool, GraphSlot, TripleTerms)>,
+        records: &mut Vec<TxnOp>,
         running: &mut Vec<(GraphSlot, TripleSet)>,
         slot: &GraphSlot,
     ) {
         let view = slot_mut(graph, running, slot);
         for t in view.drain() {
-            records.push((false, slot.clone(), t));
+            records.push(TxnOp::Delete {
+                slot: slot.clone(),
+                triple: t,
+            });
+        }
+    }
+
+    // Retract triples before recording a named-graph removal.
+    fn drop_slot(
+        graph: &Graph,
+        records: &mut Vec<TxnOp>,
+        running: &mut Vec<(GraphSlot, TripleSet)>,
+        slot: &GraphSlot,
+    ) {
+        clear_slot(graph, records, running, slot);
+        if let Some(name) = slot {
+            records.push(TxnOp::Drop(name.clone()));
         }
     }
 
@@ -1269,19 +1276,25 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
             UpdateEffect::Delta { slot, inserts, deletes } => {
                 let view = slot_mut(graph, &mut running, slot);
                 for t in deletes {
-                    records.push((false, slot.clone(), t.clone()));
+                    records.push(TxnOp::Delete {
+                        slot: slot.clone(),
+                        triple: t.clone(),
+                    });
                     view.remove(t);
                 }
                 for t in inserts {
-                    records.push((true, slot.clone(), t.clone()));
+                    records.push(TxnOp::Insert {
+                        slot: slot.clone(),
+                        triple: t.clone(),
+                    });
                     view.insert(t.clone());
                 }
             }
-            // CLEAR and DROP retract the SAME data set (every triple present in the target WHEN the
-            // op runs); they differ only in DROP also removing the slot, which is a manifest/sub-dir
-            // concern, not a journalled DATA change. So both resolve to the present-triple retractions
-            // — computed against the RUNNING view so intra-body inserts are correctly retracted.
-            UpdateEffect::Clear(target) | UpdateEffect::Drop(target) => match target {
+            // CLEAR and DROP retract the SAME data set (every triple present in the target WHEN
+            // the op runs) — computed against the RUNNING view so intra-body inserts are correctly
+            // retracted. They differ in that DROP also removes the slot, which is a change to the
+            // dataset's graph SET and so journalled as an existence record of its own.
+            UpdateEffect::Clear(target) => match target {
                 GraphTarget::DefaultGraph => clear_slot(graph, &mut records, &mut running, &None),
                 GraphTarget::NamedNode(n) => {
                     clear_slot(graph, &mut records, &mut running, &Some(Term::NamedNode(n.clone())))
@@ -1298,10 +1311,33 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
                     }
                 }
             },
-            // CREATE adds an empty graph — no triples to journal — but it makes the slot exist so a
-            // later CLEAR NAMED / DROP ALL in the same body sees it (as an empty, no-op target).
+            UpdateEffect::Drop(target) => match target {
+                // The default graph cannot cease to exist, so a DROP DEFAULT is a clear.
+                GraphTarget::DefaultGraph => clear_slot(graph, &mut records, &mut running, &None),
+                GraphTarget::NamedNode(n) => drop_slot(
+                    graph,
+                    &mut records,
+                    &mut running,
+                    &Some(Term::NamedNode(n.clone())),
+                ),
+                GraphTarget::NamedGraphs => {
+                    for name in named_slots(graph, &running) {
+                        drop_slot(graph, &mut records, &mut running, &name);
+                    }
+                }
+                GraphTarget::AllGraphs => {
+                    clear_slot(graph, &mut records, &mut running, &None);
+                    for name in named_slots(graph, &running) {
+                        drop_slot(graph, &mut records, &mut running, &name);
+                    }
+                }
+            },
+            // CREATE adds an empty graph: no triples to journal, but the graph SET changes, so the
+            // frame carries an existence record. It also makes the slot exist in the running view,
+            // so a later CLEAR NAMED / DROP ALL in the same body sees it (as an empty target).
             UpdateEffect::Create(name) => {
                 slot_mut(graph, &mut running, &Some(name.clone()));
+                records.push(TxnOp::Create(name.clone()));
             }
         }
     }
@@ -1353,7 +1389,7 @@ mod tests {
     // --- (sq-aalh) intra-body CLEAR/DROP durable-journal resolution ------------------
     //
     // The DURABLE multi-op path (`apply_effects`) resolves the redo-journal frame ONCE up-front via
-    // `resolve_effect_records`. The bug: a CLEAR/DROP in the body resolved its retraction set
+    // `resolve_effect_ops`. The bug: a CLEAR/DROP in the body resolved its retraction set
     // against the PRE-BODY graph, so a triple INSERTed earlier in the SAME body (e.g.
     // `INSERT DATA { GRAPH X { … } } ; CLEAR GRAPH X`) was journaled as an insert with NO matching
     // delete. The materialised per-graph state was correct (the per-effect loop runs in sequence),
@@ -1364,7 +1400,7 @@ mod tests {
     /// Engine-internal helper: capture the resolved effect log of `sparql` applied to a SEPARATE
     /// in-memory working copy loaded from `dataset` (the EXACT effects the server batches into
     /// `apply_effects`, captured on the in-memory fork). The journal frame is then
-    /// `resolve_effect_records(durable, &effects)` where `durable` starts from the same `dataset`.
+    /// `resolve_effect_ops(durable, &effects)` where `durable` starts from the same `dataset`.
     fn captured(dataset: &str, sparql: &str) -> Vec<UpdateEffect> {
         let mut working = Graph::load_dataset(dataset, "nquads").unwrap();
         update_in_place_capturing(&mut working, sparql, &crate::QueryBudget::unlimited()).unwrap()
@@ -1396,11 +1432,17 @@ mod tests {
 
     /// The net per-slot membership a journal frame yields after a set-semantic redo (insert adds,
     /// delete removes, in append order) — i.e. exactly what `open` reconstructs from the frame.
-    fn journal_net(records: &[(bool, GraphSlot, TripleTerms)]) -> Vec<(GraphSlot, TripleTerms)> {
+    fn journal_net(records: &[TxnOp]) -> Vec<(GraphSlot, TripleTerms)> {
         let mut set: Vec<(GraphSlot, TripleTerms)> = Vec::new();
-        for (insert, slot, t) in records {
+        for op in records {
+            let (insert, slot, t) = match op {
+                TxnOp::Insert { slot, triple } => (true, slot, triple),
+                TxnOp::Delete { slot, triple } => (false, slot, triple),
+                // Existence records change no triple; `journal_net` is the DATA net.
+                TxnOp::Create(_) | TxnOp::Drop(_) => continue,
+            };
             let key = (slot.clone(), t.clone());
-            if *insert {
+            if insert {
                 if !set.contains(&key) {
                     set.push(key);
                 }
@@ -1420,7 +1462,7 @@ mod tests {
         let base = Graph::load_dataset("", "nquads").unwrap();
         let sparql = "PREFIX : <http://ex/> INSERT DATA { GRAPH :x { :a :b :c } } ; CLEAR GRAPH :x";
         let effects = captured("", sparql);
-        let frame = resolve_effect_records(&base, &effects);
+        let frame = resolve_effect_ops(&base, &effects);
         assert!(
             journal_net(&frame).is_empty(),
             "the durable journal frame must NET to empty (insert retracted by the intra-body CLEAR), \
@@ -1433,8 +1475,11 @@ mod tests {
     #[test]
     fn journal_intra_body_insert_then_drop_named_is_net_empty() {
         let base = Graph::load_dataset("", "nquads").unwrap();
-        let effects = captured("", "PREFIX : <http://ex/> INSERT DATA { GRAPH :x { :a :b :c } } ; DROP GRAPH :x");
-        let frame = resolve_effect_records(&base, &effects);
+        let effects = captured(
+            "",
+            "PREFIX : <http://ex/> INSERT DATA { GRAPH :x { :a :b :c } } ; DROP GRAPH :x",
+        );
+        let frame = resolve_effect_ops(&base, &effects);
         assert!(
             journal_net(&frame).is_empty(),
             "DROP after an intra-body INSERT must net-retract the inserted quad in the journal, got {:?}",
@@ -1448,8 +1493,11 @@ mod tests {
     fn journal_drop_then_insert_keeps_inserted_quad() {
         let ds = "<http://ex/old> <http://ex/p> <http://ex/o> <http://ex/x> .";
         let base = Graph::load_dataset(ds, "nquads").unwrap();
-        let effects = captured(ds, "PREFIX : <http://ex/> DROP GRAPH :x ; INSERT DATA { GRAPH :x { :a :b :c } }");
-        let net = journal_net(&resolve_effect_records(&base, &effects));
+        let effects = captured(
+            ds,
+            "PREFIX : <http://ex/> DROP GRAPH :x ; INSERT DATA { GRAPH :x { :a :b :c } }",
+        );
+        let net = journal_net(&resolve_effect_ops(&base, &effects));
         let x = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/x"));
         let want = [
             Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/a")),
@@ -1466,14 +1514,102 @@ mod tests {
         let base = Graph::load_dataset("", "nquads").unwrap();
         let sparql = "PREFIX : <http://ex/> INSERT DATA { GRAPH :x { :a :b :c } GRAPH :y { :d :e :f } } ; CLEAR GRAPH :x";
         let effects = captured("", sparql);
-        let net = journal_net(&resolve_effect_records(&base, &effects));
+        let net = journal_net(&resolve_effect_ops(&base, &effects));
         let y = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/y"));
         let yf = [
             Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/d")),
             Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/e")),
             Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/f")),
         ];
-        assert_eq!(net, vec![(Some(y), yf)], "only Y survives the X-only CLEAR in the journal");
+        assert_eq!(
+            net,
+            vec![(Some(y), yf)],
+            "only Y survives the X-only CLEAR in the journal"
+        );
+    }
+
+    /// (sq-ycle) The GRAPH-SET half of the frame: `CREATE GRAPH` and `DROP GRAPH` of an
+    /// EMPTY graph resolve to no triple record at all, so only an explicit existence record
+    /// carries them — and they must appear in the order the body commits them.
+    #[test]
+    fn a_create_and_a_drop_are_journalled_as_existence_records() {
+        let base = Graph::load_dataset("", "nquads").unwrap();
+        let x = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/x"));
+        let sparql = "PREFIX : <http://ex/> CREATE GRAPH :x ; DROP GRAPH :x";
+        let frame = resolve_effect_ops(&base, &captured("", sparql));
+        assert_eq!(
+            frame,
+            vec![TxnOp::Create(x.clone()), TxnOp::Drop(x.clone())],
+            "the frame records the graph SET changes, in commit order, with no data records"
+        );
+        // The reverse order is the reverse frame — the records are not reordered or deduplicated.
+        let frame = resolve_effect_ops(
+            &base,
+            &captured(
+                "",
+                "PREFIX : <http://ex/> DROP SILENT GRAPH :x ; CREATE GRAPH :x",
+            ),
+        );
+        assert_eq!(
+            frame,
+            vec![TxnOp::Drop(x.clone()), TxnOp::Create(x.clone())]
+        );
+        // A CLEAR does NOT remove the slot, so it emits no existence record.
+        let ds = "<http://ex/a> <http://ex/b> <http://ex/c> <http://ex/x> .";
+        let cleared = resolve_effect_ops(
+            &Graph::load_dataset(ds, "nquads").unwrap(),
+            &captured(ds, "PREFIX : <http://ex/> CLEAR GRAPH :x"),
+        );
+        assert!(
+            cleared.iter().all(|op| matches!(op, TxnOp::Delete { .. })),
+            "a CLEAR is retractions only, no existence record: {:?}",
+            cleared
+        );
+        // A DROP of a NON-empty graph retracts its triples FIRST, then removes the graph: the
+        // retraction has to replay while the graph still exists.
+        let dropped = resolve_effect_ops(
+            &Graph::load_dataset(ds, "nquads").unwrap(),
+            &captured(ds, "PREFIX : <http://ex/> DROP GRAPH :x"),
+        );
+        assert!(
+            matches!(dropped.first(), Some(TxnOp::Delete { .. }))
+                && dropped.last() == Some(&TxnOp::Drop(x)),
+            "retractions then the existence record: {:?}",
+            dropped
+        );
+    }
+
+    /// Committed empty graph creation survives a reopen before materialization.
+    #[cfg(feature = "parallel")] // mmap comes from the sparq-core dev-dep
+    #[test]
+    fn crash_recovery_create_graph_restores_the_acknowledged_graph_set() {
+        let dir =
+            std::env::temp_dir().join(format!("sparq_ycle_create_crash_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/s> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut durable = Graph::open(&dir).unwrap();
+            assert!(durable.named().is_empty());
+            let effects = captured(
+                "<http://ex/s> <http://ex/p> <http://ex/o> .",
+                "CREATE GRAPH <http://ex/x>",
+            );
+            let frame = resolve_effect_ops(&durable, &effects);
+            durable.commit_txn_ops(&frame).unwrap();
+            // Crash: no materialisation, no clear_txn.
+        }
+        let g = Graph::open(&dir).unwrap();
+        assert_eq!(
+            g.named().iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+            vec![Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                "http://ex/x"
+            ))],
+            "the acknowledged CREATE GRAPH survives the crash"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// END-TO-END crash-recovery: build the resolved frame, COMMIT it to a durable store's redo
@@ -1496,8 +1632,8 @@ mod tests {
             // Server flow: capture effects on an in-memory working copy (same start state), resolve
             // the frame against the durable graph's CURRENT state, and COMMIT it — the commit point.
             let effects = captured(ds, sparql);
-            let frame = resolve_effect_records(&durable, &effects);
-            durable.commit_txn(&frame).unwrap();
+            let frame = resolve_effect_ops(&durable, &effects);
+            durable.commit_txn_ops(&frame).unwrap();
             // Drop WITHOUT materialising / clearing the journal: simulates a crash right after the
             // single commit fsync, before the per-graph WAL materialisation `apply_effects` does.
         }

@@ -98,6 +98,19 @@ use crate::field::Fp;
 use crate::partial::MpcError;
 use crate::shamir::Share;
 
+/// Maximum number of shares accepted by robust reconstruction.
+///
+/// This cap follows #7167's planned `crate::oblivious_join::MAX_OUTPUT_PARTIES`.
+/// It is `1 << 10` for now and will be defined as that shared constant when
+/// #7167 merges, adopting whatever value it has then.
+pub const MAX_ROBUST_SHARES: usize = 1 << 10;
+
+/// Maximum number of reference-subset fits attempted for abort-path attribution.
+///
+/// On an abort, if `C(n, degree + 1)` exceeds this cap or its checked computation
+/// overflows, the error remains [`MpcError::Tampered`], with no cheaters named.
+pub const MAX_SUSPECT_FITS: usize = 4096;
+
 /// Robust / consistency-checked reconstruction of a degree-`degree` sharing's
 /// value at `x = 0`, using the Reed–Solomon structure of the shares.
 ///
@@ -106,6 +119,8 @@ use crate::shamir::Share;
 ///
 /// - `n < degree + 1` → [`MpcError::Protocol`] (below threshold — cannot
 ///   reconstruct at all; same precondition as plain Lagrange).
+/// - `n > MAX_ROBUST_SHARES` → [`MpcError::Protocol`] before distinct-point
+///   validation, interpolation, or decoding.
 /// - `n == degree + 1` (NO redundancy) → plain Lagrange interpolation. Tampering
 ///   is **undetectable** here and we do NOT claim otherwise (see module docs):
 ///   never returns [`MpcError::Tampered`].
@@ -119,47 +134,47 @@ use crate::shamir::Share;
 /// polynomial. On any inconsistency that cannot be corrected, returns
 /// [`MpcError::Tampered`] with the identified cheater points where possible.
 ///
-/// Callers that need the identity of the cheaters on the SUCCESS path (the shares
-/// Berlekamp–Welch corrected — exact attribution, not a heuristic) should use
-/// [`reconstruct_robust_attributed`] instead, which returns the same secret plus
-/// that list.
+/// Callers that need the evaluation points of the shares Berlekamp–Welch corrected
+/// should use [`reconstruct_robust_attributed`], which returns the same secret plus
+/// that list. Attribution has the correction-budget limits described in the
+/// module docs.
 pub fn reconstruct_robust(shares: &[Share], degree: usize) -> Result<Fp, MpcError> {
     reconstruct_robust_attributed(shares, degree).map(|r| r.secret)
 }
 
-/// Outcome of a successful robust reconstruction with cheater attribution.
+/// Outcome of a successful robust reconstruction with correction attribution.
 ///
 /// `secret` is `Q(0)` of the recovered degree-`degree` polynomial. `cheaters`
-/// holds the evaluation points (`Share::x`) of the shares that were CORRECTED —
-/// i.e. whose supplied `y` disagrees with the recovered codeword. On the success
-/// path (Berlekamp–Welch correction, or the pure `e = 0` consistency check) this
-/// list is **exact**: the agreeing degree-`degree` majority uniquely pins the
-/// codeword, so every named point really did carry a tampered value. It is empty
-/// when all shares were already consistent (clean input, or the no-redundancy
-/// `n == degree + 1` path where attribution is impossible).
+/// holds the evaluation points (`Share::x`) whose supplied `y` disagrees with the
+/// recovered codeword. Within the correction budget this is exactly the set of
+/// tampered shares. Beyond that budget the decoder can recover a different
+/// codeword, as described in the module docs; the list then describes corrections
+/// relative to that codeword, rather than establishing which shares were changed.
+/// It is empty when all shares were already consistent, including the
+/// no-redundancy `n == degree + 1` path where attribution is impossible.
 ///
-/// Contrast with the abort path: when correction is impossible the honest set is
-/// unknown, so [`MpcError::Tampered`]'s `cheaters` is a best-effort *vote*, not an
-/// exact set. Here, because correction SUCCEEDED, attribution is sound.
+/// On an abort, [`MpcError::Tampered`]'s `cheaters` instead comes from a best-effort
+/// reference fit, or is empty when the reference-subset count exceeds the budget.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RobustReconstruction {
     /// The recovered secret `Q(0)`.
     pub secret: Fp,
-    /// Evaluation points (`Share::x`) of the corrected (tampered) shares, sorted
-    /// ascending. Exact on the success path; see the struct docs.
+    /// Evaluation points (`Share::x`) of the corrected shares, sorted ascending.
+    /// See the struct docs for the correction-budget limits on attribution.
     pub cheaters: Vec<u64>,
 }
 
-/// Robust reconstruction that ALSO returns the exactly-identified cheaters on the
-/// success path (bead sq-6u6b follow-up (1)).
+/// Robust reconstruction that also returns the evaluation points it corrected.
 ///
 /// Behaves exactly like [`reconstruct_robust`] for the secret value and for the
 /// abort/precondition errors, but on success additionally surfaces which shares
-/// Berlekamp–Welch had to correct. When correction succeeds the recovered `Q` is
-/// the unique degree-`degree` codeword agreeing with the honest majority, so the
-/// off-curve points are precisely the tampered shares — sound attribution, not a
-/// heuristic. Callers that need to *act* on a cheater (e.g. exclude a party from
-/// a re-run) should prefer this entry point over the value-only one.
+/// disagree with the recovered codeword. Within the correction budget these are
+/// precisely the tampered shares. Beyond that budget, the residual miscorrection
+/// limit in the module docs applies to both the secret and attribution.
+///
+/// Accepts at most [`MAX_ROBUST_SHARES`] shares. Abort-path attribution is omitted
+/// when the reference-subset count exceeds [`MAX_SUSPECT_FITS`] or overflows;
+/// the error remains [`MpcError::Tampered`] and its `cheaters` list is empty.
 pub fn reconstruct_robust_attributed(
     shares: &[Share],
     degree: usize,
@@ -180,6 +195,11 @@ pub fn reconstruct_robust_attributed(
         return Err(MpcError::Protocol(format!(
             "robust reconstruction needs >= {} shares, got {}",
             needed, n
+        )));
+    }
+    if n > MAX_ROBUST_SHARES {
+        return Err(MpcError::Protocol(format!(
+            "robust reconstruction: share count {n} exceeds MAX_ROBUST_SHARES={MAX_ROBUST_SHARES}"
         )));
     }
     // Distinct evaluation points are required for RS decoding (a repeated x is a
@@ -208,8 +228,9 @@ pub fn reconstruct_robust_attributed(
     for e in 0..=e_max {
         if let Some(q) = berlekamp_welch(shares, degree, e) {
             // Re-verify against ALL points: the recovered Q must disagree with at
-            // most e of them; the agreeing majority pins the true codeword. Those
-            // off-curve points ARE exactly the corrected shares — sound attribution.
+            // most e of them. The off-curve points are the corrected shares,
+            // exactly the tampered shares within the correction budget. Beyond
+            // it, miscorrection can select a different codeword (see module docs).
             let bad = disagreeing_points(shares, &q);
             if bad.len() <= e {
                 let mut cheaters: Vec<u64> = bad.into_iter().map(|i| shares[i].x).collect();
@@ -224,63 +245,87 @@ pub fn reconstruct_robust_attributed(
 
     // No degree-`degree` polynomial fits within the correctable budget: the
     // shares are mutually inconsistent beyond what redundancy can repair. Abort
-    // (detect-and-abort), naming the cheaters we can pin by a voting scheme.
+    // with best-effort names from a minimum-disagreement reference fit; these
+    // names do not establish which shares were tampered.
     Err(tampered_error(shares, degree, e_max))
 }
 
-/// Best-effort cheater attribution for the ABORT path (bead sq-6u6b follow-up
-/// (2)): name the off-curve points of the MOST self-consistent reference subset.
+/// Best-effort cheater attribution for the abort path (bead sq-6u6b).
 ///
-/// When `> e` shares are tampered the honest set is unknowable, so no attribution
-/// can be sound (the bead acknowledges this — detection is sound, blame is not).
-/// The OLD code fixed the reference to the FIRST `degree+1` points; if a cheater
-/// happened to sit in that arbitrary window the recovered polynomial was wrong and
-/// it blamed the honest majority. We instead try **every** `degree+1`-point
-/// reference subset, interpolate each, and keep the fit with the FEWEST off-curve
-/// points across all `n` shares. The intuition: a fully-honest reference subset
-/// recovers the true polynomial and disagrees only with the `≈ #cheaters` tampered
-/// shares, whereas a cheater-containing subset recovers a spurious polynomial that
-/// generically misses almost everything — so "fewest disagreements" is a strong
-/// signal for "this reference subset was (probably) all honest", and its off-curve
-/// set is then the best single-subset cheater estimate. Ties (and the pathological
-/// all-miss case) fall back to the first such minimum, which is no worse than the
-/// old fixed-subset behaviour.
+/// Within [`MAX_SUSPECT_FITS`], interpolate every `degree+1`-point reference
+/// subset and keep the fit with the fewest disagreements across all shares.
+/// Ties keep the first minimum in lexicographic subset order, preserving the
+/// existing suspect list. The minimum can include an honest party even in the
+/// first abort band (`e_max + 1` errors), so an abort-path name is not proof of
+/// which shares were tampered.
 ///
-/// **Measured guarantee and its limit.** In the FIRST abort band — exactly
-/// `e_max + 1` tampered shares (one over the correctable budget) — a fully-honest
-/// reference subset is the *unique* minimum and this names ONLY genuinely-tampered
-/// points (no honest party framed; pinned by `abort_first_band_names_only_real_
-/// cheaters` across `n = 5..9`). That is precisely the case the old fixed-first-
-/// subset code could get wrong. As the error count grows further past the budget
-/// the honest set becomes genuinely unidentifiable and the minimum-disagreement
-/// subset can itself contain a cheater, so attribution degrades to a true best-
-/// effort guess that MAY name an honest party. This is therefore NOT a blanket
-/// soundness claim: [`MpcError::Tampered::cheaters`] stays documented as best-
-/// effort and callers MUST NOT treat an abort-path name as proof of guilt.
-/// Detection itself is always sound; only blame is heuristic. The success path
-/// ([`reconstruct_robust_attributed`]) is where attribution is exact.
+/// If the checked subset count exceeds [`MAX_SUSPECT_FITS`] or overflows, no
+/// reference fits are attempted: return `Tampered` with an empty cheater list
+/// and an explanation in `detail`. The detection decision is unchanged.
 fn tampered_error(shares: &[Share], degree: usize, e_max: usize) -> MpcError {
     let n = shares.len();
-    let suspects = best_effort_suspects(shares, degree);
-    MpcError::Tampered {
-        detail: format!(
-            "RS consistency check failed: {n} shares of a degree-{degree} secret are not all on \
+    let mut detail = format!(
+        "RS consistency check failed: {n} shares of a degree-{degree} secret are not all on \
              one polynomial and the inconsistency exceeds the correctable budget e={e_max} \
              (need n >= degree + 2e + 1 to correct e errors); cheater attribution is best-effort \
              on this abort path"
-        ),
+    );
+    let suspects = if binomial_with_cap(n, degree + 1, MAX_SUSPECT_FITS).is_some() {
+        best_effort_suspects(shares, degree)
+    } else {
+        detail.push_str(&format!(
+            "; attribution was not attempted because the reference-subset count exceeds \
+             MAX_SUSPECT_FITS={MAX_SUSPECT_FITS}"
+        ));
+        Vec::new()
+    };
+    MpcError::Tampered {
+        detail,
         cheaters: suspects,
     }
+}
+
+/// Compute `C(n, k)` up to an inclusive cap, with no factorials or wrapping.
+/// `None` means over cap, including intermediate multiplication overflow.
+fn binomial_with_cap(n: usize, k: usize, cap: usize) -> Option<usize> {
+    #[cfg(test)]
+    SUSPECT_FIT_CAP.with(|observed| observed.set(Some(cap)));
+    if k > n {
+        return Some(0);
+    }
+    if cap == 0 {
+        return None;
+    }
+    let k = k.min(n - k);
+    let mut count = 1usize;
+    for i in 1..=k {
+        let next = count.checked_mul(n - k + i)? / i;
+        if next <= cap {
+            count = next;
+        } else {
+            return None;
+        }
+    }
+    Some(count)
+}
+
+// Per-thread observation only: concurrent tests cannot affect each other's tally.
+#[cfg(test)]
+std::thread_local! {
+    static SUSPECT_FITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SUSPECT_FIT_CAP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
 /// Off-curve evaluation points of the most self-consistent `degree+1`-point
 /// reference fit (sorted ascending). See [`tampered_error`] for the rationale.
 fn best_effort_suspects(shares: &[Share], degree: usize) -> Vec<u64> {
     let mut best: Option<Vec<usize>> = None;
-    // Enumerate all C(n, degree+1) reference subsets. At the intended party counts
-    // (n = 3..9, degree+1 ≤ 5) this is ≤ C(9,5)=126 fits, each O(n^2) — negligible.
+    // The caller admits at most MAX_SUSPECT_FITS reference subsets. This includes
+    // every degree at n <= 14 (maximum C(14,7)=3432) and the n=3..9 cases.
     for_each_combination(shares.len(), degree + 1, &mut |idxs| {
         let subset: Vec<Share> = idxs.iter().map(|&i| shares[i]).collect();
+        #[cfg(test)]
+        SUSPECT_FITS.with(|fits| fits.set(fits.get() + 1));
         let Ok(q) = lagrange_at_zero_poly(&subset) else {
             return;
         };
@@ -627,6 +672,245 @@ mod tests {
         shares[idx].y = shares[idx].y.add(fp(delta));
     }
 
+    fn work_bound_shares(n: usize, degree: usize) -> Vec<Share> {
+        let coeffs: Vec<Fp> = (0..=degree).map(|i| fp(42 + i as u64)).collect();
+        (1..=n)
+            .map(|x| Share {
+                x: x as u64,
+                y: eval_poly(&coeffs, fp(x as u64)),
+            })
+            .collect()
+    }
+
+    fn work_bound_abort_shares(n: usize, degree: usize) -> Vec<Share> {
+        let mut shares = work_bound_shares(n, degree);
+        for i in 0..=(n - degree - 1) / 2 {
+            corrupt(&mut shares, i, 11 * (i as u64 + 1));
+        }
+        shares
+    }
+
+    #[test]
+    fn work_bound_accepts_64_shares_and_corrects_one_tamper() {
+        let mut shares = work_bound_shares(64, 31);
+        assert_eq!(reconstruct_robust(&shares, 31).unwrap(), fp(42));
+        let clean = reconstruct_robust_attributed(&shares, 31).unwrap();
+        assert_eq!(clean.secret, fp(42));
+        assert!(clean.cheaters.is_empty());
+        corrupt(&mut shares, 63, 11);
+        let corrected = reconstruct_robust_attributed(&shares, 31).unwrap();
+        assert_eq!(corrected.secret, fp(42));
+        assert_eq!(corrected.cheaters, vec![64]);
+        assert_eq!(reconstruct_robust(&shares, 31).unwrap(), fp(42));
+        // No-redundancy interpolation also retains its existing behaviour.
+        let minimal = work_bound_shares(64, 63);
+        assert_eq!(reconstruct_robust(&minimal, 63).unwrap(), fp(42));
+    }
+
+    #[test]
+    fn work_bound_accepts_1024_shares_on_consistency_check() {
+        assert_eq!(MAX_ROBUST_SHARES, 1024);
+        // Degree zero exercises the e=0 consistency path with redundancy.
+        let shares = work_bound_shares(1024, 0);
+        let clean = reconstruct_robust_attributed(&shares, 0).unwrap();
+        assert_eq!(clean.secret, fp(42));
+        assert!(clean.cheaters.is_empty());
+        assert_eq!(reconstruct_robust(&shares, 0).unwrap(), fp(42));
+    }
+
+    #[test]
+    fn work_bound_refuses_1025_shares_before_distinct_point_validation() {
+        let mut shares = work_bound_shares(1025, 0);
+        let expected = "robust reconstruction: share count 1025 exceeds MAX_ROBUST_SHARES=1024";
+        for degree in [0, 1024] {
+            let err = reconstruct_robust_attributed(&shares, degree).unwrap_err();
+            assert!(matches!(err, MpcError::Protocol(m) if m == expected));
+            let err = reconstruct_robust(&shares, degree).unwrap_err();
+            assert!(matches!(err, MpcError::Protocol(m) if m == expected));
+        }
+        shares[1024].x = shares[0].x;
+        let err = reconstruct_robust_attributed(&shares, 0).unwrap_err();
+        assert!(matches!(err, MpcError::Protocol(m) if m == expected));
+    }
+
+    #[test]
+    fn work_bound_preserves_existing_precondition_messages() {
+        let shares = work_bound_shares(1025, 0);
+        for n in [2, 1025] {
+            let err = reconstruct_robust_attributed(&shares[..n], usize::MAX).unwrap_err();
+            let expected = format!(
+                "robust reconstruction: degree {} + 1 overflows usize; no share count \
+                 could satisfy it",
+                usize::MAX
+            );
+            assert!(matches!(err, MpcError::Protocol(m) if m == expected));
+            let err = reconstruct_robust_attributed(&shares[..n], n).unwrap_err();
+            let expected = format!("robust reconstruction needs >= {} shares, got {n}", n + 1);
+            assert!(matches!(err, MpcError::Protocol(m) if m == expected));
+        }
+        let repeated = vec![shares[0]; 2];
+        let err = reconstruct_robust_attributed(&repeated, 1).unwrap_err();
+        assert!(matches!(err, MpcError::Protocol(m)
+            if m == "robust reconstruction: repeated evaluation point x=1"));
+    }
+
+    #[test]
+    fn work_bound_under_fit_cap_preserves_main_attribution() {
+        // C(14,7)=3432 fits. This whole error was captured from the unchanged
+        // implementation for this fixture, including the sorted suspect list.
+        let shares = work_bound_abort_shares(14, 6);
+        SUSPECT_FITS.with(|fits| fits.set(0));
+        let err = reconstruct_robust_attributed(&shares, 6).unwrap_err();
+        let MpcError::Tampered { detail, cheaters } = err else {
+            panic!("expected Tampered, got {err:?}");
+        };
+        assert_eq!(cheaters, vec![1, 2, 3, 4]);
+        assert_eq!(
+            detail,
+            "RS consistency check failed: 14 shares of a degree-6 secret are not all on \
+            one polynomial and the inconsistency exceeds the correctable budget e=3 \
+            (need n >= degree + 2e + 1 to correct e errors); cheater attribution is best-effort \
+            on this abort path"
+        );
+        assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), 3432);
+    }
+
+    #[test]
+    fn work_bound_91_share_abort_attempts_4095_reference_fits() {
+        // C(91,2)=4095 is admitted. The 45 tampers exceed e_max=44;
+        // the original line has 46 agreeing points and is the unique best fit.
+        let shares = work_bound_abort_shares(91, 1);
+        SUSPECT_FITS.with(|fits| fits.set(0));
+        SUSPECT_FIT_CAP.with(|observed| observed.set(None));
+        let err = reconstruct_robust_attributed(&shares, 1).unwrap_err();
+        let MpcError::Tampered { detail, cheaters } = err else {
+            panic!("expected Tampered, got {err:?}");
+        };
+        assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), 4095);
+        // The fit tally alone cannot distinguish caps in 4095..=4185.
+        assert_eq!(SUSPECT_FIT_CAP.with(std::cell::Cell::get), Some(4096));
+        assert_eq!(cheaters, (1..=45).collect::<Vec<u64>>());
+        assert_eq!(
+            detail,
+            "RS consistency check failed: 91 shares of a degree-1 secret are not all on \
+            one polynomial and the inconsistency exceeds the correctable budget e=44 \
+            (need n >= degree + 2e + 1 to correct e errors); cheater attribution is best-effort \
+            on this abort path"
+        );
+    }
+
+    #[test]
+    fn work_bound_92_share_abort_attempts_no_reference_fits() {
+        // C(92,2)=4186 exceeds the cap; 46 tampers exceed e_max=45.
+        SUSPECT_FIT_CAP.with(|observed| observed.set(None));
+        assert_attribution_not_attempted(92, 1);
+        assert_eq!(SUSPECT_FIT_CAP.with(std::cell::Cell::get), Some(4096));
+    }
+
+    #[test]
+    fn work_bound_abort_attribution_keeps_first_tied_fit() {
+        // Two tampers exceed e_max=1. C(5,3)=10 reference fits include both the
+        // original polynomial and a tied fit naming honest points [4,5]. The first
+        // minimum is retained, matching main; abort attribution remains best-effort.
+        let shares = work_bound_abort_shares(5, 2);
+        SUSPECT_FITS.with(|fits| fits.set(0));
+        let err = reconstruct_robust_attributed(&shares, 2).unwrap_err();
+        assert!(matches!(err, MpcError::Tampered { cheaters, .. } if cheaters == vec![4, 5]));
+        assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), 10);
+    }
+
+    fn assert_attribution_not_attempted(n: usize, degree: usize) {
+        let shares = work_bound_abort_shares(n, degree);
+        SUSPECT_FITS.with(|fits| fits.set(0));
+        let err = reconstruct_robust_attributed(&shares, degree).unwrap_err();
+        let MpcError::Tampered { detail, cheaters } = err else {
+            panic!("expected Tampered, got {err:?}");
+        };
+        // Count actual fits; this pins omission without a timing assertion.
+        assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), 0);
+        assert!(cheaters.is_empty());
+        assert!(detail.ends_with(
+            "; attribution was not attempted because the reference-subset count exceeds \
+             MAX_SUSPECT_FITS=4096"
+        ));
+    }
+
+    #[test]
+    fn work_bound_over_fit_cap_omits_attribution() {
+        // C(15,8)=6435 exceeds 4096; C(14,7)=3432 above remains admitted.
+        assert_attribution_not_attempted(15, 7);
+    }
+
+    #[test]
+    fn work_bound_64_share_abort_attempts_no_reference_fits() {
+        // 17 tampers exceed e_max=16. C(64,32) exceeds the fit cap.
+        assert_attribution_not_attempted(64, 31);
+    }
+
+    #[test]
+    fn work_bound_fit_counts_are_isolated_across_threads() {
+        let barrier = std::sync::Barrier::new(2);
+        SUSPECT_FITS.with(|fits| fits.set(0));
+        std::thread::scope(|scope| {
+            for (n, degree, expected) in [(6, 2, 20), (15, 7, 0)] {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    SUSPECT_FITS.with(|fits| fits.set(0));
+                    barrier.wait();
+                    let result =
+                        reconstruct_robust_attributed(&work_bound_abort_shares(n, degree), degree);
+                    barrier.wait();
+                    assert!(matches!(result, Err(MpcError::Tampered { .. })));
+                    assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), expected);
+                });
+            }
+        });
+        assert_eq!(SUSPECT_FITS.with(std::cell::Cell::get), 0);
+    }
+
+    #[test]
+    fn work_bound_binomial_exact_and_inclusive() {
+        assert_eq!(MAX_SUSPECT_FITS, 4096);
+        for (n, k, expected) in [(0, 0, 1), (5, 2, 10), (9, 5, 126), (14, 7, 3432)] {
+            assert_eq!(binomial_with_cap(n, k, 4096), Some(expected));
+        }
+        assert_eq!(binomial_with_cap(3, 4, 4096), Some(0));
+        assert_eq!(binomial_with_cap(3, 4, 0), Some(0));
+        assert_eq!(binomial_with_cap(0, 0, 0), None);
+        assert_eq!(binomial_with_cap(4096, 1, 4096), Some(4096));
+        assert_eq!(binomial_with_cap(4096, 1, 4095), None);
+        assert_eq!(binomial_with_cap(15, 8, 6435), Some(6435));
+        assert_eq!(binomial_with_cap(15, 8, 4096), None);
+        // Independent Pascal recurrence checks every reachable degree, including
+        // all n <= 14 and the n=3..9 cases, against the inclusive production cap.
+        let mut row = vec![1u128];
+        for n in 0..=64 {
+            for (k, &expected) in row.iter().enumerate() {
+                let admitted = if expected <= 4096 {
+                    Some(expected as usize)
+                } else {
+                    None
+                };
+                assert_eq!(binomial_with_cap(n, k, 4096), admitted, "n={n}, k={k}");
+            }
+            let mut next = vec![1];
+            next.extend(row.windows(2).map(|pair| pair[0] + pair[1]));
+            next.push(1);
+            row = next;
+        }
+    }
+
+    #[test]
+    fn work_bound_binomial_overflow_and_early_stop_are_over_cap() {
+        // The permissive cap reaches multiplication overflow at i=2. Wrapping
+        // multiplication would instead return a small, falsely admitted count.
+        assert_eq!(binomial_with_cap(usize::MAX, 2, usize::MAX), None);
+        // With the production cap these stop on the first over-cap prefix,
+        // without walking the large k or computing the full coefficient.
+        assert_eq!(binomial_with_cap(usize::MAX, usize::MAX / 2, 4096), None);
+        assert_eq!(binomial_with_cap(64, 32, 4096), None);
+    }
+
     #[test]
     fn untampered_full_set_reconstructs() {
         // Genuine differential vs the UNCHECKED Lagrange primitive on
@@ -725,9 +1009,9 @@ mod tests {
     // ---------------------------------------------------------------------
 
     #[test]
-    fn attributed_success_pins_exact_cheaters() {
-        // (1) On the SUCCESS path the corrected shares are EXACTLY the tampered
-        // ones — `cheaters` lists their evaluation points (Share::x), sorted.
+    fn attributed_success_names_corrected_shares() {
+        // Within the correction budget, the corrected shares are exactly the
+        // tampered ones; `cheaters` lists their evaluation points, sorted.
         let b = ShamirBackend::new_seeded(9, 0x9999).unwrap();
         let t = b.threshold();
         assert_eq!(t, 4); // e_max = 2
@@ -741,7 +1025,7 @@ mod tests {
         expected.sort_unstable();
         assert_eq!(
             r.cheaters, expected,
-            "corrected shares must be exactly the tampered evaluation points"
+            "within the correction budget, corrected shares are exactly the tampered points"
         );
     }
 
@@ -770,17 +1054,12 @@ mod tests {
     }
 
     #[test]
-    fn abort_first_band_names_only_real_cheaters() {
-        // (2) The improvement that is genuinely demonstrable: in the FIRST abort
-        // band — exactly `e_max + 1` tampered shares (one over the correctable
-        // budget) — a fully-honest `degree+1`-reference subset is the UNIQUE
-        // minimum-disagreement fit (it disagrees with only the `e_max+1` cheaters;
-        // any cheater-containing subset recovers a spurious poly that misses many
-        // more points). So the min-disagreement heuristic names ONLY genuinely-
-        // tampered points: no honest party is framed. This is the regime the old
-        // fixed-first-subset attribution could get wrong (its arbitrary window may
-        // contain a cheater). Beyond this band attribution is provably impossible
-        // (documented best-effort), so we do NOT assert soundness there.
+    fn abort_first_band_names_tampered_points_off_tie_shapes() {
+        // These sampled first-band cases recover only the tampered points.
+        // They exercise the minimum-disagreement heuristic with independent
+        // deltas, rather than establish exact attribution for arbitrary inputs.
+        // Tied minima can name honest points even in this band; that case is
+        // pinned separately by work_bound_abort_attribution_keeps_first_tied_fit.
         let mut rng = 0x1234_5678_9abc_def0u64;
         let mut next = || {
             rng ^= rng << 13;

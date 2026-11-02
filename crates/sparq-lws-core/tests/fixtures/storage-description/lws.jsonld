@@ -109,6 +109,11 @@
       "id": "https://pod.example/#type-search",
       "serviceEndpoint": "https://pod.example/.lws/types/search",
       "type": "TypeSearchService"
+    },
+    {
+      "id": "https://pod.example/#sparql",
+      "serviceEndpoint": "https://pod.example/.lws/sparql",
+      "type": "https://jeswr.org/ns/solid-sd#SparqlQueryService"
     }
   ],
   "type": "Storage",

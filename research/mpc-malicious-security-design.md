@@ -71,6 +71,7 @@ function call, no real network):
   mask); `d = a − b` (local, `join.rs:430`); `m = d·r` (one multiplication, degree `2t`,
   `join.rs:432`); open `m` at degree `2t` (`join.rs:434`); `m == 0 ⇔ a == b`. The all-pairs
   `HiddenValueJoin::join` loops `secure_equal` over `|L|·|R|` pairs (`join.rs:459–467`).
+  `HiddenValueJoin::join` was removed; see `HiddenValueJoin::batched_join`.
 - **Comparison / threshold.** The secret-shared greater-than for the £100k verdict
   (**sq-rrz4, OPEN**) is **NOT yet realized in-crypto**: `OperatorClass::Comparison` reports
   `semi_honest_only` (`shamir.rs:250`, `backend.rs:518–522`) and the only in-crate comparator

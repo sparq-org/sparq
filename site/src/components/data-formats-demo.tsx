@@ -17,6 +17,7 @@
 //      bzip2 remains native-only (no small JS decoder — see the page's honest caveat).
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { Loader2, Play, FileArchive, FolderOpen, Database, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -103,7 +104,9 @@ const ARCHIVE_ACCEPT = ".gz,.gzip,.zip,.zst,.zstd";
 export function DataFormatsDemo() {
   const [format, setFormat] = React.useState<DataFormat>("turtle");
   const [text, setText] = React.useState(sampleFor("turtle")?.sample ?? "");
-  const [engine, setEngine] = React.useState<EngineState>("cold");
+  const [engineState, setEngine] = React.useState<EngineState>("cold");
+  const hydrated = useHydrated();
+  const engine = hydrated && engineState === "cold" ? "warming" : engineState;
   const [parse, setParse] = React.useState<ParseState>({ kind: "idle" });
   const [gzip, setGzip] = React.useState<GzipState>({ kind: "idle" });
   const [archive, setArchive] = React.useState<ArchiveState>({ kind: "idle" });
@@ -115,7 +118,6 @@ export function DataFormatsDemo() {
   // first Parse joins the in-flight load rather than re-paying a cold start.
   React.useEffect(() => {
     let cancelled = false;
-    setEngine("warming");
     const handle = prewarmSparqWhenIdle({
       onReady: () => {
         if (!cancelled) setEngine("ready");

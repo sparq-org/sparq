@@ -401,6 +401,14 @@ pub struct GraphCommitment {
 }
 
 impl GraphCommitment {
+    /// The typed string-canonical commitment for [`crate::sig::SecretKey::attest`].
+    pub fn method_commitment(&self) -> crate::sig::MethodCommitment {
+        crate::sig::MethodCommitment {
+            method: CommitmentMethod::StringCanonicalV1,
+            commitment: self.commitment,
+        }
+    }
+
     /// Leaf index of a canonical-form triple (bnode labels must be the
     /// RDFC10 canonical labels). `None` if the triple is not in the graph.
     pub fn leaf_index(&self, canonical_triple: &Triple) -> Option<usize> {

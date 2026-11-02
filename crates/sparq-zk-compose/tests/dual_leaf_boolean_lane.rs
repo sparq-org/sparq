@@ -592,10 +592,30 @@ fn raw_value_lane_toml(
     )
 }
 
+/// Require the constraint diagnostic for this assignment; process and file errors
+/// remain distinct from a refusal of the witness.
+fn assert_refused(
+    result: Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError>,
+    diagnostic: &str,
+) {
+    match result {
+        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr }) => assert!(
+            tool.starts_with("nargo") && stderr.contains(diagnostic),
+            "expected nargo constraint `{diagnostic}`, got `{tool}`:\n{stderr}"
+        ),
+        Err(other) => panic!("expected a constraint refusal, got {other}"),
+        Ok(path) => panic!(
+            "expected a constraint refusal, got witness {}",
+            path.display()
+        ),
+    }
+}
+
 /// Solve `filter_value_dl_int`'s witness for the given public/private assignment.
 /// `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
+/// Preserve the driver error so each negative case asserts its own diagnostic.
 #[allow(clippy::too_many_arguments)]
-fn member_accepts(
+fn member_witness(
     tag: &str,
     operand_enc: &FieldHex,
     op: FilterOp,
@@ -604,7 +624,7 @@ fn member_accepts(
     expected: bool,
     value_hook: &FieldHex,
     lexical_component: &FieldHex,
-) -> bool {
+) -> Result<std::path::PathBuf, sparq_zk_compose::driver::DriverError> {
     let toml = raw_value_lane_toml(
         &FieldHex(field_to_hex(&Fr::from(1u64))),
         operand_enc,
@@ -615,9 +635,11 @@ fn member_accepts(
         value_hook,
         lexical_component,
     );
-    sparq_zk_compose::driver::CircuitProver::from_crate_root()
-        .gen_witness_tagged(&CircuitId::FilterValueDl, &toml, tag)
-        .is_ok()
+    sparq_zk_compose::driver::CircuitProver::from_crate_root().gen_witness_tagged(
+        &CircuitId::FilterValueDl,
+        &toml,
+        tag,
+    )
 }
 
 /// The three in-circuit claims, in one toolchain-gated pass:
@@ -627,9 +649,12 @@ fn member_accepts(
 ///       (the `dual-leaf operand encoding mismatch` assert) — the separation.
 #[test]
 fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
-    if !support::require_toolchain("in_circuit_boolean_lane_accepts_honest_and_rejects_lies", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_boolean_lane_accepts_honest_and_rejects_lies",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
     let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Gt, false).unwrap();
     let p = unpack(&built.inputs);
     let (operand_enc, op, bound, dt, expected) =
@@ -637,21 +662,31 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
     assert!(expected, "true > false is the honest verdict");
 
     // (a) honest.
-    assert!(
-        member_accepts(
-            "sq5xdlk_ok", operand_enc, op, bound, dt, expected,
-            &built.value_hook, &built.lexical_component,
-        ),
-        "the honest boolean witness must be provable on filter_value_dl_int"
-    );
+    member_witness(
+        "sq5xdlk_ok",
+        operand_enc,
+        op,
+        bound,
+        dt,
+        expected,
+        &built.value_hook,
+        &built.lexical_component,
+    )
+    .expect("the honest witness must satisfy the relation");
 
     // (b) lying verdict — the ONLY change is `expected`.
-    assert!(
-        !member_accepts(
-            "sq5xdlk_lie", operand_enc, op, bound, dt, !expected,
-            &built.value_hook, &built.lexical_component,
+    assert_refused(
+        member_witness(
+            "sq5xdlk_lie",
+            operand_enc,
+            op,
+            bound,
+            dt,
+            !expected,
+            &built.value_hook,
+            &built.lexical_component,
         ),
-        "a flipped disclosed verdict must be unprovable"
+        "filter verdict mismatch",
     );
 
     // (c) an integer leaf on the boolean lane — the ONLY change is the datatype
@@ -661,30 +696,45 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
     let int_enc = FieldHex(field_to_hex(&int_c.leaf()));
     let int_hook = FieldHex(field_to_hex(&int_c.value_hook));
     let int_lex = FieldHex(field_to_hex(&int_c.lexical_component));
-    assert!(
-        member_accepts(
-            "sq5xdlk_int_ok", &int_enc, op, bound,
-            &FieldHex(field_to_hex(&datatype_const(XSD_INTEGER))), expected,
-            &int_hook, &int_lex,
+    member_witness(
+        "sq5xdlk_int_ok",
+        &int_enc,
+        op,
+        bound,
+        &FieldHex(field_to_hex(&datatype_const(XSD_INTEGER))),
+        expected,
+        &int_hook,
+        &int_lex,
+    )
+    .expect("the honest witness must satisfy the relation");
+    assert_refused(
+        member_witness(
+            "sq5xdlk_int_on_bool",
+            &int_enc,
+            op,
+            bound,
+            dt,
+            expected,
+            &int_hook,
+            &int_lex,
         ),
-        "control: the integer leaf IS provable on its own lane"
-    );
-    assert!(
-        !member_accepts(
-            "sq5xdlk_int_on_bool", &int_enc, op, bound, dt, expected,
-            &int_hook, &int_lex,
-        ),
-        "an xsd:integer leaf must be unprovable under the boolean datatype_const"
+        "dual-leaf operand encoding mismatch",
     );
     // ...and symmetrically, the boolean leaf on the integer lane.
-    assert!(
-        !member_accepts(
-            "sq5xdlk_bool_on_int", operand_enc, op, bound,
-            &FieldHex(field_to_hex(&datatype_const(XSD_INTEGER))), expected,
-            &built.value_hook, &built.lexical_component,
+    assert_refused(
+        member_witness(
+            "sq5xdlk_bool_on_int",
+            operand_enc,
+            op,
+            bound,
+            &FieldHex(field_to_hex(&datatype_const(XSD_INTEGER))),
+            expected,
+            &built.value_hook,
+            &built.lexical_component,
         ),
-        "an xsd:boolean leaf must be unprovable under the integer datatype_const"
+        "dual-leaf operand encoding mismatch",
     );
+    support::complete(live);
 }
 
 /// In-circuit: the string-lane leaf a whole-graph commitment gives `"true"^^xsd:boolean`
@@ -692,40 +742,84 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
 /// would hold if that hook were compared as an integer.
 #[test]
 fn in_circuit_string_lane_boolean_leaf_is_rejected() {
-    if !support::require_toolchain("in_circuit_string_lane_boolean_leaf_is_rejected", &["nargo"]) {
+    let Some(live) = support::gate(
+        "in_circuit_string_lane_boolean_leaf_is_rejected",
+        &["nargo"],
+    ) else {
         return;
-    }
+    };
+    let honest = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Gt, false).unwrap();
+    let hp = unpack(&honest.inputs);
+    member_witness(
+        "in_circuit_string_lane_boolean_leaf_is_rejected_honest",
+        hp.operand_enc,
+        hp.op,
+        hp.bound,
+        hp.datatype_const,
+        hp.expected,
+        &honest.value_hook,
+        &honest.lexical_component,
+    )
+    .expect("the honest boolean witness must satisfy this member");
     let lit = bool_lit(true);
     let leaf = FieldHex(field_to_hex(&sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap()));
     let lexical = FieldHex(field_to_hex(&encode_boolean(&lit).unwrap().lexical_component));
     let hook = FieldHex(field_to_hex(&Fr::from(sparq_zk::dual_leaf::VALUE_NONE)));
     // `VALUE_NONE > 1` holds over u64, so only the binding can reject this call.
-    assert!(
-        !member_accepts(
-            "bool_string_lane", &leaf, FilterOp::Gt, 1,
-            &boolean_datatype_const(), true, &hook, &lexical,
+    assert_refused(
+        member_witness(
+            "bool_string_lane",
+            &leaf,
+            FilterOp::Gt,
+            1,
+            &boolean_datatype_const(),
+            true,
+            &hook,
+            &lexical,
         ),
-        "a string-lane boolean leaf must be unprovable on the boolean lane"
+        "dual-leaf operand encoding mismatch",
     );
+    support::complete(live);
 }
 
 /// In-circuit: an opaque-datatype literal whose datatype IRI is shaped like a lane
 /// tag is unprovable on the boolean lane with the `VALUE_NONE` hook.
 #[test]
 fn in_circuit_opaque_datatype_leaf_is_rejected() {
-    if !support::require_toolchain("in_circuit_opaque_datatype_leaf_is_rejected", &["nargo"]) {
+    let Some(live) = support::gate("in_circuit_opaque_datatype_leaf_is_rejected", &["nargo"])
+    else {
         return;
-    }
+    };
+    let honest = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Gt, false).unwrap();
+    let hp = unpack(&honest.inputs);
+    member_witness(
+        "in_circuit_opaque_datatype_leaf_is_rejected_honest",
+        hp.operand_enc,
+        hp.op,
+        hp.bound,
+        hp.datatype_const,
+        hp.expected,
+        &honest.value_hook,
+        &honest.lexical_component,
+    )
+    .expect("the honest boolean witness must satisfy this member");
     let iri = format!("{XSD_BOOLEAN}@domain=bit");
     let lit = Literal::new_typed_literal("1", NamedNode::new(iri.as_str()).unwrap());
     let leaf = FieldHex(field_to_hex(&sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap()));
     let lexical = FieldHex(field_to_hex(&lexical_of(&lit)));
     let hook = FieldHex(field_to_hex(&Fr::from(sparq_zk::dual_leaf::VALUE_NONE)));
-    assert!(
-        !member_accepts(
-            "bool_opaque_datatype", &leaf, FilterOp::Gt, 1,
-            &boolean_datatype_const(), true, &hook, &lexical,
+    assert_refused(
+        member_witness(
+            "bool_opaque_datatype",
+            &leaf,
+            FilterOp::Gt,
+            1,
+            &boolean_datatype_const(),
+            true,
+            &hook,
+            &lexical,
         ),
-        "an opaque-datatype leaf must be unprovable on the boolean lane"
+        "dual-leaf operand encoding mismatch",
     );
+    support::complete(live);
 }

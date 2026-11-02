@@ -29,6 +29,7 @@
 // labels. (/examples and the deep-page rebuild are sequenced in sq-vw3ax.6 / .4 — not this PR.)
 
 import * as React from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
@@ -147,13 +148,9 @@ function NavLink({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  // [OPUS-4.8] sq-ymr2e.1 — post-hydration readiness marker for E2E. Set in a mount effect, so
-  // `[data-app-ready]` appears only after React has hydrated the shell — and, because the attribute
-  // is applied on the RE-RENDER after the passive-effect batch, strictly after the wrapping
-  // <CommandPalette>'s global ⌘K keydown effect has been registered. The E2E navigation barrier
-  // waits on this instead of a fixed sleep (site/e2e/support/app-ready.ts); no user-facing effect.
-  const [appReady, setAppReady] = React.useState(false);
-  React.useEffect(() => setAppReady(true), []);
+  // The server snapshot omits the marker. The hydration update exposes it after the
+  // passive effects (including the palette's keyboard subscription) have mounted.
+  const appReady = useHydrated();
   const isActive = useIsActive();
 
   return (

@@ -34,6 +34,20 @@ export interface DeriveFormResult {
   source: "desktop" | "web";
 }
 
+/** Serialize only when a ready workspace has a selected focus to derive. */
+export function formWorkspaceSnapshot(
+  ready: boolean,
+  selection: object | null,
+  snapshotStore: () => string | null,
+): { snapshot: string | null; error: string | null } {
+  if (!ready || selection === null) return { snapshot: null, error: null };
+  try {
+    return { snapshot: snapshotStore(), error: null };
+  } catch (cause) {
+    return { snapshot: null, error: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
 /** Injectable adapter dependencies keep host selection testable before either bridge lands. */
 export interface FormHostAdapters {
   desktopAvailable: boolean;

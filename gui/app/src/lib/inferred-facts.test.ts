@@ -5,6 +5,7 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { sameN3Rules } from "./n3-rules.js";
 
 import { parseNTriples, type SparqlTerm } from "@sparq/client";
 
@@ -20,6 +21,23 @@ import {
   tripleKeysOfNTriples,
   unescapeNT,
 } from "./inferred-facts.js";
+
+test("N3 rules ignore empty and cloned re-applications but detect document changes", () => {
+  assert.equal(sameN3Rules([], []), true);
+  const rules = [{ name: "rule.n3", text: "{ ?s a <urn:A> } => { ?s a <urn:B> } .", addedAt: 1 }];
+  assert.equal(sameN3Rules(rules, structuredClone(rules)), true);
+  assert.equal(sameN3Rules(rules, [{ ...rules[0], enabled: true }]), true);
+  for (const change of [
+    { text: "{ ?s a <urn:A> } => { ?s a <urn:C> } ." },
+    { enabled: false }, { name: "other.n3" }, { addedAt: 2 },
+  ]) {
+    assert.equal(sameN3Rules(rules, [{ ...rules[0], ...change }]), false);
+  }
+  assert.equal(sameN3Rules(rules, []), false);
+  assert.equal(sameN3Rules([], rules), false);
+  const second = { ...rules[0], text: "different", addedAt: 2 };
+  assert.equal(sameN3Rules([...rules, second], [second, ...rules]), false);
+});
 
 /** Key a one-line N-Triples statement through the PARSED (RdfTerm) path. */
 function keyOfLine(line: string): string {

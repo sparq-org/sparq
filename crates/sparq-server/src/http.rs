@@ -2620,7 +2620,8 @@ pub struct AppState {
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
     /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
-    /// the server's OWN loaded store, cached per serving lineage and generation. `None` until the first
+    /// the server's OWN loaded store, with independent single-flight slots per serving
+    /// lineage, generation and requested view kind. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
     /// WHERE THE AUTH VIEW LIVES relative to the ring's immutable generations (the design
@@ -2639,9 +2640,10 @@ pub struct AppState {
     /// the cap is on authorization builds in flight rather than per lane.
     #[cfg(feature = "solid-authz")]
     authz_build_pool: Arc<crate::solid_authz::AuthBuildPool>,
-    /// Admission control for streamed read bodies (SELECT JSON, CONSTRUCT / DESCRIBE). The
-    /// `concurrency_limit` layer releases its slot as soon as the handler returns the
-    /// `Response`, but a streamed body's worker keeps running on the blocking pool while the
+    /// Admission control for streamed read bodies (SELECT JSON, CONSTRUCT / DESCRIBE)
+    /// and authorization-query workers. The `concurrency_limit` layer releases its slot
+    /// as soon as the handler returns the `Response`, but a streamed body's worker
+    /// keeps running on the blocking pool while the
     /// client reads. Each such worker holds one of these `max_concurrent` permits until it
     /// exits, so a burst of slow or stalled readers is shed with 429 instead of piling up
     /// blocking-pool threads.
@@ -3075,9 +3077,9 @@ impl AppState {
         })
     }
 
-    /// Claims a streamed-body worker slot (see [`AppState::stream_workers`]), or `None` when
-    /// every slot is held by a worker that is still streaming.
-    fn try_stream_worker(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    /// Claims a query-worker slot (see [`AppState::stream_workers`]), or `None` when
+    /// every slot is held by a streamed read or authorization-query worker.
+    pub(crate) fn try_stream_worker(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         Arc::clone(&self.stream_workers).try_acquire_owned().ok()
     }
 
@@ -3495,8 +3497,21 @@ impl AppState {
             // Serialize the lineage swap with auth-view installation. A pre-restore build
             // holding this lock either installs before the swap or observes the new core.
             #[cfg(feature = "solid-authz")]
-            let _cache = self.authz_view.write().ok();
+            let mut cache = self.authz_view.write().unwrap_or_else(|e| e.into_inner());
             self.core.store(Arc::new(ServingCore { ring, writer }));
+            #[cfg(feature = "solid-authz")]
+            {
+                #[cfg(test)]
+                let clear = !self
+                    .authz_build_pool()
+                    .skip_restore_cache_clear
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                #[cfg(not(test))]
+                let clear = true;
+                if clear {
+                    *cache = None;
+                }
+            }
         }
         // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
         // generation-zero index from the prior lineage so equality on the numeric generation
@@ -6324,8 +6339,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
             "compaction complete\n".to_string(),
             false,
         ),
-        // A compaction failure (e.g. durable-write I/O error) is retryable: the writer thread
-        // stays alive and reads keep flowing from the last published snapshot.
+        // Compaction errors preserve the published read snapshot. Recovery status is logged.
         // (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
         // the server's `--persist` filesystem path (an I/O error embeds the absolute path).
         // Although this route is write/admin-gated, withhold the path from the response body —
@@ -6333,7 +6347,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
         Ok(Err(e)) => sanitized_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "compaction",
-            "compaction failed (retryable)",
+            "compaction failed; see server logs for recovery status",
             &e,
         ),
         Err(_) => json_error(
@@ -7007,16 +7021,17 @@ pub(crate) async fn await_worker(task: tokio::task::JoinHandle<Response>, config
         },
         None => task.await,
     };
-    match joined {
-        Ok(resp) => resp,
-        Err(e) if e.is_panic() => {
-            json_error(StatusCode::INTERNAL_SERVER_ERROR, "query worker panicked")
-        }
-        Err(_) => json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "query worker was cancelled",
-        ),
-    }
+    joined.unwrap_or_else(query_worker_error)
+}
+
+/// Shared response mapping for blocking query workers.
+pub(crate) fn query_worker_error(error: tokio::task::JoinError) -> Response {
+    let message = if error.is_panic() {
+        "query worker panicked"
+    } else {
+        "query worker was cancelled"
+    };
+    json_error(StatusCode::INTERNAL_SERVER_ERROR, message)
 }
 
 /// (sq-ebii) The result of awaiting a SPARQL Update worker under the timeout cap.
@@ -7601,9 +7616,9 @@ struct StreamHeld {
     slot: tokio::sync::OwnedSemaphorePermit,
 }
 
-/// Every streamed-body worker slot is taken by a worker that is still streaming: shed the
-/// request exactly as the `concurrency_limit` layer does.
-fn stream_workers_exhausted() -> Response {
+/// Every query-worker slot is still held: shed the request exactly as the
+/// `concurrency_limit` layer does.
+pub(crate) fn stream_workers_exhausted() -> Response {
     json_error(StatusCode::TOO_MANY_REQUESTS, "server is at its concurrent-request limit, retry later")
 }
 

@@ -63,6 +63,7 @@ import {
   VC_FORMAT_OPTIONS,
   vcFormatFromName,
   looksLikeJwtVc,
+  type SampleCredential,
   type VcFormat,
 } from "@/data/verifiable-credentials";
 
@@ -129,11 +130,25 @@ function nextKey(): string {
   return `vc-${Date.now()}-${importCounter}`;
 }
 
+function sampleCredential(sample: SampleCredential): ImportedCredential {
+  return {
+    key: `sample-${sample.id}`,
+    label: sample.label,
+    source: sample.source,
+    format: sample.format,
+    origin: "sample",
+    triples: 0,
+    issuer: null,
+    subject: null,
+  };
+}
+
 export function VerifiableCredentials() {
-  const [creds, setCreds] = React.useState<ImportedCredential[]>([]);
+  const [creds, setCreds] = React.useState<ImportedCredential[]>(() =>
+    SAMPLE_CREDENTIALS.map(sampleCredential),
+  );
   const [query, setQuery] = React.useState<string>(SAMPLE_QUERIES[0].sparql);
   const [state, setState] = React.useState<QueryState>({ kind: "idle" });
-  const [seeded, setSeeded] = React.useState(false);
 
   // Parse one RDF/JSON-LD document into an ephemeral store and derive its per-VC facts. Throws
   // a clear Error on a parse failure so the caller can surface it (and abort the import).
@@ -160,28 +175,32 @@ export function VerifiableCredentials() {
     [],
   );
 
-  // Seed the two sample credentials on first mount so the surface shows it working before the
-  // user imports their own. Best-effort: a wasm load hiccup leaves the list empty (the import
-  // affordances still work), it never throws into render.
+  // Seed once in state; enrich the samples after the engine loads. Updating only
+  // surviving sample keys preserves imports and removals made while loading.
   React.useEffect(() => {
-    if (seeded) return;
     let cancelled = false;
-    setSeeded(true);
-    (async () => {
-      const out: ImportedCredential[] = [];
-      for (const s of SAMPLE_CREDENTIALS) {
-        try {
-          out.push(await describe(s.label, s.source, s.format, "sample"));
-        } catch {
-          // Skip a sample that fails to parse; the rest still seed.
-        }
+    const seeds = SAMPLE_CREDENTIALS.map(sampleCredential);
+    void Promise.allSettled(seeds.map(async (sample) => ({
+      ...await describe(sample.label, sample.source, sample.format, "sample"),
+      key: sample.key,
+    }))).then((results) => {
+      if (cancelled) return;
+      const samples = new Map(seeds.map((sample, index) => [sample.key, results[index]]));
+      // A failed sample (including an engine-load failure) must leave no placeholder.
+      setCreds((prev) => prev.flatMap((cred) => {
+        const sample = samples.get(cred.key);
+        if (!sample) return [cred];
+        return sample.status === "fulfilled" ? [sample.value] : [];
+      }));
+      const failure = results.find((sample) => sample.status === "rejected");
+      if (failure?.status === "rejected") {
+        toast.error("Could not load sample credentials", {
+          description: failure.reason instanceof Error ? failure.reason.message : String(failure.reason),
+        });
       }
-      if (!cancelled) setCreds(out);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [seeded, describe]);
+    });
+    return () => { cancelled = true; };
+  }, [describe]);
 
   // Add a document to the credentials list (parsing + introspection happen here). Rejects a
   // JWT-shaped envelope with an explanation rather than mis-parsing it as RDF.

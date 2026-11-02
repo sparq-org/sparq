@@ -34,6 +34,10 @@ pub use sparq_lws_authn::jose;
 pub mod notify;
 mod records;
 pub mod resources;
+#[cfg(feature = "sparql-endpoint")]
+mod sparql;
+#[cfg(feature = "sparql-endpoint")]
+mod snapshot;
 pub mod tokens;
 pub mod tracked;
 
@@ -83,6 +87,8 @@ pub const META_SUFFIX: &str = ".meta";
 /// Boot configuration (see [`LwsConfig::from_env`]).
 #[derive(Debug, Clone)]
 pub struct LwsConfig {
+    #[cfg(feature = "crdt-sync")]
+    pub crdt_limits: sparq_lws_ysync::Limits,
     /// The public origin, without a trailing slash: `https://storage.example`.
     pub base_url: String,
     /// Browser origin policy shared with the outer overload response layer.
@@ -110,6 +116,20 @@ pub struct LwsConfig {
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
     pub max_body: usize,
+    /// Maximum readable resources assembled by one LWS query (default 10000; 507 past it).
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_max_resources: usize,
+    /// Maximum authorized RDF bytes parsed by one LWS query (default 64 MiB; 413 past it).
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_max_bytes: usize,
+    /// Query assembly and evaluation deadline (default: server request timeout).
+    /// `None` disables it; embedders may supply a shorter duration.
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_timeout: Option<std::time::Duration>,
+    /// Maximum query barrier wait and assembly time (default 500 ms).
+    /// Must be positive and shorter than the two-second mutation admission wait.
+    #[cfg(feature = "sparql-endpoint")]
+    pub sparql_barrier_budget: std::time::Duration,
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
     /// Start in the notification service's recovery mode: [`LwsState::new`] removes every stored
@@ -240,6 +260,8 @@ impl LwsConfig {
     /// suites built in that need no configuration ([`LwsConfig::suites`]).
     pub fn new(base_url: &str) -> Self {
         Self {
+            #[cfg(feature = "crdt-sync")]
+            crdt_limits: crate::crdt::limits_from_env().expect("valid CRDT limits"),
             base_url: base_url.trim_end_matches('/').to_string(),
             cors: crate::ldp::cors::CorsPolicy::default(),
             owner: None,
@@ -251,6 +273,16 @@ impl LwsConfig {
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_max_resources: 10_000,
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_max_bytes: 64 * 1024 * 1024,
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_timeout: Some(std::time::Duration::from_secs(
+                crate::overload::DEFAULT_REQUEST_TIMEOUT_SECS,
+            )),
+            #[cfg(feature = "sparql-endpoint")]
+            sparql_barrier_budget: std::time::Duration::from_millis(500),
             delivery: notify::DeliveryLimits::default(),
             reset_subscription_clock: false,
             suites: default_suites(),
@@ -304,11 +336,17 @@ impl LwsConfig {
     ///   ids to their keys, which offers the SAML 2.0 suite (set when that suite is not offered,
     ///   it is an error; `saml` in `SOLID_SERVER_LWS_AUTHN` without it is an error too);
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
+    /// - `SOLID_SERVER_LWS_SPARQL_BARRIER_MS`: query barrier wait and assembly budget
+    ///   with `sparql-endpoint` (default 500 ms; positive and less than 2000 ms).
     /// - `SOLID_SERVER_CORS_ORIGINS`: an optional comma-separated exact-origin allowlist.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
         cfg.cors = crate::ldp::cors::CorsPolicy::from_env()?;
         cfg.max_body = crate::body_limit::max_body_bytes_from_env();
+        #[cfg(feature = "sparql-endpoint")]
+        {
+            cfg.sparql_timeout = crate::overload::request_timeout_from_env();
+        }
         let var = |k: &str| {
             std::env::var(k)
                 .ok()
@@ -340,6 +378,20 @@ impl LwsConfig {
             }
             Ok(())
         };
+        #[cfg(feature = "sparql-endpoint")]
+        {
+            positive(
+                "SOLID_SERVER_LWS_SPARQL_MAX_RESOURCES",
+                &mut cfg.sparql_max_resources,
+            )?;
+            positive(
+                "SOLID_SERVER_LWS_SPARQL_MAX_BYTES",
+                &mut cfg.sparql_max_bytes,
+            )?;
+            if let Some(ms) = var("SOLID_SERVER_LWS_SPARQL_BARRIER_MS") {
+                cfg.sparql_barrier_budget = snapshot::parse_barrier_budget(&ms)?;
+            }
+        }
         positive("SOLID_SERVER_LWS_DELIVERY_QUEUE", &mut cfg.delivery.queue)?;
         positive(
             "SOLID_SERVER_LWS_DELIVERY_WORKERS",
@@ -631,6 +683,8 @@ impl<S: Store> Clone for LwsState<S> {
 }
 
 pub struct Inner<S: Store> {
+    #[cfg(feature = "crdt-sync")]
+    pub(crate) crdt: std::sync::OnceLock<Arc<crate::crdt::CrdtState<S>>>,
     /// Every change to the store moves the listing snapshots it concerns (see [`tracked`]).
     pub store: tracked::Tracked<S>,
     pub cfg: LwsConfig,
@@ -660,6 +714,10 @@ pub struct Inner<S: Store> {
     /// How many failed releases were not kept for the sweeper, the wait list being full (see
     /// [`LwsState::release_later`]).
     dropped_releases: std::sync::atomic::AtomicU64,
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    sparql_evaluation: std::sync::Mutex<Option<sparql::EvaluationGate>>,
+    #[cfg(all(test, feature = "sparql-endpoint"))]
+    sparql_parsing: std::sync::Mutex<Option<sparql::ParsingGate>>,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -725,6 +783,8 @@ impl<S: Store + 'static> LwsState<S> {
         cfg: LwsConfig,
         additional: crate::describe::ServiceCatalog,
     ) -> Result<Self, String> {
+        #[cfg(feature = "sparql-endpoint")]
+        snapshot::validate_barrier_budget(cfg.sparql_barrier_budget)?;
         store
             .exclusive()
             .map_err(|e| format!("the storage cannot be served over this store: {e}"))?;
@@ -739,7 +799,6 @@ impl<S: Store + 'static> LwsState<S> {
         let store = tracked::Tracked::new(store, cfg.storage());
         let lease = store
             .lifecycle()
-            .unwrap_or_default()
             .acquire()
             .ok_or("another LWS service is running over this store")?;
         let http = fetch_client(&cfg)?;
@@ -762,9 +821,14 @@ impl<S: Store + 'static> LwsState<S> {
         let (owner, closed) = tokio::sync::watch::channel(());
         let mut catalog = resources::service_catalog(&cfg);
         catalog.extend(additional);
+        #[cfg(feature = "crdt-sync")]
+        crate::crdt::register(&mut catalog, &cfg.base_url, false);
+        crate::history_http::catalog(&mut catalog, &cfg.base_url, true, &store.history_config());
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
+                #[cfg(feature = "crdt-sync")]
+                crdt: Default::default(),
                 store,
                 catalog,
                 cfg,
@@ -778,8 +842,14 @@ impl<S: Store + 'static> LwsState<S> {
                 settlements: Default::default(),
                 unreleased: Default::default(),
                 dropped_releases: Default::default(),
+                #[cfg(all(test, feature = "sparql-endpoint"))]
+                sparql_evaluation: Default::default(),
+                #[cfg(all(test, feature = "sparql-endpoint"))]
+                sparql_parsing: Default::default(),
             }),
         };
+        #[cfg(feature = "crdt-sync")]
+        let _ = state.crdt.set(crate::crdt::CrdtState::lws(&state));
         // Changes a process stop cut short are put back before anything is served.
         // Nothing put back in the background starts until every step that can fail has
         // succeeded: a start that fails leaves nothing running to put an old state back over a
@@ -808,6 +878,7 @@ impl<S: Store + 'static> LwsState<S> {
         state.access.replace(loaded);
         state.settle_hidden(hidden);
         notify::spawn_expiry_sweeper(&state, closed);
+        crate::history_http::spawn_lws_sweep(&state);
         Ok(state)
     }
 
@@ -1037,11 +1108,16 @@ impl<S: Store + 'static> LwsState<S> {
             }
             // Released while its locks are held: nothing can stage what it put back meanwhile.
             left.2.release(&state).await;
-            drop(left);
-            state.locks.show(&iris);
             state
-                .set_aside_bytes
-                .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
+                .store
+                .publish(async {
+                    drop(left);
+                    state.locks.show(&iris);
+                    state
+                        .set_aside_bytes
+                        .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
+                })
+                .await;
             drop(locks);
             state.touch_owed().await;
         });
@@ -1103,8 +1179,8 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// The LWS metadata stored beside `iri`, or the default when there is none. Stored metadata
-    /// that does not parse is an error, never the default: that would quietly drop the creator,
-    /// the types and the links it records.
+    /// that does not parse is [`crate::error::ServerError::InvalidMetadata`], never the default:
+    /// that would quietly drop the creator, the types and the links it records.
     pub async fn resource_meta(
         &self,
         iri: &str,
@@ -1846,6 +1922,12 @@ where
 }
 
 impl<'a, S: Store + 'static> Journal<'a, S> {
+    /// Simulate a stopped process, leaving durable holds without leaking the service lease.
+    #[cfg(test)]
+    pub(crate) fn abandon(mut self) {
+        self.holds.intended = true;
+    }
+
     pub(crate) fn new(state: &'a LwsState<S>, limit: usize) -> Self {
         Self {
             state,
@@ -2423,7 +2505,9 @@ pub(crate) fn parse_meta(
     body: &[u8],
 ) -> Result<ResourceMeta, crate::error::ServerError> {
     serde_json::from_slice(body).map_err(|e| {
-        crate::error::ServerError::Storage(format!("the metadata of {iri} is malformed: {e}"))
+        crate::error::ServerError::InvalidMetadata(format!(
+            "the metadata of {iri} is malformed: {e}"
+        ))
     })
 }
 
@@ -2473,6 +2557,10 @@ pub async fn router_with_catalog<S: Store + 'static>(
 /// (access requests, subscriptions, type search) are held to their own limits while the body is
 /// read, so no more than that is ever buffered for them; everything else to `max_body`.
 fn body_limit(path: &str, max_body: usize) -> usize {
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_ticket(path) {
+        return 8192.min(max_body);
+    }
     let limit = if path.starts_with(REQUESTS_PATH) {
         access::MAX_REQUEST_BYTES
     } else if path.starts_with(SUBSCRIPTIONS_PATH) {
@@ -2488,6 +2576,10 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_socket(req.uri().path()) {
+        return crate::crdt::lws_socket(&state, req).await;
+    }
     if notify::stream_path(req.uri().path()) {
         if let Err(refused) = check_headers(req.headers()) {
             return refused;
@@ -2591,6 +2683,17 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    #[cfg(feature = "crdt-sync")]
+    if crate::crdt::is_ticket(path) {
+        return crate::crdt::lws_ticket(state, &req, &agent).await;
+    }
+    if crate::history_http::recognizes(path, true, &state.store.history_config()) {
+        return crate::history_http::lws_handler(state, &req, &agent).await;
+    }
+    #[cfg(feature = "sparql-endpoint")]
+    if path == sparql::PATH {
+        return sparql::handle(state, &req, &agent).await;
+    }
     if path.starts_with(SUBSCRIPTIONS_PATH) {
         return notify::handle(state, &req, &agent).await;
     }
@@ -2603,7 +2706,20 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
     if path.starts_with("/.lws/") || path == "/.lws" {
         return problem(StatusCode::NOT_FOUND, None);
     }
-    resources::handle(state, &req, &agent).await
+    let original = state.cfg.absolute(&req.path);
+    let mut resp = resources::handle(state, &req, &agent).await;
+    if resp.status().is_success()
+        && state.store.history_config().versions
+        && crate::store::history::data_resource(&original)
+    {
+        add_link(
+            resp.headers_mut(),
+            &crate::history_http::listing_url(&state.cfg.base_url, true, &original),
+            "version-history",
+            None,
+        );
+    }
+    resp
 }
 
 // ---- response helpers ----
@@ -3045,9 +3161,23 @@ pub(crate) mod test_store {
     pub type GateOf = Arc<std::sync::Mutex<Option<(String, Arc<tokio::sync::Semaphore>)>>>;
 
     #[derive(Clone)]
+    pub struct WriteCycles {
+        pub uris: Vec<String>,
+        pub entered: Arc<tokio::sync::Semaphore>,
+        pub release: Arc<tokio::sync::Semaphore>,
+    }
+
+    #[derive(Clone)]
     pub struct FlakyStore {
-        inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
+        inner: Arc<
+            CompositeStore<
+                crate::store::CountingSparqClient<InMemorySparqClient>,
+                crate::store::CountingBlobStore<InMemoryBlobStore>,
+            >,
+        >,
+        pub counters: Arc<crate::store::BackendCounters>,
         pub fail_delete: Arc<AtomicBool>,
+        pub write_cycles: Arc<std::sync::Mutex<Option<WriteCycles>>>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
         /// The index is not this process's alone ([`Store::exclusive`]).
@@ -3200,12 +3330,21 @@ pub(crate) mod test_store {
 
         /// Holding at most what `limits` allow.
         pub fn with_limits(limits: crate::store::InMemoryStoreLimits) -> Self {
+            let counters = Arc::new(crate::store::BackendCounters::default());
             Self {
                 inner: Arc::new(CompositeStore::new(
-                    InMemorySparqClient::with_limits(limits),
-                    InMemoryBlobStore::with_limits(limits),
+                    crate::store::CountingSparqClient::new(
+                        InMemorySparqClient::with_limits(limits),
+                        counters.clone(),
+                    ),
+                    crate::store::CountingBlobStore::new(
+                        InMemoryBlobStore::with_limits(limits),
+                        counters.clone(),
+                    ),
                 )),
+                counters,
                 fail_delete: Arc::new(AtomicBool::new(false)),
+                write_cycles: Default::default(),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
                 hold_next_write_of: Default::default(),
@@ -3367,6 +3506,10 @@ pub(crate) mod test_store {
 
     #[async_trait]
     impl Store for FlakyStore {
+        fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+            self.inner.lifecycle()
+        }
+
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
             self.traced("read", iri);
             if self.read_fails(iri) {
@@ -3423,6 +3566,11 @@ pub(crate) mod test_store {
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
             self.step()?;
+            let cycles = self.write_cycles.lock().unwrap().clone();
+            if let Some(cycles) = cycles.filter(|cycles| cycles.uris.iter().any(|key| key == iri)) {
+                cycles.entered.add_permits(1);
+                cycles.release.acquire().await.expect("write cycle").forget();
+            }
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri)
                 || self
                     .fail_write_under
@@ -3924,6 +4072,48 @@ pub(crate) mod test_store {
         cfg.allow_insecure_fetch = true;
         cfg.page_size = page_size;
         let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
+        (state, store)
+    }
+
+    /// Wait for detached maintenance tasks to release a stopped service's lease.
+    pub async fn wait_for_stop(store: &FlakyStore, caller: &str) {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            store.lifecycle().wait_for_release(caller),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{caller}: timed out waiting for the stopped service"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_stop_waits_for_the_actual_lease_release() {
+        let store = FlakyStore::new();
+        let lease = store.lifecycle().acquire().unwrap();
+        let released = std::sync::atomic::AtomicBool::new(false);
+        let ((), (), ()) = tokio::join!(
+            biased;
+            async {
+                wait_for_stop(&store, "wait_for_stop_waits_for_the_actual_lease_release").await;
+                assert!(
+                    released.load(std::sync::atomic::Ordering::Acquire),
+                    "the stop waiter returned before the lease was released"
+                );
+            },
+            async {
+                // The release timer also ensures the timer driver observes the old deadline.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                drop(lease);
+                released.store(true, std::sync::atomic::Ordering::Release);
+            },
+            tokio::time::advance(std::time::Duration::from_secs(3)),
+        );
+        assert!(store.lifecycle().acquire().is_some());
+    }
+
+    /// A closed state measuring both backend seams, including reads inside CompositeStore.
+    pub async fn counting_state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
+        let (state, store) = closed_state(page_size).await;
+        state.notify.pause_sweeper();
         (state, store)
     }
 
@@ -4463,9 +4653,11 @@ mod tests {
             .write(&at, serde_json::to_vec(&stored).unwrap().into(), LWS_JSON)
             .await
             .unwrap();
-        // Loaded over the backend itself: the running state holds the lease of its own handle.
-        notify::Notifier::load(&store, &state.cfg).await.unwrap();
-        assert!(!state.store.exists(&at).await.unwrap());
+        let cfg = state.cfg.clone();
+        drop(state);
+        test_store::wait_for_stop(&store, "every_removal_takes_one_step").await;
+        notify::Notifier::load(&store, &cfg).await.unwrap();
+        assert!(!store.exists(&at).await.unwrap());
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }
 

@@ -53,7 +53,9 @@ not serve `application/lws+cid`.
 
 LWS retains its root, authorization server, grants, requests, notifications, type
 index and type search entries, and adds `lws:StorageDescription` pointing at the
-storage URI. `conformsTo` names `https://www.w3.org/TR/lws10-core/`. Its first two
+storage URI. With `sparql-endpoint`, `ssd:SparqlQueryService` points to
+`/.lws/sparql`; the endpoint and its entry are absent when the feature is off.
+`conformsTo` names `https://www.w3.org/TR/lws10-core/`. Its first two
 contexts stay CID v1 then LWS v1; the third is an inline extension mapping, with
 no extension context URL to retrieve. `ssd:PatchSupport.mediaType` maps
 `application/json`, `application/ld+json`, and `application/linkset+json` to `["application/json-patch+json"]`. This applies to data documents and
@@ -62,4 +64,10 @@ accepts other media types with a `+json` structured syntax suffix, without listi
 media-type patterns in the catalog.
 `ssd:RecursiveDelete` reflects `DELETE` with `Depth: infinity`.
 NotificationService's `subscriptionType` is currently `["WebhookSubscription"]`.
-Neither mode advertises move, CRDT sync, versions, trash, or unmounted channels.
+When enabled, versions and trash add `ssd:VersioningService` / `ssd:TrashService`
+and their `ssd:Versioning` / `ssd:Trash` capabilities in either mode. Versioning's
+`serviceEndpoint` is an IRI; its separate literal `ssd:listingTemplate` appends
+`?resource={resource}` to that endpoint. Trash covers data resources only;
+recursive deletes remain permanent until #7236. See [history services](history.md)
+for settings, requests and the draft additions used in their listings.
+Neither mode advertises move, CRDT sync, or unmounted channels.
