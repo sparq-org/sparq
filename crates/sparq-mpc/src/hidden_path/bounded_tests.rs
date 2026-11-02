@@ -1566,16 +1566,12 @@ fn differential_hidden_blank_node_of_the_loaded_graph_yields_its_identity_pair()
 /// The output stage's PUBLIC-SHAPE caps are decided at the OPERATOR's entry, so
 /// nothing is drawn when one of them refuses.
 ///
-/// The term and limb caps used to be charged inside the output stage, which the
-/// bounded operator reaches only after `build_bounded_candidates` has already dealt
-/// the per-hop match bits — so "refused before any draw" was true of the stage and
-/// not of the operator. `check_output_public_shape` runs the same closed forms at
-/// the operator's entry; the compute-party cap is the one a caller can trip with a
-/// legal form and a legal bound, so it is the one tested here. The counter is the
-/// witness: a refusal that still dealt would show a nonzero draw count.
+/// An over-cap output bound must be refused before `build_bounded_candidates`
+/// deals the per-hop match bits. The counter is the witness: a refusal that
+/// still dealt would show a nonzero draw count.
 #[test]
 fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
-    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
     use crate::randomness::test_sources::DrawCountingSource;
 
     let triples = [
@@ -1585,8 +1581,7 @@ fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
     let edges = predicated_edges(&triples);
     let form = HiddenBoundedPath::range(P, 1, 2);
 
-    // More compute parties than the output stage's work model admits.
-    let backend = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x91).unwrap();
+    let backend = ShamirBackend::new_seeded(3, 0x91).unwrap();
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     let err = eval_bounded_path_hidden_slots_through(
@@ -1595,11 +1590,11 @@ fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
         &edges,
         &form,
         PayloadWidths::derived(2),
-        8,
+        MAX_OUTPUT_BOUND + 1,
     )
-    .expect_err("a party count past the output cap must be refused");
+    .expect_err("an output bound past the cap must be refused");
     assert!(
-        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
         "the refusal must name the cap, got {:?}",
         err
     );
@@ -1609,19 +1604,17 @@ fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
         "the operator must refuse on public numbers alone, having drawn nothing"
     );
 
-    // And the same form at an admissible party count still runs, so the test is
-    // pinning the cap and not a broken fixture.
-    let ok_backend = ShamirBackend::new_seeded(3, 0x92).unwrap();
-    let mut ok_dealer = ok_backend.dealer();
+    // The same form and backend with an admissible bound still run.
+    let mut ok_dealer = backend.dealer();
     eval_bounded_path_hidden_slots_through(
         &mut ok_dealer,
-        &ok_backend,
+        &backend,
         &edges,
         &form,
         PayloadWidths::derived(2),
         8,
     )
-    .expect("an admissible party count still evaluates");
+    .expect("an admissible output bound still evaluates");
 }
 
 /// The bounded entry also checks public caps before its own equality draws.

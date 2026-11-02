@@ -302,18 +302,19 @@ impl BoundedPathPlan {
     ///    is a lower bound on the output stage. The stage's own
     ///    [`crate::oblivious_join::ObliviousOutputCost`] reports the full count.
     ///
-    /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
-    /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
+    /// `bound` is the PUBLIC padded output bound `B` (the operator reveals exactly
+    /// `B` slots). `parties` is the compute-party count `n`.
     ///
     /// `B` is capped by [`crate::oblivious_join::MAX_OUTPUT_BOUND`], refused before
     /// any of the counting below: step (3) builds a real [`WaksmanNetwork`] over
     /// `B` slots, so an unchecked `B` would allocate a network proportional to a
     /// number the caller chose. (That one cap is enough on its own:
     /// [`crate::oblivious::MAX_NETWORK_WIDTH`] IS `MAX_OUTPUT_BOUND`, so a `B`
-    /// inside the bound cap is inside the width cap by definition.) The party cap
-    /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`] is applied here too, for the
-    /// same reason, when `B > 0` or the plan performs secure equalities. A plan
-    /// with neither kind of work accepts larger party counts.
+    /// inside the bound cap is inside the width cap by definition.) Every backend
+    /// constructor enforces [`crate::robust::MAX_ROBUST_SHARES`]. This planner
+    /// receives a bare party count, so it checks that ceiling when `B > 0` or
+    /// the plan performs secure equalities. A plan with neither kind of work
+    /// accepts larger party counts without constructing a backend.
     ///
     /// The counting itself is CLOSED FORM: every counter the per-equality and
     /// per-slot records touch is linear in its multiplicity, so the batches fold in
@@ -328,12 +329,15 @@ impl BoundedPathPlan {
     /// values; the largest possible threshold cannot serve as a lower bound.
     pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
         crate::oblivious_join::check_output_bound_cap(bound)?;
-        // The same PARTY cap the stage applies, so a plan whose party count the
-        // stage would refuse is not costed here either — a cost model for a run
-        // that cannot happen is not a cost model.
-        //
-        if bound > 0 || self.secure_equalities > 0 {
-            crate::oblivious_join::check_output_parties_cap(parties)?;
+        // Unlike backend-taking entries, the planner receives an unchecked count.
+        if (bound > 0 || self.secure_equalities > 0) && parties > crate::robust::MAX_ROBUST_SHARES {
+            return Err(MpcError::Protocol(format!(
+                "bounded path planner: {} compute parties exceeds MAX_ROBUST_SHARES={} — \
+                 output slots and secure equalities require a party count within \
+                 the robust reconstruction share limit",
+                parties,
+                crate::robust::MAX_ROBUST_SHARES
+            )));
         }
         // The aggregate slot-work budget also needs the actual threshold and
         // payload width, neither of which this API receives. It is checked at

@@ -195,9 +195,12 @@
 //!   in its own right and an overflowing product is a refusal, not a wrapped
 //!   number under the budget. This is the check that binds on an oversized
 //!   COMBINATION, which is why each individual cap above is generous.
-//! - **Compute-party count** — [`MAX_OUTPUT_PARTIES`], because the party count
-//!   multiplies the per-limb work twice over (one sharing is `n` elements, and the
-//!   degree reduction behind each select re-shares `2t + 1` times).
+//!
+//! Every [`ShamirBackend`] constructor enforces the party ceiling
+//! [`crate::robust::MAX_ROBUST_SHARES`]. Backend-taking entries and this stage
+//! rely on that constructor check. The bounded-path planner checks the same
+//! ceiling for its bare party-count argument when it models output slots or
+//! secure equalities.
 //!
 //! Refusals name the cap and public factors (`B`, arity, width, `n`, `t`), without
 //! term text or candidate positions. In default mode the public width describes
@@ -393,18 +396,6 @@ pub const MAX_PAYLOAD_TERM_BYTES: usize = 1 << 24; // 16 MiB per term
 /// width is the per-slot work multiplier and is bounded on its own, not only
 /// through the arity and per-term widths it follows from.
 pub const MAX_SLOT_LIMBS: usize = 1 << 29; // 536_870_912
-
-/// Maximum compute-party count the output stage's work budget accepts.
-///
-/// Every sharing the stage draws is `parties` field elements, and the degree
-/// reduction behind each select re-shares `2t + 1 <= parties` times, so the party
-/// count multiplies the work twice over. It is a public plan parameter of the
-/// backend, checked in closed form when `B > 0` requires sharing and opening.
-/// The source is [`crate::robust::MAX_ROBUST_SHARES`] (1024), whose reconstruction
-/// cost is not modelled by [`MAX_SLOT_WORK`]. An empty `B = 0` stage does no
-/// party-dependent work and is accepted above this ceiling. This is not a
-/// crate-wide limit on how many parties a `ShamirBackend` may have.
-pub const MAX_OUTPUT_PARTIES: usize = crate::robust::MAX_ROBUST_SHARES;
 
 /// Maximum aggregate slot work the oblivious output stage accepts before refusing
 /// with an [`MpcError::Protocol`] error, counted in MODELLED FIELD ELEMENTS.
@@ -779,14 +770,14 @@ pub(crate) fn check_slot_work_budget(
 }
 
 /// The output stage's PUBLIC-ONLY caps, for an OPERATOR ENTRY that has not built a
-/// candidate yet: the padded bound, the payload arity, the compute-party count,
-/// and — only when the caller DECLARED the widths — the declared per-term width,
+/// candidate yet: the padded bound, the payload arity, and — only when the caller
+/// DECLARED the widths — the declared per-term width,
 /// the uniform limb count it implies and the aggregate slot work.
 ///
-/// In the DEFAULT (derived) mode only the bound, arity and party caps are checked
-/// here. The party cap applies when `B > 0`; sharing input keys alone without
-/// output slots does not require this cap. The width is a function of the rows the
-/// stage packs, so the width's caps and the aggregate work are decided at the stage,
+/// In the DEFAULT (derived) mode only the bound and arity caps are checked
+/// here. The backend constructor already enforces the party ceiling. The width
+/// is a function of the rows the stage packs, so the width's caps and the aggregate
+/// work are decided at the stage,
 /// exactly where this crate has always decided them. An entry check that guessed
 /// an upper bound from the inputs' widest term refused runs that both the stage and
 /// the pre-cap behaviour accept — a 900k-character literal at `B = 1`, or ten
@@ -804,9 +795,6 @@ pub(crate) fn check_output_entry_caps(
 ) -> Result<(), MpcError> {
     check_output_bound_cap(bound)?;
     check_payload_arity_cap(widths.arity())?;
-    if bound > 0 {
-        check_output_parties_cap(parties)?;
-    }
     if widths.declared_term_bytes().is_some() {
         // A declared width ignores the rows, so resolving over none of them gives
         // the run's real width and `resolve_rows` applies its caps.
@@ -817,19 +805,6 @@ pub(crate) fn check_output_entry_caps(
             parties,
             threshold,
         )?;
-    }
-    Ok(())
-}
-
-/// The compute-party cap for this stage's work budget. See [`MAX_OUTPUT_PARTIES`].
-pub(crate) fn check_output_parties_cap(parties: usize) -> Result<(), MpcError> {
-    if parties > MAX_OUTPUT_PARTIES {
-        return Err(MpcError::Protocol(format!(
-            "oblivious output stage: {} compute parties exceeds the MAX_OUTPUT_PARTIES cap \
-             of {} — output slots and secure equalities/comparisons require a party \
-             count within the robust reconstruction share limit",
-            parties, MAX_OUTPUT_PARTIES
-        )));
     }
     Ok(())
 }
@@ -1883,12 +1858,12 @@ fn encode_payload_row_checked(
     Ok(bytes)
 }
 
-/// Check resolved widths: public bound, arity and party caps first, then the
+/// Check resolved widths: public bound and arity caps first, then the
 /// width caps and aggregate work. In derived mode the resolved width is public
 /// but data-dependent. Only declared mode permits all these checks at an
 /// operator entry; default entries use [`check_output_entry_caps`] instead.
 ///
-/// What these bound is this STAGE: the resolved widths, the party count and the
+/// What these bound is this STAGE: the resolved widths and the
 /// aggregate per-slot work. Whole-operator resource planning — dealer batches,
 /// aggregate sharing, shuffle networks beyond this bound, session traffic and
 /// deadlines — is follow-up work and is not bounded here.
@@ -1899,14 +1874,11 @@ pub(crate) fn check_output_public_shape(
     threshold: usize,
 ) -> Result<(), MpcError> {
     // PUBLIC caps first, so a refusal that does not depend on the data is never
-    // preceded by one that does: the arity and the party count are the caller's
-    // own numbers, while in the DERIVED mode the per-term and limb widths are
+    // preceded by one that does: the arity is the caller's own number,
+    // while in the DERIVED mode the per-term and limb widths are
     // functions of the run's rows.
     check_output_bound_cap(bound)?;
     check_payload_arity_cap(widths.arity())?;
-    if bound > 0 {
-        check_output_parties_cap(parties)?;
-    }
     widths.check_shape()?;
     // With no slot at all nothing is packed and the width is 0.
     let limb_capacity = if bound == 0 {
@@ -1976,7 +1948,7 @@ impl<'a> SlotPlan<'a> {
         }
     }
 
-    /// Decide the plan from resolved values: bound, arity and party caps first,
+    /// Decide the plan from resolved values: bound and arity caps first,
     /// then packed width and aggregate work. Only declared widths are independent
     /// of the data; derived widths were measured over the candidates. This step
     /// reads no candidate, and precedes the output stage's first sharing or draw.
@@ -2509,8 +2481,8 @@ pub(crate) fn oblivious_set_output_hidden_keys_through(
     // sized from the product, so neither may be reached on an over-cap or
     // overflowing input.
     let pairs = check_candidate_pairs_within_bound(bound, left_keys.len(), right_keys.len())?;
-    // Then the output stage's PUBLIC caps — the bound, the arity (1: the index tag)
-    // and the compute-party count — before the equality chain below draws once per
+    // Then the output stage's PUBLIC caps — the bound and arity (1: the index tag)
+    // — before the equality chain below draws once per
     // pair. The width itself is resolved at the stage, over the rows it packs, as
     // in every other default-mode operator.
     check_output_entry_caps(
@@ -4375,7 +4347,7 @@ mod tests {
             other => panic!("expected Tampered on an out-of-set tag, got {other:?}"),
         }
     }
-    // ---- Output-stage WIDTH caps (arity / term width / limbs / parties / work) ----
+    // ---- Output-stage WIDTH caps (arity / term width / limbs / work) ----
 
     /// Every cap is pinned BY VALUE, so a change to one is a change to this test
     /// and not a silent relaxation of a protocol guard.
@@ -4385,8 +4357,6 @@ mod tests {
         assert_eq!(MAX_PAYLOAD_ARITY, 1 << 30);
         assert_eq!(MAX_PAYLOAD_TERM_BYTES, 1 << 24);
         assert_eq!(MAX_SLOT_LIMBS, 1 << 29);
-        assert_eq!(MAX_OUTPUT_PARTIES, 1 << 10);
-        assert_eq!(MAX_OUTPUT_PARTIES, crate::robust::MAX_ROBUST_SHARES);
         assert_eq!(MAX_SLOT_WORK, 1 << 32);
     }
 
@@ -4486,27 +4456,29 @@ mod tests {
     /// PUBLIC-SHAPE checks before it draws anything — so a run the stage would
     /// refuse draws no equality bits first.
     ///
-    /// The shape that refuses is a party count past [`MAX_OUTPUT_PARTIES`], a
+    /// The shape that refuses is a bound past [`MAX_OUTPUT_BOUND`], a
     /// public number, so no candidate is needed to decide it. The two batched join
     /// entries are covered by the same property in
-    /// `join::randomness_seam_tests::both_batched_entries_refuse_the_output_party_cap_before_any_draw`.
+    /// `join::randomness_seam_tests::both_batched_entries_refuse_the_output_bound_cap_before_any_draw`.
     #[test]
-    fn the_hidden_keys_entry_refuses_the_party_cap_before_any_draw() {
+    fn the_hidden_keys_entry_refuses_the_bound_cap_before_any_draw() {
         use crate::randomness::test_sources::DrawCountingSource;
-        // A backend past the stage's party cap. Honest majority still holds, so it
-        // is the OUTPUT stage's cap and nothing else that refuses.
-        let parties = MAX_OUTPUT_PARTIES + 2;
-        let backend = ShamirBackend::new_seeded(parties, 0x7A23).unwrap();
+        let backend = ShamirBackend::new_seeded(5, 0x7A23).unwrap();
         let left = [Fp::new(1), Fp::new(2)];
         let right = [Fp::new(2), Fp::new(3)];
 
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err =
-            oblivious_set_output_hidden_keys_through(&mut counted, &backend, &left, &right, 4)
-                .expect_err("a party count past the cap must be refused");
+        let err = oblivious_set_output_hidden_keys_through(
+            &mut counted,
+            &backend,
+            &left,
+            &right,
+            MAX_OUTPUT_BOUND + 1,
+        )
+        .expect_err("an output bound past the cap must be refused");
         assert!(
-            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
             "{:?}",
             err
         );
@@ -4551,27 +4523,32 @@ mod tests {
     fn check_output_entry_caps_checks_public_caps_before_widths() {
         let derived = PayloadWidths::derived(2);
         assert!(check_output_entry_caps(&derived, 1, 3, 1).is_ok());
-        for (widths, bound, parties, cap) in [
-            (derived, MAX_OUTPUT_BOUND + 1, 3, "MAX_OUTPUT_BOUND"),
+        for (widths, bound, cap) in [
+            (derived, MAX_OUTPUT_BOUND + 1, "MAX_OUTPUT_BOUND"),
             (
                 PayloadWidths::derived(MAX_PAYLOAD_ARITY + 1),
                 1,
-                3,
                 "MAX_PAYLOAD_ARITY",
             ),
-            (derived, 1, MAX_OUTPUT_PARTIES + 1, "MAX_OUTPUT_PARTIES"),
-            // The party cap precedes even a public declaration's width checks.
+            // Bound and arity caps precede a public declaration's width checks.
             (
                 PayloadWidths {
                     arity: 2,
                     term_bytes: Some(usize::MAX),
                 },
+                MAX_OUTPUT_BOUND + 1,
+                "MAX_OUTPUT_BOUND",
+            ),
+            (
+                PayloadWidths {
+                    arity: MAX_PAYLOAD_ARITY + 1,
+                    term_bytes: Some(usize::MAX),
+                },
                 1,
-                MAX_OUTPUT_PARTIES + 1,
-                "MAX_OUTPUT_PARTIES",
+                "MAX_PAYLOAD_ARITY",
             ),
         ] {
-            let err = check_output_entry_caps(&widths, bound, parties, 1).unwrap_err();
+            let err = check_output_entry_caps(&widths, bound, 3, 1).unwrap_err();
             assert!(matches!(err, MpcError::Protocol(m) if m.contains(cap)));
         }
         let declared = PayloadWidths::declare(1, 2800).unwrap();
@@ -4624,17 +4601,16 @@ mod tests {
         assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_ARITY")));
         assert!(source.log.is_empty());
 
-        let wide = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x9D15).unwrap();
-        let mut source = RecordingSource::new(wide.dealer());
+        let mut source = RecordingSource::new(backend.dealer());
         let err = oblivious_set_output_through(
             &mut source,
-            &wide,
+            &backend,
             &candidates,
             PayloadWidths::declare(1, 1).unwrap(),
-            1,
+            MAX_OUTPUT_BOUND + 1,
         )
         .unwrap_err();
-        assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+        assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")));
         assert!(source.log.is_empty());
     }
 
@@ -4973,41 +4949,10 @@ mod tests {
         assert_eq!(counted.draws(), 0, "refused before any draw");
     }
 
-    /// The party count is a factor of the work and is capped in its own right: a
-    /// backend with more compute parties than [`MAX_OUTPUT_PARTIES`] is refused
-    /// before any candidate is read when `B > 0` requires sharing and opening.
+    /// An admitted backend with a wider federation still evaluates output slots.
     #[test]
-    fn the_output_parties_cap_refuses_a_wider_federation() {
-        use crate::randomness::test_sources::DrawCountingSource;
-        assert!(check_output_parties_cap(MAX_OUTPUT_PARTIES).is_ok());
-        let err = check_output_parties_cap(MAX_OUTPUT_PARTIES + 1)
-            .expect_err("one party past the cap is refused");
-        assert!(
-            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
-            "{:?}",
-            err
-        );
-
-        let wide = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x7A16).unwrap();
+    fn output_slots_accept_an_admitted_wider_federation() {
         let cands = public_candidates(&[(true, vec![lit("x")])]);
-        let mut dealer = wide.dealer();
-        let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = oblivious_set_output_through(&mut counted, &wide, &cands, 1, 2)
-            .expect_err("a federation wider than the budget models must be refused");
-        assert!(
-            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
-            "{:?}",
-            err
-        );
-        assert_eq!(counted.draws(), 0, "refused before any draw");
-
-        // The cap is a cap, not a refusal of every wide federation: the check
-        // admits exactly `MAX_OUTPUT_PARTIES` (asserted above), and a federation an
-        // order of magnitude past anything this crate's suites run really does
-        // evaluate. A run AT the cap is not exercised here on purpose — every
-        // degree reduction re-shares `2t + 1` times over `n` points, so the stage's
-        // own cost at `n = MAX_OUTPUT_PARTIES` is what `MAX_SLOT_WORK` is there to
-        // bound, not something to pay inside a unit test.
         let wide_but_real = ShamirBackend::new_seeded(33, 0x7A17).unwrap();
         assert!(oblivious_set_output(&wide_but_real, &cands, 1, 2).is_ok());
     }

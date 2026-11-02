@@ -102,9 +102,9 @@ use crate::shamir::Share;
 ///
 /// Reconstruction accepts at most 1024 shares, before distinct-point validation,
 /// interpolation or decoding. The decoder's cubic work is not modelled by the
-/// output stage's slot-work budget. [`crate::oblivious_join::MAX_OUTPUT_PARTIES`]
-/// derives its ceiling from this constant for output slots or secure equalities
-/// and comparisons; sharing input keys alone does not require the output cap.
+/// output stage's slot-work budget. Every [`crate::ShamirBackend`] constructor
+/// enforces this party ceiling. The bounded-path planner checks it for its bare
+/// party-count argument when modelling output slots or secure equalities.
 pub const MAX_ROBUST_SHARES: usize = 1 << 10;
 
 /// Maximum number of reference-subset fits attempted for abort-path attribution.
@@ -710,9 +710,8 @@ mod tests {
     }
 
     #[test]
-    fn work_bound_accepts_the_output_party_cap_on_consistency_check() {
+    fn work_bound_accepts_the_robust_share_cap_on_consistency_check() {
         assert_eq!(MAX_ROBUST_SHARES, 1024);
-        assert_eq!(MAX_ROBUST_SHARES, crate::oblivious_join::MAX_OUTPUT_PARTIES);
         // Degree zero exercises the e=0 consistency path with redundancy.
         let shares = work_bound_shares(MAX_ROBUST_SHARES, 0);
         let clean = reconstruct_robust_attributed(&shares, 0).unwrap();

@@ -231,7 +231,8 @@ fn chain_out_vars() -> Vec<Variable> {
 ///
 /// Every cap HERE bounds a COUNT: the hop count, the enumerated tuple count, the
 /// candidate count and the output bound `B`. Entries check the output stage's
-/// public bound, arity and party caps before building candidates or drawing.
+/// public bound and arity caps before building candidates or drawing. The
+/// backend constructor enforces the party ceiling.
 /// Declared widths also permit entry checks of the per-term ceiling, uniform
 /// limb count and aggregate slot work. Derived widths and data-dependent term
 /// fit checks are resolved at the output stage, after the operator's own draws.
@@ -913,7 +914,7 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     check_params(backend, edges, k)?;
     // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
     // candidate is built or a share drawn: the padded bound, the payload arity (2 —
-    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the endpoint pair), and, only if the caller DECLARED
     // the widths, the declared width, its limb count and the aggregate slot work.
     // In the default derived mode the width is a function of the candidates' own
     // rows, so it and its caps are decided at the stage, which is where this crate
@@ -1663,7 +1664,7 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     check_bounded_params(backend, edges, form)?;
     // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
     // candidate is built or a share drawn: the padded bound, the payload arity (2 —
-    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the endpoint pair), and, only if the caller DECLARED
     // the widths, the declared width, its limb count and the aggregate slot work.
     // In the default derived mode the width is a function of the candidates' own
     // rows, so it and its caps are decided at the stage, which is where this crate

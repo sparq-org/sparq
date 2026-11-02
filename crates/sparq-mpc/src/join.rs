@@ -771,9 +771,10 @@ impl HiddenValueJoin {
     /// The output stage's PUBLIC-ONLY caps, run at THIS operator's entry — before a
     /// key is dealt, an equality bit drawn or a candidate built.
     ///
-    /// What it checks is the padded bound, the output arity and the compute-party
-    /// count, all of them the caller's own numbers. The DEFAULT width is a function
-    /// of the candidates' own rows, so the width's caps and the aggregate slot work
+    /// What it checks is the padded bound and the output arity, both the caller's
+    /// own numbers. The backend constructor enforces the party ceiling.
+    /// The DEFAULT width is a function of the candidates' own rows, so the width's
+    /// caps and the aggregate slot work
     /// are decided at the stage, over the rows it packs — which is this crate's
     /// long-standing draw schedule. An entry check that guessed a width from the
     /// batches' widest term refused runs the stage itself accepts.
@@ -3495,25 +3496,25 @@ mod randomness_seam_tests {
     /// OWN entry, before a key is dealt or an equality bit drawn. Derived widths
     /// are resolved at the output stage, after these operators' own draws.
     ///
-    /// The shape that refuses is a party count past
-    /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`], a public number, so neither
+    /// The shape that refuses is a bound past
+    /// [`crate::oblivious_join::MAX_OUTPUT_BOUND`], a public number, so neither
     /// entry needs a candidate to decide it. Without the entry check, both paths
     /// deal every key and draw every equality bit and only then let the output
     /// stage refuse; `RecordingSource`'s empty log is what distinguishes the two.
     #[test]
-    fn both_batched_entries_refuse_the_output_party_cap_before_any_draw() {
+    fn both_batched_entries_refuse_the_output_bound_cap_before_any_draw() {
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
         use crate::randomness::test_sources::RecordingSource;
-        let parties = crate::oblivious_join::MAX_OUTPUT_PARTIES + 2;
-        let b = ShamirBackend::new_seeded(parties, 0xBA7D1).unwrap();
+        let b = ShamirBackend::new_seeded(5, 0xBA7D1).unwrap();
         let join = HiddenValueJoin::new(b.clone());
         let (l, r) = positional_pair();
 
         let mut rec = RecordingSource::new(b.dealer());
         let err = join
-            .batched_join_through(&mut rec, &l, &r, 3)
-            .expect_err("a party count past the output cap must be refused");
+            .batched_join_through(&mut rec, &l, &r, MAX_OUTPUT_BOUND + 1)
+            .expect_err("an output bound past the cap must be refused");
         assert!(
-            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
             "{:?}",
             err
         );
@@ -3521,10 +3522,10 @@ mod randomness_seam_tests {
 
         let mut rec = RecordingSource::new(b.dealer());
         let err = join
-            .fully_oblivious_batched_join_through(&mut rec, &l, &r, 3)
-            .expect_err("a party count past the output cap must be refused");
+            .fully_oblivious_batched_join_through(&mut rec, &l, &r, MAX_OUTPUT_BOUND + 1)
+            .expect_err("an output bound past the cap must be refused");
         assert!(
-            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
             "{:?}",
             err
         );
@@ -3535,9 +3536,9 @@ mod randomness_seam_tests {
     }
 
     #[test]
-    fn batched_join_accepts_key_sharing_above_the_party_cap_without_output_slots() {
+    fn batched_join_accepts_key_sharing_without_output_slots() {
         use crate::randomness::test_sources::RecordingSource;
-        let backend = ShamirBackend::new_seeded(1025, 0xBA7D3).unwrap();
+        let backend = ShamirBackend::new_seeded(5, 0xBA7D3).unwrap();
         let join = HiddenValueJoin::new(backend.clone());
         let left = input("L", "l", &[(5, "x")], RowBinding::Keyed(vec!["a".into()]));
         let right = input("R", "r", &[(7, "y")], RowBinding::Keyed(vec!["b".into()]));
@@ -3564,41 +3565,20 @@ mod randomness_seam_tests {
     }
 
     #[test]
-    fn batched_join_refuses_output_slots_above_the_party_cap() {
-        use crate::randomness::test_sources::RecordingSource;
-        let backend = ShamirBackend::new_seeded(1025, 0xBA7D4).unwrap();
-        let join = HiddenValueJoin::new(backend.clone());
-        let left = input("L", "l", &[(5, "x")], RowBinding::Keyed(vec!["a".into()]));
-        let right = input("R", "r", &[(7, "y")], RowBinding::Keyed(vec!["b".into()]));
-        let mut source = RecordingSource::new(backend.dealer());
-        for result in [
-            join.batched_join_through(&mut source, &left, &right, 1),
-            join.batched_join(&left, &right, 1),
-        ] {
-            let err = result.expect_err("output slots must refuse 1025 parties at B = 1");
-            assert!(matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
-        }
-        assert!(
-            source.log.is_empty(),
-            "the output cap must precede key sharing"
-        );
-    }
-
-    #[test]
-    fn public_batched_entries_check_party_caps_before_input_shape() {
-        let parties = crate::oblivious_join::MAX_OUTPUT_PARTIES + 2;
-        let join = HiddenValueJoin::new(ShamirBackend::new_seeded(parties, 0xBA7D2).unwrap());
+    fn public_batched_entries_check_bound_caps_before_input_shape() {
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+        let join = HiddenValueJoin::new(ShamirBackend::new_seeded(5, 0xBA7D2).unwrap());
         let (mut left, right) = positional_pair();
-        // Public fields may be changed after construction. The party cap must
+        // Public fields may be changed after construction. The bound cap must
         // precede even this malformed input's shape and candidate checks.
         left.rows[0].1.clear();
         for result in [
-            join.batched_join(&left, &right, 3),
-            join.fully_oblivious_batched_join(&left, &right, 3),
+            join.batched_join(&left, &right, MAX_OUTPUT_BOUND + 1),
+            join.fully_oblivious_batched_join(&left, &right, MAX_OUTPUT_BOUND + 1),
         ] {
-            let err = result.expect_err("the public party cap must run first");
+            let err = result.expect_err("the public bound cap must run first");
             assert!(
-                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
                 "{:?}",
                 err
             );

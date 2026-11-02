@@ -642,36 +642,36 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
 /// One pair still draws its two key sharings, so omitting either preflight is
 /// observable even though the output stage repeats the public-cap check.
 #[test]
-fn both_distinct_entries_refuse_the_output_party_cap_before_any_draw() {
-    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+fn both_distinct_entries_refuse_the_output_bound_cap_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
     use crate::randomness::test_sources::RecordingSource;
 
-    let wide = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x9D11).unwrap();
+    let backend = ShamirBackend::new_seeded(5, 0x9D11).unwrap();
     let pairs = vec![pair(1, 2, "a", "b")];
     for oblivious in [false, true] {
-        let mut source = RecordingSource::new(wide.dealer());
+        let mut source = RecordingSource::new(backend.dealer());
         let result = if oblivious {
             distinct_hidden_pairs_oblivious_through(
                 &mut source,
-                &wide,
+                &backend,
                 &pairs,
                 PayloadWidths::derived(2),
-                1,
+                MAX_OUTPUT_BOUND + 1,
             )
             .map(|_| ())
         } else {
             distinct_hidden_pairs_slots_through(
                 &mut source,
-                &wide,
+                &backend,
                 &pairs,
                 PayloadWidths::derived(2),
-                1,
+                MAX_OUTPUT_BOUND + 1,
             )
             .map(|_| ())
         };
-        let err = result.expect_err("a party count past the output cap must be refused");
+        let err = result.expect_err("an output bound past the cap must be refused");
         assert!(
-            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
             "{err:?}"
         );
         assert!(

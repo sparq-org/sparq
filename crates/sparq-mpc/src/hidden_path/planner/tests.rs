@@ -277,45 +277,45 @@ fn comm_counter_refuses_an_over_cap_bound() {
     assert!(plan.comm_counter(5, 4).is_ok());
 }
 
-/// The cost model applies the output stage's PARTY cap, so it does not cost a
-/// plan the stage would refuse.
+/// The cost model checks the constructor's party ceiling for its bare count.
 ///
 /// A cost model for a run that cannot happen is not a cost model: the bound cap
-/// alone let `comm_counter` report a figure for a party count the stage refuses
-/// outright. Aggregate slot work requires a threshold and payload width that
-/// this API does not receive; it is checked at the output stage.
+/// alone would let `comm_counter` report a figure for a party count no backend
+/// constructor accepts. Aggregate slot work requires a threshold and payload width
+/// that this API does not receive; it is checked at the output stage.
 #[test]
-fn comm_counter_applies_the_output_party_cap() {
-    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+fn comm_counter_applies_the_constructor_party_cap() {
+    use crate::robust::MAX_ROBUST_SHARES;
     let req = HiddenPathRequest::range("p", 1, 3);
     let plan = plan_hidden_bounded_path(&req, 3).unwrap();
 
     let err = plan
-        .comm_counter(MAX_OUTPUT_PARTIES + 1, 4)
+        .comm_counter(MAX_ROBUST_SHARES + 1, 4)
         .expect_err("a party count past the cap must be refused");
     assert!(
-        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_ROBUST_SHARES")),
         "{:?}",
         err
     );
     assert!(
-        plan.comm_counter(MAX_OUTPUT_PARTIES, 4).is_ok(),
+        plan.comm_counter(MAX_ROBUST_SHARES, 4).is_ok(),
         "the cap itself is still modelled"
     );
-    let err = plan.comm_counter(MAX_OUTPUT_PARTIES + 1, 0).unwrap_err();
-    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
+    let err = plan.comm_counter(MAX_ROBUST_SHARES + 1, 0).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_ROBUST_SHARES")));
     let empty = plan_hidden_bounded_path(&req, 0).unwrap();
     assert_eq!(empty.secure_equalities, 0);
-    let err = empty.comm_counter(MAX_OUTPUT_PARTIES + 1, 1).unwrap_err();
-    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")));
-    assert!(empty.comm_counter(MAX_OUTPUT_PARTIES, 1).is_ok());
+    let err = empty.comm_counter(MAX_ROBUST_SHARES + 1, 1).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_ROBUST_SHARES")));
+    assert!(empty.comm_counter(MAX_ROBUST_SHARES, 1).is_ok());
 }
 
 #[test]
 fn comm_counter_does_not_assume_an_unstated_threshold() {
-    use crate::oblivious_join::{check_slot_work_budget, MAX_OUTPUT_PARTIES};
+    use crate::oblivious_join::check_slot_work_budget;
+    use crate::robust::MAX_ROBUST_SHARES;
     let bound = 8192;
-    let parties = MAX_OUTPUT_PARTIES;
+    let parties = MAX_ROBUST_SHARES;
     assert!(check_slot_work_budget(bound, 0, parties, (parties - 1) / 2).is_err());
     assert!(check_slot_work_budget(bound, 0, parties, 0).is_ok());
     let plan = plan_hidden_bounded_path(&HiddenPathRequest::range("p", 1, 3), 3).unwrap();

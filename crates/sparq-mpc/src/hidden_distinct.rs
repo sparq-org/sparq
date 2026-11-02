@@ -521,7 +521,7 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
 ) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
     // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
     // candidate is built or a share drawn: the padded bound, the payload arity (2 —
-    // the two endpoint terms), the compute-party count, and — only if the caller
+    // the two endpoint terms), and — only if the caller
     // DECLARED the widths — the declared width, its limb count and the aggregate
     // slot work. A DERIVED width is a function of the candidates' own rows, so it
     // and its caps are decided at the stage, which is where this crate has always
