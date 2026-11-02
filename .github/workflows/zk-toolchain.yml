@@ -607,6 +607,8 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         run: |
           set -euo pipefail
+          site='^complete crates/sparq-zk-compose/tests/method_auth_binding\.rs:[0-9]+$'
+          before=$(grep -cE "$site" "$SPARQ_ZK_LIVE_LEDGER" 2>/dev/null || true)
           cargo test -p sparq-zk-compose --features dual-leaf --test method_auth_binding \
             -- --ignored --test-threads=1 2>&1 | tee /tmp/dl-method-auth.log
           if ! grep -qE '^test result: ok\. 4 passed; 0 failed; 0 ignored; 0 measured;' /tmp/dl-method-auth.log; then
@@ -617,7 +619,8 @@ jobs:
             echo "FAIL: the dual-leaf method-authentication suite declared a SKIP" >&2
             exit 1
           fi
-          if [[ $(grep -cE '(^|\.\.\. )COMPLETE crates/sparq-zk-compose/tests/method_auth_binding\.rs:[0-9]+$' /tmp/dl-method-auth.log) -ne 4 ]]; then
+          after=$(grep -cE "$site" "$SPARQ_ZK_LIVE_LEDGER" 2>/dev/null || true)
+          if [[ $(( ${after:-0} - ${before:-0} )) -ne 4 ]]; then
             echo "FAIL: the dual-leaf method-authentication suite did not complete all four live tests" >&2
             exit 1
           fi
