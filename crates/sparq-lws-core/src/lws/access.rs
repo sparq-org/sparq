@@ -658,7 +658,7 @@ pub async fn allowed<S: Store + 'static>(
     uri: &str,
     agent: &Agent,
 ) -> Result<bool, ServerError> {
-    allowed_with_meta(state, action, uri, agent)
+    allowed_inner(state, action, uri, agent, false)
         .await
         .map(|(allowed, _)| allowed)
 }
@@ -671,8 +671,59 @@ pub(crate) async fn allowed_with_meta<S: Store + 'static>(
     uri: &str,
     agent: &Agent,
 ) -> Result<(bool, Option<ResourceMeta>), ServerError> {
+    allowed_inner(state, action, uri, agent, true).await
+}
+
+async fn allowed_inner<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+    retain_meta: bool,
+) -> Result<(bool, Option<ResourceMeta>), ServerError> {
     if state.cfg.open || is_owner(state, agent) {
         return Ok((true, None));
+    }
+    let candidates: Vec<Policy> = state
+        .access
+        .grant_policies()
+        .iter()
+        .filter(|p| p.applies(agent.subject.as_deref(), action, uri))
+        .cloned()
+        .collect();
+    if candidates.is_empty() {
+        let Some(subject) = agent.subject.as_deref() else {
+            return Ok((false, None));
+        };
+        #[derive(serde::Deserialize, Default)]
+        struct Creator {
+            #[serde(default)]
+            creator: Option<String>,
+        }
+        let body = match state.store.read(&super::meta_key(uri)).await {
+            Ok(r) => Some(r.body),
+            Err(ServerError::NotFound) => None,
+            Err(e) => return Err(e),
+        };
+        let creator: Creator = match &body {
+            Some(body) => serde_json::from_slice(body).map_err(|e| {
+                ServerError::InvalidMetadata(format!("the metadata of {uri} is malformed: {e}"))
+            })?,
+            None => Creator::default(),
+        };
+        // Pending content remains available to its creator, as in `decide`. Ordinary
+        // authorization still parses only creator. PATCH can retain the same read's
+        // metadata for capture without another store lookup or changing that decision.
+        let allowed = creator.creator.as_deref() == Some(subject);
+        let meta = (allowed && retain_meta).then(|| {
+            body.as_ref()
+                .and_then(|body| super::parse_meta(uri, body).ok())
+                .unwrap_or(ResourceMeta {
+                    pending: true,
+                    ..Default::default()
+                })
+        });
+        return Ok((allowed, meta));
     }
     let meta = state.resource_meta(uri).await?;
     let allowed = decide(state, action, uri, agent, &meta, None).await?;
@@ -910,6 +961,26 @@ async fn decide<S: Store + 'static>(
     format: Option<Option<String>>,
 ) -> Result<bool, ServerError> {
     let subject = agent.subject.as_deref();
+    let candidates: Vec<Policy> = state
+        .access
+        .grant_policies()
+        .iter()
+        .filter(|p| p.applies(subject, action, uri))
+        .cloned()
+        .collect();
+    decide_grants(state, uri, agent, meta, format, &candidates).await
+}
+
+/// Decide against the filtered grants.
+async fn decide_grants<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+    agent: &Agent,
+    meta: &ResourceMeta,
+    format: Option<Option<String>>,
+    candidates: &[Policy],
+) -> Result<bool, ServerError> {
+    let subject = agent.subject.as_deref();
     if subject.is_some() && subject == meta.creator.as_deref() {
         return Ok(true);
     }
@@ -918,13 +989,6 @@ async fn decide<S: Store + 'static>(
     if meta.pending {
         return Ok(false);
     }
-    let candidates: Vec<Policy> = state
-        .access
-        .grant_policies()
-        .iter()
-        .filter(|p| p.applies(subject, action, uri))
-        .cloned()
-        .collect();
     if candidates.is_empty() {
         return Ok(false);
     }
@@ -1235,6 +1299,7 @@ pub async fn handle<S: Store + 'static>(
         .read()
         .expect("lock")
         .get(id)
+        .filter(|record| owner || (agent.subject.is_some() && agent.subject == record.author))
         .cloned();
     let Some(record) = record else {
         return if state.needs_auth(agent) {
@@ -1243,10 +1308,6 @@ pub async fn handle<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     };
-    let mine = owner || (agent.subject.is_some() && agent.subject == record.author);
-    if !mine {
-        return state.deny(agent);
-    }
     if let Some(refused) = unavailable() {
         return refused;
     }
@@ -1952,13 +2013,28 @@ mod tests {
             .unwrap()
             .to_string();
         // A read that fails stops the start, whichever record it is.
+        drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "records_that_cannot_be_read_are_quarantined_until_deleted",
+        )
+        .await;
         for iri in [&request, &grant] {
             *store.fail_read_of_any.lock().unwrap() = vec![iri.clone()];
             let mut cfg = LwsConfig::new("http://localhost:3000");
             cfg.open = true;
-            assert!(LwsState::new(store.clone(), cfg).await.is_err(), "{iri}");
+            let Err(why) = LwsState::new(store.clone(), cfg).await else {
+                panic!("{iri}: the injected read failure did not stop the start");
+            };
+            assert!(why.contains("disk on fire"), "{iri}: {why}");
+            super::super::test_store::wait_for_stop(
+                &store,
+                "records_that_cannot_be_read_are_quarantined_until_deleted",
+            )
+            .await;
         }
         store.fail_read_of_any.lock().unwrap().clear();
+        let state = restart(&store).await;
         // Two requests and a grant whose stored bodies are not records.
         let requests = state.cfg.absolute(REQUESTS_PATH);
         let garbled = format!("{requests}garbled");
@@ -1979,6 +2055,7 @@ mod tests {
                 .await
                 .unwrap();
         }
+        drop(state);
         let state = restart(&store).await;
         // A healthy start after it quarantines them again.
         let state = {
@@ -2040,6 +2117,7 @@ mod tests {
         .await;
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         // And none comes back.
+        drop(state);
         let state = restart(&store).await;
         assert_eq!(state.access.requests.read().unwrap().len(), MAX_REQUESTS);
         assert!(state.access.grants.read().unwrap().is_empty());
@@ -2805,9 +2883,14 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let state = LwsState::new(store.clone(), state.cfg.clone())
-            .await
-            .unwrap();
+        let cfg = state.cfg.clone();
+        drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "requests_stored_past_their_quota_are_kept_reported_and_admit_no_more",
+        )
+        .await;
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
         assert_eq!(
             state.access.requests.read().unwrap().len(),
             MAX_REQUESTS_PER_AUTHOR + 1,
@@ -2950,6 +3033,7 @@ mod tests {
 
     /// The server started again over `store`, as after a process stop.
     async fn restart(store: &test_store::FlakyStore) -> LwsState<test_store::FlakyStore> {
+        super::super::test_store::wait_for_stop(store, "restart").await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
@@ -3048,6 +3132,7 @@ mod tests {
         let (status, _) = answer(state.clone(), path).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(state.access.grant_policies().is_empty());
+        drop(state);
         let state = restart(&store).await;
         assert!(state.access.grant_policies().is_empty());
         // The removal does not land and cannot be checked: not known, in force as before, here
@@ -3065,6 +3150,7 @@ mod tests {
         assert!(!state.access.grant_policies().is_empty());
         store.fail_delete.store(false, Ordering::SeqCst);
         store.fail_list.store(false, Ordering::SeqCst);
+        drop(state);
         let state = restart(&store).await;
         assert!(!state.access.grant_policies().is_empty());
     }
@@ -3099,6 +3185,7 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{kind}");
         }
         // Nothing was stored, and the server starts again.
+        drop(state);
         restart(&store).await;
     }
 
@@ -3134,12 +3221,14 @@ mod tests {
         // Still stored as it was: still there, here as at the next start, until a withdrawal
         // lands.
         assert_eq!(state.access.requests.read().unwrap().len(), 1);
+        drop(state);
         let state = restart(&store).await;
         assert_eq!(state.access.requests.read().unwrap().len(), 1);
         store.fail_delete.store(false, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(!state.store.exists(&location).await.unwrap());
+        drop(state);
         let state = restart(&store).await;
         assert!(state.access.requests.read().unwrap().is_empty());
     }
@@ -3196,6 +3285,7 @@ mod tests {
         .await;
         assert_eq!(stored().await, 2);
         // A start loads what the listing holds, and nothing else.
+        drop(state);
         let state = restart(&store).await;
         assert_eq!(state.access.grant_policies().len(), 2);
     }
@@ -3381,6 +3471,7 @@ mod tests {
         let r = handle(&state, &post(), &asker).await;
         assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
         // A start loads the same.
+        drop(state);
         let state = restart(&store).await;
         assert_eq!(
             state.access.requests.read().unwrap().len(),
@@ -3422,6 +3513,7 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(state.access.requests.read().unwrap().is_empty());
+        drop(state);
         let state = restart(&store).await;
         assert!(state.access.requests.read().unwrap().is_empty());
     }
@@ -3484,6 +3576,7 @@ mod tests {
             state.access.grants.read().unwrap().is_empty()
         })
         .await;
+        drop(state);
         let state = restart(&store).await;
         assert!(state.access.grants.read().unwrap().is_empty());
     }
@@ -3955,15 +4048,23 @@ mod tests {
             .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
             .await
             .unwrap();
-        std::mem::forget(journal);
+        journal.abandon();
         *store.fail_restore_of.lock().unwrap() = Some(d.clone());
         // And the access requests container cannot be looked up.
         let requests = state.cfg.absolute(REQUESTS_PATH);
         *store.fail_exists_of.lock().unwrap() = Some(requests.clone());
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "a_start_that_fails_loading_requests_leaves_nothing_running",
+        )
+        .await;
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
-        assert!(LwsState::new(store.clone(), cfg).await.is_err());
+        let Err(why) = LwsState::new(store.clone(), cfg).await else {
+            panic!("the injected existence failure did not stop the start");
+        };
+        assert!(why.contains("disk on fire"), "{why}");
         // Nothing of the failed start keeps trying to put `/d` back.
         let tried = store.restores.load(std::sync::atomic::Ordering::SeqCst);
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -4021,5 +4122,249 @@ mod tests {
         eventually("removed", || state.visible(&location)).await;
         assert!(!state.store.exists(&location).await.unwrap());
         assert!(state.access.grant_policies().is_empty());
+    }
+    #[tokio::test]
+    async fn another_principal_s_record_is_answered_as_an_absent_one() {
+        let (state, store) = test_store::counting_state(100).await;
+        let author = test_store::agent("https://author.example/#me");
+        let stranger = test_store::agent("https://stranger.example/#me");
+        for (container, kind, who) in [
+            (REQUESTS_PATH, "AccessRequest", author),
+            (
+                GRANTS_PATH,
+                "AccessGrant",
+                test_store::agent(test_store::OWNER),
+            ),
+        ] {
+            let created = handle(
+                &state,
+                &test_store::request(
+                    Method::POST,
+                    container,
+                    &[("content-type", LWS_JSON)],
+                    &access_doc(kind, "https://a/", None),
+                ),
+                &who,
+            )
+            .await;
+            assert_eq!(created.status(), StatusCode::CREATED);
+            let iri = created.headers()[header::LOCATION]
+                .to_str()
+                .unwrap()
+                .to_string();
+            let path = iri
+                .strip_prefix(state.cfg.base_url.as_str())
+                .unwrap_or(&iri);
+            let missing = format!("{container}absent");
+            let anonymous = Agent::anonymous();
+            for caller in [&stranger, &anonymous] {
+                for method in [
+                    Method::GET,
+                    Method::HEAD,
+                    Method::POST,
+                    Method::PUT,
+                    Method::PATCH,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                    Method::CONNECT,
+                    Method::TRACE,
+                ] {
+                    let mut answers = Vec::new();
+                    for target in [path, missing.as_str()] {
+                        store.counters.take_methods();
+                        let measured = store.counters.measure();
+                        let response = handle(
+                            &state,
+                            &test_store::request(method.clone(), target, &[], ""),
+                            caller,
+                        )
+                        .await;
+                        let status = response.status();
+                        let headers = response.headers().clone();
+                        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                            .await
+                            .unwrap();
+                        let calls = store.counters.take_methods();
+                        assert!(calls.is_empty(), "{calls:?}");
+                        answers.push((status, headers, body, measured.delta(), calls));
+                    }
+                    assert_eq!(answers[0], answers[1], "{method} {container}");
+                    assert_eq!(
+                        answers[0].0,
+                        if caller.subject.is_none() {
+                            StatusCode::UNAUTHORIZED
+                        } else {
+                            StatusCode::NOT_FOUND
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_grant_revoked_during_the_metadata_read_is_not_used() {
+        let (state, store) = test_store::closed_state(100).await;
+        let uri = test_store::data(&state, "there").await;
+        let caller = test_store::agent("https://reader.example/#me");
+        let grant =
+            test_store::grant_read(&state, caller.subject.as_deref().unwrap(), &[&uri]).await;
+        assert!(allowed(&state, Action::Read, &uri, &caller).await.unwrap());
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() =
+            Some((super::super::meta_key(&uri), gate.clone()));
+        let pending = {
+            let (state, uri) = (state.clone(), uri.clone());
+            tokio::spawn(async move { allowed(&state, Action::Read, &uri, &caller).await })
+        };
+        eventually("metadata read reached", || {
+            store.hold_next_read_reply_of.lock().unwrap().is_none()
+        })
+        .await;
+        assert!(!pending.is_finished());
+        state
+            .access
+            .remove_grant_for_test(grant.rsplit('/').next().unwrap());
+        gate.add_permits(1);
+        assert!(!pending.await.unwrap().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_creator_check_classifies_malformed_metadata() {
+        let (state, _) = test_store::closed_state(100).await;
+        let uri = test_store::data(&state, "there").await;
+        let caller = test_store::agent("https://reader.example/#me");
+        assert!(state.access.grant_policies().is_empty());
+        for body in [b"{invalid".as_slice(), br#"{"creator":42}"#] {
+            state
+                .store
+                .write(
+                    &super::super::meta_key(&uri),
+                    Bytes::copy_from_slice(body),
+                    "application/json",
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                allowed(&state, Action::Read, &uri, &caller).await,
+                Err(ServerError::InvalidMetadata(_))
+            ));
+        }
+    }
+
+    /// A cold creator lookup still fetches bytes only when the metadata record exists.
+    #[tokio::test]
+    async fn a_creator_check_reads_meta_only_when_present_residual() {
+        let (state, store) = test_store::counting_state(100).await;
+        let there = test_store::data(&state, "there").await;
+        let missing = state.cfg.absolute("/missing");
+        let caller = test_store::agent("https://stranger.example/#me");
+        // Writes do not populate the body cache; this record has never been read.
+        state
+            .store
+            .write(
+                &super::super::meta_key(&there),
+                Bytes::from_static(br#"{"creator":"https://creator.example/#me"}"#),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        for (uri, blobs) in [(&missing, 0), (&there, 1)] {
+            store.counters.take_methods();
+            let measured = store.counters.measure();
+            assert!(!allowed(&state, Action::Read, uri, &caller).await.unwrap());
+            let delta = measured.delta();
+            assert_eq!(delta.sparql_queries, 1);
+            assert_eq!(delta.blob_gets, blobs);
+            assert_eq!(delta.sparql_updates, 0);
+            assert_eq!(delta.blob_puts, 0);
+            assert_eq!(
+                store.counters.take_methods().get("index.get_meta"),
+                Some(&1)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn no_applicable_grant_is_decided_without_reading_metadata() {
+        let (state, store) = test_store::counting_state(100).await;
+        let there = test_store::data(&state, "there").await;
+        let gone = state.cfg.absolute("/gone");
+        // Invalid full metadata must never be parsed for the anonymous decision.
+        state
+            .store
+            .write(
+                &super::super::meta_key(&there),
+                Bytes::from_static(br#"{"creator":null,"pending":"invalid","links":false}"#),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        for action in [Action::Read, Action::Create, Action::Modify, Action::Delete] {
+            for iri in [&there, &gone] {
+                *store.trace.lock().unwrap() = Some(Vec::new());
+                store.counters.take_methods();
+                assert!(!allowed(&state, action, iri, &Agent::anonymous())
+                    .await
+                    .unwrap());
+                assert!(store.trace.lock().unwrap().take().unwrap().is_empty());
+                assert!(store.counters.take_methods().is_empty());
+            }
+        }
+        // With no applicable policy an authenticated caller needs only creator;
+        // unrelated fields are ignored even when they do not fit ResourceMeta.
+        assert!(!allowed(
+            &state,
+            Action::Read,
+            &there,
+            &test_store::agent("https://other.example/#me")
+        )
+        .await
+        .unwrap());
+    }
+
+    #[tokio::test]
+    async fn creator_authorization_retains_patch_metadata_without_another_read() {
+        let (state, store) = test_store::counting_state(100).await;
+        let uri = test_store::data(&state, "creator").await;
+        let creator = test_store::agent("https://creator.example/");
+        let metadata = ResourceMeta {
+            creator: creator.subject.clone(),
+            types: vec!["https://example.org/Type".into()],
+            ..Default::default()
+        };
+        state.put_resource_meta(&uri, &metadata).await.unwrap();
+        assert!(state.access.grant_policies().is_empty());
+        *store.trace.lock().unwrap() = Some(Vec::new());
+        let (permitted, retained) = allowed_with_meta(&state, Action::Read, &uri, &creator)
+            .await
+            .unwrap();
+        assert!(permitted);
+        assert_eq!(retained.unwrap(), metadata);
+        assert_eq!(
+            store.trace.lock().unwrap().take().unwrap(),
+            [format!("read {uri}.meta")]
+        );
+        // The ordinary creator decision still ignores malformed unrelated fields.
+        state
+            .store
+            .write(
+                &super::super::meta_key(&uri),
+                Bytes::from_static(
+                    br#"{"creator":"https://creator.example/","links":false,"pending":"bad"}"#,
+                ),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        assert!(allowed(&state, Action::Read, &uri, &creator).await.unwrap());
+        let (permitted, retained) = allowed_with_meta(&state, Action::Read, &uri, &creator)
+            .await
+            .unwrap();
+        assert!(permitted);
+        assert!(
+            retained.unwrap().pending,
+            "an unreadable notification snapshot must stay unreadable"
+        );
     }
 }

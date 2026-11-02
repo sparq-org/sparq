@@ -90,6 +90,45 @@ impl AuthBudget {
     }
 }
 
+impl AuthBudget {
+    /// Check one resource name against this budget's byte-length and container-depth
+    /// caps before storing it or creating its ancestors. Returns the same allowance
+    /// refusal kind as authorization materialization; no aggregate allowance is charged.
+    /// The message describes the name cap; callers add the refused operation's context.
+    pub fn validate_resource_iri(&self, iri: &str) -> Result<(), String> {
+        if iri.len() > self.max_resource_iri_bytes {
+            return Err(allowance_refusal(
+                AuthAllowance::ResourceIri,
+                &format!(
+                    "a resource of this pod is named by an IRI of {} bytes, past the \
+                     max_resource_iri_bytes budget ({})",
+                    iri.len(),
+                    self.max_resource_iri_bytes
+                ),
+            ));
+        }
+        // Each ancestor is a strictly shorter byte prefix. A name this short
+        // therefore fits the depth cap without walking its ancestors.
+        if iri.len() <= self.max_resource_path_depth {
+            return Ok(());
+        }
+        for (i, _) in crate::loader::parent_iris(iri).enumerate() {
+            let depth = i + 1;
+            if depth > self.max_resource_path_depth {
+                return Err(allowance_refusal(
+                    AuthAllowance::ResourceIri,
+                    &format!(
+                        "a resource of this pod is under more than max_resource_path_depth \
+                         ({}) containers",
+                        self.max_resource_path_depth
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The input and whole-decision budget every authorization materialization runs under
 /// unless the store is given another one ([`crate::PodStore::set_auth_budget`]).
 ///
@@ -342,35 +381,9 @@ impl InputMeter {
     /// The length is checked first, so the depth walk that follows it is itself bounded
     /// (it stops one step past the depth cap, over an IRI already known to be short).
     pub(crate) fn resource(&mut self, iri: &str) -> Result<(), String> {
-        if iri.len() > self.budget.max_resource_iri_bytes {
-            return Err(allowance_refusal(
-                AuthAllowance::ResourceIri,
-                &format!(
-                    "a resource of this pod is named by an IRI of {} bytes, past the \
-                     max_resource_iri_bytes budget ({}); the authorization view is not \
-                     built (fail-closed)",
-                    iri.len(),
-                    self.budget.max_resource_iri_bytes
-                ),
-            ));
-        }
-        let mut depth = 0usize;
-        let mut cur = iri;
-        while let Some(parent) = crate::loader::parent_iri(cur) {
-            depth += 1;
-            if depth > self.budget.max_resource_path_depth {
-                return Err(allowance_refusal(
-                    AuthAllowance::ResourceIri,
-                    &format!(
-                        "a resource of this pod is under more than max_resource_path_depth \
-                         ({}) containers; the authorization view is not built (fail-closed)",
-                        self.budget.max_resource_path_depth
-                    ),
-                ));
-            }
-            cur = parent;
-        }
-        Ok(())
+        self.budget.validate_resource_iri(iri).map_err(|e| {
+            format!("{e}; the authorization view is not built (fail-closed)")
+        })
     }
 
     /// Charge `n` bytes of the resource enumeration — one resource or container string —
@@ -472,5 +485,48 @@ impl DecisionWork {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod resource_name_tests {
+    use super::*;
+
+    #[test]
+    fn validate_resource_iri_preserves_inclusive_caps_and_refusal_kind() {
+        let mut budget = default_auth_budget();
+        budget.max_resource_iri_bytes = 32;
+        budget.max_resource_path_depth = 3;
+        assert!(budget
+            .validate_resource_iri(&format!("https://p.ex/{}", "a".repeat(19)))
+            .is_ok());
+        assert!(budget.validate_resource_iri("https://p.ex/a/b/c").is_ok());
+        for resource in [
+            format!("https://p.ex/{}", "a".repeat(20)),
+            "https://p.ex/a/b/c/d".to_owned(),
+        ] {
+            let error = budget.validate_resource_iri(&resource).unwrap_err();
+            assert!(!error.contains("authorization view is not built"));
+            let materialize_error = InputMeter::new(budget).resource(&resource).unwrap_err();
+            assert_eq!(
+                materialize_error,
+                format!("{error}; the authorization view is not built (fail-closed)")
+            );
+            assert_eq!(
+                crate::auth_allowance_refusal(&error),
+                Some(AuthAllowance::ResourceIri)
+            );
+        }
+        budget.max_resource_path_depth = 64;
+        assert!(budget.validate_resource_iri("https://p.ex/a/b/c/d").is_ok());
+        // A generous depth cap does not relax the independently configured byte cap.
+        let error = budget
+            .validate_resource_iri(&format!("https://p.ex/{}", "a".repeat(20)))
+            .unwrap_err();
+        assert_eq!(
+            crate::auth_allowance_refusal(&error),
+            Some(AuthAllowance::ResourceIri)
+        );
+        assert!(error.contains("max_resource_iri_bytes"));
     }
 }

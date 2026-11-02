@@ -94,7 +94,7 @@ pub(crate) fn opaque_head(r: &Rule) -> bool {
 fn has_empty_compound(lc: &LogicalConstraint) -> bool {
     lc.operands.is_empty()
         || lc.operands.iter().any(|n| match n {
-            ConstraintNode::Atomic(_) => false,
+            ConstraintNode::Atomic(_) | ConstraintNode::SharedAtomic(_) => false,
             ConstraintNode::Compound(inner) => has_empty_compound(inner),
         })
 }

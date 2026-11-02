@@ -255,6 +255,38 @@ export class Store {
      */
     static loadDataset(text: string, format: string): Store;
     /**
+     * sq-yz27r (#3251): parses a JSON-LD document whose `@context` is given
+     * **by URL**, resolving those URLs from a caller-supplied `contexts` map.
+     *
+     * `contexts` is an ordered array of `[url, documentText]` string pairs — the context
+     * documents the host has already retrieved:
+     *
+     * ```js
+     * // The host fetches (async, under its OWN same-origin / allowlist policy) …
+     * const url = "https://www.w3.org/2018/credentials/v1";
+     * const ctx = await (await fetch(url)).text();
+     * // … and this binding parses, with no network of its own.
+     * const store = Store.loadJsonLdWithContexts(vcJsonText, [[url, ctx]]);
+     * ```
+     *
+     * **Fail-closed.** A `@context` URL the document references but `contexts` does not
+     * carry is an `Err` (`JsError`) naming that URL — the module has no network, so it
+     * cannot and does not go and get it. The supplied map is the whole allowlist.
+     * Consequently this method never performs I/O; it is the *parse* half of a
+     * fetch-then-parse split forced by `oxjsonld`'s synchronous `LoadDocumentCallback`
+     * (see the module docs). A malformed `contexts` element (not a 2-string array) also
+     * throws rather than being skipped.
+     *
+     * Named graphs are folded into the default graph, exactly as [`load`](Self::load)
+     * does; there is no dataset-preserving variant of this method yet. For a document
+     * whose `@context` is already inline, plain `Store.load(text, "jsonld")` is
+     * unchanged and remains the cheaper path.
+     *
+     * Compiled in only with the opt-in `jsonld-contexts` bundle feature; on a bundle
+     * without it this method is absent.
+     */
+    static loadJsonLdWithContexts(text: string, contexts: Array<any>): Store;
+    /**
      * sq-f66jz (#1115): like [`load`](Self::load) but resolves the document's
      * RELATIVE IRIs against `base`.
      *
@@ -583,6 +615,7 @@ export interface InitOutput {
     readonly store_loadBytesWithBase: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly store_loadCompressed: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly store_loadDataset: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly store_loadJsonLdWithContexts: (a: number, b: number, c: any) => [number, number, number];
     readonly store_loadWithBase: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly store_new: () => [number, number, number];
     readonly store_parseShaclCompact: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];

@@ -148,7 +148,7 @@ async fn a_create_is_not_delayed_by_another_principal_s_settling_removal() {
     store.hang_fence.store(false, Ordering::SeqCst);
 }
 
-async fn stream(state: &LwsState<test_store::FlakyStore>, doc: &Value) -> axum::body::Body {
+async fn stream<S: Store + 'static>(state: &LwsState<S>, doc: &Value) -> axum::body::Body {
     use tower::ServiceExt;
     let request = axum::http::Request::builder()
         .method("GET")
@@ -157,7 +157,7 @@ async fn stream(state: &LwsState<test_store::FlakyStore>, doc: &Value) -> axum::
         .body(axum::body::Body::empty())
         .unwrap();
     let response = axum::Router::new()
-        .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+        .fallback(crate::lws::dispatch::<S>)
         .with_state(state.clone())
         .oneshot(request)
         .await
@@ -1979,4 +1979,460 @@ async fn a_principal_settlement_wait_allows_sparql_barriers() {
     );
     query_under_barrier(&state).await;
     drop(listing);
+}
+
+#[tokio::test]
+async fn capability_index_changes_preserve_owner_patch_snapshot_presence() {
+    let (state, _) = test_store::closed_state(100).await;
+    let mut owner = sub_until(i64::MAX);
+    owner.id = "owner".into();
+    owner.subscriber = Some(test_store::OWNER.into());
+    owner.capability_hash = Some([1; 32]);
+    let mut reader = owner.clone();
+    reader.id = "reader".into();
+    reader.subscriber = Some("https://reader.example/".into());
+    assert!(state
+        .notify
+        .subs
+        .write()
+        .unwrap()
+        .insert(owner.id.clone(), owner.clone()));
+    assert!(!state.notify.has_non_owner_subscriptions());
+    // A duplicate digest is refused before it can affect presence or any listing.
+    assert!(!state
+        .notify
+        .subs
+        .write()
+        .unwrap()
+        .insert(reader.id.clone(), reader.clone()));
+    assert!(!state.notify.has_non_owner_subscriptions());
+    assert_eq!(
+        state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .by_capability(&[1; 32])
+            .unwrap()
+            .id,
+        "owner"
+    );
+    reader.capability_hash = Some([2; 32]);
+    assert!(state
+        .notify
+        .subs
+        .write()
+        .unwrap()
+        .insert(reader.id.clone(), reader.clone()));
+    assert!(state.notify.has_non_owner_subscriptions());
+    // Replacing the same id can change its subscriber without leaving a stale count.
+    owner.id = reader.id.clone();
+    owner.capability_hash = None;
+    assert!(state
+        .notify
+        .subs
+        .write()
+        .unwrap()
+        .insert(owner.id.clone(), owner));
+    assert!(!state.notify.has_non_owner_subscriptions());
+    assert!(state
+        .notify
+        .subs
+        .read()
+        .unwrap()
+        .by_capability(&[2; 32])
+        .is_none());
+    assert!(state
+        .notify
+        .subs
+        .write()
+        .unwrap()
+        .insert(reader.id.clone(), reader));
+    assert!(state.notify.has_non_owner_subscriptions());
+    state.notify.subs.write().unwrap().remove("reader").unwrap();
+    assert!(!state.notify.has_non_owner_subscriptions());
+    assert_eq!(
+        state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .count_of(Some(test_store::OWNER)),
+        1
+    );
+    assert_eq!(
+        state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .by_capability(&[1; 32])
+            .unwrap()
+            .id,
+        "owner"
+    );
+}
+
+async fn history_change_keeps_admission_through_selection(restore: bool, trash_post: bool) {
+    use crate::store::{
+        history::{HistoryConfig, TrashFields},
+        CompositeStore, InMemoryBlobStore, InMemorySparqClient,
+    };
+    use futures_util::FutureExt;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    type HistoryStore = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
+    let store = HistoryStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new())
+        .with_history(HistoryConfig {
+            trash: true,
+            ..Default::default()
+        })
+        .unwrap();
+    let mut cfg = crate::lws::LwsConfig::new("http://localhost:3000");
+    cfg.owner = Some(test_store::OWNER.into());
+    cfg.allow_insecure_fetch = true;
+    let state = LwsState::new(store, cfg).await.unwrap();
+    state.notify.pause_sweeper();
+    let parent = state.cfg.storage();
+    let topic = format!("{parent}original");
+    let reader = "https://reader.example/";
+    state
+        .store
+        .create_in_container(&parent, &topic, Bytes::from_static(b"kept"), "text/plain")
+        .await
+        .unwrap();
+    state
+        .put_resource_meta(
+            &topic,
+            &crate::lws::ResourceMeta {
+                creator: Some(reader.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    // Read on the container permits the subscription, but only the captured creator
+    // metadata permits notification about the child, including after it is trashed.
+    let grant = json!({"@context": [crate::lws::LWS_CONTEXT], "type": ["AccessGrant"],
+        "storage": parent, "access": [{"type": ["AccessPolicy"], "action": ["read", "create"],
+        "assignee": reader, "target": {"type": "Container", "value": [&parent]}}]})
+    .to_string();
+    assert_eq!(
+        call(
+            &state,
+            "POST",
+            crate::lws::GRANTS_PATH,
+            Some(test_store::OWNER),
+            &grant
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    let source = if restore {
+        let member = state
+            .store
+            .trash_resource(
+                &topic,
+                Some(&parent),
+                TrashFields {
+                    original: topic.clone(),
+                    trashed_at: crate::clock::now(),
+                    deleted_by: Some(reader.into()),
+                    deleter_could_read: true,
+                },
+            )
+            .await
+            .unwrap();
+        state
+            .store
+            .delete(&crate::lws::meta_key(&topic), None)
+            .await
+            .unwrap();
+        Some(format!(
+            "{}/.lws/trash/{}",
+            state.cfg.base_url,
+            member.strip_prefix(crate::store::history::TRASH).unwrap()
+        ))
+    } else {
+        None
+    };
+    let subscribe = json!({"type": streams::SSE, "topic": [&parent]}).to_string();
+    let response = call(&state, "POST", SUBSCRIPTIONS_PATH, Some(reader), &subscribe).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let doc = test_store::body_json(response).await;
+    let mut received = stream(&state, &doc).await;
+    let id = doc["id"].as_str().unwrap().rsplit('/').next().unwrap();
+    let publication = state.notify.streams.hold_publication(id).await;
+    run_ready().await;
+    let before = state.notify.selected.load(Ordering::SeqCst);
+    let selection = Arc::new(tokio::sync::Semaphore::new(0));
+    *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+    let app = crate::app::with_overload_layers(
+        axum::Router::new()
+            .fallback(crate::lws::dispatch::<HistoryStore>)
+            .with_state(state.clone()),
+        crate::app::OverloadConfig::new(1, None),
+    );
+    let (method, path, body, expected, actor) = if let Some(source) = source {
+        (
+            "POST",
+            "/.lws/trash/",
+            json!({"restore": source}).to_string(),
+            StatusCode::CREATED,
+            reader,
+        )
+    } else if trash_post {
+        (
+            "POST",
+            "/.lws/trash/",
+            json!({"resource": topic}).to_string(),
+            StatusCode::CREATED,
+            test_store::OWNER,
+        )
+    } else {
+        (
+            "DELETE",
+            "/original",
+            String::new(),
+            StatusCode::NO_CONTENT,
+            test_store::OWNER,
+        )
+    };
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(path)
+        .header(
+            "authorization",
+            format!(
+                "Bearer {}",
+                crate::lws::tokens::mint(
+                    &state.cfg,
+                    actor,
+                    "https://app.example/",
+                    &state.cfg.realm()
+                )
+            ),
+        )
+        .header("content-type", LWS_JSON)
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    let response =
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, app.clone().oneshot(request))
+            .await
+            .expect("history response waited on selection")
+            .unwrap();
+    assert_eq!(response.status(), expected);
+    let changed = if restore {
+        response.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string()
+    } else {
+        topic
+    };
+    let get = || {
+        axum::http::Request::builder()
+            .uri("/")
+            .header(
+                "authorization",
+                format!(
+                    "Bearer {}",
+                    crate::lws::tokens::mint(
+                        &state.cfg,
+                        test_store::OWNER,
+                        "https://app.example/",
+                        &state.cfg.realm()
+                    )
+                ),
+            )
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(get()).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "history selection escaped request admission"
+    );
+    // A registration after the commit must not hear this change when selection resumes.
+    let late = call(&state, "POST", SUBSCRIPTIONS_PATH, Some(reader), &subscribe).await;
+    assert_eq!(late.status(), StatusCode::CREATED);
+    let mut late_stream = stream(&state, &test_store::body_json(late).await).await;
+    selection.add_permits(8);
+    tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+        while state.notify.selected.load(Ordering::SeqCst) < before + 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        app.oneshot(get()).await.unwrap().status(),
+        StatusCode::OK,
+        "history publication retained request admission"
+    );
+    assert!(
+        received.frame().now_or_never().is_none(),
+        "publication gate was bypassed"
+    );
+    drop(publication);
+    let delivered = next_notification(&mut received).await;
+    assert!(
+        delivered.contains(if restore { "Create" } else { "Delete" }),
+        "{delivered}"
+    );
+    assert!(delivered.contains(&changed), "{delivered}");
+    assert!(
+        late_stream.frame().now_or_never().is_none(),
+        "post-commit registration heard history change"
+    );
+    if restore {
+        assert_eq!(state.store.read(&changed).await.unwrap().body, "kept");
+        assert_eq!(
+            state
+                .resource_meta(&changed)
+                .await
+                .unwrap()
+                .creator
+                .as_deref(),
+            Some(reader)
+        );
+    } else {
+        assert!(!state.store.exists(&changed).await.unwrap());
+        assert_eq!(state.store.trash_entries().await.unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn trash_captures_at_commit_and_hands_admission_to_selection() {
+    history_change_keeps_admission_through_selection(false, false).await;
+    history_change_keeps_admission_through_selection(false, true).await;
+}
+
+#[tokio::test]
+async fn restore_captures_at_commit_and_hands_admission_to_selection() {
+    history_change_keeps_admission_through_selection(true, false).await;
+}
+
+#[cfg(feature = "crdt-sync")]
+#[tokio::test]
+async fn crdt_room_appends_keep_their_feed_through_background_selection() {
+    use sparq_lws_ysync::{yrs, LogFile, LogKind, Relay};
+    use tower::ServiceExt;
+    use yrs::sync::{Message, SyncMessage};
+    use yrs::updates::decoder::Decode;
+    use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update};
+    for halted in [false, true] {
+        let (state, _) = test_store::closed_state(100).await;
+        state.notify.pause_sweeper();
+        let room = state.cfg.storage();
+        let relay = Relay::new(
+            crate::crdt::Backend::Lws(state.downgrade()),
+            Default::default(),
+            state.notify.crdt_changes.clone(),
+        );
+        let secret = [7; 32];
+        relay
+            .ticket(
+                secret,
+                &room,
+                sparq_lws_ysync::Agent {
+                    subject: test_store::OWNER.into(),
+                    client: None,
+                    origin: None,
+                },
+            )
+            .await
+            .unwrap();
+        let mut session = relay.join(secret, &room).await.unwrap();
+        while session.incoming.try_recv().is_ok() {}
+        run_ready().await;
+        state
+            .notify
+            .high_water
+            .halted
+            .store(halted, Ordering::SeqCst);
+        let before = state.notify.selected.load(Ordering::SeqCst);
+        let selection = Arc::new(tokio::sync::Semaphore::new(0));
+        *state.notify.selection_gate.lock().unwrap() = Some(selection.clone());
+        let doc = Doc::new();
+        doc.get_or_insert_text("text")
+            .insert(&mut doc.transact_mut(), 0, "external append");
+        let file = LogFile {
+            kind: LogKind::Update,
+            millis: 1,
+            nonce: 1,
+            update: doc
+                .transact()
+                .encode_state_as_update_v1(&StateVector::default()),
+        };
+        let app = crate::app::with_overload_layers(
+            axum::Router::new()
+                .fallback(crate::lws::dispatch::<test_store::FlakyStore>)
+                .with_state(state.clone()),
+            crate::app::OverloadConfig::new(1, None),
+        );
+        let token = crate::lws::tokens::mint(
+            &state.cfg,
+            test_store::OWNER,
+            "https://app.example/",
+            &state.cfg.realm(),
+        );
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/octet-stream")
+            .body(axum::body::Body::from(file.encode()))
+            .unwrap();
+        let response =
+            tokio::time::timeout(crate::lws::records::LOCK_WAIT, app.clone().oneshot(request))
+                .await
+                .expect("CRDT append waited on selection")
+                .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let get = || {
+            axum::http::Request::builder()
+                .uri("/")
+                .header("authorization", format!("Bearer {token}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(get()).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(session.incoming.try_recv().is_err());
+        selection.add_permits(1);
+        tokio::time::timeout(crate::lws::records::LOCK_WAIT, async {
+            while state.notify.selected.load(Ordering::SeqCst) == before {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(app.oneshot(get()).await.unwrap().status(), StatusCode::OK);
+        let delivered =
+            tokio::time::timeout(crate::lws::records::LOCK_WAIT, session.incoming.recv())
+                .await
+                .expect("committed append did not reach the room feed")
+                .unwrap()
+                .unwrap();
+        let Message::Sync(SyncMessage::Update(bytes)) = Message::decode_v1(&delivered).unwrap()
+        else {
+            panic!("append was not sent as a Yjs update");
+        };
+        let client = Doc::new();
+        client
+            .transact_mut()
+            .apply_update(Update::decode_v1(&bytes).unwrap())
+            .unwrap();
+        assert_eq!(
+            client
+                .get_or_insert_text("text")
+                .get_string(&client.transact()),
+            "external append"
+        );
+        relay.leave(&session).await;
+    }
 }
