@@ -571,8 +571,9 @@ impl PodStore {
     ///
     /// [`PodStore::set_auth_limits`] bounds what the RULES may do inside ONE closure. This
     /// bounds the two things that sit outside that: the reasoning INPUT the pod's control
-    /// documents become (per-document and aggregate bytes, the length of one term, the
-    /// number of facts), and the AGGREGATE work of all the closures one materialization
+    /// documents become (per-document and source/resource aggregate bytes, generated
+    /// lexical bytes separately via [`AuthBudget::max_generated_bytes`], the length of
+    /// one term, and the number of facts), and the AGGREGATE work of all the closures one materialization
     /// runs — three for an ACP view, five for a bridged ODRL policy — which a per-closure
     /// allowance cannot bound.
     ///
@@ -942,7 +943,7 @@ impl PodStore {
     ) -> Result<FxHashSet<String>, String> {
         loader::resources(
             &self.graph,
-            &mut budget::InputMeter::with_deadline(self.auth_budget, deadline),
+            &mut budget::AuthLedger::with_deadline(self.auth_budget, deadline),
         )
     }
 
@@ -1607,10 +1608,9 @@ impl PodStore {
             self.acp_context.0 = staged;
         }
         if rebuild {
-            let budget = self.auth_budget;
-            self.auth_budget = budget.without_deadline();
-            let rebuilt = self.install_model(acp, checked).map(drop);
-            self.auth_budget = budget;
+            let rebuilt = budget::untimed_rebuild(self, |store| {
+                store.install_model(acp, checked).map(drop)
+            });
             // Rules it changed materialized on the fork first, and a provenance change alone
             // names only validated principals; should this rebuild fail anyway, the view no
             // longer describes the store, and it goes.
@@ -3001,3 +3001,9 @@ mod scoped_cache_tests {
         assert_eq!(got, vec!["https://a.ex/n1".to_owned()], "gain-access picked up after scoped write");
     }
 }
+
+#[cfg(test)]
+extern crate self as sparq_solid;
+#[cfg(test)]
+#[path = "../tests/auth_ledger_equivalence.rs"]
+mod ledger_equivalence;
