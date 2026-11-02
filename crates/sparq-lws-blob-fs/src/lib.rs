@@ -259,9 +259,10 @@ impl FsBlobStore {
 
 fn parse_key(key: &str) -> io::Result<(&str, bool)> {
     let unmarked = key.strip_prefix(POOLED_BLOB_KEY_MARK);
-    let random = unmarked
-        .unwrap_or(key)
+    let body_key = unmarked.unwrap_or(key);
+    let random = body_key
         .strip_prefix("b1-")
+        .or_else(|| body_key.strip_prefix("e1-"))
         .ok_or_else(invalid_key)?;
     if random.len() != 32
         || !random

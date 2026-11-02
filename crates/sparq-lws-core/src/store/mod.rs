@@ -828,7 +828,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// forcing the elaborate `generation`-CAS + grace-window + snapshot-threading machinery in
     /// [`super::blob`] and [`super::reconcile`] to exist purely to make a reused key safe.
     ///
-    /// This mints a NEW opaque key on EVERY write: `b1-` followed by a
+    /// This mints a NEW opaque key on EVERY write: `b1-` (or `e1-` when an envelope
+    /// is required) followed by a
     /// **128-bit cryptographically-random suffix** from the OS RNG. No resource IRI is
     /// encoded in the key. Service-pool keys retain their `$pool$` mark. So:
     ///
@@ -860,7 +861,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// on Linux, `getentropy` on the BSDs/macOS, `BCryptGenRandom` on Windows), so failing the write on the
     /// theoretical error is correct: a genuinely unavailable OS RNG is an environment fault, and failing
     /// closed (no key minted) is strictly safer than minting a key that could collide.
-    fn mint_blob_key(iri: &str) -> ServerResult<String> {
+    fn mint_blob_key(iri: &str, envelope: bool) -> ServerResult<String> {
         let mut suffix = [0u8; 16];
         // The OS CSPRNG. `getrandom` is the de-facto OS-entropy source and does not fail on any platform
         // we target. On the (effectively unreachable) error we FAIL CLOSED — the write errors rather than
@@ -879,10 +880,11 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         // A record in the service pool ([`in_service_pool`]) is marked here, where the IRI says
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
+        let prefix = if envelope { "e1-" } else { "b1-" };
         if limits::in_service_pool(iri) {
-            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
+            return Ok(format!("{}{prefix}{hex}", limits::POOLED_BLOB_KEY_MARK));
         }
-        Ok(format!("b1-{hex}"))
+        Ok(format!("{prefix}{hex}"))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -1026,7 +1028,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         //
         // Minting FAILS CLOSED if the OS RNG is unavailable (rather than minting a weak, possibly-colliding
         // key) — the write errors instead, so the no-two-writes-share-a-key invariant holds even then.
-        let blob_key = Self::mint_blob_key(iri)?;
+        let blob_key = Self::mint_blob_key(iri, self.blob.requires_envelope())?;
         let etag = Self::etag_for(content_type, &body);
         self.blob
             .put_scoped(&self.blob_scope.scope(iri), &blob_key, body)
@@ -1069,7 +1071,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // Publish bytes before committing the child record and containment together. The
         // native indexes report the replaced record so its bytes can be reclaimed; remote
         // clients leave any superseded key to the reconciler.
-        let blob_key = Self::mint_blob_key(child)?;
+        let blob_key = Self::mint_blob_key(child, self.blob.requires_envelope())?;
         let etag = Self::etag_for(content_type, &body);
         self.blob
             .put_scoped(&self.blob_scope.scope(child), &blob_key, body)
@@ -1113,7 +1115,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
     ) -> ServerResult<ResourceMeta> {
         refuse_marker(&[Some(iri), container])?;
         // As `write` and `create_in_container`, with the record's own validators kept.
-        let blob_key = Self::mint_blob_key(iri)?;
+        let blob_key = Self::mint_blob_key(iri, self.blob.requires_envelope())?;
         self.blob
             .put_scoped(&self.blob_scope.scope(iri), &blob_key, body)
             .await
@@ -2131,6 +2133,9 @@ mod tests {
 
     #[async_trait]
     impl<T: BlobStore> BlobStore for Shared<T> {
+        fn requires_envelope(&self) -> bool {
+            self.0.requires_envelope()
+        }
         async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
             self.0.get(key).await
         }
@@ -2408,7 +2413,7 @@ mod tests {
         // and every minted key is identical ⇒ this fails.
         let iri = "https://pod.example/alice/data";
         let mut keys: Vec<String> = (0..32)
-            .map(|_| S::mint_blob_key(iri).expect("the OS RNG must be available in tests"))
+            .map(|_| S::mint_blob_key(iri, false).expect("the OS RNG must be available in tests"))
             .collect();
         let total = keys.len();
         keys.sort();
@@ -2429,7 +2434,7 @@ mod tests {
             ),
             ("https://pod.example/.lws/subscriptions/private-topic", true),
         ] {
-            let key = S::mint_blob_key(iri).expect("OS RNG available");
+            let key = S::mint_blob_key(iri, false).expect("OS RNG available");
             let opaque = if pooled {
                 key.strip_prefix("$pool$").expect("pool mark retained")
             } else {

@@ -499,6 +499,10 @@ impl<B: BlobStore> CountingBlobStore<B> {
 
 #[async_trait]
 impl<B: BlobStore> BlobStore for CountingBlobStore<B> {
+    fn requires_envelope(&self) -> bool {
+        self.inner.requires_envelope()
+    }
+
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
         let _g = self.counters.op_guard();
         self.counters.blob_gets.fetch_add(1, Ordering::Relaxed);

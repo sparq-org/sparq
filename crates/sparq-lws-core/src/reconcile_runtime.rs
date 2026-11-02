@@ -150,6 +150,10 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
 
 #[async_trait]
 impl<T: BlobStore> BlobStore for SharedStore<T> {
+    fn requires_envelope(&self) -> bool {
+        self.0.requires_envelope()
+    }
+
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
         self.0.get(key).await
     }

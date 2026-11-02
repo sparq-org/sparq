@@ -25,6 +25,8 @@ impl CryptClock for ManualClock {
 struct Provider {
     inner: Arc<LocalKeyProvider>,
     calls: Arc<AtomicU64>,
+    unwraps: Arc<AtomicU64>,
+    generations: Arc<AtomicU64>,
     refuse: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     entered: Arc<tokio::sync::Notify>,
@@ -50,6 +52,8 @@ fn provider(byte: u8) -> Provider {
     Provider {
         inner: Arc::new(inner),
         calls: Arc::new(AtomicU64::new(0)),
+        unwraps: Arc::new(AtomicU64::new(0)),
+        generations: Arc::new(AtomicU64::new(0)),
         refuse: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
         entered: Arc::default(),
@@ -81,6 +85,7 @@ impl KeyProvider for Provider {
         &self,
         ctx: &KeyContext,
     ) -> sparq_lws_crypt::Result<(SecretKey, WrappedKey)> {
+        self.generations.fetch_add(1, Ordering::SeqCst);
         self.before_call().await?;
         self.inner.generate_data_key(ctx).await
     }
@@ -89,6 +94,7 @@ impl KeyProvider for Provider {
         wrapped: &WrappedKey,
         ctx: &KeyContext,
     ) -> sparq_lws_crypt::Result<SecretKey> {
+        self.unwraps.fetch_add(1, Ordering::SeqCst);
         self.before_call().await?;
         self.inner.unwrap(wrapped, ctx).await
     }
@@ -99,11 +105,13 @@ struct Backend {
     bytes: Arc<InMemoryBlobStore>,
     refuse: Arc<AtomicBool>,
     required_scope: Option<BlobScope>,
+    unscoped_reads: Arc<AtomicU64>,
 }
 
 #[async_trait]
 impl BlobStore for Backend {
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        self.unscoped_reads.fetch_add(1, Ordering::SeqCst);
         if self.required_scope.is_some() {
             return Err(BlobError::Backend("scoped read required".into()));
         }
@@ -156,6 +164,7 @@ struct ControlledIndex {
     // One-shot faults: refuse before commit, lose the reply, or pause after commit.
     fault: Arc<AtomicU64>,
     committed: Arc<tokio::sync::Notify>,
+    key_lists: Arc<AtomicU64>,
 }
 
 #[async_trait]
@@ -211,6 +220,9 @@ impl SparqClient for ControlledIndex {
         self.inner.remove_child(container, child).await
     }
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        if container == DATA_KEY_CONTAINER {
+            self.key_lists.fetch_add(1, Ordering::SeqCst);
+        }
         self.inner.list_children(container).await
     }
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
@@ -274,7 +286,10 @@ async fn current(store: &Encrypted, pod: &str) -> KeyRecord {
         .find(|r| r.pod == pod && r.current)
         .unwrap()
 }
-async fn seal_count(store: &Encrypted, id: [u8; 16]) -> u64 {
+async fn seal_count<S: SparqClient>(
+    store: &CompositeStore<S, EncryptingBlobStore<Backend, Provider>>,
+    id: [u8; 16],
+) -> u64 {
     store
         .blob
         .key_slot(id)
@@ -286,6 +301,199 @@ async fn seal_count(store: &Encrypted, id: [u8; 16]) -> u64 {
         .unwrap()
         .dek
         .seal_count()
+}
+
+#[tokio::test]
+async fn boot_unwraps_only_a_probe_and_current_keys_and_reads_retired_keys_lazily() {
+    let f = Fixture::new();
+    let mut options = f.options();
+    options.block = 1;
+    options.rotate_at = 2;
+    let store = f
+        .plain()
+        .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, options)
+        .await
+        .unwrap();
+    let mut bodies = Vec::new();
+    for i in 0..40 {
+        let iri = format!("{ALICE}/{i}");
+        let meta = store
+            .write(&iri, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        let id = parse_header(&f.backend.bytes.get(&meta.blob_key).await.unwrap())
+            .unwrap()
+            .dek_id;
+        bodies.push((iri, id));
+    }
+    store
+        .write(BOB, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let records = store.blob.records.all().await.unwrap();
+    assert!(records.len() > 10);
+    let currents = records.iter().filter(|r| r.current).count() as u64;
+    let generations = f.provider.generations.load(Ordering::SeqCst);
+    drop(store);
+    f.provider.unwraps.store(0, Ordering::SeqCst);
+    let store = Arc::new(f.encrypted().await);
+    let boot_unwraps = f.provider.unwraps.load(Ordering::SeqCst);
+    assert!((currents..=currents + 1).contains(&boot_unwraps));
+    assert_eq!(f.provider.generations.load(Ordering::SeqCst), generations);
+    for record in records.iter().filter(|r| r.current) {
+        assert!(store
+            .blob
+            .keys
+            .lock()
+            .await
+            .contains_key(&record.id().unwrap()));
+        let pod = store.blob.pod_slot(&record.pod).await;
+        assert!(
+            matches!(pod.lock().await.value, Some(PodKey::Current(id)) if id == record.id().unwrap())
+        );
+    }
+    // Choose a retired key other than the optional boot probe.
+    let (iri, id) = bodies
+        .into_iter()
+        .find(|(_, id)| {
+            records.iter().any(|r| !r.current && r.id().unwrap() == *id)
+                && !store.blob.keys.try_lock().unwrap().contains_key(id)
+        })
+        .unwrap();
+    assert!(!store.blob.keys.lock().await.contains_key(&id));
+    let mut readers = Vec::new();
+    for _ in 0..12 {
+        let store = store.clone();
+        let iri = iri.clone();
+        readers.push(tokio::spawn(async move {
+            assert_eq!(store.read(&iri).await.unwrap().body, BODY);
+        }));
+    }
+    for reader in readers {
+        reader.await.unwrap();
+    }
+    assert_eq!(f.provider.unwraps.load(Ordering::SeqCst), boot_unwraps + 1);
+    assert_eq!(store.read(&iri).await.unwrap().body, BODY);
+    assert_eq!(f.provider.unwraps.load(Ordering::SeqCst), boot_unwraps + 1);
+}
+
+#[tokio::test]
+async fn boot_with_only_retired_keys_still_refuses_a_wrong_kek() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let mut record = current(&store, "https://pod.example/alice/").await;
+    record.current = false;
+    store.blob.records.save(&record).await.unwrap();
+    drop(store);
+    let wrong = provider(0x41);
+    let result = f
+        .plain()
+        .encrypt_blobs(wrong.clone(), CryptScheme::Solid, f.options())
+        .await;
+    assert!(matches!(result, Err(BlobError::Backend(ref e)) if e == "wrong KEK"));
+    assert_eq!(wrong.unwraps.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn first_writes_for_new_pods_do_not_enumerate_key_records() {
+    let f = Fixture::new();
+    let index = ControlledIndex::default();
+    let store =
+        CompositeStore::with_body_cache(index.clone(), f.backend.clone(), BodyCache::disabled())
+            .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, f.options())
+            .await
+            .unwrap();
+    let lists = index.key_lists.load(Ordering::SeqCst);
+    for i in 0..12 {
+        let iri = format!("https://pod.example/pod{i}/body");
+        store
+            .write(&iri, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(store.read(&iri).await.unwrap().body, BODY);
+        assert_eq!(index.key_lists.load(Ordering::SeqCst), lists);
+    }
+    assert_eq!(store.blob.records.all().await.unwrap().len(), 12);
+    assert_eq!(f.provider.generations.load(Ordering::SeqCst), 12);
+}
+
+#[tokio::test]
+async fn encrypted_writes_require_envelopes_on_read_read_at_and_http_get() {
+    use crate::error::ServerError;
+    use axum::{body::to_bytes, http::StatusCode};
+
+    for pooled in [false, true] {
+        let f = Fixture::new();
+        let store = f.encrypted().await;
+        let iri = if pooled {
+            "https://pod.example/.lws/subscriptions/body"
+        } else {
+            ALICE
+        };
+        let meta = store
+            .write(iri, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        assert!(envelope_key(&meta.blob_key));
+        assert_eq!(meta.blob_key.starts_with("$pool$"), pooled);
+        assert_eq!(store.read(iri).await.unwrap().body, BODY);
+        assert!(store
+            .blob
+            .put_scoped(
+                &BlobScope("https://pod.example/alice/".into()),
+                "b1-00000000000000000000000000000000",
+                Bytes::from_static(BODY)
+            )
+            .await
+            .is_err());
+        f.backend
+            .bytes
+            .put(&meta.blob_key, Bytes::from_static(b"non-envelope body"))
+            .await
+            .unwrap();
+        assert!(
+            matches!(store.read(iri).await, Err(ServerError::Storage(ref e)) if e.contains("requires an envelope"))
+        );
+        assert!(
+            matches!(store.read_at(iri, &meta).await, Err(ServerError::Storage(ref e)) if e.contains("requires an envelope"))
+        );
+        drop(store);
+        let reopened = f.encrypted().await;
+        assert!(
+            matches!(reopened.read(iri).await, Err(ServerError::Storage(ref e)) if e.contains("requires an envelope"))
+        );
+        if !pooled {
+            let http = Http::new(reopened).await;
+            let response = http.call("GET", "/alice/file", "text/plain", "").await;
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            let body = to_bytes(response.into_body(), 10000).await.unwrap();
+            assert!(!body
+                .windows(b"non-envelope body".len())
+                .any(|w| w == b"non-envelope body"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn resource_reads_and_http_get_use_scoped_blob_reads() {
+    use axum::{body::to_bytes, http::StatusCode};
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    let meta = store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+    assert_eq!(store.read_at(ALICE, &meta).await.unwrap(), BODY);
+    let http = Http::new(store).await;
+    let response = http.call("GET", "/alice/file", "text/plain", "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(to_bytes(response.into_body(), 10000).await.unwrap(), BODY);
+    assert_eq!(f.backend.unscoped_reads.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -736,7 +944,7 @@ async fn reservation_commits_before_any_seal_and_parallel_writers_share_it() {
     let store = f.encrypted().await;
     // Persist a first reservation without publishing or sealing any body.
     let scope = BlobScope("https://pod.example/alice/".into());
-    let id = store.blob.generate(&scope).await.unwrap();
+    let id = store.blob.generate(&scope, &mut None).await.unwrap();
     assert_eq!(seal_count(&store, id).await, 0);
     assert_eq!(
         store.blob.records.load(&id).await.unwrap().reserved_seals,
@@ -853,20 +1061,137 @@ async fn cancelled_first_writer_recovers_its_committed_key_without_regenerating(
     assert_eq!(records.len(), 1);
     let id = records[0].id().unwrap();
     assert_eq!(records[0].reserved_seals, BLOCK);
+    let lists = index.key_lists.load(Ordering::SeqCst);
     store
         .write(ALICE, Bytes::from_static(BODY), "text/plain")
         .await
         .unwrap();
+    assert_eq!(index.key_lists.load(Ordering::SeqCst), lists);
     let records = store.blob.records.all().await.unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].reserved_seals, 2 * BLOCK);
     assert_eq!(f.provider.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(f.provider.generations.load(Ordering::SeqCst), 1);
     let slot = store.blob.key_slot(id).await;
     assert_eq!(
         slot.lock().await.value.as_ref().unwrap().dek.seal_count(),
         BLOCK + 1
     );
     assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+}
+
+#[tokio::test]
+async fn reopen_after_retirement_before_generation_preserves_bodies_and_seal_counts() {
+    let f = Fixture::new();
+    let index = ControlledIndex::default();
+    let options = || CryptOptions {
+        block: 2,
+        rotate_at: 4,
+        ..f.options()
+    };
+    let open = || {
+        CompositeStore::with_body_cache(index.clone(), f.backend.clone(), BodyCache::disabled())
+            .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, options())
+    };
+    let store = Arc::new(open().await.unwrap());
+    let mut old_bodies = Vec::new();
+    for i in 0..4 {
+        let iri = format!("{ALICE}/{i}");
+        let meta = store
+            .write(&iri, Bytes::from_static(BODY), "text/plain")
+            .await
+            .unwrap();
+        old_bodies.push((iri, meta));
+    }
+    let old_id = parse_header(
+        &f.backend
+            .bytes
+            .get(&old_bodies[0].1.blob_key)
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+    .dek_id;
+    assert_eq!(seal_count(&store, old_id).await, 4);
+    let generations = f.provider.generations.load(Ordering::SeqCst);
+    // Stop after the retirement commit, before its reply or any generation call.
+    index.fault.store(3, Ordering::SeqCst);
+    let writer = store.clone();
+    let task = tokio::spawn(async move {
+        writer
+            .write(ALICE, Bytes::from_static(BODY), "text/plain")
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), index.committed.notified())
+        .await
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let records = store.blob.records.all().await.unwrap();
+    assert_eq!(records.len(), 1);
+    assert!(!records[0].current);
+    assert_eq!(records[0].reserved_seals, 4);
+    assert_eq!(f.provider.generations.load(Ordering::SeqCst), generations);
+    drop(store);
+
+    let store = open().await.unwrap();
+    assert_eq!(f.provider.generations.load(Ordering::SeqCst), generations);
+    let meta = store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let new_id = parse_header(&f.backend.bytes.get(&meta.blob_key).await.unwrap())
+        .unwrap()
+        .dek_id;
+    assert_ne!(old_id, new_id);
+    assert_eq!(seal_count(&store, new_id).await, 1);
+    assert_eq!(
+        f.provider.generations.load(Ordering::SeqCst),
+        generations + 1
+    );
+    let records = store.blob.records.all().await.unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records.iter().filter(|r| r.current).count(), 1);
+    for (iri, _) in &old_bodies {
+        assert_eq!(store.read(iri).await.unwrap().body, BODY);
+    }
+    assert_eq!(seal_count(&store, old_id).await, 4);
+    drop(store);
+
+    let store = open().await.unwrap();
+    assert_eq!(seal_count(&store, new_id).await, 2);
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert_eq!(seal_count(&store, new_id).await, 3);
+    assert_eq!(
+        f.provider.generations.load(Ordering::SeqCst),
+        generations + 1
+    );
+    assert_eq!(
+        store
+            .blob
+            .records
+            .load(&old_id)
+            .await
+            .unwrap()
+            .reserved_seals,
+        4
+    );
+    assert_eq!(
+        store
+            .blob
+            .records
+            .load(&new_id)
+            .await
+            .unwrap()
+            .reserved_seals,
+        4
+    );
+    for (iri, _) in &old_bodies {
+        assert_eq!(store.read(iri).await.unwrap().body, BODY);
+    }
 }
 
 #[tokio::test]
@@ -1331,11 +1656,11 @@ async fn filesystem_http_round_trip_encrypts_disk_bytes_and_reopens_every_resour
     assert!(listing.foreign.is_empty());
     assert_eq!(listing.blobs.len(), snapshots.len() + 1);
     for entry in &listing.blobs {
-        let (random, path) = if let Some(key) = entry.key.strip_prefix("$pool$b1-") {
+        let (random, path) = if let Some(key) = entry.key.strip_prefix("$pool$e1-") {
             (key, blob_dir.join("pool"))
         } else {
             (
-                entry.key.strip_prefix("b1-").unwrap(),
+                entry.key.strip_prefix("e1-").unwrap(),
                 blob_dir.join("objects"),
             )
         };

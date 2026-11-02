@@ -229,7 +229,7 @@ impl StorageConfig {
         } else {
             CryptScheme::Solid
         };
-        // Opening validates every wrapped key, including retired keys, before any request is served.
+        // Opening validates the KEK and current keys; other keys unwrap on first read.
         let encrypted = EncryptingBlobStore::new(blob, provider, index, scheme, options)
             .await
             .map_err(io::Error::other)?;

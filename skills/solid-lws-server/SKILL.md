@@ -209,7 +209,10 @@ and set `SOLID_SERVER_CRYPT_PROVIDER=local` to enable the P1-2 decorator
 backends; `CompositeStore` uses it for every body write. The decorator refuses
 plain `put`. `BlobStore::get_scoped(&BlobScope, key)` defaults to `get` for ordinary
 backends; resource reads use it to require the authenticated DEK pod to match the
-resource pod. Transparent decorators must forward scoped reads and writes.
+resource pod. `BlobStore::requires_envelope()` defaults to `false`; encryption
+returns `true`, so body writes mint `e1-` keys (after any `$pool$` marker).
+The encryption decorator requires these marked keys for `put_scoped`.
+Transparent decorators must forward this requirement and scoped reads and writes.
 Body-cache entries retain that pod; a different pod refuses the read
 and evicts the entry. Each DEK-cache insert sweeps expired entries.
 Parsed ACL reuse requires the current blob pointer as well as its ETag in both
@@ -237,14 +240,18 @@ generation. A later independent request can retry after a failed call.
 
 The other encryption variables are read only when the provider is `local`.
 Native boot constructs one decorator per exclusive index, before sharing it with
-the router and reconciler. Existing DEKs are validated before serving; a different
-local KEK fails startup with `WrongKek` (reported as `wrong KEK`).
+the router and reconciler. Boot unwraps one existing DEK plus every current DEK,
+without repeating the probe if it is current. Other DEKs unwrap lazily on first
+read through the same TTL cache and single-flight. A different local KEK fails
+startup with `WrongKek` (reported as `wrong KEK`).
 The protocol's fixed wrapping-context `scheme` is `solid` or `lws`.
 
 Opening a data directory with encryption atomically changes `format.json` to
 `"blobs":{"major":2,"encryption":"envelope-v1"}`. This is a **one-way major
 bump**: older binaries reject it, and provider `none` refuses to open it.
 Existing plaintext remains readable; subsequent writes are encrypted.
+Bodies written with encryption enabled must be envelopes; non-envelope bytes
+for them are refused, including after restart.
 **Back up the KEK independently with the index and blobs: losing the KEK makes
 encrypted data unrecoverable.** Legacy plaintext beginning with `SQLB` is treated
 as an envelope and fails closed; it is never retried as plaintext.

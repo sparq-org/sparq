@@ -84,6 +84,12 @@ pub struct BlobEntry {
 /// here, using `PutMode::Create`/`Update` for the S3 If-None-Match/If-Match CAS (spike §6).
 #[async_trait]
 pub trait BlobStore: Send + Sync {
+    /// Whether newly minted body keys must identify envelope storage.
+    /// Transparent decorators must forward the inner store's requirement.
+    fn requires_envelope(&self) -> bool {
+        false
+    }
+
     /// Read the bytes for a storage key.
     async fn get(&self, key: &str) -> Result<Bytes, BlobError>;
 

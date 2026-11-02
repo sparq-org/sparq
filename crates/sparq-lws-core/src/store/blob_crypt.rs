@@ -266,7 +266,13 @@ impl<T> Slot<T> {
 }
 
 type KeySlot = Arc<Slot<CachedDek>>;
-type PodSlot = Arc<Slot<[u8; 16]>>;
+type PodSlot = Arc<Slot<PodKey>>;
+
+#[derive(Clone, Copy)]
+enum PodKey {
+    Pending([u8; 16]),
+    Current([u8; 16]),
+}
 
 /// Encrypt resource bodies under one current DEK per pod. Unscoped writes refuse.
 ///
@@ -284,7 +290,8 @@ pub struct EncryptingBlobStore<B, K: KeyProvider> {
 }
 
 impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
-    /// Open over an exclusive index, validating existing wrapped keys before use.
+    /// Open over an exclusive index, validating one existing key and every current key.
+    /// Other keys are unwrapped on their first read, through the shared TTL cache.
     /// Errors include a wrong local KEK. Wrapped-key records never contain plaintext keys.
     pub async fn new(
         inner: B,
@@ -303,6 +310,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             keys: Mutex::new(HashMap::new()),
             pods: Mutex::new(HashMap::new()),
         };
+        let mut validated = false;
         for record in this.records.all().await? {
             if record.scheme != scheme.as_str() {
                 return Err(invalid_record());
@@ -310,9 +318,12 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             let id = record.id()?;
             if record.current {
                 let slot = this.pod_slot(&record.pod).await;
-                if slot.lock().await.value.replace(id).is_some() {
+                if slot.lock().await.value.replace(PodKey::Current(id)).is_some() {
                     return Err(invalid_record());
                 }
+            }
+            if validated && !record.current {
+                continue;
             }
             let key = this
                 .provider
@@ -322,6 +333,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                 )
                 .await
                 .map_err(crypt_error)?;
+            validated = true;
             let cached = CachedDek {
                 dek: Dek::new(key, id, record.reserved_seals).map_err(crypt_error)?,
                 record,
@@ -434,7 +446,11 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         }
     }
 
-    async fn generate(&self, scope: &BlobScope) -> Result<[u8; 16], BlobError> {
+    async fn generate(
+        &self,
+        scope: &BlobScope,
+        current: &mut Option<PodKey>,
+    ) -> Result<[u8; 16], BlobError> {
         let context = KeyContext {
             pod: scope.0.clone(),
             scheme: self.scheme.as_str().into(),
@@ -468,6 +484,9 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
                 .as_secs(),
             current: true,
         };
+        // Retain the candidate before the commit await so a cancelled writer can
+        // check this record directly, even if the index committed without replying.
+        *current = Some(PodKey::Pending(id));
         // The reservation commits BEFORE a caller can use this key for its first seal.
         self.records.save(&record).await?;
         self.key_slot(id).await.lock().await.value = Some(CachedDek {
@@ -476,6 +495,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             expires: self.expires(),
         });
         self.sweep_expired_keys().await;
+        *current = Some(PodKey::Current(id));
         Ok(id)
     }
 
@@ -506,30 +526,30 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         scope: &BlobScope,
         key: &str,
         body: Bytes,
-        current: &mut Option<[u8; 16]>,
+        current: &mut Option<PodKey>,
     ) -> Result<Bytes, BlobError> {
         loop {
             let id = match *current {
-                Some(id) => id,
-                None => {
-                    // A cancelled first writer may have committed before publishing
-                    // its in-memory pointer. Discover it before generating another.
-                    let mut found = None;
-                    for record in self.records.all().await? {
-                        if record.current
-                            && record.pod == scope.0
-                            && found.replace(record.id()?).is_some()
-                        {
-                            return Err(invalid_record());
+                Some(PodKey::Current(id)) => id,
+                Some(PodKey::Pending(id)) => {
+                    let record = match self.records.load(&id).await {
+                        Ok(record) => record,
+                        Err(BlobError::UnknownDataKey) => {
+                            *current = None;
+                            continue;
                         }
-                    }
-                    let id = match found {
-                        Some(id) => id,
-                        None => self.generate(scope).await?,
+                        Err(error) => return Err(error),
                     };
-                    *current = Some(id);
+                    if record.pod != scope.0 || record.scheme != self.scheme.as_str() {
+                        return Err(invalid_record());
+                    }
+                    *current = record.current.then_some(PodKey::Current(id));
+                    if current.is_none() {
+                        continue;
+                    }
                     id
                 }
+                None => self.generate(scope, current).await?,
             };
             let slot = self.key_slot(id).await;
             let observed = slot.observed();
@@ -571,6 +591,11 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             None => self.inner.get(key).await?,
         };
         if !is_envelope(&body) {
+            if envelope_key(key) {
+                return Err(BlobError::Backend(
+                    "encrypted body requires an envelope".into(),
+                ));
+            }
             return Ok(body);
         }
         let id = parse_header(&body)
@@ -579,12 +604,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         let slot = self.key_slot(id).await;
         let observed = slot.observed();
         let mut cached = slot.lock().await;
-        if let Err(e) = self.refresh(id, &slot, &mut cached, observed).await {
-            if matches!(e, BlobError::UnknownDataKey) {
-                eprintln!("UnknownDataKey blob={key}");
-            }
-            return Err(e);
-        }
+        self.refresh(id, &slot, &mut cached, observed).await?;
         let c = cached.value.as_ref().ok_or_else(invalid_record)?;
         let plaintext = open(&c.dek, key, &body).map_err(crypt_error)?;
         if scope.is_some_and(|scope| c.record.pod != scope.0) {
@@ -596,9 +616,20 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
     }
 }
 
+fn envelope_key(key: &str) -> bool {
+    key.strip_prefix(super::limits::POOLED_BLOB_KEY_MARK)
+        .unwrap_or(key)
+        .starts_with("e1-")
+}
+
 #[async_trait]
 impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
+    fn requires_envelope(&self) -> bool {
+        true
+    }
+
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        // Only maintenance paths use unscoped reads; resource reads use get_scoped.
         self.decrypt(None, key).await
     }
 
@@ -613,6 +644,11 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
     }
 
     async fn put_scoped(&self, scope: &BlobScope, key: &str, body: Bytes) -> Result<(), BlobError> {
+        if !envelope_key(key) {
+            return Err(BlobError::Backend(
+                "encrypted body writes require an envelope key".into(),
+            ));
+        }
         let envelope = self.encrypt(scope, key, body).await?;
         self.inner.put_scoped(scope, key, envelope).await
     }
