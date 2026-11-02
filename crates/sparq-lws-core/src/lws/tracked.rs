@@ -124,7 +124,7 @@ pub struct Tracked<S> {
     gens: std::sync::Arc<Generations>,
     #[cfg(feature = "sparql-endpoint")]
     snapshot: std::sync::Arc<super::snapshot::Gate>,
-    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one (so a
+    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own (so a
     /// `Tracked` over a `Tracked` shares its lease), shared by every clone, so a service built
     /// over a clone, or over a wrapper of one, is refused while this one runs.
     lifecycle: std::sync::Arc<crate::store::Lifecycle>,
@@ -143,12 +143,12 @@ impl<S> Clone for Tracked<S> {
 }
 
 impl<S: Store> Tracked<S> {
-    /// Track `inner`, whose storage root is `root`. Its backend's lease is `inner`'s own when it
-    /// keeps one ([`Store::lifecycle`]), and a new one otherwise: no caller chooses it, so
+    /// Track `inner`, whose storage root is `root`. Its backend's lease is always `inner`'s own
+    /// ([`Store::lifecycle`]): no caller chooses it, so
     /// wrapping a store that is already tracked keeps the lease of the service running over it.
     pub fn new(inner: S, root: String) -> Self {
         Self {
-            lifecycle: inner.lifecycle().unwrap_or_default(),
+            lifecycle: inner.lifecycle(),
             inner: std::sync::Arc::new(inner),
             gens: std::sync::Arc::new(Generations::new(root)),
             #[cfg(feature = "sparql-endpoint")]
@@ -207,6 +207,50 @@ impl<S> std::ops::Deref for Tracked<S> {
 
 #[async_trait]
 impl<S: Store> Store for Tracked<S> {
+    fn history_config(&self) -> crate::store::history::HistoryConfig {
+        self.inner.history_config()
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> ServerResult<Vec<crate::store::history::VersionEntry>> {
+        self.inner.versions(original).await
+    }
+    async fn trash_entries(&self) -> ServerResult<Vec<crate::store::history::TrashEntry>> {
+        self.inner.trash_entries().await
+    }
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> ServerResult<Option<crate::store::history::VersionEntry>> {
+        self.inner.version_entry(member).await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> ServerResult<Option<crate::store::history::TrashEntry>> {
+        self.inner.trash_entry(member).await
+    }
+    async fn trash_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        fields: crate::store::history::TrashFields,
+    ) -> ServerResult<String> {
+        let _m = self.gens.mutating(&[iri]);
+        self.inner.trash_resource(iri, parent, fields).await
+    }
+    async fn restore_trash(&self, member: &str, target: &str, parent: &str) -> ServerResult<()> {
+        let _m = self.gens.mutating(&[target, parent]);
+        self.inner.restore_trash(member, target, parent).await
+    }
+    async fn purge_trash(&self, member: &str) -> ServerResult<()> {
+        self.inner.purge_trash(member).await
+    }
+    async fn sweep_history(&self, now: std::time::SystemTime, limit: usize) -> ServerResult<usize> {
+        self.inner.sweep_history(now, limit).await
+    }
+
     async fn read(&self, iri: &str) -> ServerResult<Resource> {
         self.inner.read(iri).await
     }
@@ -365,8 +409,8 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.reset_marker(iri, value, lease).await
     }
 
-    fn lifecycle(&self) -> Option<std::sync::Arc<crate::store::Lifecycle>> {
-        Some(self.lifecycle.clone())
+    fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+        self.lifecycle.clone()
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

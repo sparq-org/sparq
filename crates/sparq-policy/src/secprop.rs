@@ -495,6 +495,7 @@ fn logical_expr(rule_id: &str, deontic: Deontic, lc: &LogicalConstraint) -> Disc
         .iter()
         .map(|operand| match operand {
             ConstraintNode::Atomic(c) => leaf_expr(rule_id, deontic, c),
+            ConstraintNode::SharedAtomic(c) => leaf_expr(rule_id, deontic, c),
             ConstraintNode::Compound(inner) => logical_expr(rule_id, deontic, inner),
         })
         .collect();
