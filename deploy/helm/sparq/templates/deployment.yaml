@@ -16,6 +16,11 @@ metadata:
     {{- include "sparq.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- if and (eq .Values.server "lws") .Values.persistence.enabled }}
+  # Stop the previous process before opening the single-instance data directory.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sparq.selectorLabels" . | nindent 6 }}
@@ -136,6 +141,10 @@ spec:
             # [GPT-5.6] The binary defaults to loopback, which is unreachable through a Service.
             - name: SOLID_SERVER_BIND
               value: "0.0.0.0:3000"
+            {{- if .Values.persistence.enabled }}
+            - name: SOLID_SERVER_DATA_DIR
+              value: "/data"
+            {{- end }}
             {{- if .Values.lws.trustedIssuer }}
             - name: SOLID_SERVER_TRUSTED_ISSUER
               value: {{ .Values.lws.trustedIssuer | quote }}
@@ -163,7 +172,7 @@ spec:
             # R8: /tmp writable scratch (required for distroless + readOnlyRootFilesystem)
             - name: tmp
               mountPath: /tmp
-            {{- if eq .Values.server "sparq-server" }}
+            {{- if or (eq .Values.server "sparq-server") .Values.persistence.enabled }}
             # [GPT-5.6] R8: /data stays writable while the image root remains read-only.
             - name: data
               mountPath: /data
@@ -171,7 +180,7 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if eq .Values.server "sparq-server" }}
+        {{- if or (eq .Values.server "sparq-server") .Values.persistence.enabled }}
         - name: data
           {{- if .Values.persistence.enabled }}
           {{- if .Values.persistence.existingClaim }}

@@ -397,9 +397,72 @@ where
             cors.clone(),
             cors_middleware,
         ));
+    let protected = if ldp.store.history_config().versions {
+        protected.layer(axum::middleware::from_fn_with_state(
+            ldp.clone(),
+            crate::history_http::solid_links::<S>,
+        ))
+    } else {
+        protected
+    };
+    crate::history_http::spawn_solid_sweep(&ldp);
     let protected = protected.with_state(ldp.clone());
 
     let mut router = Router::new();
+    #[cfg(feature = "crdt-sync")]
+    {
+        crate::crdt::register(&mut catalog, base, true);
+        let crdt = crate::crdt::CrdtState::solid(ldp.clone(), cors.clone());
+        router = router.merge(
+            Router::new()
+                .route(
+                    crate::crdt::SOLID_TICKETS,
+                    post(crate::crdt::solid_ticket::<S>).layer(
+                        axum::middleware::from_fn_with_state(
+                            auth.clone(), auth_middleware::<J, R>,
+                        ),
+                    ),
+                )
+                .route(crate::crdt::SOLID_SOCKET, get(crate::crdt::solid_socket::<S>))
+                .with_state(crdt)
+                .layer(axum::extract::DefaultBodyLimit::max(8192))
+                .layer(axum::middleware::from_fn_with_state(cors.clone(), cors_middleware)),
+        );
+    }
+
+    let history = ldp.store.history_config();
+    crate::history_http::catalog(&mut catalog, base, false, &history);
+    if history.enabled() {
+        let mut routes = Router::new();
+        for (enabled, path) in [
+            (history.versions, "/.versions/"),
+            (history.trash, "/.trash/"),
+        ] {
+            if enabled {
+                routes = routes
+                    .route(
+                        path,
+                        axum::routing::any(crate::history_http::solid_handler::<S>),
+                    )
+                    .route(
+                        &format!("{path}{{*member}}"),
+                        axum::routing::any(crate::history_http::solid_handler::<S>),
+                    );
+            }
+        }
+        router = router.merge(
+            routes
+                .layer(axum::middleware::from_fn_with_state(
+                    auth.clone(),
+                    auth_middleware::<J, R>,
+                ))
+                .layer(axum::middleware::from_fn_with_state(
+                    cors.clone(),
+                    cors_middleware,
+                ))
+                .with_state(ldp.clone()),
+        );
+    }
 
     // sq-r1ei8: the query surface is a distinct protected route so
     // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.

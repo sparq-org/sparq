@@ -25,7 +25,7 @@ cargo test -p sparq-lws-core --no-default-features
 SOLID_SERVER_RECONCILE_INTERVAL_SECS=3600 cargo run -p sparq-lws-core
 ```
 
-The binary is configured entirely by `SOLID_SERVER_*` / `PSS_*` env variables (bind address, TLS PEM paths, backend selection, seeding) — see the module docs on `src/main.rs`. `SOLID_SERVER_RECONCILE_INTERVAL_SECS` is unset by default; a positive integer enables one periodic orphan sweep (unchanged one-hour grace period); invalid or zero fails boot.
+The binary is configured entirely by `SOLID_SERVER_*` / `PSS_*` env variables (bind address, TLS PEM paths, backend selection, seeding) — see the module docs on `src/main.rs`. `SOLID_SERVER_RECONCILE_INTERVAL_SECS` is unset by default; a positive integer enables one periodic orphan sweep (unchanged one-hour grace period); invalid or zero fails boot. The image's optional version/trash environment settings are documented in the [history service reference](../../skills/solid-lws-server/references/history.md).
 
 **`SOLID_SERVER_SEED_DEMO`** (default OFF, `1|true|TRUE|True` only) opt-in-seeds the `research/lws-demo-architecture.md` §3.2 public demo: `/playground/` writable by any *authenticated* agent, anonymous read-only, `acl:Control` granted to nobody — so visitors are not isolated and can overwrite/delete each other's resources (disclosed in the seeded `/README`). It normally requires `PSS_SPARQ_BACKEND=memory`; the escape hatch `SOLID_SERVER_ALLOW_SEED_NONMEMORY=1` permits it on **any** non-memory backend, intended for an *ephemeral* embedded test instance — the server does **not** verify ephemerality, so it is not memory-only in the enforced sense. API break: `seed::DEMO_USER` + `DemoFixtures::{pod, welcome_doc, owner}` removed, `DemoFixtures::playground` moved `/demo/playground/` → `/playground/`, `DemoFixtures::readme` added.
 
@@ -62,7 +62,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   HTTPS-only WebIDs, anonymous-mutation rejection, and strict WebID↔issuer checks are on
   by default — never set `SOLID_SERVER_ALLOW_LOOPBACK`, the seed vars, or
   `SOLID_SERVER_BIDIRECTIONAL=off`; access stays WAC-controlled.
-- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above. The `http` and `redis-replay` backends require opt-in features.
+- **Storage:** the default `memory` (and `embedded` without a directory) is ephemeral. Set `SOLID_SERVER_DATA_DIR` to a mounted data root to persist both the index and resource bytes; see the storage lifecycle above and [running durably in a container](../../skills/solid-lws-server/SKILL.md#running-durably-in-a-container) (volume, Helm, block storage, one replica). The `http` and `redis-replay` backends require opt-in features.
 
 ## ✨ Features
 
