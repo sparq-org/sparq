@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-lws-core:** lifecycle starts establish a writer epoch before intent recovery.
+  HTTP index updates carry that epoch alongside their per-operation nonce guards.
+  In-memory and embedded clients need no durable epoch. The HTTP backend remains
+  refused for LWS because it does not assure exclusive index ownership.
 - **sparq-core / sparq-engine:** durable UPDATE journals now record named-graph creation and
   removal alongside triple changes, with ordered replay and support for the previous journal
   format. Hardens named-graph layout recovery alongside directory ownership support:
@@ -846,6 +850,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core:** metadata writes, resource deletes and containment removals use
+  fenced HTTP updates. Resource deletion detaches its parent edge in the same write.
+  Journals retain unsettled write and metadata-delete fences through rollback and
+  commit, including removal of legacy membership edges. Regression coverage checks
+  that unsettled rewrites retain their fence and candidate bytes.
 - **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
   subscription lookups clone only owned records. An unconditional LWS data DELETE allowed by an
   unconstrained Delete grant without Read returns `204` for settled present or absent targets,

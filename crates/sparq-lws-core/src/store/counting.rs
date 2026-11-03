@@ -315,6 +315,10 @@ impl<S: SparqClient> CountingSparqClient<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
+    async fn begin_epoch(&self, lease: &super::LifecycleGuard) -> Result<u64, SparqError> {
+        self.inner.begin_epoch(lease).await
+    }
+
     async fn reset_marker(
         &self,
         iri: &str,
@@ -523,13 +527,9 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         #[cfg(test)]
         self.counters.record_method("index.delete_resource");
         let _g = self.counters.op_guard();
-        // Model the HTTP default's SELECT + detach + DROP, while preserving the inner
-        // backend's atomic override, just as replace_meta does.
+        // The HTTP client deletes and detaches in one update, then reads its captured blob key.
         self.counters.count_queries(1);
         self.counters.count_update();
-        if parent.is_some() {
-            self.counters.count_update();
-        }
         self.inner.delete_resource(iri, parent).await
     }
 

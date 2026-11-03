@@ -273,9 +273,13 @@ pub struct StoreUsage {
     pub resource_count: usize,
 }
 
-/// Refuse generic index mutations of the notification marker.
+/// Refuse generic index mutations of lifecycle records: the notification marker and writer epoch.
 pub(crate) fn refuse_marker_operands(iris: &[Option<&str>]) -> Result<(), super::SparqError> {
-    if iris.iter().flatten().any(|iri| is_service_marker(iri)) {
+    if iris
+        .iter()
+        .flatten()
+        .any(|iri| is_service_marker(iri) || *iri == super::sparql::WRITER_EPOCH)
+    {
         return Err(super::SparqError::Backend(
             "service markers require the lifecycle lease".into(),
         ));

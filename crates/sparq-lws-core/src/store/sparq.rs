@@ -294,6 +294,14 @@ pub trait SparqClient: Send + Sync {
         ))
     }
 
+    /// Begin a writer epoch while the service holds its lifecycle lease, before recovery.
+    /// HTTP clients raise a durable epoch so earlier processes' writes become final before replay.
+    /// In-process backends have no writes that outlive the process and return zero without I/O.
+    async fn begin_epoch(&self, lease: &super::LifecycleGuard) -> Result<u64, SparqError> {
+        let _ = lease;
+        Ok(0)
+    }
+
     /// Stop naming `blob_key` as being reclaimed ([`begin_reclaim`](Self::begin_reclaim)).
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let _ = blob_key;
@@ -312,7 +320,8 @@ pub trait SparqClient: Send + Sync {
     /// Delete a resource and its parent edge, returning the removed record's blob key.
     ///
     /// Embedded and in-memory clients read the key and remove both index entries atomically.
-    /// The default preserves the HTTP client's separate read, detach, and delete operations.
+    /// The default uses separate read, detach, and delete operations; HTTP overrides it with one
+    /// fenced write.
     /// `None` means the resource was absent; an existing parent edge is still removed.
     ///
     /// # Errors

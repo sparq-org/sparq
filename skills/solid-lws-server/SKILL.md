@@ -165,12 +165,25 @@ Set `PSS_SPARQ_BACKEND` to one of:
   read its own writes: a query sent after an update has completed must see what the
   update committed (one `sparq-server` does). An eventually consistent or replicated
   endpoint that can lag is not supported, because the LWS server decides what a failed
-  write left behind by reading the store straight after it. An update that times out
-  can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions, forward resource removals, intent creates, and the
-  content write of a resource create retain their fences. HTTP index metadata/listing
-  writes and the generic write adapter still need fencing support, so the native LWS
-  server refuses this backend (below).
+  write left behind by reading the store straight after it. Metadata upserts,
+  resource graph deletes, containment edge removals, child creates and conditional
+  empty-container deletes carry a nonce fence and writer epoch in their `WHERE`.
+  A resource delete detaches its parent edge in the same update and captures the
+  removed blob key in an operation receipt. A completion marker confirms a write
+  after its nonce fence succeeds; an unsettled outcome retains its fence and any
+  candidate blob bytes through the store and journal.
+
+  `SparqClient::begin_epoch(&LifecycleGuard) -> Result<u64, SparqError>` raises the
+  reserved `urn:x-sparq-lws:writer-epoch` record before recovery, under the service's
+  lifecycle lease. `Store::begin_epoch` and pass-through wrappers forward it.
+  The raise only advances the epoch; every HTTP `*_fenced` builder takes the epoch
+  after its nonce. Once the raise commits, updates carrying an earlier epoch have
+  no effect. In-memory and embedded clients return zero without I/O; HTTP clones
+  share the active epoch. HTTP clients used without a lifecycle start use epoch
+  zero while the epoch record is absent. Nonce fences still settle writes within
+  one process. Reclaim bookkeeping and the separate body-insert helper are outside
+  this LWS write path. The native LWS server still refuses this backend because
+  `SparqClient::exclusive` provides no remote index ownership assurance.
 
 ### Native data-directory boot
 
@@ -579,10 +592,10 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later. Service-record creates
-and removals, forward resource removals, intent creates and a resource create's content
-write retain their fences (see below). HTTP index metadata/listing writes and the generic
-write adapter still need fencing support before this refusal can be lifted.
+because the remote index does not provide the exclusive ownership the service
+requires. HTTP metadata and containment writes carry nonce and epoch guards;
+startup establishes the epoch under the lifecycle lease before intent recovery.
+The HTTP refusal remains in place independently of those guards.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
 (413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
@@ -935,10 +948,10 @@ What the server exposes, all discoverable from the storage description
   without retaining the state or its lifecycle lease or owing another touch. A touch with no
   owed intents starts no clearing task.
   Both fence a step's unsettled write before
-  trying the step again. Forward removals and intent creates retain their fences in the
-  journal: rollback fences before recreation or Forget, and commit fences before changing
-  the intent. A removal whose fence lands but
-  whose outcome cannot then be read stays out of force and is settled in the background once the
+  trying the step again. Forward writes, metadata deletes, member removals (including
+  legacy edges), and intent writes retain their fences in the journal: rollback fences
+  before restoration, recreation or Forget, and commit fences before changing the intent.
+  A removal whose fence lands but whose outcome cannot then be read stays out of force and is settled in the background once the
   listing can be read. A removal the store refuses for
   want of room answers `507`, the record still stored and back in force. A subscription
   being cancelled hears of no change from the moment its removal begins until it is back in
@@ -1156,8 +1169,8 @@ What the server exposes, all discoverable from the storage description
 - Access grant/request IDs owned by someone else answer exactly like absent IDs for every
   method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
   a borrowed record; only a match is cloned. Subscription lookups do the same.
-- Pass-through `SparqClient` and `Store` wrappers forward `exclusive`, `call_timeout`, and supported marker
-  operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
+- Pass-through `SparqClient` and `Store` wrappers forward `begin_epoch`, `exclusive`,
+  `call_timeout`, and supported marker operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
   ownership and marker resets, and use the default call timeout. Generic `delete_resource`
   refuses marker operands, including the parent, before any backend call.
 - Resource-linkset `OPTIONS` returns a fixed `204` for every caller; unsupported methods such as

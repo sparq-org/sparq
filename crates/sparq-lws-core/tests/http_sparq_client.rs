@@ -82,6 +82,8 @@ struct MockStore {
     /// The nonces fenced (`INSERT DATA` into the fences graph): a fenced update carrying one of
     /// them does nothing.
     fences: Vec<String>,
+    /// Nonce to blob key captured by a resource deletion.
+    deleted_keys: HashMap<String, String>,
     /// The last SPARQL string the mock received (so a test can assert on the query text/escaping).
     last_sparql: Option<String>,
     /// Total protocol requests received (so a test can pin how many round-trips an op cost).
@@ -203,6 +205,50 @@ fn apply_update(state: &MockState, sparql: &str) {
             .iter()
             .any(|l| store.fences.contains(l))
     {
+        return;
+    }
+    // Metadata replacement, edge detach and whole-resource delete each have one completion marker.
+    if sparql.contains("deleteMarker")
+        && sparql.starts_with("DELETE {")
+        && !sparql.contains("?anyCt")
+    {
+        let resource = first_graph_iri(sparql).unwrap();
+        let nonce = extract_literals(sparql).last().cloned().unwrap();
+        let marker_resource;
+        if sparql.contains("?oldP") {
+            let (ct, bk, et) = parse_record_literals(sparql);
+            store.meta.insert(resource.clone(), (ct, bk, et));
+            marker_resource = resource;
+        } else if sparql.contains("?s ?p ?o") {
+            if let Some((_, key, _)) = store.meta.remove(&resource) {
+                store.deleted_keys.insert(nonce.clone(), key);
+            }
+            store.children.remove(&resource);
+            store.body.remove(&resource);
+            store.markers.remove(&resource);
+            let delete_template = sparql.split("INSERT {").next().unwrap();
+            for parent in all_graph_iris(delete_template)
+                .iter()
+                .filter(|g| *g != &resource)
+            {
+                if let Some(children) = store.children.get_mut(parent) {
+                    children.retain(|child| child != &resource);
+                }
+            }
+            marker_resource = resource;
+        } else {
+            let delete_template = sparql.split("INSERT {").next().unwrap();
+            let child = extract_iris(delete_template).last().cloned().unwrap();
+            if let Some(children) = store.children.get_mut(&resource) {
+                children.retain(|member| member != &child);
+            }
+            marker_resource = child;
+        }
+        store
+            .delete_markers
+            .entry(marker_resource)
+            .or_default()
+            .push(nonce);
         return;
     }
     // delete_container_if_empty: a SINGLE `DELETE { container-graph ; parent-edge } INSERT { marker }
@@ -352,6 +398,22 @@ fn answer_query(state: &MockState, sparql: &str) -> Response {
             store.meta.contains_key(&graph)
         };
         return results_json(&format!(r#"{{"head":{{}},"boolean":{boolean}}}"#));
+    }
+    if sparql.starts_with("SELECT ?bk") && sparql.contains("deletedBlobKey") {
+        let nonce = extract_iris(sparql)
+            .get(1)
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_string();
+        let rows = match store.deleted_keys.get(&nonce) {
+            Some(key) => serde_json::json!([{"bk": {"type": "literal", "value": key}}]),
+            None => serde_json::json!([]),
+        };
+        return results_json(
+            &serde_json::json!({"head":{"vars":["bk"]},"results":{"bindings":rows}}).to_string(),
+        );
     }
     if sparql.starts_with("SELECT ?g ?ct ?bk ?etag") {
         // select_read_plan: `VALUES ?g { <target> <acl…> } GRAPH ?g { record… }` — one row per
@@ -1409,6 +1471,57 @@ async fn live_sparq_round_trip() {
 }
 
 // ---------------------------------------------------------------------------
+#[tokio::test]
+async fn metadata_and_edge_writes_confirm_their_markers_after_fencing() {
+    for operation in ["put", "delete", "detach", "delete_resource"] {
+        for applied in [true, false] {
+            let (url, state) = spawn_mock().await;
+            let c = HttpSparqClient::with_timeout(url, Duration::from_millis(300));
+            c.put_meta(CONTAINER, meta()).await.unwrap();
+            c.create_child(CONTAINER, CHILD, meta()).await.unwrap();
+            state.mode.lock().unwrap().commit_late =
+                Some(Duration::from_millis(if applied { 50 } else { 1500 }));
+            let result = match operation {
+                "put" => {
+                    c.put_meta(
+                        CHILD,
+                        ResourceMeta {
+                            blob_key: "replacement".into(),
+                            ..meta()
+                        },
+                    )
+                    .await
+                }
+                "delete" => c.delete_meta(CHILD).await,
+                "detach" => c.remove_child(CONTAINER, CHILD).await,
+                "delete_resource" => c.delete_resource(CHILD, Some(CONTAINER)).await.map(|key| {
+                    assert_eq!(key, Some(meta().blob_key));
+                }),
+                _ => unreachable!(),
+            };
+            if applied {
+                result.unwrap();
+                match operation {
+                    "put" => assert_eq!(c.get_meta(CHILD).await.unwrap().blob_key, "replacement"),
+                    "detach" => {
+                        assert!(c.exists(CHILD).await.unwrap());
+                        assert!(c.list_children(CONTAINER).await.unwrap().is_empty());
+                    }
+                    _ => assert!(!c.exists(CHILD).await.unwrap()),
+                }
+            } else {
+                assert!(
+                    matches!(result, Err(SparqError::Backend(ref detail)) if detail.contains("did not commit")),
+                    "{operation}: {result:?}"
+                );
+                assert_eq!(c.get_meta(CHILD).await.unwrap().blob_key, meta().blob_key);
+                assert_eq!(c.list_children(CONTAINER).await.unwrap(), [CHILD]);
+            }
+            assert_eq!(state.store.lock().unwrap().fences.len(), 1);
+        }
+    }
+}
+
 // #6836: a write that times out may still commit; its fence makes the outcome final.
 // ---------------------------------------------------------------------------
 

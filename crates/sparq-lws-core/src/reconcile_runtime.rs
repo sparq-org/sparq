@@ -38,6 +38,13 @@ impl<T> Clone for SharedStore<T> {
 
 #[async_trait]
 impl<T: SparqClient> SparqClient for SharedStore<T> {
+    async fn begin_epoch(
+        &self,
+        lease: &sparq_lws_core::store::LifecycleGuard,
+    ) -> Result<u64, SparqError> {
+        self.0.begin_epoch(lease).await
+    }
+
     async fn replace_meta_retaining(
         &self,
         iri: &str,

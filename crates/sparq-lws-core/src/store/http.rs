@@ -55,6 +55,10 @@
 //! notifications (subscription socket), the reconciler GC, and **TLS** (this client is plain HTTP to
 //! a trusted internal endpoint; an `https`/rustls connector is the next adapter behind the same type).
 
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -104,9 +108,9 @@ fn next_nonce() -> Result<String, SparqError> {
 /// The split is load-bearing for the composite store's crash-consistency model: a *retryable*
 /// failure (connect refused, a 5xx, a timeout) is a transient backend blip the caller may re-issue;
 /// a *fatal* failure (a 4xx, a malformed/unparseable response) is a bug or a permanent rejection that
-/// retrying cannot fix. Both map onto [`SparqError::Backend`] at the trait boundary (the trait keeps
-/// the backend opaque), but the retryability is preserved in the message + queryable here so a future
-/// retry layer (M3-next) can act on it.
+/// retrying cannot fix. Query errors map onto [`SparqError::Backend`] with the retryability hint.
+/// A guarded update whose outcome cannot yet be settled carries [`SparqError::Unsettled`] and
+/// its nonce fence instead.
 #[derive(Debug, thiserror::Error)]
 pub enum SparqHttpError {
     /// The request could not be built (a programmer error — never from untrusted input). Fatal.
@@ -185,6 +189,7 @@ pub struct HttpSparqClient {
     /// The absolute `/sparql` endpoint URL (operator-configured, trusted internal service).
     endpoint: String,
     timeout: Duration,
+    epoch: Arc<AtomicU64>,
 }
 
 impl HttpSparqClient {
@@ -207,6 +212,7 @@ impl HttpSparqClient {
             client,
             endpoint: endpoint.into(),
             timeout,
+            epoch: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -471,17 +477,59 @@ struct SelectResult {
 
 impl HttpSparqClient {
     async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        let nonce = next_nonce()?;
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
+        let u = sparql::update_put_meta_fenced(
             iri,
             &meta.content_type,
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            &nonce,
+            self.epoch.load(Ordering::Acquire),
         )?;
-        self.update_raw(&u)
+        self.write_and_confirm(&u, iri, &nonce, &[iri]).await
+    }
+
+    /// A fenced write that needed settlement succeeds only if its completion marker is present.
+    async fn write_and_confirm(
+        &self,
+        u: &str,
+        iri: &str,
+        nonce: &str,
+        touches: &[&str],
+    ) -> Result<(), SparqError> {
+        let fenced = self.update_fenced(u, nonce, touches).await?;
+        if fenced {
+            let (body, _) = self
+                .query_raw(&sparql::ask_delete_marker(iri, nonce)?, ACCEPT_RESULTS_JSON)
+                .await
+                .map_err(SparqHttpError::into_sparq)?;
+            if !parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
+                return Err(SparqError::Backend(
+                    "fatal: the write did not commit".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    async fn read_epoch(&self) -> Result<u64, SparqError> {
+        let (body, _) = self
+            .query_raw(&sparql::select_writer_epoch(), ACCEPT_RESULTS_JSON)
             .await
-            .map_err(SparqHttpError::into_sparq)
+            .map_err(SparqHttpError::into_sparq)?;
+        let rows = parse_select_json(&body)
+            .map_err(SparqHttpError::into_sparq)?
+            .rows;
+        match rows.as_slice() {
+            [] => Ok(0),
+            [row] => row
+                .get("epoch")
+                .and_then(|e| e.parse().ok())
+                .ok_or_else(|| SparqError::Backend("fatal: invalid writer epoch".into())),
+            _ => Err(SparqError::Backend("fatal: multiple writer epochs".into())),
+        }
     }
 }
 
@@ -578,11 +626,64 @@ impl SparqClient for HttpSparqClient {
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         super::limits::refuse_marker_operands(&[Some(iri)])?;
-        // DROP SILENT the resource's whole graph (idempotent on an absent graph).
-        let u = sparql::update_delete_resource(iri)?;
-        self.update_raw(&u)
+        let nonce = next_nonce()?;
+        let u =
+            sparql::update_delete_resource_fenced(iri, &nonce, self.epoch.load(Ordering::Acquire))?;
+        self.write_and_confirm(&u, iri, &nonce, &[iri]).await
+    }
+
+    async fn delete_resource(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
+        let nonce = next_nonce()?;
+        let u = sparql::update_delete_resource_with_parent_fenced(
+            iri,
+            parent,
+            &nonce,
+            self.epoch.load(Ordering::Acquire),
+        )?;
+        let touches: Vec<&str> = std::iter::once(iri).chain(parent).collect();
+        self.write_and_confirm(&u, iri, &nonce, &touches).await?;
+        // The update captured the prior key atomically; no pre-read can prevent fencing the write.
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_deleted_blob_key(&nonce)?,
+                ACCEPT_RESULTS_JSON,
+            )
             .await
-            .map_err(SparqHttpError::into_sparq)
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        result
+            .rows
+            .first()
+            .map(|row| {
+                row.get("bk").cloned().ok_or_else(|| {
+                    SparqError::Backend("fatal: delete receipt missing blob key".into())
+                })
+            })
+            .transpose()
+    }
+
+    async fn begin_epoch(&self, _: &super::LifecycleGuard) -> Result<u64, SparqError> {
+        let epoch = self
+            .read_epoch()
+            .await?
+            .checked_add(1)
+            .ok_or_else(|| SparqError::Backend("fatal: writer epoch exhausted".into()))?;
+        // Only raises: even a timed-out start's delayed update cannot lower a later epoch.
+        self.update_raw(&sparql::update_begin_epoch(epoch))
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        if self.read_epoch().await? != epoch {
+            return Err(SparqError::Backend(
+                "fatal: writer epoch was superseded".into(),
+            ));
+        }
+        self.epoch.store(epoch, Ordering::Release);
+        Ok(epoch)
     }
 
     async fn delete_meta_if_empty(
@@ -607,7 +708,12 @@ impl SparqClient for HttpSparqClient {
         //
         // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
         // the ASKs below read is final.
-        let u = sparql::update_delete_container_if_empty_fenced(iri, parent, &nonce)?;
+        let u = sparql::update_delete_container_if_empty_fenced(
+            iri,
+            parent,
+            &nonce,
+            self.epoch.load(Ordering::Acquire),
+        )?;
         let touches: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let fenced = self.update_fenced(&u, &nonce, &touches).await?;
 
@@ -669,6 +775,7 @@ impl SparqClient for HttpSparqClient {
             &meta.etag,
             modified.as_deref(),
             &nonce,
+            self.epoch.load(Ordering::Acquire),
         )?;
         let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
 
@@ -708,10 +815,15 @@ impl SparqClient for HttpSparqClient {
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
-        let u = sparql::update_remove_child(container, child)?;
-        self.update_raw(&u)
+        let nonce = next_nonce()?;
+        let u = sparql::update_remove_child_fenced(
+            container,
+            child,
+            &nonce,
+            self.epoch.load(Ordering::Acquire),
+        )?;
+        self.write_and_confirm(&u, child, &nonce, &[container, child])
             .await
-            .map_err(SparqHttpError::into_sparq)
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
@@ -859,6 +971,167 @@ impl HttpSparqClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn meta() -> ResourceMeta {
+        ResourceMeta {
+            content_type: "text/plain".into(),
+            blob_key: "candidate".into(),
+            etag: "e".into(),
+            last_modified: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn timed_out_index_writes_retain_their_fences_and_touched_resources() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = HttpSparqClient::with_timeout(
+            format!("http://{}/sparql", listener.local_addr().unwrap()),
+            Duration::from_millis(20),
+        );
+        let (iri, parent) = ("https://pod.example/c/d", "https://pod.example/c/");
+        for operation in ["put", "delete", "detach", "delete_resource"] {
+            let result = match operation {
+                "put" => client.put_meta(iri, meta()).await,
+                "delete" => client.delete_meta(iri).await,
+                "detach" => client.remove_child(parent, iri).await,
+                "delete_resource" => client.delete_resource(iri, Some(parent)).await.map(|_| ()),
+                _ => unreachable!(),
+            };
+            let Err(SparqError::Unsettled { fence, .. }) = result else {
+                panic!("{operation}: {result:?}");
+            };
+            let mut touches = fence.touches().to_vec();
+            touches.sort();
+            let mut expected = vec![iri.to_string()];
+            if matches!(operation, "detach" | "delete_resource") {
+                expected.push(parent.to_string());
+            }
+            expected.sort();
+            assert_eq!(touches, expected, "{operation}");
+            assert!(!fence.nonce().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn an_http_write_names_the_clients_epoch() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = HttpSparqClient::with_timeout(
+            format!("http://{}/sparql", listener.local_addr().unwrap()),
+            Duration::from_secs(2),
+        );
+        client.epoch.store(7, Ordering::Release);
+        let clone = client.clone();
+        let received = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 4096];
+            loop {
+                let n = socket.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                request.extend_from_slice(&chunk[..n]);
+                if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..at]);
+                    let len: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|s| s.trim().parse().unwrap())
+                        })
+                        .unwrap();
+                    if request.len() >= at + 4 + len {
+                        break;
+                    }
+                }
+            }
+            socket
+                .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        clone
+            .put_meta("https://pod.example/d", meta())
+            .await
+            .unwrap();
+        let request = received.await.unwrap();
+        let where_clause = request.split("WHERE {").last().unwrap();
+        assert!(
+            where_clause.contains("<urn:x-sparq-lws:writer-epoch> <urn:pss:index#epoch> 7"),
+            "{request}"
+        );
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn beginning_an_epoch_through_store_wrappers_updates_clones_and_finalizes_prior_writes() {
+        use crate::store::{CompositeStore, CountingSparqClient, InMemoryBlobStore, Store};
+        use axum::{extract::State, response::IntoResponse, routing::post, Router};
+        type Graph = Arc<std::sync::Mutex<sparq_core::Graph>>;
+        async fn endpoint(
+            State(graph): State<Graph>,
+            headers: http::HeaderMap,
+            body: Bytes,
+        ) -> axum::response::Response {
+            let text = std::str::from_utf8(&body).unwrap();
+            let mut graph = graph.lock().unwrap();
+            if headers[header::CONTENT_TYPE] == CT_SPARQL_UPDATE {
+                sparq_engine::update_in_place_atomic(&mut graph, text).unwrap();
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                sparq_engine::query_json(&graph, text)
+                    .unwrap()
+                    .into_response()
+            }
+        }
+        let graph = Arc::new(std::sync::Mutex::new(
+            sparq_core::Graph::load_str("", "ntriples").unwrap(),
+        ));
+        let app = Router::new()
+            .route("/sparql", post(endpoint))
+            .with_state(graph.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = HttpSparqClient::with_timeout(
+            format!("http://{}/sparql", listener.local_addr().unwrap()),
+            Duration::from_secs(2),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let clone = client.clone();
+        let store = CompositeStore::new(
+            CountingSparqClient::new(client, Arc::default()),
+            InMemoryBlobStore::new(),
+        );
+        let lease = store.lifecycle().acquire().unwrap();
+        assert_eq!(store.begin_epoch(&lease).await.unwrap(), 1);
+        assert_eq!(clone.epoch.load(Ordering::Acquire), 1);
+        let iri = "https://pod.example/d";
+        let prior = sparql::update_put_meta_fenced(
+            iri,
+            "text/plain",
+            "old-process",
+            "old",
+            None,
+            "op-old",
+            1,
+        )
+        .unwrap();
+        drop(lease);
+        let lease = store.lifecycle().acquire().unwrap();
+        assert_eq!(store.begin_epoch(&lease).await.unwrap(), 2);
+        assert_eq!(clone.epoch.load(Ordering::Acquire), 2);
+        clone.put_meta(iri, meta()).await.unwrap();
+        clone.update_raw(&prior).await.unwrap();
+        assert_eq!(clone.get_meta(iri).await.unwrap().blob_key, "candidate");
+        assert!(!sparq_engine::ask(
+            &graph.lock().unwrap(),
+            &sparql::ask_delete_marker(iri, "op-old").unwrap()
+        )
+        .unwrap());
+        server.abort();
+    }
 
     /// Review of #7174: a background fence's attempts were capped at the default call timeout
     /// whatever the client was built with. The client, and a store over it, say the timeout it

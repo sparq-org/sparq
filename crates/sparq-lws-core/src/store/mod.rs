@@ -85,7 +85,8 @@ impl Lifecycle {
 }
 
 /// A held [`Lifecycle`] lease: the authority of the one service running over a backend, which
-/// alone may lower a marker ([`Store::reset_marker`]). Only this crate makes one.
+/// alone may reset a marker ([`Store::reset_marker`]) or begin a writer epoch
+/// ([`Store::begin_epoch`]). Only this crate makes one.
 #[derive(Debug)]
 pub struct LifecycleGuard {
     lease: std::sync::Arc<Lifecycle>,
@@ -472,6 +473,13 @@ pub trait Store: Send + Sync {
     /// built with, `HttpSparqClient::with_timeout`).
     fn call_timeout(&self) -> std::time::Duration {
         STORE_CALL_TIMEOUT
+    }
+
+    /// Begin the index's writer epoch under the held lifecycle lease, before recovery.
+    /// Wrappers forward this to their backend. In-process stores need no durable epoch.
+    async fn begin_epoch(&self, lease: &LifecycleGuard) -> ServerResult<u64> {
+        let _ = lease;
+        Ok(0)
     }
 
     /// The lease shared by every handle to this backend.
@@ -988,11 +996,15 @@ impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
     }
 }
 
-/// Refuse a generic mutation naming the notification service's marker
-/// ([`is_service_marker`]): the marker changes only through [`Store::raise_marker`], which never
-/// lowers it, and [`Store::reset_marker`], which takes the service's lease.
+/// Refuse generic mutations of lifecycle records. The notification marker
+/// ([`is_service_marker`]) changes through [`Store::raise_marker`] and [`Store::reset_marker`];
+/// the writer epoch changes through [`Store::begin_epoch`].
 fn refuse_marker(iris: &[Option<&str>]) -> ServerResult<()> {
-    if iris.iter().flatten().any(|iri| is_service_marker(iri)) {
+    if iris
+        .iter()
+        .flatten()
+        .any(|iri| is_service_marker(iri) || *iri == sparql::WRITER_EPOCH)
+    {
         return Err(ServerError::Forbidden);
     }
     Ok(())
@@ -1000,6 +1012,10 @@ fn refuse_marker(iris: &[Option<&str>]) -> ServerResult<()> {
 
 #[async_trait]
 impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
+    async fn begin_epoch(&self, lease: &LifecycleGuard) -> ServerResult<u64> {
+        self.sparq.begin_epoch(lease).await.map_err(map_sparq)
+    }
+
     fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
         self.lifecycle.clone()
     }
@@ -2650,17 +2666,32 @@ mod tests {
                 "{r:?}"
             );
         };
-        refused(client.put_meta(MARKER, lower()).await);
-        refused(client.replace_meta(MARKER, lower()).await.map(|_| ()));
-        refused(client.delete_meta(MARKER).await);
-        for (iri, parent) in [(MARKER, None), (MARKER_CONTAINER, Some(MARKER))] {
-            refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
-            refused(client.delete_resource(iri, parent).await.map(|_| ()));
+        for marker in [MARKER, sparql::WRITER_EPOCH] {
+            refused(client.put_meta(marker, lower()).await);
+            refused(client.replace_meta(marker, lower()).await.map(|_| ()));
+            refused(client.delete_meta(marker).await);
+            for (iri, parent) in [(marker, None), (MARKER_CONTAINER, Some(marker))] {
+                refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
+                refused(client.delete_resource(iri, parent).await.map(|_| ()));
+            }
+            for (container, child) in [(marker, MARKER_CONTAINER), (MARKER_CONTAINER, marker)] {
+                refused(client.create_child(container, child, lower()).await);
+                refused(client.remove_child(container, child).await);
+            }
         }
-        for (container, child) in [(MARKER, MARKER_CONTAINER), (MARKER_CONTAINER, MARKER)] {
-            refused(client.create_child(container, child, lower()).await);
-            refused(client.remove_child(container, child).await);
-        }
+    }
+
+    #[tokio::test]
+    async fn generic_store_writes_refuse_the_writer_epoch_record() {
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        assert!(matches!(
+            store
+                .write(sparql::WRITER_EPOCH, Bytes::new(), "text/plain")
+                .await,
+            Err(ServerError::Forbidden)
+        ));
+        assert!(store.blob.list().await.unwrap().is_empty());
+        assert!(!store.sparq.exists(sparql::WRITER_EPOCH).await.unwrap());
     }
 
     #[tokio::test]
