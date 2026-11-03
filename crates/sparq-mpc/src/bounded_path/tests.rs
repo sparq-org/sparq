@@ -538,8 +538,8 @@ fn crypto_free_no_mpc_round_artifacts() {
     let mut witness = CommCounter::new(3);
     assert_eq!(witness.mult_rounds, 0, "control: fresh counter starts at 0");
     assert_eq!(witness.open_rounds, 0, "control: fresh counter starts at 0");
-    witness.record_mult();
-    witness.record_open();
+    witness.record_mult().unwrap();
+    witness.record_open().unwrap();
     assert!(
         witness.mult_rounds > 0 && witness.open_rounds > 0,
         "negative control FAILED: the counter does not move under MPC ops, so a \
@@ -632,7 +632,7 @@ fn naive_fixed_chain(
             join_var: hop_var(idx),
             key_disclosed: true,
         };
-        acc = join.join(&[acc, next], &plan).unwrap();
+        acc = join.join_pair(&acc, &next, &plan).unwrap();
     }
     dedup_endpoint_pairs(
         project_endpoints(&acc, subject, object).unwrap(),
@@ -668,8 +668,13 @@ fn per_hop_projection_matches_the_naive_fold_at_small_lengths() {
         let edges = disclosed_edges(docs);
         for len in 1..=8usize {
             let chain: Vec<NamedNode> = (0..len).map(|_| nn("http://ex/p")).collect();
-            let shipped =
-                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o).unwrap(), &s, &o);
+            let shipped = dedup_endpoint_pairs(
+                eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new())
+                    .unwrap()
+                    .0,
+                &s,
+                &o,
+            );
             let naive = naive_fixed_chain(&edges, &chain, &s, &o);
             assert_eq!(
                 shipped.rows, naive.rows,
@@ -696,14 +701,28 @@ fn a_dense_graph_evaluates_at_the_hop_cap() {
         Variable::new_unchecked(OBJECT_VAR),
     );
     let short = dedup_endpoint_pairs(
-        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o).unwrap(),
+        eval_fixed_chain(
+            &edges,
+            &[nn("http://ex/p")],
+            &s,
+            &o,
+            &mut PathFormBudget::new(),
+        )
+        .unwrap()
+        .0,
         &s,
         &o,
     );
     assert_eq!(short.rows.len(), 4, "the dense 2-node graph has 4 pairs");
 
     let chain: Vec<NamedNode> = (0..MAX_UNROLL_HOPS).map(|_| nn("http://ex/p")).collect();
-    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o).unwrap(), &s, &o);
+    let long = dedup_endpoint_pairs(
+        eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new())
+            .unwrap()
+            .0,
+        &s,
+        &o,
+    );
     assert_eq!(
         long.rows, short.rows,
         "every length reaches the same four endpoint pairs on this graph"
@@ -1577,7 +1596,9 @@ fn differential_zero_length_over_an_empty_graph_is_empty() {
     // The distinction that matters: an EMPTY declared domain runs, an UNDECLARED
     // one is refused. Both would print as "no identity pairs" otherwise.
     let undeclared = disclosed_edges_only(&[("", &["http://ex/p"])]);
-    assert!(eval_bounded_path_disclosed(&undeclared, &form).is_err());
+    let err = eval_bounded_path_disclosed(&undeclared, &form).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m)
+        if m.contains("needs the federation's PUBLIC node domain")));
     assert!(eval_bounded_path_disclosed(&edges, &form).is_ok());
 }
 
@@ -1631,22 +1652,48 @@ fn an_absent_bound_endpoint_self_matches_when_declared() {
 }
 
 /// THE scope limit on the advice above: a per-query widening of the domain with
-/// an absent constant OVER-answers as soon as two or more NULLABLE arms are
-/// chained in a [`PathForm::Sequence`].
+/// an absent constant OVER-answers exactly when the WHOLE `Sequence` is nullable
+/// and the bound endpoint is that constant — and then by at most ONE extra pair,
+/// `(absent, absent)`.
 ///
-/// `Sequence[p{0,1}, q{0,1}]` composes the two diagonals through a midpoint that
-/// ranges over the DECLARED domain, so the widened `ex:absent` reaches itself via
-/// itself and `(absent, absent)` appears. The engine's `ex:absent ex:p?/ex:q? ?b`
-/// returns NOTHING: its inner `q?` arm sees a VARIABLE midpoint, so that arm
-/// ranges over the graph's own nodes (`graph_nodes`), which do not contain
-/// `ex:absent`. This test pins both halves, so the doc's caveat is backed rather
-/// than asserted.
+/// Why that is the condition, and why the bound is one pair: no disclosed edge
+/// touches the widened term, so the only row that can ever carry it is a
+/// zero-length arm's own `(absent, absent)` diagonal entry. Chaining those
+/// through a `Sequence` midpoint composes to `(absent, absent)` and to nothing
+/// else; and the first arm with `min >= 1` needs an EDGE out of `absent`, which
+/// does not exist, so one non-nullable arm anywhere in the sequence removes the
+/// extra pair entirely (`p?/q?/r` below).
+///
+/// A `{0,k}` RANGE is not a case of this: it is ONE repetition, evaluated as the
+/// union over the admitted lengths — it behaves like `p?|p|p/p…`, not like the
+/// sequence `p?/p?`. The engine self-matches a bound constant on a zero-length
+/// arm too, so there the operator and the engine AGREE: that is precisely the
+/// query the widening is declared for.
+///
+/// This test pins all three shapes, so the doc's caveat is backed rather than
+/// asserted.
 #[test]
-fn an_absent_constant_over_answers_a_nested_nullable_sequence() {
-    let h1 = "ex:a ex:p ex:b . ex:b ex:q ex:c .";
-    let preds: &[&str] = &["http://ex/p", "http://ex/q"];
+fn an_absent_constant_over_answers_only_a_fully_nullable_sequence() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:q ex:c . ex:c ex:r ex:d .";
+    let preds: &[&str] = &["http://ex/p", "http://ex/q", "http://ex/r"];
     let absent = format!("{:?}", Term::from(nn("http://ex/absent")));
+    let widen = || {
+        disclosed_edges_only(&[(h1, preds)])
+            .with_node_domain(
+                active_graph_nodes(&[h1])
+                    .into_iter()
+                    .chain([t(nn("http://ex/absent"))]),
+            )
+            .unwrap()
+    };
+    let exactly = || {
+        disclosed_edges_only(&[(h1, preds)])
+            .with_node_domain(active_graph_nodes(&[h1]))
+            .unwrap()
+    };
 
+    // (1) THE over-answering shape: every arm nullable.
+    //
     // The ENGINE side, both shapes: the bound-endpoint query binds nothing, and
     // the variable-endpoint path never names ex:absent either.
     let u = union_graph(&[h1]);
@@ -1665,69 +1712,173 @@ fn an_absent_constant_over_answers_a_nested_nullable_sequence() {
     assert!(!engine.contains(&(absent.clone(), absent.clone())));
 
     // The MPC side with the widened domain: (absent, absent) appears.
-    let widened = disclosed_edges_only(&[(h1, preds)])
-        .with_node_domain(
-            active_graph_nodes(&[h1])
-                .into_iter()
-                .chain([t(nn("http://ex/absent"))]),
-        )
-        .unwrap();
-    let form = PathForm::Sequence(vec![
+    let nullable = PathForm::Sequence(vec![
         PathForm::range(nn("http://ex/p"), 0, 1),
         PathForm::range(nn("http://ex/q"), 0, 1),
     ]);
-    let over = federated_pairs(&widened, &form);
+    let over = federated_pairs(&widen(), &nullable);
     assert!(
         over.contains(&(absent.clone(), absent.clone())),
         "the widened constant reaches itself through the Sequence midpoint: {over:?}"
     );
     assert_eq!(
         &over - &engine,
-        BTreeSet::from([(absent.clone(), absent)]),
+        BTreeSet::from([(absent.clone(), absent.clone())]),
         "and (absent, absent) is the ONLY over-answer — the widening adds nothing else"
     );
 
     // Without the widening the two sides agree exactly, so the over-answer is
-    // caused by the widening and by nothing else in the nested form.
-    let exact = disclosed_edges_only(&[(h1, preds)])
-        .with_node_domain(active_graph_nodes(&[h1]))
-        .unwrap();
+    // caused by the widening and by nothing else in the form.
     assert_eq!(
-        federated_pairs(&exact, &form),
+        federated_pairs(&exactly(), &nullable),
         engine,
-        "an exactly-declared domain matches the engine on the same nested form"
+        "an exactly-declared domain matches the engine on the same form"
     );
+
+    // (2) ONE non-nullable arm removes the extra pair: `p?/q?/r` needs an edge
+    // out of the midpoint, and no disclosed edge touches the widened term.
+    let with_mandatory = PathForm::Sequence(vec![
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::range(nn("http://ex/q"), 0, 1),
+        PathForm::exact(nn("http://ex/r"), 1),
+    ]);
+    let engine_mandatory = clear_text_pairs(&[h1], "ex:p?/ex:q?/ex:r");
+    let bound_mandatory = query(
+        &u,
+        "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p?/ex:q?/ex:r ?b }",
+    )
+    .unwrap();
+    assert!(
+        bound_mandatory.rows.is_empty(),
+        "the engine returns nothing for an absent bound endpoint here either: {:?}",
+        bound_mandatory.rows
+    );
+    let mandatory = federated_pairs(&widen(), &with_mandatory);
+    assert_eq!(
+        mandatory, engine_mandatory,
+        "a sequence with one mandatory arm does not over-answer even widened"
+    );
+    assert!(
+        !mandatory.iter().any(|(a, b)| *a == absent || *b == absent),
+        "and no row mentions the widened term at all: {mandatory:?}"
+    );
+
+    // The same holds for a mandatory arm in the MIDDLE: a row through it needs an
+    // edge out of the midpoint, and no edge is incident to the widened term at
+    // either end, so the position of the mandatory arm does not matter.
+    let middle = PathForm::Sequence(vec![
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::exact(nn("http://ex/r"), 1),
+        PathForm::range(nn("http://ex/q"), 0, 1),
+    ]);
+    let middle_pairs = federated_pairs(&widen(), &middle);
+    assert_eq!(
+        middle_pairs,
+        clear_text_pairs(&[h1], "ex:p?/ex:r/ex:q?"),
+        "a mandatory arm in the middle does not over-answer either"
+    );
+    assert!(
+        !middle_pairs
+            .iter()
+            .any(|(a, b)| *a == absent || *b == absent),
+        "and no row mentions the widened term: {middle_pairs:?}"
+    );
+
+    // (3) A `{0,k}` RANGE is ONE repetition, not `p?/p?`: the engine self-matches
+    // the bound constant on the zero-length arm, so the operator and the engine
+    // agree — this is the query the widening is declared for, not an over-answer.
+    // (The engine's path syntax has no `{m,k}`, so the engine half is pinned on
+    // `p?`, which IS `{0,1}`.)
+    let bound_range = query(
+        &u,
+        "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p? ?b }",
+    )
+    .unwrap();
+    assert_eq!(
+        bound_range.rows.len(),
+        1,
+        "the engine self-matches a bound constant on the zero-length arm: {:?}",
+        bound_range.rows
+    );
+    // And the extra pair stays ONE for every k: a wider range admits more
+    // LENGTHS of the same repetition, it does not chain `p?` arms through a
+    // midpoint, so nothing composes the widened term with anything else.
+    for k in 1..=3 {
+        let form = PathForm::range(nn("http://ex/p"), 0, k);
+        let ranged = federated_pairs(&widen(), &form);
+        assert!(
+            ranged.contains(&(absent.clone(), absent.clone())),
+            "the operator self-matches the declared constant at k={k}: {ranged:?}"
+        );
+        assert_eq!(
+            &ranged - &federated_pairs(&exactly(), &form),
+            BTreeSet::from([(absent.clone(), absent.clone())]),
+            "one repetition adds exactly the declared constant's own diagonal \
+             entry, whatever k is (k={k})"
+        );
+    }
 }
 
-/// A BLANK NODE in the active graph is a subject/object term, so it is in the
-/// zero-length domain and a `{0,k}` arm must bind its `(x,x)` pair. The EDGE
-/// relations stay IRI-only — `from_holder_edges` still refuses a blank-node
-/// endpoint — so the blank node reaches the answer only through the declaration,
-/// and its `(x,x)` row can only ever meet another diagonal row for the same
-/// declared term.
+/// A BLANK NODE of the LOADED graph, against the real engine. The fixture puts a
+/// blank node in the active graph under a predicate the path does not traverse,
+/// so it is a subject/object term of the domain while the EDGE relations stay
+/// IRI-only, and the declared domain is the graph's own — nothing synthetic is
+/// added. A `{0,1}` arm must then bind the blank node's `(x,x)` pair exactly as
+/// the engine does.
+///
+/// The second half pins the edge regime: `from_holder_edges` still refuses a
+/// blank-node EDGE endpoint, which is why a diagonal row for a blank node can
+/// only ever meet another diagonal row for the same declared term.
 #[test]
-fn a_blank_node_in_the_declared_domain_yields_its_identity_pair() {
-    let h1 = "ex:a ex:p ex:b .";
-    let b = Term::BlankNode(BlankNode::new("b0").unwrap());
+fn a_blank_node_of_the_loaded_graph_yields_its_identity_pair() {
+    // `ex:q` is in the graph but is NOT a disclosed edge predicate of the path,
+    // so its blank-node object reaches the operator only through the domain.
+    let h1 = "ex:a ex:p ex:b . ex:c ex:q [ ] .";
+
+    // ONE load for both sides: a blank node's identity is per-load, so the
+    // declared domain and the engine's answer must come from the SAME graph for
+    // the differential to be about the operator rather than about labelling.
+    let g = union_graph(&[h1]);
+    let mut domain: BTreeMap<String, Term> = BTreeMap::new();
+    for row in &query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap().rows {
+        for slot in row.iter().flatten() {
+            domain
+                .entry(format!("{:?}", slot))
+                .or_insert_with(|| slot.clone());
+        }
+    }
+    let engine_res = query(
+        &g,
+        "PREFIX ex: <http://ex/> SELECT ?a ?b WHERE { ?a ex:p? ?b }",
+    )
+    .unwrap();
+    let engine = pair_set(&engine_res.vars, &engine_res.rows);
+
     let edges = disclosed_edges_only(&[(h1, &["http://ex/p"])])
-        .with_node_domain(active_graph_nodes(&[h1]).into_iter().chain([b.clone()]))
-        .expect("a blank node is a legal DOMAIN term");
+        .with_node_domain(domain.into_values())
+        .expect("the loaded graph's own domain, blank node included");
 
     let form = PathForm::range(nn("http://ex/p"), 0, 1);
     let got = federated_pairs(&edges, &form);
-    let key = format!("{b:?}");
-    assert!(
-        got.contains(&(key.clone(), key)),
-        "the blank node's identity pair must be present: {got:?}"
+    assert_eq!(
+        got, engine,
+        "the operator must agree with the engine on the loaded graph's domain"
     );
-    // (a,a), (b,b), (_:b0,_:b0) and the (a,b) edge.
-    assert_eq!(got.len(), 4, "{got:?}");
+    let blanks = got
+        .iter()
+        .filter(|(a, b)| a.starts_with("BlankNode") && a == b)
+        .count();
+    assert_eq!(
+        blanks, 1,
+        "the loaded graph's blank node must contribute its identity pair: {got:?}"
+    );
 
     // The EDGE regime is untouched: a blank-node edge endpoint is still refused.
+    let b = Term::BlankNode(BlankNode::new("b0").unwrap());
     let bad = PartialResult {
         holder: HolderId::new("h0"),
         vars: vec![Variable::new_unchecked("s"), Variable::new_unchecked("o")],
-        rows: vec![vec![Some(b.clone()), Some(Term::from(nn("http://ex/x")))]],
+        rows: vec![vec![Some(b), Some(Term::from(nn("http://ex/x")))]],
     };
     let err = DisclosedEdges::from_holder_edges([(nn("http://ex/p"), bad)]).unwrap_err();
     assert!(matches!(err, MpcError::Protocol(_)));
@@ -1828,5 +1979,913 @@ fn disclosed_edges_debug_prints_sizes_not_terms() {
     assert!(
         format!("{undeclared:?}").contains("none declared"),
         "an undeclared domain must say so rather than print a size"
+    );
+}
+
+// =====================================================================
+// The whole-form ROW BUDGET and the deduped union
+// =====================================================================
+
+/// The budget constant is pinned BY VALUE, so changing it is changing this test
+/// and not quietly relaxing a guard.
+#[test]
+fn the_path_form_row_budget_is_pinned_by_value() {
+    assert_eq!(MAX_PATH_FORM_ROWS, 1 << 26);
+}
+
+/// The budget's own arithmetic: exactly at [`MAX_PATH_FORM_ROWS`] is accepted, one
+/// row past it is refused, and a total that would overflow `usize` is refused
+/// rather than wrapping to a small number under the budget.
+#[test]
+fn the_row_budget_accepts_the_cap_and_refuses_one_past_it() {
+    let mut b = PathFormBudget::new();
+    b.charge(MAX_PATH_FORM_ROWS).expect("exactly at the cap");
+    assert_eq!(b.charged(), MAX_PATH_FORM_ROWS);
+    let err = b.charge(1).expect_err("one row past the cap is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+
+    let mut over = PathFormBudget::with_charged(usize::MAX);
+    assert!(
+        over.charge(1).is_err(),
+        "an overflowing total must refuse, not wrap under the budget"
+    );
+}
+
+/// The budget is WIRED into the real unroll and binds there: a form that runs on a
+/// fresh budget is refused by exactly the same code path when the budget has
+/// already been spent, and runs again when just enough is left for it.
+///
+/// There is no "zero draws" half to this one: the disclosed unroll is crypto-free,
+/// so there is no randomness source to draw from at all (see
+/// `crypto_free_no_mpc_round_artifacts`). What the refusal precedes is the rows.
+#[test]
+fn the_row_budget_binds_on_a_real_form_at_the_cap() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:d .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 3);
+
+    // What this form actually holds at its PEAK, measured on the real path. The
+    // row budget is live, so the peak is what has to fit in it — not the sum over
+    // the chains, which are evaluated and released one at a time.
+    let mut measured = PathFormBudget::new();
+    let baseline = eval_with_budget(&edges, &form, &mut measured).unwrap();
+    let spend = measured.peak();
+    assert!(spend > 0, "the unroll must charge the budget it is given");
+
+    // A budget with one row less than it needs: refused, naming the budget.
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (spend - 1));
+    let err = eval_with_budget(&edges, &form, &mut tight)
+        .expect_err("a form that would pass the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+
+    // With exactly enough left it runs, and returns the same answer.
+    let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - spend);
+    let got = eval_with_budget(&edges, &form, &mut exact).expect("exactly enough budget runs");
+    assert_eq!(got.rows, baseline.rows);
+}
+
+/// The ZERO-LENGTH arm's diagonal is charged to the same budget as a chain's
+/// rows. The declared node domain is a public plan input, but the `(x, x)` rows it
+/// contributes are rows this form materialises, so a `{0,k}` over a large
+/// declared domain cannot walk past the cap on the quiet.
+#[test]
+fn the_row_budget_charges_the_zero_length_diagonal_too() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let domain = active_graph_nodes(&[h1]).len();
+    assert!(domain > 0, "the fixture declares a non-empty domain");
+    let nullable = PathForm::range(nn("http://ex/p"), 0, 2);
+    let mandatory = PathForm::range(nn("http://ex/p"), 1, 2);
+
+    let mut with_diagonal = PathFormBudget::new();
+    let baseline = eval_with_budget(&edges, &nullable, &mut with_diagonal).unwrap();
+    let mut without_diagonal = PathFormBudget::new();
+    eval_with_budget(&edges, &mandatory, &mut without_diagonal).unwrap();
+    assert_eq!(
+        with_diagonal.work(),
+        without_diagonal.work() + domain as u64,
+        "the zero-length arm must charge exactly one row per declared node"
+    );
+
+    // And the charge BINDS: one row less than the form's PEAK is refused.
+    let spend = with_diagonal.peak();
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (spend - 1));
+    let err = eval_with_budget(&edges, &nullable, &mut tight)
+        .expect_err("a nullable form that would pass the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+    let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - spend);
+    let got = eval_with_budget(&edges, &nullable, &mut exact).expect("exactly enough budget runs");
+    assert_eq!(got.rows, baseline.rows);
+}
+
+/// The repetition union is deduped AS IT GROWS, not only at the top. A pair that
+/// several chain lengths reach contributes ONE row to the relation the repetition
+/// RETURNS, so the union holds the answer's rows rather than one row per
+/// (pair, chain).
+///
+/// Asserted on `eval_form_relation`'s own output — BEFORE the top-level
+/// `dedup_endpoint_pairs` — because that top-level dedup collapses duplicates
+/// either way and would hide whether the union ever held them. The budget, which
+/// charges every row PRODUCED, is read alongside to show duplicates really were
+/// produced and really were dropped.
+#[test]
+fn the_repetition_union_is_deduped_as_it_grows() {
+    // A complete little cycle, so every length reaches the same pairs repeatedly.
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:a . ex:a ex:p ex:a . ex:b ex:p ex:b .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 4);
+    let subject = Variable::new_unchecked(SUBJECT_VAR);
+    let object = Variable::new_unchecked(OBJECT_VAR);
+
+    let mut budget = PathFormBudget::new();
+    let mut scope = 0usize;
+    let (raw, _charge) =
+        eval_form_relation(&edges, &form, &subject, &object, &mut scope, &mut budget).unwrap();
+
+    // The relation the repetition hands back carries NO duplicate row.
+    let distinct: BTreeSet<String> = raw.rows.iter().map(|r| format!("{r:?}")).collect();
+    assert_eq!(
+        raw.rows.len(),
+        distinct.len(),
+        "the repetition's own union must already be a set, not {} rows over {} distinct",
+        raw.rows.len(),
+        distinct.len()
+    );
+    // And duplicates really were produced: four chain lengths re-reach the same
+    // pairs, so the WORK the form did exceeds the rows it kept. The row budget is
+    // live, so it cannot show this — the rows a collapsed duplicate occupied were
+    // released when its chain was dropped, which is the point.
+    assert!(
+        budget.work() > raw.rows.len() as u64,
+        "the work charged ({}) must exceed the {} retained rows — otherwise nothing \
+         was collapsed",
+        budget.work(),
+        raw.rows.len()
+    );
+
+    // And the answer is still right once the top-level dedup has run too.
+    let got = eval_bounded_path_disclosed(&edges, &form).unwrap();
+    let want = clear_text_pairs(
+        &[h1],
+        "ex:p | ex:p/ex:p | ex:p/ex:p/ex:p | ex:p/ex:p/ex:p/ex:p",
+    );
+    assert_eq!(pair_set(&got.vars, &got.rows), want);
+}
+
+// =====================================================================
+// PathForm nesting DEPTH and the static whole-form WORK budget
+// =====================================================================
+
+/// Both form-shape caps are pinned BY VALUE.
+#[test]
+fn the_form_shape_caps_are_pinned_by_value() {
+    assert_eq!(MAX_PATH_FORM_DEPTH, 1 << 14);
+    assert_eq!(MAX_PATH_FORM_WORK, 1 << 32);
+    assert_eq!(MAX_PATH_FORM_JOIN_WORK, 1 << 31);
+}
+
+/// Build a `Sequence`-in-`Sequence` form of exactly `depth` levels, with one
+/// trivial repetition at the bottom. Built ITERATIVELY so the fixture itself
+/// cannot be what overflows.
+fn nested_form(depth: usize) -> PathForm {
+    let mut form = PathForm::exact(nn("http://ex/p"), 1);
+    for _ in 1..depth {
+        form = PathForm::Sequence(vec![form]);
+    }
+    form
+}
+
+fn dispose_form(form: PathForm) {
+    let mut pending = vec![form];
+    while let Some(form) = pending.pop() {
+        if let PathForm::Sequence(parts) = form {
+            pending.extend(parts);
+        }
+    }
+}
+
+#[test]
+fn shallow_forms_run_inline_and_deeper_forms_spawn_once() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            assert_eq!(INLINE_PATH_FORM_DEPTH, 256);
+            assert_eq!(PATH_FORM_STACK_BYTES, 128 * 1024 * 1024);
+            let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
+            PATH_WORKER_SPAWNS.with(|count| count.set(0));
+            for depth in [1, INLINE_PATH_FORM_DEPTH, INLINE_PATH_FORM_DEPTH + 1] {
+                for two_parts in [false, true] {
+                    let mut form = nested_form(1);
+                    for _ in 1..depth {
+                        form = if two_parts {
+                            PathForm::Sequence(vec![nested_form(1), form])
+                        } else {
+                            PathForm::Sequence(vec![form])
+                        };
+                    }
+                    let result = eval_bounded_path_disclosed(&edges, &form);
+                    dispose_form(form);
+                    assert_eq!(result.unwrap().rows.len(), 1);
+                    PATH_WORKER_SPAWNS.with(|count| {
+                        let expected = if depth > INLINE_PATH_FORM_DEPTH {
+                            1 + usize::from(two_parts)
+                        } else {
+                            0
+                        };
+                        assert_eq!(count.get(), expected);
+                    });
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn the_stack_choice_uses_the_deepest_branch() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
+    // The worklist is LIFO; both branch orders must select the larger stack.
+    for deep_first in [false, true] {
+        let deep = nested_form(INLINE_PATH_FORM_DEPTH);
+        let shallow = nested_form(1);
+        let parts = if deep_first {
+            vec![deep, shallow]
+        } else {
+            vec![shallow, deep]
+        };
+        let form = PathForm::Sequence(parts);
+        PATH_WORKER_SPAWNS.with(|count| count.set(0));
+        let result = eval_bounded_path_disclosed(&edges, &form);
+        dispose_form(form);
+        assert_eq!(result.unwrap().rows.len(), 1);
+        PATH_WORKER_SPAWNS.with(|count| assert_eq!(count.get(), 1));
+    }
+}
+
+#[test]
+fn path_worker_panics_resume_with_the_original_payload() {
+    let panic = std::panic::catch_unwind(|| {
+        with_path_stack::<()>(INLINE_PATH_FORM_DEPTH + 1, || {
+            std::panic::panic_any(731_u64);
+        })
+    })
+    .expect_err("a worker panic must reach the caller");
+    assert_eq!(*panic.downcast::<u64>().unwrap(), 731);
+}
+
+/// A form nested one level past [`MAX_PATH_FORM_DEPTH`] is refused; a form exactly
+/// AT the cap evaluates. The refusal comes from the ITERATIVE shape check, before
+/// `eval_sequence` recurses into anything — which is the whole point, since nesting
+/// depth is stack depth on the evaluator.
+///
+/// There is no "zero draws" half: the disclosed unroll is crypto-free, so there is
+/// no randomness source to draw from (see `crypto_free_no_mpc_round_artifacts`).
+#[test]
+fn the_form_depth_cap_refuses_just_over_and_runs_at_the_cap() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let edges = disclosed_edges(&[("ex:a ex:p ex:a .", &["http://ex/p"])]);
+            // Dismantle the fixture iteratively: recursive destruction belongs
+            // to the caller and is independent of the evaluation stack.
+            for depth in [MAX_PATH_FORM_DEPTH + 1, MAX_PATH_FORM_DEPTH + 16] {
+                let form = nested_form(depth);
+                let err = eval_bounded_path_disclosed(&edges, &form)
+                    .expect_err("one level past the depth cap must be refused");
+                dispose_form(form);
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_DEPTH")),
+                    "{:?}",
+                    err
+                );
+            }
+            PATH_WORKER_SPAWNS.with(|count| assert_eq!(count.get(), 0));
+
+            let flat = eval_bounded_path_disclosed(&edges, &nested_form(1)).unwrap();
+            // Exercise both single-part sequences and the right-nested p/(...)
+            // shape from a caller with the standard small thread stack.
+            for two_parts in [false, true] {
+                let mut form = PathForm::exact(nn("http://ex/p"), 1);
+                for _ in 1..MAX_PATH_FORM_DEPTH {
+                    form = if two_parts {
+                        PathForm::Sequence(vec![PathForm::exact(nn("http://ex/p"), 1), form])
+                    } else {
+                        PathForm::Sequence(vec![form])
+                    };
+                }
+                let got = eval_bounded_path_disclosed(&edges, &form);
+                dispose_form(form);
+                let got = got.expect("the deepest legal form evaluates");
+                assert_eq!(got.rows, flat.rows);
+                assert_eq!(got.rows.len(), 1);
+                PATH_WORKER_SPAWNS.with(|count| {
+                    assert_eq!(count.get(), 1 + usize::from(two_parts));
+                });
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// The static whole-form work budget bounds a LONG Sequence, which neither
+/// per-repetition shape cap nor the row budget catches: every part passes both
+/// shape caps, and over an edge set that yields no rows the row budget is never
+/// charged either.
+///
+/// Exercised exactly at and one unit past [`MAX_PATH_FORM_WORK`] on the real shape
+/// check, reaching the budget by handing the walk work already charged rather than
+/// by building a form of a quarter of a billion parts.
+#[test]
+fn the_form_work_budget_refuses_just_over_and_runs_at_the_cap() {
+    // A part that charges exactly `1 + chains*hops = 1 + 0*0 = 1`: `{0,0}` unrolls
+    // to no chain at all (the reflexive arm is not a chain), so each part's whole
+    // charge is the `+ 1` that makes a long sequence of free parts finite.
+    let unit = PathForm::Repetition(BoundedRepetition {
+        step: PathStep::predicate(nn("http://ex/p")),
+        min: 0,
+        max: 0,
+    });
+    assert_eq!(
+        check_form_shape(&unit).unwrap(),
+        1,
+        "a zero-length repetition part costs 1"
+    );
+
+    // A ten-part sequence: the root plus ten unit parts.
+    let seq = PathForm::Sequence((0..10).map(|_| unit.clone()).collect::<Vec<_>>());
+    let charge = check_form_shape(&seq).unwrap();
+    assert_eq!(charge, 11, "root + 10 parts");
+
+    // Exactly AT the budget: accepted.
+    assert_eq!(
+        check_form_shape_from(&seq, MAX_PATH_FORM_WORK - charge).unwrap(),
+        MAX_PATH_FORM_WORK
+    );
+    // One unit past it: refused, naming the budget.
+    let err = check_form_shape_from(&seq, MAX_PATH_FORM_WORK - charge + 1)
+        .expect_err("one unit past the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    // An overflowing charge refuses rather than wrapping under the budget.
+    assert!(check_form_shape_from(&seq, u64::MAX).is_err());
+
+    // Enough individually legal repetitions exceed the static ceiling even
+    // without any rows. Check the shape directly rather than enumerate them.
+    let heavy = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        19,
+    );
+    let heavy_charge = check_form_shape(&heavy).expect("a heavy-but-legal repetition");
+    let parts = (MAX_PATH_FORM_WORK / heavy_charge + 1) as usize;
+    let long = PathForm::Sequence((0..parts).map(|_| heavy.clone()).collect::<Vec<_>>());
+    let err =
+        check_form_shape(&long).expect_err("a long sequence must be refused on the work budget");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+
+    // A single near-ceiling repetition remains within the composition budget.
+    let admitted = check_form_shape(&heavy).expect("the heaviest legal part is admitted");
+    assert_eq!(admitted, 1 + ((1u64 << 20) - 2) * 19);
+    assert!(admitted <= MAX_PATH_FORM_WORK);
+    // One hop more is refused by the CHAIN cap, exactly as it was before this
+    // budget existed.
+    let past = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        20,
+    );
+    let err = check_form_shape(&past).expect_err("one hop more passes the chain cap");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_CHAINS")),
+        "{:?}",
+        err
+    );
+}
+
+/// A JOIN's output is charged from its closed form BEFORE the join is built.
+///
+/// The hub pattern is the case that matters: `N` edges into one node and `N` out
+/// of it join to `N²` rows from `2N` input rows, so charging the result after
+/// building it charges a number the budget was supposed to decide. With the budget
+/// already spent, `exact(p, 2)` over a hub must refuse having built NO join at
+/// all, which the thread-local join counter asserts — a memory figure could not.
+#[test]
+fn a_hub_join_is_charged_from_its_closed_form_before_it_is_built() {
+    const N: usize = 200;
+    // N edges into ex:hub and N out of it: one hop's join is N x N rows.
+    let mut doc = String::new();
+    for i in 0..N {
+        doc.push_str(&format!("ex:in{i} ex:p ex:hub . ex:hub ex:p ex:out{i} . "));
+    }
+    let edges = disclosed_edges_only(&[(doc.as_str(), &["http://ex/p"])]);
+    let form = PathForm::exact(nn("http://ex/p"), 2);
+
+    // The closed form says what the join will produce, from the inputs alone.
+    let s = Variable::new_unchecked(SUBJECT_VAR);
+    let o = Variable::new_unchecked(OBJECT_VAR);
+    let mid = Variable::new_unchecked(format!("{INTERMEDIATE_PREFIX}1"));
+    let left = edges.relation_for(&nn("http://ex/p"), &s, &mid);
+    let right = edges.relation_for(&nn("http://ex/p"), &mid, &o);
+    let projected = projected_join_rows(&left, &right, &mid).unwrap();
+    assert_eq!(
+        projected,
+        N * N,
+        "the hub key carries N in-edges against N out-edges; every other key \
+         matches on one side only"
+    );
+
+    // With the budget spent to one row short of that, the join is refused and
+    // nothing is built.
+    joins_built_reset();
+    let mut spent = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - projected + 1);
+    let err = eval_with_budget(&edges, &form, &mut spent)
+        .expect_err("the hub join must be refused on the closed form");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+    assert_eq!(
+        joins_built(),
+        0,
+        "the join must be refused BEFORE it is built"
+    );
+
+    // With room for it the same form runs and builds exactly its one hop's join.
+    joins_built_reset();
+    let mut room = PathFormBudget::new();
+    eval_with_budget(&edges, &form, &mut room).expect("a fresh budget has room for the hub");
+    assert_eq!(joins_built(), 1, "one hop, one join");
+    // The row charge is LIVE, so by the time the form has returned the join's own
+    // rows have been released — what proves they were charged is the cumulative
+    // work counter, and the PEAK the live budget reached.
+    assert!(
+        room.work() >= projected as u64,
+        "the join's rows are charged: {} vs {}",
+        room.work(),
+        projected
+    );
+    assert!(
+        room.peak() >= projected,
+        "the join's rows were held live while it ran: {} vs {}",
+        room.peak(),
+        projected
+    );
+    assert!(
+        room.charged() < projected,
+        "and released once the hop was projected down: {} still held of {}",
+        room.charged(),
+        projected
+    );
+}
+
+/// The closed form is exact on the shapes this module joins, and bounded above
+/// where a key is unbound.
+#[test]
+fn the_closed_form_join_size_matches_what_the_join_produces() {
+    let s = Variable::new_unchecked("a");
+    let m = Variable::new_unchecked("m");
+    let o = Variable::new_unchecked("b");
+    let rel = |vars: Vec<Variable>, rows: Vec<Vec<Option<Term>>>| PartialResult {
+        holder: HolderId::new("h"),
+        vars,
+        rows,
+    };
+    let t = |n: &str| Some(Term::from(nn(&format!("http://ex/{n}"))));
+
+    // Degrees 2 and 3 on one key, 1 and 0 on another: 2*3 + 1*0 = 6.
+    let left = rel(
+        vec![s.clone(), m.clone()],
+        vec![
+            vec![t("a1"), t("k1")],
+            vec![t("a2"), t("k1")],
+            vec![t("a3"), t("k2")],
+        ],
+    );
+    let right = rel(
+        vec![m.clone(), o.clone()],
+        vec![
+            vec![t("k1"), t("b1")],
+            vec![t("k1"), t("b2")],
+            vec![t("k1"), t("b3")],
+        ],
+    );
+    let predicted = projected_join_rows(&left, &right, &m).unwrap();
+    let plan = JoinPlan {
+        join_var: m.clone(),
+        key_disclosed: true,
+    };
+    let built = DisclosedKeyJoin::new()
+        .join_pair(&left, &right, &plan)
+        .unwrap();
+    assert_eq!(predicted, 6);
+    assert_eq!(predicted, built.rows.len(), "the closed form must be exact");
+
+    // An UNBOUND key is compatible with the whole other side, so it is counted
+    // against it — an upper bound, never an under-count.
+    let with_unbound = rel(
+        vec![m.clone(), o.clone()],
+        vec![vec![t("k1"), t("b1")], vec![None, t("b2")]],
+    );
+    let predicted = projected_join_rows(&left, &with_unbound, &m).unwrap();
+    let built = DisclosedKeyJoin::new()
+        .join_pair(&left, &with_unbound, &plan)
+        .unwrap();
+    assert!(
+        predicted >= built.rows.len(),
+        "{} must bound {}",
+        predicted,
+        built.rows.len()
+    );
+}
+
+/// The SEQUENCE join is charged the same way: a two-part sequence whose
+/// composition has more rows than the budget has left is refused before the join
+/// is built. (Removing the sequence's charge used to survive the whole suite.)
+#[test]
+fn the_sequence_join_is_charged_before_it_is_built() {
+    // ex:a -p-> ex:m -q-> {b1, b2, b3}: the composition has 3 rows.
+    let doc = "ex:a ex:p ex:m . ex:m ex:q ex:b1 . ex:m ex:q ex:b2 . ex:m ex:q ex:b3 .";
+    let edges = disclosed_edges_only(&[(doc, &["http://ex/p", "http://ex/q"])]);
+    let form = PathForm::Sequence(vec![
+        PathForm::exact(nn("http://ex/p"), 1),
+        PathForm::exact(nn("http://ex/q"), 1),
+    ]);
+
+    // What the two parts alone charge, and what the whole form charges.
+    let mut whole = PathFormBudget::new();
+    joins_built_reset();
+    let got = eval_with_budget(&edges, &form, &mut whole).expect("the form runs");
+    assert_eq!(got.rows.len(), 3);
+    assert_eq!(joins_built(), 1, "one sequence join");
+    // The PEAK is what the live row budget has to fit; the final `charged()` is
+    // only what the form still holds once its working set has been released.
+    let total = whole.peak();
+    assert!(total > 0, "the sequence must charge the budget it is given");
+
+    // One row short of what the form needs: refused, with no join built.
+    joins_built_reset();
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (total - 1));
+    let err = eval_with_budget(&edges, &form, &mut tight)
+        .expect_err("a sequence that would pass the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+    assert_eq!(
+        joins_built(),
+        0,
+        "the sequence join must be refused BEFORE it is built"
+    );
+
+    // And with exactly enough it runs and gives the same answer.
+    let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - total);
+    assert_eq!(
+        eval_with_budget(&edges, &form, &mut exact).unwrap().rows,
+        got.rows
+    );
+}
+
+/// Final endpoint projection transfers the accumulator's charge in both folds.
+/// A small hub and a precharged budget pin the live boundary without allocating
+/// a cap-sized result. Charging the final rows again refuses the admitted case.
+#[test]
+fn final_endpoint_projection_keeps_the_accumulators_charge() {
+    const N: usize = 8;
+    let mut doc = String::new();
+    for i in 0..N {
+        doc.push_str(&format!("ex:in{i} ex:p ex:hub . ex:hub ex:p ex:out{i} . "));
+    }
+    let edges = disclosed_edges_only(&[(&doc, &["http://ex/p"])]);
+    for (form, room) in [
+        (PathForm::exact(nn("http://ex/p"), 2), N * N),
+        (
+            PathForm::sequence([nn("http://ex/p"), nn("http://ex/p")]),
+            N * N + 4 * N,
+        ),
+    ] {
+        let mut under = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - room - 1);
+        let got = eval_with_budget(&edges, &form, &mut under)
+            .expect("the hub fits just under the live ceiling");
+        assert_eq!(got.rows.len(), N * N);
+        assert_eq!(under.peak(), MAX_PATH_FORM_ROWS - 1);
+        let mut at = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - room);
+        assert_eq!(
+            eval_with_budget(&edges, &form, &mut at).unwrap().rows,
+            got.rows
+        );
+        assert_eq!(at.peak(), MAX_PATH_FORM_ROWS);
+        let mut over = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - room + 1);
+        let err = eval_with_budget(&edges, &form, &mut over)
+            .expect_err("the hub would exceed the live ceiling by one row");
+        assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")));
+    }
+}
+
+/// The per-repetition caps keep their own refusals and their own ORDER inside the
+/// shape check: the hop cap before the chain projection, whose per-length loop
+/// grows with `max`. Checking the work budget first would have had to project a
+/// `max` of a million to charge for it.
+#[test]
+fn the_repetition_caps_still_decide_their_own_cases_in_order() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:b .", &["http://ex/p"])]);
+
+    // Over the hop cap: the hop cap's message, not the work budget's.
+    let form = PathForm::repeat_step(PathStep::predicate(nn("http://ex/p")), 1, 1_000_000);
+    let err = eval_bounded_path_disclosed(&edges, &form).unwrap_err();
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_HOPS")),
+        "{:?}",
+        err
+    );
+
+    // Over the chain cap but inside the hop cap: the chain cap's message.
+    let form = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        40,
+    );
+    let err = eval_bounded_path_disclosed(&edges, &form).unwrap_err();
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_CHAINS")),
+        "{:?}",
+        err
+    );
+}
+
+/// A `Sequence`'s declared part count is charged BEFORE its parts are pushed onto
+/// the shape walk's worklist.
+///
+/// Both orders end in the same refusal, so the order is only observable in how far
+/// the walk got: charging after pushing grows the worklist to hold every part of a
+/// form that was already over budget, which is the allocation the budget exists to
+/// decide. `worklist_peak` is the seam — the walk returns a work figure, not its
+/// own stack size.
+#[test]
+fn a_sequences_part_count_is_charged_before_its_parts_are_pushed() {
+    let unit = PathForm::Repetition(BoundedRepetition {
+        step: PathStep::predicate(nn("http://ex/p")),
+        min: 0,
+        max: 0,
+    });
+    // A sequence of many free parts. Each costs only its own `+ 1`, so the whole
+    // charge is the declared count plus the root.
+    let parts = 4096;
+    let seq = PathForm::Sequence((0..parts).map(|_| unit.clone()).collect::<Vec<_>>());
+
+    // Hand the walk a budget that the declared count alone exhausts.
+    worklist_peak_reset();
+    let err = check_form_shape_from(&seq, MAX_PATH_FORM_WORK - 1)
+        .expect_err("a part count past the budget must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    assert!(
+        worklist_peak() < parts,
+        "the parts of an over-budget Sequence must not reach the worklist: peak {} of {} \
+         part(s)",
+        worklist_peak(),
+        parts
+    );
+
+    // With room, the same form walks every part, so the assertion above is about
+    // the ORDER and not about the walk refusing to descend at all.
+    worklist_peak_reset();
+    check_form_shape(&seq).expect("the same form is legal with room");
+    assert_eq!(
+        worklist_peak(),
+        parts,
+        "a form inside the budget must have every part walked"
+    );
+}
+
+// =====================================================================
+// LIVE row charging vs the CUMULATIVE work budget
+// =====================================================================
+
+/// The row budget charges rows LIVE: a chain's working set is released when the
+/// chain is dropped, so a form whose chains charge far more rows IN TOTAL than
+/// [`MAX_PATH_FORM_ROWS`] still runs as long as its PEAK fits.
+///
+/// This is the property a cumulative row counter did not have. A repetition
+/// evaluates its chains one at a time — `ChainOdometer` yields one chain, the
+/// chain's hops are joined, projected and deduped, and everything but the
+/// endpoint rows the union keeps is dropped before the next chain starts — so
+/// summing every chain's charge against one row budget refused forms whose peak
+/// memory was a few thousand rows. The assertions are the two halves of that: the
+/// WORK the form did passes the row budget, and the PEAK it held does not.
+///
+/// Deleting the release (or the `retain` that moves a chain's kept rows into the
+/// retained total without leaving its working set charged) makes the run refuse,
+/// which is what makes this test not vacuous.
+#[test]
+fn the_row_budget_is_live_so_a_form_may_do_more_work_than_it_can_hold() {
+    // A 10-node double cycle: |E_p| = |E_q| = 10, and every pair is reachable, so
+    // an alternation's chains all produce rows rather than dying out.
+    let mut doc = String::new();
+    for i in 0..10usize {
+        doc.push_str(&format!(
+            "ex:v{} ex:p ex:v{} . ex:v{} ex:q ex:v{} . ",
+            i,
+            (i + 1) % 10,
+            i,
+            (i + 2) % 10
+        ));
+    }
+    let edges = disclosed_edges(&[(doc.as_str(), &["http://ex/p", "http://ex/q"])]);
+    let form = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        11,
+    );
+
+    let mut budget = PathFormBudget::new();
+    let got = eval_with_budget(&edges, &form, &mut budget).expect("the form must RUN");
+    assert_eq!(got.rows.len(), 100, "all 10x10 pairs are reachable");
+
+    // The work this form charges in TOTAL is orders of magnitude past what it ever
+    // holds at once, which is the whole point of releasing a chain's charge: a
+    // cumulative row counter would be deciding this form on its total.
+    assert!(
+        budget.work() > 100 * budget.peak() as u64,
+        "the fixture must charge far more rows in total than it ever holds: {} vs {}",
+        budget.work(),
+        budget.peak()
+    );
+    // And the peak fits the row budget.
+    assert!(
+        budget.peak() <= MAX_PATH_FORM_ROWS,
+        "the peak must fit the row budget: {} vs {}",
+        budget.peak(),
+        MAX_PATH_FORM_ROWS
+    );
+    // The cumulative work budget is what bounds the work instead, and this form is
+    // inside it.
+    assert!(budget.work() <= MAX_PATH_FORM_JOIN_WORK);
+
+    // And once the result has left the budget's scope, NOTHING stays charged.
+    // Retaining each chain's whole working set instead — rather than only the rows
+    // the union took from it — leaves the budget holding a charge per chain that
+    // the final release cannot cover, which is the cumulative behaviour in another
+    // guise; the count below is what detects it.
+    assert_eq!(
+        budget.charged(),
+        0,
+        "every charge this form made must be released once its result has left scope"
+    );
+}
+
+/// The CUMULATIVE work budget binds on the real unroll: the same form that runs on
+/// a fresh budget is refused when the work budget has already been spent, and runs
+/// again when just enough is left.
+///
+/// This is the half the live row budget cannot cover: releasing a chain's rows is
+/// what lets a million small chains run, so without this counter the only bound on
+/// the work would be the static one, which never sees the edge set.
+#[test]
+fn the_cumulative_work_budget_binds_on_a_real_form() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:d .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 3);
+
+    let mut measured = PathFormBudget::new();
+    let baseline = eval_with_budget(&edges, &form, &mut measured).unwrap();
+    let spend = measured.work();
+    assert!(spend > 0, "the unroll must charge work for what it does");
+
+    // One row-step short of what the form needs: refused, naming the work budget.
+    let mut tight = PathFormBudget::with_work(MAX_PATH_FORM_JOIN_WORK - (spend - 1));
+    let err = eval_with_budget(&edges, &form, &mut tight)
+        .expect_err("a form that would pass the work budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_JOIN_WORK")),
+        "{:?}",
+        err
+    );
+    // With exactly enough it runs, and the answer is unchanged.
+    let mut exact = PathFormBudget::with_work(MAX_PATH_FORM_JOIN_WORK - spend);
+    let got = eval_with_budget(&edges, &form, &mut exact).expect("exactly enough work runs");
+    assert_eq!(got.rows, baseline.rows);
+    // And an overflowing total refuses rather than wrapping under the budget.
+    let mut huge = PathFormBudget::with_work(u64::MAX);
+    let err = eval_with_budget(&edges, &form, &mut huge).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_JOIN_WORK")));
+}
+
+/// The shape walk's charge is MONOTONIC: a `Sequence` charges its declared part
+/// count and pushes its parts PREPAID, rather than charging the count and then
+/// giving it back after the push.
+///
+/// Giving it back let the worklist hold parts the budget had not paid for, since
+/// `work` dropped again the moment the parts were on it. Monotonicity is the
+/// observable difference: with the count still charged, the walk's running total
+/// never decreases, and the total a nested form ends on is the same whichever
+/// order the walk pops its parts in.
+#[test]
+fn the_shape_walk_never_gives_a_charge_back() {
+    // A nested form: a Sequence of Sequences, so the inner levels' part counts are
+    // charged while the outer level's parts are still on the worklist.
+    let leaf = PathForm::exact(nn("http://ex/p"), 1);
+    let inner = PathForm::Sequence(vec![leaf.clone(), leaf.clone(), leaf.clone()]);
+    let outer = PathForm::Sequence(vec![inner.clone(), inner.clone(), inner.clone()]);
+
+    // The total is the part count of every level plus each leaf's own chain work:
+    // 1 root + 3 inner + 9 leaves = 13 parts, and each leaf charges `1 x 1` chain
+    // step on top of its part.
+    let charged = check_form_shape(&outer).expect("a small nested form is legal");
+    assert_eq!(charged, 13 + 9);
+
+    // Charging the count and then giving it back would still END here, so the
+    // property to pin is that no prefix of the walk is cheaper than its budget
+    // says: starting one step below the budget must refuse.
+    let err = check_form_shape_from(&outer, MAX_PATH_FORM_WORK - charged + 1)
+        .expect_err("one step past the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    // And the worklist never holds more parts than the budget has paid for: with
+    // room for the root and the three inner parts but not their nine leaves, the
+    // walk refuses with the leaves never pushed.
+    worklist_peak_reset();
+    let err = check_form_shape_from(&outer, MAX_PATH_FORM_WORK - 5)
+        .expect_err("room for the root and its parts but not their leaves");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    assert!(
+        worklist_peak() <= 3,
+        "the walk must not push parts the budget has not paid for: peak {}",
+        worklist_peak()
+    );
+}
+
+/// A hop's own EDGE ROWS are not charged, and the hop does not copy them.
+///
+/// The fixture is a single-predicate `exact(p, 1)` over `N` edges, run on a budget
+/// with room for exactly `N` more rows. What that form materialises is ONE
+/// relation — the projection of the borrowed edge set onto the endpoint columns —
+/// so `N` rows of room is enough. Charging the hop's edge list as well would want
+/// `2N` and refuse, which is precisely the regression this removal fixes: a
+/// single-predicate path over a few hundred thousand edges is evaluated in about a
+/// second, and no budget that refuses it is bounding anything real.
+#[test]
+fn a_hops_edge_rows_are_neither_copied_nor_charged() {
+    const N: usize = 64;
+    let mut doc = String::new();
+    for i in 0..N {
+        doc.push_str(&format!("ex:n{i} ex:p ex:n{}. ", i + 1));
+    }
+    let edges = disclosed_edges_only(&[(doc.as_str(), &["http://ex/p"])]);
+    let form = PathForm::exact(nn("http://ex/p"), 1);
+
+    // Room for exactly the one relation the form materialises.
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - N);
+    let got = eval_with_budget(&edges, &form, &mut tight)
+        .expect("a single-predicate hop must not be charged for the edge set it borrows");
+    assert_eq!(got.rows.len(), N, "every edge is an endpoint pair");
+    // And the charge really is ONE relation's worth, not two.
+    assert_eq!(
+        tight.work(),
+        N as u64,
+        "only the projection may be charged, not the edge list as well"
+    );
+
+    // One row less of room and the projection itself is refused, so the budget is
+    // still deciding this form — it is deciding it on what the form materialises.
+    let mut too_tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - N + 1);
+    let err = eval_with_budget(&edges, &form, &mut too_tight)
+        .expect_err("the projection is charged and must be refused when it does not fit");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
     );
 }
