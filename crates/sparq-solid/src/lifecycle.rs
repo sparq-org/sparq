@@ -28,7 +28,7 @@
 //! which is what the whole-store rebuild after an update needs; the update path records no
 //! creator, so only a direct edit reaches the recording at all.
 
-use crate::budget::InputMeter;
+use crate::budget::AuthLedger;
 use crate::loader::{validate_principal_iri, ResourceGraphs, ACR_SUFFIX};
 use crate::{AccessProvenance, AuthBudget};
 use oxrdf::Term;
@@ -155,7 +155,7 @@ pub(crate) fn provenance_after(
         None,
         stored,
         installed_acrs,
-        &mut InputMeter::new(budget),
+        &mut AuthLedger::new(budget),
     )
 }
 
@@ -183,7 +183,7 @@ pub(crate) fn provenance_after_names(
         created,
         stored,
         installed_acrs,
-        &mut InputMeter::new(budget),
+        &mut AuthLedger::new(budget),
     )
 }
 
@@ -196,7 +196,7 @@ fn replay<'a>(
     created: Option<&[&str]>,
     stored_before: impl Fn(&str) -> bool,
     installed_acrs: &FxHashSet<String>,
-    meter: &mut InputMeter,
+    meter: &mut AuthLedger,
 ) -> Result<Option<AccessProvenance>, String> {
     // Each resource the change touches, with whether it was one before the change (the first
     // time the change touches it says which). Only the net effect counts: a resource that
@@ -297,8 +297,8 @@ mod tests {
     const ALICE: &str = "https://alice.ex/card#me";
 
     /// A fresh input meter over `budget`, for the enumeration helpers that charge one.
-    fn meter(budget: crate::AuthBudget) -> crate::budget::InputMeter {
-        crate::budget::InputMeter::new(budget)
+    fn meter(budget: crate::AuthBudget) -> crate::budget::AuthLedger {
+        crate::budget::AuthLedger::new(budget)
     }
 
     const BOB: &str = "https://bob.ex/card#me";
