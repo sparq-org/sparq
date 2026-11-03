@@ -224,6 +224,9 @@ impl Pending {
                 // truncated file in place could expose only an old frame-prefix after
                 // another crash, overwriting the already-checkpointed WAL state.
                 // Never sync the failed descriptor again.
+                #[cfg(windows)]
+                write_fresh_journal(path, &bytes)?;
+                #[cfg(not(windows))]
                 write_fresh(path, &bytes)?;
                 return Err(error);
             }
