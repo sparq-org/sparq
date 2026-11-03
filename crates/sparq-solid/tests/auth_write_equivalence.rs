@@ -2,9 +2,12 @@
 //! write is compared with committed snapshots captured from the pinned source revision.
 //! Both the complete stored quad sets (including views) and per-session decisions enter
 //! the snapshot; large sets use a length-framed digest, never a cardinality-only oracle.
-//! Source: `1c600eb34e5721950472915115533f56eb84041e`.
+//! Source: `5cfd3640a661d1bcaf994708f0d16a1e0c5adccc`.
 //! Regenerate with `python3 crates/sparq-solid/tests/regenerate_auth_writes.py OUTPUT_DIR`.
 //! Capture runs require AUTH_WRITE_GOLDEN_DIR and write outside the repository.
+//! In-crate `src/*_tests.rs` suites use private fault hooks and lifecycle state that an
+//! external observing store cannot intercept. They run in the unit-test suite; this
+//! corpus covers the shared public write methods and their resulting store/view state.
 
 extern crate self as sparq_solid;
 extern crate sparq_solid as implementation;
@@ -273,3 +276,6 @@ mod view_model_entry_points;
 mod wac;
 #[path = "write_through.rs"]
 mod write_through;
+
+#[path = "write_admission_parity.rs"]
+mod write_admission_parity;

@@ -14,11 +14,16 @@ import sys
 import tarfile
 import tempfile
 
-SOURCE = "1c600eb34e5721950472915115533f56eb84041e"
+SOURCE = "5cfd3640a661d1bcaf994708f0d16a1e0c5adccc"
 ROOT = Path(__file__).resolve().parents[3]
 
 
 def main():
+    merge_base = subprocess.check_output(
+        ["git", "merge-base", "HEAD", "origin/main"], cwd=ROOT, text=True
+    ).strip()
+    if merge_base != SOURCE:
+        raise RuntimeError("update SOURCE to the merge base before capturing fixtures")
     output = Path(sys.argv[1]).resolve()
     output.mkdir(parents=True, exist_ok=True)
     target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve()
@@ -32,7 +37,7 @@ def main():
             with tarfile.open(archive) as tree:
                 tree.extractall(source, filter="data")
             tests = source / "crates/sparq-solid/tests"
-            for name in ["auth_write_equivalence.rs", "fixtures/auth-write-ledger.json"]:
+            for name in ["auth_write_equivalence.rs", "write_admission_parity.rs", "fixtures/auth-write-ledger.json"]:
                 shutil.copy2(Path(__file__).parent / name, tests / name)
             # A shared target directory can otherwise consider the archived source older
             # than artifacts built from the working tree. Force the changed crate fresh.

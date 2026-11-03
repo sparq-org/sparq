@@ -2308,7 +2308,11 @@ impl PodStore {
                     let at = match added.iter().position(|(d, _)| *d == doc) {
                         Some(at) => at,
                         None => {
-                            admission.reserve(&mut added, 1, sparq_core::meter::Dim::Nodes)?;
+                            admission
+                                .reserve(&mut added, 1, sparq_core::meter::Dim::Nodes)
+                                .map_err(|e| {
+                                    format!("update denied: {}", loader::write_admission_refusal(e))
+                                })?;
                             added.push((doc, Vec::new()));
                             added.len() - 1
                         }
@@ -2316,7 +2320,11 @@ impl PodStore {
                     // Deletes first, then inserts, as the effect applies them.
                     let pending = &mut added[at].1;
                     pending.retain(|t| !deletes.contains(t));
-                    admission.reserve(pending, inserts.len(), sparq_core::meter::Dim::Nodes)?;
+                    admission
+                        .reserve(pending, inserts.len(), sparq_core::meter::Dim::Nodes)
+                        .map_err(|e| {
+                            format!("update denied: {}", loader::write_admission_refusal(e))
+                        })?;
                     pending.extend(inserts.iter());
                 }
                 sparq_engine::UpdateEffect::Clear(target) | sparq_engine::UpdateEffect::Drop(target) => {
@@ -2334,28 +2342,24 @@ impl PodStore {
                 _ => {}
             }
         }
-        if let Some((doc, _)) = added.iter().find(|(_, pending)| !pending.is_empty()) {
-            loader::admit_write_document(&mut admission, doc, sparql.len())
-                .map_err(|e| format!("update denied: {e}"))?;
-        }
         // Admit every changed document before resolving cross-document dependencies.
         // Empty additions are removals: they retain the existing unmetered replay rule.
         for (doc, pending) in &added {
             if !pending.is_empty() {
-                control_writes
-                    .admit(doc, &mut admission)
-                    .map_err(|e| format!("update denied: {e}"))?;
+                control_writes.admit(doc, &mut admission).map_err(|e| {
+                    format!("update denied: {}", loader::write_admission_refusal(e))
+                })?;
             }
         }
         for (doc, pending) in &added {
             control_writes
                 .check(doc, pending.iter().copied(), &mut admission)
-                .map_err(|e| format!("update denied: {e}"))?;
+                .map_err(|e| format!("update denied: {}", loader::write_admission_refusal(e)))?;
         }
         if added.iter().any(|(_, pending)| !pending.is_empty()) {
             admission
                 .checkpoint()
-                .map_err(|e| format!("update denied: {e}"))?;
+                .map_err(|e| format!("update denied: {}", loader::write_admission_refusal(e)))?;
         }
         // The ACP view is built from trusted provenance too: an update that ends or begins a
         // resource's life stages the provenance that follows, and rebuilds the view with it

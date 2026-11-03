@@ -361,8 +361,8 @@ Materialize the authorization view from the access-control documents, then enfor
   primitive. Replaces (or removes) the `.acl`/`.acr` GRAPH and re-materializes
   `<urn:sparq:auth>` as ONE **atomic, fail-closed** unit, so SPARQ stays the source of
   truth (the auth view is always a pure function of the present `.acl` graphs — no stale
-  grant survives a rule change). Write admission checks the document byte cap before
-  parsing, then meters parsed triples and ACP dependencies before touching the stored slot
+  grant survives a rule change). Write admission parses the document, then meters stored
+  terms, parsed triples and ACP dependencies before touching the stored slot
   (see [Write admission](#write-admission)). Malformed content or a statement the document
   may not make also returns `Err` without mutation; a re-materialization
   failure ROLLS BACK to the prior content + prior auth view (all-or-nothing). A non-`.acl`/`.acr` target IRI is
@@ -960,11 +960,12 @@ authorization is disabled and every request is denied until a rebuild succeeds.
 `put_acl` and `put_acl_acp` create one admission `AuthLedger` from the store's
 `AuthBudget`. Admission charges, in order:
 
-1. Serialized document bytes against `max_document_bytes`, before parsing.
-2. Each parsed row against `max_input_facts`, then each stored term against
-   `max_input_term_bytes`, `max_document_bytes` and aggregate `max_input_bytes`,
-   before dictionary reconstruction. The parsed document starts a fresh document-byte
-   counter: serialized bytes and stored-term bytes each face the per-document cap.
+1. Apply the stored-row byte lower bound used by materialization, then check each stored term against `max_input_term_bytes`, then the per-document stored-term
+   total against `max_document_bytes` and the aggregate against `max_input_bytes`,
+   before dictionary reconstruction. An impossible row total reports `InputBytes`
+   before individual terms are inspected. Serialized comments and unrelated update data
+   do not consume these allowances; the transport layer bounds request text.
+2. Each parsed row against `max_input_facts`, after its stored terms have been checked.
 3. ACP dependency validation, when a new statement references another ACR. The check
    borrows stored graphs, charges their document names before retaining descriptors,
    and charges each row and stored term before reconstructing one triple at a time.
@@ -976,19 +977,21 @@ authorization is disabled and every request is denied until a rebuild succeeds.
 
 All admission completes before the named slot is removed or replaced. A refusal keeps
 stored dictionaries, triples, slot order, ACR lifecycle tracking and the installed view
-unchanged. Serialized or aggregate byte-cap refusals are `AuthAllowance::InputBytes`;
+unchanged. Document-total or aggregate byte-cap refusals are `AuthAllowance::InputBytes`;
 row-cap refusals are `InputFacts`; per-term byte and nesting refusals are
 `InputTermBytes`. Admission keeps the configured deadline and reports `Deadline` when
 it expires. Dependency-admission refusals retain the allowance kind and omit other
-ACRs' names, terms and sizes. These caps also apply to otherwise valid documents, including documents
-with large comments or repeated serialized triples, documents whose rows are rejected
-by validation, dependency sets whose combined source exceeds the input allowance, and
-empty ACR sets whose document names alone exhaust the aggregate byte allowance.
+ACRs' names, terms and sizes. Admission refusals state that the write was refused and
+the previous authorization view remains in force. These caps also apply to documents
+whose rows are rejected by validation, dependency sets whose combined stored source
+exceeds the input allowance, and empty ACR sets whose document names alone exhaust the aggregate byte allowance.
 
 Session-checked SPARQL control writes use the same admission ledger on the candidate
-fork. When surviving additions remain, the update text faces `max_document_bytes`,
-then the affected candidate documents are charged before the added statements and ACP
-dependencies are checked. All public update entry points share this path. Their
+fork. When surviving additions remain, only affected candidate documents read by the
+active model are charged before the added statements and ACP dependencies are checked.
+Both put and update admission skip an inactive `.acr` graph under WAC and an inactive
+`.acl` graph under ACP. Update text, comments and ordinary data graphs are not charged
+as access-control documents. All public update entry points share this path. Their
 candidate admission and candidate materialization keep their deadlines; a refusal
 discards the fork before commit. Removal-only updates do not charge admission input.
 
