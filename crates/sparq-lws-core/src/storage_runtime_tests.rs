@@ -918,6 +918,52 @@ mod embedded {
     }
 }
 
+#[cfg(feature = "crypt")]
+#[path = "storage_crypt_tests.rs"]
+mod crypt;
+
+#[test]
+fn crypt_provider_selection_refuses_unknown_and_unbuilt_providers() {
+    for provider in ["aws-kms", "azure-kv"] {
+        let error = config(&[(ENV_CRYPT_PROVIDER, provider)]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error.to_string().contains(provider));
+        assert!(error.to_string().contains("not built"));
+    }
+    for provider in ["", "unknown"] {
+        assert_eq!(
+            config(&[(ENV_CRYPT_PROVIDER, provider)])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+    assert!(config(&[(ENV_CRYPT_PROVIDER, "none")]).is_ok());
+    #[cfg(not(feature = "crypt"))]
+    {
+        let error = config(&[(ENV_CRYPT_PROVIDER, "local")]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("not built"));
+        assert!(error.to_string().contains("crypt"));
+    }
+}
+
+#[test]
+fn invalid_unicode_provider_never_selects_the_plaintext_default() {
+    let error = StorageConfig::read_environment(|key| {
+        if key == ENV_CRYPT_PROVIDER {
+            Err(std::env::VarError::NotUnicode(std::ffi::OsString::from(
+                "invalid provider bytes",
+            )))
+        } else {
+            Err(std::env::VarError::NotPresent)
+        }
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains(ENV_CRYPT_PROVIDER));
+    assert!(error.to_string().contains("Unicode"));
+}
+
 #[cfg(not(feature = "blob-object"))]
 #[test]
 fn object_url_without_feature_is_a_startup_error() {
@@ -1002,6 +1048,102 @@ mod object_boot {
     #[tokio::test]
     async fn file_object_lws_put_get_survives_restart() {
         embedded::restart_round_trip(true, true).await;
+    }
+
+    #[cfg(feature = "crypt")]
+    #[tokio::test]
+    async fn encrypted_object_reopen_preserves_backend_and_url() {
+        use sparq_lws_core::store::{CompositeStore, Store};
+        use std::io::Write;
+        use std::sync::Arc;
+
+        let data = Directory::new();
+        let objects = Directory::new();
+        let key = data.0.join("kek");
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(&key).unwrap().write_all(&[0x29; 32]).unwrap();
+        let url = url::Url::from_directory_path(&objects.0).unwrap();
+        let cfg = config(&[
+            (ENV_DATA_DIR, data.0.to_str().unwrap()),
+            (ENV_BLOB_URL, url.as_str()),
+            (ENV_CRYPT_PROVIDER, "local"),
+            (ENV_CRYPT_KEK, key.to_str().unwrap()),
+        ])
+        .unwrap();
+        let iri = "https://pod.example/alice/body";
+        for reopen in [false, true] {
+            let (index, raw) = cfg.open_embedded().await.unwrap();
+            let encrypted = cfg.encrypt(Arc::new(index.clone()), raw).await.unwrap();
+            let store = CompositeStore::new(index.clone(), encrypted);
+            if !reopen {
+                store
+                    .write(
+                        iri,
+                        bytes::Bytes::from_static(b"private bytes"),
+                        "text/plain",
+                    )
+                    .await
+                    .unwrap();
+            }
+            let resource = store.read(iri).await.unwrap();
+            assert_eq!(resource.body, b"private bytes"[..]);
+            assert!(resource.meta.blob_key.starts_with("e1-"));
+            let object = fs::read(objects.0.join(&resource.meta.blob_key)).unwrap();
+            assert!(object.starts_with(b"SQLB"));
+            assert_ne!(object, b"private bytes");
+            let marker: serde_json::Value =
+                serde_json::from_slice(&fs::read(data.0.join("format.json")).unwrap()).unwrap();
+            assert_eq!(marker["blobs"]["major"], 2);
+            assert_eq!(marker["blobs"]["encryption"], "envelope-v1");
+            assert_eq!(marker["blobs"]["backend"], "object");
+            assert_eq!(marker["blobs"]["url"], url.as_str());
+            index.compact().await.unwrap();
+        }
+        // The decorator must preserve streaming beyond the adapter's snapshot limit.
+        for i in 0..4097 {
+            fs::write(objects.0.join(format!("b1-{i:032x}")), b"legacy body").unwrap();
+        }
+        let (index, raw) = cfg.open_embedded().await.unwrap();
+        let encrypted = cfg.encrypt(Arc::new(index.clone()), raw).await.unwrap();
+        assert!(encrypted.list().await.is_err());
+        let entries: Vec<_> = encrypted
+            .list_stream()
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 4098);
+        drop((encrypted, index));
+        let marker = fs::read(data.0.join("format.json")).unwrap();
+        let mut changed = config(&[
+            (ENV_DATA_DIR, data.0.to_str().unwrap()),
+            (ENV_CRYPT_PROVIDER, "local"),
+            (ENV_CRYPT_KEK, key.to_str().unwrap()),
+        ])
+        .unwrap();
+        assert!(changed
+            .open_embedded()
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("backend mismatch"));
+        changed.blob_url = Some("file:///different-location/".into());
+        assert!(changed
+            .open_embedded()
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("URL mismatch"));
+        assert_eq!(fs::read(data.0.join("format.json")).unwrap(), marker);
     }
 
     #[tokio::test]
@@ -1146,13 +1288,13 @@ fn format_publication_preserves_a_concurrent_winners_backend() {
     let existing = br#"{"schema":1,"index":{"major":1},"blobs":{"major":1}}"#;
     fs::write(&marker, existing).unwrap();
     fs::write(&tmp, br#"{"schema":1,"index":{"major":1},"blobs":{"major":1,"backend":"object","url":"file:///other"}}"#).unwrap();
-    assert!(publish_format(&tmp, &marker, Some("file:///other")).is_err());
+    assert!(publish_format(&tmp, &marker, false, Some("file:///other")).is_err());
     assert_eq!(fs::read(&marker).unwrap(), existing);
     fs::write(&tmp, existing).unwrap();
-    publish_format(&tmp, &marker, None).unwrap();
+    publish_format(&tmp, &marker, false, None).unwrap();
     assert_eq!(fs::read(&marker).unwrap(), existing);
     fs::remove_file(&marker).unwrap();
-    publish_format(&tmp, &marker, None).unwrap();
+    publish_format(&tmp, &marker, false, None).unwrap();
     assert_eq!(fs::read(&marker).unwrap(), existing);
 }
 
@@ -1160,9 +1302,9 @@ fn format_publication_preserves_a_concurrent_winners_backend() {
 #[test]
 fn format_backend_identity_is_checked_independently_of_url() {
     let marker = br#"{"schema":1,"index":{"major":1},"blobs":{"major":1,"backend":"unknown"}}"#;
-    assert!(validate_format(marker, None).is_err());
+    assert!(validate_format(marker, false, None).is_err());
     let marker = br#"{"schema":1,"index":{"major":1},"blobs":{"major":1,"backend":"object","url":"s3://private/location"}}"#;
-    let failure = validate_format(marker, Some("s3://other/location")).unwrap_err();
+    let failure = validate_format(marker, false, Some("s3://other/location")).unwrap_err();
     assert!(failure.to_string().contains("blob URL mismatch"));
     assert!(!failure.to_string().contains("private"));
 }

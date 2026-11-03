@@ -128,12 +128,17 @@ fn incompatible_majors(data: &Path, mode: Mode) {
     let format: Value = serde_json::from_slice(&original).unwrap();
     for plane in ["index", "blobs"] {
         let mut altered = format.clone();
-        altered[plane]["major"] = json!(2);
+        let encrypted = format["blobs"]["major"] == 2;
+        altered[plane]["major"] = json!(if plane == "blobs" && encrypted { 3 } else { 2 });
         std::fs::write(&marker, serde_json::to_vec(&altered).unwrap()).unwrap();
         refuses(
             data,
             mode,
-            "unsupported format.json: expected schema=1, index.major=1, blobs.major=1",
+            if plane == "blobs" && encrypted {
+                "unsupported format.json blob format: expected major=1 or major=2 with encryption=envelope-v1"
+            } else {
+                "unsupported format.json: expected schema=1, index.major=1, blobs.major=1"
+            },
         );
     }
     std::fs::write(marker, original).unwrap();
@@ -142,7 +147,7 @@ fn incompatible_majors(data: &Path, mode: Mode) {
 // Reuse the harness with the public origin and external signing configuration, without
 // provisioning or opening the restored store. Only the transport listener changes.
 fn restored_fixture(original: &Fixture, directory: Directory) -> Fixture {
-    for name in ["as-key.json", "notify-key.json"] {
+    for name in ["as-key.json", "notify-key.json", "crypt-kek"] {
         let source = original.directory.0.join(name);
         if source.is_file() {
             std::fs::copy(source, directory.0.join(name)).unwrap();
@@ -349,9 +354,38 @@ async fn verify(corpus: &Corpus, f: &Fixture) {
     }
 }
 
+async fn backup_boot(f: &Fixture, encrypted: bool) -> Process {
+    if encrypted {
+        let key = f.directory.0.join("crypt-kek");
+        f.boot_with(&[
+            ("SOLID_SERVER_CRYPT_PROVIDER", "local"),
+            ("SOLID_SERVER_CRYPT_LOCAL_KEK_FILE", key.to_str().unwrap()),
+        ])
+        .await
+    } else {
+        f.boot().await
+    }
+}
+
 async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
+    configured_backup_and_restore(mode, false).await
+}
+
+async fn configured_backup_and_restore(mode: Mode, encrypted: bool) -> (Fixture, Fixture) {
     let original = Fixture::new(mode).await;
-    let server = original.boot().await;
+    if encrypted {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(original.directory.0.join("crypt-kek"))
+            .unwrap()
+            .write_all(&[0x37; 32])
+            .unwrap();
+    }
+    let server = backup_boot(&original, encrypted).await;
     let corpus = Corpus::write(&original).await;
     assert_corpus(&corpus, &original);
     verify(&corpus, &original).await;
@@ -379,7 +413,7 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
 
     // Start the original first so its listener is occupied when choosing the copy's port.
     // Configuration and signing keys live outside the data archive in this harness.
-    let original_server = original.boot().await;
+    let original_server = backup_boot(&original, encrypted).await;
     let restored = restored_fixture(&original, destination);
     assert_ne!(restored.data(), original.data());
     assert_ne!(restored.endpoint, original.endpoint);
@@ -391,7 +425,7 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
         restored.base, original.base,
         "stored IRIs retain their origin"
     );
-    let restored_server = restored.boot().await;
+    let restored_server = backup_boot(&restored, encrypted).await;
     assert_ne!(original_server.id(), restored_server.id());
     assert_index_locked(&original);
     assert_index_locked(&restored);
@@ -437,6 +471,42 @@ async fn offline_backup_and_restore(mode: Mode) -> (Fixture, Fixture) {
     verify(&corpus, &original).await;
     original_server.stop();
     incompatible_majors(&restored.data(), mode);
+    if encrypted {
+        let marker: Value =
+            serde_json::from_slice(&std::fs::read(restored.data().join("format.json")).unwrap())
+                .unwrap();
+        assert_eq!(marker["blobs"]["major"], 2);
+        assert_eq!(marker["blobs"]["encryption"], "envelope-v1");
+        assert!(
+            !restored.data().join("crypt-kek").exists(),
+            "KEK must be restored separately"
+        );
+        refuses(&restored.data(), mode,
+            "format.json blobs.major=2 requires encryption; SOLID_SERVER_CRYPT_PROVIDER=none cannot open this directory");
+        let blob = sparq_lws_core::store::blob_fs::FsBlobStore::open(restored.data().join("blobs"))
+            .unwrap();
+        let entries = blob.list().unwrap();
+        assert!(entries.foreign.is_empty());
+        assert!(entries
+            .blobs
+            .iter()
+            .any(|entry| entry.key.starts_with("e1-")));
+        if mode == Mode::Lws {
+            assert!(entries
+                .blobs
+                .iter()
+                .any(|entry| entry.key.starts_with("$pool$e1-")));
+        }
+        for entry in entries.blobs {
+            if entry.key.trim_start_matches("$pool$").starts_with("e1-") {
+                assert!(
+                    blob.get(&entry.key).unwrap().starts_with(b"SQLB"),
+                    "envelope missing for {}",
+                    entry.key
+                );
+            }
+        }
+    }
     (original, restored)
 }
 
@@ -557,4 +627,26 @@ fn archive_layout_locks_and_restored_format_guards_solid() {
 #[test]
 fn archive_layout_locks_and_restored_format_guards_lws() {
     archive_layout_locks_and_restored_format_guards(Mode::Lws);
+}
+
+#[cfg(feature = "crypt")]
+#[tokio::test]
+async fn encrypted_offline_backup_and_restore_solid() {
+    tokio::time::timeout(
+        TEST_DEADLINE,
+        configured_backup_and_restore(Mode::Solid, true),
+    )
+    .await
+    .expect("encrypted Solid backup/restore exceeded deadline");
+}
+
+#[cfg(feature = "crypt")]
+#[tokio::test]
+async fn encrypted_offline_backup_and_restore_lws() {
+    tokio::time::timeout(
+        TEST_DEADLINE,
+        configured_backup_and_restore(Mode::Lws, true),
+    )
+    .await
+    .expect("encrypted LWS backup/restore exceeded deadline");
 }

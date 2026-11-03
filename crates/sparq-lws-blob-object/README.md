@@ -45,7 +45,7 @@ rejects unknown options. Provider credential discovery can consult local files,
 environment variables and instance metadata; supply explicit credentials to avoid
 ambient discovery. Errors and Debug output omit backend details.
 
-Keys match `($pool$)?b1-[0-9a-f]{32}`. Normal objects live under `<prefix>/b1-…`;
+Keys match `($pool$)?(b1|e1)-[0-9a-f]{32}`. Normal objects live under `<prefix>/b1-…`;
 pooled objects under `<prefix>/pool/b1-…`. Writes use atomic create mode. Callers
 must mint a fresh key for every write, including after deletion. Delete is
 unconditional and idempotent. Listings stream backend pages, preserve modification
