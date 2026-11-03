@@ -212,6 +212,8 @@ contract suite exposed by `test-support`. The same create-only contract runs ove
 `InMemoryBlobStore::with_immutable_keys()` (under `test-support`), the object
 adapter, and `FsBlobStore` (in the `blob-fs` tests). Legacy in-memory constructors
 keep their replacement semantics.
+The offline directory-copy backup and restore procedure covers only the
+filesystem blob backend.
 
 The dependency-free `sparq-lws-blob-key` crate shares `POOL_MARK`, `PREFIX`,
 `parse(&str) -> Option<(&str, bool)>` (bare key and pool flag), and
@@ -258,9 +260,24 @@ semantics. Keep **one replica**; this is a single-instance index and blob store.
 ### Backup and restore
 
 An offline copy of the whole data directory covers the embedded index and the
-filesystem blob backend. Stop the server before copying or restoring it, and
-retain `format.json` with both planes. See the
-[backup and restore procedure](references/native-storage.md#backup-and-restore).
+filesystem blob backend in both Solid and LWS modes. Stop the server with SIGTERM
+and wait for exit status zero: shutdown has drained requests and completed
+compaction. Then archive the **whole** data directory, including `format.json`,
+`index/`, `blobs/` and the advisory lock files (harmless to copy).
+
+Restore by unpacking into an **empty** directory and starting the server with
+`SOLID_SERVER_DATA_DIR` pointing at it. Retain the public base URL and external
+configuration/signing keys. Online or hot backup is unsupported; copying a
+running data directory is unsafe. A backup is only as consistent as the stop
+that preceded it.
+
+Archive the whole directory rather than picking files: a crash can leave
+unreferenced blob files until the reconciler runs, and they belong in the copy.
+
+In a container or Kubernetes, stop the container or scale the workload to zero,
+wait for clean exit and volume detachment, then snapshot the detached volume.
+See the [offline backup and restore procedure](references/native-storage.md#backup-and-restore)
+for commands, refusal cases, deployment references and recovery limits.
 
 With `SOLID_SERVER_BLOB_URL`, the backend record points to a separately configured
 object namespace. A data-directory copy does not guarantee a complete backup,

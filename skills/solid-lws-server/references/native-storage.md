@@ -12,7 +12,8 @@ The default native build opens `FsBlobStore` at `<data>/blobs`. `embedded-sparq`
 A missing feature refuses boot with a message naming it.
 The default-off `blob-object` feature lets `SOLID_SERVER_BLOB_URL` replace only
 the byte plane; its URL and provider options are described in
-[object storage](blob-object.md). Without a data
+[object storage](blob-object.md). The offline directory-copy backup and restore
+procedure covers only the filesystem blob backend. Without a data
 directory, the native binary uses in-memory blobs.
 
 The boot contract checks `<data>/format.json` before opening either plane:
@@ -92,23 +93,107 @@ Dropping the final client joins its actor and explicitly releases its index lock
 
 ## Backup and restore
 
-For the filesystem blob backend, stop the server and wait for shutdown to
-finish before copying the whole data directory to an independent location.
-Keep `format.json`, `index/` and `blobs/` together, including journal and recovery
-files. An index-only snapshot does not include resource bytes. Preserve the
-server configuration separately; credentials are not stored in `format.json`.
+This procedure uses the durable `SOLID_SERVER_DATA_DIR` contract with the default
+native build and filesystem blob backend described above. It applies to both Solid
+and LWS protocol modes. It does not back up ephemeral in-memory storage or a
+remote SPARQ service. An index-only snapshot does not include resource bytes.
 
-Restore with the server stopped, into a fresh data directory on a filesystem
-that supports the documented locking, hard-link and sync requirements. Restore
-the complete directory together, retain its marker, and give the server access
-to its files before starting with `SOLID_SERVER_DATA_DIR` pointing at that root.
-Do not combine an index from one backup with blobs from another.
-
-This directory-copy procedure covers only the filesystem blob backend. When
-`SOLID_SERVER_BLOB_URL` selects object storage, including `file://`, the bytes
+When `SOLID_SERVER_BLOB_URL` selects object storage, including `file://`, the bytes
 live in the separately configured object namespace. Stop the server
 and coordinate the index backup with a separate backup of that entire namespace;
 preserve object keys, including the pool layout. Restore both to the same stopped
 state before restarting. `format.json` must still record the same backend and
 exact URL, while provider options and credentials may rotate. A changed backend
 or URL requires migration; editing or removing the marker does not migrate bytes.
+
+### Make an offline backup
+
+1. Send SIGTERM to the server and **wait for the process to exit successfully**.
+   Exit status zero means requests have drained, the reconciler has stopped and
+   shutdown compaction has completed. Sending the signal alone is insufficient.
+   Run `wait` in the shell that owns the server process, or use the service
+   manager's stop-and-wait operation and inspect the exit status.
+2. With the server stopped, archive the **whole data directory**, including
+   `format.json`, `index/` and `blobs/`. Include all blob subdirectories and any
+   remaining journal/recovery files. The lock files are advisory and harmless to
+   copy: a copied file does not carry the original process's OS lock.
+
+For example, in the shell that launched the server in the background (and saved
+its PID in `server_pid`):
+
+```sh
+set -eu
+kill -TERM "$server_pid"
+if ! wait "$server_pid"; then
+  echo 'Server did not stop cleanly; do not treat this as a clean backup' >&2
+  exit 1
+fi
+data_dir=/srv/solid/data
+archive=/srv/backups/solid-data.tar
+tar -cpf "$archive" -C "$data_dir" .
+```
+
+Keep the archive outside the data directory, check `tar`'s exit status, and keep
+the source stopped until archiving finishes. Back up deployment configuration
+and external secrets separately, including any AS and notification signing-key
+files configured outside the data directory. The directory archive contains
+only files under that directory. Protect both the archive and the key backups
+as private data.
+Credentials are not stored in `format.json`.
+
+### Restore an offline backup
+
+1. Unpack a trusted archive into a new, **empty** directory. Do not overlay an
+   existing store or unrelated files. Use a filesystem that supports the
+   documented locking, hard-link and sync requirements. `mktemp -d` creates an
+   empty destination:
+
+   ```sh
+   set -eu
+   archive=/srv/backups/solid-data.tar
+   restored_dir=$(mktemp -d /srv/solid/restored.XXXXXXXX)
+   tar -xpf "$archive" -C "$restored_dir"
+   ```
+
+2. Check extraction succeeded and the root contains `format.json`, `index/`
+   and `blobs/`. Restore external configuration and signing keys, use a
+   compatible server build, and retain `SOLID_SERVER_BASE_URL`: stored resource
+   and grant IRIs are not rewritten to a new origin. Ensure the server's OS
+   user can read and write the restored directory.
+   Do not combine an index from one backup with blobs from another.
+3. Start with `SOLID_SERVER_DATA_DIR` pointing at that directory. For example,
+   with the other settings restored in the environment:
+
+   ```sh
+   SOLID_SERVER_DATA_DIR="$restored_dir" /usr/local/bin/sparq-lws-core
+   ```
+
+Boot refuses populated `index/` or `blobs/` directories without `format.json`
+as foreign data, and refuses an unsupported marker schema or index/blob major.
+Do not remove or edit the marker to bypass a refusal. These are boot guards;
+they cannot stop `tar` overwriting files in a non-empty destination, so always
+extract into an empty directory. A copy in its own directory has independent
+locks and can boot while the original runs, using a separate listener. Preserve
+the public origin when checking it through that listener.
+
+### Consistency limits and volume snapshots
+
+Online or hot backup is unsupported. Copying or snapshotting a running data
+directory is unsafe: the index and blob planes can come from different writes.
+A backup is only as consistent as the stop that preceded it. A SIGKILL, forced
+container termination, failed compaction or non-zero exit is not a clean stop;
+retain the original files for recovery rather than labelling their copy clean.
+
+A crash can leave unreferenced blob files until the reconciler runs. The
+offline archive preserves them with the rest of the directory; do not omit
+blobs from the backup or delete files by guessing which keys are live.
+
+For a container, stop it and wait for clean exit before detaching the data
+volume. On Kubernetes, scale the workload to zero, wait for its pod to finish
+cleanly and for the volume to detach, then snapshot the detached volume. Ensure
+the orchestrator allows shutdown to finish rather than escalating to SIGKILL.
+Snapshot the volume holding the **whole** data directory, not just one plane.
+Restore its snapshot into a fresh volume before starting the workload.
+See the [native container configuration](../../../crates/sparq-lws-core/README.md)
+and [Helm persistence settings](../../helm-deploy/SKILL.md#use-persistence-and-private-images)
+for the deployment configuration to restore alongside the volume.
