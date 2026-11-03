@@ -1210,6 +1210,10 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
 /// or when the query document has no forward rule
 /// (a fact-only or backward-only query document has nothing to project — fail loudly rather
 /// than return an empty answer that reads like "the query matched nothing").
+///
+/// A premise's own `@forAll` uses the forward firing's independence check and
+/// stored-predicate placement limits. Backward rules in either document keep such
+/// a premise unsupported, with the same quantified-antecedent error.
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, String> {
     query_terms_in(data, query, Truncation::top_level())
 }
@@ -1219,9 +1223,11 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let data_parsed = bounded::parse_n3(data, "", &cuts)?;
     let query_parsed = bounded::parse_n3(query, "", &cuts)?;
     validate_rule_quantifiers(&query_parsed)?;
-    // A query premise is matched below with no independence check, and over a closure
-    // proved with backward rules: its own universals stay refused (GH #6882).
-    if query_parsed.rules.iter().any(|r| premise_universals(&r.premise).is_some()) {
+    // The query validator covers its own backward rules. Data backward rules also
+    // make a store universal unsafe in a goal, just as in a forward document (GH #6882).
+    if !data_parsed.backward_rules.is_empty()
+        && query_parsed.rules.iter().any(|r| premise_universals(&r.premise).is_some())
+    {
         return Err(QUANTIFIED_ANTECEDENT.into());
     }
     if query_parsed.rules.is_empty() {
@@ -1292,6 +1298,16 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
         let Some(root) = bw.root_path(ri) else { break };
         let bindings = match_premise(&premise, &facts, &bw, root);
+        // The data closure is this top-level run's store. Nested closures use their
+        // own universal namespace through the same firing check in the forward loop.
+        let universals = premise_universals(&premise);
+        let bindings: Vec<Binding> = match universals.as_deref() {
+            None => bindings,
+            Some(us) => bindings
+                .into_iter()
+                .filter(|b| independent_firing(b, us, serialize::UNIVERSAL_VAR))
+                .collect(),
+        };
         let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
             for c in &rule.conclusion {
                 let c = match sk {
