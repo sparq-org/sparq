@@ -245,7 +245,7 @@ fn every_embedded_update_uses_the_commit_helper() {
         .collect();
     assert_eq!(calls.len(), 2, "only the commit helper may execute updates");
     assert!(calls[0].contains("sparq_engine::update_in_place_atomic("));
-    assert!(calls[1].contains("sparq_engine::update_in_place_capturing("));
+    assert!(calls[1].contains("sparq_engine::update_in_place_algebra_capturing("));
     let helper = source
         .split("fn commit(")
         .nth(1)
@@ -1098,6 +1098,267 @@ fn final_client_drop_finishes_and_releases_the_directory() {
     dropping.join().unwrap();
     let reopened = dir.open();
     drop(reopened);
+}
+
+fn dataset_terms(graph: &Graph) -> Vec<(Option<oxrdf::Term>, Vec<[oxrdf::Term; 3]>)> {
+    fn triples(graph: &Graph) -> Vec<[oxrdf::Term; 3]> {
+        let mut rows: Vec<_> = graph
+            .iter_ids()
+            .map(|row| row.map(|id| graph.dict().term(id)))
+            .collect();
+        rows.sort_by_cached_key(|row| format!("{row:?}"));
+        rows
+    }
+    let mut rows = vec![(None, triples(graph))];
+    rows.extend(
+        graph
+            .named()
+            .iter()
+            .map(|(name, graph)| (Some(name.clone()), triples(graph))),
+    );
+    rows.sort_by_cached_key(|(name, _)| format!("{name:?}"));
+    rows
+}
+
+#[test]
+fn lws_builder_effects_match_full_forks() {
+    let parent = sparql::update_put_meta(PARENT, "text/turtle", "parent", "parent", None).unwrap();
+    let child = sparql::update_put_meta(CHILD, "text/plain", "child", "child", None).unwrap();
+    let body = sparql::insert_body_data(
+        CHILD,
+        &[(
+            "urn:s".into(),
+            "urn:p".into(),
+            sparql::BodyObject::Iri("urn:o".into()),
+        )],
+    )
+    .unwrap();
+    let corpus = [
+        parent.clone(),
+        child.clone(),
+        body,
+        sparql::update_put_meta(
+            CHILD,
+            "text/plain",
+            "new",
+            "new",
+            Some("2026-01-01T00:00:00Z"),
+        )
+        .unwrap(),
+        sparql::update_create_child(PARENT, CHILD, "text/plain", "new", "new", None, "create")
+            .unwrap(),
+        sparql::update_create_child_fenced(
+            PARENT,
+            CHILD,
+            "text/plain",
+            "new",
+            "new",
+            None,
+            "create",
+        )
+        .unwrap(),
+        sparql::update_delete_container_if_empty(PARENT, None, "delete").unwrap(),
+        sparql::update_delete_container_if_empty_fenced(CHILD, Some(PARENT), "delete").unwrap(),
+        sparql::update_fence("create"),
+        sparql::update_remove_child(PARENT, CHILD).unwrap(),
+        sparql::update_delete_resource(CHILD).unwrap(),
+        sparql::update_end_reclaim("unreferenced"),
+    ];
+    for populated in [false, true] {
+        let mut base = Graph::load_str("", "ntriples").unwrap();
+        if populated {
+            sparq_engine::update_in_place(&mut base, &format!("{parent}; {child}")).unwrap();
+        }
+        for update in &corpus {
+            let algebra = sparq_engine::parse_update_rec2013(update).unwrap();
+            let names = sparq_engine::update_graph_scope(&algebra).expect("concrete LWS builder");
+            let mut scoped = base.fork_scoped(&names);
+            let mut full = base.fork();
+            let budget = sparq_engine::QueryBudget::unlimited();
+            let a = sparq_engine::update_in_place_algebra_capturing(
+                &mut scoped,
+                &algebra,
+                None,
+                None,
+                &budget,
+            )
+            .unwrap();
+            let b = sparq_engine::update_in_place_algebra_capturing(
+                &mut full, &algebra, None, None, &budget,
+            )
+            .unwrap();
+            assert_eq!(a, b, "{update}");
+            let mut replay = base.fork();
+            sparq_engine::apply_effects(&mut replay, &a).unwrap();
+            assert_eq!(dataset_terms(&replay), dataset_terms(&full), "{update}");
+        }
+    }
+    // Reclaim admission examines references in every named graph.
+    let reclaim = sparq_engine::parse_update_rec2013(&sparql::update_begin_reclaim("key")).unwrap();
+    assert_eq!(sparq_engine::update_graph_scope(&reclaim), None);
+}
+
+#[tokio::test]
+async fn durable_single_resource_commit_forks_only_named_slots() {
+    let dir = Directory(std::env::temp_dir().join(format!(
+        "lws-scoped-fork-{}-{}",
+        std::process::id(),
+        next_nonce(),
+    )));
+    let mut data = String::new();
+    for i in 0..1000 {
+        data.push_str(&format!(
+            "<urn:s> <urn:p> \"{i}\" <https://pod.example/r{i}> .\n"
+        ));
+    }
+    Graph::load_dataset(&data, "nquads")
+        .unwrap()
+        .save(&dir.0)
+        .unwrap();
+    let client = dir.open();
+    client
+        .dispatch(|_| {
+            NAMED_GRAPH_FORKS.with(|count| count.set(0));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    client
+        .put_meta("https://pod.example/r999", meta("after"))
+        .await
+        .unwrap();
+    client
+        .dispatch(|graph| {
+            assert_eq!(NAMED_GRAPH_FORKS.with(|count| count.replace(0)), 1);
+            assert_eq!(graph.named().len(), 1000);
+            assert_eq!(
+                graph
+                    .named_graph(
+                        &oxrdf::NamedNode::new("https://pod.example/r0")
+                            .unwrap()
+                            .into()
+                    )
+                    .unwrap()
+                    .len(),
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // An enumeration operation takes the full-fork branch on the same durable path.
+    client
+        .dispatch(|graph| {
+            commit(graph, "CLEAR NAMED", "scoped fallback")?;
+            assert_eq!(NAMED_GRAPH_FORKS.with(|count| count.replace(0)), 1000);
+            assert!(graph.named().iter().all(|(_, graph)| graph.is_empty()));
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn resource_removal_preserves_unrelated_graph_files() {
+    // Each entry point removes the same record; none needs to republish another graph's files.
+    for operation in ["metadata", "resource", "member"] {
+        let dir = Directory::empty();
+        let c = dir.open();
+        c.put_meta(PARENT, meta("parent")).await.unwrap();
+        c.create_child(PARENT, CHILD, meta("child")).await.unwrap();
+        c.actor.call(|graph| commit(graph,
+            &format!("INSERT DATA {{ GRAPH <{CHILD}> {{ <urn:subject> <urn:predicate> <urn:object> }} }}"),
+            "seed resource statements")).await.unwrap();
+        let sibling = "https://pod.example/unrelated";
+        c.put_meta(sibling, meta("sibling")).await.unwrap();
+        let slot = c
+            .actor
+            .call(move |graph| {
+                Ok(graph
+                    .named()
+                    .iter()
+                    .position(|(name, _)| {
+                        name == &oxrdf::Term::NamedNode(oxrdf::NamedNode::new(sibling).unwrap())
+                    })
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        let files = dir.0.join("named").join(slot.to_string());
+        let snapshot = || -> Option<std::collections::BTreeMap<String, Vec<u8>>> {
+            std::fs::read_dir(&files)
+                .ok()?
+                .map(|entry| {
+                    let entry = entry.ok()?;
+                    Some((
+                        entry.file_name().to_str()?.to_string(),
+                        std::fs::read(entry.path()).ok()?,
+                    ))
+                })
+                .collect()
+        };
+        let before = snapshot().expect("unrelated graph's files");
+        assert!(before.get("wal.log").is_some_and(|bytes| !bytes.is_empty()));
+        match operation {
+            "metadata" => c.delete_meta(CHILD).await.unwrap(),
+            "resource" => {
+                assert_eq!(
+                    c.delete_resource(CHILD, None).await.unwrap(),
+                    Some("child".into())
+                );
+            }
+            "member" => {
+                assert_eq!(
+                    c.delete_resource(CHILD, Some(PARENT)).await.unwrap(),
+                    Some("child".into())
+                );
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            snapshot(),
+            Some(before),
+            "unrelated graph changed after {operation}"
+        );
+        assert!(!c.exists(CHILD).await.unwrap());
+        assert!(
+            c.actor
+                .call(|graph| Ok(graph
+                    .named_graph(&oxrdf::Term::NamedNode(
+                        oxrdf::NamedNode::new(CHILD).unwrap()
+                    ))
+                    .is_none()))
+                .await
+                .unwrap(),
+            "removed resource's named-graph slot remains after {operation}"
+        );
+        assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
+        drop(c);
+        let c = dir.open();
+        assert!(
+            !c.exists(CHILD).await.unwrap(),
+            "removed record stays absent after {operation}"
+        );
+        assert!(
+            c.actor
+                .call(|graph| Ok(graph
+                    .named_graph(&oxrdf::Term::NamedNode(
+                        oxrdf::NamedNode::new(CHILD).unwrap()
+                    ))
+                    .is_none()))
+                .await
+                .unwrap(),
+            "removed resource's named-graph slot returns after reopening {operation}"
+        );
+        assert_eq!(c.get_meta(sibling).await.unwrap(), meta("sibling"));
+        if operation == "member" {
+            assert!(c.list_children(PARENT).await.unwrap().is_empty());
+        }
+        c.create_child(PARENT, CHILD, meta("recreated"))
+            .await
+            .unwrap();
+        assert_eq!(c.get_meta(CHILD).await.unwrap(), meta("recreated"));
+    }
 }
 
 #[tokio::test]
