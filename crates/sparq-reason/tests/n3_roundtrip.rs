@@ -3,9 +3,10 @@
 //! example per review round.
 //!
 //! The contract (`n3::serialize`, the `Unit` docs): every RE-REASONABLE writer is exact or
-//! refuses. `parse(write(x))` is `x` exactly — a backward-chaining copy
-//! `__bw<n>___ua.<iri>` reading back as the universal it copies is the one normalisation —
-//! or the write returns `NotRepresentable`, which it does exactly for the shapes with no
+//! refuses. `parse(write(x))` is `x` under one document-wide variable bijection, with
+//! universals retaining their exact names. A backward copy `__bw<n>.__ua.<iri>` cannot
+//! read back as the original universal; it is refused. The writer returns
+//! `NotRepresentable` for the shapes with no
 //! lossless N3 form (checked against an independent oracle). A document-level `@forAll`
 //! is ONE variable, `__ua.<iri>`, so the writer declares it once, at document level; a
 //! formula-level one binds only in its formula (GH #6754) and is declared in that formula
@@ -17,8 +18,11 @@
 //! Semantics, not just syntax: for every document in a corpus (Codex's examples among it),
 //! `reason_n3_pass_all` either refuses or writes a document whose closure — read directly,
 //! through `log:conclusion` of each formula-valued fact, and through `log:semantics` +
-//! `log:conclusion` of the whole document — equals the source's. On top of that: a
-//! statement renders the same whatever surrounds it, distinct variables (a universal and
+//! `log:conclusion` of the whole document — equals the source's. Fixpoint checks exclude
+//! fresh conclusion existentials and output retaining unbound backward variables: a
+//! written generated name becomes an ordinary source variable when read back, and a
+//! later pass can add a distinct formula. Ordinary-variable spellings share one document
+//! plan, so another statement can reserve a spelling. Distinct variables (a universal and
 //! its backward-chaining copy) are never merged, and identity keys (`statement_keys`,
 //! which provenance addresses facts by) are injective over every `Term` field.
 
@@ -55,7 +59,7 @@ fn formula(rows: Vec<[Term; 3]>) -> Term {
 fn atoms() -> Vec<Term> {
     vec![
         var("__ua.http://ex/x"),
-        var("__bw0___ua.http://ex/x"),
+        var("__bw0.__ua.http://ex/x"),
         iri("http://ex/x"),
         var("x"),
         var("x_2"),
@@ -66,14 +70,14 @@ fn atoms() -> Vec<Term> {
     ]
 }
 
-/// `__bw<n>_` copies of a universal read back as the universal.
+/// `__bw<n>.` copies of a universal read back as the universal.
 fn normalise(t: &Term) -> Term {
     match t {
         Term::Var(v) => {
             let mut rest = v.as_str();
             while let Some(r) = rest.strip_prefix("__bw") {
                 let d = r.bytes().take_while(u8::is_ascii_digit).count();
-                match r[d..].strip_prefix('_') {
+                match r[d..].strip_prefix('.') {
                     Some(r2) if d > 0 && r2.starts_with("__") => rest = r2,
                     _ => break,
                 }
@@ -517,7 +521,7 @@ fn identity_keys_are_injective_over_every_term_field() {
         }
     }
     atoms.push(var("__ua.http://ex/x"));
-    atoms.push(var("__bw0___ua.http://ex/x"));
+    atoms.push(var("__bw0.__ua.http://ex/x"));
     let few = [&atoms[0], &atoms[1], &atoms[2], &atoms[7], &atoms[8]];
     let mut all = atoms.clone();
     all.push(Term::List(vec![]));
@@ -564,7 +568,7 @@ fn key_term(r: &mut Rng, depth: usize, out: &mut Vec<Term>) -> Term {
             1 => Term::Lit(s(r), ["http://ex/d", "http://ex/e"][r.below(2)].into(), None),
             2 => Term::Lit(s(r), "http://ex/d".into(), [Some("en".to_string()), Some("EN".into()), None][r.below(3)].clone()),
             3 => Term::Blank(s(r)),
-            4 => var(["x", "__ua.http://ex/x", "__bw0___ua.http://ex/x"][r.below(3)]),
+            4 => var(["x", "__ua.http://ex/x", "__bw0.__ua.http://ex/x"][r.below(3)]),
             _ => var(&s(r)),
         },
         (_, 6) => Term::List((0..r.below(3)).map(|_| key_term(r, depth - 1, out)).collect()),
@@ -642,7 +646,11 @@ fn a_backslash_iri_round_trips() {
 /// would merge them, so every exact writer refuses; neither may ever come back as one.
 #[test]
 fn a_universal_and_its_copies_are_never_merged() {
-    let (ua, c0, c1) = (var("__ua.http://ex/x"), var("__bw0___ua.http://ex/x"), var("__bw1___ua.http://ex/x"));
+    let (ua, c0, c1) = (
+        var("__ua.http://ex/x"),
+        var("__bw0.__ua.http://ex/x"),
+        var("__bw1.__ua.http://ex/x"),
+    );
     let k = iri("http://ex/k");
     for (a, b) in [(&ua, &c0), (&c0, &c1), (&c1, &ua)] {
         let f = [k.clone(), k.clone(), formula(vec![[a.clone(), k.clone(), b.clone()]])];
@@ -763,8 +771,17 @@ fn every_universal_is_declared_in_its_own_scope_or_refused() {
     // Backward-chaining copies: refused alone (round 13: `Unspellable`), and two distinct
     // ones in two FACTS would spell as one <http://ex/x> — the document-wide check refuses
     // that merge first (round 10, MEDIUM).
-    let fact = |v: &str| [k.clone(), k.clone(), formula(vec![[var(v), k.clone(), k.clone()]])];
-    let (f0, f1) = (fact("__bw0___ua.http://ex/x"), fact("__bw1___ua.http://ex/x"));
+    let fact = |v: &str| {
+        [
+            k.clone(),
+            k.clone(),
+            formula(vec![[var(v), k.clone(), k.clone()]]),
+        ]
+    };
+    let (f0, f1) = (
+        fact("__bw0.__ua.http://ex/x"),
+        fact("__bw1.__ua.http://ex/x"),
+    );
     for f in [&f0, &f1] {
         assert!(matches!(serialize_facts([f].into_iter()), Err(NotRepresentable::Unspellable(_))));
     }

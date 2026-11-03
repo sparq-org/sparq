@@ -38,6 +38,10 @@ impl<T> Clone for SharedStore<T> {
 
 #[async_trait]
 impl<T: SparqClient> SparqClient for SharedStore<T> {
+    fn lifecycle(&self) -> std::sync::Arc<sparq_lws_core::store::Lifecycle> {
+        self.0.lifecycle()
+    }
+
     async fn replace_meta_retaining(
         &self,
         iri: &str,
@@ -245,6 +249,12 @@ impl<T: BlobStore> BlobStore for SharedStore<T> {
 
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
         self.0.list().await
+    }
+
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        self.0.list_stream().await
     }
 
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {

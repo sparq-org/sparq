@@ -7,8 +7,12 @@
 //! whole stack is testable without a running SPARQ or S3.
 
 pub mod blob;
+#[cfg(any(test, feature = "test-support"))]
+pub mod blob_contract;
 #[cfg(all(feature = "blob-fs", not(target_arch = "wasm32")))]
 pub mod blob_fs;
+#[cfg(all(feature = "blob-object", not(target_arch = "wasm32")))]
+pub mod blob_object;
 // The blob-body LRU cache (read-4 — backend-read-path.md §3.4): `(blob_key, etag)`-keyed,
 // byte-budgeted, sat in front of BlobStore::get inside CompositeStore so a hot unchanged
 // resource's repeat read pays zero blob round-trips. Immutable-by-construction (unique-per-write
@@ -89,6 +93,22 @@ impl Lifecycle {
 #[derive(Debug)]
 pub struct LifecycleGuard {
     lease: std::sync::Arc<Lifecycle>,
+}
+
+impl LifecycleGuard {
+    /// Whether this guard holds the supplied backend's lifecycle lease.
+    /// Store and raw index implementations check this before resetting a marker.
+    ///
+    /// ```
+    /// use sparq_lws_core::store::{LifecycleGuard, SparqClient};
+    ///
+    /// fn matches_backend(client: &impl SparqClient, guard: &LifecycleGuard) -> bool {
+    ///     guard.belongs_to(&client.lifecycle())
+    /// }
+    /// ```
+    pub fn belongs_to(&self, lifecycle: &std::sync::Arc<Lifecycle>) -> bool {
+        std::sync::Arc::ptr_eq(&self.lease, lifecycle)
+    }
 }
 
 impl Drop for LifecycleGuard {
@@ -505,7 +525,8 @@ pub trait Store: Send + Sync {
     /// unusable and has removed what it decided ([`raise_marker`](Store::raise_marker) keeps
     /// every other write from lowering it). Only the service holding the backend's
     /// [`Lifecycle`] lease may make it: `lease` is its guard, which no caller outside this crate
-    /// can make.
+    /// can make. Implementations check [`LifecycleGuard::belongs_to`] against their retained lease
+    /// before writing.
     ///
     /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
     async fn reset_marker(
@@ -658,11 +679,12 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// Build with an explicitly-configured [`BodyCache`] (the `SOLID_SERVER_BODY_CACHE_BYTES` /
     /// `SOLID_SERVER_BODY_CACHE_MAX_ENTRY_BYTES` boot wiring, or a disabled sentinel in tests).
     pub fn with_body_cache(sparq: S, blob: B, body_cache: BodyCache) -> Self {
+        let lifecycle = sparq.lifecycle();
         Self {
             sparq: std::sync::Arc::new(sparq),
             blob: std::sync::Arc::new(blob),
             body_cache: std::sync::Arc::new(body_cache),
-            lifecycle: Default::default(),
+            lifecycle,
             history: Default::default(),
             holding: Default::default(),
         }
@@ -883,7 +905,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// is that the pointer now names a unique object rather than a shared one.
     ///
     /// 128 bits of OS entropy makes a key collision across independent writes cryptographically
-    /// negligible; no IRI-derived component is needed.
+    /// negligible; the fixed `b1-` prefix versions the opaque key format.
     ///
     /// # Why this FAILS CLOSED on RNG failure (the Medium fix)
     /// Minting is **fallible**: if the OS CSPRNG ([`getrandom`]) cannot fill the 128-bit suffix, this
@@ -906,18 +928,10 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         getrandom::getrandom(&mut suffix).map_err(|e| {
             ServerError::Storage(format!("OS RNG unavailable for blob-key minting: {e}"))
         })?;
-        let hex = suffix.iter().fold(String::with_capacity(32), |mut acc, b| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        });
         // A record in the service pool ([`in_service_pool`]) is marked here, where the IRI says
         // which it is: the blob store admits it against the pool's ceilings and never against
         // stored content's, and it has only the key to go on.
-        if limits::in_service_pool(iri) {
-            return Ok(format!("{}b1-{hex}", limits::POOLED_BLOB_KEY_MARK));
-        }
-        Ok(format!("b1-{hex}"))
+        Ok(sparq_lws_blob_key::format(suffix, limits::in_service_pool(iri)))
     }
 
     /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
@@ -1526,6 +1540,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         value: i64,
         lease: &LifecycleGuard,
     ) -> ServerResult<()> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(ServerError::Forbidden);
+        }
         if !self.sparq.raises_markers() {
             return Err(ServerError::Storage(
                 "this store cannot raise a marker atomically".into(),
@@ -1964,6 +1981,10 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for PutBackFirst {
+        fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
+            self.inner.lifecycle()
+        }
+
         fn call_timeout(&self) -> std::time::Duration {
             self.inner.call_timeout()
         }
@@ -2136,8 +2157,18 @@ mod tests {
     /// One backend shared by several stores, as several processes share one.
     struct Shared<T>(std::sync::Arc<T>);
 
+    impl<T> Clone for Shared<T> {
+        fn clone(&self) -> Self {
+            Self(self.0.clone())
+        }
+    }
+
     #[async_trait]
     impl<T: SparqClient> SparqClient for Shared<T> {
+        fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
+            self.0.lifecycle()
+        }
+
         fn call_timeout(&self) -> std::time::Duration {
             self.0.call_timeout()
         }
@@ -2324,6 +2355,10 @@ mod tests {
 
     #[async_trait]
     impl SparqClient for FailsDetaching {
+        fn lifecycle(&self) -> std::sync::Arc<Lifecycle> {
+            self.inner.lifecycle()
+        }
+
         // Keep the default delete_resource so detach/delete fault injection is observed.
         async fn replace_meta(
             &self,
@@ -2607,16 +2642,8 @@ mod tests {
             ("https://pod.example/.lws/subscriptions/private-topic", true),
         ] {
             let key = S::mint_blob_key(iri).expect("OS RNG available");
-            let opaque = if pooled {
-                key.strip_prefix("$pool$").expect("pool mark retained")
-            } else {
-                key.as_str()
-            };
-            assert_eq!(opaque.len(), 35);
-            assert!(opaque.starts_with("b1-"));
-            assert!(opaque[3..]
-                .bytes()
-                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            let (_, actual_pooled) = sparq_lws_blob_key::parse(&key).expect("canonical blob key");
+            assert_eq!(actual_pooled, pooled);
             for part in [
                 "https",
                 "pod.example",
@@ -2632,6 +2659,13 @@ mod tests {
     }
 
     #[test]
+    fn mint_blob_key_is_fallible_and_succeeds_on_a_working_os_rng() {
+        let result: Result<String, ServerError> = S::mint_blob_key("https://pod.example/alice/data");
+        let key = result.expect("the OS RNG must be available in tests");
+        assert_eq!(sparq_lws_blob_key::parse(&key), Some((key.as_str(), false)));
+    }
+
+    #[test]
     fn write_persists_an_opaque_blob_pointer() {
         let iri = "https://pod.example/alice/private-report";
         let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
@@ -2640,11 +2674,10 @@ mod tests {
                 .write(iri, Bytes::from_static(b"body"), "text/turtle")
                 .await
                 .expect("write with a working RNG");
-            assert_eq!(meta.blob_key.len(), 35);
-            assert!(meta.blob_key.starts_with("b1-"));
-            assert!(meta.blob_key[3..]
-                .bytes()
-                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+            assert_eq!(
+                sparq_lws_blob_key::parse(&meta.blob_key),
+                Some((meta.blob_key.as_str(), false))
+            );
             for part in ["https", "pod.example", "alice", "private-report"] {
                 assert!(!meta.blob_key.contains(part));
             }
@@ -2664,7 +2697,7 @@ mod tests {
             .block_on(f)
     }
     /// Every raw mutator refuses either marker operand before touching its backend.
-    async fn check_raw_mutators_refuse_a_marker(client: &impl SparqClient) {
+    async fn check_raw_mutators_refuse_a_marker(client: &impl SparqClient, retains_history: bool) {
         let refused = |r: Result<(), SparqError>| {
             assert!(
                 matches!(r, Err(SparqError::Backend(ref e))
@@ -2672,16 +2705,79 @@ mod tests {
                 "{r:?}"
             );
         };
-        refused(client.put_meta(MARKER, lower()).await);
-        refused(client.replace_meta(MARKER, lower()).await.map(|_| ()));
-        refused(client.delete_meta(MARKER).await);
-        for (iri, parent) in [(MARKER, None), (MARKER_CONTAINER, Some(MARKER))] {
-            refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
-            refused(client.delete_resource(iri, parent).await.map(|_| ()));
-        }
-        for (container, child) in [(MARKER, MARKER_CONTAINER), (MARKER_CONTAINER, MARKER)] {
-            refused(client.create_child(container, child, lower()).await);
-            refused(client.remove_child(container, child).await);
+        for root in [
+            "https://pod.example",
+            "https://pod.example/alice",
+            "https://pod.example/teams/alice",
+        ] {
+            let container = format!("{root}{SERVICE_POOL_PATH}");
+            let marker = format!("{container}{SERVICE_MARKER_FRAGMENT}");
+            refused(client.put_meta(&marker, lower()).await);
+            refused(client.replace_meta(&marker, lower()).await.map(|_| ()));
+            refused(client.delete_meta(&marker).await);
+            for (iri, parent) in [(&marker, None), (&container, Some(marker.as_str()))] {
+                refused(client.delete_meta_if_empty(iri, parent).await.map(|_| ()));
+                refused(client.delete_resource(iri, parent).await.map(|_| ()));
+            }
+            for (container, child) in [(&marker, &container), (&container, &marker)] {
+                refused(client.create_child(container, child, lower()).await);
+                refused(
+                    client
+                        .replace_child(container, child, lower())
+                        .await
+                        .map(|_| ()),
+                );
+                refused(client.remove_child(container, child).await);
+            }
+            if retains_history {
+                let ordinary = "https://pod.example/doc";
+                for (iri, member) in [(marker.as_str(), ordinary), (ordinary, marker.as_str())] {
+                    refused(
+                        client
+                            .replace_meta_retaining(
+                                iri,
+                                lower(),
+                                member,
+                                history::VersionFields {
+                                    original: ordinary.into(),
+                                    max_versions: 2,
+                                },
+                            )
+                            .await
+                            .map(|_| ()),
+                    );
+                }
+                for (iri, parent, member) in [
+                    (marker.as_str(), ordinary, ordinary),
+                    (ordinary, marker.as_str(), ordinary),
+                    (ordinary, ordinary, marker.as_str()),
+                ] {
+                    refused(
+                        client
+                            .move_to_trash(
+                                iri,
+                                Some(parent),
+                                member,
+                                history::TrashFields {
+                                    original: ordinary.into(),
+                                    trashed_at: std::time::SystemTime::UNIX_EPOCH,
+                                    deleted_by: None,
+                                    deleter_could_read: false,
+                                },
+                            )
+                            .await,
+                    );
+                    refused(client.restore_from_trash(iri, parent, member).await);
+                }
+                for (iri, parent) in [(marker.as_str(), ordinary), (ordinary, marker.as_str())] {
+                    refused(
+                        client
+                            .delete_resource_retiring(iri, Some(parent))
+                            .await
+                            .map(|_| ()),
+                    );
+                }
+            }
         }
     }
 
@@ -2689,9 +2785,9 @@ mod tests {
     async fn raw_mutators_refuse_a_marker_in_memory() {
         let client = InMemorySparqClient::new();
         client.raise_marker(MARKER, 7).await.unwrap();
-        check_raw_mutators_refuse_a_marker(&client).await;
+        check_raw_mutators_refuse_a_marker(&client, true).await;
         assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "7");
-        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        let lease = client.lifecycle().acquire().unwrap();
         client.reset_marker(MARKER, 2, &lease).await.unwrap();
         assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
     }
@@ -2702,14 +2798,14 @@ mod tests {
         let client = EmbeddedSparqClient::in_memory().unwrap();
         client.raise_marker(MARKER, 7).await.unwrap();
         let before = client.engine_round_trips();
-        check_raw_mutators_refuse_a_marker(&client).await;
+        check_raw_mutators_refuse_a_marker(&client, true).await;
         assert_eq!(
             client.engine_round_trips(),
             before,
             "refusal reached the engine"
         );
         assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "7");
-        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        let lease = client.lifecycle().acquire().unwrap();
         client.reset_marker(MARKER, 2, &lease).await.unwrap();
         assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
     }
@@ -2719,16 +2815,169 @@ mod tests {
     async fn raw_mutators_refuse_a_marker_http() {
         // A backend that cannot be reached: only the fixed local refusal may answer.
         let client = HttpSparqClient::new("http://127.0.0.1:1/sparql");
-        check_raw_mutators_refuse_a_marker(&client).await;
+        check_raw_mutators_refuse_a_marker(&client, false).await;
     }
 
     #[tokio::test]
     async fn a_shared_client_forwards_a_marker_reset() {
         let client = Shared(std::sync::Arc::new(InMemorySparqClient::new()));
-        let lease = std::sync::Arc::new(Lifecycle::default()).acquire().unwrap();
+        let lease = client.lifecycle().acquire().unwrap();
         client.0.raise_marker(MARKER, 42).await.unwrap();
         client.reset_marker(MARKER, 2, &lease).await.unwrap();
         assert_eq!(client.get_meta(MARKER).await.unwrap().etag, "2");
+    }
+
+    async fn check_composites_share_backend_lease<C: SparqClient + Clone + 'static>(client: C) {
+        let counters = std::sync::Arc::new(BackendCounters::default());
+        let store = CompositeStore::new(
+            CountingSparqClient::new(client.clone(), counters.clone()),
+            CountingBlobStore::new(InMemoryBlobStore::new(), counters.clone()),
+        );
+        let mut second_store = CompositeStore::new(
+            CountingSparqClient::new(client, counters.clone()),
+            CountingBlobStore::new(InMemoryBlobStore::new(), counters.clone()),
+        );
+        second_store.blob = store.blob.clone();
+        let resource = "https://pod.example/alice/shared";
+        store
+            .write(resource, Bytes::from_static(b"shared"), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(second_store.read(resource).await.unwrap().body, "shared");
+        let mut cfg = crate::lws::LwsConfig::new("https://pod.example/alice");
+        cfg.open = true;
+        let first = crate::lws::LwsState::new(store.clone(), cfg.clone())
+            .await
+            .unwrap();
+        first.notify.pause_sweeper();
+        counters.take_methods();
+        let second = crate::lws::LwsState::new(second_store.clone(), cfg.clone());
+        tokio::pin!(second);
+        let refused =
+            std::future::poll_fn(|cx| match std::future::Future::poll(second.as_mut(), cx) {
+                std::task::Poll::Ready(result) => std::task::Poll::Ready(result.err()),
+                std::task::Poll::Pending => panic!("a second state must be refused before I/O"),
+            })
+            .await;
+        assert_eq!(
+            refused.as_deref(),
+            Some("another LWS service is running over this store")
+        );
+        assert!(counters.take_methods().is_empty());
+        drop(first);
+        store
+            .lifecycle()
+            .wait_for_release("check_composites_share_backend_lease")
+            .await;
+        let replacement = crate::lws::LwsState::new(second_store, cfg).await.unwrap();
+        replacement.notify.pause_sweeper();
+        assert_eq!(
+            replacement.store.read(resource).await.unwrap().body,
+            "shared"
+        );
+        drop(replacement);
+        store
+            .lifecycle()
+            .wait_for_release("check_composites_share_backend_lease replacement")
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn composites_share_in_memory_backend_lease() {
+        check_composites_share_backend_lease(InMemorySparqClient::new()).await;
+    }
+
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test(start_paused = true)]
+    async fn composites_share_embedded_backend_lease() {
+        let dir = std::env::temp_dir().join(format!(
+            "lws-backend-lease-{}",
+            S::mint_blob_key("lease").unwrap()
+        ));
+        let client = EmbeddedSparqClient::open_or_create(&dir.join("index")).unwrap();
+        check_composites_share_backend_lease(client).await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    async fn check_marker_reset_uses_backend_lease<C: SparqClient + 'static>(client: C) {
+        let store = CompositeStore::new(client, InMemoryBlobStore::new());
+        let mut cfg = crate::lws::LwsConfig::new("https://pod.example");
+        cfg.open = true;
+        let other = crate::lws::LwsState::new(
+            CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new()),
+            cfg.clone(),
+        )
+        .await
+        .unwrap();
+        let state = crate::lws::LwsState::new(store.clone(), cfg).await.unwrap();
+        let foreign = other.notify.lease().unwrap();
+        let marker = "https://pod.example/alice/.lws/subscriptions/#high-water";
+        store.raise_marker(marker, 7).await.unwrap();
+        assert!(matches!(
+            store.reset_marker(marker, 2, foreign).await,
+            Err(ServerError::Forbidden)
+        ));
+        assert!(matches!(store.sparq.reset_marker(marker, 2, foreign).await,
+            Err(SparqError::Backend(ref message))
+                if message == "marker reset requires this backend's lifecycle lease"));
+        assert_eq!(store.sparq.get_meta(marker).await.unwrap().etag, "7");
+        store
+            .reset_marker(marker, 2, state.notify.lease().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(store.sparq.get_meta(marker).await.unwrap().etag, "2");
+    }
+
+    #[tokio::test]
+    async fn marker_reset_uses_in_memory_backend_lease() {
+        check_marker_reset_uses_backend_lease(InMemorySparqClient::new()).await;
+    }
+
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn marker_reset_uses_embedded_backend_lease() {
+        check_marker_reset_uses_backend_lease(EmbeddedSparqClient::in_memory().unwrap()).await;
+    }
+
+    #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn marker_reset_uses_http_backend_lease() {
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let app = axum::Router::new().route(
+            "/sparql",
+            axum::routing::post(move |headers: axum::http::HeaderMap, body: String| {
+                let sent = sent.clone();
+                async move {
+                    sent.send((headers, body)).unwrap();
+                    axum::http::StatusCode::NO_CONTENT
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client =
+            HttpSparqClient::new(format!("http://{}/sparql", listener.local_addr().unwrap()));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let other = InMemorySparqClient::new();
+        let foreign = other.lifecycle().acquire().unwrap();
+        assert!(matches!(client.reset_marker(MARKER, 2, &foreign).await,
+            Err(SparqError::Backend(ref message))
+                if message == "marker reset requires this backend's lifecycle lease"));
+        assert!(received.try_recv().is_err());
+        let lease = client.lifecycle().acquire().unwrap();
+        client
+            .clone()
+            .reset_marker(MARKER, 2, &lease)
+            .await
+            .unwrap();
+        let (headers, update) = received.try_recv().unwrap();
+        assert_eq!(
+            headers[axum::http::header::CONTENT_TYPE],
+            "application/sparql-update"
+        );
+        assert!(update.contains("https://pod.example/.lws/subscriptions/#high-water"));
+        assert!(update.contains("\"2\""));
+        assert!(received.try_recv().is_err());
+        server.abort();
     }
 
     #[tokio::test(start_paused = true)]

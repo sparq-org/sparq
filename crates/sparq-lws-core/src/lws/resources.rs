@@ -14233,6 +14233,91 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[tokio::test]
+    async fn trash_delete_without_read_matches_settled_absent() {
+        use super::super::{test_store as ts, FOAF_AGENT};
+        use crate::store::history::HistoryConfig;
+        for (assignee, caller) in [
+            (FOAF_AGENT, Agent::anonymous()),
+            (
+                "https://writer.example/#me",
+                ts::agent("https://writer.example/#me"),
+            ),
+        ] {
+            let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new())
+                .with_history(HistoryConfig {
+                    trash: true,
+                    ..Default::default()
+                })
+                .unwrap();
+            let mut cfg = super::super::LwsConfig::new(BASE);
+            cfg.owner = Some(ts::OWNER.into());
+            let state = LwsState::new(store, cfg).await.unwrap();
+            let root = state.cfg.storage();
+            let owner = ts::agent(ts::OWNER);
+            state.access.put_grant_for_test(
+                "delete",
+                super::super::access::policies(
+                    &json!([{"type": ["AccessPolicy"], "action": ["delete"],
+                        "assignee": assignee}]),
+                    &root,
+                )
+                .unwrap(),
+            );
+            let uri = create_as(&state, &owner, &root, "there", false).await;
+            assert!(
+                !super::super::access::allowed(&state, Action::Read, &uri, &caller)
+                    .await
+                    .unwrap()
+            );
+            let request = request("DELETE", path_of(&uri), &[], "");
+            let present = delete_answer(handle(&state, &request, &caller).await).await;
+            let absent = delete_answer(handle(&state, &request, &caller).await).await;
+            assert_eq!(present.0, StatusCode::NO_CONTENT);
+            assert_eq!(present, absent);
+            assert!(!present.1.contains_key(header::LOCATION));
+            assert!(!present.1.contains_key(header::LINK));
+            assert!(present.2.is_empty());
+            let entries = state.store.trash_entries().await.unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].fields.original, uri);
+            assert!(!entries[0].fields.deleter_could_read);
+            assert!(!state.store.exists(&uri).await.unwrap());
+
+            let readable = create_as(&state, &owner, &root, "readable", false).await;
+            let response = handle(
+                &state,
+                &ts::request(Method::DELETE, path_of(&readable), &[], ""),
+                &owner,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert!(body_of(response).await.is_empty());
+            assert!(state
+                .store
+                .trash_entries()
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| entry.fields.original == readable && entry.fields.deleter_could_read));
+
+            let posted = create_as(&state, &owner, &root, "posted", false).await;
+            let response = crate::history_http::lws_handler(
+                &state,
+                &ts::request(
+                    Method::POST,
+                    "/.lws/trash/",
+                    &[("content-type", "application/json")],
+                    &json!({"resource": posted}).to_string(),
+                ),
+                &owner,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert!(hdr(&response, "location").starts_with(&format!("{BASE}/.lws/trash/")));
+        }
+    }
+
     async fn delete_answer(response: Response) -> (StatusCode, HeaderMap, Bytes) {
         let status = response.status();
         let headers = response.headers().clone();

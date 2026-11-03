@@ -24,6 +24,11 @@ on:
       - "crates/sparq-lws-authn*/**"
       - ".github/workflows/lws-conformance.yml"
   workflow_dispatch:
+    inputs:
+      blob_object:
+        description: Run the optional object-store contract against MinIO
+        type: boolean
+        default: false
 
 concurrency:
   group: lws-conformance-${{ github.ref }}
@@ -38,6 +43,76 @@ env:
   LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
 
 jobs:
+  blob-object:
+    # Dispatch-only integration signal; not a required PR check.
+    if: github.event_name == 'workflow_dispatch' && inputs.blob_object
+    name: lws object-store integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_BUILD_JOBS: "2"
+      LWS_BLOB_TEST_URL: s3://blob-contract/integration
+      LWS_BLOB_TEST_ENDPOINT: http://127.0.0.1:9000
+      LWS_BLOB_TEST_ACCESS_KEY: local-contract-user
+      LWS_BLOB_TEST_SECRET_KEY: local-contract-password
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: lws-blob-object
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          # Match the toolchain directive in the pinned MinIO go.mod.
+          go-version: "1.24.2"
+          cache: false
+      - name: Install pinned MinIO and bucket client
+        run: |
+          export GOBIN="$RUNNER_TEMP/minio-bin"
+          mkdir -p "$GOBIN"
+          # RELEASE.2025-04-22T22-12-26Z, commit 0d7408fc9969caf07de6a8c3a84f9fbb10a6739e.
+          go install github.com/minio/minio@v0.0.0-20250422221226-0d7408fc9969
+          # The object-store wrapper has no bucket API; avoid custom signing in the test.
+          go install github.com/minio/mc@v0.0.0-20250312172924-c1d5d4cbb4ca
+      - name: Start isolated MinIO
+        env:
+          MINIO_ROOT_USER: ${{ env.LWS_BLOB_TEST_ACCESS_KEY }}
+          MINIO_ROOT_PASSWORD: ${{ env.LWS_BLOB_TEST_SECRET_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/minio-data"
+          nohup "$RUNNER_TEMP/minio-bin/minio" server \
+            --address 127.0.0.1:9000 --console-address 127.0.0.1:9001 \
+            "$RUNNER_TEMP/minio-data" > "$RUNNER_TEMP/minio.log" 2>&1 < /dev/null &
+          echo "$!" > "$RUNNER_TEMP/minio.pid"
+          curl --fail --retry 20 --retry-delay 1 --retry-connrefused --max-time 5 \
+            "$LWS_BLOB_TEST_ENDPOINT/minio/health/ready"
+      - name: Create isolated bucket
+        run: |
+          "$RUNNER_TEMP/minio-bin/mc" --config-dir "$RUNNER_TEMP/minio-client" \
+            alias set fixture "$LWS_BLOB_TEST_ENDPOINT" \
+            "$LWS_BLOB_TEST_ACCESS_KEY" "$LWS_BLOB_TEST_SECRET_KEY"
+          "$RUNNER_TEMP/minio-bin/mc" --config-dir "$RUNNER_TEMP/minio-client" \
+            mb fixture/blob-contract
+      - name: Run MinIO contract, router round trip and grace-window sweep
+        run: |
+          cargo test -p sparq-lws-core \
+            --features blob-object,test-support,sparq-lws-blob-object/aws \
+            --test blob_object minio_contract_router_and_orphan_sweep -- --ignored
+      - name: Print MinIO server log
+        if: failure()
+        run: |
+          if [[ -f "$RUNNER_TEMP/minio.log" ]]; then
+            cat "$RUNNER_TEMP/minio.log"
+          fi
+      - name: Stop MinIO
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/minio.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/minio.pid")" || true
+          fi
+
   touchstone:
     # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true

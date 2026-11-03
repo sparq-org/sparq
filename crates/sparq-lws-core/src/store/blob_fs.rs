@@ -141,6 +141,13 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn filesystem_backend_satisfies_the_shared_contract() {
+        let directory = Directory::new();
+        let blob = FsBlobStore::open(&directory.0).unwrap();
+        crate::store::blob_contract::run(&blob).await;
+    }
+
+    #[tokio::test]
     async fn composite_round_trip_overwrite_hold_reclaim_and_delete() {
         let directory = Directory::new();
         let store = CompositeStore::with_body_cache(
@@ -203,8 +210,9 @@ mod tests {
             POOLED_BLOB_KEY_MARK,
             sparq_lws_blob_fs::POOLED_BLOB_KEY_MARK
         );
-        assert!(pooled.blob_key.starts_with("$pool$b1-"));
-        let random = &pooled.blob_key[9..];
+        let (bare, is_pooled) = sparq_lws_blob_key::parse(&pooled.blob_key).unwrap();
+        assert!(is_pooled);
+        let random = &bare[sparq_lws_blob_key::PREFIX.len()..];
         assert!(directory
             .0
             .join("pool")
