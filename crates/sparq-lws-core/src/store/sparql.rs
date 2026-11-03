@@ -232,6 +232,14 @@ pub fn ask_reclaiming(blob_key: &str) -> String {
     )
 }
 
+/// Confirm a reclaim and observe its append directory in the same query. No row
+/// means the claim was refused; an unbound `?hasAppends` means no directory exists.
+pub fn select_reclaim_with_appends(blob_key: &str) -> String {
+    format!("SELECT ?hasAppends WHERE {{ GRAPH {r} {{ {r} {pr} {key} }} OPTIONAL {{ GRAPH {dir} {{ {s} {pct} ?ct }} BIND(true AS ?hasAppends) }} }}",
+        r = iri_const(RECLAIMING), pr = iri_const(&p_reclaiming()), key = literal(blob_key),
+        dir = iri_const(&super::append_dir(blob_key)), s = iri_const(&s_record()), pct = iri_const(&p_content_type()))
+}
+
 /// UPDATE: stop naming `blob_key` as being reclaimed (its bytes are gone).
 pub fn update_end_reclaim(blob_key: &str) -> String {
     format!(
@@ -305,15 +313,16 @@ pub fn ask_create_marker(child: &str, nonce: &str) -> Result<String, BuildError>
 /// `If-Modified-Since`, never a spurious 304.
 pub fn select_meta(resource: &str) -> Result<String, BuildError> {
     Ok(format!(
-        "SELECT ?ct ?bk ?etag ?mod WHERE {{ GRAPH {g} {{ \
+        "SELECT ?ct ?bk ?etag ?mod ?appendSeq WHERE {{ GRAPH {g} {{ \
             {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?etag . \
-            OPTIONAL {{ {s} {pmod} ?mod }} }} }} LIMIT 1",
+            OPTIONAL {{ {s} {pmod} ?mod }} OPTIONAL {{ {s} {pseq} ?appendSeq }} }} }} LIMIT 1",
         g = iri(resource)?,
         s = iri_const(&s_record()),
         pct = iri_const(&p_content_type()),
         pbk = iri_const(&p_blob_key()),
         pet = iri_const(&p_etag()),
         pmod = iri_const(&p_modified()),
+        pseq = iri_const(&p_append_seq()),
     ))
 }
 
@@ -342,15 +351,16 @@ pub fn select_read_plan(target: &str, acl_candidates: &[String]) -> Result<Strin
         values.push_str(&iri(raw)?);
     }
     Ok(format!(
-        "SELECT ?g ?ct ?bk ?etag ?mod WHERE {{ VALUES ?g {{ {values} }} \
+        "SELECT ?g ?ct ?bk ?etag ?mod ?appendSeq WHERE {{ VALUES ?g {{ {values} }} \
             GRAPH ?g {{ {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?etag . \
-            OPTIONAL {{ {s} {pmod} ?mod }} }} }}",
+            OPTIONAL {{ {s} {pmod} ?mod }} OPTIONAL {{ {s} {pseq} ?appendSeq }} }} }}",
         values = values,
         s = iri_const(&s_record()),
         pct = iri_const(&p_content_type()),
         pbk = iri_const(&p_blob_key()),
         pet = iri_const(&p_etag()),
         pmod = iri_const(&p_modified()),
+        pseq = iri_const(&p_append_seq()),
     ))
 }
 
@@ -401,6 +411,102 @@ pub fn select_referenced_blob_keys() -> String {
     )
 }
 
+/// The append sequence attached to a document's current byte pointer.
+pub fn p_append_seq() -> String {
+    format!("{PSS_NS}appendSeq")
+}
+
+/// Advance a line-format document and write an operation-specific receipt in
+/// the same update. The receipt preserves the returned key and sequence even
+/// when another writer immediately advances or replaces the document.
+pub fn update_bump_append(
+    resource: &str,
+    receipt: &str,
+    etag: &str,
+    modified: &str,
+) -> Result<String, BuildError> {
+    let type_essence = format!(
+        "LCASE(REPLACE(STRBEFORE(CONCAT(?ct, \";\"), \";\"), {}, \"\"))",
+        literal(r"^\s+|\s+$")
+    );
+    Ok(format!(
+        "DELETE {{ GRAPH {g} {{ {s} {pseq} ?oldSeq ; {pet} ?oldTag ; {pmod} ?oldMod }} }} \
+         INSERT {{ GRAPH {g} {{ {s} {pseq} ?next ; {pet} {tag} ; {pmod} {modified} }} \
+                   GRAPH {receipt} {{ {s} <urn:pss:index#appendBlobKey> ?bk ; {pseq} ?next }} }} \
+         WHERE {{ GRAPH {g} {{ {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?oldTag . \
+                   OPTIONAL {{ {s} {pseq} ?oldSeq }} OPTIONAL {{ {s} {pmod} ?oldMod }} }} \
+                   FILTER ({type_essence} IN \
+                       (\"text/turtle\", \"application/n-triples\", \"application/n-quads\")) \
+                   BIND(COALESCE(?oldSeq, 0) + 1 AS ?next) FILTER (?next <= 18446744073709551615) }}",
+        g = iri(resource)?, s = iri_const(&s_record()), pseq = iri_const(&p_append_seq()),
+        pet = iri_const(&p_etag()), pmod = iri_const(&p_modified()),
+        pct = iri_const(&p_content_type()), pbk = iri_const(&p_blob_key()),
+        receipt = iri(receipt)?, tag = literal(etag), modified = datetime_literal(modified),
+    ))
+}
+
+/// Read an append's own result; another operation cannot overwrite its receipt.
+pub fn select_append_receipt(receipt: &str) -> Result<String, BuildError> {
+    Ok(format!(
+        "SELECT ?bk ?seq WHERE {{ GRAPH {} {{ {} <urn:pss:index#appendBlobKey> ?bk ; {} ?seq }} }}",
+        iri(receipt)?,
+        iri_const(&s_record()),
+        iri_const(&p_append_seq())
+    ))
+}
+
+/// Atomically publish an insert and advance its target only while the original
+/// byte pointer is current. Allocate the visible sequence at publication time.
+#[cfg(any(feature = "http-sparq", feature = "embedded-sparq"))]
+pub(crate) fn update_publish_append(
+    resource: &str,
+    key: &str,
+    blob_key: &str,
+    nonce: &str,
+    modified: &str,
+    fenced: bool,
+) -> Result<String, BuildError> {
+    let dir = super::append_dir(key);
+    let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
+    let type_essence = format!(
+        "LCASE(REPLACE(STRBEFORE(CONCAT(?ct, \";\"), \";\"), {}, \"\"))",
+        literal(r"^\s+|\s+$")
+    );
+    Ok(format!(
+        "DELETE {{ GRAPH {g} {{ {s} {pseq} ?oldSeq ; {pet} ?oldTag ; {pmod} ?oldMod }} \
+                   GRAPH {dir} {{ {s} {pseq} ?dirSeq }} }} \
+         INSERT {{ GRAPH {g} {{ {s} {pseq} ?next ; {pet} {tag} ; {pmod} {modified} }} \
+                   GRAPH {dir} {{ {s} {pct} \"application/n-triples\" ; {pbk} \"\" ; {pet} \"\" ; {pseq} ?next ; {contains} ?record }} \
+                   GRAPH ?record {{ {s} {pct} \"application/n-triples\" ; {pbk} {blob_key} ; {pet} \"\" ; {pseq} ?parent ; {pmod} {modified} }} \
+                   GRAPH {receipt} {{ {s} <urn:pss:index#appendBlobKey> {blob_key} ; {pseq} ?next }} }} \
+         WHERE {{ GRAPH {g} {{ {s} {pct} ?ct ; {pbk} {key} ; {pet} ?oldTag . \
+                   OPTIONAL {{ {s} {pseq} ?oldSeq }} OPTIONAL {{ {s} {pmod} ?oldMod }} }} \
+                   FILTER ({type_essence} IN (\"text/turtle\", \"application/n-triples\", \"application/n-quads\")) \
+                   OPTIONAL {{ GRAPH {dir} {{ {s} {pseq} ?dirSeq }} }} \
+                   BIND(COALESCE(?oldSeq, 0) AS ?parent) \
+                   BIND(IF(COALESCE(?dirSeq, 0) > ?parent, ?dirSeq, ?parent) + 1 AS ?next) FILTER (?next <= 18446744073709551615) \
+                   BIND(IRI(CONCAT({dir_text}, SUBSTR(CONCAT(\"00000000000000000000\", STR(?next)), STRLEN(STR(?next)) + 1), \"-\", {nonce_text})) AS ?record) {fence} }}",
+        g = iri(resource)?, s = iri_const(&s_record()), pseq = iri_const(&p_append_seq()),
+        pet = iri_const(&p_etag()), pmod = iri_const(&p_modified()),
+        pct = iri_const(&p_content_type()), pbk = iri_const(&p_blob_key()),
+        dir = iri(&dir)?, dir_text = literal(&dir), contains = iri_const(LDP_CONTAINS),
+        receipt = iri(&receipt)?, key = literal(key), blob_key = literal(blob_key),
+        tag = literal(&format!("\"append-{nonce}\"")), modified = datetime_literal(modified),
+        nonce_text = literal(nonce), fence = fence_guard(fenced, nonce),
+    ))
+}
+
+/// Create or replace a legacy metadata row with no stored append sequence.
+pub fn update_put_meta(
+    resource: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+) -> Result<String, BuildError> {
+    update_put_meta_with_append_seq(resource, content_type, blob_key, etag, modified, 0)
+}
+
 /// UPDATE: create-or-replace ONLY a resource's reserved index-record triples (content type, blob-key,
 /// ETag, and — when a value is given — modification time) — leaving everything else in the graph
 /// (containment `ldp:contains` edges, the resource's own RDF) untouched.
@@ -417,12 +523,13 @@ pub fn select_referenced_blob_keys() -> String {
 /// cleared (so writing `last_modified: None` faithfully leaves NO modification time — a later read
 /// returns `None`, never a stale `Some(...)` that could drive a wrong 304); the fresh value is
 /// INSERTed only when `modified` is `Some`.
-pub fn update_put_meta(
+pub(crate) fn update_put_meta_with_append_seq(
     resource: &str,
     content_type: &str,
     blob_key: &str,
     etag: &str,
     modified: Option<&str>,
+    append_seq: u64,
 ) -> Result<String, BuildError> {
     let g = iri(resource)?;
     let s = iri_const(&s_record());
@@ -430,6 +537,7 @@ pub fn update_put_meta(
     let pbk = iri_const(&p_blob_key());
     let pet = iri_const(&p_etag());
     let pmod = iri_const(&p_modified());
+    let pseq = iri_const(&p_append_seq());
     // `pss:modified` is single-valued exactly like the other record predicates, so its stale value is
     // ALWAYS DELETE-cleared — even when `modified` is `None`. This makes the written state faithful to
     // the `ResourceMeta`: writing `last_modified: None` genuinely clears any prior timestamp, so a
@@ -440,11 +548,12 @@ pub fn update_put_meta(
         None => String::new(),
     };
     Ok(format!(
-        "DELETE WHERE {{ GRAPH {g} {{ {s} {pmod} ?oldMod }} }} ; \
+        "DELETE WHERE {{ GRAPH {g} {{ {s} {pseq} ?oldSeq }} }} ; \
+         DELETE WHERE {{ GRAPH {g} {{ {s} {pmod} ?oldMod }} }} ; \
          DELETE WHERE {{ GRAPH {g} {{ {s} {pct} ?oldCt }} }} ; \
          DELETE WHERE {{ GRAPH {g} {{ {s} {pbk} ?oldBk }} }} ; \
          DELETE WHERE {{ GRAPH {g} {{ {s} {pet} ?oldEt }} }} ; \
-         INSERT DATA {{ GRAPH {g} {{ {s} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{mod_insert} . }} }}",
+         INSERT DATA {{ GRAPH {g} {{ {s} {pct} {ct} ; {pbk} {bk} ; {pet} {et} ; {pseq} {append_seq}{mod_insert} . }} }}",
         g = g,
         s = s,
         pmod = pmod,
@@ -507,6 +616,7 @@ pub fn update_create_child(
         modified,
         nonce,
         false,
+        0,
     )
 }
 
@@ -531,6 +641,32 @@ pub fn update_create_child_fenced(
         modified,
         nonce,
         true,
+        0,
+    )
+}
+
+/// Build a child transaction from a complete stored metadata snapshot.
+#[cfg(any(feature = "http-sparq", feature = "embedded-sparq"))]
+pub(crate) fn update_create_child_meta(
+    container: &str,
+    child: &str,
+    meta: &super::ResourceMeta,
+    nonce: &str,
+    fenced: bool,
+) -> Result<String, BuildError> {
+    let modified = meta
+        .last_modified
+        .and_then(super::timestamp::to_xsd_datetime);
+    create_child_guarded(
+        container,
+        child,
+        &meta.content_type,
+        &meta.blob_key,
+        &meta.etag,
+        modified.as_deref(),
+        nonce,
+        fenced,
+        meta.append_seq,
     )
 }
 
@@ -544,6 +680,7 @@ fn create_child_guarded(
     modified: Option<&str>,
     nonce: &str,
     fenced: bool,
+    append_seq: u64,
 ) -> Result<String, BuildError> {
     let cg = iri(child)?;
     let crec = iri_const(&s_record());
@@ -552,6 +689,7 @@ fn create_child_guarded(
     let pet = iri_const(&p_etag());
     let pmark = iri_const(&p_create_marker());
     let pmod = iri_const(&p_modified());
+    let pseq = iri_const(&p_append_seq());
     let pg = iri(container)?;
     let prec = iri_const(&s_record());
     let contains = iri_const(LDP_CONTAINS);
@@ -569,15 +707,16 @@ fn create_child_guarded(
     };
     Ok(format!(
         "DELETE {{ \
-            GRAPH {cg} {{ {crec} {pct} ?oldCt ; {pbk} ?oldBk ; {pet} ?oldEt{mod_del} . }} \
+            GRAPH {cg} {{ {crec} {pct} ?oldCt ; {pbk} ?oldBk ; {pet} ?oldEt ; {pseq} ?oldSeq{mod_del} . }} \
          }} INSERT {{ \
-            GRAPH {cg} {{ {crec} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{mod_ins} ; {pmark} {nce} . }} \
+            GRAPH {cg} {{ {crec} {pct} {ct} ; {pbk} {bk} ; {pet} {et} ; {pseq} {append_seq}{mod_ins} ; {pmark} {nce} . }} \
             GRAPH {pg} {{ {prec} {contains} {childi} . }} \
          }} WHERE {{ \
             GRAPH {pg} {{ {prec} {pct} ?anyCt }} \
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pct} ?oldCt }} }} \
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pbk} ?oldBk }} }} \
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pet} ?oldEt }} }} \
+            OPTIONAL {{ GRAPH {cg} {{ {crec} {pseq} ?oldSeq }} }} \
             {mod_opt}{fence}\
          }}",
         fence = fence_guard(fenced, nonce),
@@ -1061,12 +1200,12 @@ mod tests {
         // whole graph (which would erase containment edges + user RDF — the roborev finding).
         let q = update_put_meta("http://pod/c/", "text/turtle", "bk", "\"e\"", None).unwrap();
         assert!(!q.contains("DROP"), "must not DROP the graph: {q}");
-        // It targets exactly the four single-valued reserved predicates for deletion (modified is
+        // It targets exactly the five single-valued reserved predicates for deletion (modified is
         // ALWAYS cleared, even with None), then re-inserts.
         assert_eq!(
             q.matches("DELETE WHERE").count(),
-            4,
-            "four targeted deletes (incl. modified): {q}"
+            5,
+            "five targeted deletes (incl. modified and appendSeq): {q}"
         );
         assert!(q.contains("INSERT DATA"));
         assert!(q.contains(&iri_const(&p_content_type())));
@@ -1101,11 +1240,11 @@ mod tests {
             Some("2026-07-05T12:34:56Z"),
         )
         .unwrap();
-        // Four targeted deletes now: the three record predicates + the old modified.
+        // Five targeted deletes: the record predicates, modified and appendSeq.
         assert_eq!(
             q.matches("DELETE WHERE").count(),
-            4,
-            "three record deletes + one modified delete: {q}"
+            5,
+            "three record deletes + modified and appendSeq deletes: {q}"
         );
         assert!(
             q.contains(&iri_const(&p_modified())),

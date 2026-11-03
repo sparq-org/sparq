@@ -648,6 +648,7 @@ mod tests {
                 blob_key: key.clone(),
                 etag: key,
                 last_modified: Some(at),
+                append_seq: 0,
             };
             store
                 .sparq

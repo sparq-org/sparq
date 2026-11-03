@@ -354,6 +354,7 @@ async fn create_child_commits_metadata_and_membership_atomically() {
         blob_key: "k".into(),
         etag: "\"e\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
 
     // Missing container ⇒ NotFound, no metadata + no edge written.
@@ -613,6 +614,7 @@ async fn delete_meta_if_empty_on_the_sparq_client_is_atomic() {
         blob_key: "k".into(),
         etag: "\"e\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
 
     // Absent ⇒ NotFound.
@@ -662,6 +664,7 @@ async fn delete_meta_if_empty_folds_the_parent_detach_into_the_one_op() {
         blob_key: "k".into(),
         etag: "\"e\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
     sparq.put_meta(parent, meta.clone()).await.unwrap();
     // Index the empty sub-container AND its edge in the parent (create_child commits both).
@@ -1012,6 +1015,14 @@ struct StaleOnceSparq {
 
 #[async_trait]
 impl SparqClient for StaleOnceSparq {
+    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+        self.inner.bump_append(iri).await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        self.inner.publish_append(iri, key, blob_key).await
+    }
+
     fn call_timeout(&self) -> std::time::Duration {
         self.inner.call_timeout()
     }

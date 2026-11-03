@@ -38,6 +38,14 @@ impl<T> Clone for SharedStore<T> {
 
 #[async_trait]
 impl<T: SparqClient> SparqClient for SharedStore<T> {
+    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+        self.0.bump_append(iri).await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        self.0.publish_append(iri, key, blob_key).await
+    }
+
     async fn replace_meta_retaining(
         &self,
         iri: &str,
@@ -117,6 +125,10 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         self.0.exists(iri).await
+    }
+
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        self.0.begin_reclaim_with_appends(blob_key).await
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {

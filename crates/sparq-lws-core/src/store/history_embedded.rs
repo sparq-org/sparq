@@ -21,7 +21,7 @@ fn field_update(member: &str, fields: &[(&str, String)]) -> Result<String, Sparq
     ))
 }
 fn meta_update(member: &str, meta: &ResourceMeta) -> Result<String, SparqError> {
-    sparql::update_put_meta(
+    sparql::update_put_meta_with_append_seq(
         member,
         &meta.content_type,
         &meta.blob_key,
@@ -29,6 +29,7 @@ fn meta_update(member: &str, meta: &ResourceMeta) -> Result<String, SparqError> 
         meta.last_modified
             .and_then(timestamp::to_xsd_datetime)
             .as_deref(),
+        meta.append_seq,
     )
     .map_err(Into::into)
 }
@@ -69,7 +70,7 @@ fn records(
         .map(|m| sparql::iri(m).map(|iri| format!("BIND({iri} AS ?member)")))
         .transpose()?
         .unwrap_or_default();
-    let q = format!("SELECT ?member ?original ?ct ?bk ?etag ?mod ?order ?at ?read ?by WHERE {{ {bind} GRAPH {named_graph} {{ ?s <urn:pss:index#original> ?original ; <urn:pss:index#contentType> ?ct ; <urn:pss:index#blobKey> ?bk ; <urn:pss:index#etag> ?etag . OPTIONAL {{ ?s <urn:pss:index#modified> ?mod }} {extra} }} FILTER STRSTARTS(STR(?member), {}) {filter} }}", sparql::literal(prefix));
+    let q = format!("SELECT ?member ?original ?ct ?bk ?etag ?mod ?appendSeq ?order ?at ?read ?by WHERE {{ {bind} GRAPH {named_graph} {{ ?s <urn:pss:index#original> ?original ; <urn:pss:index#contentType> ?ct ; <urn:pss:index#blobKey> ?bk ; <urn:pss:index#etag> ?etag . OPTIONAL {{ ?s <urn:pss:index#modified> ?mod }} OPTIONAL {{ ?s <urn:pss:index#appendSeq> ?appendSeq }} {extra} }} FILTER STRSTARTS(STR(?member), {}) {filter} }}", sparql::literal(prefix));
     let mut q = q;
     if let Some(before) = before {
         let date = timestamp::to_xsd_datetime(before)
@@ -111,6 +112,11 @@ fn row_meta(
         blob_key: required("bk")?,
         etag: required("etag")?,
         last_modified: cell(r, row, "mod").and_then(|s| timestamp::from_xsd_datetime(&s)),
+        append_seq: cell(r, row, "appendSeq")
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+            .unwrap_or(0),
     })
 }
 pub(super) fn versions(
@@ -290,18 +296,7 @@ pub(super) fn restore(
         ));
     }
     let t = trash_entry(graph, member)?.ok_or(SparqError::NotFound)?;
-    let create = sparql::update_create_child(
-        parent,
-        target,
-        &t.meta.content_type,
-        &t.meta.blob_key,
-        &t.meta.etag,
-        t.meta
-            .last_modified
-            .and_then(timestamp::to_xsd_datetime)
-            .as_deref(),
-        &next_nonce(),
-    )?;
+    let create = sparql::update_create_child_meta(parent, target, &t.meta, &next_nonce(), false)?;
     let mut updates = vec![
         create,
         copy_body(member, target)?,

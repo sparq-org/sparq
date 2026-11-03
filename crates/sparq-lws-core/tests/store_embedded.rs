@@ -58,6 +58,7 @@ async fn durable_middle_delete_and_post_compaction_rewrites_preserve_other_resou
         blob_key: key.into(),
         etag: format!("\"{key}\""),
         last_modified: None,
+        append_seq: 0,
     };
     let mut client = EmbeddedSparqClient::open_or_create(&path).unwrap();
     let parent = "https://pod.example/alice/";
@@ -267,6 +268,7 @@ async fn create_child_commits_metadata_and_membership_atomically_on_the_engine()
         blob_key: "k".into(),
         etag: "\"e\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
 
     let err = sparq
@@ -303,6 +305,7 @@ async fn modified_time_round_trips_through_the_real_engine() {
         blob_key: "k".into(),
         etag: "\"e\"".into(),
         last_modified: Some(t),
+        append_seq: 0,
     };
     sparq.put_meta(iri, meta).await.unwrap();
     let read_back = sparq.get_meta(iri).await.unwrap();
@@ -319,6 +322,7 @@ async fn modified_time_round_trips_through_the_real_engine() {
         blob_key: "k2".into(),
         etag: "\"e2\"".into(),
         last_modified: Some(t2),
+        append_seq: 0,
     };
     sparq.put_meta(iri, meta2).await.unwrap();
     let after = sparq.get_meta(iri).await.unwrap();
@@ -335,6 +339,7 @@ async fn modified_time_round_trips_through_the_real_engine() {
         blob_key: "k3".into(),
         etag: "\"e3\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
     sparq.put_meta(none_iri, meta_none).await.unwrap();
     assert_eq!(
@@ -574,6 +579,7 @@ async fn referenced_blob_keys_on_the_embedded_client_collects_all_pointers() {
         blob_key: bk.into(),
         etag: "\"e\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
     sparq
         .put_meta("https://pod.example/a", m("k1"))
@@ -614,6 +620,7 @@ async fn named_graph_isolation_mutating_one_resource_never_bleeds_into_another()
         blob_key: bk.into(),
         etag: format!("\"{etag}\""),
         last_modified: None,
+        append_seq: 0,
     };
     let a = "https://pod.example/alice/a";
     let b = "https://pod.example/alice/b";
@@ -670,6 +677,7 @@ async fn concurrent_same_child_creates_commit_exactly_one_untorn_record() {
                 blob_key: "kc".into(),
                 etag: "\"ec\"".into(),
                 last_modified: None,
+                append_seq: 0,
             },
         )
         .await
@@ -688,6 +696,7 @@ async fn concurrent_same_child_creates_commit_exactly_one_untorn_record() {
                         blob_key: format!("k{i}"),
                         etag: format!("\"e{i}\""),
                         last_modified: None,
+                        append_seq: 0,
                     },
                 )
                 .await
@@ -733,6 +742,7 @@ async fn concurrent_delete_if_empty_vs_create_child_never_leaves_a_torn_state() 
             blob_key: bk.into(),
             etag: "\"e\"".into(),
             last_modified: None,
+            append_seq: 0,
         };
         let parent = "https://pod.example/";
         let container = "https://pod.example/dir/";

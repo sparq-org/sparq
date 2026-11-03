@@ -82,6 +82,10 @@ struct GatedStore {
 
 #[async_trait::async_trait]
 impl Store for GatedStore {
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        self.inner.append(iri, ntriples).await
+    }
+
     fn exclusive(&self) -> ServerResult<()> {
         self.inner.exclusive()
     }

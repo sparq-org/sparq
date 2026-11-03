@@ -13,6 +13,7 @@ fn meta(key: &str) -> ResourceMeta {
         blob_key: key.into(),
         etag: format!("\"{key}\""),
         last_modified: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(123)),
+        append_seq: 0,
     }
 }
 

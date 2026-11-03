@@ -575,6 +575,14 @@ struct ChurningSparq {
 
 #[async_trait::async_trait]
 impl SparqClient for ChurningSparq {
+    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+        self.inner.bump_append(iri).await
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        self.inner.publish_append(iri, key, blob_key).await
+    }
+
     fn call_timeout(&self) -> std::time::Duration {
         self.inner.call_timeout()
     }

@@ -28,6 +28,10 @@ pub struct ResourceMeta {
     pub blob_key: String,
     /// An opaque entity tag for conditional requests. M2: derived from the SPARQ index state.
     pub etag: String,
+    /// Append sequence for a metadata snapshot. CompositeStore publishes it with
+    /// the insert record; an insert record stores its predecessor, and an internal
+    /// append directory stores the allocation high-water mark.
+    pub append_seq: u64,
     /// The resource's server-recorded modification time (the `pss:modified` `xsd:dateTime` in the
     /// index), or `None` when the index holds no modification time for this resource.
     ///
@@ -38,6 +42,42 @@ pub struct ResourceMeta {
     /// [`super::Store::create_in_container`]) stamps it to the write instant, so a re-write bumps it
     /// and a subsequent `If-Modified-Since` correctly re-serves the changed representation.
     pub last_modified: Option<SystemTime>,
+}
+
+/// Whether N-Triples insert lines can be represented by this stored type.
+pub(crate) fn appendable(content_type: &str) -> bool {
+    matches!(
+        crate::ldp::content::stored_format(content_type),
+        Some(
+            crate::ldp::content::RdfFormat::Turtle
+                | crate::ldp::content::RdfFormat::NTriples
+                | crate::ldp::content::RdfFormat::NQuads
+        )
+    )
+}
+
+/// Prepare an append's index row without inspecting its bytes.
+pub(crate) fn advance_append(meta: &mut ResourceMeta) -> Result<(), SparqError> {
+    if !appendable(&meta.content_type) {
+        return Err(SparqError::Unsupported);
+    }
+    let seq = meta
+        .append_seq
+        .checked_add(1)
+        .ok_or_else(|| SparqError::Backend("append sequence exhausted".into()))?;
+    let mut nonce = [0u8; 16];
+    getrandom::getrandom(&mut nonce)
+        .map_err(|e| SparqError::Backend(format!("append ETag entropy: {e}")))?;
+    use std::fmt::Write as _;
+    let mut tag = String::from("\"append-");
+    for byte in nonce {
+        let _ = write!(tag, "{byte:02x}");
+    }
+    tag.push('"');
+    meta.etag = tag;
+    meta.append_seq = seq;
+    meta.last_modified = Some(crate::clock::now());
+    Ok(())
 }
 
 /// The result of ONE combined read-plan lookup ([`SparqClient::read_plan`]) — the whole per-read
@@ -83,7 +123,7 @@ pub enum DeleteOutcome {
 /// A SPARQ-client error (opaque — never leaks backend detail to a client).
 #[derive(Debug, thiserror::Error)]
 pub enum SparqError {
-    /// This backend does not implement the required atomic operation.
+    /// This backend or stored resource does not support the requested operation.
     #[error("operation unsupported by this index backend")]
     Unsupported,
     #[error("resource not indexed")]
@@ -270,6 +310,15 @@ pub trait SparqClient: Send + Sync {
     /// Whether the resource is indexed (the authoritative existence check — never an S3 HEAD).
     async fn exists(&self, iri: &str) -> Result<bool, SparqError>;
 
+    /// Begin reclamation and report `(claimed, has_append_directory)`. The
+    /// directory observation belongs to the same index step as the claim, so a
+    /// document with no stored inserts needs no extra cleanup lookup. The default
+    /// conservatively asks the store to check the directory after a successful claim.
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        let claimed = self.begin_reclaim(blob_key).await?;
+        Ok((claimed, claimed))
+    }
+
     /// Name the bytes under `blob_key` as being reclaimed, in one atomic step that also finds no
     /// record naming them as its bytes (a resource's, or a hold's): `Ok(false)`, with nothing
     /// named, when one does. Keys are minted per write and only a record already naming them
@@ -407,6 +456,28 @@ pub trait SparqClient: Send + Sync {
         Err(SparqError::Backend(
             "this index has no unsettled writes to fence".into(),
         ))
+    }
+
+    /// Advance an appendable document's sequence and refresh its strong ETag and
+    /// modification time in one indivisible index step. Returns its blob key and
+    /// the new sequence; an absent row is `NotFound`, a non-line format is
+    /// `Unsupported`. The default refuses without modifying anything.
+    /// This raw primitive updates metadata alone. CompositeStore uses
+    /// [`publish_append`](Self::publish_append) to advance its visible sequence
+    /// together with the immutable insert record instead.
+    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+        let _ = iri;
+        Err(SparqError::Unsupported)
+    }
+
+    /// Publish already-stored insert bytes together with a fresh sequence and
+    /// validators in one index step. `key` must still be the target's blob key;
+    /// otherwise return `NotFound`. The record's sequence is allocated here,
+    /// after all bytes exist, so no older snapshot can gain a late insert.
+    /// The default refuses without changing the index.
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        let _ = (iri, key, blob_key);
+        Err(SparqError::Unsupported)
     }
 
     /// Whether [`raise_marker`](SparqClient::raise_marker) is atomic here. The default is
@@ -549,6 +620,7 @@ pub(crate) fn marker_meta(value: &str) -> ResourceMeta {
         blob_key: String::new(),
         etag: value.to_string(),
         last_modified: None,
+        append_seq: 0,
     }
 }
 
@@ -571,6 +643,8 @@ struct Meta {
     pooled: usize,
     /// Records of holds ([`super::is_hold_record`]), admitted apart from every ceiling.
     holds: usize,
+    /// Zero-byte append directory rows; their content records remain charged.
+    append_directories: usize,
     /// The one notification marker ([`super::is_service_marker`]) holding the slot kept for it,
     /// admitted apart from every ceiling and counted in none: the first stored. Any other IRI of
     /// that shape (another origin's) is an ordinary pool record.
@@ -623,6 +697,7 @@ impl Meta {
         let marker = self.is_marker_slot(&iri);
         let pooled = super::in_service_pool(&iri) && !marker;
         let hold = super::is_hold_record(&iri);
+        let append_directory = is_append_directory(&iri);
         if marker && self.marker.is_none() {
             self.marker = Some(iri.clone());
         }
@@ -630,6 +705,7 @@ impl Meta {
         if replaced.is_none() {
             self.pooled += usize::from(pooled);
             self.holds += usize::from(hold);
+            self.append_directories += usize::from(append_directory);
         }
         replaced
     }
@@ -644,8 +720,17 @@ impl Meta {
         if super::is_hold_record(iri) {
             self.holds -= 1;
         }
+        if is_append_directory(iri) {
+            self.append_directories -= 1;
+        }
         Some(gone)
     }
+}
+
+fn is_append_directory(iri: &str) -> bool {
+    iri.strip_prefix("urn:x-sparq-lws:appends/")
+        .and_then(|tail| tail.strip_suffix('/'))
+        .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 /// The in-memory index state: metadata records + containment membership.
@@ -738,6 +823,7 @@ impl InMemorySparqClient {
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
         if index.meta.contains_key(iri)
             || super::is_hold_record(iri)
+            || is_append_directory(iri)
             || index.meta.is_marker_slot(iri)
         {
             return Ok(());
@@ -747,7 +833,11 @@ impl InMemorySparqClient {
             (pooled, self.limits.max_pool_resource_count)
         } else {
             (
-                index.meta.len() - pooled - index.meta.holds() - index.meta.markers(),
+                index.meta.len()
+                    - pooled
+                    - index.meta.holds()
+                    - index.meta.markers()
+                    - index.meta.append_directories,
                 self.limits.max_resource_count,
             )
         };
@@ -1058,6 +1148,77 @@ impl SparqClient for InMemorySparqClient {
         Ok(raised)
     }
 
+    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let mut meta = guard.meta.get(iri).cloned().ok_or(SparqError::NotFound)?;
+        advance_append(&mut meta)?;
+        let result = (meta.blob_key.clone(), meta.append_seq);
+        guard.meta.insert(iri.to_string(), meta);
+        Ok(result)
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let mut index = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let mut meta = index
+            .meta
+            .get(iri)
+            .cloned()
+            .filter(|m| m.blob_key == key)
+            .ok_or(SparqError::NotFound)?;
+        let dir = super::append_dir(key);
+        let predecessor = meta.append_seq;
+        meta.append_seq = meta
+            .append_seq
+            .max(index.meta.get(&dir).map_or(0, |m| m.append_seq));
+        advance_append(&mut meta)?;
+        let record = format!(
+            "{dir}{:020}-{}",
+            meta.append_seq,
+            meta.etag.trim_matches('"')
+        );
+        self.admit_resource(&index, &dir)?;
+        let directory = ResourceMeta {
+            content_type: "application/n-triples".into(),
+            blob_key: String::new(),
+            etag: String::new(),
+            last_modified: None,
+            append_seq: meta.append_seq,
+        };
+        let previous_dir = index.meta.insert(dir.clone(), directory);
+        if let Err(e) = self.admit_resource(&index, &record) {
+            match previous_dir {
+                Some(previous) => {
+                    index.meta.insert(dir, previous);
+                }
+                None => {
+                    index.meta.remove(&dir);
+                }
+            }
+            return Err(e);
+        }
+        index.meta.insert(
+            record.clone(),
+            ResourceMeta {
+                content_type: "application/n-triples".into(),
+                blob_key: blob_key.into(),
+                etag: String::new(),
+                last_modified: meta.last_modified,
+                append_seq: predecessor,
+            },
+        );
+        index.children.entry(dir).or_default().push(record);
+        index.meta.insert(iri.into(), meta);
+        Ok(())
+    }
+
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         let guard = self
             .inner
@@ -1069,6 +1230,18 @@ impl SparqClient for InMemorySparqClient {
     /// Held in this process's memory: nobody else's.
     fn exclusive(&self) -> Result<(), SparqError> {
         Ok(())
+    }
+
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        if guard.meta.values().any(|m| m.blob_key == blob_key) {
+            return Ok((false, false));
+        }
+        guard.reclaiming.insert(blob_key.to_string());
+        Ok((true, guard.meta.contains_key(&super::append_dir(blob_key))))
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
@@ -1323,6 +1496,7 @@ mod tests {
             blob_key: blob_key.into(),
             etag: "\"etag\"".into(),
             last_modified: None,
+            append_seq: 0,
         }
     }
 

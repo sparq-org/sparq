@@ -191,6 +191,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-lws-core:** insert-only LDP PATCH without Read stores inserts beside a
+  Turtle, N-Triples or N-Quads document and returns `204` with no Location or ETag
+  for both append and creation. Other stored types remain refused from index
+  metadata; creation still requires Append on the container. New public
+  `Store::append`, `SparqClient::bump_append`, `SparqClient::publish_append` and
+  `ResourceMeta::append_seq` support
+  merged reads, replacement, put-back and reclamation. The wasm persistence journal
+  records and replays stored inserts.
+
 - **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
   A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
   and absent targets answer `204`, subject to the same full-budget and set-aside-parent checks.

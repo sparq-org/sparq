@@ -472,12 +472,13 @@ struct SelectResult {
 impl HttpSparqClient {
     async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
+        let u = sparql::update_put_meta_with_append_seq(
             iri,
             &meta.content_type,
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            meta.append_seq,
         )?;
         self.update_raw(&u)
             .await
@@ -516,6 +517,12 @@ impl SparqClient for HttpSparqClient {
             blob_key,
             etag,
             last_modified,
+            append_seq: row
+                .get("appendSeq")
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+                .unwrap_or(0),
         })
     }
 
@@ -532,6 +539,100 @@ impl SparqClient for HttpSparqClient {
     ) -> Result<(), SparqError> {
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
+    }
+
+    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let nonce = next_nonce()?;
+        let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
+        let etag = format!("\"append-{nonce}\"");
+        let modified = timestamp::to_xsd_datetime(crate::clock::now())
+            .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
+        let update = sparql::update_bump_append(iri, &receipt, &etag, &modified)?;
+        self.update_raw(&update)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_append_receipt(&receipt)?,
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        let Some(row) = result.rows.first() else {
+            let meta = self.get_meta(iri).await?;
+            return Err(if super::sparq::appendable(&meta.content_type) {
+                SparqError::Backend("append sequence exhausted".into())
+            } else {
+                SparqError::Unsupported
+            });
+        };
+        let key = row
+            .get("bk")
+            .cloned()
+            .ok_or_else(|| SparqError::Backend("append receipt missing key".into()))?;
+        let seq = row
+            .get("seq")
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| SparqError::Backend("append receipt missing sequence".into()))?;
+        // Cleanup is separate from the one indivisible document update. A lost
+        // cleanup reply does not undo a committed append reservation.
+        let _ = self
+            .update_raw(&sparql::update_delete_resource(&receipt)?)
+            .await;
+        Ok((key, seq))
+    }
+
+    async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        let nonce = next_nonce()?;
+        let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
+        let modified = timestamp::to_xsd_datetime(crate::clock::now())
+            .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
+        let update = sparql::update_publish_append(iri, key, blob_key, &nonce, &modified, true)?;
+        let dir = super::append_dir(key);
+        let fenced = self.update_fenced(&update, &nonce, &[iri, &dir]).await?;
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_append_receipt(&receipt)?,
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        if result.rows.is_empty() {
+            return Err(if fenced {
+                SparqError::Backend("append publication did not commit".into())
+            } else {
+                SparqError::NotFound
+            });
+        }
+        let _ = self
+            .update_raw(&sparql::update_delete_resource(&receipt)?)
+            .await;
+        Ok(())
+    }
+
+    async fn begin_reclaim_with_appends(&self, blob_key: &str) -> Result<(bool, bool), SparqError> {
+        self.update_raw(&sparql::update_begin_reclaim(blob_key))
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let (body, _) = self
+            .query_raw(
+                &sparql::select_reclaim_with_appends(blob_key),
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        Ok((
+            !result.rows.is_empty(),
+            result
+                .rows
+                .iter()
+                .any(|row| row.get("hasAppends").is_some_and(|s| s == "true")),
+        ))
     }
 
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
@@ -657,19 +758,10 @@ impl SparqClient for HttpSparqClient {
         // ONE atomic update: DELETE any stale child record + marker, INSERT the child record + the
         // containment edge + THIS operation's marker, guarded by the container-record EXISTS in the
         // WHERE clause. A missing container ⇒ the WHERE yields nothing ⇒ nothing inserted.
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
         //
         // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
         // the ASK below reads is final.
-        let u = sparql::update_create_child_fenced(
-            container,
-            child,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-            &nonce,
-        )?;
+        let u = sparql::update_create_child_meta(container, child, &meta, &nonce, true)?;
         let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
 
         // CONFIRM the guard matched by ASKing for OUR marker (not the shared containment edge):
@@ -796,6 +888,12 @@ impl SparqClient for HttpSparqClient {
                 blob_key: bind("bk")?,
                 etag: bind("etag")?,
                 last_modified,
+                append_seq: row
+                    .get("appendSeq")
+                    .map(|s| s.parse())
+                    .transpose()
+                    .map_err(|_| SparqError::Backend("invalid append sequence".into()))?
+                    .unwrap_or(0),
             };
             // First row per graph wins (a well-formed index holds exactly one record per graph —
             // `update_put_meta`/`update_create_child` keep the record single-valued; this mirrors

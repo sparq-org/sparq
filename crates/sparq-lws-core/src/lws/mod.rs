@@ -3506,6 +3506,10 @@ pub(crate) mod test_store {
 
     #[async_trait]
     impl Store for FlakyStore {
+        async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+            self.inner.append(iri, ntriples).await
+        }
+
         fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
             self.inner.lifecycle()
         }
