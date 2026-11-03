@@ -260,3 +260,71 @@ fn large_policy_inputs_match_main() {
     .unwrap();
     assert!(out.granted);
 }
+
+pub(crate) fn source_only_policy_cases() -> Vec<String> {
+    let base = "@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read; o:target <urn:t>; o:assignee <urn:alice> .\n";
+    let mut cases = Vec::new();
+    let mut source = format!("{base}<urn:unused> <urn:metadata> ");
+    for i in 0..10_000 {
+        if i > 0 {
+            source.push_str(", ");
+        }
+        source.push_str(&format!("\"v{i:05}{}\"", "x".repeat(90)));
+    }
+    source.push_str(" .\n#");
+    let cap = sparq_solid::default_auth_budget().max_input_bytes;
+    source.extend(std::iter::repeat_n(' ', cap - 1 - source.len()));
+    cases.push(source);
+    for language in [false, true] {
+        let mut source = format!("{base}<urn:unused> <urn:metadata> ");
+        for i in 0..20_000 {
+            if i > 0 {
+                source.push_str(", ");
+            }
+            if language {
+                source.push_str(&format!("\"word{i:05}{}\"@en", "x".repeat(25)));
+            } else {
+                source.push_str(&format!("10000000000000000000000000000000{i:08}"));
+            }
+        }
+        source.push_str(" .");
+        cases.push(source);
+    }
+    let mut source = format!(
+        "{base}@prefix l: <urn:long:{}:> . l:s l:p ",
+        "x".repeat(120)
+    );
+    for i in 0..17_000 {
+        if i > 0 {
+            source.push_str(", ");
+        }
+        source.push_str(&format!("l:o{i}"));
+    }
+    source.push_str(" .");
+    cases.push(source);
+    for distinct in [true, false] {
+        let mut source = format!("{base}<urn:unused> <urn:metadata> ");
+        for i in 0..40_000 {
+            if i > 0 {
+                source.push_str(", ");
+            }
+            source.push_str(&format!("<urn:o{}>", if distinct { i } else { 0 }));
+        }
+        source.push_str(" .");
+        cases.push(source);
+    }
+    assert!(cases.iter().all(|source| source.len() <= cap));
+    cases
+}
+
+#[test]
+fn source_only_policy_inputs_match_main() {
+    let request = Request::new("http://www.w3.org/ns/odrl/2/read")
+        .on("urn:t")
+        .by("urn:alice");
+    for source in source_only_policy_cases() {
+        let result =
+            sparq_solid::odrl_bridge::materialize_odrl_n3(&mut Graph::new(), &source, &request);
+        assert!(result.as_ref().is_ok_and(|out| out.granted), "{result:?}");
+    }
+}

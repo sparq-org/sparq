@@ -584,19 +584,14 @@ successful results carrying `BridgeOutcome.refused`; they are distinct from I/O 
   silently ignoring it would drop a deny and WIDEN access), or an invalid request-field IRI all return
   `Err` and materialize **nothing**. Grants/denies land in `<urn:sparq:auth>` +
   `<urn:sparq:auth-bridged>` exactly as the Rust bridge writes them.
-  One ledger covers source admission, policy extraction, input facts and all five
-  closures. The source length is bounded by `max_input_bytes` before strict Turtle
-  parsing, using the source-byte ledger dimension. Independently, each policy
-  term occurrence contributes its lexical bytes once to the aggregate input-byte
-  allowance; policy model allocations share that allowance. Every parsed quad,
-  including duplicates, charges `max_input_facts` once. Request facts and lexical
-  bytes are admitted before interning. Control-document byte and per-input-term
-  caps do not apply to policy or request facts on this lane. The one new refusal
-  is a source over `max_input_bytes`, reported as `InputBytes` before parsing.
-  Resource enumeration is absent.
-  The core Turtle parser currently fills its dictionary and row buffer before the
-  bridge checks each parsed quad, including duplicates. These checks precede index
-  construction; source-byte admission already precedes parsing.
+  The bridge ledger covers source admission, request facts and all five closures.
+  Policy source length is checked against `max_input_bytes` before strict Turtle
+  parsing. This is the only policy input-cap check: policy term bytes and quads
+  do not consume bridge input counters. Policy extraction uses its own ledger,
+  sized with `default_policy_limits_for` the loaded graph, as the ordinary parser
+  does. Request facts and lexical bytes are admitted before interning. The one new
+  refusal is a source over `max_input_bytes`, reported as `InputBytes` before parsing.
+  The existing aggregate decision-work allowance still bounds all closures.
 - `store.refresh_odrl_grant(&Policy, &Request, BridgeKind)` / `refresh_odrl_grants()` —
   **opt-in** (`odrl-bridge`; sq-dpk4): re-evaluate **bridged** ODRL grants when
   the policy changes and **retract** the ones that no longer hold (a withdrawn permission, a
