@@ -212,3 +212,51 @@ fn legacy_reader_term_refusals() {
         );
     }
 }
+
+pub(crate) fn boundary_policy_source() -> String {
+    let cap = sparq_solid::default_auth_budget().max_input_bytes;
+    let mut source = String::from("@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read; o:target <urn:t>; o:assignee <urn:alice> . <urn:unused> <urn:metadata> \"");
+    source.extend(std::iter::repeat_n('x', cap - 16 * 1024));
+    source.push_str("\" .\n#");
+    source.extend(std::iter::repeat_n(' ', cap - 1 - source.len()));
+    source
+}
+
+#[test]
+fn large_policy_inputs_match_main() {
+    let request = Request::new("http://www.w3.org/ns/odrl/2/read")
+        .on("urn:t")
+        .by("urn:alice");
+    let base = "@prefix o: <http://www.w3.org/ns/odrl/2/> . <urn:p> o:permission <urn:r> . <urn:r> o:action o:read; o:target <urn:t>; o:assignee <urn:alice> .\n";
+    for count in [400, 31_000] {
+        let mut source = base.to_owned();
+        for i in 0..count {
+            source.push_str(&format!("<urn:s{i}> <urn:metadata> <urn:value> .\n"));
+        }
+        // Use the short predicate/object from the independent size probe.
+        source = source
+            .replace("<urn:metadata>", "<urn:p>")
+            .replace("<urn:value>", "<urn:o>");
+        assert!(source.len() < sparq_solid::default_auth_budget().max_input_bytes);
+        let out =
+            sparq_solid::odrl_bridge::materialize_odrl_n3(&mut Graph::new(), &source, &request)
+                .unwrap();
+        assert!(out.granted);
+    }
+    let out = sparq_solid::odrl_bridge::materialize_odrl_n3(
+        &mut Graph::new(),
+        &boundary_policy_source(),
+        &request,
+    )
+    .unwrap();
+    assert!(out.granted);
+    let long_party = format!("urn:{}", "a".repeat(5000));
+    let source = base.replace("urn:alice", &long_party);
+    let out = sparq_solid::odrl_bridge::materialize_odrl_n3(
+        &mut Graph::new(),
+        &source,
+        &request.by(long_party),
+    )
+    .unwrap();
+    assert!(out.granted);
+}

@@ -2635,6 +2635,27 @@ mod metered_tests {
             assert!(n.get() >= 4000, "all constraints must be evaluated");
             assert!(n.get() <= 8000, "each constraint probes at most two groups");
         });
+
+        let subsumed = crate::Request::new(format!("{ODRL_NS}read"))
+            .for_purpose(Value::Iri("urn:child".into()))
+            .with_purpose_subsumption("urn:child", "urn:v0");
+        SET_TEXT_BUILDS.with(|n| n.set(0));
+        assert!(crate::evaluate(&policy, &subsumed).allow);
+        let subsumption_builds = SET_TEXT_BUILDS.with(|n| n.get());
+
+        let recipient_rdf = rdf.replace("o:leftOperand o:purpose", "o:leftOperand o:recipient");
+        let recipients = parse_policy_str(&recipient_rdf, "turtle").unwrap();
+        let recipient = crate::Request::new(format!("{ODRL_NS}read"))
+            .by("urn:recipient")
+            .with_party_membership("urn:recipient", "urn:v0");
+        SET_TEXT_BUILDS.with(|n| n.set(0));
+        assert!(crate::evaluate(&recipients, &recipient).allow);
+        let recipient_builds = SET_TEXT_BUILDS.with(|n| n.get());
+        assert_eq!(
+            (subsumption_builds, recipient_builds),
+            (0, 0),
+            "subsumption or recipient membership joined shared groups"
+        );
     }
 
     #[test]

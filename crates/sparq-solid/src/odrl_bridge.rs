@@ -1857,9 +1857,9 @@ pub fn materialize_odrl_n3(
 /// with ([`crate::PodStore::auth_budget`]), so a lowered budget is honoured on this lane as
 /// it is on the WAC and ACP ones; `materialize_odrl_n3` uses the default.
 ///
-/// Source bytes are charged before Turtle parsing. Policy terms, parser allocations
-/// and assembled policy/request facts share the input-byte and input-fact caps;
-/// individual terms retain `max_input_term_bytes`. No resources are enumerated.
+/// Source bytes are charged before Turtle parsing. Input lexical terms share the
+/// aggregate input-byte allowance and each parsed quad charges the fact allowance
+/// once. Control-document and per-input-term caps do not apply to this lane.
 /// Use [`crate::PodStore::materialize_odrl_n3`] to apply a store's closure limits too.
 ///
 /// # Errors
@@ -1901,20 +1901,7 @@ impl crate::PodStore {
         let result = materialize_odrl_n3_limited(view, policy_ttl, request, budget, limits);
         let (outcome, policy) = match result {
             Ok(result) => result,
-            Err(N3BridgeError::Prepare(error)) => {
-                return Err(match crate::auth_allowance_refusal(&error) {
-                    Some(
-                        crate::AuthAllowance::TotalJoinRows
-                        | crate::AuthAllowance::JoinRows
-                        | crate::AuthAllowance::RoundsOrFacts
-                        | crate::AuthAllowance::TermBytes,
-                    ) => crate::materialize::allowance_refusal(
-                        crate::AuthAllowance::DecisionWork,
-                        &error,
-                    ),
-                    _ => error,
-                });
-            }
+            Err(N3BridgeError::Prepare(error)) => return Err(error),
             Err(N3BridgeError::Write(error)) => return self.grant_write_result(Err(error)),
         };
         if outcome.granted || outcome.prohibited {
@@ -1950,10 +1937,9 @@ fn load_policy_metered(
             e
         )
     })?;
-    ledger.open()?;
     for triple in &triples {
         for id in triple {
-            ledger.stored_term("ODRL policy", &dict, *id)?;
+            charge_policy_term(&dict, *id, ledger)?;
         }
         ledger
             .core()
@@ -1962,6 +1948,64 @@ fn load_policy_metered(
     }
     let graph = Graph::from_parts(dict, triples);
     Ok(graph)
+}
+
+// This lane reuses dictionary ids, so admit their lexical bytes without the
+// control-document term-node overhead or its individual-term cap.
+fn charge_policy_term(
+    dict: &Dict,
+    id: Id,
+    ledger: &mut crate::budget::AuthLedger,
+) -> Result<(), String> {
+    use sparq_core::dict::{split_lang_dir, INLINE_BASE};
+    use sparq_core::meter::{Exceeded, MAX_TRIPLE_DEPTH};
+    let mut pending = [(id, 0usize); 2 * MAX_TRIPLE_DEPTH + 1];
+    let mut len = 1;
+    let mut bytes = 0usize;
+    while len > 0 {
+        len -= 1;
+        let (id, depth) = pending[len];
+        let lexical = if is_inline(id) {
+            let value = id - INLINE_BASE;
+            (if value == 0 {
+                1
+            } else {
+                value.ilog10() as usize + 1
+            }) + "http://www.w3.org/2001/XMLSchema#integer".len()
+        } else {
+            match dict.term_parts(id) {
+                TermParts::Iri { prefix, suffix } => prefix.len().saturating_add(suffix.len()),
+                TermParts::Blank(value) => value.len(),
+                TermParts::Lit {
+                    value,
+                    datatype,
+                    lang,
+                } => value
+                    .len()
+                    .saturating_add(datatype.len())
+                    .saturating_add(lang.map_or(0, |lang| split_lang_dir(lang).0.len())),
+                TermParts::Triple(ids) => {
+                    if depth >= MAX_TRIPLE_DEPTH {
+                        return Err(ledger.refusal(
+                            Exceeded::new(Dim::TermDepth, MAX_TRIPLE_DEPTH, depth + 1),
+                            Dim::Bytes,
+                            "ODRL policy",
+                        ));
+                    }
+                    for child in ids {
+                        pending[len] = (child, depth + 1);
+                        len += 1;
+                    }
+                    0
+                }
+            }
+        };
+        bytes = bytes.saturating_add(lexical);
+    }
+    ledger
+        .core()
+        .charge(Dim::Bytes, bytes)
+        .map_err(|e| ledger.refusal(e, Dim::Bytes, "ODRL policy"))
 }
 
 enum N3BridgeError {
@@ -1996,6 +2040,7 @@ fn materialize_odrl_n3_limited(
     let policy_limits = sparq_policy::default_policy_limits();
     let mut core_limits = *ledger.core().limits();
     core_limits.source_bytes = budget.max_input_bytes;
+    core_limits.term_bytes = usize::MAX;
     core_limits.depth = policy_limits.depth;
     core_limits.nodes = policy_limits.nodes;
     core_limits.query_rows = policy_limits.query_rows;
@@ -2004,8 +2049,15 @@ fn materialize_odrl_n3_limited(
     // The source charge precedes the only Turtle parser invocation.
     let policy_graph = load_policy_metered(policy_ttl, &mut ledger)?;
     ledger.checkpoint()?;
-    let policy_triples =
-        crate::loader::graph_triples_metered(&policy_graph, "ODRL policy", &mut ledger)?;
+    // Source terms and raw quads were admitted once by the loader. Validation
+    // borrows their ids; reconstruct its temporary rows without charging them again.
+    let mut policy_triples = Vec::new();
+    let scan = policy_graph.store().scan(&[None, None, None]);
+    ledger.reserve(&mut policy_triples, scan.rows.len(), Dim::Nodes)?;
+    for row in scan.rows.iter() {
+        policy_triples.push(scan.to_spo(row).map(|id| policy_graph.dict().term(id)));
+    }
+    drop(scan);
     ledger.checkpoint()?;
 
     // 0a. Run the SAME `odrl:conflict` admissibility guard every Rust
@@ -2066,9 +2118,8 @@ fn materialize_odrl_n3_limited(
         let triple = scan.to_spo(row);
         for id in triple {
             validate_legacy_input_term(policy_graph.dict(), id)?;
-            ledger.stored_term("ODRL policy", policy_graph.dict(), id)?;
         }
-        ledger.reserve(&mut closure, 1, Dim::Facts)?;
+        ledger.reserve(&mut closure, 1, Dim::Nodes)?;
         closure.push(triple);
     }
     drop(scan);
@@ -2688,10 +2739,17 @@ fn intern_request(
             None => TermRef::Iri(value),
         };
         for term in [TermRef::Iri(REQUEST_IRI), TermRef::Iri(predicate), object] {
+            let bytes = match term {
+                TermRef::Iri(value) => value.len(),
+                TermRef::Literal {
+                    value, datatype, ..
+                } => value.len().saturating_add(datatype.len()),
+                _ => unreachable!("request facts contain only IRIs and dateTime literals"),
+            };
             ledger
                 .core()
-                .term(term)
-                .map_err(|e| ledger.refusal(e, Dim::TermBytes, "ODRL request"))?;
+                .charge(Dim::Bytes, bytes)
+                .map_err(|e| ledger.refusal(e, Dim::Bytes, "ODRL request"))?;
         }
         ledger.reserve(facts, 1, Dim::Facts)?;
         let object = match datatype {
@@ -2764,6 +2822,8 @@ mod tests {
             Some(crate::AuthAllowance::InputBytes),
             "{err}"
         );
+        assert!(err.contains("the ODRL policy source"), "{err}");
+        assert!(!err.contains("access-control document"), "{err}");
         SOURCE_PARSES.with(|count| assert_eq!(count.get(), 0, "refused source was parsed"));
         assert_eq!(bridge_golden::graph_snapshot(&graph), before);
     }
@@ -2811,6 +2871,69 @@ mod tests {
     }
 
     #[test]
+    fn policy_input_counts_each_quad_and_lexical_term_once() {
+        let source = "<urn:s> <urn:p> \"value\" . <urn:s> <urn:p> \"value\" .";
+        let mut budget = crate::default_auth_budget();
+        budget.max_document_bytes = 0;
+        budget.max_input_term_bytes = 0;
+        let mut ledger = crate::budget::AuthLedger::new(budget);
+        let graph = load_policy_metered(source, &mut ledger).unwrap();
+        assert_eq!(graph.len(), 1);
+        assert_eq!(ledger.core().spent(Dim::Facts), 2);
+        assert_eq!(ledger.core().spent(Dim::SourceBytes), source.len());
+        assert_eq!(ledger.core().spent(Dim::DocumentBytes), 0);
+        assert_eq!(
+            ledger.core().spent(Dim::Bytes),
+            2 * (5 + 5 + 5 + "http://www.w3.org/2001/XMLSchema#string".len())
+        );
+    }
+
+    #[test]
+    fn policy_source_boundary_keeps_main_outcome_without_document_or_term_caps() {
+        let mut source = bridge_golden::boundary_policy_source();
+        let budget = crate::default_auth_budget();
+        assert_eq!(source.len(), budget.max_input_bytes - 1);
+        let mut graph = Graph::new();
+        let result =
+            materialize_odrl_n3_with_budget(&mut graph, &source, &metered_request(), budget);
+        assert!(result.as_ref().is_ok_and(|out| out.granted), "{result:?}");
+        let expected = materialize_odrl_n3_with_budget(
+            &mut Graph::new(),
+            METERED_POLICY,
+            &metered_request(),
+            budget,
+        )
+        .unwrap();
+        assert_eq!(format!("{:?}", result.unwrap()), format!("{expected:?}"));
+        let before = bridge_golden::graph_snapshot(&graph);
+        source.push_str("  ");
+        assert_eq!(source.len(), budget.max_input_bytes + 1);
+        SOURCE_PARSES.with(|count| count.set(0));
+        let error =
+            materialize_odrl_n3_with_budget(&mut graph, &source, &metered_request(), budget)
+                .unwrap_err();
+        assert_eq!(
+            crate::auth_allowance_refusal(&error),
+            Some(crate::AuthAllowance::InputBytes)
+        );
+        SOURCE_PARSES.with(|count| assert_eq!(count.get(), 0));
+        assert_eq!(bridge_golden::graph_snapshot(&graph), before);
+
+        let mut budget = budget;
+        budget.max_document_bytes = 0;
+        budget.max_input_term_bytes = 0;
+        let long_party = format!("urn:{}", "a".repeat(5000));
+        let source = METERED_POLICY.replace("urn:alice", &long_party);
+        let result = materialize_odrl_n3_with_budget(
+            &mut Graph::new(),
+            &source,
+            &metered_request().by(long_party),
+            budget,
+        );
+        assert!(result.as_ref().is_ok_and(|out| out.granted), "{result:?}");
+    }
+
+    #[test]
     fn bridge_policy_source_is_parsed_once() {
         SOURCE_PARSES.with(|count| count.set(0));
         let out = materialize_odrl_n3_with_budget(
@@ -2835,27 +2958,28 @@ mod tests {
         );
         let before = bridge_golden::graph_snapshot(store.graph());
         let mut limits = store.auth_limits();
-        limits.max_facts = 1;
+        limits.max_total_join_rows = 1;
         store.set_auth_limits(limits);
         let result = store.materialize_odrl_n3(METERED_POLICY, &metered_request());
         assert!(result.is_err(), "lowered store limits were ignored");
         let err = result.unwrap_err();
         assert_eq!(
             crate::auth_allowance_refusal(&err),
-            Some(crate::AuthAllowance::DecisionWork),
+            Some(crate::AuthAllowance::TotalJoinRows),
             "{err}"
         );
+        assert!(err.contains("max_total_join_rows"), "{err}");
         assert_eq!(bridge_golden::graph_snapshot(store.graph()), before);
     }
 
     #[test]
     fn request_facts_are_charged_before_dictionary_or_row_growth() {
-        for (term_cap, fact_cap, kind) in [
+        for (byte_cap, fact_cap, kind) in [
             (usize::MAX, 0, crate::AuthAllowance::InputFacts),
-            (1, usize::MAX, crate::AuthAllowance::InputTermBytes),
+            (1, usize::MAX, crate::AuthAllowance::InputBytes),
         ] {
             let mut budget = crate::default_auth_budget();
-            budget.max_input_term_bytes = term_cap;
+            budget.max_input_bytes = byte_cap;
             budget.max_input_facts = fact_cap;
             let mut ledger = crate::budget::AuthLedger::new(budget);
             let mut dict = Dict::new();

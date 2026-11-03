@@ -550,7 +550,8 @@ successful results carrying `BridgeOutcome.refused`; they are distinct from I/O 
   `default_auth_budget()`). `PodStore::materialize_odrl_n3(policy_ttl, &Request)`
   uses the store's `auth_budget()` and `auth_limits()`, tracks its resulting policy
   grants and refreshes the session index. Lowered closure limits refuse with
-  `AuthAllowance::DecisionWork`; admission refusals preserve the existing graph.
+  the per-closure kind (such as `AuthAllowance::TotalJoinRows`), whose hint names
+  the lowered setting; admission refusals preserve the existing graph.
   The free functions retain the default per-closure limits.
   — **opt-in** (`odrl-bridge`; sq-zgbso.2, sq-zgbso.2): an alternative
   materialization path that runs the stateless ODRL core as **five stratified `reason_n3` calls**
@@ -585,12 +586,14 @@ successful results carrying `BridgeOutcome.refused`; they are distinct from I/O 
   `<urn:sparq:auth-bridged>` exactly as the Rust bridge writes them.
   One ledger covers source admission, policy extraction, input facts and all five
   closures. The source length is bounded by `max_input_bytes` before strict Turtle
-  parsing, using the source-byte ledger dimension. Independently, policy term
-  copies, parser model bytes and interned input share an aggregate byte allowance
-  of that same configured size. Source and assembled facts both charge `max_input_facts`; each term is
-  checked against `max_input_term_bytes`. These existing input caps now also apply
-  to this lane, so an over-cap source can report `InputBytes` before a Turtle error.
-  Document bytes apply to policy terms, and resource enumeration is absent.
+  parsing, using the source-byte ledger dimension. Independently, each policy
+  term occurrence contributes its lexical bytes once to the aggregate input-byte
+  allowance; policy model allocations share that allowance. Every parsed quad,
+  including duplicates, charges `max_input_facts` once. Request facts and lexical
+  bytes are admitted before interning. Control-document byte and per-input-term
+  caps do not apply to policy or request facts on this lane. The one new refusal
+  is a source over `max_input_bytes`, reported as `InputBytes` before parsing.
+  Resource enumeration is absent.
   The core Turtle parser currently fills its dictionary and row buffer before the
   bridge checks each parsed quad, including duplicates. These checks precede index
   construction; source-byte admission already precedes parsing.
