@@ -170,15 +170,20 @@ fn spellable_var(name: &str) -> bool {
 /// The common generated spelling needs only its one internal separator changed to `_`.
 /// Complex original names retain an explicit spelling in the unit's plan.
 fn default_generated(v: &str, out: &mut String) -> bool {
-    let Some((_, original)) = super::minted_parts(v).or_else(|| super::escaped_parts(v)) else {
+    let Some((prefix, original)) = generated_spelling(v) else {
         return false;
     };
+    write_generated(prefix, original, out);
+    true
+}
+
+fn generated_spelling(v: &str) -> Option<(&str, &str)> {
+    let (_, original) = super::minted_parts(v).or_else(|| super::escaped_parts(v))?;
     if !spellable_var(original) {
-        return false;
+        return None;
     }
     let end = v.len() - original.len() - super::MINTED_VAR_SEPARATOR.len_utf8();
-    write_generated(&v[..end], original, out);
-    true
+    Some((&v[..end], original))
 }
 
 fn write_generated(prefix: &str, original: &str, out: &mut String) {
@@ -501,13 +506,17 @@ impl<'a> Unit<'a> {
             .iter()
             .filter(|v| !binder_named(v) && !spellable_var(v))
             .filter_map(|v| {
-                let mut base = String::with_capacity(v.len());
-                let default = default_generated(v, &mut base);
-                if !default {
-                    base = sanitize_name(v);
-                }
-                if taken.insert(base.clone()) {
-                    (!default).then(|| (v.to_string(), base))
+                let (base, default) = match generated_spelling(v) {
+                    Some((prefix, original)) => {
+                        let mut base = String::with_capacity(v.len());
+                        write_generated(prefix, original, &mut base);
+                        (base, true)
+                    }
+                    None => (sanitize_name(v), false),
+                };
+                if default && !taken.contains(&base) {
+                    taken.insert(base);
+                    None
                 } else {
                     Some((v.to_string(), Unit::fresh_name(base, &mut taken)))
                 }
@@ -573,6 +582,7 @@ impl<'a> Unit<'a> {
                     if let Some(name) = self.renamed.get(v.as_str()) {
                         out.push_str(name);
                     } else if !default_generated(v, out) {
+                        debug_assert!(spellable_var(v), "unplanned variable spelling: {v}");
                         out.push_str(v);
                     }
                 }

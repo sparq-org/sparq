@@ -1298,7 +1298,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple::<true>(&c, b, &bw.truncated) {
+                if let Some(g) = ground_triple(&c, b, &bw.truncated, &Escape::All) {
                     // A conclusion past the term-depth limit is dropped, as a cut.
                     if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
                     {
@@ -2056,17 +2056,17 @@ fn run_closure(
     runtime: Option<&RuntimeDocs>,
 ) -> Result<Closure, String> {
     let own = serialize::UNIVERSAL_VAR;
-    run_closure_in::<true>(parsed, resolver, inherit, truncated, mode, cycles, runtime, own)
+    run_closure_in(parsed, resolver, inherit, truncated, mode, cycles, runtime, own, &Escape::All)
 }
 
 /// [`run_closure`] over a document whose own universals are the variables named with the
 /// prefix `own_universals`: `__ua.` for a document, `__ul.<k>.` for the statements of a
 /// formula closed in the [`formula_closure`] run `k`. Only those can prove a rule
 /// premise's own universal ([`independent_firing`]).
-/// `TOP_LEVEL` escapes surviving backward names only when they leave every proof;
-/// nested closures preserve names that an enclosing proof can still bind.
+/// `escape` preserves only the input formula's enclosing live names in a nested run;
+/// every run escapes names minted by its own proofs before storing them.
 #[allow(clippy::too_many_arguments)]
-fn run_closure_in<const TOP_LEVEL: bool>(
+fn run_closure_in(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
     // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
@@ -2089,6 +2089,7 @@ fn run_closure_in<const TOP_LEVEL: bool>(
     runtime: Option<&RuntimeDocs>,
     // The prefix of this document's own universals.
     own_universals: &str,
+    escape: &Escape,
 ) -> Result<Closure, String> {
     validate_rule_quantifiers(&parsed)?;
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
@@ -2441,7 +2442,7 @@ fn run_closure_in<const TOP_LEVEL: bool>(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple::<TOP_LEVEL>(&c, b, &bw.truncated) {
+                        if let Some(g) = ground_triple(&c, b, &bw.truncated, escape) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
                             if !facts.contains(&g)
                                 && bw.settle(bounded::generated(&bw.truncated, &g))
@@ -2455,11 +2456,11 @@ fn run_closure_in<const TOP_LEVEL: bool>(
                                             // The lookup key uses this store's emission
                                             // boundary, including any escaped free names.
                                             None => {
-                                                ground_triple::<TOP_LEVEL>(p, b, &bw.truncated)
+                                                ground_triple(p, b, &bw.truncated, escape)
                                             }
                                             // The stored facts a premise universal was
                                             // proved from mention a store universal.
-                                            Some(_) => premise_instance(p, b, &bw.truncated),
+                                            Some(_) => premise_instance(p, b, &bw.truncated, escape),
                                         })
                                         .filter(|t| facts.contains(t))
                                         .collect()
@@ -4040,11 +4041,11 @@ impl bounded::Subst for Produced<'_> {
 ///
 /// The same goal re-proved at the same node in a later round takes the same name and
 /// derives the same fact, so in-run deduplication is stable. Before a result enters the
-/// top-level fact store or query output, [`finish_conclusion_names`] moves surviving names
+/// fact store or query output, [`finish_conclusion_names`] moves surviving owned names
 /// into the deterministic `__bx<fold>.` namespace. Such a name is an ordinary free variable:
 /// [`minted_parts`] and [`live_var`] never recognize it as a live application name, even
-/// when a later round proves the same goal at the same node. Nested closures keep live
-/// names until the enclosing proof finishes and its result reaches that boundary.
+/// when a later round proves the same goal at the same node. Nested closures preserve
+/// only live names already in their input formula, which an enclosing proof still owns.
 ///
 /// A path is ONE `u64`, not a chain: each step's fingerprint is folded from the step and the
 /// fingerprint it is taken from ([`NodeKey::Step`]), and registered like any other, so the
@@ -5117,10 +5118,11 @@ fn formula_search(
 /// statements include rules — cwm keeps those rule variables quoted in the
 /// emitted formula). Only a variable at the triple level (or inside a list)
 /// leaves the conclusion genuinely uninstantiated.
-fn ground_triple<const ESCAPE: bool>(
+fn ground_triple(
     t: &[Term; 3],
     b: &Binding,
     run: &Truncation,
+    escape: &Escape,
 ) -> Option<[Term; 3]> {
     fn instantiated(t: &Term) -> bool {
         match t {
@@ -5128,7 +5130,7 @@ fn ground_triple<const ESCAPE: bool>(
             Term::List(ms) => ms.iter().all(instantiated),
             Term::Formula(_) => true, // opaque value; inner vars are formula-scoped
             // TRANSPARENT structure (unlike a formula): a variable left inside
-            // a concluded quoted triple leaves the conclusion uninstantiated.
+            // a concluded triple term leaves the conclusion uninstantiated.
             Term::Triple(tr) => tr.iter().all(instantiated),
             _ => true,
         }
@@ -5140,7 +5142,7 @@ fn ground_triple<const ESCAPE: bool>(
     ];
     // The conclusion's own `@forAll` universals, now asserted, are document-level ones
     // (GH #6754). After substitution, so no binding can reach them.
-    g.iter_mut().for_each(finish_conclusion_names::<ESCAPE>);
+    g.iter_mut().for_each(|t| finish_conclusion_names(t, escape));
     if g.iter().all(instantiated) {
         Some(g)
     } else {
@@ -5151,12 +5153,67 @@ fn ground_triple<const ESCAPE: bool>(
 /// A premise atom instantiated under `b`, left variables and all: with [`ground_triple`]'s
 /// substitution but not its groundness test, so a fact that mentions a store universal
 /// can be named as a firing's support.
-fn premise_instance(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 3]> {
-    Some([
+fn premise_instance(
+    t: &[Term; 3],
+    b: &Binding,
+    run: &Truncation,
+    escape: &Escape,
+) -> Option<[Term; 3]> {
+    let mut g = [
         bounded::substitute_deep(&t[0], b, run)?,
         bounded::substitute_deep(&t[1], b, run)?,
         bounded::substitute_deep(&t[2], b, run)?,
-    ])
+    ];
+    // Keep store universals intact, but spell free application names as the store does.
+    g.iter_mut().for_each(|t| escape.term(t));
+    Some(g)
+}
+
+/// Which application names still belong to an enclosing proof at this emission boundary.
+enum Escape {
+    All,
+    Except(FxHashSet<String>),
+}
+
+impl Escape {
+    fn for_formula(ts: &[[Term; 3]]) -> Self {
+        let mut live = FxHashSet::default();
+        let mut pending: Vec<&Term> = ts.iter().flatten().collect();
+        while let Some(t) = pending.pop() {
+            match t {
+                Term::Var(v) if minted_var(v) => {
+                    live.insert(v.clone());
+                }
+                Term::Formula(rows) => pending.extend(rows.iter().flatten()),
+                Term::List(ms) => pending.extend(ms),
+                Term::Triple(tr) => pending.extend(tr.iter()),
+                _ => {}
+            }
+        }
+        // Ownership is by exact name. A nested application reusing an enclosing fold
+        // and original variable is indistinguishable here and would also stay live.
+        Self::Except(live)
+    }
+
+    fn name(&self, v: &mut String) {
+        let keep = match self {
+            Self::All => false,
+            Self::Except(live) => live.contains(v.as_str()),
+        };
+        if !keep && minted_var(v) {
+            v.replace_range(..MINTED_VAR.len(), ESCAPED_VAR);
+        }
+    }
+
+    fn term(&self, t: &mut Term) {
+        match t {
+            Term::Var(v) => self.name(v),
+            Term::Formula(rows) => rows.iter_mut().flatten().for_each(|t| self.term(t)),
+            Term::List(ms) => ms.iter_mut().for_each(|t| self.term(t)),
+            Term::Triple(tr) => tr.iter_mut().for_each(|t| self.term(t)),
+            _ => {}
+        }
+    }
 }
 
 /// Every variable of `stmts` named `from + rest` renamed to `to + rest`, at any depth.
@@ -5185,25 +5242,26 @@ fn rename_var_prefix(stmts: &mut [[Term; 3]], from: &str, to: &str) {
 ///
 /// Top-level fact and query emission escape still-unbound application names to `__bx<fold>.`
 /// in this same walk, preserving the fold and original name for deterministic deduplication.
-/// Nested closure emission keeps live names (`ESCAPE = false`). Proof supports use the
-/// same boundary as their store, so their keys match the emitted facts at lookup.
-fn finish_conclusion_names<const ESCAPE: bool>(t: &mut Term) {
+/// Nested closure emission preserves the exact live names found in its input formula,
+/// including names in nested formulas, lists and triple terms. Proof supports use the
+/// same policy as their store, so their keys match the emitted facts at lookup.
+fn finish_conclusion_names(t: &mut Term, escape: &Escape) {
     match t {
         Term::Var(v) => {
             if let Some(iri) = v.strip_prefix(serialize::CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{}{iri}", serialize::UNIVERSAL_VAR));
             } else if let Some(rest) = v.strip_prefix(CLOSURE_CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{LIFTED_UNIVERSAL}{rest}"));
-            } else if ESCAPE && minted_var(v) {
-                v.replace_range(..MINTED_VAR.len(), ESCAPED_VAR);
+            } else {
+                escape.name(v);
             }
         }
         Term::Formula(ts) => ts
             .iter_mut()
             .flatten()
-            .for_each(finish_conclusion_names::<ESCAPE>),
-        Term::List(ms) => ms.iter_mut().for_each(finish_conclusion_names::<ESCAPE>),
-        Term::Triple(tr) => tr.iter_mut().for_each(finish_conclusion_names::<ESCAPE>),
+            .for_each(|t| finish_conclusion_names(t, escape)),
+        Term::List(ms) => ms.iter_mut().for_each(|t| finish_conclusion_names(t, escape)),
+        Term::Triple(tr) => tr.iter_mut().for_each(|t| finish_conclusion_names(t, escape)),
         _ => {}
     }
 }
@@ -6178,7 +6236,8 @@ fn with_formula_closure<R>(
         NegationCycles::SinglePass => NegationCycles::SinglePass,
         _ => NegationCycles::Reject,
     };
-    let closed = match run_closure_in::<false>(
+    let escape = Escape::for_formula(ts);
+    let closed = match run_closure_in(
         parsed,
         bw.resolver,
         Some(bw.visited.clone()),
@@ -6187,6 +6246,7 @@ fn with_formula_closure<R>(
         cycles,
         None,
         &lift,
+        &escape,
     ) {
         Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
@@ -8657,6 +8717,55 @@ mod runtime_doc_key_golden {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nested_escape_owns_every_input_name_but_no_escaped_name() {
+        use super::*;
+        let var = |s: &str| Term::Var(s.into());
+        let p = Term::Iri("http://ex/p".into());
+        let input = vec![[
+            var("__bw7.direct"),
+            p.clone(),
+            Term::List(vec![
+                Term::Formula(vec![[var("__bw8.deep"), p.clone(), var("source")]]),
+                Term::Triple(Box::new([p.clone(), p.clone(), var("__bw9.triple")])),
+                var("__bx10.escaped"),
+                var("__bw07.invalid"),
+            ]),
+        ]];
+        let escape = Escape::for_formula(&input);
+        let mut output = Term::List(vec![
+            Term::Formula(input.clone()),
+            var("__bw7.other"),
+            var("__bw10.escaped"),
+            Term::Formula(vec![[p.clone(), p.clone(), var("__bw11.new")]]),
+            Term::Triple(Box::new([p.clone(), p.clone(), var("__bw12.new")])),
+        ]);
+        let raw = output.clone();
+        finish_conclusion_names(&mut output, &escape);
+        let expected = Term::List(vec![
+            Term::Formula(input),
+            var("__bx7.other"),
+            var("__bx10.escaped"),
+            Term::Formula(vec![[p.clone(), p.clone(), var("__bx11.new")]]),
+            Term::Triple(Box::new([p.clone(), p.clone(), var("__bx12.new")])),
+        ]);
+        assert_eq!(output, expected);
+        // Both support arms share the name policy. The universal arm must additionally
+        // retain the store universal itself rather than requiring a ground triple.
+        let universal = var("__ua.http://ex/u");
+        let mut binding = Binding::new();
+        binding.insert(Rc::from("value"), raw);
+        assert_eq!(
+            premise_instance(
+                &[universal.clone(), p.clone(), var("value")],
+                &binding,
+                &Truncation::top_level(),
+                &escape,
+            ),
+            Some([universal, p, expected]),
+        );
+    }
+
     // The text parser excludes dots from variable names. Build the two ownership cases
     // through Term so they exercise minted-shaped data, rather than a lexer rejection.
     #[test]
@@ -12232,7 +12341,7 @@ mod tests {
         let registered = |src: &str| {
             let shared = run_shared::RunShared::for_sources(&[]);
             let parsed = bounded::parse_n3(src, "", &Truncation::top_level()).expect("parses");
-            let out = run_closure_in::<true>(
+            let out = run_closure_in(
                 parsed,
                 None,
                 Some(shared.clone()),
@@ -12241,6 +12350,7 @@ mod tests {
                 NegationCycles::Reject,
                 None,
                 "",
+                &Escape::All,
             )
             .expect("closes");
             drop(out);

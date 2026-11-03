@@ -1268,13 +1268,95 @@ fn a_nested_closure_preserves_an_outer_name_bound_later() {
 #[test]
 fn a_supports_closure_preserves_the_enclosing_proofs_live_name() {
     assert_eq!(
-        out(":s :val :v . \
-            { ?x :check :yes } <= { ?x :val ?y . \
+        // Leave ?y unbound: supports substitutes bound terms before closing its
+        // subject, which would hide an erroneous escape of the enclosing name.
+        out("{ :s :check :yes } <= { \
             { :a :p { :b :c ?y } . { :a :p ?w } => { :a :q ?w } . } \
-            log:supports { :a :q { :b :c ?y } } } . \
+            log:supports { :a :p ?same . :a :q ?same } } . \
             { :s :check :yes } => { :out :fired :yes } ."),
         fired()
     );
+}
+
+/// Round 9 ncap: a nested run's own backward answers must escape before its next round.
+#[test]
+fn a_nested_closure_escapes_its_own_stored_backward_answer() {
+    let data = ":s :p :v . :s :src { :v :inner :A } . \
+                :sc :is { :v :inner :A . :v :inner :B } .";
+    let head = "?x :has { ?y :inner ?z }";
+    let body = "?x :p ?y . ?x :src ?g . :sc :is ?sc . ?sc log:includes ?g";
+    let consumer = "{ :s :has ?f } => { :s :src ?f . :out :got ?f } .";
+    let close = |rule: &str| {
+        format!(
+            "{P}:doc :is {{ {data} {rule} {consumer} }} . \
+             {{ :doc :is ?d . ?d log:conclusion ?c }} => {{ :res :is ?c }} ."
+        )
+    };
+    let backward = nested_answer_rows(&close(&format!("{{ {head} }} <= {{ {body} }} .")));
+    let forward = nested_answer_rows(&close(&format!("{{ {body} }} => {{ {head} }} .")));
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let expected = vec![[
+        iri("out"),
+        iri("got"),
+        Term::Formula(vec![[iri("v"), iri("inner"), Term::Var("z".into())]]),
+    ]];
+    assert_eq!(forward, expected);
+    assert_eq!(backward.len(), 1, "one variable-valued row: {backward:?}");
+    let mut normalized = backward;
+    let Term::Formula(rows) = &mut normalized[0][2] else {
+        panic!("{normalized:?}")
+    };
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(matches!(&rows[0][2], Term::Var(v) if v.starts_with("__bx") && v.ends_with(".z")));
+    rows[0][2] = Term::Var("z".into());
+    assert_eq!(
+        normalized, forward,
+        "complete rows agree under the free-name bijection"
+    );
+}
+
+fn nested_answer_rows(src: &str) -> Vec<[Term; 3]> {
+    let closure = reason_n3_terms(src, None).expect("nested document reasons");
+    let answers: Vec<_> = closure
+        .facts
+        .iter()
+        .filter(|t| t[0] == Term::Iri("http://ex/res".into()))
+        .collect();
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    let Term::Formula(rows) = &answers[0][2] else {
+        panic!("{answers:?}")
+    };
+    let mut out: Vec<_> = rows
+        .iter()
+        .filter(|t| t[0] == Term::Iri("http://ex/out".into()))
+        .cloned()
+        .collect();
+    out.sort_by_key(sparq_reason::n3::serialize::statement_keys);
+    out
+}
+
+/// Round 9 nfix: the simple nested backward producer still returns its bound member.
+#[test]
+fn a_nested_backward_producer_keeps_its_bound_member() {
+    let rows = nested_answer_rows(&format!(
+        "{P}:doc :is {{ :s :p :v . \
+         {{ ?x :has {{ ?y :inner ?z }} }} <= {{ ?x :p ?y }} . \
+         {{ :s :has ?f }} => {{ :out :got ?f }} . }} . \
+         {{ :doc :is ?d . ?d log:conclusion ?c }} => {{ :res :is ?c }} ."
+    ));
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let Term::Formula(value) = &rows[0][2] else {
+        panic!("{rows:?}")
+    };
+    assert_eq!(value.len(), 1, "{value:?}");
+    assert_eq!(
+        &value[0][..2],
+        &[
+            Term::Iri("http://ex/v".into()),
+            Term::Iri("http://ex/inner".into())
+        ]
+    );
+    assert!(matches!(&value[0][2], Term::Var(v) if v.starts_with("__bx") && v.ends_with(".z")));
 }
 
 #[test]

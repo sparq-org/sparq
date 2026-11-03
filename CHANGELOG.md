@@ -930,7 +930,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as they are, so a formula a caller supplies and a formula read from the store come back as
   they went in. A variable no premise binds keeps its derivation fingerprint, escaped to
   `__bx<fold>.name` before it enters the top-level fact store or query result. Nested
-  closures keep names live until the enclosing proof finishes. Re-proving the same
+  closures preserve only the enclosing live names present in their input formula; names
+  their own proofs mint escape before entering their store. Re-proving the same
   goal in a later round therefore treats the stored name as an ordinary free variable.
   Proof-support lookup uses the store's same spelling, preserving `why()` support when
   a later round re-proves the goal. A quoted
