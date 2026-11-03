@@ -6,8 +6,13 @@ use std::time::Duration;
 
 #[cfg(all(feature = "embedded-sparq", feature = "blob-fs"))]
 use sparq_lws_core::store::blob_fs::FsBlobStore;
+#[cfg(all(feature = "embedded-sparq", feature = "blob-object"))]
+use sparq_lws_core::store::blob_object::{ObjectBlobAdapter, ObjectBlobStore};
 #[cfg(feature = "embedded-sparq")]
 use sparq_lws_core::store::{BlobEntry, BlobError, BlobStore, InMemoryBlobStore};
+
+const ENV_BLOB_URL: &str = "SOLID_SERVER_BLOB_URL";
+const ENV_BLOB_OPTIONS: &str = "SOLID_SERVER_BLOB_OPTIONS";
 
 const ENV_DATA_DIR: &str = "SOLID_SERVER_DATA_DIR";
 const ENV_SPARQ_DIR: &str = "SOLID_SERVER_SPARQ_DIR";
@@ -31,16 +36,26 @@ struct CryptConfig {
     pod: Option<String>,
 }
 
-#[derive(Debug)]
 pub(super) struct StorageConfig {
     pub backend: String,
     data_dir: Option<PathBuf>,
     sparq_dir: Option<PathBuf>,
     #[cfg(feature = "embedded-sparq")]
+    blob_url: Option<String>,
+    #[cfg(all(feature = "embedded-sparq", feature = "blob-object"))]
+    blob_options: std::collections::BTreeMap<String, String>,
+    #[cfg(feature = "embedded-sparq")]
     wait: Duration,
     allow_inconsistent: bool,
     #[cfg(feature = "crypt")]
     crypt: Option<CryptConfig>,
+}
+
+// Configuration can contain provider credentials. Never expose its values in diagnostics.
+impl std::fmt::Debug for StorageConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageConfig").finish_non_exhaustive()
+    }
 }
 
 impl StorageConfig {
@@ -54,7 +69,10 @@ impl StorageConfig {
         let mut invalid_key = None;
         let result = Self::read(|key| match var(key) {
             Ok(value) => Some(value),
-            Err(std::env::VarError::NotUnicode(_)) if key.starts_with("SOLID_SERVER_CRYPT_") => {
+            Err(std::env::VarError::NotUnicode(_))
+                if key.starts_with("SOLID_SERVER_CRYPT_")
+                    || matches!(key, ENV_BLOB_URL | ENV_BLOB_OPTIONS) =>
+            {
                 // Invalid provider bytes must never silently select the plaintext default.
                 invalid_key = Some(key.to_owned());
                 None
@@ -74,6 +92,53 @@ impl StorageConfig {
         };
         let data_dir = path(var(ENV_DATA_DIR));
         let sparq_dir = path(var(ENV_SPARQ_DIR));
+        let blob_url = var(ENV_BLOB_URL);
+        let blob_options = var(ENV_BLOB_OPTIONS);
+        #[cfg(not(feature = "blob-object"))]
+        if blob_url.is_some() {
+            return Err(invalid(format!(
+                "{ENV_BLOB_URL} requires the opt-in `blob-object` build feature"
+            )));
+        }
+        if blob_url.is_some() && data_dir.is_none() {
+            return Err(invalid(format!("{ENV_BLOB_URL} requires {ENV_DATA_DIR}")));
+        }
+        if blob_options.is_some() && blob_url.is_none() {
+            return Err(invalid(format!(
+                "{ENV_BLOB_OPTIONS} requires {ENV_BLOB_URL}"
+            )));
+        }
+        if let Some(raw) = &blob_url {
+            let url =
+                url::Url::parse(raw).map_err(|_| invalid(format!("invalid {ENV_BLOB_URL}")))?;
+            if !matches!(url.scheme(), "file" | "s3" | "az" | "gs")
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+            {
+                return Err(invalid(format!(
+                    "{ENV_BLOB_URL} requires file://, s3://, az:// or gs:// without user information, query or fragment"
+                )));
+            }
+        }
+        let blob_options: std::collections::BTreeMap<String, String> = blob_options
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()
+            .map_err(|_| {
+                invalid(format!(
+                    "{ENV_BLOB_OPTIONS} must be a JSON object of string values"
+                ))
+            })?
+            .unwrap_or_default();
+        #[cfg(not(all(feature = "embedded-sparq", feature = "blob-object")))]
+        let _ = blob_options;
+        #[cfg(not(feature = "embedded-sparq"))]
+        if blob_url.is_some() {
+            return Err(invalid(format!(
+                "{ENV_BLOB_URL} requires the `embedded-sparq` build feature"
+            )));
+        }
         let backend = var(ENV_BACKEND).map(|value| value.trim().to_ascii_lowercase());
         if data_dir.is_some() && sparq_dir.is_some() {
             return Err(invalid(format!(
@@ -163,6 +228,10 @@ impl StorageConfig {
             data_dir,
             sparq_dir,
             #[cfg(feature = "embedded-sparq")]
+            blob_url,
+            #[cfg(all(feature = "embedded-sparq", feature = "blob-object"))]
+            blob_options,
+            #[cfg(feature = "embedded-sparq")]
             wait,
             allow_inconsistent,
             #[cfg(feature = "crypt")]
@@ -235,7 +304,7 @@ impl StorageConfig {
             .map_err(io::Error::other)?;
         #[cfg(feature = "embedded-sparq")]
         if let Some(data) = &self.data_dir {
-            upgrade_blob_format(data)?;
+            upgrade_blob_format(data, self.blob_url.as_deref())?;
         }
         Ok(encrypted)
     }
@@ -270,6 +339,25 @@ impl StorageConfig {
         Ok(())
     }
 
+    /// Open the configured native byte plane while retaining the data-directory index.
+    #[cfg(feature = "embedded-sparq")]
+    pub async fn open_embedded(
+        &self,
+    ) -> io::Result<(sparq_lws_core::store::EmbeddedSparqClient, NativeBlobs)> {
+        self.open_embedded_with(self.has_data_dir(), |path| {
+            #[cfg(feature = "blob-object")]
+            if let Some(url) = &self.blob_url {
+                return ObjectBlobStore::from_url(url, &self.blob_options)
+                    .map(|store| NativeBlobs::Object(ObjectBlobAdapter(store)))
+                    .map_err(|_| invalid(format!(
+                        "cannot configure {ENV_BLOB_URL}: check the URL, provider build feature and {ENV_BLOB_OPTIONS}"
+                    )));
+            }
+            make_blobs(path)
+        })
+        .await
+    }
+
     /// The constructor is injected so tests can exercise the boot order with durable test bytes.
     /// It runs only after the index lock is held; a failure drops and joins the index actor.
     #[cfg(feature = "embedded-sparq")]
@@ -287,17 +375,18 @@ impl StorageConfig {
         let sparq_dir = self.sparq_dir.clone();
         let wait = self.wait;
         let encrypted = self.encryption_enabled();
+        let blob_url = self.blob_url.clone();
         let client = tokio::task::spawn_blocking(move || {
             use sparq_lws_core::store::EmbeddedSparqClient;
             if let Some(data) = data_dir {
-                prepare_format(&data, encrypted)?;
+                prepare_format(&data, encrypted, blob_url.as_deref())?;
                 let client = open_with_retry(
                     &data.join("index"),
                     wait,
                     EmbeddedSparqClient::open_or_create,
                 )?;
                 // A prior holder may have upgraded the marker while this boot waited.
-                prepare_format(&data, encrypted)?;
+                prepare_format(&data, encrypted, blob_url.as_deref())?;
                 Ok(client)
             } else if let Some(dir) = sparq_dir {
                 // Keep the legacy path's existing-snapshot semantics and backend error text.
@@ -339,6 +428,8 @@ pub(super) enum NativeBlobs {
     InMemory(InMemoryBlobStore),
     #[cfg(feature = "blob-fs")]
     Filesystem(FsBlobStore),
+    #[cfg(feature = "blob-object")]
+    Object(ObjectBlobAdapter),
 }
 
 #[cfg(feature = "embedded-sparq")]
@@ -349,6 +440,8 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::get(store, key).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::get(store, key).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::get(store, key).await,
         }
     }
 
@@ -357,6 +450,8 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::put(store, key, body).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::put(store, key, body).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::put(store, key, body).await,
         }
     }
 
@@ -365,6 +460,8 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::exists(store, key).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::exists(store, key).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::exists(store, key).await,
         }
     }
 
@@ -373,6 +470,8 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::delete(store, key).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::delete(store, key).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::delete(store, key).await,
         }
     }
 
@@ -381,6 +480,20 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::list(store).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::list(store).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::list(store).await,
+        }
+    }
+
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        match self {
+            Self::InMemory(store) => BlobStore::list_stream(store).await,
+            #[cfg(feature = "blob-fs")]
+            Self::Filesystem(store) => BlobStore::list_stream(store).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::list_stream(store).await,
         }
     }
 
@@ -389,6 +502,8 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::stat(store, key).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::stat(store, key).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::stat(store, key).await,
         }
     }
 
@@ -397,6 +512,8 @@ impl BlobStore for NativeBlobs {
             Self::InMemory(store) => BlobStore::delete_if_unchanged(store, key, generation).await,
             #[cfg(feature = "blob-fs")]
             Self::Filesystem(store) => BlobStore::delete_if_unchanged(store, key, generation).await,
+            #[cfg(feature = "blob-object")]
+            Self::Object(store) => BlobStore::delete_if_unchanged(store, key, generation).await,
         }
     }
 }
@@ -451,14 +568,18 @@ fn open_with_retry<T>(
 }
 
 #[cfg(feature = "embedded-sparq")]
-fn prepare_format(data: &std::path::Path, encrypted: bool) -> io::Result<()> {
+fn prepare_format(
+    data: &std::path::Path,
+    encrypted: bool,
+    blob_url: Option<&str>,
+) -> io::Result<()> {
     use std::fs;
 
     const FORMAT: &[u8] = b"{\"schema\":1,\"index\":{\"major\":1},\"blobs\":{\"major\":1}}\n";
     fs::create_dir_all(data)?;
     let marker = data.join("format.json");
     match fs::read(&marker) {
-        Ok(bytes) => return validate_format(&bytes, encrypted).map(|_| ()),
+        Ok(bytes) => return validate_format(&bytes, encrypted, blob_url).map(|_| ()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
@@ -469,7 +590,7 @@ fn prepare_format(data: &std::path::Path, encrypted: bool) -> io::Result<()> {
                 if entries.next().transpose()?.is_some() {
                     // A concurrent fresh boot may have published the marker after our first read.
                     if let Ok(bytes) = fs::read(&marker) {
-                        return validate_format(&bytes, encrypted).map(|_| ());
+                        return validate_format(&bytes, encrypted, blob_url).map(|_| ());
                     }
                     return Err(invalid(format!(
                         "refusing foreign data directory {}: format.json is absent but {name}/ has content",
@@ -481,14 +602,25 @@ fn prepare_format(data: &std::path::Path, encrypted: bool) -> io::Result<()> {
             Err(error) => return Err(error),
         }
     }
-    write_format(data, FORMAT, false)?;
-    validate_format(&fs::read(marker)?, encrypted).map(|_| ())
+    let object_format;
+    let bytes = if let Some(url) = blob_url {
+        object_format = serde_json::to_vec(&serde_json::json!({
+            "schema": 1,
+            "index": {"major": 1},
+            "blobs": {"major": 1, "backend": "object", "url": url}
+        }))?;
+        &object_format[..]
+    } else {
+        FORMAT
+    };
+    write_format(data, bytes, false, encrypted, blob_url)?;
+    validate_format(&fs::read(marker)?, encrypted, blob_url).map(|_| ())
 }
 
 #[cfg(all(feature = "crypt", feature = "embedded-sparq"))]
-fn upgrade_blob_format(data: &std::path::Path) -> io::Result<()> {
+fn upgrade_blob_format(data: &std::path::Path, blob_url: Option<&str>) -> io::Result<()> {
     let bytes = std::fs::read(data.join("format.json"))?;
-    if validate_format(&bytes, true)? == 2 {
+    if validate_format(&bytes, true, blob_url)? == 2 {
         return Ok(());
     }
     let mut format: serde_json::Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
@@ -498,11 +630,19 @@ fn upgrade_blob_format(data: &std::path::Path) -> io::Result<()> {
         data,
         &serde_json::to_vec(&format).map_err(io::Error::other)?,
         true,
+        true,
+        blob_url,
     )
 }
 
 #[cfg(feature = "embedded-sparq")]
-fn write_format(data: &std::path::Path, bytes: &[u8], replace: bool) -> io::Result<()> {
+fn write_format(
+    data: &std::path::Path,
+    bytes: &[u8],
+    replace: bool,
+    encrypted: bool,
+    blob_url: Option<&str>,
+) -> io::Result<()> {
     use std::fs::{self, File, OpenOptions};
     use std::io::Write;
 
@@ -520,12 +660,7 @@ fn write_format(data: &std::path::Path, bytes: &[u8], replace: bool) -> io::Resu
             // Upgrades run with the exclusive index lock held.
             fs::rename(&tmp, &marker)?;
         } else {
-            // A delayed fresh boot must never replace a marker another boot upgraded.
-            match fs::hard_link(&tmp, &marker) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
-            }
+            publish_format(&tmp, &marker, encrypted, blob_url)?;
             fs::remove_file(&tmp)?;
         }
         File::open(data)?.sync_all()
@@ -537,7 +672,24 @@ fn write_format(data: &std::path::Path, bytes: &[u8], replace: bool) -> io::Resu
 }
 
 #[cfg(feature = "embedded-sparq")]
-fn validate_format(bytes: &[u8], encrypted: bool) -> io::Result<u64> {
+fn publish_format(
+    tmp: &std::path::Path,
+    marker: &std::path::Path,
+    encrypted: bool,
+    blob_url: Option<&str>,
+) -> io::Result<()> {
+    // Publish without replacing a marker from a concurrent first boot.
+    match std::fs::hard_link(tmp, marker) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            validate_format(&std::fs::read(marker)?, encrypted, blob_url).map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(feature = "embedded-sparq")]
+fn validate_format(bytes: &[u8], encrypted: bool, blob_url: Option<&str>) -> io::Result<u64> {
     #[derive(serde::Deserialize)]
     struct Plane {
         major: u64,
@@ -546,6 +698,8 @@ fn validate_format(bytes: &[u8], encrypted: bool) -> io::Result<u64> {
     struct BlobFormat {
         major: u64,
         encryption: Option<String>,
+        backend: Option<String>,
+        url: Option<String>,
     }
     #[derive(serde::Deserialize)]
     struct Format {
@@ -553,21 +707,37 @@ fn validate_format(bytes: &[u8], encrypted: bool) -> io::Result<u64> {
         index: Plane,
         blobs: BlobFormat,
     }
-    let format: Format = serde_json::from_slice(bytes)
-        .map_err(|error| invalid(format!("invalid format.json: {error}")))?;
-    if format.schema != 1 || format.index.major != 1 {
+    let format: Format =
+        serde_json::from_slice(bytes).map_err(|_| invalid("invalid format.json"))?;
+    if format.schema != 1
+        || format.index.major != 1
+        || (!encrypted && format.blobs.encryption.is_none() && format.blobs.major != 1)
+    {
         return Err(invalid(
-            "unsupported format.json: expected schema=1, index.major=1",
+            "unsupported format.json: expected schema=1, index.major=1, blobs.major=1",
         ));
     }
-    match (format.blobs.major, format.blobs.encryption.as_deref()) {
-        (1, None) => Ok(1),
-        (2, Some("envelope-v1")) if encrypted => Ok(2),
-        (2, Some("envelope-v1")) => Err(invalid(format!(
+    let major = match (format.blobs.major, format.blobs.encryption.as_deref()) {
+        (1, None) => 1,
+        (2, Some("envelope-v1")) if encrypted => 2,
+        (2, Some("envelope-v1")) => return Err(invalid(format!(
             "format.json blobs.major=2 requires encryption; {ENV_CRYPT_PROVIDER}=none cannot open this directory"
         ))),
-        _ => Err(invalid("unsupported format.json blob format: expected major=1 or major=2 with encryption=envelope-v1")),
+        _ => return Err(invalid("unsupported format.json blob format: expected major=1 or major=2 with encryption=envelope-v1")),
+    };
+    let backend = format.blobs.backend.as_deref().unwrap_or("filesystem");
+    let expected_backend = if blob_url.is_some() {
+        "object"
+    } else {
+        "filesystem"
+    };
+    if backend != expected_backend {
+        return Err(invalid("format.json blob backend mismatch: reopen with the recorded backend; changing backends requires migration"));
     }
+    if format.blobs.url.as_deref() != blob_url {
+        return Err(invalid("format.json blob URL mismatch: reopen with the recorded SOLID_SERVER_BLOB_URL; changing locations requires migration"));
+    }
+    Ok(major)
 }
 
 /// Own the final embedded handle across listener drain, background-task stop and compaction.

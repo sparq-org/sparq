@@ -708,6 +708,11 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
     async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
         self.inner.list().await
     }
+    async fn list_stream(
+        &self,
+    ) -> Result<futures_util::stream::BoxStream<'_, Result<BlobEntry, BlobError>>, BlobError> {
+        self.inner.list_stream().await
+    }
     async fn stat(&self, key: &str) -> Result<Option<BlobEntry>, BlobError> {
         self.inner.stat(key).await
     }

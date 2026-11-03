@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 /// The marker for service-pool blob keys.
-pub const POOLED_BLOB_KEY_MARK: &str = "$pool$";
+pub const POOLED_BLOB_KEY_MARK: &str = sparq_lws_blob_key::POOL_MARK;
 
 /// A stored blob and its filesystem modification time.
 #[derive(Debug, Clone)]
@@ -258,20 +258,8 @@ impl FsBlobStore {
 }
 
 fn parse_key(key: &str) -> io::Result<(&str, bool)> {
-    let unmarked = key.strip_prefix(POOLED_BLOB_KEY_MARK);
-    let body_key = unmarked.unwrap_or(key);
-    let random = body_key
-        .strip_prefix("b1-")
-        .or_else(|| body_key.strip_prefix("e1-"))
-        .ok_or_else(invalid_key)?;
-    if random.len() != 32
-        || !random
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-    {
-        return Err(invalid_key());
-    }
-    Ok((random, unmarked.is_some()))
+    let (bare, pooled) = sparq_lws_blob_key::parse(key).ok_or_else(invalid_key)?;
+    Ok((&bare[sparq_lws_blob_key::PREFIX.len()..], pooled))
 }
 
 fn invalid_key() -> io::Error {

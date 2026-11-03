@@ -10,6 +10,8 @@ fn wasm_graph_contains_router_but_no_native_transport_or_crypto() {
     assert_boundary("wasm,crypt");
     assert_boundary("wasm,blob-fs");
     assert_boundary("wasm,crypt,blob-fs");
+    assert_boundary("wasm,blob-fs,blob-object");
+    assert_boundary("wasm,crypt,blob-fs,blob-object");
 }
 
 fn assert_boundary(features: &str) {
@@ -57,6 +59,7 @@ fn assert_boundary(features: &str) {
         "sparq-core",
         "sparq-engine",
         "sparq-lws-blob-fs",
+        "sparq-lws-blob-object",
         "tokio v",
     ] {
         assert!(

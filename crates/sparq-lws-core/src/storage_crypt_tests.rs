@@ -677,6 +677,8 @@ mod durable {
             &dir.0,
             br#"{"schema":1,"index":{"major":1},"blobs":{"major":1}}"#,
             false,
+            true,
+            None,
         )
         .unwrap();
         assert_eq!(fs::read(dir.0.join("format.json")).unwrap(), format);
