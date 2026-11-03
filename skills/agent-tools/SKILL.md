@@ -164,7 +164,12 @@ vocabularies (`ldp`/`acl`/`acp`/`solid`/…) registered for compaction. It is ON
 type, not an HTTP `Accept` list; `;`-parameters (`q=`) are ignored; anything else is a
 tool error naming what IS served, never a silent coercion. Negotiation is a pure
 function of the `accept` string evaluated BEFORE the read gate, so it cannot become an
-existence oracle. JSON-LD is INGEST-only (`resource_put` under the `jsonld` feature) —
+existence oracle. Resource and container writes check the store's
+`AuthBudget::max_resource_iri_bytes` and `max_resource_path_depth` before parsing content
+or creating containment graphs, using the materializer's allowance refusal kind and cap
+clause with `write refused` context. The bounds are inclusive. Control-document writes
+retain their separate write-through path;
+deletions can still remove names beyond the current caps. JSON-LD is INGEST-only (`resource_put` under the `jsonld` feature) —
 there is no JSON-LD writer, so `accept: application/ld+json` is refused.
 `resources/read` has no per-request `accept` in MCP, so it stays N-Triples.
 

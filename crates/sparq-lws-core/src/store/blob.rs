@@ -353,7 +353,12 @@ impl InMemoryBlobStore {
     }
 
     /// Insert one body while atomically enforcing byte and entry ceilings and updating accounting.
-    fn put_at(&self, key: &str, body: Bytes, last_modified: SystemTime) -> Result<(), BlobError> {
+    pub(super) fn put_at(
+        &self,
+        key: &str,
+        body: Bytes,
+        last_modified: SystemTime,
+    ) -> Result<(), BlobError> {
         #[cfg(any(test, feature = "test-support"))]
         self.validate_key(key)?;
         let mut guard = self

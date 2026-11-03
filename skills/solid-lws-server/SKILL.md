@@ -1,6 +1,6 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query readable resources through `/sparql` (Solid) or `/.lws/sparql` (LWS), or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query readable resources through `/sparql` (Solid) or `/.lws/sparql` (LWS), or run the W3C LWS 1.0 protocol mode (`SOLID_SERVER_PROTOCOL=lws`). Use for the Rust LWS server and the native modes of the `@sparq-org/solid-server` development host."
 license: MIT
 metadata:
   version: "0.1.0"
@@ -17,6 +17,46 @@ separate `@sparq-org/solid-server` loopback development host.
 Query entry points and structural rewrites retain VERSION announcements;
 see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
 or incompatible labels do not silently select REC 2013.
+
+## Start from npm
+
+`@sparq-org/solid-server` keeps its wasm Solid mode by default. Select the native
+executable for LWS or for Solid with WebSocketChannel2023 notifications:
+
+```sh
+npx @sparq-org/solid-server --protocol lws --port 3000 --base-url http://127.0.0.1:3000
+npx @sparq-org/solid-server --native --port 3000 --base-url http://127.0.0.1:3000
+```
+
+`--protocol` is `solid` by default and also accepts `lws`; LWS always selects the
+native executable. npm supplies optional platform packages for Linux x64/arm64,
+Darwin x64/arm64 and Windows x64, at exactly the host version. They install with
+`ignore-scripts=true`. Runtime resolution uses installed files; a missing
+package is an error naming the required package, and an installed version must
+match the host. Signals reach the native child and shutdown has a deadline.
+
+`startSolidServer({ protocol: 'lws', port, baseUrl })` and
+`startSolidServer({ protocol: 'solid', native: true, port, baseUrl })` return a
+handle with `child`, `exited` (a promise of `{ code, signal }`), `address()`,
+`scheme` (`http` or `https`) and `closeAsync(signal = 'SIGTERM')` (also accepts
+`SIGINT`). Native `signal: AbortSignal` cancels startup or stops the child after
+startup. Readiness comes from the child's bound listener, including the actual
+port when `port: 0` is used; provide `baseUrl` explicitly with an ephemeral port.
+Default Solid mode returns the existing Node server. Native mode
+uses the native authentication settings below; wasm `ownerWebid`/`oidc` options
+are rejected. `--port` sets `SOLID_SERVER_BIND=127.0.0.1:<port>`;
+`--base-url` sets `SOLID_SERVER_BASE_URL`. Other native environment settings are
+inherited. `PSS_SPARQ_BACKEND` defaults to `memory`; use the default ephemeral
+backend for local development. In the default wasm mode, the CLI closes
+gracefully on the first SIGINT/SIGTERM and exits immediately on a second signal
+with the corresponding signal exit status.
+
+`SOLID_SERVER_READY_STDOUT` defaults to unset. At `1`, the native binary emits
+one flushed JSON line on stdout after binding its TCP listener:
+`{"event":"native-listening","address":"127.0.0.1:3000","scheme":"http"}`.
+The scheme is `https` when terminating TLS. The npm launcher sets this variable
+and consumes the line; native callers can use it for process supervision. Other
+values leave stdout unchanged.
 
 ## Start a local server
 
@@ -100,6 +140,9 @@ LWS data-resource reads carry `X-Content-Type-Options: nosniff`.
 
 ## Choose a data backend
 
+For embedded directory opens, lock lifetimes, and the optional boot-time wait for
+another live holder, see [native storage](references/native-storage.md).
+
 Set `PSS_SPARQ_BACKEND` to one of:
 
 - `memory` (default): an ephemeral in-memory test double.
@@ -117,8 +160,11 @@ Set `PSS_SPARQ_BACKEND` to one of:
   a missing outside lock or poisoned transaction journal), or stopped actor returns a
   backend error. After an indeterminate commit or job panic, the actor closes its queue and
   drops pending jobs, including sends already in flight; their callers receive the stopped-actor
-  error and must restart to recover. Dropping the last client joins its actor thread, releasing the directory
-  lock before returning. A refused compaction that leaves the graph unfrozen keeps reads and
+  error and must restart to recover. Dropping the last client joins its actor thread and drops
+  its directory locks before returning. Explicit unlock prevents descriptor copies inherited
+  between fork and exec from extending that lifetime. Embedded opens attempt once and refuse
+  live holders immediately; see [native storage](references/native-storage.md).
+  A refused compaction that leaves the graph unfrozen keeps reads and
   writes available.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
@@ -135,7 +181,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
 ### Native data-directory boot
 
 `SOLID_SERVER_DATA_DIR` (default unset) selects `<data>/index` and `<data>/blobs`,
-implies `PSS_SPARQ_BACKEND=embedded`, and conflicts with `SOLID_SERVER_SPARQ_DIR`.
+implies `PSS_SPARQ_BACKEND=embedded`, and refuses any other explicit backend or
+a non-empty `SOLID_SERVER_SPARQ_DIR`.
 The default native build opens the filesystem blob store after acquiring the
 index lock. Builds without `embedded-sparq` refuse data-directory boot; `blob-fs` is required
 when no object URL is configured.
@@ -176,6 +223,50 @@ The native backend wrapper and periodic reconciler's shared handle forward
 `list_stream`, preserving backend
 streaming when the compatibility snapshot is unavailable or exceeds its limit.
 A listing error aborts its current batch immediately; earlier batches may have completed.
+
+### Running durably in a container
+
+Mount a named volume and enable the data-directory contract:
+
+```sh
+docker run --name sparq-lws-core -p 127.0.0.1:3000:3000 \
+  -v data:/data -e SOLID_SERVER_DATA_DIR=/data \
+  -e SOLID_SERVER_BASE_URL=https://solid.example \
+  -e SOLID_SERVER_TRUSTED_ISSUER=https://idp.example \
+  ghcr.io/sparq-org/sparq-lws-core:X.Y.Z
+```
+
+The image's empty `/data` is owned by `65532:65532`; a fresh named volume
+inherits that ownership. Mounting it alone keeps storage in-memory. Setting
+`SOLID_SERVER_DATA_DIR=/data` opts in to the boot contract above, including
+`/data/index`, `/data/blobs`, and `/data/format.json`.
+
+Building the image behind a TLS-intercepting proxy: pass
+`--secret id=build_ca,src=/path/to/ca-bundle.crt` (the bundle never enters a layer),
+and `--build-arg BUILD_JOBS=N` to cap cargo on a memory-limited builder.
+
+For Helm set `server=lws`, `replicaCount=1`, `persistence.enabled=true`, and
+`persistence.accessMode=ReadWriteOnce`; optionally choose `persistence.storageClass`
+or `persistence.existingClaim`. The shared top-level persistence block mounts
+`/data`, sets the environment variable, and uses `Recreate` for upgrades.
+
+Use a filesystem on a **block volume** (EBS, PD, Azure Disk), never a network
+filesystem (EFS, Azure Files, NFS): the index relies on file locking and fsync
+semantics. Keep **one replica**; this is a single-instance index and blob store.
+**Stop the server before backing up** the whole volume.
+
+### Backup and restore
+
+An offline copy of the whole data directory covers the embedded index and the
+filesystem blob backend. Stop the server before copying or restoring it, and
+retain `format.json` with both planes. See the
+[backup and restore procedure](references/native-storage.md#backup-and-restore).
+
+With `SOLID_SERVER_BLOB_URL`, the backend record points to a separately configured
+object namespace. A data-directory copy does not guarantee a complete backup,
+including for a `file://` URL. Back up and restore those bytes while the server
+is stopped, preserving blob keys and the exact URL recorded in `format.json`.
+Changing that backend or URL requires migration.
 
 ### Child record replacement
 
@@ -393,7 +484,12 @@ curl -i -X POST \
 collision-resistant child IRI below a container, `PATCH` accepts supported
 Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
-conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
+conditional mutations. A concrete tag in `If-Match` or `If-None-Match`
+requires the target's read permission (`Control` for an ACL document).
+LDP exempts bare `*`: writers without Read can use `If-None-Match: *` to create
+without overwriting, or `If-Match: *` to require an existing target. Unconditional
+LDP PUT and DELETE already disclose existence through their status codes.
+`If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
 listing can change without moving their recorded time. `If-Modified-Since` on a
@@ -475,6 +571,28 @@ is absent because `up` is server-managed. Notification subscription types come f
 the catalog (currently webhooks). Draft extension terms use an inline context.
 See [catalog entries and embedding](references/service-description.md) for the
 RDF terms, media maps and the `describe::ServiceCatalog` registration API.
+
+## Collaborate with Yjs
+
+The default-off native `crdt-sync` feature mounts ticket and Yjs socket services
+in Solid and LWS modes, and registers `CrdtSyncService` in the service catalog.
+These routes use the configured browser origin policy.
+Solid collaboration room access composes an attached ODRL gate; live compaction,
+replay-byte reservations, snapshot cutoffs, bounded awareness clock tombstones,
+and socket upgrade Origin checks follow the collaboration contract. Compaction
+backs off without progress; reload preserves concurrent appends while peers continue
+editing. Admission keeps headroom for a compaction snapshot.
+See [collaboration](references/collaboration.md) for ticket JSON, room templates,
+read/write access, awareness, persistent room logs and configurable bounds.
+Live updates broadcast before persistence: clients retain their local Yjs state
+and append log resources on socket loss before reconnecting and synchronizing.
+Room loading and unload compaction are isolated per room. Closed connections release
+their presence IDs so a continuously occupied room supports new connections.
+Awareness forwarding follows protocol clocks; close cleanup follows the connection
+that first announced each state.
+Binary messages have limits on protocol record count and aggregate reply bytes.
+The native dependency's owned string interface uses the local standard-library adapter
+under `vendor/smallstr-shim`; document encoding remains supplied by `yrs`.
 
 ## Query readable resources
 
@@ -564,9 +682,9 @@ one IRI, the first marker stored; any other IRI of that shape takes room in the 
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
 the process; the directory-backed embedded index journals each raise before acknowledging it.
 Restoring an independent snapshot taken before a raise restores the earlier mark and loses
-expiries decided after that snapshot. The wasm adapter's `PersistentStore` reports no
-atomic-marker capability: its snapshot journal does not yet preserve marker mutations or forward
-the lifecycle lease, so `LwsState::new` refuses it before reading or writing. A listing,
+expiries decided after that snapshot. The wasm adapter's `PersistentStore` does not claim
+`exclusive`, so `LwsState::new` refuses it before reading or writing. It forwards the lifecycle
+lease, but holds, restores and atomic markers are neither forwarded nor journaled. A listing,
 and the listing a conditional create compares, is read as one snapshot once its lock is held: the
 subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
 left out. It is written only
@@ -597,18 +715,21 @@ before the state (or its store) is handed out, so no request is in flight: it re
 subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
 the mark; construction fails, the mark unchanged, while any of them is still stored (start again
 once it can be removed). An `LwsState` holds a lease (`store::Lifecycle`) for as long as it
-lives, and the lease is per store handle: it is shared by every clone of `LwsState::store` and by
-any `Tracked` wrapper of one (`Tracked::new` takes its inner store's lease and offers no other), so
-a second `LwsState` built in the same process over a clone or a wrapper of a running one's store
-is refused, and only the holder may lower the mark (`Store::reset_marker` takes the lease's guard,
-which only this crate makes). It is not exclusion per backend: a store opened again separately
-over the same backend, or wrapped by a `Store` implementation that does not forward
-`Store::lifecycle`, has a lease of its own. A state that replaces another must be built after the
+lives. Every `Store` must keep and return one lease through the required
+`Store::lifecycle() -> Arc<Lifecycle>` method; wrappers forward their inner store's lease.
+`CompositeStore` clones share their backend handles, cache, holds and lease. Every clone of
+`LwsState::store` and every `Tracked` wrapper shares that lease too, so a second `LwsState`
+built over any of them is refused before backend work. Only the holder may lower the mark
+(`Store::reset_marker` and `SparqClient::reset_marker` take its guard, which only this crate
+makes). Separately opening the same backend still creates a separate in-process lease.
+A state that replaces another must be built after the
 old one is dropped. Running a second process over the same store directory is unsupported, and
 nothing at this release keeps one out. The mark changes only through `Store::raise_marker` and
 `Store::reset_marker`: the generic mutators of the store (`write`, `create_in_container`,
 `restore`, `hold`, `reinstate`, `delete`, `delete_container_if_empty`) refuse an IRI shaped like
-the mark (`ServerError::Forbidden`). A create whose
+the mark (`ServerError::Forbidden`). The raw index mutators also refuse every marker operand,
+including either containment operand and the parent of an empty-container removal, with a fixed
+backend error before backend work. A create whose
 purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
 its listing locks are held, a subscription create takes the mark's raise lock and checks again
 that the service is not halted and that its expiry is after both the clock and the stored mark
@@ -882,6 +1003,24 @@ What the server exposes, all discoverable from the storage description
   Creation alone discloses the capability URL: SSE `source` and `receiveFrom`, or
   WebSocket `receiveFrom`. GET inspects the subscription without redisclosing it;
   DELETE cancels it. Delivery and replay recheck the subscriber's resource access.
+  A confirmed denial returns `403` on connect or closes an open WebSocket with `4403`
+  (SSE sends `event: revoked`), withdrawing the subscription: subscribe again.
+  An undecided access check returns `503` with `Retry-After` on connect, or closes
+  an open WebSocket with `1013` (SSE ends without `revoked`). Keep the capability
+  and reconnect when access checks recover. A halted notification service also
+  closes for retry and keeps the subscription, including when it halts during a
+  pending topic check. Any confirmed readable topic wins, even while another waits;
+  otherwise a transient undecided topic keeps the whole check undecided, even if
+  another topic is denied. A hidden or changing topic uses its prior access state:
+  a confirmed denial still denies, while a readable hidden topic, a store read
+  failure or a check timeout is undecided. Stored metadata that does not parse
+  denies (`ServerError::InvalidMetadata` from the Rust metadata API, still HTTP
+  `500` for resource requests). An unreadable absent topic is denied like a stored one.
+  A slow WebSocket consumer also closes with `1013` but withdraws the subscription;
+  inspect its record before reconnecting. Capability lookup probes a SHA-256 digest
+  index and does not scan other principals' subscriptions; the token itself is never
+  retained. A second stored record with the same digest is quarantined and counted
+  in the service quotas until the owner deletes it.
   SSE retention is bounded by event count, age and serialized body bytes, with
   Last-Event-ID replay or reset for evicted cursors. Replay drains before live frames
   without holding the registration gate; webhooks enter their delivery queue independently
@@ -1038,14 +1177,17 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. A bare `*` asks only whether the target exists and needs no Read: a writer learns
-  that much from any write's response (`201` or `204`, a `DELETE`'s `404`). The Read check comes
-  first, before the target's existence, format or metadata decide anything, and an
-  `If-Unmodified-Since` counts as a comparison on every route that evaluates dates, whether or not
-  the target has a recorded time. A
-  precondition that compares no state (`*`, or a field the write ignores or cannot read) is
-  evaluated on the target's existence alone, without its listing, so neither a page past the last
-  nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
+  outcome would have been. On LWS resource `DELETE`, `If-None-Match: *` requires Read.
+  A non-reader's data `DELETE` with `If-Match: *` is treated as unconditional, answering `204`
+  for settled present and absent targets with the same full-budget and set-aside-parent checks,
+  so for a caller without Read that `204` does not confirm the target existed.
+  Other `If-Match` values on `DELETE`, including malformed or empty lists, require Read too.
+  `POST` with `If-Match: *` or `If-None-Match: *` works without Read, since even an
+  unconditional create discloses whether its container exists. Tags and applicable dates
+  still require Read on every method. The Read check comes before authorization waits,
+  existence, metadata and format lookups. A bare `*` can avoid generating a listing.
+  Service containers (grants, requests and subscriptions) retain their existence-only `*`
+  handling. When `Accept` selects the description, a conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
   that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
@@ -1057,6 +1199,50 @@ What the server exposes, all discoverable from the storage description
   subscriber's subscription listing, and its `ETag`, change only with its own subscriptions, and
   are read through a per-subscriber index, so neither what it is shown nor the work taken to
   show it grows with how many subscriptions anyone else holds.
+- Access grant/request IDs owned by someone else answer exactly like absent IDs for every
+  method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
+  a borrowed record; only a match is cloned. Subscription lookups do the same.
+- Pass-through `SparqClient` and `Store` wrappers forward `exclusive`, `call_timeout`, and supported marker
+  operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
+  ownership and marker resets, and use the default call timeout. Generic `delete_resource`
+  refuses marker operands, including the parent, before any backend call.
+- Resource-linkset `OPTIONS` returns a fixed `204` for every caller; unsupported methods such as
+  `POST` and `DELETE` return `405`. Both answer before authorization, existence checks, preconditions,
+  or set-aside checks, with fixed `Allow`, `Accept-Patch`, and anchor `Link` headers and no
+  backend reads. This also changes readers' answers: an absent target previously answered
+  `404`, and a set-aside target `503`, for `OPTIONS`.
+- Unconditional LWS data-resource `DELETE` by a caller whose unconstrained Delete grant applies
+  but who lacks Read answers `204` for settled present and absent targets, and for an absent prior
+  during an in-flight or set-aside create. This includes anonymous callers with a public Delete
+  grant, before any authentication challenge. Read for an absent URI uses no stored metadata,
+  so partial creates and orphan creator metadata cannot turn that `204` into `404`.
+  A concurrent removal, including after the delete lock is taken, uses the settled-absent
+  decision too: type-constrained Delete grants are refused and callers needing authentication
+  are challenged without reading orphan metadata. A full set-aside budget instead returns `503` with
+  `Retry-After`. A set-aside change to a previously present resource still returns `503` to an
+  authorized caller. A set-aside parent container returns `503` for both a present and an
+  absent child. An absent delete changes and announces nothing. An authenticated caller
+  allowed both Delete and Read for absence retains `404`. Container deletion still requires Read. Residual: pending metadata
+  on a present resource or Delete grants constrained by type or format can produce different
+  answers from absence; those constraints are the caller's requested policy.
+- Authorization computes applicable grant policies in memory first. With no applicable policy,
+  an anonymous caller is denied without reading resource metadata. An authenticated caller's
+  creator check parses only creator; without creator access it returns false even
+  when unrelated metadata fields are malformed. Full metadata is parsed only for a policy.
+  Residual backend work: an absent creator record costs one index lookup, while a present
+  `.meta` record can also fetch its bytes. Keeping creator in the index row is deferred.
+- Conformance-pinned residuals remain explicit:
+  - LDP PUT returns `201` with Location for creation versus `204` for replacement:
+    RFC 9110 section 9.3.4 and CTH `web-access-control/protected-operation/write-access-bob.feature`,
+    "Bob can PUT fictive W inherited [201]".
+  - POST into an existing unreadable container returns `201`; an absent container is refused.
+    CTH `write-access-bob.feature`, "Bob can POST container no A", and Touchstone
+    `core/data_resources#create-in-missing-container-404` pin this split. LWS create has the
+    same split (an authorized absent parent is `404`).
+  - LDP DELETE retains absent `401`/`403` versus present `204`: CTH `write-access-bob.feature`,
+    "Bob cannot DELETE fictive W inherited [403]" and "Bob can DELETE plain W inherited".
+  - LDP insert-only PATCH status remains deferred to the later brief.
+
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
@@ -1107,6 +1293,10 @@ What the server exposes, all discoverable from the storage description
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
 `floor.json`) and run in `.github/workflows/lws-conformance.yml`.
+Both Touchstone and the Solid CTH driver accept `PSS_SPARQ_BACKEND=durable` to test
+an ephemeral `SOLID_SERVER_DATA_DIR` across graceful and idle hard-kill restarts.
+See the [conformance harness guide](../../crates/sparq-lws-core/conformance/README.md#durable-restart-checks)
+for the storage dependencies, byte/ETag checks and unchanged suite ratchets.
 
 ## Follow the normative specs, not this server
 
@@ -1170,3 +1360,13 @@ reconstructed from the code and cites it line by line; it also maps the source-r
   default-off `trust-graph` feature. It adds the library function
   `authz::trust_admit::trust_admit_verdict`, which is deliberately not wired
   into the request pipeline, so enabling it changes no request's outcome.
+
+## Optional versions and trash
+
+`SOLID_SERVER_VERSIONS=1` and `SOLID_SERVER_TRASH=1` enable the services in either protocol; both default to unset (off). `SOLID_SERVER_VERSIONS_MAX` defaults to `20` retained states per resource. `SOLID_SERVER_VERSIONS_RETENTION` and `SOLID_SERVER_TRASH_RETENTION` default to `P30D` and accept positive day/time XSD durations. An HTTP index with either service enabled is refused at startup. Trash covers data resources only. Empty-container deletion remains permanent; recursive LWS `Depth: infinity` deletes are permanent until #7236.
+
+History follows the resource through trash. Solid restore also requires Write on the target; LWS restore takes the create path's locks. Access-control documents ending in `.acl` or `.acr` are excluded.
+
+POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
+
+See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.

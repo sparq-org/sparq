@@ -66,6 +66,65 @@ Override knobs (all optional): `CTH_IMAGE`, `SPEC_TESTS`, `SPEC_TESTS_REPO`, `SE
 in-memory graph. Unlike the source repo, no extra `--features` flag is needed — `embedded-sparq` is
 default-on in this workspace (sq-gg0qq.3).
 
+### Durable restart checks
+
+`PSS_SPARQ_BACKEND=durable ./crates/sparq-lws-core/conformance/run.sh` selects the
+data-directory contract: the driver creates a fresh temporary directory under `RUNNER_TEMP`
+(falling back to `TMPDIR`, then `/tmp`) and passes `SOLID_SERVER_DATA_DIR` to the binary.
+It leaves the binary's backend selection unset. This leg needs the filesystem blob and
+data-directory startup changes from #7229 and #7232, including their final wiring; keep its
+PR draft until those dependencies merge and both durable suites pass against the updated main.
+Restart checks need Python 3, `curl` and `openssl` alongside each suite's existing prerequisites.
+
+After the first full suite meets the unchanged `baseline.json`, the driver captures the
+surviving resources under both users' configured `TEST_CONTAINER`, including container listings
+and ACL documents. It also PUTs RDF and binary fixtures outside the suite's cleanup tree,
+including an overwritten binary resource. Every captured readable resource must have an ETag.
+The manifest stores the bytes and ETag returned before shutdown, with no access tokens or
+private signing keys. Missing optional ACLs are recorded as absent.
+
+The driver sends SIGTERM, waits for a successful graceful exit, then restarts on the same directory
+without any seed flag or seed override. It GETs the captured resources and requires identical
+bytes, ETags and absence results **before** another full CTH run can recreate state. That run
+must meet the same baseline. It then captures fresh writes and repeats with SIGKILL while idle,
+followed by another read-only check and full suite. The new writes after SIGTERM exercise recovery
+from journals without depending on shutdown compaction. `SOLID_SERVER_WAIT_FOR_LOCK_SECS=10`
+bounds startup's directory-lock wait. The seed opt-in is used only on the ephemeral first boot.
+Durable mode refuses `CTH_ENFORCE_BASELINE=0`.
+
+The Touchstone driver supports the same mode:
+
+```sh
+PSS_SPARQ_BACKEND=durable TOUCHSTONE=../touchstone \
+  crates/sparq-lws-core/conformance/lws/touchstone.sh all
+```
+
+It uses `SOLID_SERVER_PROTOCOL=lws` and the same temporary-directory lifecycle, with the
+secured storage owner and authorization key file retained across restarts. It reads successful
+PUT targets from the current Touchstone `run.json`; surviving targets must retain their bytes
+and ETags, and targets deleted by the suite must remain absent. The independent RDF and binary
+fixtures ensure that cleanup cannot make the check empty. The unchanged `lws/floor.json` is
+checked before restarting and after each full rerun. Durable mode requires `all`.
+Its tests run serially so other tests cannot keep changing the root during its listing check.
+The durable workflow leg has a separate job budget for its three full suite runs;
+the memory leg retains its single-run budget.
+Independent LWS probes are created by POST to the storage root, using the returned Location,
+before PUT replaces their contents; LWS PUT does not create missing resources.
+Only successful suite PUTs on the storage origin count as persistence evidence; writes to
+the identity and webhook fixture host are excluded before any resources are read.
+
+Initial reports keep their usual location. Restart reports are separated into `post-term/` and
+`post-kill/`, with distinct server logs. The drivers remove their temporary stores on exit and
+only signal their own child process. Touchstone's generated key files and target configurations
+contain private fixture keys and must stay out of uploaded artifacts.
+Normal completion checks the final graceful shutdown explicitly. Its bounded wait allows index
+compaction to finish; a shutdown failure fails the driver instead of being hidden by exit cleanup.
+
+`python3 -B crates/sparq-lws-core/conformance/test-durable.py` exercises the HTTP capture/check
+commands against a loopback fixture and both complete shell drivers with local process and suite
+fixtures. These checks cover harness orchestration; the real suites against a binary with the
+merged storage dependencies provide the durability evidence.
+
 ## Auth wiring (Keycloak, the hard part)
 
 The CTH logs its test users in to obtain access tokens. Identity is delegated to **Keycloak**; the

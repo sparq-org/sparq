@@ -62,7 +62,9 @@
 //! the one strict improvement: `Mutex` wakeups were arbitrary, so a caller could be starved.
 //!
 //! Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the actor thread.
-//! Its graph and directory lock are released before drop returns.
+//! Its graph explicitly unlocks the directory before drop returns, even if a child between fork
+//! and exec still holds inherited descriptors. [`EmbeddedSparqClient::open`] attempts the open
+//! once and immediately refuses a directory held by another live holder.
 //!
 //! ## Persistence
 //! Constructed over a FRESH in-memory graph ([`EmbeddedSparqClient::in_memory`]), or over a
@@ -139,8 +141,9 @@ struct GraphActor {
 impl GraphActor {
     /// Move `graph` onto a fresh dedicated OS thread and start serving jobs.
     ///
-    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread, releasing
-    /// the graph's directory lock before returning. A spawn failure is a backend error.
+    /// Dropping the last [`EmbeddedSparqClient`] clone drains queued jobs and joins the thread,
+    /// dropping the graph and releasing its directory locks before returning, including when a
+    /// child retains inherited descriptors. A spawn failure is a backend error.
     fn spawn(graph: Graph) -> Result<Self, SparqError> {
         let (tx, rx) = mpsc::unbounded_channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -289,6 +292,9 @@ impl EmbeddedSparqClient {
 
     /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
     /// snapshot). The on-disk path the persistence option selects.
+    ///
+    /// Attempts the open once. A live holder is refused immediately; a dropped graph explicitly
+    /// releases its locks even when a child still holds inherited descriptors.
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
         let graph = Graph::open(dir).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
@@ -465,6 +471,11 @@ fn engine_err(context: &str, e: String) -> SparqError {
     SparqError::Backend(format!("fatal: embedded engine {context}: {e}"))
 }
 
+#[cfg(test)]
+thread_local! {
+    static NAMED_GRAPH_FORKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Preserve atomic in-memory updates; journal captured effects for directory-backed graphs.
 /// Never publish a durable graph's fork: it carries neither WAL nor transaction journal.
 fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqError> {
@@ -476,9 +487,18 @@ fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqErr
             .map_err(|e| engine_err(op, e));
     }
     let budget = sparq_engine::QueryBudget::unlimited();
-    let mut working = graph.graph.fork();
-    let effects = sparq_engine::update_in_place_capturing(&mut working, sparql, &budget)
-        .map_err(|e| engine_err(op, e))?;
+    let update = sparq_engine::parse_update_rec2013(sparql).map_err(|e| engine_err(op, e))?;
+    let mut working = match sparq_engine::update_graph_scope(&update) {
+        Some(names) => graph.graph.fork_scoped(&names),
+        None => graph.graph.fork(),
+    };
+    // Each member of the working dataset was forked once. Count the resulting
+    // named slots, rather than the requested names (which may include absent slots).
+    #[cfg(test)]
+    NAMED_GRAPH_FORKS.with(|count| count.set(count.get() + working.named().len()));
+    let effects = sparq_engine::update_in_place_algebra_capturing(
+        &mut working, &update, None, None, &budget,
+    ).map_err(|e| engine_err(op, e))?;
     drop(working);
     #[cfg(test)]
     let result = match graph.apply_failure.take() {
@@ -499,6 +519,9 @@ fn commit(graph: &mut ActorGraph, sparql: &str, op: &str) -> Result<(), SparqErr
         }
     })
 }
+
+#[path = "history_embedded.rs"]
+mod history_ops;
 
 #[cfg(test)]
 #[path = "embedded_journal_tests.rs"]
@@ -555,6 +578,25 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
 }
 
 impl EmbeddedSparqClient {
+    async fn put_meta_unchecked(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        // The SAME `update_put_meta` builder — a single `;`-joined update (3 targeted deletes + one
+        // insert). Capture the whole request before committing: the whole request commits
+        // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
+        // for a direct library consumer, per the sparq-engine docs).
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let u = sparql::update_put_meta(
+            iri,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+        )?;
+        self.dispatch(move |graph| {
+            commit(graph, &u, "put_meta")
+        })
+        .await
+    }
+
     async fn commit_child(
         &self,
         container: &str,
@@ -562,6 +604,7 @@ impl EmbeddedSparqClient {
         meta: ResourceMeta,
         return_previous: bool,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         // IN-PROCESS atomicity simplification: inside ONE actor job, verify the container exists, then
         // commit the child record + the containment edge atomically. No create-marker/follow-up-ASK
         // is needed (the HTTP path needs them only because an UPDATE over HTTP cannot report whether
@@ -628,22 +671,18 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
-        // The SAME `update_put_meta` builder — a single `;`-joined update (3 targeted deletes + one
-        // insert). Capture the whole request before committing: the whole request commits
-        // all-or-nothing, so a re-write never leaves a half-deleted record (the safe public default
-        // for a direct library consumer, per the sparq-engine docs).
-        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_put_meta(
-            iri,
-            &meta.content_type,
-            &meta.blob_key,
-            &meta.etag,
-            modified.as_deref(),
-        )?;
-        self.dispatch(move |graph| {
-            commit(graph, &u, "put_meta")
-        })
-        .await
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
+        self.put_meta_unchecked(iri, meta).await
+    }
+
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        _: &super::LifecycleGuard,
+    ) -> Result<(), SparqError> {
+        self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
+            .await
     }
 
     async fn replace_meta(
@@ -651,6 +690,7 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         meta: ResourceMeta,
     ) -> Result<Option<ResourceMeta>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // The read of the previous record and the upsert run in ONE actor job, so no other index
         // operation can interleave: the returned record is exactly the one this update replaced.
         let q = sparql::select_meta(iri)?;
@@ -676,6 +716,84 @@ impl SparqClient for EmbeddedSparqClient {
         .await
     }
 
+    async fn replace_meta_retaining(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+        member: &str,
+        fields: super::history::VersionFields,
+    ) -> Result<Vec<String>, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), Some(member)])?;
+        let (iri, member) = (iri.to_string(), member.to_string());
+        self.dispatch(move |g| history_ops::replace(g, &iri, meta, &member, fields))
+            .await
+    }
+    async fn move_to_trash(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+        member: &str,
+        fields: super::history::TrashFields,
+    ) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent, Some(member)])?;
+        let (iri, parent, member) = (
+            iri.to_string(),
+            parent.map(str::to_string),
+            member.to_string(),
+        );
+        self.dispatch(move |g| {
+            history_ops::move_to_trash(g, &iri, parent.as_deref(), &member, fields)
+        })
+        .await
+    }
+    async fn restore_from_trash(
+        &self,
+        member: &str,
+        target: &str,
+        parent: &str,
+    ) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(member), Some(target), Some(parent)])?;
+        let (member, target, parent) = (member.to_string(), target.to_string(), parent.to_string());
+        self.dispatch(move |g| history_ops::restore(g, &member, &target, &parent))
+            .await
+    }
+    async fn versions(
+        &self,
+        original: Option<&str>,
+    ) -> Result<Vec<super::history::VersionEntry>, SparqError> {
+        let original = original.map(str::to_string);
+        self.dispatch(move |g| history_ops::versions(g, original.as_deref()))
+            .await
+    }
+    async fn trash_entries(&self) -> Result<Vec<super::history::TrashEntry>, SparqError> {
+        self.dispatch(move |g| history_ops::trash(g)).await
+    }
+
+    async fn version_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<super::history::VersionEntry>, SparqError> {
+        let member = member.to_string();
+        self.dispatch(move |g| history_ops::version_entry(g, &member))
+            .await
+    }
+    async fn trash_entry(
+        &self,
+        member: &str,
+    ) -> Result<Option<super::history::TrashEntry>, SparqError> {
+        let member = member.to_string();
+        self.dispatch(move |g| history_ops::trash_entry(g, &member))
+            .await
+    }
+    async fn expired_history(
+        &self,
+        versions_before: std::time::SystemTime,
+        trash_before: std::time::SystemTime,
+        limit: usize,
+    ) -> Result<Vec<super::history::ExpiredEntry>, SparqError> {
+        self.dispatch(move |g| history_ops::expired(g, versions_before, trash_before, limit))
+            .await
+    }
     fn raises_markers(&self) -> bool {
         true
     }
@@ -756,6 +874,7 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri)])?;
         // DROP SILENT the resource's whole named graph (idempotent on an absent graph) — the SAME
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
@@ -770,9 +889,28 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, SparqError> {
+        self.delete_resource_retiring(iri, parent)
+            .await
+            .map(|r| r.live_key)
+    }
+
+    async fn delete_resource_retiring(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<super::history::RetiredResource, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         let q = sparql::select_meta(iri)?;
-        let u = sparql::update_delete_resource_with_parent(iri, parent)?;
+        let mut u = sparql::update_delete_resource_with_parent(iri, parent)?;
+        let iri = iri.to_string();
         self.dispatch(move |graph| {
+            let mut version_keys = Vec::new();
+            for v in history_ops::versions(graph, Some(&iri))? {
+                version_keys.push(v.meta.blob_key);
+                u.push_str("; ");
+                u.push_str(&sparql::update_delete_resource(&v.member)?);
+            }
+
             let result = sparq_engine::query(graph, &q)
                 .map_err(|e| engine_err("delete_resource/read", e))?;
             let key = match meta_from_result(&result) {
@@ -781,7 +919,10 @@ impl SparqClient for EmbeddedSparqClient {
                 Err(e) => return Err(e),
             };
             commit(graph, &u, "delete_resource")?;
-            Ok(key)
+            Ok(super::history::RetiredResource {
+                live_key: key,
+                version_keys,
+            })
         })
         .await
     }
@@ -791,6 +932,7 @@ impl SparqClient for EmbeddedSparqClient {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<DeleteOutcome, SparqError> {
+        super::limits::refuse_marker_operands(&[Some(iri), parent])?;
         // IN-PROCESS atomicity simplification (the documented difference from the HTTP impl): the
         // whole op is ONE indivisible actor job, so the existence + empty checks and the delete decide
         // their outcome DIRECTLY with no interleaving — NO marker/follow-up-ASK dance is needed. The
@@ -850,6 +992,7 @@ impl SparqClient for EmbeddedSparqClient {
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        super::limits::refuse_marker_operands(&[Some(container), Some(child)])?;
         let u = sparql::update_remove_child(container, child)?;
         self.dispatch(move |graph| {
             commit(graph, &u, "remove_child")

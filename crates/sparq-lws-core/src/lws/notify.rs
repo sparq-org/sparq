@@ -139,6 +139,8 @@ pub struct Pending {
 #[derive(Debug, Default)]
 #[must_use = "prepared notifications go out, and are counted, only through Notifier::send"]
 pub struct Prepared {
+    #[cfg(feature = "crdt-sync")]
+    crdt_create: Option<(String, String)>,
     pending: Vec<Pending>,
     /// The resource the change is to.
     uri: String,
@@ -452,9 +454,29 @@ pub fn covers(topic: &str, uri: &str) -> bool {
     topic == uri || (topic.ends_with('/') && uri.starts_with(topic))
 }
 
-/// The subscriptions in force, held by id and by subscriber.
+#[cfg(not(test))]
+type RecordHasher = std::collections::hash_map::RandomState;
+
+#[cfg(test)]
+#[derive(Default)]
+struct RecordHasher {
+    state: std::collections::hash_map::RandomState,
+    probes: Arc<AtomicUsize>,
+}
+
+#[cfg(test)]
+impl std::hash::BuildHasher for RecordHasher {
+    type Hasher = <std::collections::hash_map::RandomState as std::hash::BuildHasher>::Hasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        self.state.build_hasher()
+    }
+}
+
+/// The subscriptions in force, held by id, subscriber and capability digest.
 ///
-/// Both indexes live under one lock, so the ids recorded for a subscriber and the subscriptions
+/// All indexes live under one lock, so the ids recorded for a subscriber and the subscriptions
 /// themselves can never disagree. The subscriber index is what a subscriber's listing and the
 /// count of its own capacity read ([`Subs::mine`], [`Subs::live_count_of`]): each reads that
 /// subscriber's records and no one else's, so neither its answer nor the work it takes grows
@@ -462,28 +484,111 @@ pub fn covers(topic: &str, uri: &str) -> bool {
 ///
 /// The subscriber a record is indexed under is set when it is inserted and never changed:
 /// [`Subs::get_mut`] is for the delivery failure count, which does change in place.
-#[derive(Default)]
 struct Subs {
-    by_id: BTreeMap<String, Subscription>,
+    by_id: HashMap<String, Subscription, RecordHasher>,
+    // Ordered traversal is for listings and expiry sweeps, never capability lookup.
+    ordered_ids: std::collections::BTreeSet<String>,
     by_subscriber: BTreeMap<Option<String>, std::collections::BTreeSet<String>>,
+    capability_index: HashMap<[u8; 32], String>,
+    #[cfg(test)]
+    capability_probes: AtomicUsize,
+    #[cfg(test)]
+    record_probes: Arc<AtomicUsize>,
+}
+
+impl Default for Subs {
+    fn default() -> Self {
+        let hasher = RecordHasher::default();
+        #[cfg(test)]
+        let record_probes = hasher.probes.clone();
+        Self {
+            by_id: HashMap::with_hasher(hasher),
+            ordered_ids: Default::default(),
+            by_subscriber: Default::default(),
+            capability_index: Default::default(),
+            #[cfg(test)]
+            capability_probes: AtomicUsize::new(0),
+            #[cfg(test)]
+            record_probes,
+        }
+    }
 }
 
 impl Subs {
-    /// Hold `sub` under `id`, giving back what `id` held before.
-    fn insert(&mut self, id: String, sub: Subscription) -> Option<Subscription> {
+    /// Hold `sub` under `id`, unless another id already holds its capability digest.
+    fn insert(&mut self, id: String, sub: Subscription) -> bool {
         let subscriber = sub.subscriber.clone();
+        let hash = sub.capability_hash;
+        if hash.is_some_and(|hash| {
+            self.capability_index
+                .get(&hash)
+                .is_some_and(|held| held != &id)
+        }) {
+            debug_assert!(self.capability_agrees(&hash.expect("duplicate digest")));
+            return false;
+        }
         let replaced = self.by_id.insert(id.clone(), sub);
+        self.ordered_ids.insert(id.clone());
         if let Some(old) = &replaced {
             self.unindex(&id, &old.subscriber);
+            if let Some(hash) = old.capability_hash {
+                if self
+                    .capability_index
+                    .get(&hash)
+                    .is_some_and(|held| held == &id)
+                {
+                    self.capability_index.remove(&hash);
+                }
+            }
+        }
+        if let Some(hash) = hash {
+            self.capability_index.insert(hash, id.clone());
         }
         self.by_subscriber.entry(subscriber).or_default().insert(id);
-        replaced
+        for hash in hash
+            .into_iter()
+            .chain(replaced.and_then(|old| old.capability_hash))
+        {
+            debug_assert!(self.capability_agrees(&hash));
+        }
+        true
     }
 
     fn remove(&mut self, id: &str) -> Option<Subscription> {
         let gone = self.by_id.remove(id)?;
+        self.ordered_ids.remove(id);
         self.unindex(id, &gone.subscriber);
+        if let Some(hash) = gone.capability_hash {
+            if self
+                .capability_index
+                .get(&hash)
+                .is_some_and(|held| held == id)
+            {
+                self.capability_index.remove(&hash);
+            }
+            debug_assert!(self.capability_agrees(&hash));
+        }
         Some(gone)
+    }
+
+    fn capability_agrees(&self, hash: &[u8; 32]) -> bool {
+        let indexed = self.capability_index.get(hash);
+        indexed.is_none_or(|id| {
+            self.by_id
+                .get(id)
+                .is_some_and(|sub| sub.capability_hash.as_ref() == Some(hash))
+        }) && self
+            .by_id
+            .iter()
+            .all(|(id, sub)| sub.capability_hash.as_ref() != Some(hash) || indexed == Some(id))
+    }
+
+    fn by_capability(&self, hash: &[u8; 32]) -> Option<&Subscription> {
+        #[cfg(test)]
+        self.capability_probes.fetch_add(1, Ordering::SeqCst);
+        self.capability_index
+            .get(hash)
+            .and_then(|id| self.by_id.get(id))
     }
 
     /// Drop `id` from `subscriber`'s ids, and the subscriber itself once it holds none. Every
@@ -522,26 +627,28 @@ impl Subs {
     }
 
     #[cfg(test)]
-    fn keys(&self) -> std::collections::btree_map::Keys<'_, String, Subscription> {
-        self.by_id.keys()
+    fn keys(&self) -> std::collections::btree_set::Iter<'_, String> {
+        self.ordered_ids.iter()
     }
 
-    fn values(&self) -> std::collections::btree_map::Values<'_, String, Subscription> {
-        self.by_id.values()
+    fn values(&self) -> impl Iterator<Item = &Subscription> {
+        self.ordered_ids.iter().map(|id| &self.by_id[id])
     }
 
     #[cfg(test)]
-    fn values_mut(&mut self) -> std::collections::btree_map::ValuesMut<'_, String, Subscription> {
+    fn values_mut(&mut self) -> std::collections::hash_map::ValuesMut<'_, String, Subscription> {
         self.by_id.values_mut()
     }
 
-    fn range<T, R>(&self, range: R) -> std::collections::btree_map::Range<'_, String, Subscription>
+    fn range<T, R>(&self, range: R) -> impl Iterator<Item = (&String, &Subscription)>
     where
         T: Ord + ?Sized,
         String: std::borrow::Borrow<T> + Ord,
         R: std::ops::RangeBounds<T>,
     {
-        self.by_id.range(range)
+        self.ordered_ids
+            .range(range)
+            .map(|id| (id, self.by_id.get::<str>(id.as_str()).expect("indexed id")))
     }
 
     /// How many unexpired subscriptions `subscriber` holds, read through the subscriber index as
@@ -590,6 +697,8 @@ impl Subs {
 
 /// The subscriptions of the storage and the notification sender.
 pub struct Notifier {
+    #[cfg(feature = "crdt-sync")]
+    pub(crate) crdt_changes: sparq_lws_ysync::Changes,
     subs: RwLock<Subs>,
     streams: streams::Streams,
     /// Entity tag of the subscription listing; changes with its membership.
@@ -821,11 +930,17 @@ impl Notifier {
         self.subs.write().expect("lock").insert("test".into(), sub);
     }
 
+    /// Pause expiry maintenance while a test measures request-local backend work.
+    #[cfg(test)]
+    pub(crate) fn pause_sweeper(&self) {
+        self.sweeper_off.store(true, Ordering::SeqCst);
+    }
+
     /// Ensure the service container exists and load the subscriptions it holds, all visible.
     #[cfg(test)]
     pub async fn load<S: Store>(store: &S, cfg: &LwsConfig) -> Result<Self, String> {
         let me = Self::new(cfg)?;
-        let lease = store.lifecycle().unwrap_or_default();
+        let lease = store.lifecycle();
         me.hold(lease.acquire().ok_or("the store's lease is held")?);
         me.load_with(store, cfg, |_| true).await?;
         Ok(me)
@@ -847,6 +962,8 @@ impl Notifier {
             .build()
             .map_err(|e| format!("notification client: {e}"))?;
         Ok(Self {
+            #[cfg(feature = "crdt-sync")]
+            crdt_changes: Default::default(),
             subs: RwLock::new(Subs::default()),
             streams: streams::Streams::new(),
             etag: RwLock::new(new_etag()),
@@ -937,6 +1054,7 @@ impl Notifier {
             );
         }
         let mut loaded = Vec::new();
+        let mut capabilities = std::collections::HashSet::new();
         let mut held_back = 0;
         let mut quarantined = std::collections::BTreeSet::new();
         for child in store
@@ -988,6 +1106,13 @@ impl Notifier {
                 continue;
             }
             sub.id = id;
+            if sub
+                .capability_hash
+                .is_some_and(|hash| !capabilities.insert(hash))
+            {
+                quarantined.insert(sub.id);
+                continue;
+            }
             loaded.push((child, sub));
         }
         // No high water stored (or none that reads as a time) while subscriptions with an expiry
@@ -1242,13 +1367,18 @@ impl Notifier {
     }
 
     /// Subscription `id`, unless it is expired by `now` ([`Notifier::decide`]).
-    fn get(&self, id: &str, now: i64) -> Option<Subscription> {
+    fn get(
+        &self,
+        id: &str,
+        now: i64,
+        owns: impl FnOnce(&Subscription) -> bool,
+    ) -> Option<Subscription> {
         let high_water = self.high_water();
         self.subs
             .read()
             .expect("lock")
             .get(id)
-            .filter(|s| !s.lapsing(high_water, now))
+            .filter(|s| owns(s) && !s.lapsing(high_water, now))
             .cloned()
     }
 
@@ -1328,12 +1458,18 @@ impl Notifier {
     /// deliveries) nor expired, decided durably ([`Notifier::decide`]). A delivery that goes
     /// ahead waits on nothing here.
     async fn stands_now<S: Store>(&self, store: &S, id: &str) -> bool {
-        let Some(now) = self.decide(store, |_| vec![id.to_string()]).await else {
-            return false;
-        };
+        self.standing_now(store, id).await.unwrap_or(false)
+    }
+
+    /// A halted service cannot decide whether the subscription still stands.
+    async fn standing_now<S: Store>(&self, store: &S, id: &str) -> Option<bool> {
+        let now = self.decide(store, |_| vec![id.to_string()]).await?;
+        if self.halted() {
+            return None;
+        }
         let high_water = self.high_water();
         let subs = self.subs.read().expect("lock");
-        subs.get(id).is_some_and(|s| !s.lapsing(high_water, now)) && !self.is_withdrawn(id)
+        Some(subs.get(id).is_some_and(|s| !s.lapsing(high_water, now)) && !self.is_withdrawn(id))
     }
 
     /// Whether the subscription `id` is out of force while its removal runs.
@@ -1491,7 +1627,15 @@ impl Notifier {
         event: &Event,
         limit: usize,
     ) -> Prepared {
-        self.prepare_for(state, event, limit, None).await
+        #[allow(unused_mut)]
+        let mut prepared = self.prepare_for(state, event, limit, None).await;
+        #[cfg(feature = "crdt-sync")]
+        if event.kind == "Create" {
+            if let Some(("target", parent)) = &event.relation {
+                prepared.crdt_create = Some((parent.clone(), event.uri.clone()));
+            }
+        }
+        prepared
     }
 
     /// Tell every subscriber whose topic covers the service record `event.uri` (an access grant
@@ -1663,6 +1807,10 @@ impl Notifier {
     /// Deliver notifications [`Notifier::prepare`]d earlier, and count what preparing them left
     /// out.
     pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, prepared: Prepared) {
+        #[cfg(feature = "crdt-sync")]
+        if let Some((room, file)) = &prepared.crdt_create {
+            self.crdt_changes.created(room, file);
+        }
         if prepared.dropped > 0 {
             self.note_dropped(prepared.dropped, &prepared.uri);
         }
@@ -2153,11 +2301,10 @@ pub async fn handle<S: Store + 'static>(
         return quarantined(state, req, id).await;
     }
     // Who may see it is asked of what is stored; whether it expired is decided below.
-    let sub = state.notify.get(id, state.notify.high_water());
-    let mine = sub
-        .as_ref()
-        .is_some_and(|s| owner || (agent.subject.is_some() && agent.subject == s.subscriber));
-    let Some(sub) = sub.filter(|_| mine) else {
+    let sub = state.notify.get(id, state.notify.high_water(), |s| {
+        owner || (agent.subject.is_some() && agent.subject == s.subscriber)
+    });
+    let Some(sub) = sub else {
         // A subscription discloses its topics and inbox; to anyone else it does not exist.
         return if state.needs_auth(agent) {
             state.challenge(None)
@@ -2173,7 +2320,7 @@ pub async fn handle<S: Store + 'static>(
     else {
         return halted();
     };
-    if state.notify.get(id, now).is_none() {
+    if state.notify.get(id, now, |_| true).is_none() {
         return problem(StatusCode::NOT_FOUND, None);
     }
     if let Some(refused) = unavailable() {
@@ -3344,7 +3491,15 @@ mod tests {
         // it) and starts with its clock back before the expiry; the subscription stands again,
         // and nothing ever showed otherwise.
         store.fail_marker_write.store(false, Ordering::SeqCst);
-        let restarted = Notifier::load(&store, &state.cfg).await.unwrap();
+        let cfg = state.cfg.clone();
+        drop(sweeper);
+        drop(state);
+        test_store::wait_for_stop(
+            &store,
+            "nothing_shows_an_expiry_until_stored_and_a_restart_may_revive_it_as_documented",
+        )
+        .await;
+        let restarted = Notifier::load(&store, &cfg).await.unwrap();
         assert!(restarted.is_live("c"));
     }
 
@@ -3373,7 +3528,9 @@ mod tests {
         let kept = stored_sub(&state, "kept", sub_until(now + 1800)).await;
         stored_sub(&state, "later", sub_until(now + 7200)).await;
         *store.fail_delete_of.lock().unwrap() = Some(kept.clone());
-        let restarted = Notifier::load(&store, &state.cfg).await.unwrap();
+        let cfg = state.cfg.clone();
+        drop(state);
+        let restarted = Notifier::load(&store, &cfg).await.unwrap();
         assert!(!store.exists(&gone).await.unwrap(), "not purged");
         assert!(store.exists(&kept).await.unwrap());
         assert!(!restarted.is_live("kept"), "served again");
@@ -3387,9 +3544,9 @@ mod tests {
         assert_eq!(listed, ["later"]);
     }
 
-    /// A removal whose delete's outcome is unknown leaves the subscription expired: a start
-    /// meanwhile, its clock stepped back, still finds it so and removes it, and the removal is
-    /// settled later with nothing put back.
+    /// A removal whose outcome is unknown leaves the stored subscription expired: inspecting
+    /// its durable high water with the clock stepped back still removes it. The original
+    /// removal settles later without putting anything back; no second service is started.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_expired_subscription_whose_removal_is_unknown_stays_expired() {
         let (state, store) = test_store::state(100).await;
@@ -3420,7 +3577,11 @@ mod tests {
         let r = handle(&state, &get, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NOT_FOUND);
         // A start now, an hour behind what is stored, finds it expired and removes it.
-        let restarted = Notifier::load(&store, &state.cfg).await.unwrap();
+        let restarted = Notifier::new(&state.cfg).unwrap();
+        restarted
+            .load_with(&store, &state.cfg, |_| true)
+            .await
+            .unwrap();
         assert!(!restarted.is_live("u"), "served again");
         assert!(!store.exists(&iri).await.unwrap());
         // The first removal is settled once the store lets it: gone.
@@ -3494,6 +3655,7 @@ mod tests {
             );
             // Once it is removed, the next start stores one.
             *store.fail_delete_of.lock().unwrap() = None;
+            drop(loaded);
             let loaded = Notifier::load(&store, &cfg).await.unwrap();
             assert!(!store.exists(&stored[1]).await.unwrap(), "{corrupt:?}");
             assert!(loaded.is_live("open"));
@@ -4029,6 +4191,11 @@ mod tests {
         };
         assert!(why.contains("another LWS service"), "{why}");
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &_store,
+            "a_second_state_over_a_running_ones_store_is_refused",
+        )
+        .await;
         let state = LwsState::new(backend, cfg).await.unwrap();
         assert!(state.notify.lease().is_some());
     }
@@ -4286,6 +4453,11 @@ mod tests {
         // Once the running state is gone, a wrapper of its store may be served.
         let backend = state.store.clone();
         drop(state);
+        super::super::test_store::wait_for_stop(
+            &_store,
+            "a_state_over_a_wrapper_of_a_running_ones_store_is_refused",
+        )
+        .await;
         let state = LwsState::new(Tracked::new(backend, root), cfg)
             .await
             .unwrap();
@@ -4430,6 +4602,8 @@ mod tests {
         assert!(store.exists(&stored[0]).await.unwrap());
         assert!(!restarted.is_live("before"));
         assert!(restarted.is_live("after"));
+        drop(restarted);
+        drop(loaded);
         // A start in the recovery mode fails while one with an expiry is left, and lowers
         // nothing (what it could remove is gone).
         let mut recovery = cfg.clone();
@@ -4452,6 +4626,7 @@ mod tests {
             .parse()
             .unwrap();
         assert!((now..now + 60).contains(&reset), "{reset}");
+        drop(recovered);
         let loaded = Notifier::load(&store, &cfg).await.unwrap();
         assert!(loaded.is_live("open"));
         assert!(!loaded.halted());
@@ -4491,9 +4666,11 @@ mod tests {
         let loaded = Notifier::load(&store, &cfg).await.unwrap();
         assert_eq!(loaded.subs.read().unwrap().len(), 1, "kept while stored");
         *store.fail_delete_of.lock().unwrap() = None;
+        drop(loaded);
         let loaded = Notifier::load(&store, &cfg).await.unwrap();
         assert!(loaded.subs.read().unwrap().is_empty(), "purged");
         assert!(!store.exists(&iri).await.unwrap());
+        drop(loaded);
         let unreadable = format!("{container}unreadable");
         store
             .create_in_container(&container, &unreadable, Bytes::from("{}"), LWS_JSON)
@@ -4669,14 +4846,25 @@ mod tests {
         let tag = listed.headers()["etag"].to_str().unwrap().to_string();
         let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
         assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        let last_listed = state
+            .notify
+            .listed(reader.subject.as_deref(), false)
+            .last()
+            .unwrap()
+            .id
+            .clone();
         {
             let mut subs = state.notify.subs.write().unwrap();
             // The last listed, on the second page: the first page lists the same members.
-            let live = subs
-                .values_mut()
-                .filter(|s| s.expires_at.is_none())
-                .last()
+            let id = subs
+                .ordered_ids
+                .iter()
+                .rev()
+                .find(|id| subs.get(id).unwrap().expires_at.is_none())
+                .cloned()
                 .unwrap();
+            assert_eq!(id, last_listed);
+            let live = subs.get_mut(&id).unwrap();
             live.expires_at = Some(1);
         }
         let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
@@ -4861,14 +5049,20 @@ mod tests {
             |tag: &str| test_store::request(Method::DELETE, &path, &[("if-match", tag)], "");
         let r = handle(&state, &delete("\"other\""), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
-        assert!(state.notify.get("s1", state.notify.clock()).is_some());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_some());
         // A read is held to If-Match as well.
         let other = test_store::request(Method::GET, &path, &[("if-match", "\"other\"")], "");
         let r = handle(&state, &other, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
         let r = handle(&state, &delete(&tag), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
-        assert!(state.notify.get("s1", state.notify.clock()).is_none());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_none());
     }
 
     /// Review finding: a recursive delete prepared every notification for every descendant
@@ -5761,7 +5955,10 @@ mod tests {
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(!state.store.exists(&iri).await.unwrap());
-        assert!(state.notify.get("s1", state.notify.clock()).is_none());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_none());
     }
 
     #[tokio::test]
@@ -5773,13 +5970,19 @@ mod tests {
         store.fail_delete.store(true, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(state.notify.get("s1", state.notify.clock()).is_some());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_some());
         let iri = state.cfg.absolute(&path);
         assert!(state.store.exists(&iri).await.unwrap());
         store.fail_delete.store(false, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-        assert!(state.notify.get("s1", state.notify.clock()).is_none());
+        assert!(state
+            .notify
+            .get("s1", state.notify.clock(), |_| true)
+            .is_none());
         assert!(!state.store.exists(&iri).await.unwrap());
     }
 
@@ -6439,9 +6642,14 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let state = LwsState::new(store.clone(), state.cfg.clone())
-            .await
-            .unwrap();
+        let cfg = state.cfg.clone();
+        drop(state);
+        super::super::test_store::wait_for_stop(
+            &store,
+            "subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more",
+        )
+        .await;
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
         assert_eq!(
             state.notify.subs.read().unwrap().len(),
             MAX_SUBSCRIPTIONS + 1,
@@ -6549,6 +6757,8 @@ mod tests {
                 .unwrap();
         }
         let cfg = state.cfg.clone();
+        drop(state);
+        test_store::wait_for_stop(&store, "state_with_other_subscribers").await;
         let state = LwsState::new(store, cfg).await.unwrap();
         (state, topic, ours)
     }
@@ -8119,8 +8329,8 @@ mod tests {
             let req = test_store::request(Method::GET, &grant_path, &[], "");
             async move { test_store::route_as(&state, req, &who).await.status() }
         };
-        assert_eq!(ask_grant(&reader).await, StatusCode::FORBIDDEN);
-        assert_eq!(ask_grant(&stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(ask_grant(&reader).await, StatusCode::NOT_FOUND);
+        assert_eq!(ask_grant(&stranger).await, StatusCode::NOT_FOUND);
         assert_eq!(ask_grant(&owner).await, StatusCode::SERVICE_UNAVAILABLE);
     }
 
@@ -8131,8 +8341,8 @@ mod tests {
     /// that is there, kept as it was, against a create of one that is not).
     #[tokio::test]
     async fn a_topic_the_subscriber_may_not_read_is_decided_the_same_whether_it_exists() {
-        use test_store::{agent, closed_state, data};
-        let (state, store) = closed_state(100).await;
+        use test_store::{agent, counting_state, data};
+        let (state, store) = counting_state(100).await;
         state.notify.sweeper_off.store(true, Ordering::SeqCst);
         let there = data(&state, "there").await;
         let gone = format!("{}gone", state.cfg.storage());
@@ -8175,6 +8385,8 @@ mod tests {
                     None => None,
                 };
                 *store.trace.lock().unwrap() = Some(Vec::new());
+                store.counters.take_methods();
+                let measured = store.counters.measure();
                 let r = test_store::route_as(&state, req, &who).await;
                 let trace = store.trace.lock().unwrap().take().unwrap();
                 if changing.is_some() {
@@ -8189,7 +8401,13 @@ mod tests {
                     .into_iter()
                     .map(|t| t.replace(&topic, "{topic}"))
                     .collect();
-                (status, body, trace)
+                (
+                    status,
+                    body,
+                    trace,
+                    measured.delta(),
+                    store.counters.take_methods(),
+                )
             }
         };
         for changing in [None, Some(super::super::Prior::default())] {
