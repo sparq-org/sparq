@@ -155,6 +155,8 @@ pub struct InMemoryStoreLimits {
     /// Maximum aggregate bytes of stored content physically retained by the blob store.
     pub max_total_bytes: usize,
     /// Maximum stored-content entries retained by either the blob or metadata store.
+    /// Each insert consumes one entry; its zero-byte directory is bookkeeping,
+    /// bounded by retained or reclaiming document keys, and consumes no content entry.
     pub max_resource_count: usize,
     /// Maximum entries in the service pool ([`in_service_pool`]), counted apart from
     /// [`InMemoryStoreLimits::max_resource_count`].

@@ -263,6 +263,14 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.exists(iri).await
     }
 
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        self.change(async {
+            let _m = self.gens.mutating(&[iri]);
+            self.inner.append(iri, ntriples).await
+        })
+        .await?
+    }
+
     async fn write(
         &self,
         iri: &str,

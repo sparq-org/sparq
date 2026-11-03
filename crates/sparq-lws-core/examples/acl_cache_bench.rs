@@ -60,6 +60,10 @@ impl<S: Store> CountingStore<S> {
 
 #[async_trait]
 impl<S: Store> Store for CountingStore<S> {
+    async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+        self.inner.append(iri, ntriples).await
+    }
+
     // The default read_plan/read_at call the counted meta/read methods.
     fn exclusive(&self) -> ServerResult<()> {
         self.inner.exclusive()

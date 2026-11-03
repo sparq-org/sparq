@@ -150,6 +150,12 @@ bytes)` is the opt-in persistent constructor: the same in-memory pod behind a jo
 decorator. `snapshot()` returns the bytes to persist (`undefined` for a pod built with `new`), and
 `snapshotRevision()` is a monotonic mutation counter so a host can skip a flush when nothing moved.
 
+The Solid host's persistence journal also records `Store::append` insert lines without
+reading the target. Journal format version 2 replays these append records after their
+resource is created; the decoder still accepts version 1 snapshots. A replacement or
+delete folds away earlier append records when no retained container dependency prevents
+that fold.
+
 ```js
 const previous = await readFile(statePath).catch(() => new Uint8Array());
 const pod = SolidServer.withSnapshot("https://pod.example", owner, previous);

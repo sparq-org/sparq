@@ -32,6 +32,7 @@ async fn shared_embedded_delete_is_one_atomic_job_and_returns_the_overwritten_ke
         blob_key: key.into(),
         etag: format!("\"{key}\""),
         last_modified: None,
+        append_seq: 0,
     };
     shared.put_meta(parent, meta("parent")).await.unwrap();
     shared
@@ -271,6 +272,7 @@ async fn runtime_flag_controls_periodic_sweep_without_weakening_delete_safety() 
                 blob_key: "referenced-live".into(),
                 etag: "\"live\"".into(),
                 last_modified: Some(SystemTime::now()),
+                append_seq: 0,
             },
         )
         .await

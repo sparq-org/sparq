@@ -70,6 +70,8 @@ struct Prior {
     content_type: String,
     etag: String,
     modified: Option<(u64, u32)>,
+    #[serde(default)]
+    append_seq: u64,
 }
 
 impl Prior {
@@ -83,6 +85,7 @@ impl Prior {
             blob,
             content_type: meta.content_type.clone(),
             etag: meta.etag.clone(),
+            append_seq: meta.append_seq,
             modified: meta.last_modified.and_then(|t| {
                 let d = t.duration_since(UNIX_EPOCH).ok()?;
                 Some((d.as_secs(), d.subsec_nanos()))
@@ -99,6 +102,7 @@ impl Prior {
             content_type: self.content_type,
             blob_key: String::new(),
             etag: self.etag,
+            append_seq: self.append_seq,
             last_modified: self.modified.map(|(s, n)| UNIX_EPOCH + Duration::new(s, n)),
         };
         Some(match self.blob {
@@ -635,6 +639,29 @@ mod tests {
             before
         );
         assert_eq!(intents_left(&st).await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_stored_insert_is_put_back_after_restart() {
+        let (st, store, d, _) = typed_doc().await;
+        st.store
+            .append(&d, Bytes::from_static(b"<urn:s> <urn:p> \"insert\" .\n"))
+            .await
+            .unwrap();
+        let before = st.store.read(&d).await.unwrap();
+        let mut journal = st.journal();
+        journal.stage(&d).await.unwrap();
+        journal
+            .write(&d, Bytes::from_static(b"replacement"), "text/turtle")
+            .await
+            .unwrap();
+        journal.abandon();
+        drop(st);
+        let restarted = restart(&store).await;
+        let after = restarted.store.read(&d).await.unwrap();
+        assert_eq!(after.body, before.body);
+        assert_eq!(after.meta, before.meta);
+        assert_eq!(intents_left(&restarted).await, 0);
     }
 
     /// The same for a recursive delete cut short: the members it removed are back, in their

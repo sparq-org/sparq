@@ -1758,16 +1758,6 @@ pub async fn patch_handler<S: Store>(
     // header, BEFORE the target read.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
-    // The caller IS authorized. ONLY NOW load the current representation (an authorized writer is
-    // entitled to learn create-vs-modify). Match the read into THREE states:
-    //  - `Ok(r)`            → present (modify path);
-    //  - `Err(NotFound)`    → absent  (create-on-PATCH / delete-on-missing path);
-    //  - `Err(other)`       → a backend/blob inconsistency → surface the 500 (the caller is authorized,
-    //                         so a 500 leaks nothing they could not already learn via a normal read).
-    //
-    // An insert-only patch needs only Append, so a writer that may not read the target is told
-    // nothing about it when the patch cannot apply (its format, whether it parses, what the result
-    // would be): it gets the refusal it would get without access.
     let reader = may_read(&target.iri, &granted);
     let unread = |e: ServerError| {
         if reader {
@@ -1778,13 +1768,37 @@ pub async fn patch_handler<S: Store>(
             ServerError::Forbidden
         }
     };
-    // A non-`NotFound` store error goes only to a caller permitted to read the target; an
-    // insert-only writer that may not gets the refusal above. (`ServerError` is not `Clone`; we
-    // distinguish present/absent via `current`.)
-    let current: Option<crate::store::Resource> = match state.store.read(&target.iri).await {
-        Ok(r) => Some(r),
-        Err(ServerError::NotFound) => None,
-        Err(e) => return Err(unread(e)),
+    if !reader {
+        // A container is refused from its IRI alone, before any target lookup.
+        if target.iri.ends_with('/') {
+            return Err(unread(ServerError::Forbidden));
+        }
+        let text = appended_ntriples(&patch).ok_or_else(|| unread(ServerError::Forbidden))??;
+        match state.store.append(&target.iri, Bytes::from(text)).await {
+            Ok(()) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                state
+                    .notifications
+                    .notify(&target.iri, ActivityType::Update, None)
+                    .await;
+                return Ok(StatusCode::NO_CONTENT.into_response());
+            }
+            Err(ServerError::NotFound) => {} // The create path below authorizes containment.
+            Err(ServerError::Forbidden) => return Err(unread(ServerError::Forbidden)),
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Readers load the current representation. An append that found no row uses
+    // the create path, whose container authorization is checked below.
+    let current: Option<crate::store::Resource> = if reader {
+        match state.store.read(&target.iri).await {
+            Ok(r) => Some(r),
+            Err(ServerError::NotFound) => None,
+            Err(e) => return Err(unread(e)),
+        }
+    } else {
+        None
     };
 
     // Apply preconditions against the current state's tag and modification time.
@@ -1802,40 +1816,6 @@ pub async fn patch_handler<S: Store>(
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
-
-    // A writer that may not read the target appends to it without its content being parsed: the
-    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document (each
-    // takes N-Triples lines, the last into its default graph), so the outcome follows the
-    // request, the requester's permissions and the stored type alone, never what is stored
-    // (whether it parses, what its graph holds). Any other stored type is refused to it. (Only an
-    // unconditional insert-only patch gets here without Read.) The stored bytes are still read
-    // and rewritten whole, so the time this takes follows their size.
-    if let (Some(res), false) = (&current, reader) {
-        let appendable = matches!(
-            stored_format(&res.meta.content_type),
-            Some(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
-        );
-        let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
-            return Err(unread(ServerError::Forbidden));
-        };
-        let text = text?;
-        let mut body = Vec::with_capacity(res.body.len() + text.len() + 1);
-        body.extend_from_slice(&res.body);
-        if !body.is_empty() && !body.ends_with(b"\n") {
-            body.push(b'\n');
-        }
-        body.extend_from_slice(text.as_bytes());
-        let meta = state
-            .store
-            .write(&target.iri, Bytes::from(body), &res.meta.content_type)
-            .await?;
-        #[cfg(not(target_arch = "wasm32"))]
-        state
-            .notifications
-            .notify(&target.iri, ActivityType::Update, None)
-            .await;
-        return Ok(write_response(true, &meta, &target, false));
-    }
 
     // Determine the existing triples + the stored format (default Turtle for a new resource).
     let (existing_triples, stored_as) = match &current {
@@ -1938,7 +1918,11 @@ pub async fn patch_handler<S: Store>(
     state.invalidate_acl_if_acl(&target.iri);
 
     let reader = may_read(&target.iri, &granted);
-    Ok(write_response(existed, &meta, &target, reader))
+    if reader {
+        Ok(write_response(existed, &meta, &target, reader))
+    } else {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    }
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -3292,6 +3276,7 @@ mod tests {
                     blob_key: "k".into(),
                     etag: "\"acl\"".into(),
                     last_modified: None,
+                    append_seq: 0,
                 };
                 return Ok(Resource { body, meta });
             }
@@ -3316,6 +3301,7 @@ mod tests {
                     blob_key: "k".into(),
                     etag: "\"acl\"".into(),
                     last_modified: None,
+                    append_seq: 0,
                 }));
             }
             Ok(None)
@@ -4630,6 +4616,7 @@ mod tests {
                 blob_key: "k".into(),
                 etag: "\"acl\"".into(),
                 last_modified: None,
+                append_seq: 0,
             }
         }
     }
@@ -4981,6 +4968,7 @@ mod tests {
                 blob_key: "b".into(),
                 etag: "\"fixed\"".into(),
                 last_modified: self.last_modified,
+                append_seq: 0,
             }
         }
         fn acl_meta() -> ResourceMeta {
@@ -4989,6 +4977,7 @@ mod tests {
                 blob_key: "bacl".into(),
                 etag: "\"acl\"".into(),
                 last_modified: None,
+                append_seq: 0,
             }
         }
         fn acl_body() -> AxBytes {
@@ -6988,8 +6977,14 @@ mod tests {
                 statuses.push(result.unwrap_or_else(IntoResponse::into_response).status());
             }
             assert_eq!(statuses[0], statuses[1], "{verb}");
-            if verb != "DELETE" {
+            if verb == "PUT" {
                 assert!(statuses[0].is_success(), "{verb}: {}", statuses[0]);
+            } else if verb == "PATCH" {
+                assert_eq!(
+                    statuses[0],
+                    StatusCode::FORBIDDEN,
+                    "a container insert needs Read"
+                );
             }
         }
     }

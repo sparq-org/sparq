@@ -41,7 +41,7 @@
 //! Both folds are refused (and the record kept verbatim) when some other record still names the
 //! IRI as its container or parent, because replay applies records in order and
 //! `create_in_container` fails with 404 against a container that does not exist yet. That is the
-//! only ordering dependency between records, so guarding it is enough to keep replay faithful.
+//! container dependency between records; inserted lines retain their target ordering.
 //!
 //! # What restart does not preserve
 //!
@@ -57,12 +57,13 @@ use std::sync::{Mutex, PoisonError};
 /// Leading bytes of an encoded journal — `LWS Journal`.
 const MAGIC: &[u8; 4] = b"LWSJ";
 
-/// Format version written by [`Journal::encode`] and required by [`decode`].
-const VERSION: u8 = 1;
+/// Current version written by [`Journal::encode`]; [`decode`] also accepts version 1.
+const VERSION: u8 = 2;
 
 const TAG_WRITE: u8 = 1;
 const TAG_CREATE_IN_CONTAINER: u8 = 2;
 const TAG_DELETE: u8 = 3;
+const TAG_APPEND: u8 = 4;
 
 /// One store mutation, in the form needed to re-apply it to an empty pod.
 ///
@@ -91,6 +92,13 @@ pub enum Mutation {
         /// The stored bytes.
         body: Vec<u8>,
     },
+    /// `Store::append`: store insert lines without reading the existing body.
+    Append {
+        /// The existing resource IRI.
+        iri: String,
+        /// N-Triples insert lines.
+        ntriples: Vec<u8>,
+    },
     /// `Store::delete`: remove a resource and detach it from `parent`.
     ///
     /// Retained only when the deleted IRI cannot be folded away (see the module documentation);
@@ -104,10 +112,10 @@ pub enum Mutation {
 }
 
 impl Mutation {
-    /// The IRI this record brings into existence, or removes.
+    /// The IRI whose resource this record changes.
     pub fn target(&self) -> &str {
         match self {
-            Mutation::Write { iri, .. } => iri,
+            Mutation::Write { iri, .. } | Mutation::Append { iri, .. } => iri,
             Mutation::CreateInContainer { child, .. } => child,
             Mutation::Delete { iri, .. } => iri,
         }
@@ -115,11 +123,11 @@ impl Mutation {
 
     /// The IRI this record requires to already exist when it is replayed, if any.
     ///
-    /// This is the journal's only ordering dependency, and therefore the only thing the folding
+    /// This is the container ordering dependency that the folding
     /// rules have to protect (see the module documentation).
     pub fn container(&self) -> Option<&str> {
         match self {
-            Mutation::Write { .. } => None,
+            Mutation::Write { .. } | Mutation::Append { .. } => None,
             Mutation::CreateInContainer { container, .. } => Some(container),
             Mutation::Delete { parent, .. } => parent.as_deref(),
         }
@@ -148,6 +156,11 @@ impl Mutation {
                 put_str(out, child);
                 put_str(out, content_type);
                 put_bytes(out, body);
+            }
+            Mutation::Append { iri, ntriples } => {
+                out.push(TAG_APPEND);
+                put_str(out, iri);
+                put_bytes(out, ntriples);
             }
             Mutation::Delete { iri, parent } => {
                 out.push(TAG_DELETE);
@@ -285,7 +298,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Mutation>, DecodeError> {
         return Err(DecodeError::NotAJournal);
     }
     let version = reader.u8()?;
-    if version != VERSION {
+    if version != VERSION && version != 1 {
         return Err(DecodeError::UnsupportedVersion(version));
     }
     let count = reader.len_prefix()?;
@@ -307,12 +320,12 @@ fn fold(records: &mut Vec<Mutation>, mutation: Mutation) {
         Mutation::Write { iri, .. } => {
             if is_unreferenced(records, iri) {
                 records.retain(
-                    |record| !matches!(record, Mutation::Write { iri: earlier, .. } if earlier == iri),
+                    |record| !matches!(record, Mutation::Write { iri: earlier, .. } | Mutation::Append { iri: earlier, .. } if earlier == iri),
                 );
             }
             records.push(mutation);
         }
-        Mutation::CreateInContainer { .. } => records.push(mutation),
+        Mutation::CreateInContainer { .. } | Mutation::Append { .. } => records.push(mutation),
         Mutation::Delete { iri, .. } => {
             if is_unreferenced(records, iri) {
                 // Replay starts from an empty pod, so dropping every record that created this IRI
@@ -396,6 +409,10 @@ impl<'a> Reader<'a> {
                 content_type: self.string()?,
                 body: self.bytes()?,
             }),
+            TAG_APPEND => Ok(Mutation::Append {
+                iri: self.string()?,
+                ntriples: self.bytes()?,
+            }),
             TAG_DELETE => Ok(Mutation::Delete {
                 iri: self.string()?,
                 parent: self.optional_string()?,
@@ -468,6 +485,15 @@ mod wasm_store {
 
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
             self.inner.exists(iri).await
+        }
+
+        async fn append(&self, iri: &str, ntriples: Bytes) -> ServerResult<()> {
+            self.inner.append(iri, ntriples.clone()).await?;
+            self.journal.append(Mutation::Append {
+                iri: iri.to_owned(),
+                ntriples: ntriples.to_vec(),
+            });
+            Ok(())
         }
 
         async fn write(
@@ -596,6 +622,9 @@ mod wasm_store {
                     .create_in_container(&container, &child, Bytes::from(body), &content_type)
                     .await
                     .map(|_| ()),
+                Mutation::Append { iri, ntriples } => {
+                    store.append(&iri, Bytes::from(ntriples)).await
+                }
                 Mutation::Delete { iri, parent } => store.delete(&iri, parent.as_deref()).await,
             };
             outcome.map_err(|error| ReplayError {
@@ -613,6 +642,79 @@ pub use wasm_store::{replay, PersistentStore, ReplayError};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn stored_inserts_survive_journal_replay_and_fold_with_replacement() {
+        use axum::body::Bytes;
+        use sparq_lws_core::store::{
+            CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store,
+        };
+        use std::sync::Arc;
+        let journal = Arc::new(Journal::new());
+        let store = PersistentStore::new(
+            CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new()),
+            journal.clone(),
+        );
+        let iri = "https://pod.example/doc";
+        store
+            .write(iri, Bytes::from_static(b"old"), "text/turtle")
+            .await
+            .unwrap();
+        store
+            .append(iri, Bytes::from_static(b"insert\n"))
+            .await
+            .unwrap();
+        let expected = store.read(iri).await.unwrap().body;
+        assert_eq!(expected, "old\ninsert\n");
+        assert!(matches!(
+            journal.records().last(),
+            Some(Mutation::Append { .. })
+        ));
+        let restored = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        replay(&restored, decode(&journal.encode()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(restored.read(iri).await.unwrap().body, expected);
+        store
+            .write(iri, Bytes::from_static(b"new"), "text/turtle")
+            .await
+            .unwrap();
+        assert_eq!(journal.len(), 1);
+        assert!(!journal
+            .records()
+            .iter()
+            .any(|r| matches!(r, Mutation::Append { .. })));
+        let restored = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        replay(&restored, decode(&journal.encode()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(restored.read(iri).await.unwrap().body, "new");
+        store
+            .append(iri, Bytes::from_static(b"insert\n"))
+            .await
+            .unwrap();
+        store.delete(iri, None).await.unwrap();
+        assert!(journal.is_empty());
+    }
+
+    #[test]
+    fn the_append_journal_decoder_still_accepts_version_one() {
+        // A fixed v1 snapshot, independent of the current encoder and tag constants.
+        let encoded = [
+            b"LWSJ\x01\x01\0\0\0\0\0\0\0\x01\x07\0\0\0\0\0\0\0".as_slice(),
+            b"urn:doc\x0b\0\0\0\0\0\0\0text/turtle\x03\0\0\0\0\0\0\0old",
+        ]
+        .concat();
+        assert_eq!(
+            decode(&encoded),
+            Ok(vec![Mutation::Write {
+                iri: "urn:doc".into(),
+                content_type: "text/turtle".into(),
+                body: b"old".to_vec(),
+            }])
+        );
+    }
 
     /// A persistence wrapper is refused before startup can write unsupported markers.
     #[cfg(not(target_arch = "wasm32"))]

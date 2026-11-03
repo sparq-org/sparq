@@ -285,6 +285,50 @@ including for a `file://` URL. Back up and restore those bytes while the server
 is stopped, preserving blob keys and the exact URL recorded in `format.json`.
 Changing that backend or URL requires migration.
 
+### Stored inserts
+
+`ResourceMeta::append_seq` identifies a document snapshot's last published insert
+(default `0` for old index rows). Insert records use the same field for their immutable
+predecessor, and the internal directory uses it as an allocation high-water mark.
+This preserves earlier snapshots and branches correctly when a held version is put back.
+
+`SparqClient::bump_append(iri)` is the raw metadata primitive: it atomically increments
+the row's sequence, refreshes a strong ETag and modification time, and returns
+`(blob_key, sequence)`. An absent row returns `NotFound`; an unsupported stored type
+returns `Unsupported`. Its default refuses. The in-memory and embedded clients
+serialize the whole step; HTTP uses one guarded Update and a unique receipt.
+The metadata mapping persists `pss:appendSeq`; existing public SPARQL builders keep
+their signatures and seed zero. Internal helpers preserve complete metadata snapshots.
+
+`Store::append(iri, ntriples: Bytes)` stores request-derived N-Triples insert lines;
+its default refuses. `CompositeStore` checks only the target's index row, stores a
+fresh blob, then calls `SparqClient::publish_append(iri, key, blob_key)`. This new
+primitive atomically publishes the insert record and directory, allocates its visible
+sequence and refreshes validators while the target still names `key`. Its default
+refuses. Composite append uses publication rather than a preliminary metadata bump,
+so a read snapshot cannot acquire an insert after its validators were issued.
+HTTP publication is fenced against a delayed Update and confirmed through a unique
+receipt, under the same serial-update backend assumption as reclamation.
+
+Insert records live under `store::append_dir(blob_key)`. Each insert charges its own
+bytes and one content slot; the zero-byte directory is bookkeeping, bounded by the
+retained or reclaiming document keys, and consumes no content slot. `read` and `read_at` follow immutable
+predecessor links from the snapshot's sequence and concatenate in publication order,
+only for the three line-compatible types. They insert a newline when needed. The base
+body cache is bypassed for appended snapshots so reclamation cannot leave a truncated
+cached representation. Replacements mint a new key and hide the old inserts;
+`reinstate` restores held metadata and its insert chain. `restore` copies already-merged
+bytes to a fresh key and resets its sequence.
+
+Reclamation removes a retired key's directory, records and blobs; interrupted reclaim
+work is retried at startup. Orphan reconciliation also claims and removes the insert
+records when it discovers document bytes left after a stop before reclaim began.
+Its report counts base-blob candidates; linked insert cleanup is part of that candidate.
+`SparqClient::begin_reclaim_with_appends` returns `(claimed, has_append_directory)`
+in the existing reclaim step. The native clients and HTTP confirmation include that
+observation, so ordinary reads and writes with no appends retain their backend counts.
+Its default conservatively requests a directory check after a successful claim.
+
 ### Child record replacement
 
 `SparqClient::replace_child(container, child, meta)` commits the child record and
@@ -350,7 +394,8 @@ the mmap'd index on the running host (P3 scope). The sparq index directory holds
 the RDF graph in plaintext on disk; P1 requires a CMK-encrypted block volume
 (EBS/Azure Disk/dm-crypt). Application-level index encryption is research
 ([#2567](https://github.com/sparq-org/sparq/issues/2567)).
-ETags derive from plaintext, so equal bodies get equal ETags across pods.
+Full replacements derive ETags from plaintext. Stored inserts use fresh opaque
+ETags, so equal bodies need not have equal tags.
 
 ## Authenticate requests
 
@@ -370,10 +415,17 @@ must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
 the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
-without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
-N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
-any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
-bytes are still read and rewritten whole, so the time an append takes follows their size. A
+without `acl:Read` stores N-Triples lines beside the document, without reading or rewriting
+its bytes. Readers see those lines in its Turtle, N-Triples or N-Quads representation,
+with a newline between the original bytes and the inserts when needed. The response is
+`204`, with no `Location` or `ETag`, whether it appended to an existing document or created
+one. Container IRIs are refused from their trailing slash alone. Other stored types
+(including JSON-LD and non-RDF types) remain refused (`403` for an authenticated writer),
+using the index's type alone: accepting lines that no representation shows would lose the
+inserted data. This format distinction is a residual. Creating a missing target also needs
+`acl:Append` on its container; appending to an existing document does not. CTH
+`web-access-control/protected-operation/write-access-bob.feature`, "Bob can PATCH rdf no A",
+pins the latter behavior. A full store still answers `507` against the shared ceilings. A
 reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
 N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
 `PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it
@@ -1258,7 +1310,10 @@ What the server exposes, all discoverable from the storage description
     same split (an authorized absent parent is `404`).
   - LDP DELETE retains absent `401`/`403` versus present `204`: CTH `write-access-bob.feature`,
     "Bob cannot DELETE fictive W inherited [403]" and "Bob can DELETE plain W inherited".
-  - LDP insert-only PATCH status remains deferred to the later brief.
+  - Insert-only PATCH without Read answers `204` for both append and create. Creation
+    needs container Append, whereas an existing document does not; CTH
+    `write-access-bob.feature`, "Bob can PATCH rdf no A", pins the existing case.
+    Types other than Turtle, N-Triples and N-Quads remain refused from index metadata.
 
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces

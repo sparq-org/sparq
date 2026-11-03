@@ -685,6 +685,7 @@ fn meta() -> ResourceMeta {
         blob_key: "blob-key-1".into(),
         etag: "\"etag-1\"".into(),
         last_modified: None,
+        append_seq: 0,
     }
 }
 
@@ -728,6 +729,7 @@ async fn read_plan_is_one_protocol_request_carrying_target_and_all_candidates() 
         blob_key: "blob-acl".into(),
         etag: "\"etag-acl\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
     c.put_meta("https://pod.example/.acl", root_acl_meta)
         .await
@@ -963,6 +965,7 @@ async fn put_meta_rewrite_preserves_container_children() {
         blob_key: "blob-key-2".into(),
         etag: "\"etag-2\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
     c.put_meta(CONTAINER, updated.clone()).await.unwrap();
     assert_eq!(
@@ -1328,6 +1331,7 @@ async fn live_sparq_round_trip() {
         blob_key: "live-blob-1".into(),
         etag: "\"live-etag-1\"".into(),
         last_modified: None,
+        append_seq: 0,
     };
 
     // Clean slate.

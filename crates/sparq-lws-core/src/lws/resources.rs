@@ -5461,6 +5461,49 @@ const _USED: &str = AS_CONTEXT;
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn an_lws_put_back_restores_the_inserts_it_hid() {
+        use super::super::test_store::{agent, request as req, state};
+        let (st, store) = state(100).await;
+        let owner = agent("https://owner.example/#me");
+        let iri = st.cfg.absolute("/doc.ttl");
+        let original = "<https://e/s> <https://e/p> \"old\" .";
+        let insert = b"<https://e/s> <https://e/q> \"new\" .\n";
+        let create_request = req(
+            Method::POST,
+            "/",
+            &[("slug", "doc.ttl"), ("content-type", "text/turtle")],
+            original,
+        );
+        let created = create(&st, &create_request, &owner, &st.cfg.storage()).await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        st.store
+            .append(&iri, Bytes::from_static(insert))
+            .await
+            .unwrap();
+        let before = st.store.read(&iri).await.unwrap();
+        assert!(before.body.ends_with(insert));
+        *store.fail_after_write_of.lock().unwrap() = Some(iri.clone());
+        let response = handle(
+            &st,
+            &req(
+                Method::PUT,
+                "/doc.ttl",
+                &[
+                    ("content-type", "text/turtle"),
+                    ("link", "<urn:Changed>; rel=\"type\""),
+                ],
+                "replacement",
+            ),
+            &owner,
+        )
+        .await;
+        assert!(response.status().is_server_error());
+        let after = st.store.read(&iri).await.unwrap();
+        assert_eq!(after.body, before.body);
+        assert_eq!(after.meta, before.meta);
+    }
+
     #[test]
     fn conneg() {
         assert_eq!(negotiate_container(None).as_deref(), Some(LWS_JSON));
