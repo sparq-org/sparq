@@ -488,6 +488,10 @@ impl FailingIndex {
 
 #[async_trait]
 impl SparqClient for FailingIndex {
+    fn lifecycle(&self) -> std::sync::Arc<crate::store::Lifecycle> {
+        self.inner.lifecycle()
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         self.inner.get_meta(iri).await
     }

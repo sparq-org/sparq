@@ -695,7 +695,8 @@ one small record in the store's index alone (`Store::raise_marker`, under a frag
 subscriptions container that no request can name), raised in one step under the index's own
 write lock, so a raise that lands late never lowers it; it needs no blob capacity, and its index
 entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
-one IRI, the first marker stored; any other IRI of that shape takes room in the pool). The mark
+one IRI, the first marker stored; any other IRI of that shape follows the ordinary entry
+ceilings for its path). The mark
 is only as durable as the backend's own persistence: the in-memory index holds it for the life of
 the process; the directory-backed embedded index journals each raise before acknowledging it.
 Restoring an independent snapshot taken before a raise restores the earlier mark and loses
@@ -734,17 +735,27 @@ the mark; construction fails, the mark unchanged, while any of them is still sto
 once it can be removed). An `LwsState` holds a lease (`store::Lifecycle`) for as long as it
 lives. Every `Store` must keep and return one lease through the required
 `Store::lifecycle() -> Arc<Lifecycle>` method; wrappers forward their inner store's lease.
+`SparqClient::lifecycle() -> Arc<Lifecycle>` is also required: index clients retain the lease,
+clones share it, and wrappers forward it. `CompositeStore::new` takes its lease from the index,
+so separately built composites over clones of one index share it. `InMemorySparqClient` clones
+share both the index and the lease; embedded and HTTP client clones share their leases too.
 `CompositeStore` clones share their backend handles, cache, holds and lease. Every clone of
 `LwsState::store` and every `Tracked` wrapper shares that lease too, so a second `LwsState`
-built over any of them is refused before backend work. Only the holder may lower the mark
-(`Store::reset_marker` and `SparqClient::reset_marker` take its guard, which only this crate
-makes). Separately opening the same backend still creates a separate in-process lease.
+built over any of them is refused before backend work. Only the holder may lower the mark:
+`Store::reset_marker` and raw `SparqClient::reset_marker` check that the guard belongs to their
+backend's lease. Custom implementations call `lease.belongs_to(&self.lifecycle())` before
+resetting a marker. Only this crate makes a guard. Separately opening a backend creates
+a separate in-process lease.
 A state that replaces another must be built after the
 old one is dropped. Running a second process over the same store directory is unsupported, and
 nothing at this release keeps one out. The mark changes only through `Store::raise_marker` and
 `Store::reset_marker`: the generic mutators of the store (`write`, `create_in_container`,
 `restore`, `hold`, `reinstate`, `delete`, `delete_container_if_empty`) refuse an IRI shaped like
-the mark (`ServerError::Forbidden`). The raw index mutators also refuse every marker operand,
+the mark (`ServerError::Forbidden`). Marker recognition includes path-based storage roots,
+such as `https://pod.example/alice/.lws/subscriptions/#high-water`, using the exact marker suffix
+below any HTTP(S) root without a query or fragment. The `.lws/` segment at a storage root is
+reserved for services; resource creation cannot name this fragment IRI.
+The raw index mutators also refuse every marker operand,
 including either containment operand and the parent of an empty-container removal, with a fixed
 backend error before backend work. A create whose
 purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
@@ -1219,7 +1230,7 @@ What the server exposes, all discoverable from the storage description
 - Access grant/request IDs owned by someone else answer exactly like absent IDs for every
   method: a challenge if authentication is needed, otherwise `404`. Ownership is checked on
   a borrowed record; only a match is cloned. Subscription lookups do the same.
-- Pass-through `SparqClient` and `Store` wrappers forward `exclusive`, `call_timeout`, and supported marker
+- Pass-through `SparqClient` and `Store` wrappers forward `lifecycle`, `exclusive`, `call_timeout`, and supported marker
   operations, including `reset_marker` with its lifecycle guard. Their defaults refuse exclusive
   ownership and marker resets, and use the default call timeout. Generic `delete_resource`
   refuses marker operands, including the parent, before any backend call.
@@ -1384,6 +1395,6 @@ reconstructed from the code and cites it line by line; it also maps the source-r
 
 History follows the resource through trash. Solid restore also requires Write on the target; LWS restore takes the create path's locks. Access-control documents ending in `.acl` or `.acr` are excluded.
 
-POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
+POST to the trash endpoint with `{"resource":"<absolute-resource-URL>"}` moves a resource to trash and returns `201 Created` with the member URL in `Location`. DELETE-to-trash remains available. In LWS mode it returns a bare `204 No Content`, including for a caller with Delete but without Read; a settled-absent DELETE for that caller has the same response. POST retains its member `Location` response. POST with `{"restore":"<trash-member-URL>"}` restores; provide exactly one of `resource` or `restore`. Enabled services advertise `ssd:Versioning` / `ssd:Trash`; the version service has an IRI endpoint and a separate literal `ssd:listingTemplate`. RDF listings use the IANA `original` relation.
 
 See [version/trash requests, authorization, retention and storage API](references/history.md) for routes, catalog terms and client restore examples.

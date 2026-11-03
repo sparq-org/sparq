@@ -850,6 +850,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core:** marker recognition includes path-based storage roots for generic store and raw index mutations.
+- **sparq-lws-core:** separately assembled composites over clones of an index share its lifecycle lease.
+- **sparq-lws-core:** marker resets require a guard belonging to the store's and raw index client's backend lease.
 - **sparq-lws-core:** access grant/request lookups hide records owned by another principal;
   subscription lookups clone only owned records. An unconditional LWS data DELETE allowed by an
   unconstrained Delete grant without Read returns `204` for settled present or absent targets,
