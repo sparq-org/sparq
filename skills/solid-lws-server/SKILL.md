@@ -169,17 +169,26 @@ Set `PSS_SPARQ_BACKEND` to one of:
   resource graph deletes, containment edge removals, child creates and conditional
   empty-container deletes carry a nonce fence and writer epoch in their `WHERE`.
   A resource delete detaches its parent edge in the same update and captures the
-  removed blob key in an operation receipt. A completion marker confirms a write
-  after its nonce fence succeeds; an unsettled outcome retains its fence and any
-  candidate blob bytes through the store and journal.
+  removed blob key in an operation receipt. Every acknowledged update is confirmed
+  through its completion marker, including updates whose guard matched nothing.
+  An acknowledged update carrying a superseded writer epoch is reported as refused with
+  `Backend("fatal: writer epoch superseded")`, including child creates and conditional
+  empty-container deletes. After confirmation and any receipt read, the client removes
+  only that operation's marker and receipt. Cleanup is best effort: a failed cleanup
+  leaves the confirmed outcome unchanged. An unsettled outcome retains its fence and
+  any candidate blob bytes through the store and journal. Backend counters include
+  completion confirmation, receipt reads and cleanup in their HTTP request model.
 
   `SparqClient::begin_epoch(&LifecycleGuard) -> Result<u64, SparqError>` raises the
   reserved `urn:x-sparq-lws:writer-epoch` record before recovery, under the service's
   lifecycle lease. `Store::begin_epoch` and pass-through wrappers forward it.
-  The raise only advances the epoch; every HTTP `*_fenced` builder takes the epoch
-  after its nonce. Once the raise commits, updates carrying an earlier epoch have
-  no effect. In-memory and embedded clients return zero without I/O; HTTP clones
-  share the active epoch. HTTP clients used without a lifecycle start use epoch
+  The raise only advances the epoch and records a fresh owner nonce; startup confirms
+  both the epoch and its owner, so competing starts cannot claim the same epoch.
+  `sparql::update_begin_epoch(epoch, owner)` builds that raise. Every HTTP `*_fenced`
+  builder takes the epoch after its nonce; the internal `fence_guard` takes
+  `Option<u64>` (`None` for unfenced builders). Once the raise commits, updates
+  carrying an earlier epoch have no effect and are reported as refused. In-memory
+  and embedded clients return zero without I/O; HTTP clones share the active epoch. HTTP clients used without a lifecycle start use epoch
   zero while the epoch record is absent. Nonce fences still settle writes within
   one process. Reclaim bookkeeping and the separate body-insert helper are outside
   this LWS write path. The native LWS server still refuses this backend because

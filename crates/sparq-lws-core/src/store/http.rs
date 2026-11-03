@@ -189,6 +189,8 @@ pub struct HttpSparqClient {
     /// The absolute `/sparql` endpoint URL (operator-configured, trusted internal service).
     endpoint: String,
     timeout: Duration,
+    /// Fences writes from earlier processes. Clones and service instances using this client in
+    /// the same process share the active epoch; it is not an instance ownership mechanism.
     epoch: Arc<AtomicU64>,
 }
 
@@ -488,10 +490,12 @@ impl HttpSparqClient {
             &nonce,
             self.epoch.load(Ordering::Acquire),
         )?;
-        self.write_and_confirm(&u, iri, &nonce, &[iri]).await
+        self.write_and_confirm(&u, iri, &nonce, &[iri]).await?;
+        self.clear_completion(iri, &nonce).await;
+        Ok(())
     }
 
-    /// A fenced write that needed settlement succeeds only if its completion marker is present.
+    /// Confirm every write, including an acknowledged update whose epoch guard matched nothing.
     async fn write_and_confirm(
         &self,
         u: &str,
@@ -500,16 +504,30 @@ impl HttpSparqClient {
         touches: &[&str],
     ) -> Result<(), SparqError> {
         let fenced = self.update_fenced(u, nonce, touches).await?;
-        if fenced {
-            let (body, _) = self
-                .query_raw(&sparql::ask_delete_marker(iri, nonce)?, ACCEPT_RESULTS_JSON)
-                .await
-                .map_err(SparqHttpError::into_sparq)?;
-            if !parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
-                return Err(SparqError::Backend(
-                    "fatal: the write did not commit".into(),
-                ));
-            }
+        let (body, _) = self
+            .query_raw(&sparql::ask_delete_marker(iri, nonce)?, ACCEPT_RESULTS_JSON)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        if !parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
+            return Err(SparqError::Backend(if fenced {
+                "fatal: the write did not commit".into()
+            } else {
+                "fatal: writer epoch superseded".into()
+            }));
+        }
+        Ok(())
+    }
+
+    async fn clear_completion(&self, iri: &str, nonce: &str) {
+        if let Ok(update) = sparql::update_clear_completion(iri, nonce) {
+            // Only this nonce is removed. Its write is final and any required receipt has been read.
+            let _ = self.update_raw(&update).await;
+        }
+    }
+
+    async fn require_epoch(&self, epoch: u64) -> Result<(), SparqError> {
+        if self.read_epoch().await? != epoch {
+            return Err(SparqError::Backend("fatal: writer epoch superseded".into()));
         }
         Ok(())
     }
@@ -629,7 +647,9 @@ impl SparqClient for HttpSparqClient {
         let nonce = next_nonce()?;
         let u =
             sparql::update_delete_resource_fenced(iri, &nonce, self.epoch.load(Ordering::Acquire))?;
-        self.write_and_confirm(&u, iri, &nonce, &[iri]).await
+        self.write_and_confirm(&u, iri, &nonce, &[iri]).await?;
+        self.clear_completion(iri, &nonce).await;
+        Ok(())
     }
 
     async fn delete_resource(
@@ -656,7 +676,7 @@ impl SparqClient for HttpSparqClient {
             .await
             .map_err(SparqHttpError::into_sparq)?;
         let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
-        result
+        let key = result
             .rows
             .first()
             .map(|row| {
@@ -664,7 +684,9 @@ impl SparqClient for HttpSparqClient {
                     SparqError::Backend("fatal: delete receipt missing blob key".into())
                 })
             })
-            .transpose()
+            .transpose()?;
+        self.clear_completion(iri, &nonce).await;
+        Ok(key)
     }
 
     async fn begin_epoch(&self, _: &super::LifecycleGuard) -> Result<u64, SparqError> {
@@ -674,13 +696,19 @@ impl SparqClient for HttpSparqClient {
             .checked_add(1)
             .ok_or_else(|| SparqError::Backend("fatal: writer epoch exhausted".into()))?;
         // Only raises: even a timed-out start's delayed update cannot lower a later epoch.
-        self.update_raw(&sparql::update_begin_epoch(epoch))
+        let owner = next_nonce()?;
+        self.update_raw(&sparql::update_begin_epoch(epoch, &owner))
             .await
             .map_err(SparqHttpError::into_sparq)?;
-        if self.read_epoch().await? != epoch {
-            return Err(SparqError::Backend(
-                "fatal: writer epoch was superseded".into(),
-            ));
+        let (body, _) = self
+            .query_raw(
+                &sparql::ask_writer_epoch_owner(epoch, &owner),
+                ACCEPT_RESULTS_JSON,
+            )
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        if !parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
+            return Err(SparqError::Backend("fatal: writer epoch superseded".into()));
         }
         self.epoch.store(epoch, Ordering::Release);
         Ok(epoch)
@@ -708,12 +736,8 @@ impl SparqClient for HttpSparqClient {
         //
         // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
         // the ASKs below read is final.
-        let u = sparql::update_delete_container_if_empty_fenced(
-            iri,
-            parent,
-            &nonce,
-            self.epoch.load(Ordering::Acquire),
-        )?;
+        let epoch = self.epoch.load(Ordering::Acquire);
+        let u = sparql::update_delete_container_if_empty_fenced(iri, parent, &nonce, epoch)?;
         let touches: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let fenced = self.update_fenced(&u, &nonce, &touches).await?;
 
@@ -726,8 +750,10 @@ impl SparqClient for HttpSparqClient {
             .await
             .map_err(SparqHttpError::into_sparq)?;
         if parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
+            self.clear_completion(iri, &nonce).await;
             return Ok(DeleteOutcome::Deleted);
         }
+        self.require_epoch(epoch).await?;
         // Marker absent ⇒ the delete did NOT run (container was non-empty OR absent). Split the two by
         // a single ASK on the container's own record: present ⇒ NotEmpty (it had members, so the empty
         // guard blocked the delete), absent ⇒ NotFound (it was never indexed). Fail-closed.
@@ -767,6 +793,7 @@ impl SparqClient for HttpSparqClient {
         //
         // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
         // the ASK below reads is final.
+        let epoch = self.epoch.load(Ordering::Acquire);
         let u = sparql::update_create_child_fenced(
             container,
             child,
@@ -775,7 +802,7 @@ impl SparqClient for HttpSparqClient {
             &meta.etag,
             modified.as_deref(),
             &nonce,
-            self.epoch.load(Ordering::Acquire),
+            epoch,
         )?;
         let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
 
@@ -790,15 +817,19 @@ impl SparqClient for HttpSparqClient {
             .map_err(SparqHttpError::into_sparq)?;
         let created = parse_ask_json(&body).map_err(SparqHttpError::into_sparq)?;
         if created {
+            self.clear_completion(child, &nonce).await;
             Ok(())
-        } else if fenced {
-            // Fenced before it ran, or refused for a missing container: it did not commit, and
-            // never will.
-            Err(SparqError::Backend(
-                "fatal: the create failed and did not commit".into(),
-            ))
         } else {
-            Err(SparqError::NotFound)
+            self.require_epoch(epoch).await?;
+            if fenced {
+                // Fenced before it ran, or refused for a missing container: it did not commit, and
+                // never will.
+                Err(SparqError::Backend(
+                    "fatal: the create failed and did not commit".into(),
+                ))
+            } else {
+                Err(SparqError::NotFound)
+            }
         }
     }
 
@@ -823,7 +854,9 @@ impl SparqClient for HttpSparqClient {
             self.epoch.load(Ordering::Acquire),
         )?;
         self.write_and_confirm(&u, child, &nonce, &[container, child])
-            .await
+            .await?;
+        self.clear_completion(child, &nonce).await;
+        Ok(())
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
@@ -1014,48 +1047,43 @@ mod tests {
 
     #[tokio::test]
     async fn an_http_write_names_the_clients_epoch() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use axum::{extract::State, response::IntoResponse, routing::post, Router};
+        let requests = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        async fn endpoint(
+            State(requests): State<Arc<std::sync::Mutex<Vec<String>>>>,
+            headers: http::HeaderMap,
+            body: Bytes,
+        ) -> axum::response::Response {
+            requests
+                .lock()
+                .unwrap()
+                .push(String::from_utf8(body.to_vec()).unwrap());
+            if headers[header::CONTENT_TYPE] == CT_SPARQL_UPDATE {
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                r#"{"boolean":true}"#.into_response()
+            }
+        }
+        let app = Router::new()
+            .route("/sparql", post(endpoint))
+            .with_state(requests.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = HttpSparqClient::with_timeout(
             format!("http://{}/sparql", listener.local_addr().unwrap()),
             Duration::from_secs(2),
         );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
         client.epoch.store(7, Ordering::Release);
         let clone = client.clone();
-        let received = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = Vec::new();
-            let mut chunk = [0; 4096];
-            loop {
-                let n = socket.read(&mut chunk).await.unwrap();
-                assert!(n > 0);
-                request.extend_from_slice(&chunk[..n]);
-                if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let headers = String::from_utf8_lossy(&request[..at]);
-                    let len: usize = headers
-                        .lines()
-                        .find_map(|line| {
-                            line.to_ascii_lowercase()
-                                .strip_prefix("content-length:")
-                                .map(|s| s.trim().parse().unwrap())
-                        })
-                        .unwrap();
-                    if request.len() >= at + 4 + len {
-                        break;
-                    }
-                }
-            }
-            socket
-                .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
-                .await
-                .unwrap();
-            String::from_utf8(request).unwrap()
-        });
         clone
             .put_meta("https://pod.example/d", meta())
             .await
             .unwrap();
-        let request = received.await.unwrap();
+        server.abort();
+        let requests = requests.lock().unwrap();
+        let request = &requests[0];
         let where_clause = request.split("WHERE {").last().unwrap();
         assert!(
             where_clause.contains("<urn:x-sparq-lws:writer-epoch> <urn:pss:index#epoch> 7"),
@@ -1069,30 +1097,50 @@ mod tests {
         Arc<std::sync::Mutex<sparq_core::Graph>>,
         tokio::task::JoinHandle<()>,
     ) {
+        engine_endpoint_with_epoch_barrier(None).await
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    async fn engine_endpoint_with_epoch_barrier(
+        barrier: Option<Arc<tokio::sync::Barrier>>,
+    ) -> (
+        HttpSparqClient,
+        Arc<std::sync::Mutex<sparq_core::Graph>>,
+        tokio::task::JoinHandle<()>,
+    ) {
         use axum::{extract::State, response::IntoResponse, routing::post, Router};
         type Graph = Arc<std::sync::Mutex<sparq_core::Graph>>;
         async fn endpoint(
-            State(graph): State<Graph>,
+            State((graph, barrier)): State<(Graph, Option<Arc<tokio::sync::Barrier>>)>,
             headers: http::HeaderMap,
             body: Bytes,
         ) -> axum::response::Response {
             let text = std::str::from_utf8(&body).unwrap();
-            let mut graph = graph.lock().unwrap();
-            if headers[header::CONTENT_TYPE] == CT_SPARQL_UPDATE {
-                sparq_engine::update_in_place_atomic(&mut graph, text).unwrap();
-                StatusCode::NO_CONTENT.into_response()
-            } else {
-                sparq_engine::query_json(&graph, text)
-                    .unwrap()
-                    .into_response()
+            let response = {
+                let mut graph = graph.lock().unwrap();
+                if headers[header::CONTENT_TYPE] == CT_SPARQL_UPDATE {
+                    sparq_engine::update_in_place_atomic(&mut graph, text).unwrap();
+                    StatusCode::NO_CONTENT.into_response()
+                } else {
+                    sparq_engine::query_json(&graph, text)
+                        .unwrap()
+                        .into_response()
+                }
+            };
+            // Both starts read the old epoch before either is allowed to send its raise.
+            if text.starts_with("SELECT ?epoch") {
+                if let Some(barrier) = barrier {
+                    barrier.wait().await;
+                }
             }
+            response
         }
         let graph = Arc::new(std::sync::Mutex::new(
             sparq_core::Graph::load_str("", "ntriples").unwrap(),
         ));
         let app = Router::new()
             .route("/sparql", post(endpoint))
-            .with_state(graph.clone());
+            .with_state((graph.clone(), barrier));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = HttpSparqClient::with_timeout(
             format!("http://{}/sparql", listener.local_addr().unwrap()),
@@ -1102,6 +1150,241 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         (client, graph, server)
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    async fn refuse_superseded(operations: &[&str]) {
+        for epoch in [0, 1] {
+            let (client, graph, server) = engine_endpoint().await;
+            let (parent, child, absent) = (
+                "https://pod.example/c/",
+                "https://pod.example/c/d",
+                "https://pod.example/absent/",
+            );
+            client.put_meta(parent, meta()).await.unwrap();
+            client.create_child(parent, child, meta()).await.unwrap();
+            client.epoch.store(epoch, Ordering::Release);
+            client
+                .update_raw(&sparql::update_begin_epoch(epoch + 1, "later-start"))
+                .await
+                .unwrap();
+            let snapshot = || {
+                sparq_engine::query_json(
+                    &graph.lock().unwrap(),
+                    "SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } } ORDER BY ?g ?s ?p ?o",
+                )
+                .unwrap()
+            };
+            let before = snapshot();
+            for &operation in operations {
+                let result = match operation {
+                    "put" => {
+                        client
+                            .put_meta(
+                                child,
+                                ResourceMeta {
+                                    blob_key: "replacement".into(),
+                                    ..meta()
+                                },
+                            )
+                            .await
+                    }
+                    "delete" => client.delete_meta(child).await,
+                    "detach" => client.remove_child(parent, child).await,
+                    "delete_resource" => client
+                        .delete_resource(child, Some(parent))
+                        .await
+                        .map(|_| ()),
+                    "delete_resource_parentless" => {
+                        client.delete_resource(child, None).await.map(|_| ())
+                    }
+                    "empty_delete_nonempty" => {
+                        client.delete_meta_if_empty(parent, None).await.map(|_| ())
+                    }
+                    "create" => client.create_child(parent, child, meta()).await,
+                    "create_absent" => client.create_child(absent, child, meta()).await,
+                    "empty_delete" => client
+                        .delete_meta_if_empty(child, Some(parent))
+                        .await
+                        .map(|_| ()),
+                    "empty_delete_absent" => {
+                        client.delete_meta_if_empty(absent, None).await.map(|_| ())
+                    }
+                    _ => unreachable!(),
+                };
+                assert!(
+                    matches!(result, Err(SparqError::Backend(ref error)) if error == "fatal: writer epoch superseded"),
+                    "{operation}: {result:?}"
+                );
+                assert_eq!(snapshot(), before, "{operation} changed the index");
+            }
+            server.abort();
+        }
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn superseded_writers_refuse_every_index_mutation_without_changing_the_index() {
+        refuse_superseded(&[
+            "put",
+            "delete",
+            "detach",
+            "delete_resource",
+            "create",
+            "empty_delete",
+            "create_absent",
+            "empty_delete_absent",
+            "empty_delete_nonempty",
+            "delete_resource_parentless",
+        ])
+        .await;
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn superseded_child_creates_report_refusal_before_missing_container() {
+        refuse_superseded(&["create", "create_absent"]).await;
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn superseded_container_deletes_report_refusal_before_empty_or_absent() {
+        refuse_superseded(&[
+            "empty_delete",
+            "empty_delete_absent",
+            "empty_delete_nonempty",
+        ])
+        .await;
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn confirmed_writes_remove_their_markers_and_delete_receipts() {
+        let (client, graph, server) = engine_endpoint().await;
+        let (parent, child) = ("https://pod.example/c/", "https://pod.example/c/d");
+        let assert_clean = || {
+            assert!(!sparq_engine::ask(&graph.lock().unwrap(),
+                "ASK { GRAPH ?g { ?s ?p ?o } FILTER (?p IN (<urn:pss:index#createMarker>, <urn:pss:index#deleteMarker>, <urn:pss:index#deletedBlobKey>)) }").unwrap());
+        };
+        client.put_meta(parent, meta()).await.unwrap();
+        assert_clean();
+        client.create_child(parent, child, meta()).await.unwrap();
+        assert_clean();
+        client.remove_child(parent, child).await.unwrap();
+        assert_clean();
+        client.delete_meta(child).await.unwrap();
+        assert_clean();
+        client.create_child(parent, child, meta()).await.unwrap();
+        assert_eq!(
+            client.delete_resource(child, Some(parent)).await.unwrap(),
+            Some("candidate".into())
+        );
+        assert_clean();
+        client.create_child(parent, child, meta()).await.unwrap();
+        assert_eq!(
+            client
+                .delete_meta_if_empty(child, Some(parent))
+                .await
+                .unwrap(),
+            DeleteOutcome::Deleted
+        );
+        assert_clean();
+        server.abort();
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn completion_cleanup_retains_other_operations_evidence() {
+        let (client, graph, server) = engine_endpoint().await;
+        let (parent, child) = ("https://pod.example/c/", "https://pod.example/c/d");
+        client.put_meta(parent, meta()).await.unwrap();
+        client
+            .update_raw(
+                &sparql::update_create_child_fenced(
+                    parent,
+                    child,
+                    "text/plain",
+                    "candidate",
+                    "e",
+                    None,
+                    "pending-create",
+                    0,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        client.create_child(parent, child, meta()).await.unwrap();
+        assert!(sparq_engine::ask(
+            &graph.lock().unwrap(),
+            &sparql::ask_create_marker(child, "pending-create").unwrap()
+        )
+        .unwrap());
+        client
+            .update_raw(&sparql::update_delete_resource_fenced(child, "pending-delete", 0).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            client.delete_resource(child, Some(parent)).await.unwrap(),
+            None
+        );
+        assert!(sparq_engine::ask(
+            &graph.lock().unwrap(),
+            &sparql::ask_delete_marker(child, "pending-delete").unwrap()
+        )
+        .unwrap());
+        let receipt = sparq_engine::query(
+            &graph.lock().unwrap(),
+            &sparql::select_deleted_blob_key("pending-delete").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            receipt.rows,
+            vec![vec![Some(
+                oxrdf::Literal::new_simple_literal("candidate").into()
+            )]]
+        );
+        server.abort();
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn simultaneous_starts_confirm_only_the_owner_of_the_epoch() {
+        use crate::store::{CompositeStore, InMemoryBlobStore, Store};
+        let (first, graph, server) =
+            engine_endpoint_with_epoch_barrier(Some(Arc::new(tokio::sync::Barrier::new(2)))).await;
+        let second = HttpSparqClient::new(first.endpoint.clone());
+        let first_store = CompositeStore::new(first.clone(), InMemoryBlobStore::new());
+        let second_store = CompositeStore::new(second.clone(), InMemoryBlobStore::new());
+        let first_lease = first_store.lifecycle().acquire().unwrap();
+        let second_lease = second_store.lifecycle().acquire().unwrap();
+        let (a, b) = tokio::join!(
+            first.begin_epoch(&first_lease),
+            second.begin_epoch(&second_lease)
+        );
+        assert_ne!(a.is_ok(), b.is_ok(), "{a:?}; {b:?}");
+        let (winner, loser, refusal) = if a.is_ok() {
+            (&first, &second, b)
+        } else {
+            (&second, &first, a)
+        };
+        assert!(
+            matches!(refusal, Err(SparqError::Backend(ref error)) if error == "fatal: writer epoch superseded")
+        );
+        assert_eq!(winner.epoch.load(Ordering::Acquire), 1);
+        assert_eq!(loser.epoch.load(Ordering::Acquire), 0);
+        let iri = "https://pod.example/d";
+        winner.put_meta(iri, meta()).await.unwrap();
+        assert!(matches!(
+            loser.put_meta(iri, meta()).await,
+            Err(SparqError::Backend(_))
+        ));
+        assert_eq!(winner.get_meta(iri).await.unwrap().blob_key, "candidate");
+        let rows = sparq_engine::query(&graph.lock().unwrap(), &sparql::select_writer_epoch())
+            .unwrap()
+            .rows;
+        assert_eq!(rows.len(), 1);
+        server.abort();
     }
 
     #[cfg(feature = "embedded-sparq")]

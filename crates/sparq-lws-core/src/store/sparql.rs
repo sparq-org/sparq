@@ -514,13 +514,9 @@ pub fn update_put_meta_fenced(
 /// [`ask_create_marker`]) — a signal no concurrent `remove_child`/sibling create ever touches — so the
 /// confirm is immune to a containment-edge race between the update and the check.
 ///
-/// The marker is **APPEND-ONLY**: it is NOT in the DELETE/OPTIONAL clause, so a concurrent same-child
-/// create can never remove an earlier operation's marker (the round-5 finding — deleting all markers
-/// let operation B clear operation A's nonce before A confirmed, giving A a false `NotFound`). Each
-/// operation only ever ASKs for its OWN unique nonce, so leftover markers from other operations are
-/// harmless; pruning them is a reconciler-GC concern (M3-next). Only the single-valued record
-/// predicates (`contentType`/`blobKey`/`etag`) are DELETE-replaced (so `select_meta(... LIMIT 1)`
-/// stays deterministic — the round-3 finding); the marker is purely additive.
+/// Concurrent creates retain each other's markers. After confirming its own nonce, a client may
+/// remove that nonce alone; markers for operations still awaiting confirmation remain available.
+/// Only the single-valued record predicates are DELETE-replaced by this update.
 pub fn update_create_child(
     container: &str,
     child: &str,
@@ -704,7 +700,10 @@ pub(super) fn update_delete_resource_with_parent(
 ) -> Result<String, BuildError> {
     let delete = update_delete_resource(resource)?;
     match parent {
-        Some(parent) => Ok(format!("{}; {delete}", update_remove_child(parent, resource)?)),
+        Some(parent) => Ok(format!(
+            "{}; {delete}",
+            update_remove_child(parent, resource)?
+        )),
         None => Ok(delete),
     }
 }
@@ -793,6 +792,25 @@ fn completion_marker(resource: &str, nonce: &str) -> Result<String, BuildError> 
     ))
 }
 
+/// Remove only this operation's completion evidence after its confirmation and receipt reads.
+/// A failed cleanup may be left for later; it does not change the completed write's outcome.
+#[cfg(feature = "http-sparq")]
+pub(super) fn update_clear_completion(resource: &str, nonce: &str) -> Result<String, BuildError> {
+    Ok(format!(
+        "DELETE {{ GRAPH {mg} {{ {resource} {deleted} {nonce_literal} . {receipt} {key} ?key }} \
+         GRAPH {resource} {{ {record} {created} {nonce_literal} }} }} \
+         WHERE {{ OPTIONAL {{ GRAPH {mg} {{ {receipt} {key} ?key }} }} }}",
+        mg = iri_const(&g_delete_markers()),
+        resource = iri(resource)?,
+        deleted = iri_const(&p_delete_marker()),
+        nonce_literal = literal(nonce),
+        receipt = delete_receipt(nonce)?,
+        key = iri_const(&format!("{PSS_NS}deletedBlobKey")),
+        record = iri_const(&s_record()),
+        created = iri_const(&p_create_marker()),
+    ))
+}
+
 /// The reserved graph holding the storage index's writer epoch.
 /// Generic resource mutations refuse this IRI; only a lifecycle start raises it.
 pub const WRITER_EPOCH: &str = "urn:x-sparq-lws:writer-epoch";
@@ -802,15 +820,23 @@ pub fn select_writer_epoch() -> String {
     format!("SELECT ?epoch WHERE {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?epoch }} }}")
 }
 
-/// Raise the writer epoch to at least `epoch` in one atomic modify.
-/// A delayed raise cannot lower a subsequent start's epoch.
-pub fn update_begin_epoch(epoch: u64) -> String {
+/// Raise the writer epoch to `epoch` in one atomic modify, recording this start's `owner` nonce.
+/// A delayed raise cannot lower a subsequent epoch or claim another start's equal epoch.
+pub fn update_begin_epoch(epoch: u64, owner: &str) -> String {
     format!(
-        "DELETE {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?old }} }} \
-        INSERT {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> {epoch} }} }} \
+        "DELETE {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?old ; <{PSS_NS}epochOwner> ?owner }} }} \
+        INSERT {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> {epoch} ; <{PSS_NS}epochOwner> {owner} }} }} \
         WHERE {{ OPTIONAL {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> ?old }} }} \
-        FILTER (!BOUND(?old) || ?old < {epoch}) }}"
+        OPTIONAL {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epochOwner> ?owner }} }} \
+        FILTER (!BOUND(?old) || ?old < {epoch}) }}",
+        owner = literal(owner),
     )
+}
+
+/// Confirm the start that established this epoch, including its unique owner nonce.
+#[cfg(feature = "http-sparq")]
+pub(super) fn ask_writer_epoch_owner(epoch: u64, owner: &str) -> String {
+    format!("ASK {{ GRAPH <{WRITER_EPOCH}> {{ <{WRITER_EPOCH}> <{PSS_NS}epoch> {epoch} ; <{PSS_NS}epochOwner> {} }} }}", literal(owner))
 }
 
 fn epoch_guard(epoch: u64) -> String {
@@ -1109,7 +1135,11 @@ mod tests {
         );
         assert_eq!(
             update_delete_resource_with_parent(child, Some(parent)).unwrap(),
-            format!("{}; {}", update_remove_child(parent, child).unwrap(), update_delete_resource(child).unwrap())
+            format!(
+                "{}; {}",
+                update_remove_child(parent, child).unwrap(),
+                update_delete_resource(child).unwrap()
+            )
         );
         assert_eq!(
             update_delete_resource_with_parent("bad>iri", None),
@@ -1871,11 +1901,11 @@ mod tests {
                     &format!("INSERT DATA {{ GRAPH <{child}> {{ <urn:s> <urn:p> \"body\" }} }}"),
                 );
                 if epoch > 0 {
-                    run(&mut graph, &update_begin_epoch(1));
+                    run(&mut graph, &update_begin_epoch(1, "start-one"));
                 }
                 match protection {
                     "nonce" => run(&mut graph, &update_fence("op-table")),
-                    "epoch" | "pre-start" => run(&mut graph, &update_begin_epoch(2)),
+                    "epoch" | "pre-start" => run(&mut graph, &update_begin_epoch(2, "start-two")),
                     _ => {}
                 }
                 run(&mut graph, &update);
@@ -1969,7 +1999,8 @@ mod tests {
     fn epoch_raises_do_not_lower_a_later_start() {
         let mut graph = sparq_core::Graph::load_str("", "ntriples").unwrap();
         for epoch in [1, 2, 2, 1] {
-            sparq_engine::update_in_place_atomic(&mut graph, &update_begin_epoch(epoch)).unwrap();
+            sparq_engine::update_in_place_atomic(&mut graph, &update_begin_epoch(epoch, "start"))
+                .unwrap();
         }
         assert!(sparq_engine::ask(&graph,
             "ASK { GRAPH <urn:x-sparq-lws:writer-epoch> { <urn:x-sparq-lws:writer-epoch> <urn:pss:index#epoch> 2 } }").unwrap());

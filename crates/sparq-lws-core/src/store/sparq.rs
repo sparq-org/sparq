@@ -166,7 +166,7 @@ pub trait SparqClient: Send + Sync {
     ///
     /// The composite store uses the returned record's `blob_key` to reclaim the superseded bytes
     /// once this commit has succeeded. The DEFAULT implementation is a [`get_meta`](Self::get_meta)
-    /// followed by a [`put_meta`](Self::put_meta) — two round-trips, NOT atomic: a concurrent writer
+    /// followed by a [`put_meta`](Self::put_meta), without atomicity: a concurrent writer
     /// can commit between them, in which case the returned record is that writer's predecessor and
     /// the concurrent writer's own key is left for the reconciler. That is still safe to delete:
     /// blob keys are minted unique per write and an index pointer never moves BACK to a key it has

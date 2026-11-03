@@ -195,6 +195,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking — sparq-lws-core:** the public `update_create_child_fenced` and
+  `update_delete_container_if_empty_fenced` builders take an `epoch` parameter after
+  their nonce. Other public `*_fenced` builders also require the epoch. The internal
+  `fence_guard` takes `Option<u64>` in place of a boolean; `None` selects an unfenced
+  update. `update_begin_epoch(epoch, owner)` records the start's owner nonce alongside
+  the epoch. HTTP updates carrying a superseded epoch are reported as refused.
+  Confirmed completion markers and delete receipts are removed with best-effort cleanup.
+
 - **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
   A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
   and absent targets answer `204`, subject to the same full-budget and set-aside-parent checks.

@@ -62,6 +62,8 @@ struct MockMode {
     commit_late: Option<Duration>,
     /// Fence updates answer `503`, as while the endpoint cannot apply them.
     fail_fences: bool,
+    /// Completion cleanup can fail after the write has already been confirmed.
+    fail_cleanup: bool,
 }
 
 /// The mock's tiny store: resource IRI → its index record; container IRI → child IRIs; resource IRI
@@ -84,10 +86,15 @@ struct MockStore {
     fences: Vec<String>,
     /// Nonce to blob key captured by a resource deletion.
     deleted_keys: HashMap<String, String>,
+    /// The stored writer epoch; absence permits only pre-start writes.
+    epoch: Option<u64>,
+    epoch_owner: Option<String>,
     /// The last SPARQL string the mock received (so a test can assert on the query text/escaping).
     last_sparql: Option<String>,
     /// Total protocol requests received (so a test can pin how many round-trips an op cost).
     requests: usize,
+    query_requests: u64,
+    update_requests: u64,
 }
 
 #[derive(Clone)]
@@ -145,9 +152,17 @@ async fn handle_sparql(
         let mut store = state.store.lock().unwrap();
         store.last_sparql = Some(sparql.clone());
         store.requests += 1;
+        if ct.starts_with("application/sparql-update") {
+            store.update_requests += 1;
+        } else {
+            store.query_requests += 1;
+        }
     }
 
     if ct.starts_with("application/sparql-update") {
+        if is_cleanup(&sparql) && mode.fail_cleanup {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
         if is_fence(&sparql) && mode.fail_fences {
             return (StatusCode::SERVICE_UNAVAILABLE, "fences fail").into_response();
         }
@@ -193,6 +208,36 @@ async fn handle_sparql(
 /// is written. See `apply_delete_container_modify`.
 fn apply_update(state: &MockState, sparql: &str) {
     let mut store = state.store.lock().unwrap();
+    if is_cleanup(sparql) {
+        let iris = extract_iris(sparql);
+        let resource = &iris[1];
+        let nonce = extract_literals(sparql).first().cloned().unwrap();
+        if let Some(nonces) = store.markers.get_mut(resource) {
+            nonces.retain(|n| n != &nonce);
+        }
+        if let Some(nonces) = store.delete_markers.get_mut(resource) {
+            nonces.retain(|n| n != &nonce);
+        }
+        store.deleted_keys.remove(&nonce);
+        return;
+    }
+    if sparql.starts_with("DELETE {") && sparql.contains("epochOwner") {
+        let insert = sparql.split("INSERT {").nth(1).unwrap();
+        let epoch: u64 = insert
+            .split("<urn:pss:index#epoch> ")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        if store.epoch.is_none_or(|old| old < epoch) {
+            store.epoch = Some(epoch);
+            store.epoch_owner = extract_literals(sparql).first().cloned();
+        }
+        return;
+    }
     // A fence: `INSERT DATA { GRAPH <…#fences> { <record> <…#fenced> "nonce" } }`.
     if is_fence(sparql) {
         let nonce = extract_literals(sparql).pop().unwrap_or_default();
@@ -206,6 +251,19 @@ fn apply_update(state: &MockState, sparql: &str) {
             .any(|l| store.fences.contains(l))
     {
         return;
+    }
+    if sparql.contains("#fenced>") {
+        let marker = "<urn:pss:index#epoch> ";
+        let expected = sparql.split(marker).nth(1).unwrap();
+        let allowed = if expected.starts_with("?epoch") {
+            store.epoch.unwrap_or(0) == 0
+        } else {
+            let epoch: u64 = expected.split_whitespace().next().unwrap().parse().unwrap();
+            store.epoch == Some(epoch)
+        };
+        if !allowed {
+            return;
+        }
     }
     // Metadata replacement, edge detach and whole-resource delete each have one completion marker.
     if sparql.contains("deleteMarker")
@@ -348,6 +406,12 @@ fn apply_update(state: &MockState, sparql: &str) {
     }
 }
 
+fn is_cleanup(sparql: &str) -> bool {
+    sparql.starts_with("DELETE {")
+        && !sparql.contains("INSERT {")
+        && sparql.contains("createMarker")
+}
+
 /// Whether `sparql` is a fence ([`sparq_lws_core::store::sparql::update_fence`]).
 fn is_fence(sparql: &str) -> bool {
     sparql.starts_with("INSERT DATA") && sparql.contains("#fences>")
@@ -358,7 +422,19 @@ fn answer_query(state: &MockState, sparql: &str) -> Response {
     let store = state.store.lock().unwrap();
     if sparql.starts_with("ASK") {
         let graph = first_graph_iri(sparql).unwrap_or_default();
-        let boolean = if sparql.contains("deleteMarker") {
+        let boolean = if sparql.contains("epochOwner") {
+            let epoch: u64 = sparql
+                .split("<urn:pss:index#epoch> ")
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            store.epoch == Some(epoch)
+                && store.epoch_owner == extract_literals(sparql).first().cloned()
+        } else if sparql.contains("deleteMarker") {
             // ask_delete_marker: ASK { GRAPH <scratch> { <container> <deleteMarker> "nonce" } } — true
             // iff that exact nonce was recorded for the container. The graph here is the SCRATCH graph;
             // the container is the SUBJECT (the first <...> IRI INSIDE the graph block), and the nonce
@@ -398,6 +474,17 @@ fn answer_query(state: &MockState, sparql: &str) -> Response {
             store.meta.contains_key(&graph)
         };
         return results_json(&format!(r#"{{"head":{{}},"boolean":{boolean}}}"#));
+    }
+    if sparql.starts_with("SELECT ?epoch") {
+        let rows = match store.epoch {
+            Some(epoch) => {
+                serde_json::json!([{"epoch": {"type": "literal", "value": epoch.to_string()}}])
+            }
+            None => serde_json::json!([]),
+        };
+        return results_json(
+            &serde_json::json!({"head":{"vars":["epoch"]},"results":{"bindings":rows}}).to_string(),
+        );
     }
     if sparql.starts_with("SELECT ?bk") && sparql.contains("deletedBlobKey") {
         let nonce = extract_iris(sparql)
@@ -964,16 +1051,24 @@ async fn create_child_in_missing_container_is_not_found() {
 
 #[tokio::test]
 async fn repeated_same_child_create_each_confirms_its_own_marker() {
-    // Regression for the round-5 finding: markers are APPEND-ONLY, so a second create on the same
-    // child does NOT remove the first op's marker. Two sequential creates (each with its own unique
-    // nonce) both succeed — neither false-NotFounds because the other cleared its marker.
+    // A pending operation's marker survives other creates and their per-nonce cleanup.
     let (url, state) = spawn_mock().await;
     let c = HttpSparqClient::new(url);
     c.put_meta(CONTAINER, meta()).await.unwrap();
+    let pending = sparq_lws_core::store::sparql::update_create_child_fenced(
+        CONTAINER,
+        CHILD,
+        "text/plain",
+        "pending",
+        "pending",
+        None,
+        "op-pending",
+        0,
+    )
+    .unwrap();
+    apply_update(&state, &pending);
     c.create_child(CONTAINER, CHILD, meta()).await.unwrap();
-    // A second create on the SAME child must also succeed (idempotent membership, fresh marker).
     c.create_child(CONTAINER, CHILD, meta()).await.unwrap();
-    // Both operations' markers are retained (append-only) — proof neither cleared the other's.
     let markers = state
         .store
         .lock()
@@ -982,7 +1077,11 @@ async fn repeated_same_child_create_each_confirms_its_own_marker() {
         .get(CHILD)
         .cloned()
         .unwrap_or_default();
-    assert_eq!(markers.len(), 2, "both markers retained: {markers:?}");
+    assert_eq!(
+        markers,
+        ["op-pending"],
+        "only the unconfirmed marker remains"
+    );
     // Membership stays a single edge (idempotent).
     assert_eq!(
         c.list_children(CONTAINER).await.unwrap(),
@@ -1664,4 +1763,121 @@ async fn an_unsettled_write_is_fenced_through_the_counting_decorator() {
     // Fenced before it landed: it never does.
     tokio::time::sleep(Duration::from_millis(1800)).await;
     assert!(store.list_children(CONTAINER).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_mock_refuses_superseded_epoch_writes() {
+    let (url, state) = spawn_mock().await;
+    let client = HttpSparqClient::new(url);
+    client.put_meta(CONTAINER, meta()).await.unwrap();
+    client.create_child(CONTAINER, CHILD, meta()).await.unwrap();
+    state.store.lock().unwrap().epoch = Some(1);
+    for operation in [
+        "put",
+        "delete",
+        "detach",
+        "delete_resource",
+        "create",
+        "empty_delete",
+    ] {
+        let result = match operation {
+            "put" => client.put_meta(CHILD, meta()).await,
+            "delete" => client.delete_meta(CHILD).await,
+            "detach" => client.remove_child(CONTAINER, CHILD).await,
+            "delete_resource" => client
+                .delete_resource(CHILD, Some(CONTAINER))
+                .await
+                .map(|_| ()),
+            "create" => client.create_child(CONTAINER, CHILD, meta()).await,
+            "empty_delete" => client
+                .delete_meta_if_empty(CHILD, Some(CONTAINER))
+                .await
+                .map(|_| ()),
+            _ => unreachable!(),
+        };
+        assert!(
+            matches!(result, Err(SparqError::Backend(ref error)) if error == "fatal: writer epoch superseded"),
+            "{operation}: {result:?}"
+        );
+        assert_eq!(client.get_meta(CHILD).await.unwrap(), meta());
+        assert_eq!(client.list_children(CONTAINER).await.unwrap(), [CHILD]);
+    }
+}
+
+#[tokio::test]
+async fn completion_cleanup_failure_does_not_change_the_write_result() {
+    let (url, state) = spawn_mock().await;
+    let client = HttpSparqClient::new(url);
+    state.mode.lock().unwrap().fail_cleanup = true;
+    client.put_meta(CONTAINER, meta()).await.unwrap();
+    client.create_child(CONTAINER, CHILD, meta()).await.unwrap();
+    assert_eq!(
+        client
+            .delete_resource(CHILD, Some(CONTAINER))
+            .await
+            .unwrap(),
+        Some(meta().blob_key)
+    );
+    let store = state.store.lock().unwrap();
+    assert!(store
+        .delete_markers
+        .values()
+        .any(|nonces| !nonces.is_empty()));
+    assert!(!store.deleted_keys.is_empty());
+    assert!(!store.meta.contains_key(CHILD));
+    assert!(store.children.get(CONTAINER).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mutation_counters_match_the_http_requests_observed_by_the_endpoint() {
+    use sparq_lws_core::store::{BackendCounters, CountingSparqClient};
+    let (url, state) = spawn_mock().await;
+    let counters = BackendCounters::new();
+    let client = CountingSparqClient::new(HttpSparqClient::new(url), counters.clone());
+    let wire = || {
+        let store = state.store.lock().unwrap();
+        (store.query_requests, store.update_requests)
+    };
+    macro_rules! measured {
+        ($call:expr) => {{
+            let before = counters.snapshot();
+            let prior = wire();
+            let result = $call.await;
+            let delta = counters.snapshot().since(&before);
+            let after = wire();
+            assert_eq!(
+                (delta.sparql_queries, delta.sparql_updates),
+                (after.0 - prior.0, after.1 - prior.1),
+                stringify!($call)
+            );
+            result
+        }};
+    }
+    measured!(client.put_meta(CONTAINER, meta())).unwrap();
+    measured!(client.create_child(CONTAINER, CHILD, meta())).unwrap();
+    measured!(client.replace_child(CONTAINER, CHILD, meta())).unwrap();
+    measured!(client.replace_meta(CHILD, meta())).unwrap();
+    assert_eq!(
+        measured!(client.delete_meta_if_empty(CONTAINER, None)).unwrap(),
+        DeleteOutcome::NotEmpty
+    );
+    measured!(client.remove_child(CONTAINER, CHILD)).unwrap();
+    assert_eq!(
+        measured!(client.delete_resource(CHILD, Some(CONTAINER))).unwrap(),
+        Some(meta().blob_key)
+    );
+    measured!(client.delete_meta(CHILD)).unwrap();
+    measured!(client.delete_resource(CHILD, None)).unwrap();
+    assert_eq!(
+        measured!(client.delete_meta_if_empty(CONTAINER, None)).unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert_eq!(
+        measured!(client.delete_meta_if_empty(CONTAINER, None)).unwrap(),
+        DeleteOutcome::NotFound
+    );
+    assert!(matches!(
+        measured!(client.create_child(CONTAINER, CHILD, meta())),
+        Err(SparqError::NotFound)
+    ));
 }
