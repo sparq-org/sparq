@@ -181,6 +181,9 @@ impl SparqClient for ControlledIndex {
     fn exclusive(&self) -> Result<(), SparqError> {
         self.inner.exclusive()
     }
+    fn lifecycle(&self) -> Arc<super::super::Lifecycle> {
+        self.inner.lifecycle()
+    }
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         self.inner.delete_meta(iri).await
     }

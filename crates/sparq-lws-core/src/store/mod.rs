@@ -3118,7 +3118,7 @@ mod tests {
     async fn composites_share_embedded_backend_lease() {
         let dir = std::env::temp_dir().join(format!(
             "lws-backend-lease-{}",
-            S::mint_blob_key("lease").unwrap()
+            S::mint_blob_key("lease", false).unwrap()
         ));
         let client = EmbeddedSparqClient::open_or_create(&dir.join("index")).unwrap();
         check_composites_share_backend_lease(client).await;
