@@ -14,10 +14,6 @@
 # ---------------------------------------------------------------------------
 # server: "sparq-server" → SPARQL endpoint, port 3030, health GET /health
 # server: "lws"          → Solid/LWS server, port 3000, health GET /livez + /readyz
-#                          NOTE: lws values below are marked "(activates once sq-lmz40 ships)"
-#                          because the ghcr.io/sparq-org/sparq-lws-core image is not yet
-#                          published. Set server: lws once sq-lmz40 merges and the image
-#                          is available.
 server: sparq-server
 
 # ---------------------------------------------------------------------------
@@ -40,9 +36,9 @@ imagePullSecrets: []
 # ---------------------------------------------------------------------------
 # Replica count
 # [GPT-5.6] Both servers are pinned to one replica. sparq-server has one writable
-# in-memory store per pod. The planned canonical LWS image lacks redis-replay, and
-# the current LWS runtime has no shared durable blob store, so Redis alone cannot
-# make its data path safe to scale out.
+# in-memory store per pod. The LWS index and blob store are single-instance;
+# Redis replay protection alone cannot make that data directory safe to share.
+# Persistent LWS upgrades use Recreate so two pods never open it concurrently.
 # ---------------------------------------------------------------------------
 replicaCount: 1
 
@@ -80,7 +76,6 @@ sparqServer:
 
 # ---------------------------------------------------------------------------
 # LWS / sparq-lws-core config (ignored when server=sparq-server)
-# ACTIVATES ONCE sq-lmz40 SHIPS (image not yet published).
 # ---------------------------------------------------------------------------
 lws:
   # REQUIRED for any production LWS deploy. LWS cannot start without a trusted OIDC IdP.
@@ -137,7 +132,12 @@ resources:
     memory: "2Gi"
 
 # ---------------------------------------------------------------------------
-# Persistent volume for the dataset (/data) — sparq-server only
+# Persistent volume (/data) for either server. For LWS this also sets
+# SOLID_SERVER_DATA_DIR=/data (embedded index, blobs, and format.json).
+# LWS requires a filesystem on a block volume with ReadWriteOnce access
+# (EBS, PD, Azure Disk). Network filesystems (EFS, Azure Files, NFS) are NOT
+# supported: the index relies on file locking and fsync semantics.
+# Keep one replica and stop the server before backing up the whole volume.
 # ---------------------------------------------------------------------------
 persistence:
   enabled: false

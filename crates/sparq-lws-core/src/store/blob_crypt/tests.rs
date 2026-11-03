@@ -257,9 +257,11 @@ impl Fixture {
     fn plain(&self) -> CompositeStore<InMemorySparqClient, Backend> {
         CompositeStore {
             sparq: self.index.clone(),
-            blob: self.backend.clone(),
+            blob: Arc::new(self.backend.clone()),
             blob_scope: BlobScopePolicy::Solid,
-            body_cache: BodyCache::disabled(),
+            body_cache: Arc::new(BodyCache::disabled()),
+            lifecycle: Default::default(),
+            history: Default::default(),
             holding: Default::default(),
         }
     }
@@ -691,7 +693,7 @@ async fn pod_reads_require_the_original_pod_with_cold_and_warm_body_cache() {
         for warm in [false, true] {
             let f = Fixture::new();
             let mut store = f.encrypted().await;
-            store.body_cache = BodyCache::new(65536);
+            store.body_cache = Arc::new(BodyCache::new(65536));
             let source = if path == "acl" {
                 "https://pod.example/alice/file.acl"
             } else {
@@ -977,9 +979,14 @@ async fn composite_write_paths_are_scoped_and_etags_remain_plaintext_derived() {
     let counters = BackendCounters::new();
     let counted = CompositeStore {
         sparq: store.sparq,
-        blob: CountingBlobStore::new(store.blob, counters.clone()),
+        blob: Arc::new(CountingBlobStore::new(
+            Arc::try_unwrap(store.blob).ok().unwrap(),
+            counters.clone(),
+        )),
         blob_scope: BlobScopePolicy::Solid,
-        body_cache: BodyCache::disabled(),
+        body_cache: Arc::new(BodyCache::disabled()),
+        lifecycle: store.lifecycle,
+        history: store.history,
         holding: Default::default(),
     };
     counted
@@ -1676,7 +1683,7 @@ async fn key_records_stay_outside_resource_operations_and_the_reconciler() {
     let raw_before = f.index.get_meta(&iri).await.unwrap();
     let report = reconcile_orphans(
         f.index.as_ref(),
-        &store.blob,
+        store.blob.as_ref(),
         &ReconcileOptions {
             grace: Duration::ZERO,
             dry_run: false,
@@ -2147,10 +2154,78 @@ async fn internal_key_records_do_not_consume_content_slots_or_escape_through_edg
 }
 
 #[tokio::test]
+async fn retained_bodies_keep_their_original_pod_after_encryption_and_cloning() {
+    let f = Fixture::new();
+    let mut plain = f
+        .plain()
+        .with_history(crate::store::history::HistoryConfig {
+            versions: true,
+            trash: true,
+            ..Default::default()
+        })
+        .unwrap();
+    plain.body_cache = Arc::new(BodyCache::new(65536));
+    let lifecycle = plain.lifecycle();
+    let store = plain
+        .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, f.options())
+        .await
+        .unwrap();
+    let cloned = store.clone();
+    assert!(Arc::ptr_eq(&lifecycle, &cloned.lifecycle()));
+    assert!(cloned.history_config().versions);
+    assert!(cloned.history_config().trash);
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert_eq!(store.read(ALICE).await.unwrap().body, BODY);
+    cloned
+        .write(ALICE, Bytes::from_static(b"second"), "text/plain")
+        .await
+        .unwrap();
+    let version = store.versions(Some(ALICE)).await.unwrap().pop().unwrap();
+    assert!(envelope_key(&version.meta.blob_key));
+    assert_eq!(
+        cloned.read_at(&version.member, &version.meta).await.unwrap(),
+        BODY
+    );
+    assert!(cloned.read_at(BOB, &version.meta).await.is_err());
+    assert_eq!(
+        cloned.read_at(&version.member, &version.meta).await.unwrap(),
+        BODY
+    );
+    assert_eq!(cloned.read(ALICE).await.unwrap().body, "second");
+    let member = store
+        .trash_resource(
+            ALICE,
+            None,
+            crate::store::history::TrashFields {
+                original: ALICE.into(),
+                trashed_at: crate::clock::now(),
+                deleted_by: None,
+                deleter_could_read: true,
+            },
+        )
+        .await
+        .unwrap();
+    let trash = store.trash_entry(&member).await.unwrap().unwrap();
+    assert!(envelope_key(&trash.meta.blob_key));
+    assert_eq!(
+        cloned.read_at(&member, &trash.meta).await.unwrap(),
+        "second"
+    );
+    assert!(cloned.read_at(BOB, &trash.meta).await.is_err());
+    assert_eq!(
+        cloned.read_at(&member, &trash.meta).await.unwrap(),
+        "second"
+    );
+}
+
+#[tokio::test]
 async fn assembly_rechecks_legacy_bodies_with_the_new_decoder() {
     let f = Fixture::new();
     let mut plain = f.plain();
-    plain.body_cache = BodyCache::with_max_entry_bytes(64000, 32000);
+    plain.body_cache = Arc::new(BodyCache::with_max_entry_bytes(64000, 32000));
     let legacy = Bytes::from_static(b"SQLB\x01xxxxxxxxxxxxxxxxyyyyyyyyyyyyold legacy body");
     plain
         .write(ALICE, legacy.clone(), "text/plain")

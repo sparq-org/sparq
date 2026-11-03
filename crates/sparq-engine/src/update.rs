@@ -547,6 +547,113 @@ pub fn parse_update_rec2013(sparql: &str) -> Result<Update, String> {
     Ok(update)
 }
 
+/// Named graph slots an update can observe or change, in first-seen order.
+///
+/// `Some(names)` permits evaluation on [`Graph::fork_scoped`] with those names;
+/// the default graph is always included by that fork. `None` requires a full
+/// [`Graph::fork`]: variable graph names, NAMED/ALL targets and SERVICE are
+/// conservatively unbounded. Analyze the exact algebra that will be evaluated,
+/// including every operation in a request, before creating the working copy.
+/// Commit captured effects to the complete dataset; never publish the partial fork.
+pub fn update_graph_scope(update: &Update) -> Option<Vec<Term>> {
+    use spargebra::algebra::GraphPattern;
+
+    #[derive(Default)]
+    struct Scope(Vec<Term>);
+    impl Scope {
+        fn add(&mut self, name: &oxrdf::NamedNode) {
+            let name = Term::NamedNode(name.clone());
+            if !self.0.contains(&name) {
+                self.0.push(name);
+            }
+        }
+        fn graph(&mut self, name: &GraphName) {
+            match name {
+                GraphName::DefaultGraph => (),
+                GraphName::NamedNode(name) => self.add(name),
+            }
+        }
+        fn template(&mut self, name: &GraphNamePattern) -> Option<()> {
+            match name {
+                GraphNamePattern::DefaultGraph => (),
+                GraphNamePattern::NamedNode(name) => self.add(name),
+                GraphNamePattern::Variable(_) => return None,
+            }
+            Some(())
+        }
+    }
+    impl crate::algebra_walk::Visitor for Scope {
+        fn pattern(&mut self, pattern: &GraphPattern) -> bool {
+            match pattern {
+                GraphPattern::Graph {
+                    name: NamedNodePattern::NamedNode(name),
+                    ..
+                } => {
+                    self.add(name);
+                    true
+                }
+                GraphPattern::Graph {
+                    name: NamedNodePattern::Variable(_),
+                    ..
+                }
+                | GraphPattern::Service { .. } => false,
+                _ => true,
+            }
+        }
+    }
+
+    let mut scope = Scope::default();
+    for operation in &update.operations {
+        match operation {
+            GraphUpdateOperation::InsertData { data } => {
+                for quad in data {
+                    scope.graph(&quad.graph_name);
+                }
+            }
+            GraphUpdateOperation::DeleteData { data } => {
+                for quad in data {
+                    scope.graph(&quad.graph_name);
+                }
+            }
+            GraphUpdateOperation::DeleteInsert {
+                delete,
+                insert,
+                using,
+                pattern,
+            } => {
+                for quad in delete {
+                    scope.template(&quad.graph_name)?;
+                }
+                for quad in insert {
+                    scope.template(&quad.graph_name)?;
+                }
+                if let Some(using) = using {
+                    for name in &using.default {
+                        scope.add(name);
+                    }
+                    if let Some(named) = &using.named {
+                        for name in named {
+                            scope.add(name);
+                        }
+                    }
+                }
+                if !crate::algebra_walk::all_pattern(pattern, &mut scope) {
+                    return None;
+                }
+            }
+            GraphUpdateOperation::Load { destination, .. } => scope.graph(destination),
+            GraphUpdateOperation::Create { graph, .. } => scope.add(graph),
+            GraphUpdateOperation::Clear { graph, .. }
+            | GraphUpdateOperation::Drop { graph, .. } => match graph {
+                GraphTarget::DefaultGraph => (),
+                GraphTarget::NamedNode(name) => scope.add(name),
+                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => return None,
+            },
+        }
+    }
+    Some(scope.0)
+}
+
 fn require_update_budget(budget: &crate::QueryBudget) -> Result<(), String> {
     if budget.ebv_semantics.is_some_and(|rule| rule != crate::EbvSemantics::Rec2013) {
         return Err("UPDATE supports only REC 2013 EBV semantics".into());
@@ -885,6 +992,8 @@ pub fn update_in_place_atomic_with_budget(
     sparql: &str,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
+    // This path publishes the whole working copy. Keep a full fork so untouched
+    // named graphs survive the swap; durable effect capture can use a scoped fork.
     let mut working = graph.fork();
     update_in_place_with_budget(&mut working, sparql, budget)?;
     *graph = working;

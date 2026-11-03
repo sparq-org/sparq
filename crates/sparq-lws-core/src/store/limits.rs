@@ -198,6 +198,24 @@ impl Default for InMemoryStoreLimits {
 mod tests {
     use super::*;
 
+    #[test]
+    fn refuse_marker_operands_rejects_each_position_and_accepts_ordinary_names() {
+        let marker = "https://pod.example/.lws/subscriptions/#high-water";
+        let ordinary = "https://pod.example/doc";
+        for operands in [
+            vec![Some(marker)],
+            vec![Some(marker), Some(ordinary)],
+            vec![Some(ordinary), Some(marker)],
+            vec![None, Some(marker)],
+        ] {
+            assert!(matches!(refuse_marker_operands(&operands),
+                Err(super::super::SparqError::Backend(ref message))
+                    if message == "service markers require the lifecycle lease"));
+        }
+        assert!(refuse_marker_operands(&[]).is_ok());
+        assert!(refuse_marker_operands(&[Some(ordinary), None]).is_ok());
+    }
+
     /// Naming a pool leaves the content ceilings alone, and the other way round.
     #[test]
     fn a_named_pool_leaves_the_content_ceilings_alone() {
@@ -261,4 +279,14 @@ pub const DATA_KEY_CONTAINER: &str = "urn:x-sparq-lws:data-keys/";
 /// Whether an index IRI belongs to the reserved wrapped-data-key namespace.
 pub fn is_data_key_record(iri: &str) -> bool {
     iri.starts_with(DATA_KEY_CONTAINER)
+}
+
+/// Refuse generic index mutations of the notification marker.
+pub(crate) fn refuse_marker_operands(iris: &[Option<&str>]) -> Result<(), super::SparqError> {
+    if iris.iter().flatten().any(|iri| is_service_marker(iri)) {
+        return Err(super::SparqError::Backend(
+            "service markers require the lifecycle lease".into(),
+        ));
+    }
+    Ok(())
 }

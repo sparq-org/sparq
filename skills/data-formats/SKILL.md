@@ -72,6 +72,13 @@ locks while replacing the default graph with an in-memory view; that view's late
 updates are not logged. See [named accessors and durable layout operations](named-accessors.md)
 for slot persistence, journal operations and recovery methods.
 
+Writable `wal.log` and `txn.log` handles defer entry sync until their first append: after
+syncing the frame data, they sync the file and, on Unix, its parent directory before
+acknowledging that append. This also covers existing entries left by an interrupted open;
+opening a clean tree without writes does not sync logs or directories.
+Compaction packs sparse named slots throughout the tree even when no graph has pending
+triples, reclaiming both interior holes and the allocation cursor left by trailing drops.
+
 ## Quickstart
 
 Add the dependency (HDT is a separate, native-only crate):
@@ -244,11 +251,18 @@ g.remove_triple(
 )?; // absent ⇒ no-op, never an error
 ```
 
+`Graph::fork_scoped(names)` omits every unlisted named graph, ignores absent names,
+and preserves dataset order without duplicating repeated names. It shares storage and
+mapping locks like `fork()`, carries no write-ahead log, and must only be used when the
+caller has bounded every graph the evaluation can observe. Commit resolved effects to
+the complete dataset rather than replacing it with this partial view.
+
 `sparq_core::Graph` — cheap snapshots / forks (the serving pattern):
 
 ```rust
 pub fn snapshot(&self) -> GraphSnapshot   // immutable COW view; O(pending delta), not O(triples)
 pub fn fork(&self) -> Graph               // mutable structural fork (Arc-shares base storage)
+pub fn fork_scoped(&self, names: &[Term]) -> Graph // default graph plus selected existing named graphs
 ```
 
 `sparq_core::GraphSnapshot` — `Send + Sync`, `Deref<Target = Graph>` (every read method:
@@ -679,7 +693,12 @@ are crate-internal), and every memory-mapped part of a graph carries the lock: i
 the graph, any mapped `fork()`/`snapshot()`, or a graph rebuilt
 around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the graphs `compact`,
 `vacuum` and `restore_in_place` swap in. A second holder, in another process or this one, gets
-`WouldBlock` at once. Rules that follow:
+`WouldBlock` at once. When the final graph or mapped view drops, its owning process explicitly
+unlocks the inside and outside files before closing them. Temporary descriptor copies,
+including those inherited by a child between fork and exec, do not extend that lock lifetime.
+A guard inherited by a forked child skips explicit unlock on drop, preserving the parent's
+live lock. Independent shared readers and mapped views continue to hold their own locks.
+Rules that follow:
 
 - **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
   from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused

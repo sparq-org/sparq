@@ -280,7 +280,7 @@ enum PodKey {
 /// reservations and provider calls are serialized per pod/key, across reads and writes.
 /// Native boot assembles one decorator before sharing it with request and maintenance paths.
 pub struct EncryptingBlobStore<B, K: KeyProvider> {
-    inner: B,
+    inner: Arc<B>,
     provider: K,
     records: KeyRecords,
     scheme: CryptScheme,
@@ -295,6 +295,16 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
     /// Errors include a wrong local KEK. Wrapped-key records never contain plaintext keys.
     pub async fn new(
         inner: B,
+        provider: K,
+        index: Arc<dyn SparqClient>,
+        scheme: CryptScheme,
+        options: CryptOptions,
+    ) -> Result<Self, BlobError> {
+        Self::from_shared(Arc::new(inner), provider, index, scheme, options).await
+    }
+
+    async fn from_shared(
+        inner: Arc<B>,
         provider: K,
         index: Arc<dyn SparqClient>,
         scheme: CryptScheme,
@@ -723,7 +733,7 @@ impl<S: SparqClient + 'static, B: BlobStore> CompositeStore<S, B> {
             CryptScheme::Solid => self.blob_scope,
         };
         let blob =
-            EncryptingBlobStore::new(self.blob, provider, self.sparq.clone(), scheme, options)
+            EncryptingBlobStore::from_shared(self.blob, provider, self.sparq.clone(), scheme, options)
                 .await?;
         // Re-read existing bodies through the envelope sniff after changing decoders.
         let body_cache = super::BodyCache::with_max_entry_bytes(
@@ -732,9 +742,11 @@ impl<S: SparqClient + 'static, B: BlobStore> CompositeStore<S, B> {
         );
         Ok(CompositeStore {
             sparq: self.sparq,
-            blob,
+            blob: Arc::new(blob),
             blob_scope: policy,
-            body_cache,
+            body_cache: Arc::new(body_cache),
+            lifecycle: self.lifecycle,
+            history: self.history,
             holding: self.holding,
         })
     }
