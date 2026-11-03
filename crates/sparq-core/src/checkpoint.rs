@@ -119,9 +119,9 @@ impl TreeState {
 
     pub(super) fn checkpoint(&self) -> std::io::Result<()> {
         let _permit = self.write_permit();
-        if self.materializing() {
+        if self.materializing() || self.grouping() {
             return Err(std::io::Error::other(
-                "finish transaction materialization before checkpoint",
+                "finish transaction materialization and commit the group before checkpoint",
             ));
         }
         if self.poisoned() {
@@ -238,6 +238,7 @@ impl Drop for TreeState {
     fn drop(&mut self) {
         if !self.poisoned()
             && !self.materializing()
+            && !self.grouping()
             && !std::thread::panicking()
             && self
                 .checkpoint_on_drop

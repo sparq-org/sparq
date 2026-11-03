@@ -24,6 +24,8 @@ pub mod dir_lock;
 mod fault;
 #[cfg(feature = "mmap")]
 mod checkpoint;
+#[cfg(feature = "mmap")]
+mod group;
 #[cfg(all(test, feature = "mmap"))]
 mod crash;
 #[cfg(all(test, feature = "mmap"))]
@@ -1855,11 +1857,12 @@ impl Graph {
     /// triples (in place: `rebuild` may add terms and triples, as a reasoner does), keeping its
     /// named graphs, and the lock of its directory while anything it maps lives. The rebuilt
     /// default graph is in memory: later updates to it are not logged. `Err`, changing
-    /// nothing, when this graph refuses writes.
+    /// nothing, when this graph refuses writes or has an active durable group.
     pub fn rebuild_default<R>(
         &mut self,
         rebuild: impl FnOnce(&mut Dict, &mut Vec<[Id; 3]>) -> R,
     ) -> Result<R, String> {
+        self.refuse_group_replacement()?;
         self.refuse_if_detached()?;
         let mut triples: Vec<[Id; 3]> = self.iter_ids().collect();
         let mut dict = std::mem::take(&mut self.dict);
@@ -1872,13 +1875,22 @@ impl Graph {
     /// graphs of its own, keeping this graph's named graphs and the lock of its directory. The
     /// new default graph is in memory: later updates to it are not logged. `Err`, changing
     /// nothing, when this graph refuses writes, or `default` has named graphs, is
-    /// directory-backed or refuses writes.
+    /// directory-backed or refuses writes. An active durable group also refuses replacement.
     pub fn replace_default(&mut self, default: Graph) -> Result<(), String> {
+        self.refuse_group_replacement()?;
         self.check_named_insertable(&default)?;
         if !default.named.is_empty() {
             return Err("the new default graph has named graphs of its own".to_owned());
         }
         self.replace_default_unchecked(default);
+        Ok(())
+    }
+
+    fn refuse_group_replacement(&self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        if self.tree.grouping() {
+            return Err("commit the group before replacing its default graph".to_owned());
+        }
         Ok(())
     }
 
@@ -3729,7 +3741,7 @@ impl Graph {
             let appended = match &mut self.wal {
                 WriteState::Durable(w) => {
                     if tree.materializing() {
-                        w.append_batch_deferred(inserts, deletes)
+                        tree.append_wal(w, inserts, deletes)
                             .and_then(|()| tree.dirty_wal(w))
                             .map_err(|e| e.to_string())
                     } else {
@@ -3841,6 +3853,7 @@ impl Graph {
     }
 
     /// Commits ordered triple and named-graph operations in one journal frame.
+    /// Inside a group, success stages the frame; withhold results until `commit_group`.
     pub fn commit_txn_ops(&mut self, ops: &[TxnOp]) -> Result<(), String> {
         self.commit_txn_ops_checked(ops).map_err(|(_, e)| e)
     }
@@ -3868,7 +3881,7 @@ impl Graph {
             }
             // Append errors freeze the shared tree until recovery.
             let appended = match &mut self.txn {
-                Some(j) => j.append(ops),
+                Some(j) => tree.append_journal(j, ops),
                 None => Ok(()),
             };
             if let Err(e) = appended {
@@ -3890,8 +3903,40 @@ impl Graph {
         Ok(())
     }
 
+    /// Starts a group of journaled updates on this graph. Nested groups are refused.
+    /// Materialize and finish each update as usual, but withhold all results (including
+    /// reads of those updates) until [`commit_group`](Self::commit_group) succeeds.
+    /// Direct writes and checkpoints are refused during a group. In-memory graphs are a no-op.
+    pub fn begin_group(&mut self) -> Result<(), String> {
+        self.check_writable()?;
+        #[cfg(feature = "mmap")]
+        if let Some(journal) = &self.txn {
+            let tree = std::sync::Arc::clone(&self.tree);
+            let _permit = tree.write_permit();
+            self.begin_durable_write()?;
+            tree.begin_group(journal).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Writes the group's journal frames together and syncs once before writing any
+    /// buffered WAL bytes. Only then may callers release their results. A failure freezes
+    /// the tree; discard the handle and reopen to recover. There is no rollback of memory.
+    /// Refuses unfinished materialization. Checkpoints if the retained journal is due.
+    pub fn commit_group(&mut self) -> Result<(), String> {
+        self.check_writable()?;
+        #[cfg(feature = "mmap")]
+        if self.txn.is_some() {
+            let tree = std::sync::Arc::clone(&self.tree);
+            let _permit = tree.write_permit();
+            tree.commit_group().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Finishes materialization, checkpointing only when the retained journal reaches
-    /// the size limit. The committed frame already covers every deferred WAL append.
+    /// the size limit. Inside a group this only ends materialization; the group
+    /// barrier must still succeed before the updates can be acknowledged.
     pub fn finish_txn(&mut self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         {
@@ -3901,7 +3946,9 @@ impl Graph {
                 self.begin_durable_write()?;
             }
             self.tree.materializing.store(false, std::sync::atomic::Ordering::Release);
-            self.tree.checkpoint_if_due().map_err(|e| e.to_string())?;
+            if !self.tree.grouping() {
+                self.tree.checkpoint_if_due().map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }
@@ -7868,7 +7915,11 @@ impl Wal {
         inserts: &[[Term; 3]],
         deletes: &[[Term; 3]],
     ) -> std::io::Result<()> {
-        use std::io::Write;
+        let buf = Self::frame(inserts, deletes)?;
+        Self::write_frame(&mut self.file, &Self::path(&self.dir), &buf)
+    }
+
+    fn frame(inserts: &[[Term; 3]], deletes: &[[Term; 3]]) -> std::io::Result<Vec<u8>> {
         let n_records = u32::try_from(inserts.len() + deletes.len())
             .map_err(|_| Self::too_big("the record count", inserts.len() + deletes.len()))?;
         let mut body = Vec::new();
@@ -7890,20 +7941,25 @@ impl Wal {
         let crc = Self::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Self::COMMIT_MARKER.to_le_bytes());
+        Ok(buf)
+    }
+
+    fn write_frame(file: &mut std::fs::File, path: &std::path::Path, buf: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
         // Test-only partial-frame append failure.
         #[cfg(test)]
         if let Some(drop_tail) = io_fault::take(&io_fault::WAL_DROP_TAIL) {
             let keep = buf.len().saturating_sub(drop_tail);
-            self.file.write_all(&buf[..keep])?;
-            self.file.sync_data()?;
+            file.write_all(&buf[..keep])?;
+            file.sync_data()?;
             return Err(std::io::Error::other(
                 "injected WAL append fault: a partial frame is on disk",
             ));
         } // Another handle on this log (in this process) may have appended since this one did:
           // write at the end, never over it.
-        std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))?;
-        self.file.write_all(&buf)?;
-        fault_point("wal-appended", &Self::path(&self.dir))
+        std::io::Seek::seek(file, std::io::SeekFrom::End(0))?;
+        file.write_all(buf)?;
+        fault_point("wal-appended", path)
     }
 
     fn push_record(buf: &mut Vec<u8>, op: u8, t: &[Term; 3]) -> std::io::Result<()> {
@@ -8175,6 +8231,9 @@ struct TreeState {
     /// Reentrant exclusion for durable operations throughout a graph tree.
     writer: WriterPermit,
     checkpoint: std::sync::Mutex<checkpoint::Pending>,
+    group: std::sync::Mutex<Option<group::Group>>,
+    // Keep ordinary journal/WAL appends off the group mutex.
+    group_active: std::sync::atomic::AtomicBool,
     materializing: std::sync::atomic::AtomicBool,
     /// A base rewrite refused during validation preserves its recovery files through drop.
     checkpoint_on_drop: std::sync::atomic::AtomicBool,
@@ -8215,6 +8274,8 @@ impl TreeState {
             layout: std::sync::Mutex::new(LayoutLog::default()),
             writer: WriterPermit::new(),
             checkpoint: std::sync::Mutex::new(checkpoint::Pending::default()),
+            group: std::sync::Mutex::new(None),
+            group_active: std::sync::atomic::AtomicBool::new(false),
             materializing: std::sync::atomic::AtomicBool::new(false),
             checkpoint_on_drop: std::sync::atomic::AtomicBool::new(true),
         })
@@ -8399,8 +8460,11 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 }
 
 /// The parent-level redo journal (`txn.log`) is the commit point for an atomic
-/// multi-operation update. Each frame is written and data-synced before any WAL
-/// materialization. The first append also completes [`sync_log_entry`]. During
+/// multi-operation update. A group concatenates complete frames into one write and
+/// data sync; singleton updates use the same writer. Individual frames remain the
+/// recovery units: a failed group sync may leave a prefix of unacknowledged frames. Materialization is visible in
+/// memory inside a group, but all WAL bytes are buffered until that sync succeeds.
+/// The first append also completes [`sync_log_entry`]. During
 /// materialization, WAL frames are appended without syncing and named-layout changes
 /// are retained in the shared tree until checkpoint. Direct writes checkpoint first
 /// and retain their own WAL sync, preserving order with earlier journal frames.
@@ -8447,7 +8511,7 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
-    needs_entry_sync: bool,
+    needs_entry_sync: std::sync::Arc<std::sync::Mutex<bool>>,
     /// The store directory this journal belongs to — needed to announce the journal's format to
     /// older binaries (see [`TxnJournal::mark_store_format`]).
     dir: std::path::PathBuf,
@@ -8482,7 +8546,7 @@ impl TxnJournal {
         let file = open_log(&Self::path(dir))?;
         Ok(TxnJournal {
             file,
-            needs_entry_sync: true,
+            needs_entry_sync: std::sync::Arc::new(std::sync::Mutex::new(true)),
             dir: dir.to_path_buf(),
             poisoned: false,
             format_marked: false,
@@ -8531,17 +8595,16 @@ impl TxnJournal {
     /// entirely. An empty record set is a no-op (an UPDATE that resolves to no data change
     /// carries no atomicity obligation).
     fn append(&mut self, records: &[TxnOp]) -> std::io::Result<()> {
-        use std::io::Write;
-        // A failed append may have left any part of its frame behind, a complete one included,
-        // for a later replay to apply: the journal takes no further frame, not even an empty
-        // one, until it is reopened (and replayed), so nothing is ever appended after it.
+        let buf = self.frame(records)?;
+        self.write_frames(&buf)
+    }
+
+    fn frame(&mut self, records: &[TxnOp]) -> std::io::Result<Vec<u8>> {
         if self.poisoned {
-            return Err(std::io::Error::other(
-                "txn journal refused: an earlier append failed; reopen the graph",
-            ));
+            return Err(std::io::Error::other("txn journal refused: reopen the graph"));
         }
         if records.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let too_big = |what: &str, n: usize| {
             std::io::Error::new(
@@ -8592,6 +8655,14 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
+        Ok(buf)
+    }
+
+    fn write_frames(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        if buf.is_empty() {
+            return Ok(());
+        }
         // Test-only partial-frame append failure.
         #[cfg(test)]
         if let Some(drop_tail) = io_fault::take(&io_fault::JOURNAL_DROP_TAIL) {
@@ -8607,10 +8678,11 @@ impl TxnJournal {
             ));
         }
         let written = std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))
-            .and_then(|_| self.file.write_all(&buf))
+            .and_then(|_| self.file.write_all(buf))
             .and_then(|()| sync_log_data(&self.file, &Self::path(&self.dir)))
             .and_then(|()| {
-                sync_log_entry(&self.file, &Self::path(&self.dir), &mut self.needs_entry_sync)
+                sync_log_entry(&self.file, &Self::path(&self.dir),
+                    &mut self.needs_entry_sync.lock().unwrap_or_else(|e| e.into_inner()))
             });
         if written.is_err() {
             self.poisoned = true;

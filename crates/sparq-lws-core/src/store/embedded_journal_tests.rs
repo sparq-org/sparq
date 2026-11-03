@@ -553,7 +553,7 @@ async fn leave_frame(c: &EmbeddedSparqClient, update: String, partial: bool) {
         Ok(())
     })
     .await
-    .unwrap();
+    .expect_err("a stopped actor cannot acknowledge the crash fixture job");
 }
 
 #[tokio::test]
@@ -1505,4 +1505,261 @@ async fn history_primitives_recover_whole_transactions() {
             }
         }
     }
+}
+
+fn group_update(key: &str) -> String {
+    let meta = meta(key);
+    let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+    sparql::update_put_meta(
+        CHILD,
+        &meta.content_type,
+        &meta.blob_key,
+        &meta.etag,
+        modified.as_deref(),
+    )
+    .unwrap()
+}
+
+fn group_block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
+#[test]
+fn queued_write_and_read_replies_wait_for_the_whole_group() {
+    let dir = Directory::empty();
+    let graph = Graph::open(&dir.0).unwrap();
+    let (tx, rx) = mpsc::unbounded_channel();
+    let computed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let replied = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for i in 0..9 {
+        let computed = computed.clone();
+        let replied = replied.clone();
+        let journal = dir.0.join("txn.log");
+        tx.send(Job {
+            barrier: false,
+            run: Box::new(move |graph| {
+                assert_eq!(
+                    replied.load(Ordering::SeqCst),
+                    0,
+                    "a reply escaped before the group completed"
+                );
+                if i == 4 {
+                    assert!(sparq_engine::ask(
+                        graph,
+                        "ASK { GRAPH <https://pod.example/c/item> { ?s ?p ?o } }"
+                    )
+                    .unwrap());
+                } else {
+                    let update = group_update(&format!("group-{i}"));
+                    commit(graph, &update, "group-test").unwrap();
+                }
+                computed.fetch_add(1, Ordering::SeqCst);
+                Box::new(move |error| {
+                    assert!(error.is_none(), "{error:?}");
+                    assert_eq!(computed.load(Ordering::SeqCst), 9);
+                    assert!(
+                        std::fs::metadata(&journal).unwrap().len() > 0,
+                        "reply preceded the journal barrier"
+                    );
+                    replied.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+        })
+        .ok()
+        .unwrap();
+    }
+    drop(tx);
+    actor_loop(graph, rx);
+    assert_eq!(replied.load(Ordering::SeqCst), 9);
+    group_block_on(async {
+        assert_eq!(dir.open().get_meta(CHILD).await.unwrap(), meta("group-8"));
+    });
+}
+
+#[test]
+fn failed_group_errors_every_reply_and_stops_before_the_next_job() {
+    let dir = Directory::empty();
+    group_block_on(async {
+        let client = dir.open();
+        client
+            .put_meta(CHILD, meta("durable-before"))
+            .await
+            .unwrap();
+    });
+    let graph = Graph::open(&dir.0).unwrap();
+    let (tx, rx) = mpsc::unbounded_channel();
+    let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for i in 0..8 {
+        let errors = errors.clone();
+        tx.send(Job {
+            barrier: false,
+            run: Box::new(move |graph| {
+                if i == 4 {
+                    assert!(sparq_engine::ask(
+                        graph,
+                        "ASK { GRAPH <https://pod.example/c/item> { ?s ?p ?o } }"
+                    )
+                    .unwrap());
+                } else {
+                    let update = group_update(&format!("uncommitted-{i}"));
+                    commit(graph, &update, "group-test").unwrap();
+                }
+                if i == 7 {
+                    // Refuse the real commit_group before it writes its buffered frames.
+                    graph.poison_txn();
+                }
+                Box::new(move |error| {
+                    assert!(matches!(error, Some(SparqError::Backend(_))));
+                    errors.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+        })
+        .ok()
+        .unwrap();
+    }
+    tx.send(Job {
+        barrier: true,
+        run: Box::new(|_| panic!("actor served a later job after failed group commit")),
+    })
+    .ok()
+    .unwrap();
+    actor_loop(graph, rx);
+    assert_eq!(errors.load(Ordering::SeqCst), 8);
+    assert!(tx.is_closed());
+    group_block_on(async {
+        assert_eq!(
+            dir.open().get_meta(CHILD).await.unwrap(),
+            meta("durable-before")
+        );
+    });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_concurrent_children_equal_the_acknowledged_listing() {
+    let dir = Directory::empty();
+    let client = dir.open();
+    client.put_meta(PARENT, meta("parent")).await.unwrap();
+    let mut tasks = tokio::task::JoinSet::new();
+    for i in 0..128 {
+        let client = client.clone();
+        tasks.spawn(async move {
+            let child = format!("{PARENT}child-{i}");
+            client
+                .create_child(PARENT, &child, meta(&format!("child-{i}")))
+                .await
+                .unwrap();
+            child
+        });
+    }
+    let mut acknowledged = std::collections::BTreeSet::new();
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        while let Some(result) = tasks.join_next().await {
+            assert!(acknowledged.insert(result.unwrap()));
+        }
+    })
+    .await
+    .expect("every writer receives a definite response");
+    assert_eq!(acknowledged.len(), 128);
+    assert_eq!(
+        client
+            .list_children(PARENT)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        acknowledged
+    );
+    drop(client);
+    let reopened = dir.open();
+    assert_eq!(
+        reopened
+            .list_children(PARENT)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        acknowledged
+    );
+    for child in acknowledged {
+        let key = child.strip_prefix(PARENT).unwrap();
+        assert_eq!(reopened.get_meta(&child).await.unwrap(), meta(key));
+    }
+}
+
+#[test]
+fn busy_queue_releases_each_bounded_group_without_waiting_for_arrivals() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let computed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let replied = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for i in 0..130 {
+        let computed = computed.clone();
+        let replied = replied.clone();
+        tx.send(Job {
+            barrier: false,
+            run: Box::new(move |_| {
+                computed.fetch_add(1, Ordering::SeqCst);
+                Box::new(move |error| {
+                    assert!(error.is_none());
+                    let end = (16 * (i / 16 + 1)).min(130);
+                    assert_eq!(computed.load(Ordering::SeqCst), end);
+                    replied.fetch_add(1, Ordering::SeqCst);
+                })
+            }),
+        })
+        .ok()
+        .unwrap();
+    }
+    drop(tx);
+    actor_loop(Graph::new(), rx);
+    assert_eq!(replied.load(Ordering::SeqCst), 130);
+}
+
+#[tokio::test]
+async fn queued_compaction_is_a_barrier_between_write_groups() {
+    async fn queue<F: std::future::Future>(mut future: std::pin::Pin<&mut F>) {
+        std::future::poll_fn(|cx| {
+            assert!(future.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+    }
+
+    let dir = Directory::empty();
+    let client = dir.open();
+    let (started, ready) = oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    client
+        .actor
+        .tx
+        .send(Job {
+            barrier: true,
+            run: Box::new(move |_| {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+                Box::new(|_| {})
+            }),
+        })
+        .ok()
+        .unwrap();
+    ready.await.unwrap();
+    let mut first = Box::pin(client.put_meta(CHILD, meta("first")));
+    let mut second = Box::pin(client.put_meta(CHILD, meta("second")));
+    let mut compact = Box::pin(client.compact());
+    let mut last = Box::pin(client.put_meta(CHILD, meta("last")));
+    queue(first.as_mut()).await;
+    queue(second.as_mut()).await;
+    queue(compact.as_mut()).await;
+    queue(last.as_mut()).await;
+    release.send(()).unwrap();
+    let (first, second, compact, last) = tokio::join!(first, second, compact, last);
+    first.unwrap();
+    second.unwrap();
+    compact.unwrap();
+    last.unwrap();
+    drop(client);
+    assert_eq!(dir.open().get_meta(CHILD).await.unwrap(), meta("last"));
 }
