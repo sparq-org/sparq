@@ -1064,9 +1064,11 @@ mod tests {
     }
 
     #[cfg(feature = "embedded-sparq")]
-    #[tokio::test]
-    async fn beginning_an_epoch_through_store_wrappers_updates_clones_and_finalizes_prior_writes() {
-        use crate::store::{CompositeStore, CountingSparqClient, InMemoryBlobStore, Store};
+    async fn engine_endpoint() -> (
+        HttpSparqClient,
+        Arc<std::sync::Mutex<sparq_core::Graph>>,
+        tokio::task::JoinHandle<()>,
+    ) {
         use axum::{extract::State, response::IntoResponse, routing::post, Router};
         type Graph = Arc<std::sync::Mutex<sparq_core::Graph>>;
         async fn endpoint(
@@ -1099,6 +1101,71 @@ mod tests {
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
+        (client, graph, server)
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn resource_deletes_return_the_key_captured_by_their_own_update() {
+        let (client, _, server) = engine_endpoint().await;
+        let (parent, child, sibling) = (
+            "https://pod.example/c/",
+            "https://pod.example/c/d",
+            "https://pod.example/c/sibling",
+        );
+        client.put_meta(parent, meta()).await.unwrap();
+        client.create_child(parent, sibling, meta()).await.unwrap();
+        for key in ["first-key", "second-key"] {
+            client
+                .create_child(
+                    parent,
+                    child,
+                    ResourceMeta {
+                        blob_key: key.into(),
+                        ..meta()
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                client.delete_resource(child, Some(parent)).await.unwrap(),
+                Some(key.into())
+            );
+            assert!(!client.exists(child).await.unwrap());
+            assert_eq!(client.list_children(parent).await.unwrap(), [sibling]);
+            assert_eq!(
+                client.delete_resource(child, Some(parent)).await.unwrap(),
+                None,
+                "an absent resource must not reuse a prior operation's receipt"
+            );
+        }
+        client.create_child(parent, child, meta()).await.unwrap();
+        client.delete_meta(child).await.unwrap();
+        assert!(client
+            .list_children(parent)
+            .await
+            .unwrap()
+            .iter()
+            .any(|c| c == child));
+        assert_eq!(
+            client.delete_resource(child, Some(parent)).await.unwrap(),
+            None,
+            "a legacy edge has no resource key"
+        );
+        assert_eq!(client.list_children(parent).await.unwrap(), [sibling]);
+        assert_eq!(client.get_meta(parent).await.unwrap().blob_key, "candidate");
+        assert_eq!(
+            client.get_meta(sibling).await.unwrap().blob_key,
+            "candidate"
+        );
+        server.abort();
+    }
+
+    #[cfg(feature = "embedded-sparq")]
+    #[tokio::test]
+    async fn beginning_an_epoch_through_store_wrappers_updates_clones_and_finalizes_prior_writes() {
+        use crate::store::{CompositeStore, CountingSparqClient, InMemoryBlobStore, Store};
+        let (client, graph, server) = engine_endpoint().await;
         let clone = client.clone();
         let store = CompositeStore::new(
             CountingSparqClient::new(client, Arc::default()),

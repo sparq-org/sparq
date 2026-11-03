@@ -1925,13 +1925,19 @@ mod tests {
                             }
                         }
                     }
-                    if name == "delete_parent" {
+                    if matches!(name, "delete" | "delete_parent") {
                         let result = sparq_engine::query(
                             &graph,
                             &select_deleted_blob_key("op-table").unwrap(),
                         )
                         .unwrap();
-                        assert_eq!(result.rows.len(), 1, "deleted key captured by the write");
+                        assert_eq!(
+                            result.rows,
+                            vec![vec![Some(
+                                oxrdf::Literal::new_simple_literal("original").into()
+                            )]],
+                            "{name}: receipt captures the deleted record's exact key"
+                        );
                         assert!(
                             !ask(&graph, &ask_blob_referenced("original")),
                             "receipt is not a live pointer"
