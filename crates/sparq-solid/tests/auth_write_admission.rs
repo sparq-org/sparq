@@ -110,20 +110,12 @@ fn oversized_control_updates_are_refused_before_commit_for_every_entry_point() {
                 pod.materialize_acp().unwrap();
                 triple = format!("<{doc}#p> <{ACP}allOf> <https://pod.ex/policy.acr#m>");
             }
-            let mut query = format!("INSERT DATA {{ GRAPH <{doc}> {{ {triple} }} }}");
-            if cap == "document" {
-                // Parsed terms fit. Only serialized input exceeds the configured cap,
-                // so candidate materialization cannot mask a missing admission check.
-                query = format!(
-                    "#{}\n{query}",
-                    "x".repeat(default_auth_budget().max_document_bytes)
-                );
-            }
+            let query = format!("INSERT DATA {{ GRAPH <{doc}> {{ {triple} }} }}");
             let before = snapshot(&pod);
             let mut budget = default_auth_budget();
             let kind = match cap {
                 "document" => {
-                    budget.max_document_bytes = query.len() - 1;
+                    budget.max_document_bytes = 512;
                     AuthAllowance::InputBytes
                 }
                 "facts" => {
@@ -163,6 +155,12 @@ fn oversized_control_updates_are_refused_before_commit_for_every_entry_point() {
             pod.set_auth_budget(budget);
             let error = entry(&mut pod, &session, &query).unwrap_err();
             assert_eq!(auth_allowance_refusal(&error), Some(kind), "{cap}: {error}");
+            assert!(error.starts_with("update denied:"), "{error}");
+            assert!(
+                error.contains("previous authorization view is still in force"),
+                "{error}"
+            );
+            assert!(!error.contains("view is not built"), "{error}");
             assert_eq!(
                 snapshot(&pod),
                 before,

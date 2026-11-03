@@ -1,5 +1,5 @@
 {
-  "source": "1c600eb34e5721950472915115533f56eb84041e",
+  "source": "5cfd3640a661d1bcaf994708f0d16a1e0c5adccc",
   "writes": {
     "acp::acp_budgeted_write_enforces_grants_and_the_budget/0/0": {
       "decisions": {
@@ -7221,6 +7221,134 @@
       "result": {
         "allowance": null,
         "refused": true
+      }
+    },
+    "write_admission_parity::default_budget_large_update_text_with_one_acl_triple/0/0": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 3021,
+        "fnv1a128": "6cf57c91fb387c49ea8971fb3b1cbd9a"
+      },
+      "operation": "update_as",
+      "result": {
+        "ok": "()"
+      }
+    },
+    "write_admission_parity::default_budget_put_acl_with_large_comment/0/0": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "rows": [
+          "<https://pod.ex/.acl> <https://pod.ex/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization>",
+          "<https://pod.ex/.acl> <https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/>",
+          "<https://pod.ex/.acl> <https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/me>",
+          "<https://pod.ex/.acl> <https://pod.ex/.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control>",
+          "<https://pod.ex/d> <https://pod.ex/d#s> <urn:p> <urn:o>",
+          "<urn:sparq:auth> <https://alice.ex/me> <https://sparq.dev/ns/auth#control> <https://pod.ex/>",
+          "<urn:sparq:auth> <https://alice.ex/me> <https://sparq.dev/ns/auth#read> <https://pod.ex/.acl>",
+          "<urn:sparq:auth> <https://alice.ex/me> <https://sparq.dev/ns/auth#write> <https://pod.ex/.acl>",
+          "graph ",
+          "graph <https://pod.ex/.acl>",
+          "graph <https://pod.ex/d>",
+          "graph <urn:sparq:auth>"
+        ]
+      },
+      "operation": "put_acl",
+      "result": {
+        "ok": "AclWriteOutcome { acl: NamedNode { iri: \"https://pod.ex/.acl\" }, existed: true, triples: 4 }"
+      }
+    },
+    "write_admission_parity::impossible_document_row_total_keeps_its_byte_refusal_kind/0/0": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 20,
+        "fnv1a128": "9adfa555dfcd066c6fe9b64fafef0ba9"
+      },
+      "operation": "put_acl",
+      "result": {
+        "allowance": "InputBytes",
+        "refused": true
+      }
+    },
+    "write_admission_parity::impossible_document_row_total_keeps_its_byte_refusal_kind/0/1": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 20,
+        "fnv1a128": "9adfa555dfcd066c6fe9b64fafef0ba9"
+      },
+      "operation": "update_as",
+      "result": {
+        "allowance": "InputBytes",
+        "refused": true
+      }
+    },
+    "write_admission_parity::kind_for_one_oversized_term/0/0": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 20,
+        "fnv1a128": "9adfa555dfcd066c6fe9b64fafef0ba9"
+      },
+      "operation": "put_acl",
+      "result": {
+        "allowance": "InputTermBytes",
+        "refused": true
+      }
+    },
+    "write_admission_parity::kind_for_one_oversized_term/0/1": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 20,
+        "fnv1a128": "9adfa555dfcd066c6fe9b64fafef0ba9"
+      },
+      "operation": "update_as",
+      "result": {
+        "allowance": "InputTermBytes",
+        "refused": true
+      }
+    },
+    "write_admission_parity::wac_put_does_not_meter_an_inactive_acr/0/0": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 22,
+        "fnv1a128": "bcdb382a89c3ef3b4a11f3124b60a35f"
+      },
+      "operation": "put_acl",
+      "result": {
+        "ok": "AclWriteOutcome { acl: NamedNode { iri: \"https://pod.ex/unused.acr\" }, existed: false, triples: 1 }"
+      }
+    },
+    "write_admission_parity::wac_updates_do_not_meter_inactive_acr_graphs/0/0": {
+      "decisions": {
+        "count": 48,
+        "fnv1a128": "352dc589ed14c0592ac6528753430d45"
+      },
+      "graphs": {
+        "count": 28,
+        "fnv1a128": "89c1e606d6bf01c743ce9056ebb343ed"
+      },
+      "operation": "update_as",
+      "result": {
+        "ok": "()"
       }
     },
     "write_through::auth_view_is_pure_function_of_final_acl_state/0/0": {

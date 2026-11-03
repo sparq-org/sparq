@@ -236,6 +236,10 @@ impl<'g> ControlWrites<'g> {
 
     /// Charge a candidate document once, before any validation reconstructs its terms.
     pub(crate) fn admit(&self, doc: &str, ledger: &mut AuthLedger) -> Result<(), String> {
+        let suffix = if self.acp { ACR_SUFFIX } else { ACL_SUFFIX };
+        if !reads_as_control(doc, suffix) {
+            return Ok(());
+        }
         if let Some((iri, graph)) = self
             .graph
             .named()
@@ -245,6 +249,7 @@ impl<'g> ControlWrites<'g> {
             if !self.admitted.borrow().contains(&std::ptr::from_ref(graph)) {
                 ledger.open()?;
                 let scan = graph.store().scan(&[None, None, None]);
+                ledger.document_row_bytes(scan.rows.len(), iri)?;
                 for row in scan.rows.iter() {
                     admit_write_row(graph, iri, scan.to_spo(row), ledger)?;
                 }
@@ -295,6 +300,9 @@ impl<'g> ControlWrites<'g> {
             ledger.open()?;
             let prepaid = self.admitted.borrow().contains(&std::ptr::from_ref(graph));
             let scan = graph.store().scan(&[None, None, None]);
+            if !prepaid {
+                ledger.document_row_bytes(scan.rows.len(), iri)?;
+            }
             for row in scan.rows.iter() {
                 let ids = scan.to_spo(row);
                 if !prepaid {
@@ -396,7 +404,7 @@ fn dependency_admission_refusal(error: String) -> String {
 
 /// Whether the loader reads the stored graph `iri` as a control document with `suffix`:
 /// outside the reserved and skolem spaces, and governing a resource below an authority.
-fn reads_as_control(iri: &str, suffix: &str) -> bool {
+pub(crate) fn reads_as_control(iri: &str, suffix: &str) -> bool {
     !iri.starts_with(RESERVED_PREFIX)
         && !iri.starts_with(SKOLEM_PREFIX)
         && iri
@@ -639,18 +647,17 @@ pub(crate) enum System {
     Acp,
 }
 
-/// Check the serialized write before parsing. Parsed-term accounting starts a fresh
-/// document counter, while sharing the admission ledger's aggregate and fact counters.
-pub(crate) fn admit_write_document(
-    ledger: &mut AuthLedger,
-    iri: &str,
-    bytes: usize,
-) -> Result<(), String> {
-    ledger.open()?;
-    ledger
-        .core()
-        .charge(Dim::DocumentBytes, bytes)
-        .map_err(|e| ledger.refusal(e, Dim::DocumentBytes, iri))
+/// Keep admission diagnostics distinct from a failed materialization: no write or
+/// view replacement has happened. Other documents' details remain private.
+pub(crate) fn write_admission_refusal(error: String) -> String {
+    match crate::auth_allowance_refusal(&error) {
+        Some(kind) => crate::materialize::allowance_refusal(
+            kind,
+            "write refused during access-control admission; the previous authorization view \
+             is still in force; nothing was changed",
+        ),
+        None => error,
+    }
 }
 
 fn admit_write_row(
@@ -659,13 +666,13 @@ fn admit_write_row(
     ids: [Id; 3],
     ledger: &mut AuthLedger,
 ) -> Result<(), String> {
+    for id in ids {
+        ledger.stored_term(iri, graph.dict(), id)?;
+    }
     ledger
         .core()
         .charge(Dim::Facts, 1)
         .map_err(|e| ledger.refusal(e, Dim::Facts, iri))?;
-    for id in ids {
-        ledger.stored_term(iri, graph.dict(), id)?;
-    }
     Ok(())
 }
 
@@ -677,6 +684,7 @@ pub(crate) fn write_triples_metered(
 ) -> Result<Vec<[Term; 3]>, String> {
     ledger.open()?;
     let scan = graph.store().scan(&[None, None, None]);
+    ledger.document_row_bytes(scan.rows.len(), iri)?;
     let mut out = Vec::new();
     for row in scan.rows.iter() {
         let ids = scan.to_spo(row);
