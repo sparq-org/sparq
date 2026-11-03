@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-// Bound recovery work without imposing a checkpoint on ordinary small updates.
-// This is a policy limit, independent of the size of any one atomic frame.
-pub(crate) const JOURNAL_CHECKPOINT_BYTES: u64 = 4 * 1024 * 1024;
+// Bound retained redo during graph-heavy writes while amortizing checkpoints
+// across small updates. One atomic frame may exceed this policy limit.
+pub(crate) const JOURNAL_CHECKPOINT_BYTES: u64 = 128 * 1024;
 
 #[derive(Default)]
 pub(super) struct Pending {

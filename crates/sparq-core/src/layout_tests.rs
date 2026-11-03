@@ -1546,13 +1546,24 @@ fn journal_size_policy_checkpoints_after_materialization() {
     graph.tree.checkpoint_if_due().unwrap();
     assert_eq!(std::fs::read(&journal).unwrap(), retained);
 
-    let huge = Literal::new_simple_literal("x".repeat(4 * 1024 * 1024));
-    let triple = [name("large"), name("p"), huge.into()];
+    let near = [
+        name("near-limit"), name("p"),
+        Literal::new_simple_literal("x".repeat(127 * 1024)).into(),
+    ];
+    graph.commit_txn(&[(true, None, near.clone())]).unwrap();
+    graph.apply_delta(&[near], &[]).unwrap();
+    graph.finish_txn().unwrap();
+    assert!(journal.metadata().unwrap().len() > 127 * 1024);
+    assert!(journal.metadata().unwrap().len() < 128 * 1024);
+
+    let triple = [
+        name("large"), name("p"), Literal::new_simple_literal("x".repeat(1024)).into(),
+    ];
     graph.commit_txn(&[(true, None, triple.clone())]).unwrap();
     graph.apply_delta(&[triple], &[]).unwrap();
-    assert!(journal.metadata().unwrap().len() > 4 * 1024 * 1024);
+    assert!(journal.metadata().unwrap().len() > 128 * 1024);
     graph.finish_txn().unwrap();
     assert_eq!(journal.metadata().unwrap().len(), 0);
     drop(graph);
-    assert_eq!(Graph::open(&path).unwrap().len(), 2);
+    assert_eq!(Graph::open(&path).unwrap().len(), 3);
 }

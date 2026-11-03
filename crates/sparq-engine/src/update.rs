@@ -1126,11 +1126,9 @@ fn materialize_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<()
                 apply_slot_delta(graph, slot, &[], deletes)?;
                 apply_slot_delta(graph, slot, inserts, &[])?;
             }
-            // (sq-glw2) The durable mirror replays CLEAR/DROP through the SAME durable
-            // helpers the live path uses (`clear_named_durable` / `drop_named_durable`), so the
-            // mirror's named-graph clear/drop is WAL/manifest-durable before its ack too — not
-            // just at the next compaction (the old `empty_graph()`/`retain` swap dropped the
-            // sub-graph WAL / left the on-disk sub-dir, so the mirror would resurrect the data).
+            // CLEAR/DROP use the same durable helpers as the live path. Their WAL and
+            // manifest changes are covered by the synced journal until checkpoint, so
+            // removed data cannot return on reopen.
             UpdateEffect::Clear(target) => match target {
                 GraphTarget::DefaultGraph => replace_default(graph)?,
                 GraphTarget::NamedNode(n) => {

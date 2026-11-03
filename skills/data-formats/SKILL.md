@@ -81,7 +81,7 @@ then call `finish_txn()`. The journal frame is synced before materialization; pe
 WAL appends and named-layout publication defer their syncs to checkpoint. Direct
 `apply_delta` calls outside a frame still sync before returning and checkpoint earlier
 frames first. `finish_txn()` checkpoints when retained journal bytes reach the internal
-`JOURNAL_CHECKPOINT_BYTES` limit (4 MiB), bounding recovery work while amortizing
+`JOURNAL_CHECKPOINT_BYTES` limit (128 KiB), bounding recovery work while amortizing
 checkpoint writes across small updates. A single frame can exceed that limit.
 `clear_txn()` requests an immediate checkpoint: dirty WALs, new slot bases, manifest
 and directory entries become durable before the journal is truncated and synced.

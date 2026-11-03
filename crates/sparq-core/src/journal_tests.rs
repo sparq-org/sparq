@@ -179,6 +179,19 @@ proptest! {
         graph.poison_txn(); // Drop the handles without a clean-close checkpoint.
         drop(graph);
         crash::crash(&tmp.0, persist);
+        if mode == 1 {
+            crash::start(&tmp.0);
+            let mut steps = cut % 12;
+            fault::crash_at(move |_, _| {
+                if steps == 0 { true } else { steps -= 1; false }
+            });
+            let recovery = Graph::open(&tmp.0);
+            fault::disarm();
+            if let Ok(mut graph) = recovery {
+                graph.poison_txn();
+            }
+            crash::crash(&tmp.0, persist.rotate_left(17));
+        }
         let reopened = Graph::open(&tmp.0).unwrap();
         let actual = state(&reopened);
         prop_assert!(actual == expected(&model) || (mode == 0 && actual == expected(&previous)),
@@ -218,6 +231,44 @@ fn one_sync_per_materialized_update() {
         crash::stop();
     }
     graph.close().unwrap();
+}
+
+#[test]
+fn direct_writes_sync_without_a_journal_frame() {
+    let tmp = TempDir::new();
+    let (mut graph, mut model) = seed(&tmp.0);
+    for i in 0..4 {
+        let target = if i == 0 {
+            &mut graph
+        } else {
+            &mut graph.named[i - 1].1
+        };
+        target.apply_delta(&[triple(1)], &[]).unwrap();
+        model.get_mut(&(i as u8)).unwrap().insert(1);
+    }
+    crash::start(&tmp.0);
+    for i in 0..4 {
+        let target = if i == 0 {
+            &mut graph
+        } else {
+            &mut graph.named[i - 1].1
+        };
+        let before = crash::syncs();
+        target.apply_delta(&[triple(2)], &[triple(0)]).unwrap();
+        assert_eq!(
+            crash::syncs() - before,
+            1,
+            "a direct write syncs its own WAL"
+        );
+        let values = model.get_mut(&(i as u8)).unwrap();
+        values.remove(&0);
+        values.insert(2);
+    }
+    assert_eq!(TxnJournal::path(&tmp.0).metadata().unwrap().len(), 0);
+    graph.poison_txn();
+    drop(graph);
+    crash::crash(&tmp.0, 0);
+    assert_eq!(state(&Graph::open(&tmp.0).unwrap()), expected(&model));
 }
 
 #[test]

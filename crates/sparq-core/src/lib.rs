@@ -161,7 +161,7 @@ pub struct Graph {
     /// resolved per-slot quad-delta of one `apply_effects` call is recorded here as ONE fsync'd
     /// frame BEFORE it is materialised across the per-graph WALs, so a crash mid-body can never
     /// leave a PARTIAL durable write (e.g. parent containment without the child graph). On the next
-    /// `open` a committed frame is redone idempotently and the journal truncated. `None` for
+    /// `open` committed frames are redone in order and the journal checkpointed. `None` for
     /// in-memory graphs (the per-`apply_effects` commit/finish are then no-ops). See [`TxnJournal`].
     #[cfg(feature = "mmap")]
     txn: Option<TxnJournal>,
@@ -2601,7 +2601,6 @@ impl Graph {
 
     /// Replays ordered journal operations through the deferred durable helpers. The
     /// caller checkpoints all WALs and the named layout before discarding the journal.
-    #[cfg(feature = "mmap")]
     ///
     /// Replays [`TxnOp::Create`] and [`TxnOp::Drop`] through the idempotent durable helpers.
     #[cfg(feature = "mmap")]
@@ -3739,8 +3738,9 @@ impl Graph {
     /// `INSERT DATA { … }` SPARQL string for what is conceptually one append. The term is interned
     /// APPEND-ONLY and applied through the same delta-overlay path as `apply_delta`, so it inherits
     /// the identical semantics: set-valued (re-inserting an existing triple is a no-op), O(1) work,
-    /// and — for a directory-backed graph (opened via `open`) — WAL-logged + fsync'd
-    /// before it is applied. To add several triples at once, prefer one
+    /// and — for a directory-backed graph (opened via `open`) — WAL-logged before it
+    /// is applied, with the same journal/checkpoint sync rules as `apply_delta`.
+    /// To add several triples at once, prefer one
     /// [`apply_delta`](Self::apply_delta) batch over a loop of single inserts (one WAL append).
     ///
     /// [RDF 1.2]: https://www.w3.org/TR/rdf12-concepts/
@@ -3759,7 +3759,7 @@ impl Graph {
     ///
     /// Removing a triple the graph does not contain is a NO-OP (set semantics, inherited from
     /// `apply_delta`), never an error. As with `insert_triple`, for a directory-backed graph the
-    /// deletion is WAL-logged + fsync'd before it is applied; to retract several triples at once,
+    /// deletion follows `apply_delta`'s logging and sync rules; to retract several triples at once,
     /// prefer one [`apply_delta`](Self::apply_delta) batch.
     pub fn remove_triple(
         &mut self,
@@ -3998,8 +3998,8 @@ impl Graph {
     /// `*graph = empty_graph()` on a directory-backed graph (where the latter dropped the WAL
     /// and a reopen restored the old on-disk base). For a directory-backed graph the current
     /// triples are retracted through [`apply_delta`](Self::apply_delta), so the deletions are
-    /// WAL-logged + fsync'd and survive a crash/reopen; for an in-memory graph it clears the
-    /// store overlay in place (no WAL to keep). Named graphs are untouched.
+    /// covered by `apply_delta`'s durability contract and survive a crash/reopen; for an in-memory
+    /// graph it clears the store overlay in place (no WAL to keep). Named graphs are untouched.
     pub fn clear_default_durable(&mut self) -> Result<(), String> {
         self.refuse_if_detached()?;
         #[cfg(feature = "mmap")]
@@ -4034,7 +4034,7 @@ impl Graph {
     /// (on a directory-backed parent) dropped the sub-graph's WAL/dir so the clear only became
     /// durable at the next compaction. The retraction routes through the sub-graph's own
     /// [`clear_default_durable`](Self::clear_default_durable), so for a directory-backed
-    /// sub-graph the deletions are WAL-logged + fsync'd (durable before this returns) and
+    /// sub-graph the deletions follow `apply_delta`'s durability contract and
     /// survive a crash/reopen; the manifest is untouched (the slot stays). Returns `true` if a
     /// matching named graph existed (and was emptied), `false` if it was absent — the caller
     /// keeps the SPARQL CLEAR no-op-on-absent semantics. An in-memory parent's sub-graph just
@@ -4060,6 +4060,8 @@ impl Graph {
     /// Durably removes the named graph and its manifest entry.
     ///
     /// Survivors keep their slots. Detached entries remain declared until explicitly dropped.
+    /// Within a committed journal frame, manifest publication waits until checkpoint;
+    /// the synced frame covers recovery in the meantime.
     /// Writable opens clean undeclared residue after validating the complete declared layout.
     /// Returns false when no attached graph matches. A stale handle is detached from memory only.
     pub fn drop_named_durable(&mut self, name: &Term) -> Result<bool, String> {
@@ -4072,7 +4074,7 @@ impl Graph {
         #[cfg(feature = "mmap")]
         let _permit = tree.write_permit();
         // Refused while this graph, or any named graph under it, refuses writes (a frozen named
-        // graph would be re-saved from its view) or keeps a journal frame for the reopen.
+        // graph would be re-saved from its view) or keeps a failed journal commit for the reopen.
         self.refuse_while_txn_poisoned()?;
         self.named_changed();
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
@@ -7720,7 +7722,8 @@ fn truncate_log(file: &mut std::fs::File) -> std::io::Result<()> {
 /// COMMIT POINT: `replay` only applies a batch whose trailer is present AND whose checksum
 /// matches, and TRUNCATES the log at the start of the first batch that fails either check
 /// (the torn tail of an interrupted append). So replay applies exactly the batches that were
-/// fully durable — never a prefix of one. The whole batch is `write_all`'d then fsync'd once.
+/// fully durable — never a prefix of one. Direct appends sync each batch; journal-covered
+/// appends defer that sync until checkpoint.
 #[cfg(feature = "mmap")]
 struct Wal {
     file: std::fs::File,
