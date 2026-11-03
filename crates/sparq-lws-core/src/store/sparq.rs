@@ -156,6 +156,10 @@ impl From<super::sparql::BuildError> for SparqError {
 /// retains the WAC/ACP ACL-document graphs the (future) access-evaluation step reads.
 #[async_trait]
 pub trait SparqClient: Send + Sync {
+    /// The lifecycle lease retained by this backend. Clones share the same `Arc` and wrappers
+    /// forward their inner client's lease, including when building a new composite store.
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle>;
+
     /// Fetch the authoritative metadata for a resource IRI, or [`SparqError::NotFound`].
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError>;
 
@@ -424,7 +428,8 @@ pub trait SparqClient: Send + Sync {
     /// Reset a marker under the running service's lifecycle lease.
     ///
     /// # Errors
-    /// Refuses by default; clients supporting resets write the marker in one operation.
+    /// Refuses by default; clients supporting resets check that `lease` belongs to their
+    /// backend with [`super::LifecycleGuard::belongs_to`] before writing the marker in one operation.
     async fn reset_marker(
         &self,
         iri: &str,
@@ -525,9 +530,11 @@ pub trait SparqClient: Send + Sync {
 ///
 /// Holds the metadata records AND the containment edges (container IRI → ordered child IRIs) behind
 /// a single lock, so a POST/DELETE that touches both stays internally consistent under the test
-/// double's coarse locking.
+/// double's coarse locking. Clones share the index and its lifecycle lease.
+#[derive(Clone)]
 pub struct InMemorySparqClient {
-    inner: Mutex<Index>,
+    inner: std::sync::Arc<Mutex<Index>>,
+    lifecycle: std::sync::Arc<super::Lifecycle>,
     /// Immutable admission ceiling, enforced under the index lock.
     limits: InMemoryStoreLimits,
 }
@@ -709,7 +716,8 @@ impl InMemorySparqClient {
     /// Build with an explicit resource-count limit.
     pub fn with_limits(limits: InMemoryStoreLimits) -> Self {
         Self {
-            inner: Mutex::new(Index::default()),
+            inner: std::sync::Arc::new(Mutex::new(Index::default())),
+            lifecycle: Default::default(),
             limits,
         }
     }
@@ -795,6 +803,10 @@ impl InMemorySparqClient {
 
 #[async_trait]
 impl SparqClient for InMemorySparqClient {
+    fn lifecycle(&self) -> std::sync::Arc<super::Lifecycle> {
+        self.lifecycle.clone()
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         let guard = self
             .inner
@@ -812,8 +824,13 @@ impl SparqClient for InMemorySparqClient {
         &self,
         iri: &str,
         value: i64,
-        _: &super::LifecycleGuard,
+        lease: &super::LifecycleGuard,
     ) -> Result<(), SparqError> {
+        if !lease.belongs_to(&self.lifecycle) {
+            return Err(SparqError::Backend(
+                "marker reset requires this backend's lifecycle lease".into(),
+            ));
+        }
         self.put_meta_unchecked(iri, super::sparq::marker_meta(&value.to_string()))
             .await
     }
@@ -1421,9 +1438,17 @@ mod tests {
         assert!(!crate::store::is_service_marker(
             "http://u@a.example/.lws/subscriptions/#high-water"
         ));
-        assert!(!crate::store::is_service_marker(
+        assert!(crate::store::is_service_marker(
             "http://a.example/x/.lws/subscriptions/#high-water"
         ));
+        for ordinary in [
+            "http://a.example/x/.lws/subscriptions/record",
+            "http://a.example/x/.lws/subscriptions/#other",
+            "http://a.example/x?next=/.lws/subscriptions/#high-water",
+            "http://a.example/x#part/.lws/subscriptions/#high-water",
+        ] {
+            assert!(!crate::store::is_service_marker(ordinary), "{ordinary}");
+        }
     }
 
     /// A marker admitted to the pool (the slot held by another) stays in it when the slot's

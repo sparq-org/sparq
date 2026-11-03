@@ -1530,23 +1530,15 @@ fn the_checked_prove_entry_refuses_a_v2_method_carrying_a_v1_lane_constant() {
     assert!(!out.exists(), "the refusal must precede any scratch directory");
 }
 
-/// Non-canonical texts for a value-lane `FieldHex`: texts that would add TOML
-/// structure the fields did not produce (a second top-level key, a nested
-/// table, a trailing newline), plus the spellings the permissive parser accepts
-/// (uppercase, short, `0x`-less).
+/// Field texts containing TOML structure or an out-of-range integer.
 fn non_canonical_spellings() -> Vec<(&'static str, String)> {
     let v1 = boolean_datatype_const().0;
-    // An element whose canonical text has hex LETTERS, so its uppercase
-    // spelling actually differs from it.
     let canonical = hexf(&Fr::from(0xabc7u64)).0;
-    assert_ne!(canonical, canonical.to_uppercase().replace("0X", "0x"));
     vec![
         ("second key", format!("{}\"\ndatatype_const = \"{}", canonical, v1)),
         ("nested table", format!("{}\"\n[unused]\ndatatype_const = \"{}", canonical, v1)),
         ("trailing newline", format!("{}\n", canonical)),
-        ("uppercase", format!("0x{}", canonical[2..].to_uppercase())),
-        ("short", "0x7".to_string()),
-        ("no prefix", canonical[2..].to_string()),
+        ("out of range", "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001".into()),
     ]
 }
 
@@ -1554,7 +1546,7 @@ fn non_canonical_spellings() -> Vec<(&'static str, String)> {
 /// the only caller text that enters its `Prover.toml` arrives through `FieldHex`
 /// fields — and each of those, in every position the file is rendered from
 /// (`challenge`, `operand_enc`, `datatype_const`, `value_hook`,
-/// `lexical_component`), is refused unless it is canonical hex, naming the field,
+/// `lexical_component`), is refused unless it parses strictly, naming the field,
 /// before any subprocess. The public renderers refuse the same texts.
 #[test]
 fn caller_text_cannot_reach_the_rendered_prover_toml() {
@@ -1797,32 +1789,36 @@ fn a_crossed_variant_and_member_is_refused_by_the_shared_derivation() {
     );
 }
 
-/// An uppercase or short `operand_enc` — both of which the permissive parser
-/// decodes to the intended element — is refused by the `ProofInputs`-level check,
-/// by every ordinary renderer and by the checked prove entry.
+/// Equivalent operand spellings retain the same field value across renderers.
 #[test]
-fn an_uppercase_or_short_operand_enc_is_refused_everywhere() {
-    let canonical = hexf(&Fr::from(0xabc7u64));
-    for text in [format!("0x{}", canonical.0[2..].to_uppercase()), "0xabc7".to_string()] {
+fn equivalent_operand_spellings_are_accepted_everywhere() {
+    let full = hexf(&Fr::from(0xabc7u64));
+    for (text, value) in [
+        (format!("0x{}", full.0[2..].to_uppercase()), 0xabc7u64),
+        ("0xabc7".to_string(), 0xabc7),
+        ("abc7".to_string(), 0xabc7),
+        ("0Xabc7".to_string(), 0xabc7),
+        ("10".to_string(), 0x10),
+    ] {
+        let canonical = hexf(&Fr::from(value));
         let bad = FieldHex(text.clone());
-        assert_ne!(bad, canonical, "the spelling must differ from the canonical text");
-        assert_eq!(field_from_hex_str(&text), Some(Fr::from(0xabc7u64)), "{}", text);
+        assert_ne!(bad.0, canonical.0);
+        assert_eq!(bad, canonical);
+        assert_eq!(bad.to_field(), Some(Fr::from(value)), "{}", text);
         let mut proof = integer_lane(hexf(&dual_leaf_v2::integer_lane_const()));
         if let ValueLaneProof::Integer(i) = &mut proof {
             i.operand_enc = bad.clone();
         }
+        let operand_line = format!("operand_enc = \"{}\"", canonical.0);
         let named = |r: Result<String, DispatchError>| {
-            matches!(r, Err(DispatchError::NonCanonicalFieldHex { field, .. }) if field == "operand_enc")
+            r.is_ok_and(|s| s.lines().any(|line| line == operand_line))
         };
         assert!(named(proof.checked_prover_toml(
             CommitmentMethod::DualLeafV2,
             MethodUse::NewIssuance,
             &challenge_one()
         )));
-        assert!(matches!(
-            check_lane_member_pairing(&proof.proof_inputs()),
-            Err(DispatchError::NonCanonicalFieldHex { .. })
-        ));
+        assert_eq!(check_lane_member_pairing(&proof.proof_inputs()), Ok(()));
         let (c, h) = (challenge_one(), hexf(&Fr::from(3u64)));
         let f = |x: Fr| hexf(&x);
         assert!(named(filter_value_dl_prover_toml(
@@ -2354,82 +2350,34 @@ fn an_unknown_constant_is_refused_on_every_member() {
     }
 }
 
-/// The decision is made on the DECODED field element, so a RE-SPELLED constant
-/// does not slip past a text comparison. `field_from_hex_str` accepts an
-/// uppercase, `0x`-less, short (left-padded) and at-or-above-modulus (reduced)
-/// spelling, and all four decode to the V2 integer lane constant's element — yet
-/// every one is refused as non-canonical rather than accepted.
+/// Lane constants compare by field value, while invalid integers are refused.
 #[test]
-fn a_re_spelled_lane_constant_is_refused_as_non_canonical() {
+fn lane_constant_spellings_compare_by_value() {
     let canonical = field_to_hex(&dual_leaf_v2::integer_lane_const());
-    let body = canonical.strip_prefix("0x").expect("canonical hex is 0x-prefixed");
-
-    let uppercase = format!("0x{}", body.to_uppercase());
-    let no_prefix = body.to_string();
-    // Short: drop the leading zero nibbles the canonical form pads with. Use a
-    // small element whose canonical form HAS leading zeros.
-    let small = Fr::from(7u64);
-    let short = "0x7".to_string();
-    // At or above the modulus: the canonical text of `1` plus the modulus, which
-    // `field_from_hex_str` reduces back to `1`.
-    let modulus_plus_one = {
-        // p = 2^254 + 0x0f0000000000000000000000000000000000000000000000000000000000000... —
-        // rather than hard-code it, re-derive: -1 in the field is p-1, so p = (p-1) + 1.
-        let p_minus_1 = Fr::from(0u64) - Fr::from(1u64);
-        let bytes = field_to_hex(&p_minus_1);
-        // Increment the last nibble of (p-1) to spell p itself, which reduces to 0.
-        let (head, last) = bytes.split_at(bytes.len() - 1);
-        let digit = u8::from_str_radix(last, 16).expect("hex nibble");
-        format!("{}{:x}", head, digit + 1)
-    };
-
-    for (label, text, expect_decode) in [
-        ("uppercase", uppercase, Some(dual_leaf_v2::integer_lane_const())),
-        ("no 0x prefix", no_prefix, Some(dual_leaf_v2::integer_lane_const())),
-        ("short", short, Some(small)),
-        ("the modulus itself", modulus_plus_one, Some(Fr::from(0u64))),
-    ] {
-        let h = FieldHex(text.clone());
-        // The permissive parser DOES accept it (which is the hazard).
-        assert_eq!(
-            field_from_hex_str(&text),
-            expect_decode,
-            "{}: the permissive parser decodes this spelling",
-            label
-        );
-        let r = check_lane_const_for_member(
-            &CircuitId::FilterValueDl,
-            &h,
-            MethodUse::LegacyAlreadyIssued,
-        );
-        assert!(
-            matches!(r, Err(DispatchError::NonCanonicalFieldHex { .. })),
-            "{}: must be refused as non-canonical, got {:?}",
-            label,
-            r
-        );
+    let body = canonical.strip_prefix("0x").unwrap();
+    for text in [canonical.clone(), body.to_string(), format!("0x{}", body.to_uppercase())] {
+        assert_eq!(check_lane_const_for_member(
+            &CircuitId::FilterValueDl, &FieldHex(text), MethodUse::LegacyAlreadyIssued,
+        ), Ok(()));
     }
-
-    // And the canonical spelling of that same element is accepted, so the refusal
-    // is about the TEXT and not about the constant.
-    assert_eq!(
-        check_lane_const_for_member(
-            &CircuitId::FilterValueDl,
-            &FieldHex(canonical),
-            MethodUse::LegacyAlreadyIssued
-        ),
-        Ok(())
-    );
+    for text in ["0x7", "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"] {
+        let result = check_lane_const_for_member(
+            &CircuitId::FilterValueDl, &FieldHex(text.into()), MethodUse::LegacyAlreadyIssued,
+        );
+        if text == "0x7" {
+            assert!(matches!(result, Err(DispatchError::UnknownLaneConst { .. })));
+        } else {
+            assert!(matches!(result, Err(DispatchError::NonCanonicalFieldHex { .. })));
+        }
+    }
 }
 
-/// The canonicality check runs over EVERY `FieldHex` public input of a value-lane
-/// variant, not only `datatype_const`: a re-spelled `operand_enc` is refused too,
-/// and the refusal names the field.
+/// Invalid field input remains refused and names the field.
 #[test]
-fn a_non_canonical_operand_enc_is_refused_and_names_the_field() {
+fn an_invalid_operand_enc_is_refused_and_names_the_field() {
     let inputs = ProofInputs::FilterValueDl {
         id: CircuitId::FilterValueDl,
-        operand_enc: FieldHex("0xAB".to_string()),
+        operand_enc: FieldHex("0xZZ".to_string()),
         op: FilterOp::Eq,
         bound: 1,
         datatype_const: FieldHex(field_to_hex(&dual_leaf_v2::integer_lane_const())),
@@ -2440,7 +2388,7 @@ fn a_non_canonical_operand_enc_is_refused_and_names_the_field() {
             assert_eq!(field, "operand_enc");
             assert_eq!(circuit, "filter_value_dl_int");
         }
-        other => panic!("expected a non-canonical-field refusal, got {:?}", other),
+        other => panic!("expected an invalid field refusal, got {:?}", other),
     }
 }
 

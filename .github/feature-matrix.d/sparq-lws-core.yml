@@ -121,6 +121,17 @@
   features: "blob-fs"
   test: true
 
+# Immutable native byte plane and reusable downstream backend contract.
+- name: "sparq-lws-core (blob-object)"
+  crate: "sparq-lws-core"
+  features: "blob-object,test-support"
+  test: true
+
+- name: "sparq-lws-core (test-support)"
+  crate: "sparq-lws-core"
+  features: "test-support"
+  test: true
+
 # Exercise room authorization with the optional read gate attached.
 - name: "sparq-lws-core (crdt-sync + odrl-authz)"
   crate: "sparq-lws-core"
