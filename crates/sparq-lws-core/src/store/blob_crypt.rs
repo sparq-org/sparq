@@ -311,9 +311,24 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             pods: Mutex::new(HashMap::new()),
         };
         let mut validated = false;
+        let mut local_kek_id = None;
         for record in this.records.all().await? {
             if record.scheme != scheme.as_str() {
                 return Err(invalid_record());
+            }
+            let wrapped = WrappedKey::from_bytes(&record.wrapped).map_err(crypt_error)?;
+            if wrapped.provider_id != this.provider.id() {
+                return Err(crypt_error(sparq_lws_crypt::Error::WrongProvider));
+            }
+            // Local storage uses one KEK, including for records opened lazily.
+            if this.provider.id() == "local" {
+                if local_kek_id
+                    .as_ref()
+                    .is_some_and(|id| id != &wrapped.kek_id)
+                {
+                    return Err(crypt_error(sparq_lws_crypt::Error::WrongKek));
+                }
+                local_kek_id = Some(wrapped.kek_id.clone());
             }
             let id = record.id()?;
             if record.current {
@@ -327,10 +342,7 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             }
             let key = this
                 .provider
-                .unwrap(
-                    &WrappedKey::from_bytes(&record.wrapped).map_err(crypt_error)?,
-                    &record.context(),
-                )
+                .unwrap(&wrapped, &record.context())
                 .await
                 .map_err(crypt_error)?;
             validated = true;
@@ -371,10 +383,15 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
             };
             if state.value.as_ref().is_some_and(|c| now >= c.expires) {
                 state.value = None;
-                // Keep slots that have active or queued callers on the same flight.
-                return Arc::strong_count(slot) > 1;
             }
-            true
+            // Keep slots that have active or queued callers on the same flight.
+            state.value.is_some() || Arc::strong_count(slot) > 1
+        });
+        self.pods.lock().await.retain(|_, slot| {
+            let Ok(state) = slot.state.try_lock() else {
+                return true;
+            };
+            state.value.is_some() || Arc::strong_count(slot) > 1
         });
     }
 
@@ -508,15 +525,22 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         // its failure. A later independent request can retry immediately.
         let pod_observed = pod.observed();
         let mut current = pod.lock().await;
-        if let Some(error) = pod.joined_failure(&current, pod_observed) {
-            return Err(error);
-        }
-        let result = self
-            .encrypt_current(scope, key, body, &mut current.value)
-            .await;
-        match &result {
-            Ok(_) => current.failure = None,
-            Err(error) => pod.failed(&mut current, error),
+        let result = if let Some(error) = pod.joined_failure(&current, pod_observed) {
+            Err(error)
+        } else {
+            let result = self
+                .encrypt_current(scope, key, body, &mut current.value)
+                .await;
+            match &result {
+                Ok(_) => current.failure = None,
+                Err(error) => pod.failed(&mut current, error),
+            }
+            result
+        };
+        drop(current);
+        drop(pod);
+        if result.is_err() {
+            self.sweep_expired_keys().await;
         }
         result
     }
@@ -604,15 +628,27 @@ impl<B: BlobStore, K: KeyProvider> EncryptingBlobStore<B, K> {
         let slot = self.key_slot(id).await;
         let observed = slot.observed();
         let mut cached = slot.lock().await;
-        self.refresh(id, &slot, &mut cached, observed).await?;
-        let c = cached.value.as_ref().ok_or_else(invalid_record)?;
-        let plaintext = open(&c.dek, key, &body).map_err(crypt_error)?;
-        if scope.is_some_and(|scope| c.record.pod != scope.0) {
-            return Err(BlobError::Backend(
-                "data-key pod does not match resource pod".into(),
-            ));
+        let result = async {
+            self.refresh(id, &slot, &mut cached, observed).await?;
+            let c = cached.value.as_ref().ok_or_else(invalid_record)?;
+            let plaintext = open(&c.dek, key, &body).map_err(crypt_error)?;
+            if scope.is_some_and(|scope| c.record.pod != scope.0) {
+                return Err(BlobError::Backend(
+                    "data-key pod does not match resource pod".into(),
+                ));
+            }
+            Ok(Bytes::from(plaintext))
         }
-        Ok(Bytes::from(plaintext))
+        .await;
+        drop(cached);
+        drop(slot);
+        if matches!(result, Err(BlobError::UnknownDataKey)) {
+            tracing::warn!(blob_key = key, "UnknownDataKey");
+        }
+        if result.is_err() {
+            self.sweep_expired_keys().await;
+        }
+        result
     }
 }
 
@@ -629,7 +665,7 @@ impl<B: BlobStore, K: KeyProvider> BlobStore for EncryptingBlobStore<B, K> {
     }
 
     async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
-        // Only maintenance paths use unscoped reads; resource reads use get_scoped.
+        // Unscoped reads authenticate by blob key; resource reads use get_scoped.
         self.decrypt(None, key).await
     }
 

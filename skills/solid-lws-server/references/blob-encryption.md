@@ -17,7 +17,8 @@ The envelope uses the `e1` format from
 | `SOLID_SERVER_CRYPT_POD_SCOPE` | unset | Non-empty fixed Solid pod identity; otherwise Solid uses the first path segment. LWS uses the storage root. |
 
 Only provider `local` reads the KEK, TTL and scope settings. A missing or invalid
-KEK file aborts startup. Boot unwraps one existing DEK plus every current DEK,
+KEK file aborts startup. Boot checks every record's provider and local KEK identity,
+then unwraps one existing DEK plus every current DEK,
 without repeating the probe if it is current. Pod pointers are built from records
 without unwrapping other keys; those keys unwrap on first read through the shared
 TTL cache and single-flight. A different local KEK returns `WrongKek` (reported as
@@ -41,6 +42,9 @@ after opening the envelope. A mismatch returns an error without returning bytes.
 The body cache stores the pod authenticated for each entry; a lookup from another
 pod returns an error and evicts the entry. Inserting a DEK sweeps expired cached
 keys; active key flights keep their shared slots.
+Completed failed lookups release idle key and pod slots. Unscoped `get` opens
+using the blob key and the wrapped record's context; resource callers use
+`get_scoped` to provide the pod for the additional comparison.
 Parsed ACL entries additionally track the blob pointer read for that parse. Both
 authorization paths re-read a changed pointer through the store, including when
 the ETag is unchanged. The encryption decorator forwards scoped operations to
@@ -88,7 +92,10 @@ host's mmap'd index. See the server skill for the complete P1 threat model.
 
 The `SQLB` prefix is reserved even in truncated or unsupported envelopes. Matching
 bytes always take the envelope path, and authentication/framing errors propagate;
-there is no plaintext retry. An unknown DEK id returns `UnknownDataKey`.
+there is no plaintext retry. An unknown DEK id returns `UnknownDataKey` and emits
+a warning containing only the blob key. The configured encrypted native runtime
+installs warning logging when no subscriber is already installed; library callers
+can supply their own subscriber.
 A legacy plaintext body that begins with `SQLB`
 therefore fails closed; P1-4 re-encryption will report those blobs. A truncated or
 unsupported header is a framing error; a valid header naming an absent key returns

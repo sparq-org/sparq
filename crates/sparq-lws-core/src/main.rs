@@ -1011,6 +1011,10 @@ where
 {
     #[cfg(feature = "crypt")]
     if storage.crypt_enabled() {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(std::io::stderr)
+            .try_init();
         // One coordinator per index. Sharing for reconciliation happens only after assembly.
         let sparq = SharedStore::new(sparq);
         let blob = storage

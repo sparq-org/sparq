@@ -399,6 +399,169 @@ async fn boot_with_only_retired_keys_still_refuses_a_wrong_kek() {
 }
 
 #[tokio::test]
+async fn boot_checks_the_local_kek_identity_of_every_retired_record() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let record = current(&store, "https://pod.example/alice/").await;
+    for id in [0xa7, 0xa8] {
+        let mut retired = record.clone();
+        retired.dek_id = hex(&[id; 16]);
+        retired.current = false;
+        store.blob.records.save(&retired).await.unwrap();
+    }
+    // Choose a retired entry after the boot probe in the stable child listing.
+    let mut retired = store
+        .blob
+        .records
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .skip(1)
+        .find(|r| !r.current)
+        .unwrap();
+    let other = provider(0x41);
+    let (_, wrapped) = other.generate_data_key(&retired.context()).await.unwrap();
+    retired.wrapped = wrapped.to_bytes().unwrap();
+    store.blob.records.save(&retired).await.unwrap();
+    drop(store);
+    let result = f
+        .plain()
+        .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, f.options())
+        .await;
+    assert!(matches!(result, Err(BlobError::Backend(ref e)) if e == "wrong KEK"));
+}
+
+#[tokio::test]
+async fn boot_checks_the_provider_of_every_retired_record() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    let record = current(&store, "https://pod.example/alice/").await;
+    for id in [0xa7, 0xa8] {
+        let mut retired = record.clone();
+        retired.dek_id = hex(&[id; 16]);
+        retired.current = false;
+        store.blob.records.save(&retired).await.unwrap();
+    }
+    let mut retired = store
+        .blob
+        .records
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .skip(1)
+        .find(|r| !r.current)
+        .unwrap();
+    let mut wrapped = WrappedKey::from_bytes(&retired.wrapped).unwrap();
+    wrapped.provider_id = "another-provider".into();
+    retired.wrapped = wrapped.to_bytes().unwrap();
+    store.blob.records.save(&retired).await.unwrap();
+    drop(store);
+    let result = f
+        .plain()
+        .encrypt_blobs(f.provider.clone(), CryptScheme::Solid, f.options())
+        .await;
+    assert!(matches!(result, Err(BlobError::Backend(ref e)) if e == "wrong key provider"));
+}
+
+#[tokio::test]
+async fn completed_unknown_key_reads_release_their_cache_slots() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    let meta = f
+        .plain()
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    for id in 0..12u8 {
+        let mut envelope = b"SQLB\x01".to_vec();
+        envelope.extend_from_slice(&[id; 16]);
+        envelope.extend_from_slice(&[0; 28]);
+        f.backend
+            .bytes
+            .put(&meta.blob_key, Bytes::from(envelope))
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.read(ALICE).await,
+            Err(crate::error::ServerError::Storage(ref e)) if e == "UnknownDataKey"
+        ));
+        assert!(store.blob.keys.lock().await.is_empty());
+    }
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn completed_generation_failures_release_empty_pod_slots() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    f.provider.refuse.store(true, Ordering::SeqCst);
+    for id in 0..12 {
+        let iri = format!("https://pod.example/p{id}/file");
+        assert!(store
+            .write(&iri, Bytes::from_static(BODY), "text/plain")
+            .await
+            .is_err());
+        assert!(store.blob.pods.lock().await.is_empty());
+        assert!(store.blob.keys.lock().await.is_empty());
+    }
+    assert!(store.blob.records.all().await.unwrap().is_empty());
+    assert!(f.backend.list().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn unknown_key_reads_emit_only_the_blob_key() {
+    use tracing::instrument::WithSubscriber;
+
+    struct Capture(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    let meta = f
+        .plain()
+        .write(
+            ALICE,
+            Bytes::from_static(b"SQLB\x01xxxxxxxxxxxxxxxxyyyyyyyyyyyyprivate legacy body"),
+            "text/plain",
+        )
+        .await
+        .unwrap();
+    let output = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = output.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_level(false)
+        .with_target(false)
+        .with_writer(move || Capture(writer.clone()))
+        .finish();
+    let result = store.read(ALICE).with_subscriber(subscriber).await;
+    assert!(result.is_err());
+    let diagnostic = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    assert_eq!(
+        diagnostic,
+        format!("UnknownDataKey blob_key={:?}\n", meta.blob_key)
+    );
+}
+
+#[tokio::test]
 async fn first_writes_for_new_pods_do_not_enumerate_key_records() {
     let f = Fixture::new();
     let index = ControlledIndex::default();
@@ -494,6 +657,26 @@ async fn resource_reads_and_http_get_use_scoped_blob_reads() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(to_bytes(response.into_body(), 10000).await.unwrap(), BODY);
     assert_eq!(f.backend.unscoped_reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn unscoped_reads_authenticate_by_key_and_scoped_reads_use_the_resource_pod() {
+    let f = Fixture::new();
+    let store = f.encrypted().await;
+    let meta = store
+        .write(ALICE, Bytes::from_static(BODY), "text/plain")
+        .await
+        .unwrap();
+    assert_eq!(store.blob.get(&meta.blob_key).await.unwrap(), BODY);
+    assert!(store
+        .blob
+        .get_scoped(&BlobScope("https://pod.example/bob/".into()), &meta.blob_key)
+        .await
+        .is_err());
+    let mut bytes = f.backend.bytes.get(&meta.blob_key).await.unwrap().to_vec();
+    *bytes.last_mut().unwrap() ^= 1;
+    f.backend.bytes.put(&meta.blob_key, bytes.into()).await.unwrap();
+    assert!(store.blob.get(&meta.blob_key).await.is_err());
 }
 
 #[tokio::test]
