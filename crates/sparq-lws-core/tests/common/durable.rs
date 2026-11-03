@@ -432,6 +432,24 @@ impl Corpus {
             );
             Some(f.grant_read("/corpus/large.bin").await)
         };
+        if f.mode == Mode::Lws {
+            // Service containers are lazy; a subscription must exercise the blob pool.
+            let subscription = success(
+                f.request(Method::POST, "/.lws/subscriptions/")
+                    .header("Content-Type", LWS_JSON)
+                    .json(&json!({
+                        "type": "WebhookSubscription",
+                        "topic": [format!("{}/corpus/large.bin", f.base)],
+                        "inbox": format!("{}/unused-inbox", f.endpoint),
+                    }))
+                    .send()
+                    .await
+                    .unwrap(),
+                "corpus subscription",
+            )
+            .await;
+            assert_eq!(subscription.status(), 201);
+        }
         let mut snapshots = BTreeMap::new();
         for path in [
             "/corpus/",
