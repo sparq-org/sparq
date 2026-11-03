@@ -745,9 +745,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existential whose witness may depend on it). A ground fact never proves it. Supported where the
   universal is a subject or object (or in a list or triple term there) of a
   stored-predicate atom, in a document with no backward rules; every other placement (or a
-  premise that also holds a blank constant, as a rule inside a closed formula can), and
-  an N3 query document, is still refused with the same error. The `compiled-rules` engine
-  compiles such a rule as one that never fires (its store is ground), and
+  premise that also holds a blank constant, as a rule inside a closed formula can), or
+  a document with backward rules, is still refused with the same error. N3 query
+  documents now use the forward firing's same independence check and placement limits;
+  backward rules in either data or query still cause the same refusal. The
+  `compiled-rules` engine compiles such a rule as one that never fires (its store is ground), and
   `MaterializedN3Graph` evaluates it in fallback mode. (#6882)
 
 - **sparq-core:** `net::is_forbidden_ip` is the one outbound-address classifier behind the
