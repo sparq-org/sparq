@@ -458,15 +458,17 @@ pub trait SparqClient: Send + Sync {
         ))
     }
 
-    /// Advance an appendable document's sequence and refresh its strong ETag and
-    /// modification time in one indivisible index step. Returns its blob key and
-    /// the new sequence; an absent row is `NotFound`, a non-line format is
-    /// `Unsupported`. The default refuses without modifying anything.
-    /// This raw primitive updates metadata alone. CompositeStore uses
-    /// [`publish_append`](Self::publish_append) to advance its visible sequence
-    /// together with the immutable insert record instead.
-    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
-        let _ = iri;
+    /// Replace an exactly matching appended snapshot with already-stored merged
+    /// bytes. Retain its validators and type, switch the key and clear the chain
+    /// in one index step. A changed or missing target returns `false`.
+    /// The default refuses without changing anything.
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        let _ = (iri, expected, blob_key);
         Err(SparqError::Unsupported)
     }
 
@@ -1148,17 +1150,25 @@ impl SparqClient for InMemorySparqClient {
         Ok(raised)
     }
 
-    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
         super::limits::refuse_marker_operands(&[Some(iri)])?;
-        let mut guard = self
+        let mut index = self
             .inner
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        let mut meta = guard.meta.get(iri).cloned().ok_or(SparqError::NotFound)?;
-        advance_append(&mut meta)?;
-        let result = (meta.blob_key.clone(), meta.append_seq);
-        guard.meta.insert(iri.to_string(), meta);
-        Ok(result)
+        if index.meta.get(iri) != Some(expected) {
+            return Ok(false);
+        }
+        let mut meta = expected.clone();
+        meta.blob_key = blob_key.to_owned();
+        meta.append_seq = 0;
+        index.meta.insert(iri.to_owned(), meta);
+        Ok(true)
     }
 
     async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {

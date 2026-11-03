@@ -1769,6 +1769,9 @@ pub async fn patch_handler<S: Store>(
         }
     };
     if !reader {
+        if headers.contains_key(header::IF_MATCH) || headers.contains_key(header::IF_NONE_MATCH) {
+            return Err(unread(ServerError::Forbidden));
+        }
         // A container is refused from its IRI alone, before any target lookup.
         if target.iri.ends_with('/') {
             return Err(unread(ServerError::Forbidden));

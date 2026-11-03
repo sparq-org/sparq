@@ -35,7 +35,7 @@
 //!   (`read_plan` is the ONE combined read-plan SELECT on the live client — §3.1; the in-memory
 //!   double answers it in one atomic index pass, so the 1-query model holds for it too).
 //! - `put_meta` / `delete_meta` / `remove_child`: **1 update**.
-//! - `bump_append` / `publish_append`: **2 updates + 1 query** (mutation, receipt, cleanup).
+//! - `publish_append`: **2 updates + 1 query** (mutation, receipt, cleanup).
 //! - `create_child` / `replace_child`: **1 update + 1 query** (the guarded insert, then the create-marker ASK).
 //! - `delete_meta_if_empty`: **1 update**, then **1 query** (marker ASK) when the outcome is
 //!   `Deleted`, else **2 queries** (marker ASK + exists ASK).
@@ -472,6 +472,21 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.begin_reclaim_with_appends(blob_key).await
     }
 
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        #[cfg(test)]
+        self.counters.record_method("index.fold_appends");
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.counters.count_queries(1);
+        self.counters.count_update();
+        self.inner.fold_appends(iri, expected, blob_key).await
+    }
+
     async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {
         #[cfg(test)]
         self.counters.record_method("index.publish_append");
@@ -629,17 +644,6 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
 
     fn call_timeout(&self) -> std::time::Duration {
         self.inner.call_timeout()
-    }
-
-    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
-        #[cfg(test)]
-        self.counters.record_method("index.bump_append");
-        let _g = self.counters.op_guard();
-        // HTTP advances the row, reads its receipt, then removes that receipt.
-        self.counters.count_update();
-        self.counters.count_queries(1);
-        self.counters.count_update();
-        self.inner.bump_append(iri).await
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {

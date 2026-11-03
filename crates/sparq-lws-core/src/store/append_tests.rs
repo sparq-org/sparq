@@ -349,66 +349,9 @@ async fn reclaiming_a_document_removes_its_inserts() {
     reclaim(EmbeddedSparqClient::in_memory().unwrap()).await;
 }
 
-async fn bump_atomic<S: SparqClient + 'static>(index: S) {
-    let index = Arc::new(index);
-    let meta = ResourceMeta {
-        content_type: " \tTEXT/TURTLE \t; charset=utf-8".into(),
-        blob_key: "key".into(),
-        etag: "\"old\"".into(),
-        last_modified: None,
-        append_seq: 0,
-    };
-    index.put_meta(DOC, meta).await.unwrap();
-    let mut tasks = Vec::new();
-    let start = Arc::new(tokio::sync::Barrier::new(32));
-    for _ in 0..32 {
-        let index = index.clone();
-        let start = start.clone();
-        tasks.push(tokio::spawn(async move {
-            start.wait().await;
-            index.bump_append(DOC).await.unwrap()
-        }));
-    }
-    let mut sequences = Vec::new();
-    for task in tasks {
-        let (key, seq) = task.await.unwrap();
-        assert_eq!(key, "key");
-        sequences.push(seq);
-    }
-    sequences.sort();
-    assert_eq!(sequences, (1..=32).collect::<Vec<_>>());
-    let meta = index.get_meta(DOC).await.unwrap();
-    assert_eq!(meta.append_seq, 32);
-    assert_ne!(meta.etag, "\"old\"");
-    assert!(meta.etag.starts_with('"') && !meta.etag.starts_with("W/"));
-    assert!(meta.last_modified.is_some());
-    assert_eq!(index.read_plan(DOC, &[]).await.unwrap().target, Some(meta));
-    for ct in ["application/ld+json", "image/png"] {
-        let mut denied = index.get_meta(DOC).await.unwrap();
-        denied.content_type = ct.into();
-        index.put_meta(DOC, denied.clone()).await.unwrap();
-        assert!(matches!(
-            index.bump_append(DOC).await,
-            Err(SparqError::Unsupported)
-        ));
-        assert_eq!(index.get_meta(DOC).await.unwrap(), denied);
-    }
-    assert!(matches!(
-        index.bump_append("https://pod.example/missing").await,
-        Err(SparqError::NotFound)
-    ));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn bump_append_is_atomic() {
-    bump_atomic(InMemorySparqClient::new()).await;
-    #[cfg(feature = "embedded-sparq")]
-    bump_atomic(EmbeddedSparqClient::in_memory().unwrap()).await;
-}
-
 #[cfg(all(feature = "http-sparq", feature = "embedded-sparq"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn bump_append_is_atomic_over_http() {
+async fn stored_append_publication_is_atomic_over_http() {
     use axum::{extract::State, http::HeaderMap, response::IntoResponse, routing::post, Router};
     use std::sync::Mutex;
     async fn endpoint(
@@ -434,11 +377,12 @@ async fn bump_append_is_atomic_over_http() {
         .route("/sparql", post(endpoint))
         .with_state(Arc::new(Mutex::new(sparq_core::Graph::new())));
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    bump_atomic(HttpSparqClient::new(url.clone())).await;
     publication_snapshot(HttpSparqClient::new(url.clone())).await;
     publication_replacement(HttpSparqClient::new(url.clone())).await;
     concurrent_inserts(HttpSparqClient::new(url.clone())).await;
     put_back_fork(HttpSparqClient::new(url.clone())).await;
+    fold_keeps_held_snapshot(HttpSparqClient::new(url.clone())).await;
+    fold_races_an_insert(HttpSparqClient::new(url.clone())).await;
     reclaim(HttpSparqClient::new(url)).await;
     server.abort();
 }
@@ -599,7 +543,10 @@ async fn an_append_sequence_survives_embedded_reopen() {
         )
         .await
         .unwrap();
-    index.bump_append(DOC).await.unwrap();
+    index
+        .publish_append(DOC, "key", "insert-bytes")
+        .await
+        .unwrap();
     let before = index.get_meta(DOC).await.unwrap();
     assert_eq!(before.append_seq, 1);
     drop(index);
@@ -625,4 +572,245 @@ async fn an_append_sequence_survives_embedded_reopen() {
         assert_eq!(after.body, before.body);
         assert_eq!(after.body, [b"old\n".as_slice(), INSERT].concat());
     }
+}
+
+#[tokio::test]
+async fn duplicate_append_sequences_are_storage_errors() {
+    let store = CompositeStore::with_body_cache(
+        InMemorySparqClient::new(),
+        InMemoryBlobStore::new(),
+        BodyCache::disabled(),
+    );
+    store
+        .write(DOC, Bytes::from_static(b"old"), "text/turtle")
+        .await
+        .unwrap();
+    store.append(DOC, Bytes::from_static(INSERT)).await.unwrap();
+    let meta = store.meta(DOC).await.unwrap().unwrap();
+    let dir = append_dir(&meta.blob_key);
+    let name = store
+        .sparq
+        .list_children(&dir)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let record = store.sparq.get_meta(&name).await.unwrap();
+    let duplicate = format!("{}-duplicate", name.rsplit_once('-').unwrap().0);
+    store
+        .sparq
+        .create_child(&dir, &duplicate, record)
+        .await
+        .unwrap();
+    let result = store.read_at(DOC, &meta).await;
+    assert!(
+        matches!(result, Err(ServerError::Storage(ref message)) if message == "duplicate append sequence"),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn merged_bodies_are_cached_by_key_sequence_and_etag() {
+    let counters = counting::BackendCounters::new();
+    let store = CompositeStore::new(
+        counting::CountingSparqClient::new(InMemorySparqClient::new(), counters.clone()),
+        counting::CountingBlobStore::new(InMemoryBlobStore::new(), counters.clone()),
+    );
+    store
+        .write(DOC, Bytes::from_static(b"old\n"), "text/turtle")
+        .await
+        .unwrap();
+    store
+        .append(DOC, Bytes::from_static(b"first\n"))
+        .await
+        .unwrap();
+    let first = store.read(DOC).await.unwrap();
+    assert_eq!(first.body, "old\nfirst\n");
+    let scope = counters.measure();
+    assert_eq!(store.read(DOC).await.unwrap().body, first.body);
+    let counts = scope.delta();
+    assert_eq!(counts.blob_gets, 0, "a complete merged snapshot is cached");
+    assert_eq!(
+        counts.sparql_queries, 1,
+        "only authoritative target metadata is read"
+    );
+    store
+        .append(DOC, Bytes::from_static(b"second\n"))
+        .await
+        .unwrap();
+    let second = store.read(DOC).await.unwrap();
+    assert_eq!(second.body, "old\nfirst\nsecond\n");
+    let mut distinct_sequence = second.meta.clone();
+    distinct_sequence.append_seq = first.meta.append_seq;
+    assert_eq!(
+        store.read_at(DOC, &distinct_sequence).await.unwrap(),
+        first.body,
+        "the sequence is part of the cache identity even when key and tag agree"
+    );
+    assert_eq!(store.read_at(DOC, &second.meta).await.unwrap(), second.body);
+}
+
+async fn fold_keeps_held_snapshot<S: SparqClient>(index: S) {
+    let store =
+        CompositeStore::with_body_cache(index, InMemoryBlobStore::new(), BodyCache::disabled());
+    store
+        .write(DOC, Bytes::from_static(b"old\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = b"old\n".to_vec();
+    for _ in 0..APPEND_FOLD_THRESHOLD {
+        store.append(DOC, Bytes::from_static(INSERT)).await.unwrap();
+        expected.extend_from_slice(INSERT);
+    }
+    let held = store.hold(DOC, "fold-test").await.unwrap().unwrap();
+    assert_eq!(store.read(DOC).await.unwrap().body, expected);
+    let folded = store.meta(DOC).await.unwrap().unwrap();
+    assert_eq!(folded.append_seq, 0);
+    assert_ne!(folded.blob_key, held.blob_key);
+    assert_eq!(store.read_at(DOC, &held).await.unwrap(), expected);
+    store.release(&held, "fold-test").await.unwrap();
+    assert!(!store.blob.exists(&held.blob_key).await.unwrap());
+    assert!(!store
+        .sparq
+        .exists(&append_dir(&held.blob_key))
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn folding_keeps_held_snapshots_until_release() {
+    fold_keeps_held_snapshot(InMemorySparqClient::new()).await;
+    #[cfg(feature = "embedded-sparq")]
+    fold_keeps_held_snapshot(EmbeddedSparqClient::in_memory().unwrap()).await;
+}
+
+async fn fold_races_an_insert<S: SparqClient + 'static>(index: S) {
+    let store =
+        CompositeStore::with_body_cache(index, PausingBlobs::default(), BodyCache::disabled());
+    store
+        .write(DOC, Bytes::from_static(b"old\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = b"old\n".to_vec();
+    for _ in 0..APPEND_FOLD_THRESHOLD {
+        store.append(DOC, Bytes::from_static(INSERT)).await.unwrap();
+        expected.extend_from_slice(INSERT);
+    }
+    store
+        .blob
+        .pause
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let reader = store.clone();
+    let task = tokio::spawn(async move { reader.read(DOC).await.unwrap() });
+    store.blob.entered.notified().await;
+    store
+        .append(DOC, Bytes::from_static(b"later\n"))
+        .await
+        .unwrap();
+    store.blob.resume.notify_one();
+    assert_eq!(task.await.unwrap().body, expected);
+    expected.extend_from_slice(b"later\n");
+    assert_eq!(
+        store.read(DOC).await.unwrap().body,
+        expected,
+        "the fold cannot lose a later insert"
+    );
+    assert_eq!(store.meta(DOC).await.unwrap().unwrap().append_seq, 0);
+    assert_eq!(
+        store.blob.list().await.unwrap().len(),
+        1,
+        "failed candidates and retired chains are reclaimed"
+    );
+}
+
+#[tokio::test]
+async fn folding_does_not_overwrite_a_later_insert() {
+    fold_races_an_insert(InMemorySparqClient::new()).await;
+    #[cfg(feature = "embedded-sparq")]
+    fold_races_an_insert(EmbeddedSparqClient::in_memory().unwrap()).await;
+}
+
+struct YieldingBlobs(InMemoryBlobStore);
+
+#[async_trait::async_trait]
+impl BlobStore for YieldingBlobs {
+    async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        tokio::task::yield_now().await;
+        self.0.get(key).await
+    }
+    async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+        self.0.put(key, body).await
+    }
+    async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        self.0.exists(key).await
+    }
+    async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        self.0.delete(key).await
+    }
+    async fn list(&self) -> Result<Vec<blob::BlobEntry>, BlobError> {
+        self.0.list().await
+    }
+    async fn delete_if_unchanged(&self, key: &str, generation: u64) -> Result<bool, BlobError> {
+        self.0.delete_if_unchanged(key, generation).await
+    }
+}
+
+#[tokio::test]
+async fn insert_blob_fetches_overlap_in_bounded_batches() {
+    let counters = counting::BackendCounters::new();
+    let store = CompositeStore::with_body_cache(
+        counting::CountingSparqClient::new(InMemorySparqClient::new(), counters.clone()),
+        counting::CountingBlobStore::new(YieldingBlobs(InMemoryBlobStore::new()), counters.clone()),
+        BodyCache::disabled(),
+    );
+    store
+        .write(DOC, Bytes::from_static(b"old\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = String::from("old\n");
+    for n in 0..APPEND_FETCH_CONCURRENCY + 1 {
+        let insert = format!("insert {n}\n");
+        expected.push_str(&insert);
+        store.append(DOC, Bytes::from(insert)).await.unwrap();
+    }
+    let scope = counters.measure();
+    assert_eq!(store.read(DOC).await.unwrap().body, expected);
+    let counts = scope.delta();
+    assert!(
+        counts.max_in_flight > 1,
+        "insert fetches must overlap: {counts:?}"
+    );
+    assert!(
+        counts.max_in_flight <= APPEND_FETCH_CONCURRENCY as u64,
+        "the fetch fan-out must stay bounded: {counts:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_quota_refused_fold_still_serves_the_complete_snapshot() {
+    let insert_count = APPEND_FOLD_THRESHOLD as usize;
+    let store = CompositeStore::in_memory_with_limits(InMemoryStoreLimits::new(
+        b"old\n".len() + insert_count * INSERT.len(),
+        insert_count + 2,
+    ));
+    store
+        .write(DOC, Bytes::from_static(b"old\n"), "text/turtle")
+        .await
+        .unwrap();
+    let mut expected = b"old\n".to_vec();
+    for _ in 0..insert_count {
+        store.append(DOC, Bytes::from_static(INSERT)).await.unwrap();
+        expected.extend_from_slice(INSERT);
+    }
+    let before = store.meta(DOC).await.unwrap();
+    assert_eq!(store.read(DOC).await.unwrap().body, expected);
+    assert_eq!(
+        store.meta(DOC).await.unwrap(),
+        before,
+        "quota can defer maintenance"
+    );
+    assert!(
+        store.blob.exists(&before.unwrap().blob_key).await.unwrap(),
+        "a refused fold must retain the original base bytes"
+    );
 }

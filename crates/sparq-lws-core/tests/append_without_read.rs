@@ -47,7 +47,7 @@ impl Harness {
             if container_append { format!("<#w> a acl:Authorization; acl:agent <{WRITER}>; acl:accessTo <{BASE_URL}/>; acl:default <{BASE_URL}/>; acl:mode acl:Append.") } else { String::new() });
         let target_acl = format!("@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n<#o> a acl:Authorization; acl:agent <{OWNER}>; acl:accessTo <{TARGET}>; acl:mode acl:Read, acl:Write, acl:Control.\n<#w> a acl:Authorization; acl:agent <{WRITER}>; acl:accessTo <{TARGET}>; acl:mode acl:Append.");
         let used = root_acl.len() + target_acl.len() + body.as_ref().map_or(0, Bytes::len);
-        let limits = InMemoryStoreLimits::new(spare.map_or(usize::MAX, |n| used + n), 100);
+        let limits = InMemoryStoreLimits::new(spare.map_or(usize::MAX, |n| used + n), 1024);
         let counters = BackendCounters::new();
         let store = CompositeStore::with_body_cache(
             CountingSparqClient::new(InMemorySparqClient::with_limits(limits), counters.clone()),
@@ -283,7 +283,7 @@ async fn an_insert_is_shown_to_readers() {
 }
 
 #[tokio::test]
-async fn inserts_into_a_non_rdf_document_are_not_shown() {
+async fn inserts_into_unsupported_stored_formats_are_refused_without_changes() {
     for ct in ["application/ld+json", "image/png", "text/plain"] {
         let original = Bytes::from_static(b"opaque");
         let h = Harness::new(Some(original.clone()), ct, true, None).await;
@@ -341,4 +341,107 @@ async fn residual_creating_by_insert_needs_append_on_the_container() {
     let absent = Harness::new(None, "text/turtle", false, None).await;
     assert_eq!(absent.insert().await.0, StatusCode::FORBIDDEN);
     assert!(!absent.store.exists(TARGET).await.unwrap());
+}
+
+#[tokio::test]
+async fn conditional_inserts_without_read_are_refused_without_changes() {
+    let mut answers = Vec::new();
+    for present in [false, true] {
+        for header in ["if-match", "if-none-match"] {
+            for value in ["*", "\"held\"", ""] {
+                let original = present.then(|| Bytes::from_static(b"old"));
+                let h = Harness::new(original.clone(), "text/turtle", true, None).await;
+                let before = h.store.meta(TARGET).await.unwrap();
+                let scope = h.counters.measure();
+                let response = h
+                    .request(Some(WRITER), "PATCH", "/doc", &[(header, value)])
+                    .await;
+                let counts = scope.delta();
+                let (mut parts, body) = response.into_parts();
+                parts.headers.remove("date");
+                assert_eq!(
+                    parts.status,
+                    StatusCode::FORBIDDEN,
+                    "{header}: {value}, present={present}"
+                );
+                assert_eq!(counts.blob_puts, 0, "a denied insert stores no bytes");
+                assert_eq!(
+                    counts.sparql_updates, 0,
+                    "a denied insert changes no index rows"
+                );
+                assert_eq!(h.store.meta(TARGET).await.unwrap(), before);
+                if let Some(original) = original {
+                    assert_eq!(h.store.read(TARGET).await.unwrap().body, original);
+                }
+                answers.push((
+                    parts.status,
+                    parts.headers,
+                    to_bytes(body, usize::MAX).await.unwrap(),
+                ));
+            }
+        }
+    }
+    for answer in &answers[1..] {
+        assert_eq!(
+            *answer, answers[0],
+            "denial depends only on the requester's modes"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_owner_get_folds_long_insert_chains_and_bounds_repeat_reads() {
+    use sparq_lws_core::store::APPEND_FOLD_THRESHOLD;
+    for count in [APPEND_FOLD_THRESHOLD + 1, APPEND_FOLD_THRESHOLD * 3] {
+        let h = Harness::new(
+            Some(Bytes::from_static(b"old\n")),
+            "text/turtle",
+            true,
+            None,
+        )
+        .await;
+        let scope = h.counters.measure();
+        let baseline = h.request(Some(OWNER), "GET", "/doc", &[]).await;
+        assert_eq!(baseline.status(), StatusCode::OK);
+        let budget = scope.delta().total_backend_ops();
+        let mut expected = b"old\n".to_vec();
+        for _ in 0..count {
+            h.store
+                .append(TARGET, Bytes::from_static(INSERT.as_bytes()))
+                .await
+                .unwrap();
+            expected.extend_from_slice(INSERT.as_bytes());
+        }
+        let before = h.store.meta(TARGET).await.unwrap().unwrap();
+        let folded = h.request(Some(OWNER), "GET", "/doc", &[]).await;
+        assert_eq!(folded.status(), StatusCode::OK);
+        assert_eq!(folded.headers()["etag"], before.etag);
+        assert_eq!(
+            to_bytes(folded.into_body(), usize::MAX).await.unwrap(),
+            expected
+        );
+        let after = h.store.meta(TARGET).await.unwrap().unwrap();
+        assert_eq!(after.append_seq, 0, "a reader folds the long chain");
+        assert_ne!(after.blob_key, before.blob_key);
+        assert_eq!(after.etag, before.etag);
+        assert_eq!(after.last_modified, before.last_modified);
+        let scope = h.counters.measure();
+        let repeated = h.request(Some(OWNER), "GET", "/doc", &[]).await;
+        assert_eq!(repeated.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(repeated.into_body(), usize::MAX).await.unwrap(),
+            expected
+        );
+        assert!(
+            scope.delta().total_backend_ops() <= budget,
+            "a folded GET fits the unappended GET's operation budget: {:?}",
+            scope.delta()
+        );
+        h.store
+            .append(TARGET, Bytes::from_static(INSERT.as_bytes()))
+            .await
+            .unwrap();
+        expected.extend_from_slice(INSERT.as_bytes());
+        assert_eq!(h.store.read(TARGET).await.unwrap().body, expected);
+    }
 }

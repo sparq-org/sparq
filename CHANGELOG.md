@@ -195,18 +195,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Turtle, N-Triples or N-Quads document and returns `204` with no Location or ETag
   for both append and creation. Other stored types remain refused from index
   metadata; creation still requires Append on the container. New public
-  `Store::append`, `SparqClient::bump_append`, `SparqClient::publish_append` and
-  `ResourceMeta::append_seq` support
-  merged reads, replacement, put-back and reclamation. The wasm persistence journal
+  `Store::append` and `SparqClient::publish_append` support
+  merged reads, replacement, put-back and reclamation. Reader-triggered folding uses
+  `SparqClient::fold_appends` to replace a matching snapshot with merged bytes while
+  preserving its validators; merged snapshots are cached and insert fetches overlap.
+  Individual inserts and layout-only folds do not create history versions.
+  The wasm persistence journal
   records and replays stored inserts.
+  **Breaking:** `ResourceMeta` gains the public `append_seq: u64` field; downstream
+  struct literals must initialize it. Insert-only PATCH on a container by a writer
+  without Read now returns `403` (`401` for anonymous callers), whether present or
+  absent. All `If-Match` and `If-None-Match` headers on that path require Read,
+  including `*`. The unused metadata-only `bump_append` API has been removed.
 
 - **Breaking — sparq-lws-core:** LWS resource DELETE requires Read for `If-None-Match: *`.
   A non-reader's data DELETE with `If-Match: *` is treated as unconditional: settled present
   and absent targets answer `204`, subject to the same full-budget and set-aside-parent checks.
   Other `If-Match` values on DELETE, including malformed or empty lists, require Read too.
   POST with either bare `*` works without Read. Concrete tags and
-  applicable dates require Read on every method. LDP exempts bare `*`, and LWS service
-  containers retain their existence-only handling. Conditional POST to the storage root
+  applicable dates require Read on every method. LDP PUT, POST and DELETE exempt
+  bare `*`; insert-only PATCH without Read refuses either entity-tag header.
+  LWS service containers retain their existence-only handling. Conditional POST to the storage root
   needs no Read when `Accept` selects its public description.
 - **Breaking — sparq-lws-core:** `Store::lifecycle` is required and returns `Arc<Lifecycle>`;
   `CompositeStore` clones share it. `SparqClient::reset_marker` requires a lifecycle guard;

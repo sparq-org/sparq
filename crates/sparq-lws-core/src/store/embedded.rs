@@ -777,26 +777,33 @@ impl SparqClient for EmbeddedSparqClient {
         true
     }
 
-    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
         super::limits::refuse_marker_operands(&[Some(iri)])?;
         let q = sparql::select_meta(iri)?;
-        let iri = iri.to_string();
+        let modified = expected.last_modified.and_then(timestamp::to_xsd_datetime);
+        let update = sparql::update_put_meta_with_append_seq(
+            iri,
+            &expected.content_type,
+            blob_key,
+            &expected.etag,
+            modified.as_deref(),
+            0,
+        )?;
+        let expected = expected.clone();
         self.dispatch(move |graph| {
-            let result =
-                sparq_engine::query(graph, &q).map_err(|e| engine_err("append/read", e))?;
-            let mut meta = meta_from_result(&result)?;
-            super::sparq::advance_append(&mut meta)?;
-            let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-            let u = sparql::update_put_meta_with_append_seq(
-                &iri,
-                &meta.content_type,
-                &meta.blob_key,
-                &meta.etag,
-                modified.as_deref(),
-                meta.append_seq,
-            )?;
-            commit(graph, &u, "bump_append")?;
-            Ok((meta.blob_key, meta.append_seq))
+            let result = sparq_engine::query(graph, &q).map_err(|e| engine_err("fold/read", e))?;
+            match meta_from_result(&result) {
+                Ok(current) if current == expected => {}
+                Ok(_) | Err(SparqError::NotFound) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+            commit(graph, &update, "fold_appends")?;
+            Ok(true)
         })
         .await
     }

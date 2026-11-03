@@ -416,35 +416,6 @@ pub fn p_append_seq() -> String {
     format!("{PSS_NS}appendSeq")
 }
 
-/// Advance a line-format document and write an operation-specific receipt in
-/// the same update. The receipt preserves the returned key and sequence even
-/// when another writer immediately advances or replaces the document.
-pub fn update_bump_append(
-    resource: &str,
-    receipt: &str,
-    etag: &str,
-    modified: &str,
-) -> Result<String, BuildError> {
-    let type_essence = format!(
-        "LCASE(REPLACE(STRBEFORE(CONCAT(?ct, \";\"), \";\"), {}, \"\"))",
-        literal(r"^\s+|\s+$")
-    );
-    Ok(format!(
-        "DELETE {{ GRAPH {g} {{ {s} {pseq} ?oldSeq ; {pet} ?oldTag ; {pmod} ?oldMod }} }} \
-         INSERT {{ GRAPH {g} {{ {s} {pseq} ?next ; {pet} {tag} ; {pmod} {modified} }} \
-                   GRAPH {receipt} {{ {s} <urn:pss:index#appendBlobKey> ?bk ; {pseq} ?next }} }} \
-         WHERE {{ GRAPH {g} {{ {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?oldTag . \
-                   OPTIONAL {{ {s} {pseq} ?oldSeq }} OPTIONAL {{ {s} {pmod} ?oldMod }} }} \
-                   FILTER ({type_essence} IN \
-                       (\"text/turtle\", \"application/n-triples\", \"application/n-quads\")) \
-                   BIND(COALESCE(?oldSeq, 0) + 1 AS ?next) FILTER (?next <= 18446744073709551615) }}",
-        g = iri(resource)?, s = iri_const(&s_record()), pseq = iri_const(&p_append_seq()),
-        pet = iri_const(&p_etag()), pmod = iri_const(&p_modified()),
-        pct = iri_const(&p_content_type()), pbk = iri_const(&p_blob_key()),
-        receipt = iri(receipt)?, tag = literal(etag), modified = datetime_literal(modified),
-    ))
-}
-
 /// Read an append's own result; another operation cannot overwrite its receipt.
 pub fn select_append_receipt(receipt: &str) -> Result<String, BuildError> {
     Ok(format!(
@@ -452,6 +423,47 @@ pub fn select_append_receipt(receipt: &str) -> Result<String, BuildError> {
         iri(receipt)?,
         iri_const(&s_record()),
         iri_const(&p_append_seq())
+    ))
+}
+
+/// Switch an exactly matching append snapshot to merged bytes without changing
+/// its representation validators. The receipt is in the same atomic update.
+#[cfg(feature = "http-sparq")]
+pub(crate) fn update_fold_appends(
+    resource: &str,
+    expected: &super::sparq::ResourceMeta,
+    blob_key: &str,
+    receipt: &str,
+    nonce: &str,
+) -> Result<String, BuildError> {
+    let modified = match expected
+        .last_modified
+        .and_then(super::timestamp::to_xsd_datetime)
+    {
+        Some(value) => format!("FILTER (?modified = {})", datetime_literal(&value)),
+        None => "FILTER (!BOUND(?modified))".into(),
+    };
+    Ok(format!(
+        "DELETE {{ GRAPH {g} {{ {s} {pbk} ?bk ; {pseq} ?seq }} }} \
+         INSERT {{ GRAPH {g} {{ {s} {pbk} {new_key} ; {pseq} 0 }} \
+                   GRAPH {receipt} {{ {s} <urn:pss:index#appendBlobKey> {new_key} ; {pseq} 0 }} }} \
+         WHERE {{ GRAPH {g} {{ {s} {pbk} ?bk ; {pseq} ?seq ; {pet} {tag} ; {pct} {ct} . \
+                   OPTIONAL {{ {s} {pmod} ?modified }} }} \
+                   FILTER (?bk = {old_key} && ?seq = {seq}) {modified} {fence} }}",
+        g = iri(resource)?,
+        s = iri_const(&s_record()),
+        pbk = iri_const(&p_blob_key()),
+        pseq = iri_const(&p_append_seq()),
+        pet = iri_const(&p_etag()),
+        pct = iri_const(&p_content_type()),
+        pmod = iri_const(&p_modified()),
+        new_key = literal(blob_key),
+        old_key = literal(&expected.blob_key),
+        tag = literal(&expected.etag),
+        ct = literal(&expected.content_type),
+        seq = expected.append_seq,
+        receipt = iri(receipt)?,
+        fence = fence_guard(true, nonce),
     ))
 }
 

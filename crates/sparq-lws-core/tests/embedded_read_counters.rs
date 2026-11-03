@@ -379,8 +379,13 @@ impl<S: SparqClient> RawSeamCounter<S> {
 
 #[async_trait]
 impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
-    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
-        self.inner.bump_append(iri).await
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
+        self.inner.fold_appends(iri, expected, blob_key).await
     }
 
     async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {

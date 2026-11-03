@@ -2,7 +2,7 @@
 //! The **blob-body LRU cache** — read-4 of the read-path perf plan
 //! (`research/lws-design-records.md` §7; RSS `docs/design/backend-read-path.md` §3.4 +
 //! `docs/design/throughput-hard-cases.md` §5 `read-4-bodycache`): a byte-budgeted LRU of resource
-//! BODIES keyed by **`(blob_key, etag)`**, sat in front of
+//! BODIES keyed by **`(blob_key, append_seq, etag)`**, sat in front of
 //! [`BlobStore::get`](super::blob::BlobStore::get) inside [`CompositeStore`](super::CompositeStore)
 //! — so a hot, unchanged resource's repeat GET pays **zero** blob-store round-trips (blob-gets/op 1
 //! → 0 on a hit).
@@ -13,7 +13,7 @@
 //! invalidation protocol at all**:
 //!
 //! - **The lookup key comes from THIS request's authoritative index round-trip.** Every consumer
-//!   (`CompositeStore::read` / `read_at`) keys the lookup with the `(blob_key, etag)` pair from the
+//!   (`CompositeStore::read` / `read_at`) keys the lookup with the `(blob_key, append_seq, etag)` snapshot from the
 //!   [`ResourceMeta`](super::ResourceMeta) the SPARQ index returned FOR THIS REQUEST — never from a
 //!   remembered/cached pointer. A write commits a NEW blob key (and a new etag) into the index, so
 //!   the next read's authoritative meta names a key this cache has never seen ⇒ a MISS ⇒ a fresh
@@ -28,7 +28,7 @@
 //!   it cannot resurrect deleted bytes.
 //! - **The etag in the key is defence-in-depth** (the PSS keying): even on a hypothetical backend
 //!   path that REUSED a blob key, changed bytes get a different content-derived etag ⇒ a different
-//!   cache key ⇒ a miss. Two writes can only collide on a cache entry by sharing BOTH the
+//!   cache key ⇒ a miss. Two writes can only collide on a cache entry by sharing the same sequence,
 //!   128-bit-random key AND the content etag.
 //!
 //! ## Why a hit can NEVER bypass authorization
@@ -78,15 +78,15 @@ struct BodyEntry {
     last_access: u64,
 }
 
-/// The lock-protected state: the `(blob_key, etag)`-keyed map + the running total of charged bytes.
+/// The lock-protected state: the `(blob_key, append_seq, etag)`-keyed map + the running total of charged bytes.
 /// Kept together so an insert's eviction loop and total adjustment are one critical section.
 #[derive(Default)]
 struct BodyCacheInner {
-    map: HashMap<(String, String), BodyEntry>,
+    map: HashMap<(String, u64, String), BodyEntry>,
     total_charged: usize,
 }
 
-/// A byte-budgeted, `(blob_key, etag)`-keyed LRU cache of blob bodies (see the module docs for the
+/// A byte-budgeted, `(blob_key, append_seq, etag)`-keyed LRU cache of blob bodies (see the module docs for the
 /// staleness/authz arguments). Thread-safe (one `Mutex`), per-instance.
 ///
 /// A `max_bytes` of 0 builds the [`disabled`](BodyCache::disabled) sentinel: it NEVER stores and
@@ -151,7 +151,7 @@ impl BodyCache {
         self.max_entry_bytes
     }
 
-    /// Look up the cached body for `(blob_key, etag)`. `None` on a disabled cache or no entry — the
+    /// Look up the cached body for `(blob_key, 0, etag)`. `None` on a disabled cache or no entry — the
     /// caller then fetches from the blob store (and [`insert`](Self::insert)s). Bumps LRU recency on
     /// a hit; the returned [`Bytes`] is a refcount clone (no payload copy).
     ///
@@ -160,6 +160,15 @@ impl BodyCache {
     /// a remembered pointer. Under that contract a hit returns exactly the bytes that metadata
     /// committed with (see the module docs' staleness argument).
     pub fn get(&self, blob_key: &str, etag: &str) -> Option<Bytes> {
+        self.get_snapshot(blob_key, 0, etag)
+    }
+
+    pub(crate) fn get_snapshot(
+        &self,
+        blob_key: &str,
+        append_seq: u64,
+        etag: &str,
+    ) -> Option<Bytes> {
         let inner = self.inner.as_ref()?;
         let mut guard = match inner.lock() {
             Ok(g) => g,
@@ -169,17 +178,27 @@ impl BodyCache {
         let tick = self.clock.fetch_add(1, Ordering::Relaxed) + 1;
         let entry = guard
             .map
-            .get_mut(&(blob_key.to_string(), etag.to_string()))?;
+            .get_mut(&(blob_key.to_string(), append_seq, etag.to_string()))?;
         entry.last_access = tick;
         Some(entry.body.clone())
     }
 
-    /// Cache the body fetched for `(blob_key, etag)` — called after a MISS's blob fetch so the next
+    /// Cache the body fetched for `(blob_key, 0, etag)` — called after a MISS's blob fetch so the next
     /// read of the same unchanged resource is a hit. An OVERSIZE body (charge > per-entry cap)
     /// bypasses the cache (never stored — one large blob must not evict the whole hot set). At
     /// budget, least-recently-used entries are evicted until the new entry fits. No-op on a disabled
     /// cache. The stored [`Bytes`] is a refcount clone of `body`.
     pub fn insert(&self, blob_key: &str, etag: &str, body: &Bytes) {
+        self.insert_snapshot(blob_key, 0, etag, body);
+    }
+
+    pub(crate) fn insert_snapshot(
+        &self,
+        blob_key: &str,
+        append_seq: u64,
+        etag: &str,
+        body: &Bytes,
+    ) {
         let Some(inner) = self.inner.as_ref() else {
             return; // disabled: never cache.
         };
@@ -196,7 +215,7 @@ impl BodyCache {
             Ok(g) => g,
             Err(_) => return, // a poisoned lock simply means no caching — correctness unaffected.
         };
-        let key = (blob_key.to_string(), etag.to_string());
+        let key = (blob_key.to_string(), append_seq, etag.to_string());
         // Replacing an existing entry (same key ⇒ same immutable bytes in practice): release its
         // charge first so the running total stays exact.
         if let Some(old) = guard.map.remove(&key) {
@@ -254,7 +273,7 @@ impl BodyCache {
     /// space.
     fn evict_until_freed(guard: &mut BodyCacheInner, needed: usize) {
         // One pass: snapshot (recency, key) and sort oldest-first.
-        let mut by_recency: Vec<(u64, (String, String))> = guard
+        let mut by_recency: Vec<(u64, (String, u64, String))> = guard
             .map
             .iter()
             .map(|(k, e)| (e.last_access, k.clone()))

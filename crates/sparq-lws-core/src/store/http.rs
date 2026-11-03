@@ -541,17 +541,17 @@ impl SparqClient for HttpSparqClient {
             .await
     }
 
-    async fn bump_append(&self, iri: &str) -> Result<(String, u64), SparqError> {
+    async fn fold_appends(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        blob_key: &str,
+    ) -> Result<bool, SparqError> {
         super::limits::refuse_marker_operands(&[Some(iri)])?;
         let nonce = next_nonce()?;
         let receipt = format!("urn:x-sparq-lws:append-results/{nonce}");
-        let etag = format!("\"append-{nonce}\"");
-        let modified = timestamp::to_xsd_datetime(crate::clock::now())
-            .ok_or_else(|| SparqError::Backend("invalid append timestamp".into()))?;
-        let update = sparql::update_bump_append(iri, &receipt, &etag, &modified)?;
-        self.update_raw(&update)
-            .await
-            .map_err(SparqHttpError::into_sparq)?;
+        let update = sparql::update_fold_appends(iri, expected, blob_key, &receipt, &nonce)?;
+        let fenced = self.update_fenced(&update, &nonce, &[iri]).await?;
         let (body, _) = self
             .query_raw(
                 &sparql::select_append_receipt(&receipt)?,
@@ -560,28 +560,17 @@ impl SparqClient for HttpSparqClient {
             .await
             .map_err(SparqHttpError::into_sparq)?;
         let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
-        let Some(row) = result.rows.first() else {
-            let meta = self.get_meta(iri).await?;
-            return Err(if super::sparq::appendable(&meta.content_type) {
-                SparqError::Backend("append sequence exhausted".into())
+        if result.rows.is_empty() {
+            return if fenced {
+                Err(SparqError::Backend("append fold did not commit".into()))
             } else {
-                SparqError::Unsupported
-            });
-        };
-        let key = row
-            .get("bk")
-            .cloned()
-            .ok_or_else(|| SparqError::Backend("append receipt missing key".into()))?;
-        let seq = row
-            .get("seq")
-            .and_then(|s| s.parse().ok())
-            .ok_or_else(|| SparqError::Backend("append receipt missing sequence".into()))?;
-        // Cleanup is separate from the one indivisible document update. A lost
-        // cleanup reply does not undo a committed append reservation.
+                Ok(false)
+            };
+        }
         let _ = self
             .update_raw(&sparql::update_delete_resource(&receipt)?)
             .await;
-        Ok((key, seq))
+        Ok(true)
     }
 
     async fn publish_append(&self, iri: &str, key: &str, blob_key: &str) -> Result<(), SparqError> {

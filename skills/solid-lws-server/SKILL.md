@@ -224,18 +224,19 @@ semantics. Keep **one replica**; this is a single-instance index and blob store.
 
 ### Stored inserts
 
+Insert-only PATCH without Read refuses every `If-Match` or `If-None-Match` header,
+including `*`, with the caller's usual denial before looking up the target.
+A container IRI is also refused without Read (`403` for an authenticated caller,
+`401` for an anonymous caller), whether or not it exists.
+
 `ResourceMeta::append_seq` identifies a document snapshot's last published insert
 (default `0` for old index rows). Insert records use the same field for their immutable
 predecessor, and the internal directory uses it as an allocation high-water mark.
 This preserves earlier snapshots and branches correctly when a held version is put back.
 
-`SparqClient::bump_append(iri)` is the raw metadata primitive: it atomically increments
-the row's sequence, refreshes a strong ETag and modification time, and returns
-`(blob_key, sequence)`. An absent row returns `NotFound`; an unsupported stored type
-returns `Unsupported`. Its default refuses. The in-memory and embedded clients
-serialize the whole step; HTTP uses one guarded Update and a unique receipt.
-The metadata mapping persists `pss:appendSeq`; existing public SPARQL builders keep
-their signatures and seed zero. Internal helpers preserve complete metadata snapshots.
+The metadata mapping persists `pss:appendSeq`. Retained public metadata builders
+seed zero; internal helpers preserve complete metadata snapshots. The unused
+metadata-only `bump_append` API and its Update builder have been removed.
 
 `Store::append(iri, ntriples: Bytes)` stores request-derived N-Triples insert lines;
 its default refuses. `CompositeStore` checks only the target's index row, stores a
@@ -251,9 +252,24 @@ Insert records live under `store::append_dir(blob_key)`. Each insert charges its
 bytes and one content slot; the zero-byte directory is bookkeeping, bounded by the
 retained or reclaiming document keys, and consumes no content slot. `read` and `read_at` follow immutable
 predecessor links from the snapshot's sequence and concatenate in publication order,
-only for the three line-compatible types. They insert a newline when needed. The base
-body cache is bypassed for appended snapshots so reclamation cannot leave a truncated
-cached representation. Replacements mint a new key and hide the old inserts;
+only for the three line-compatible types. They insert a newline when needed. Metadata
+and insert bytes are fetched in bounded concurrent batches. Complete merged bodies
+are cached by `(blob_key, append_seq, etag)`; a cached snapshot includes all its inserts.
+Once a snapshot reaches `store::APPEND_FOLD_THRESHOLD`, a reader stores its merged
+bytes under a fresh key and uses `SparqClient::fold_appends` to compare the complete
+snapshot and atomically switch the key and clear the sequence. Validators and bytes
+stay the same. The native index locks serialize the comparison and publication; HTTP
+uses a fenced Update and unique receipt. A concurrent change cancels the fold.
+The old directory is reclaimed when no live record, version or hold names its key.
+The first uncached read still assembles the chain; later reads use the folded base.
+Folding is best effort: a full shared quota or unsupported index can defer it, while
+the read succeeds. With caching disabled or an oversized entry, a deferred fold can
+therefore still leave reads proportional to the retained chain.
+
+Individual inserts do not create history versions, even with version retention
+enabled. A fold changes storage layout only and also creates no history version.
+A later full replacement retains the then-current merged snapshot when versions are
+enabled. Replacements mint a new key and hide the old inserts;
 `reinstate` restores held metadata and its insert chain. `restore` copies already-merged
 bytes to a fresh key and resets its sequence.
 
@@ -492,9 +508,11 @@ Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
 conditional mutations. A concrete tag in `If-Match` or `If-None-Match`
 requires the target's read permission (`Control` for an ACL document).
-LDP exempts bare `*`: writers without Read can use `If-None-Match: *` to create
-without overwriting, or `If-Match: *` to require an existing target. Unconditional
-LDP PUT and DELETE already disclose existence through their status codes.
+LDP PUT, POST and DELETE exempt bare `*`: writers without Read can use
+`If-None-Match: *` to create without overwriting, or `If-Match: *` to require
+an existing target. Insert-only PATCH without Read refuses either header,
+including `*`, before any target lookup. Unconditional LDP PUT and DELETE already
+disclose existence through their status codes.
 `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose

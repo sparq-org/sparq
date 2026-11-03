@@ -154,7 +154,11 @@ The Solid host's persistence journal also records `Store::append` insert lines w
 reading the target. Journal format version 2 replays these append records after their
 resource is created; the decoder still accepts version 1 snapshots. A replacement or
 delete folds away earlier append records when no retained container dependency prevents
-that fold.
+that fold. Insert-only PATCH without Read refuses every `If-Match` and
+`If-None-Match` header, including `*`, before looking up the target. Reader-triggered
+folding and complete merged-body caching use the core store's snapshot rules
+(see [stored inserts](../solid-lws-server/SKILL.md#stored-inserts)); a layout-only
+fold needs no journal mutation because replay reconstructs the same resource bytes.
 
 ```js
 const previous = await readFile(statePath).catch(() => new Uint8Array());
