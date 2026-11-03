@@ -5264,7 +5264,14 @@ impl FreshFile {
     /// (`fsync`, or `FlushFileBuffers` on Windows), [`publish_rename`] it over the target, then
     /// [`fsync_dir`] the directory. Every publication error is returned; removing the temporary
     /// file after a failure is best effort.
-    pub(crate) fn commit(mut self) -> std::io::Result<()> {
+    pub(crate) fn commit(self) -> std::io::Result<()> {
+        self.commit_with(publish_rename)
+    }
+
+    fn commit_with(
+        mut self,
+        publish: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         let file = self.file.take().expect("a fresh file is committed once");
         // The file it replaces keeps its permissions (on Unix: a store whose files an operator
         // made group-readable stays so); a new file gets the default under the umask.
@@ -5289,7 +5296,7 @@ impl FreshFile {
         crash::synced(&self.tmp);
         fault_point("file-synced", &self.path)?;
         drop(file);
-        if let Err(e) = publish_rename(&self.tmp, &self.path) {
+        if let Err(e) = publish(&self.tmp, &self.path) {
             std::fs::remove_file(&self.tmp).ok();
             return Err(e);
         }
@@ -5500,6 +5507,24 @@ fn publish_rename(from: &std::path::Path, to: &std::path::Path) -> std::io::Resu
         delay *= 2;
     }
     unreachable!("the loop returns")
+}
+
+#[cfg(all(feature = "mmap", windows))]
+fn write_fresh_journal(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = FreshFile::create(path)?;
+    std::io::Write::write_all(&mut f, bytes)?;
+    f.commit_with(|from, to| {
+        fault_point("rename", from)?;
+        let fresh = std::fs::OpenOptions::new().write(true).open(from)?;
+        // Unlike publish_rename, std's Windows rename falls back to FileRenameInfoEx
+        // with REPLACE_IF_EXISTS | POSIX_SEMANTICS, replacing the still-open journal
+        // (Rust opens it with FILE_SHARE_DELETE). Unsupported systems/filesystems
+        // return an error: checkpoint must keep the tree frozen, never skip restoration.
+        std::fs::rename(from, to)?;
+        // This rename has no MOVEFILE_WRITE_THROUGH. Flush its metadata through the
+        // fresh file, never through the failed journal descriptor.
+        fresh.sync_all()
+    })
 }
 
 /// A random 128-bit identifier in 32 lowercase hex digits (a store's identity in its marker, or

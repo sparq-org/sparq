@@ -494,6 +494,8 @@ fn failed_journal_sync_preserves_whole_frames_by_fresh_publication() {
     let journal = TxnJournal::path(&tmp.0);
     let retained = std::fs::read(&journal).unwrap();
     let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let original = std::fs::File::open(&journal).unwrap();
+    let cloned = original.try_clone().unwrap();
     let observed = events.clone();
     let failed = journal.clone();
     fault::fail_every(move |step, path| {
@@ -506,6 +508,8 @@ fn failed_journal_sync_preserves_whole_frames_by_fresh_publication() {
     assert_eq!(fault::disarm(), 1);
     assert!(graph.is_frozen());
     assert_eq!(std::fs::read(&journal).unwrap(), retained);
+    assert_eq!(original.metadata().unwrap().len(), 0);
+    assert_eq!(cloned.metadata().unwrap().len(), 0);
     assert_eq!(crash::synced_len(&journal), Some(retained.len()));
     let events = events.borrow();
     let synced = events
